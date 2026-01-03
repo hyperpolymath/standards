@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: Documentation Format Enforcement
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions: read-all
+
+jobs:
+  check-doc-format:
+    name: Check Documentation Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Check for duplicate documentation formats
+        run: |
+          DUPLICATES=0
+
+          # Check for docs that exist in both .md and .adoc (except GitHub-required)
+          for doc in README ARCHITECTURE ROADMAP PHILOSOPHY INSTALL CHANGELOG; do
+            if [ -f "${doc}.md" ] && [ -f "${doc}.adoc" ]; then
+              echo "::error::Duplicate documentation: ${doc}.md and ${doc}.adoc both exist. Keep only .adoc"
+              DUPLICATES=$((DUPLICATES + 1))
+            fi
+          done
+
+          # CONTRIBUTING can have both but .md should just be a redirect
+          if [ -f "CONTRIBUTING.md" ] && [ -f "CONTRIBUTING.adoc" ]; then
+            if ! grep -q "See.*CONTRIBUTING.adoc" CONTRIBUTING.md 2>/dev/null; then
+              echo "::warning::CONTRIBUTING.md exists alongside CONTRIBUTING.adoc but is not a redirect"
+            fi
+          fi
+
+          if [ $DUPLICATES -gt 0 ]; then
+            echo "::error::Found $DUPLICATES duplicate documentation files"
+            exit 1
+          fi
+
+          echo "✓ No duplicate documentation formats found"
+
+      - name: Check documentation uses .adoc
+        run: |
+          # List of files that MUST be .md for GitHub community health
+          # SECURITY.md, CONTRIBUTING.md (can redirect), CODE_OF_CONDUCT.md, CHANGELOG.md
+
+          # Check README is .adoc (not .md)
+          if [ -f "README.md" ] && [ ! -f "README.adoc" ]; then
+            echo "::warning::README.md found without README.adoc. Consider converting to AsciiDoc."
+          fi
+
+          # Check other docs are .adoc
+          for doc in ARCHITECTURE ROADMAP PHILOSOPHY INSTALL; do
+            if [ -f "${doc}.md" ]; then
+              echo "::warning::${doc}.md should be ${doc}.adoc"
+            fi
+          done
+
+          echo "✓ Documentation format check complete"
+
+      - name: Verify GitHub-required files exist
+        run: |
+          # These files are required/preferred by GitHub in .md format
+          MISSING=0
+
+          if [ ! -f "SECURITY.md" ]; then
+            echo "::warning::SECURITY.md not found (required for GitHub security tab)"
+          fi
+
+          if [ ! -f "LICENSE.txt" ] && [ ! -f "LICENSE" ]; then
+            echo "::warning::LICENSE file not found"
+          fi
+
+          echo "✓ GitHub-required files check complete"

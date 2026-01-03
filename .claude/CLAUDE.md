@@ -1,5 +1,20 @@
 # CLAUDE.md - AI Assistant Instructions
 
+## Machine-Readable Artefacts
+
+Every Hyperpolymath repo must have `.machine_readable/` with these 6 SCM files:
+
+- `STATE.scm` - Current project state and progress
+- `META.scm` - Architecture decisions and development practices
+- `ECOSYSTEM.scm` - Position in the ecosystem and related projects
+- `AGENTIC.scm` - AI agent interaction patterns
+- `NEUROSYM.scm` - Neurosymbolic integration config
+- `PLAYBOOK.scm` - Operational runbook
+
+See: https://github.com/hyperpolymath/standards
+
+---
+
 ## Language Policy (Hyperpolymath Standard)
 
 ### ALLOWED Languages & Tools
@@ -14,9 +29,8 @@
 | **Gleam** | Backend services | Runs on BEAM or compiles to JS |
 | **Bash/POSIX Shell** | Scripts, automation | Keep minimal |
 | **JavaScript** | Only where ReScript cannot | MCP protocol glue, Deno APIs |
-| **Python** | SaltStack only | No other Python permitted |
 | **Nickel** | Configuration language | For complex configs |
-| **Guile Scheme** | State/meta files | STATE.scm, META.scm, ECOSYSTEM.scm |
+| **Guile Scheme** | State/meta files | STATE.scm, META.scm, etc. |
 | **Julia** | Batch scripts, data processing | Per RSR |
 | **OCaml** | AffineScript compiler | Language-specific |
 | **Ada** | Safety-critical systems | Where required |
@@ -31,11 +45,24 @@
 | Bun | Deno |
 | pnpm/yarn | Deno |
 | Go | Rust |
-| Python (general) | ReScript/Rust |
+| **Python** | ReScript/Rust |
 | Java/Kotlin | Rust/Tauri/Dioxus |
 | Swift | Tauri/Dioxus |
 | React Native | Tauri/Dioxus |
 | Flutter/Dart | Tauri/Dioxus |
+| **Makefiles** | Mustfile/justfile |
+
+**NOTE:** Python is fully banned. There are no exceptions (SaltStack exception removed 2026-01-03).
+
+### Build System
+
+All repositories use Mustfile/justfile instead of Makefiles:
+
+- `Mustfile` - Mandatory checks definition
+- `justfile` - Build recipes (https://just.systems)
+- `mustfile.toml` - Configuration (optional)
+
+See: https://github.com/hyperpolymath/mustfile
 
 ### Mobile Development
 
@@ -52,14 +79,21 @@ Both are FOSS with independent governance (no Big Tech).
 2. **No package.json for runtime deps** - Use deno.json imports
 3. **No node_modules in production** - Deno caches deps automatically
 4. **No Go code** - Use Rust instead
-5. **Python only for SaltStack** - All other Python must be rewritten
+5. **No Python** - All Python must be rewritten
 6. **No Kotlin/Swift for mobile** - Use Tauri 2.0+ or Dioxus
+7. **No Makefiles** - Use Mustfile/justfile instead
 
 ### Package Management
 
 - **Primary**: Guix (guix.scm)
 - **Fallback**: Nix (flake.nix)
 - **JS deps**: Deno (deno.json imports)
+
+### Documentation Format
+
+- All docs must be `.adoc` (AsciiDoc) except GitHub-required files
+- GitHub-required `.md`: SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md
+- No duplicate formats (if `.adoc` exists, don't also have `.md`)
 
 ### Security Requirements
 

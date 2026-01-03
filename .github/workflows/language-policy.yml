@@ -1,0 +1,131 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: Language Policy Enforcement
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions: read-all
+
+jobs:
+  check-banned-languages:
+    name: Check for Banned Languages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Check for TypeScript files
+        run: |
+          if find . -name "*.ts" -o -name "*.tsx" | grep -v node_modules | grep -v ".d.ts" | head -1 | grep -q .; then
+            echo "::error::TypeScript files found. Use ReScript instead."
+            find . -name "*.ts" -o -name "*.tsx" | grep -v node_modules | grep -v ".d.ts"
+            exit 1
+          fi
+          echo "✓ No TypeScript files found"
+
+      - name: Check for Go files
+        run: |
+          if find . -name "*.go" | head -1 | grep -q .; then
+            echo "::error::Go files found. Use Rust instead."
+            find . -name "*.go"
+            exit 1
+          fi
+          echo "✓ No Go files found"
+
+      - name: Check for Python files (except Ansible)
+        run: |
+          # Allow Python only in ansible/ directories or for Ansible-specific files
+          PYTHON_FILES=$(find . -name "*.py" | grep -v __pycache__ | grep -v ".venv" | grep -v "ansible" | grep -v "molecule" || true)
+          if [ -n "$PYTHON_FILES" ]; then
+            echo "::error::Python files found outside Ansible context. Rewrite in Rust/ReScript."
+            echo "$PYTHON_FILES"
+            exit 1
+          fi
+          echo "✓ No unauthorized Python files found"
+
+      - name: Check for Makefiles
+        run: |
+          MAKEFILES=$(find . -name "Makefile" -o -name "Makefile.*" -o -name "*.mk" | grep -v ".github" || true)
+          if [ -n "$MAKEFILES" ]; then
+            echo "::error::Makefiles found. Use Mustfile/justfile instead."
+            echo "$MAKEFILES"
+            exit 1
+          fi
+          echo "✓ No Makefiles found"
+
+      - name: Check for package.json (npm/node)
+        run: |
+          if [ -f "package.json" ]; then
+            # Allow if it only contains devDependencies for tooling
+            if grep -q '"dependencies"' package.json; then
+              echo "::error::package.json with runtime dependencies found. Use deno.json instead."
+              exit 1
+            fi
+          fi
+          echo "✓ No npm runtime dependencies found"
+
+      - name: Check for Java/Kotlin files
+        run: |
+          if find . -name "*.java" -o -name "*.kt" -o -name "*.kts" | head -1 | grep -q .; then
+            echo "::error::Java/Kotlin files found. Use Rust/Tauri/Dioxus instead."
+            find . -name "*.java" -o -name "*.kt" -o -name "*.kts"
+            exit 1
+          fi
+          echo "✓ No Java/Kotlin files found"
+
+      - name: Check for Swift files
+        run: |
+          if find . -name "*.swift" | head -1 | grep -q .; then
+            echo "::error::Swift files found. Use Tauri/Dioxus instead."
+            find . -name "*.swift"
+            exit 1
+          fi
+          echo "✓ No Swift files found"
+
+  check-required-files:
+    name: Check Required Files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Check for .machine_readable directory
+        run: |
+          if [ ! -d ".machine_readable" ]; then
+            echo "::warning::.machine_readable/ directory not found"
+          else
+            echo "✓ .machine_readable/ directory exists"
+            for scm in STATE META ECOSYSTEM AGENTIC NEUROSYM PLAYBOOK; do
+              if [ ! -f ".machine_readable/${scm}.scm" ]; then
+                echo "::warning::Missing .machine_readable/${scm}.scm"
+              else
+                echo "✓ .machine_readable/${scm}.scm exists"
+              fi
+            done
+          fi
+
+      - name: Check for Mustfile/justfile
+        run: |
+          if [ ! -f "Mustfile" ] && [ ! -f "justfile" ]; then
+            echo "::warning::Neither Mustfile nor justfile found"
+          else
+            echo "✓ Build system files present"
+          fi
+
+      - name: Check SPDX headers
+        run: |
+          MISSING_SPDX=0
+          for ext in rs res js jsx mjs ts tsx py go java kt swift sh bash; do
+            while IFS= read -r file; do
+              if [ -n "$file" ] && ! head -5 "$file" | grep -q "SPDX-License-Identifier"; then
+                echo "::warning::Missing SPDX header: $file"
+                MISSING_SPDX=$((MISSING_SPDX + 1))
+              fi
+            done < <(find . -name "*.$ext" -type f 2>/dev/null | grep -v node_modules | grep -v .git | head -50)
+          done
+          if [ $MISSING_SPDX -gt 0 ]; then
+            echo "::warning::$MISSING_SPDX files missing SPDX headers"
+          fi
