@@ -1,4 +1,4 @@
-;; SPDX-License-Identifier: AGPL-3.0-or-later
+;; SPDX-License-Identifier: PMPL-1.0-or-later
 ;; SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 ;; SATELLITES.scm — Hub-Satellite Registry for hyperpolymath/standards
 ;;
@@ -121,8 +121,22 @@
     ;; RELATED STANDARDS
     ;; ============================================================
     (satellite
-      (name "palimpsest-licence")
-      (url "https://github.com/hyperpolymath/palimpsest-licence")
+      (name "a2ml")
+      (url "https://github.com/hyperpolymath/a2ml")
+      (role "specification")
+      (tier "format")
+      (description "Attested Markup Language - typed, verified documents")
+      (media-types ("application/vnd.a2ml"))
+      (relationships
+        (parent "standards")
+        (related ("meta-scm" "neurosym-scm"))
+        (adjacent ("k9-svc"))
+        (example-implementations ("stateful-artefacts-for-gitforges"))))
+
+    
+    (satellite
+      (name "palimpsest-license")
+      (url "https://github.com/hyperpolymath/palimpsest-license")
       (role "governance")
       (tier "foundation")
       (description "Philosophical license overlay for ethical AI development")
