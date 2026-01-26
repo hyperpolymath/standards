@@ -133,7 +133,26 @@
         (adjacent ("k9-svc"))
         (example-implementations ("stateful-artefacts-for-gitforges"))))
 
-    
+    (satellite
+      (name "k9-svc")
+      (url "https://github.com/hyperpolymath/k9-svc")
+      (role "specification")
+      (tier "format")
+      (description "Self-validating components with embedded contracts and deployment logic")
+      (relationships
+        (parent "standards")
+        (related ("a2ml"))))
+
+    (satellite
+      (name "stateful-artefacts-for-gitforges")
+      (url "https://github.com/hyperpolymath/stateful-artefacts-for-gitforges")
+      (role "tooling")
+      (tier "application")
+      (description "Metadata-driven documentation pipeline for Git forges")
+      (relationships
+        (parent "standards")
+        (related ("a2ml"))))
+
     (satellite
       (name "palimpsest-license")
       (url "https://github.com/hyperpolymath/palimpsest-license")
