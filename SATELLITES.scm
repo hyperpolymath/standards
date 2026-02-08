@@ -10,7 +10,9 @@
   (hub
     (name "standards")
     (url "https://github.com/hyperpolymath/standards")
-    (description "Organization-wide standards, policies, and enforcement mechanisms")
+    (architecture "monorepo")
+    (absorbed-date "2026-02-08")
+    (description "Organization-wide standards, policies, and enforcement mechanisms — satellites absorbed as subdirectories")
     (governs
       (language-policy "CLAUDE.md")
       (enforcement-workflows ".github/workflows/")
@@ -28,6 +30,7 @@
     (satellite
       (name "meta-scm")
       (url "https://github.com/hyperpolymath/meta-scm")
+      (local-path "meta-scm/")
       (role "specification")
       (tier "primary")
       (format-defines ("META.scm" "STATE.scm" "ECOSYSTEM.scm"))
@@ -43,6 +46,7 @@
     (satellite
       (name "playbook-scm")
       (url "https://github.com/hyperpolymath/playbook-scm")
+      (local-path "playbook-scm/")
       (role "specification")
       (tier "execution")
       (format-defines ("PLAYBOOK.scm"))
@@ -56,6 +60,7 @@
     (satellite
       (name "agentic-scm")
       (url "https://github.com/hyperpolymath/agentic-scm")
+      (local-path "agentic-scm/")
       (role "specification")
       (tier "execution")
       (format-defines ("AGENTIC.scm"))
@@ -70,6 +75,7 @@
     (satellite
       (name "neurosym-scm")
       (url "https://github.com/hyperpolymath/neurosym-scm")
+      (local-path "neurosym-scm/")
       (role "specification")
       (tier "execution")
       (format-defines ("NEUROSYM.scm"))
@@ -84,6 +90,7 @@
     (satellite
       (name "anchor.scm")
       (url "https://github.com/hyperpolymath/anchor.scm")
+      (local-path "anchor-scm/")
       (role "specification")
       (tier "intervention")
       (format-defines ("ANCHOR.scm"))
