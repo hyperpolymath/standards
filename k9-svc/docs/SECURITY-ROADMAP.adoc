@@ -1,0 +1,659 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= K9-SVC Security Roadmap
+:subtitle: Implementation Timeline to Industry-Leading Security
+:author: Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+:revdate: 2026-01-30
+:toc: left
+:icons: font
+
+== Overview
+
+This roadmap details the path from current state (v1.0.0) to industry-leading security (v2.0.0).
+
+**Timeline:** 6-12 months +
+**Investment:** $50-150k (mostly security audit + formal verification) +
+**Result:** 95% risk elimination, enterprise-ready
+
+**Status Tracking:** https://github.com/hyperpolymath/k9-svc/projects/security-roadmap
+
+---
+
+== Tier 1: Foundation (Weeks 1-5)
+
+**Goal:** 70% risk elimination, ready for internal professional use
+
+**Investment:** Development time only (~200 hours) +
+**Timeline:** 3-5 weeks +
+**Status:** 🟡 PLANNED
+
+=== Milestone 1.1: Rust Rewrite of sign.sh (Weeks 1-3)
+
+**Problem:** sign.sh is shell script (vulnerable to injection, memory bugs)
+
+**Solution:** Rewrite in Rust with memory safety
+
+**Tasks:**
+- [ ] Design Rust API (`k9-sign` CLI)
+- [ ] Implement key generation (Ed25519 via `ring` or `ed25519-dalek`)
+- [ ] Implement signing
+- [ ] Implement verification (atomic verify-then-execute)
+- [ ] Implement trust management
+- [ ] Comprehensive error handling
+- [ ] Unit tests (90%+ coverage)
+- [ ] Integration tests
+- [ ] Fuzz testing harness (cargo-fuzz)
+- [ ] Documentation
+- [ ] Replace sign.sh with k9-sign in workflows
+
+**Deliverable:** `k9-sign` binary (Rust)
+
+**Success Metric:** All existing sign.sh functionality works, fuzzing finds no crashes
+
+**Owner:** Core team
+
+---
+
+=== Milestone 1.2: Refuse Root Execution (Week 1)
+
+**Problem:** K9 can run as root, enabling privilege escalation
+
+**Solution:** Refuse by default, require explicit flag
+
+**Tasks:**
+- [ ] Add root detection to `must` shim
+- [ ] Exit with error if root detected
+- [ ] Add `--allow-root` flag (requires confirmation)
+- [ ] Add warning prompt if `--allow-root` used
+- [ ] Update documentation
+- [ ] Update test suite
+
+**Deliverable:** Updated `must` shim
+
+**Success Metric:** K9 refuses to run as root without explicit override
+
+**Owner:** Core team
+
+---
+
+=== Milestone 1.3: Improved Key Management (Week 2)
+
+**Problem:** Keys stored in plaintext, no fingerprint display
+
+**Solution:** Password protection + fingerprint verification
+
+**Tasks:**
+- [ ] Add password protection to keygen (optional but recommended)
+- [ ] Display fingerprint when trusting keys
+- [ ] Require user to verify fingerprint matches published value
+- [ ] Add key rotation documentation
+- [ ] Update GUIDE.adoc with key management best practices
+
+**Deliverable:** Enhanced `k9-sign keygen` and `k9-sign trust`
+
+**Success Metric:** Users see fingerprint and confirm before trusting
+
+**Owner:** Core team
+
+---
+
+=== Milestone 1.4: Static Analysis Tool (k9-scan) (Week 3-4)
+
+**Problem:** No way to detect malicious patterns before execution
+
+**Solution:** Static analysis tool flags dangerous commands
+
+**Tasks:**
+- [ ] Design k9-scan (Rust or shell)
+- [ ] Pattern matching for dangerous commands:
+  - `rm -rf` (file deletion)
+  - `curl | bash` (remote execution)
+  - `eval` / `exec` (code injection)
+  - `sudo` / `su` (privilege escalation)
+  - Network operations (`nc`, `wget`)
+- [ ] Risk scoring (HIGH/MEDIUM/LOW)
+- [ ] Integration with justfile (`just scan`)
+- [ ] CI integration
+- [ ] False positive handling
+
+**Deliverable:** `k9-scan` tool
+
+**Success Metric:** Detects 90%+ of obviously malicious patterns
+
+**Owner:** Core team
+
+---
+
+=== Milestone 1.5: Dry-Run Mode (Week 4)
+
+**Problem:** Users can't preview what will execute
+
+**Solution:** Show all commands before execution, require approval
+
+**Tasks:**
+- [ ] Add `--dry-run` flag to `must` shim
+- [ ] Parse justfile, display commands
+- [ ] Prompt for approval
+- [ ] Integrate with signature verification
+- [ ] Update documentation
+
+**Deliverable:** `./must deploy --dry-run`
+
+**Success Metric:** Users see all commands before execution
+
+**Owner:** Core team
+
+---
+
+=== Milestone 1.6: Terminology Updates (Week 1)
+
+**Problem:** "Hunt", "Unleash" sound dangerous
+
+**Solution:** Rename to less threatening terms
+
+**Tasks:**
+- [ ] Update all docs: "Hunt" → "Production"
+- [ ] Update all docs: "Unleash" → "Deploy"
+- [ ] Update all docs: "Active pedigree" → "Embedded validation"
+- [ ] Update code comments
+- [ ] Update examples
+- [ ] Maintain backwards compatibility (leash = 'Hunt still works)
+
+**Deliverable:** Updated documentation
+
+**Success Metric:** All user-facing docs use new terminology
+
+**Owner:** Documentation team
+
+---
+
+=== Milestone 1.7: Security Warnings (Week 1)
+
+**Problem:** No prominent security warnings in docs
+
+**Solution:** Add warnings to all entry points
+
+**Tasks:**
+- [ ] Add security section to README.adoc
+- [ ] Add warnings to GUIDE.adoc
+- [ ] Add warnings to SPEC.adoc
+- [ ] Create SECURITY-BEST-PRACTICES.adoc
+- [ ] Link to security docs from all pages
+
+**Deliverable:** Enhanced documentation
+
+**Success Metric:** Every doc mentions security risks and mitigations
+
+**Owner:** Documentation team
+
+---
+
+**Tier 1 Completion Criteria:**
+- ✅ k9-sign (Rust) passes all tests and fuzzing
+- ✅ Refuses to run as root by default
+- ✅ k9-scan detects dangerous patterns
+- ✅ Dry-run mode works
+- ✅ Documentation updated
+- ✅ All tests pass
+
+**Release:** K9-SVC v1.1.0 (Internal Professional Use)
+
+---
+
+== Tier 2: Production Ready (Months 2-3)
+
+**Goal:** 90% risk elimination, external adoption ready
+
+**Investment:** Dev time + hardware (~$5k for HSMs) +
+**Timeline:** 6-10 weeks +
+**Status:** 🔴 NOT STARTED
+
+=== Milestone 2.1: HSM/YubiKey Integration (Weeks 6-8)
+
+**Problem:** Software key theft
+
+**Solution:** Hardware-backed keys for production
+
+**Tasks:**
+- [ ] Research HSM/YubiKey APIs (PKCS#11, OpenSC)
+- [ ] Add hardware key support to k9-sign
+- [ ] Document hardware key setup
+- [ ] Create production key policy: "MUST use hardware keys"
+- [ ] Add hardware key detection
+- [ ] Warn if production config signed with software key
+- [ ] Testing with YubiKey 5 series
+- [ ] Testing with Nitrokey
+
+**Deliverable:** Hardware key support in k9-sign
+
+**Success Metric:** Production keys physically isolated, software-theft impossible
+
+**Owner:** Security team
+
+**Cost:** $50-200 per YubiKey/Nitrokey
+
+---
+
+=== Milestone 2.2: Key Revocation System (Weeks 7-9)
+
+**Problem:** No way to revoke compromised keys
+
+**Solution:** Certificate Revocation List (CRL) or similar
+
+**Tasks:**
+- [ ] Design revocation mechanism
+  - Option A: CRL file (local or remote)
+  - Option B: OCSP-like protocol
+  - Option C: Blockchain-based (overkill?)
+- [ ] Implement revocation checking in k9-sign
+- [ ] Create `k9-sign revoke` command
+- [ ] Document revocation procedure
+- [ ] Test revocation workflow
+- [ ] CI integration (check revocation before deploy)
+
+**Deliverable:** Key revocation system
+
+**Success Metric:** Revoked keys cannot verify signatures
+
+**Owner:** Security team
+
+---
+
+=== Milestone 2.3: Nickel Process Sandboxing (Weeks 8-10)
+
+**Problem:** Nickel vulnerabilities could affect K9
+
+**Solution:** Run Nickel in isolated process with seccomp filter
+
+**Tasks:**
+- [ ] Design sandbox architecture (Linux namespaces + seccomp)
+- [ ] Implement sandbox launcher in Rust
+- [ ] Seccomp filter: block network, file I/O (except stdin/stdout)
+- [ ] Memory limit enforcement
+- [ ] Timeout enforcement
+- [ ] Test with malicious Nickel code
+- [ ] Platform-specific handling (Linux, macOS, BSD)
+- [ ] Fallback for unsupported platforms
+
+**Deliverable:** Sandboxed Nickel evaluation
+
+**Success Metric:** Nickel exploit cannot escape sandbox
+
+**Owner:** Security team
+
+---
+
+=== Milestone 2.4: Hunt-Level Sandboxing (k9-sandbox) (Weeks 9-11)
+
+**Problem:** Hunt-level components have full system access
+
+**Solution:** Optional sandbox for testing/untrusted configs
+
+**Tasks:**
+- [ ] Design k9-sandbox (Podman/Docker container)
+- [ ] Container image with K9 tooling
+- [ ] Filesystem isolation (bind mounts)
+- [ ] Network isolation (optional)
+- [ ] Resource limits (CPU, memory)
+- [ ] Integration with must shim
+- [ ] Documentation: when to use sandbox
+- [ ] CI testing
+
+**Deliverable:** k9-sandbox tool
+
+**Success Metric:** Hunt-level malware contained in sandbox
+
+**Owner:** Core team
+
+---
+
+=== Milestone 2.5: Reproducible Builds (Weeks 10-12)
+
+**Problem:** Cannot verify K9 binaries match source
+
+**Solution:** Bit-for-bit reproducible builds
+
+**Tasks:**
+- [ ] Research reproducible build tools (Bazel, Nix, etc.)
+- [ ] Implement reproducible build for k9-sign
+- [ ] Publish build instructions
+- [ ] Publish checksums for releases
+- [ ] CI verification (build twice, compare)
+- [ ] Documentation for users to verify
+
+**Deliverable:** Reproducible build system
+
+**Success Metric:** Anyone can build K9 and get identical binary
+
+**Owner:** Build team
+
+---
+
+=== Milestone 2.6: Security Audit (Weeks 11-13)
+
+**Problem:** No third-party verification of security
+
+**Solution:** Professional security audit by reputable firm
+
+**Tasks:**
+- [ ] Select auditor (Trail of Bits, NCC Group, Cure53)
+- [ ] Define audit scope:
+  - k9-sign implementation
+  - Signature verification logic
+  - Key management
+  - Sandbox implementation
+  - Supply chain
+- [ ] Provide codebase and documentation
+- [ ] Respond to auditor questions
+- [ ] Fix identified issues
+- [ ] Publish audit results
+
+**Deliverable:** Public audit report
+
+**Success Metric:** No critical vulnerabilities, public report available
+
+**Owner:** Executive team
+
+**Cost:** $25-50k
+
+---
+
+**Tier 2 Completion Criteria:**
+- ✅ Hardware keys supported and documented
+- ✅ Key revocation system works
+- ✅ Nickel sandboxed
+- ✅ Hunt-level sandbox available
+- ✅ Reproducible builds
+- ✅ Security audit complete with public report
+- ✅ No critical vulnerabilities remaining
+
+**Release:** K9-SVC v1.5.0 (Production Ready)
+
+---
+
+== Tier 3: Industry Leading (Months 4-12)
+
+**Goal:** 95% risk elimination, mission-critical ready
+
+**Investment:** $50-100k (formal verification, bug bounty) +
+**Timeline:** 3-9 months +
+**Status:** 🔴 NOT STARTED
+
+=== Milestone 3.1: Formal Verification (Months 4-9)
+
+**Problem:** Cannot prove signature logic is correct
+
+**Solution:** Formal verification with TLA+/Coq/Isabelle
+
+**Tasks:**
+- [ ] Select formal method (TLA+ for protocols, Coq for implementation)
+- [ ] Model signature verification algorithm
+- [ ] Specify correctness properties:
+  - Valid signature always accepted
+  - Invalid signature always rejected
+  - No signature bypass possible
+  - Atomic verify-then-execute
+- [ ] Prove properties hold
+- [ ] Extract verified code (Coq → Rust)
+- [ ] Integration testing
+- [ ] Publish formal model and proofs
+
+**Deliverable:** Formally verified signature verification
+
+**Success Metric:** Mathematical proof of correctness
+
+**Owner:** Research team
+
+**Cost:** $50-100k (consulting or academic collaboration)
+
+---
+
+=== Milestone 3.2: Bug Bounty Program (Months 4-12)
+
+**Problem:** Unknown vulnerabilities may exist
+
+**Solution:** Public bug bounty program
+
+**Tasks:**
+- [ ] Set up HackerOne or Bugcrowd program
+- [ ] Define scope (k9-sign, signatures, sandboxing)
+- [ ] Set reward tiers:
+  - Critical (RCE, signature bypass): $2000-5000
+  - High (key theft, sandbox escape): $1000-2000
+  - Medium (DoS, information leak): $500-1000
+  - Low (minor issues): $100-500
+- [ ] Allocate budget ($20-50k annually)
+- [ ] Triage and respond to reports
+- [ ] Fix vulnerabilities
+- [ ] Public disclosure
+
+**Deliverable:** Active bug bounty program
+
+**Success Metric:** 50+ researchers engaged, vulnerabilities fixed
+
+**Owner:** Security team
+
+**Cost:** $20-50k annually
+
+---
+
+=== Milestone 3.3: Enterprise PKI Integration (Months 5-8)
+
+**Problem:** Enterprises use existing PKI systems
+
+**Solution:** Integration with Active Directory, LDAP, etc.
+
+**Tasks:**
+- [ ] Research enterprise PKI systems
+- [ ] Design integration architecture
+- [ ] Implement AD/LDAP key management
+- [ ] Certificate-based authentication
+- [ ] Group policy integration
+- [ ] SSO integration
+- [ ] Documentation for enterprise admins
+- [ ] Testing with real enterprise deployments
+
+**Deliverable:** Enterprise PKI support
+
+**Success Metric:** K9 integrates with existing enterprise identity systems
+
+**Owner:** Enterprise team
+
+---
+
+=== Milestone 3.4: NIST/FIPS Compliance (Months 6-12, if needed)
+
+**Problem:** Some regulated environments require NIST/FIPS
+
+**Solution:** FIPS 140-2/3 certified crypto
+
+**Tasks:**
+- [ ] Assess need (user demand?)
+- [ ] Use FIPS-certified OpenSSL build
+- [ ] FIPS mode for k9-sign
+- [ ] Compliance testing
+- [ ] Certification process
+- [ ] Documentation
+
+**Deliverable:** FIPS-compliant mode
+
+**Success Metric:** Passes FIPS certification
+
+**Owner:** Compliance team
+
+**Cost:** $10-30k (certification)
+
+**Note:** Only if user demand justifies cost
+
+---
+
+=== Milestone 3.5: Advanced Static Analysis (Months 5-7)
+
+**Problem:** k9-scan can be bypassed
+
+**Solution:** Machine learning-based malware detection
+
+**Tasks:**
+- [ ] Collect dataset (benign vs malicious K9 files)
+- [ ] Train ML model (random forest, neural net)
+- [ ] Integration with k9-scan
+- [ ] Continuous learning
+- [ ] False positive handling
+
+**Deliverable:** ML-powered k9-scan
+
+**Success Metric:** 95%+ detection rate, <5% false positives
+
+**Owner:** Research team
+
+---
+
+=== Milestone 3.6: Multi-Signature Support (Months 6-8)
+
+**Problem:** Single key compromise enables full attack
+
+**Solution:** Require M-of-N signatures for critical operations
+
+**Tasks:**
+- [ ] Design multi-sig protocol
+- [ ] Implement in k9-sign
+- [ ] Threshold signatures (e.g., 2-of-3 keys required)
+- [ ] Key ceremony documentation
+- [ ] Testing
+
+**Deliverable:** Multi-signature support
+
+**Success Metric:** Production configs require 2+ signatures
+
+**Owner:** Security team
+
+---
+
+=== Milestone 3.7: Security Certifications (Months 9-12, if needed)
+
+**Problem:** Some industries require certifications
+
+**Solution:** Obtain relevant certifications
+
+**Options:**
+- Common Criteria EAL4+
+- ISO 27001 (process, not product)
+- SOC 2 Type II (for hosted service)
+
+**Tasks:**
+- [ ] Assess need based on user demand
+- [ ] Select certification(s)
+- [ ] Preparation and testing
+- [ ] Certification process
+- [ ] Ongoing compliance
+
+**Deliverable:** Security certifications
+
+**Success Metric:** Certifications obtained
+
+**Owner:** Compliance team
+
+**Cost:** $50-100k+ per certification
+
+**Note:** Only if market requires
+
+---
+
+**Tier 3 Completion Criteria:**
+- ✅ Formal verification complete
+- ✅ Bug bounty program active (6+ months)
+- ✅ Enterprise PKI integration
+- ✅ Advanced static analysis
+- ✅ Multi-signature support
+- ✅ Certifications (if needed)
+- ✅ No high or critical vulnerabilities remaining
+
+**Release:** K9-SVC v2.0.0 (Industry Leading)
+
+---
+
+== Timeline Gantt Chart
+
+```
+Month  |  1  |  2  |  3  |  4  |  5  |  6  |  7  |  8  |  9  | 10  | 11  | 12
+-------+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+Tier 1 |█████|████ |     |     |     |     |     |     |     |     |     |
+Tier 2 |     |█████|█████|████ |     |     |     |     |     |     |     |
+Tier 3 |     |     |     |█████|█████|█████|█████|█████|████ |     |     |
+Audit  |     |     |██████████ |     |     |     |     |     |     |     |
+FV     |     |     |     |     |████████████████████████████ |     |     |
+Bug$   |     |     |     |█████████████████████████████████████████████████
+
+█ = Active development
+```
+
+---
+
+== Resource Requirements
+
+**Personnel:**
+- Core team: 2-3 developers (full-time, months 1-3)
+- Security team: 1-2 specialists (part-time, months 2-12)
+- Documentation team: 1 writer (part-time, months 1-3)
+- Research team: 1-2 academics (part-time, months 4-9)
+
+**Budget:**
+- Security audit: $25-50k
+- Formal verification: $50-100k
+- Bug bounty: $20-50k annually
+- Hardware keys: $5-10k (YubiKeys for team)
+- Certifications (optional): $50-100k
+- **Total: $150-310k** (depending on optional items)
+
+**Infrastructure:**
+- CI/CD capacity (fuzzing, testing)
+- Hardware security modules (testing)
+- Sandboxing infrastructure (containers, VMs)
+
+---
+
+== Success Metrics
+
+**Tier 1 (Internal Use):**
+- 0 memory safety bugs (Rust eliminates)
+- 0 privilege escalation vulnerabilities
+- 70% overall risk elimination
+- Ready for internal professional dogfooding
+
+**Tier 2 (Production Ready):**
+- Security audit complete (public report)
+- 0 critical vulnerabilities
+- 90% overall risk elimination
+- Ready for external adoption
+
+**Tier 3 (Industry Leading):**
+- Formal verification complete (mathematical proof)
+- Bug bounty active (50+ researchers)
+- 95% overall risk elimination
+- Suitable for mission-critical environments
+
+**Continuous:**
+- 0 open critical vulnerabilities (always)
+- <7 days to patch high vulnerabilities
+- <30 days to patch medium vulnerabilities
+- Public transparency (security advisories)
+
+---
+
+## Maintenance (Post-v2.0.0)
+
+**Ongoing activities:**
+- Monitor bug bounty submissions
+- Respond to CVEs in dependencies
+- Update dependencies quarterly
+- Annual security audit
+- Continuous documentation updates
+- Community engagement
+
+**Budget:** $20-50k annually
+
+---
+
+**Maintainer:** Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk> +
+**Project Board:** https://github.com/hyperpolymath/k9-svc/projects/security-roadmap +
+**Status Updates:** Monthly (GitHub Discussions) +
+**Last Updated:** 2026-01-30

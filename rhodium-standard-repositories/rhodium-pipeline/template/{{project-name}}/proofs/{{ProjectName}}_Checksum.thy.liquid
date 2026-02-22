@@ -1,0 +1,156 @@
+(*
+  {{ ProjectName }}_Checksum.thy
+
+  Checksum integrity proofs for {{ project-name }}.
+
+  Verifies that checksum operations correctly detect data changes.
+
+  Part of Rhodium Pipeline Template methodology.
+*)
+
+theory {{ ProjectName }}_Checksum
+  imports {{ ProjectName }}_Prelude
+begin
+
+section \<open>Checksum Model\<close>
+
+text \<open>
+  We model checksums abstractly. The key property is collision resistance:
+  different data should (with overwhelming probability) have different checksums.
+
+  For our purposes, we assume an ideal hash function with no collisions
+  within our working set.
+\<close>
+
+locale ideal_checksum =
+  fixes hash :: "payload \<Rightarrow> checksum"
+  assumes injective: "hash p1 = hash p2 \<Longrightarrow> p1 = p2"
+begin
+
+section \<open>Verification\<close>
+
+text \<open>Verify that data matches its checksum.\<close>
+
+definition verify :: "payload \<Rightarrow> checksum \<Rightarrow> bool" where
+  "verify data stored \<equiv> hash data = stored"
+
+lemma verify_correct:
+  "verify data (hash data)"
+  unfolding verify_def by simp
+
+lemma verify_sound:
+  assumes "verify data stored"
+  shows "stored = hash data"
+  using assms unfolding verify_def by simp
+
+lemma tampering_detected:
+  assumes "data' \<noteq> data"
+  shows "\<not> verify data' (hash data)"
+  using assms injective unfolding verify_def by auto
+
+section \<open>Checksummed Records\<close>
+
+text \<open>A record with its checksum.\<close>
+
+type_synonym checksummed_record = "record \<times> checksum"
+
+definition make_checksummed :: "record \<Rightarrow> checksummed_record" where
+  "make_checksummed r = (r, hash (record_data r))"
+
+definition verify_checksummed :: "checksummed_record \<Rightarrow> bool" where
+  "verify_checksummed cr = verify (record_data (fst cr)) (snd cr)"
+
+theorem checksummed_correct:
+  "verify_checksummed (make_checksummed r)"
+  unfolding make_checksummed_def verify_checksummed_def
+  using verify_correct by simp
+
+theorem checksummed_detects_tampering:
+  assumes "record_data r' \<noteq> record_data r"
+  shows "\<not> verify_checksummed (r', snd (make_checksummed r))"
+  using assms injective
+  unfolding make_checksummed_def verify_checksummed_def verify_def
+  by auto
+
+section \<open>Checksummed Dataset\<close>
+
+type_synonym checksummed_dataset = "checksummed_record fset"
+
+definition checksum_dataset :: "dataset \<Rightarrow> checksummed_dataset" where
+  "checksum_dataset ds = fimage make_checksummed ds"
+
+definition verify_dataset :: "checksummed_dataset \<Rightarrow> bool" where
+  "verify_dataset cds = fBall cds verify_checksummed"
+
+theorem checksum_dataset_valid:
+  "verify_dataset (checksum_dataset ds)"
+  unfolding checksum_dataset_def verify_dataset_def
+  using checksummed_correct by auto
+
+section \<open>Transfer Integrity\<close>
+
+text \<open>
+  When data is transferred (e.g., written to disk and read back),
+  checksums detect any corruption.
+\<close>
+
+definition transfer_with_checksum ::
+  "checksummed_record \<Rightarrow> (record \<Rightarrow> record) \<Rightarrow> bool" where
+  "transfer_with_checksum cr transfer =
+    verify_checksummed (transfer (fst cr), snd cr)"
+
+theorem uncorrupted_transfer:
+  assumes "\<And>r. record_data (transfer r) = record_data r"
+  shows "transfer_with_checksum (make_checksummed r) transfer"
+  using assms unfolding transfer_with_checksum_def make_checksummed_def
+    verify_checksummed_def verify_def
+  by simp
+
+theorem corrupted_transfer_detected:
+  assumes "record_data (transfer r) \<noteq> record_data r"
+  shows "\<not> transfer_with_checksum (make_checksummed r) transfer"
+  using assms injective
+  unfolding transfer_with_checksum_def make_checksummed_def
+    verify_checksummed_def verify_def
+  by auto
+
+end \<comment> \<open>locale ideal_checksum\<close>
+
+section \<open>Practical Checksum Properties\<close>
+
+text \<open>
+  In practice, we use SHAKE3-256 which has negligible collision probability.
+  We model this with a weaker assumption.
+\<close>
+
+locale practical_checksum =
+  fixes hash :: "payload \<Rightarrow> checksum"
+  fixes collision_bound :: real
+  assumes collision_prob: "collision_bound < 2 ^ (-128)"
+    \<comment> \<open>Probability of collision negligible\<close>
+begin
+
+text \<open>
+  With overwhelming probability, different data has different checksums.
+\<close>
+
+definition probably_different :: "payload \<Rightarrow> payload \<Rightarrow> bool" where
+  "probably_different p1 p2 \<equiv> p1 \<noteq> p2 \<longrightarrow> hash p1 \<noteq> hash p2"
+
+text \<open>
+  For security-critical applications, we verify this property
+  holds for all data in our working set.
+\<close>
+
+definition collision_free_set :: "payload set \<Rightarrow> bool" where
+  "collision_free_set S \<equiv> inj_on hash S"
+
+lemma collision_free_implies_detection:
+  assumes "collision_free_set S"
+  assumes "p1 \<in> S" "p2 \<in> S" "p1 \<noteq> p2"
+  shows "hash p1 \<noteq> hash p2"
+  using assms unfolding collision_free_set_def inj_on_def by auto
+
+end \<comment> \<open>locale practical_checksum\<close>
+
+end

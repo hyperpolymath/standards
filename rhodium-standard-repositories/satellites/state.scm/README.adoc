@@ -1,0 +1,245 @@
+= STATE
+:toc: left
+:toclevels: 3
+:source-highlighter: highlight.js
+
+*Stateful Context Tracking Engine for AI Conversation Continuity*
+
+== Overview
+
+STATE is a checkpoint/restore system for AI conversations that persists project
+context, decisions, and next actions across multiple Claude conversations.
+
+=== Problem
+
+* Each new Claude conversation starts with zero context about ongoing projects
+* Complex project interdependencies get lost between sessions
+* Progress gets reset; decisions already made must be repeated
+* Token limits force mid-project context loss
+
+=== Solution
+
+* Single declarative file (`STATE.scm`) in Guile Scheme
+* Human-readable format (not JSON/binary)
+* Download at end of session -> Upload at start of next
+* Claude reads it and resumes exactly where you left off
+* Includes: current project focus, blockers, next actions, completion percentages
+
+== Quick Start
+
+=== Development Environment
+
+*Primary (Guix):*
+
+[source,bash]
+----
+guix shell -m manifest.scm
+just test
+----
+
+*Fallback (Nix):*
+
+[source,bash]
+----
+nix develop
+just test
+----
+
+*Container (Wolfi + Guix):*
+
+[source,bash]
+----
+nerdctl build -t state:latest .
+nerdctl run -it --rm state:latest
+----
+
+=== End of Conversation
+
+----
+User: "Create STATE handover and prepare for next session"
+Claude:
+  1. Updates all project completion percentages
+  2. Lists critical blockers
+  3. Exports STATE.scm
+  4. Says: "Download STATE.scm now - you'll upload it next session"
+----
+
+=== Start of Next Conversation
+
+----
+User: [Uploads STATE.scm] "Continue from this state"
+Claude:
+  1. Reads and parses STATE.scm
+  2. Reconstructs project context
+  3. Identifies current focus
+  4. Picks up exactly where last conversation left off
+----
+
+== Technology Stack
+
+*Language:* Guile Scheme (GNU's Scheme implementation)
+
+* Minimal, readable, homoiconic (code = data)
+* minikanren-like patterns for constraint/logic queries over project state
+
+*Package Management:* Guix (primary), Nix (fallback)
+
+*Containers:* Wolfi base image with Guix
+
+== File Structure
+
+The STATE.scm file contains these major sections:
+
+[[metadata]]
+=== Metadata
+Format version and timestamps for tracking state evolution.
+
+[[user]]
+=== User Context
+Name, roles, language preferences, tool preferences, and values.
+
+[[session]]
+=== Session Context
+Conversation ID, message counts, and token limit status.
+
+[[focus]]
+=== Focus
+Current project, phase, deadlines, and blocking dependencies.
+
+[[projects]]
+=== Project Catalog
+Complete list of all projects with:
+
+* Status (in-progress, blocked, paused, complete, abandoned)
+* Completion percentage
+* Category and phase
+* Dependencies and blockers
+* Next actions
+
+[[history]]
+=== History
+Completion snapshots over time for velocity tracking and estimation.
+
+[[critical-next]]
+=== Critical Next Actions
+Prioritized list of immediate actions with optional deadlines.
+
+== Query System
+
+STATE supports minikanren-style relational queries:
+
+[source,scheme]
+----
+;; Load the library
+(add-to-load-path "lib")
+(use-modules (state))
+
+;; What's my current focus?
+(get-current-focus state)
+;; -> "Oblibeny parser implementation"
+
+;; What projects are blocked?
+(get-blocked-projects state)
+;; -> (project-alist ...)
+
+;; minikanren relational query
+(run* (q) (statuso q "blocked" state))
+;; -> ("My Language Solo" "ZeroStep" "Aletheia")
+
+;; Generate dependency graph
+(generate-dot state)      ; GraphViz DOT
+(generate-mermaid state)  ; Mermaid diagram
+----
+
+== Why Scheme?
+
+. *Minimal syntax* - S-expressions are almost self-explanatory
+. *Lisp tradition* - Code-as-data matches logic programming
+. *Portable* - Runs on Linux, macOS, Windows (via WSL)
+. *GNU standard* - Free Software Foundation standard for extensibility
+. *Human-readable* - Easier to read and edit than JSON
+
+Comparison:
+
+[source,scheme]
+----
+;; Scheme: minimal syntax, obvious structure
+(project-name . "VALUE")
+
+;; JSON: noise-heavy
+{"projectName": "VALUE"}
+----
+
+== Files in This Repository
+
+=== Core
+
+* `STATE.scm` - Template state file
+* `lib/` - Modular Scheme library
+** `state-core.scm` - Core accessors and predicates
+** `state-kanren.scm` - minikanren integration
+** `state-graph.scm` - GraphViz/Mermaid visualization
+** `state-history.scm` - Velocity tracking and estimation
+** `state.scm` - Main entry point
+* `examples/` - Example state files
+
+=== Documentation
+
+* `README.adoc` - This documentation
+* `USAGE.adoc` - Comprehensive usage guide
+* `CHANGELOG.adoc` - Version history
+* `CONTRIBUTING.adoc` - Contribution guidelines
+* `GOVERNANCE.adoc` - Project governance
+* `CODE_OF_CONDUCT.adoc` - Community standards
+
+=== Infrastructure
+
+* `channels.scm` - Guix channel definition
+* `manifest.scm` - Guix package manifest
+* `guix.scm` - Guix package definition
+* `flake.nix` - Nix flake (fallback)
+* `Containerfile` - Wolfi + Guix container
+* `justfile` - Task automation
+* `.gitlab-ci.yml` - CI/CD pipeline
+
+== Roadmap
+
+=== Phase 1: Foundation ✓
+
+* [x] Basic STATE.scm structure
+* [x] Project metadata encoding
+* [x] Session checkpoint
+* [x] Manual download/upload cycle
+
+=== Phase 2: Smart Queries ✓
+
+* [x] Modular architecture
+* [x] minikanren integration (with fallback)
+* [x] GraphViz DOT visualization
+* [x] Mermaid diagram generation
+* [x] History tracking
+* [x] Velocity calculation
+* [x] Time estimation
+
+=== Phase 3: Automation
+
+* [ ] Elixir service for STATE.scm read/write
+* [ ] Integration with Echomesh for automatic state capture
+* [ ] Periodic exports
+* [ ] Diff tracking
+
+=== Phase 4: Full Integration
+
+* [ ] UPM (Universal Project Manager) integration
+* [ ] Git hooks for auto-update on commits
+* [ ] Team collaboration features
+
+== License
+
+Dual licensed under MIT and Palimpsest v0.8. See LICENSE.txt for details.
+
+== Author
+
+Designed by Jonathan D.A. Jewell +
+Implemented with Claude assistance +
+December 2025

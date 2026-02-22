@@ -1,0 +1,257 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: k9-sign CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'k9-sign/**'
+      - '.github/workflows/k9-sign-ci.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'k9-sign/**'
+      - '.github/workflows/k9-sign-ci.yml'
+
+permissions: read-all
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable, beta]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6d9817901c499d6b02debbb57edb38d33daa680b # stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@704facf57e6136b1bc63b828d79edcd491f0ee84 # v3
+        with:
+          path: k9-sign/target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run tests
+        working-directory: k9-sign
+        run: cargo test --verbose -- --test-threads=1
+
+      - name: Run tests (release mode)
+        working-directory: k9-sign
+        run: cargo test --release --verbose -- --test-threads=1
+
+  build:
+    name: Build Binary
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6d9817901c499d6b02debbb57edb38d33daa680b # stable
+        with:
+          toolchain: stable
+
+      - name: Build release binary
+        working-directory: k9-sign
+        run: cargo build --release --verbose
+
+      - name: Check binary size
+        working-directory: k9-sign
+        run: |
+          ls -lh target/release/k9-sign
+          echo "Binary size: $(du -h target/release/k9-sign | cut -f1)"
+
+      - name: Smoke test binary
+        working-directory: k9-sign
+        run: |
+          ./target/release/k9-sign --version
+          ./target/release/k9-sign --help
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b888a15615d19a852ae32 # v3
+        with:
+          name: k9-sign-${{ matrix.os }}
+          path: k9-sign/target/release/k9-sign
+          retention-days: 7
+
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6d9817901c499d6b02debbb57edb38d33daa680b # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        working-directory: k9-sign
+        run: cargo fmt -- --check
+
+      - name: Run clippy
+        working-directory: k9-sign
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6d9817901c499d6b02debbb57edb38d33daa680b # stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run security audit
+        working-directory: k9-sign
+        run: cargo audit
+
+  benchmark:
+    name: Performance Benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6d9817901c499d6b02debbb57edb38d33daa680b # stable
+
+      - name: Build release binary
+        working-directory: k9-sign
+        run: cargo build --release
+
+      - name: Benchmark keygen
+        working-directory: k9-sign
+        run: |
+          echo "Benchmarking keygen (10 iterations)..."
+          for i in {1..10}; do
+            time ./target/release/k9-sign keygen bench-key-$i
+          done
+
+      - name: Benchmark sign/verify
+        working-directory: k9-sign
+        run: |
+          # Create test file
+          dd if=/dev/urandom of=test.bin bs=1M count=1
+
+          # Trust key
+          ./target/release/k9-sign trust ~/.config/k9/keys/bench-key-1.pub
+
+          # Benchmark sign
+          echo "Benchmarking sign (10 iterations)..."
+          for i in {1..10}; do
+            rm -f test.bin.sig
+            time ./target/release/k9-sign sign test.bin bench-key-1
+          done
+
+          # Benchmark verify
+          echo "Benchmarking verify (10 iterations)..."
+          for i in {1..10}; do
+            time ./target/release/k9-sign verify test.bin
+          done
+
+  integration:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    needs: [test, build]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6d9817901c499d6b02debbb57edb38d33daa680b # stable
+
+      - name: Build k9-sign
+        working-directory: k9-sign
+        run: cargo build --release
+
+      - name: Full workflow test
+        working-directory: k9-sign
+        run: |
+          set -e
+
+          # 1. Generate keypair
+          echo "==> Generating keypair..."
+          ./target/release/k9-sign keygen integration-key
+
+          # 2. Trust key
+          echo "==> Trusting key..."
+          ./target/release/k9-sign trust ~/.config/k9/keys/integration-key.pub
+
+          # 3. Create test component
+          echo "==> Creating test component..."
+          cat > test-component.k9.ncl <<'EOF'
+          K9!
+          leash = 'Hunt
+          pedigree = {
+            schema_version = "1.0.0",
+            component_type = "integration-test"
+          }
+          EOF
+
+          # 4. Sign component
+          echo "==> Signing component..."
+          ./target/release/k9-sign sign test-component.k9.ncl integration-key
+
+          # 5. Verify signature
+          echo "==> Verifying signature..."
+          ./target/release/k9-sign verify test-component.k9.ncl
+
+          # 6. Authorize Hunt component
+          echo "==> Authorizing Hunt component..."
+          ./target/release/k9-sign authorize test-component.k9.ncl
+
+          # 7. List keys
+          echo "==> Listing keys..."
+          ./target/release/k9-sign list
+
+          echo ""
+          echo "✓ Integration test passed!"
+
+  all-checks:
+    name: All Checks Passed
+    runs-on: ubuntu-latest
+    needs: [test, build, lint, security, integration]
+    steps:
+      - name: Success
+        run: echo "All k9-sign CI checks passed!"

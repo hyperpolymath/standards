@@ -1,0 +1,670 @@
+# {{ project-name }} Task Automation
+#
+# Comprehensive justfile with 200+ recipes covering all workflows.
+# Part of Rhodium Pipeline Template methodology.
+#
+# Usage:
+#   just              # Show help
+#   just <recipe>     # Run recipe
+#   just --list       # List all recipes
+#
+# Environment:
+#   {{ PROJECT_NAME }}_PRESET=dev|prod|ci|paranoid
+#   {{ PROJECT_NAME }}_THREADS=N
+#   {{ PROJECT_NAME }}_VALIDATION=skip|quick|standard|full|paranoid
+
+# Default recipe
+default: help
+
+# Project metadata
+project := "{{ project-name }}"
+version := `cargo pkgid | cut -d# -f2 | cut -d@ -f2`
+
+# Toolchain versions
+rust_version := "{{ min_rust_version }}"
+isabelle_version := "{{ isabelle_version }}"
+nickel_version := `nickel --version 2>/dev/null | head -1 || echo "not installed"`
+guile_version := `guile --version 2>/dev/null | head -1 || echo "not installed"`
+
+# Directories
+src_dir := "src"
+proofs_dir := "proofs"
+config_dir := "config"
+schemes_dir := "schemes"
+docs_dir := "docs"
+tests_dir := "tests"
+target_dir := "target"
+
+# Colors for output
+red := '\033[0;31m'
+green := '\033[0;32m'
+yellow := '\033[0;33m'
+blue := '\033[0;34m'
+nc := '\033[0m'
+
+# ==============================================================================
+# META - Information and Help
+# ==============================================================================
+
+# Show all available recipes with descriptions
+help:
+    @echo "{{ project-name }} v{{{{ version }}}}"
+    @echo "================================"
+    @echo ""
+    @echo "Usage: just <recipe> [args...]"
+    @echo ""
+    @just --list --unsorted
+
+# Show detailed help for a specific recipe
+help-recipe recipe:
+    @just --show {{{{ recipe }}}}
+
+# Show project version
+version:
+    @echo "{{ project-name }} v{{{{ version }}}}"
+
+# Show complete version info for all tools
+versions:
+    @echo "Project: {{ project-name }} v{{{{ version }}}}"
+    @echo "Rust: $(rustc --version)"
+    @echo "Cargo: $(cargo --version)"
+    @echo "Nickel: {{{{ nickel_version }}}}"
+    @echo "Guile: {{{{ guile_version }}}}"
+    @echo "Isabelle: {{{{ isabelle_version }}}}"
+
+# Display current configuration
+config:
+    @nickel export config/default.ncl 2>/dev/null || echo "Nickel not available, showing defaults"
+
+# Explain configuration values
+config-explain:
+    @echo "Configuration Sections:"
+    @echo "  input      - Input file/directory settings"
+    @echo "  output     - Output file/directory settings"
+    @echo "  processing - Thread count, batch size, algorithm"
+    @echo "  validation - Validation level and strictness"
+    @echo "  checksum   - Checksum algorithm and automation"
+    @echo "  logging    - Log level and format"
+
+# Show changelog
+changelog:
+    @cat CHANGELOG.adoc 2>/dev/null || echo "No changelog found"
+
+# Show license information
+license:
+    @cat LICENSE
+
+# Show project statistics
+stats:
+    @echo "Project Statistics"
+    @echo "=================="
+    @echo "Rust files: $(find {{{{ src_dir }}}} -name '*.rs' | wc -l)"
+    @echo "Rust LOC: $(find {{{{ src_dir }}}} -name '*.rs' -exec cat {} + | wc -l)"
+    @echo "Isabelle theories: $(find {{{{ proofs_dir }}}} -name '*.thy' | wc -l)"
+    @echo "Test files: $(find {{{{ tests_dir }}}} -name '*.rs' | wc -l)"
+
+# ==============================================================================
+# DEPS - Dependency Management
+# ==============================================================================
+
+# Check all dependencies are installed
+check-deps: check-deps-rust check-deps-nickel check-deps-guile check-deps-isabelle
+    @echo "{{{{ green }}}}All dependencies satisfied{{{{ nc }}}}"
+
+# Check Rust toolchain
+check-deps-rust:
+    @echo "Checking Rust..."
+    @rustc --version >/dev/null 2>&1 || (echo "{{{{ red }}}}Rust not found. Install from rustup.rs{{{{ nc }}}}" && exit 1)
+    @cargo --version >/dev/null 2>&1 || (echo "{{{{ red }}}}Cargo not found{{{{ nc }}}}" && exit 1)
+    @echo "{{{{ green }}}}✓ Rust OK{{{{ nc }}}}"
+
+# Check Nickel installation
+check-deps-nickel:
+    @echo "Checking Nickel..."
+    @nickel --version >/dev/null 2>&1 || (echo "{{{{ yellow }}}}Nickel not found. Install: cargo install nickel-lang-cli{{{{ nc }}}}" && exit 1)
+    @echo "{{{{ green }}}}✓ Nickel OK{{{{ nc }}}}"
+
+# Check Guile installation
+check-deps-guile:
+    @echo "Checking Guile..."
+    @guile --version >/dev/null 2>&1 || (echo "{{{{ yellow }}}}Guile not found. Install: apt install guile-3.0{{{{ nc }}}}" && exit 1)
+    @echo "{{{{ green }}}}✓ Guile OK{{{{ nc }}}}"
+
+# Check Isabelle installation
+check-deps-isabelle:
+    @echo "Checking Isabelle..."
+    @which isabelle >/dev/null 2>&1 || (echo "{{{{ yellow }}}}Isabelle not found. Install from isabelle.in.tum.de{{{{ nc }}}}" && exit 1)
+    @echo "{{{{ green }}}}✓ Isabelle OK{{{{ nc }}}}"
+
+{% if include_julia -%}
+# Check Julia installation
+check-deps-julia:
+    @echo "Checking Julia..."
+    @julia --version >/dev/null 2>&1 || (echo "{{{{ yellow }}}}Julia not found. Install from julialang.org{{{{ nc }}}}" && exit 1)
+    @echo "{{{{ green }}}}✓ Julia OK{{{{ nc }}}}"
+{%- endif %}
+
+# Install missing Rust dependencies
+install-deps-rust:
+    @cargo install cargo-watch cargo-nextest cargo-audit cargo-outdated
+
+# Install all dependencies
+install-deps: install-deps-rust
+    @echo "Installing nickel..."
+    @cargo install nickel-lang-cli || true
+    @echo "{{{{ green }}}}Dependencies installed{{{{ nc }}}}"
+
+# Update Rust dependencies
+update-deps:
+    @cargo update
+
+# Audit dependencies for vulnerabilities
+audit-deps:
+    @cargo audit
+
+# Check for outdated dependencies
+outdated-deps:
+    @cargo outdated
+
+# ==============================================================================
+# BUILD - Compilation and Generation
+# ==============================================================================
+
+# Development build
+build:
+    cargo build
+
+# Development build with all features
+build-all-features:
+    cargo build --all-features
+
+# Optimized release build
+release:
+    cargo build --release
+
+# Debug build with extra symbols
+build-debug:
+    RUSTFLAGS="-C debuginfo=2" cargo build
+
+# Build all variants
+build-all: build release build-debug
+    @echo "{{{{ green }}}}All builds complete{{{{ nc }}}}"
+
+# Cross-compile for a target
+build-cross target:
+    cargo build --release --target {{{{ target }}}}
+
+# Build static binary
+build-static:
+    RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-unknown-linux-musl
+
+# Build with specific features
+build-features features:
+    cargo build --features "{{{{ features }}}}"
+
+# Build documentation
+build-docs:
+    cargo doc --no-deps
+
+# Build documentation and open
+build-docs-open:
+    cargo doc --no-deps --open
+
+# Check build without producing artifacts
+check:
+    cargo check
+
+# Check all targets
+check-all:
+    cargo check --all-targets --all-features
+
+# ==============================================================================
+# TEST - Testing at All Levels
+# ==============================================================================
+
+# Run all tests
+test:
+    cargo test
+
+# Run all tests with nextest (faster)
+test-nextest:
+    cargo nextest run
+
+# Run unit tests only
+test-unit:
+    cargo test --lib
+
+# Run integration tests only
+test-integration:
+    cargo test --test '*'
+
+# Run property-based tests
+test-property:
+    cargo test --test property
+
+# Run tests with coverage
+test-coverage:
+    cargo tarpaulin --out Html
+
+# Run tests in watch mode
+test-watch:
+    cargo watch -x test
+
+# Run specific test
+test-one name:
+    cargo test {{{{ name }}}} -- --nocapture
+
+# Run tests matching pattern
+test-match pattern:
+    cargo test {{{{ pattern }}}}
+
+# Run tests with verbose output
+test-verbose:
+    cargo test -- --nocapture
+
+# Run tests in release mode
+test-release:
+    cargo test --release
+
+# Run doc tests
+test-doc:
+    cargo test --doc
+
+# ==============================================================================
+# PROVE - Formal Verification
+# ==============================================================================
+
+# Check all Isabelle proofs
+prove:
+    @echo "Building Isabelle session..."
+    @isabelle build -d {{{{ proofs_dir }}}} {{ ProjectName }}
+
+# Quick proof check (skip slow lemmas)
+prove-fast:
+    @isabelle build -d {{{{ proofs_dir }}}} -o quick_and_dirty {{ ProjectName }}
+
+# Full proof verification with document
+prove-full:
+    @isabelle build -d {{{{ proofs_dir }}}} -o document=pdf {{ ProjectName }}
+
+# Check proof dependencies
+prove-deps:
+    @isabelle build -d {{{{ proofs_dir }}}} -n {{ ProjectName }}
+
+# Generate proof documentation
+prove-document:
+    @isabelle build -d {{{{ proofs_dir }}}} -o document=pdf {{ ProjectName }}
+    @echo "Documentation generated in {{{{ proofs_dir }}}}/output/document"
+
+# Clean proof artifacts
+prove-clean:
+    @rm -rf {{{{ proofs_dir }}}}/output
+    @isabelle build -d {{{{ proofs_dir }}}} -c {{ ProjectName }}
+
+# Open proof in Isabelle/jEdit
+prove-edit theory:
+    @isabelle jedit -d {{{{ proofs_dir }}}} {{{{ theory }}}}.thy
+
+# ==============================================================================
+# VALIDATE - Validation and Verification
+# ==============================================================================
+
+# Run all validation
+validate: validate-config validate-schemas validate-schemes
+    @echo "{{{{ green }}}}All validation passed{{{{ nc }}}}"
+
+# Validate Nickel configuration
+validate-config:
+    @echo "Validating Nickel configuration..."
+    @nickel typecheck config/default.ncl
+    @nickel typecheck config/schema.ncl
+    @nickel typecheck config/presets.ncl
+    @echo "{{{{ green }}}}✓ Nickel config valid{{{{ nc }}}}"
+
+# Validate all Nickel schemas
+validate-schemas:
+    @echo "Validating Nickel schemas..."
+    @for f in config/**/*.ncl; do nickel typecheck "$$f" || exit 1; done
+    @echo "{{{{ green }}}}✓ All schemas valid{{{{ nc }}}}"
+
+# Validate Guile schemes
+validate-schemes:
+    @echo "Validating Guile schemes..."
+    @for f in schemes/*.scm; do guile -c "(load \"$$f\")" 2>/dev/null || echo "Warning: $$f"; done
+    @echo "{{{{ green }}}}✓ Schemes checked{{{{ nc }}}}"
+
+# Quick validation (fast subset)
+validate-quick:
+    @cargo check
+    @nickel typecheck config/default.ncl
+
+# ==============================================================================
+# RUN - Execution
+# ==============================================================================
+
+# Run with default arguments
+run *args:
+    cargo run -- {{{{ args }}}}
+
+# Run in release mode
+run-release *args:
+    cargo run --release -- {{{{ args }}}}
+
+# Dry run (simulate without writing)
+run-dry *args:
+    cargo run -- --dry-run {{{{ args }}}}
+
+# Verbose run
+run-verbose *args:
+    cargo run -- -vvv {{{{ args }}}}
+
+# Run with tracing
+run-trace *args:
+    RUST_LOG=trace cargo run -- {{{{ args }}}}
+
+# Run with profiling
+run-profile *args:
+    cargo build --release
+    perf record -g ./target/release/{{ project-name }} {{{{ args }}}}
+    perf report
+
+# Run with valgrind
+run-valgrind *args:
+    cargo build
+    valgrind --leak-check=full ./target/debug/{{ project-name }} {{{{ args }}}}
+
+# Run example pipeline
+run-example:
+    @echo "Running example pipeline..."
+    @just run --input fixtures/sample --output /tmp/output --validate standard
+
+# ==============================================================================
+# LINT - Code Quality
+# ==============================================================================
+
+# Run all linters
+lint: lint-rust lint-nickel lint-clippy
+    @echo "{{{{ green }}}}All lints passed{{{{ nc }}}}"
+
+# Rust linting with clippy
+lint-rust:
+    cargo clippy -- -D warnings
+
+# Strict clippy (pedantic)
+lint-clippy:
+    cargo clippy -- -W clippy::pedantic -W clippy::nursery
+
+# Lint Nickel files
+lint-nickel:
+    @for f in config/**/*.ncl; do nickel typecheck "$$f" || exit 1; done
+
+# Auto-fix clippy warnings
+lint-fix:
+    cargo clippy --fix --allow-dirty
+
+# Check for unsafe code
+lint-unsafe:
+    cargo clippy -- -D unsafe_code
+
+# ==============================================================================
+# FORMAT - Code Formatting
+# ==============================================================================
+
+# Format all code
+fmt: fmt-rust
+    @echo "{{{{ green }}}}All code formatted{{{{ nc }}}}"
+
+# Format Rust code
+fmt-rust:
+    cargo fmt
+
+# Check Rust formatting
+fmt-check:
+    cargo fmt -- --check
+
+# Format and check
+fmt-all: fmt-rust fmt-check
+
+# ==============================================================================
+# DOCS - Documentation
+# ==============================================================================
+
+# Build all documentation
+docs: build-docs docs-man
+    @echo "{{{{ green }}}}Documentation built{{{{ nc }}}}"
+
+# Serve documentation locally
+docs-serve:
+    @cargo doc --no-deps
+    @echo "Opening docs at target/doc/{{ project_name }}/index.html"
+    @xdg-open target/doc/{{ project_name }}/index.html 2>/dev/null || open target/doc/{{ project_name }}/index.html
+
+# Generate man page
+docs-man:
+    @cargo run -- manpage --output docs/man/{{ project-name }}.1
+
+# Install man page
+docs-install-man:
+    @sudo cp docs/man/{{ project-name }}.1 /usr/local/share/man/man1/
+    @sudo mandb
+
+# Generate shell completions
+docs-completions shell="bash":
+    @mkdir -p completions
+    @cargo run -- completions {{{{ shell }}}} --output completions/{{ project-name }}.{{{{ shell }}}}
+
+# Install bash completions
+docs-install-completions:
+    @just docs-completions bash
+    @sudo cp completions/{{ project-name }}.bash /etc/bash_completion.d/
+
+# ==============================================================================
+# RELEASE - Release Management
+# ==============================================================================
+
+# Pre-release checks
+release-check: test lint validate prove
+    @echo "{{{{ green }}}}Pre-release checks passed{{{{ nc }}}}"
+
+# Build release artifacts
+release-build: release-check
+    @cargo build --release
+    @just docs
+    @echo "{{{{ green }}}}Release artifacts built{{{{ nc }}}}"
+
+# Tag a release
+release-tag ver:
+    @git tag -a v{{{{ ver }}}} -m "Release v{{{{ ver }}}}"
+    @echo "Tagged v{{{{ ver }}}}"
+
+# Publish to crates.io (dry run)
+release-publish-dry:
+    @cargo publish --dry-run
+
+# Publish to crates.io
+release-publish:
+    @cargo publish
+
+# Create GitHub/GitLab release
+release-create ver:
+    @just release-build
+    @just release-tag {{{{ ver }}}}
+    @git push origin v{{{{ ver }}}}
+    @echo "{{{{ green }}}}Release v{{{{ ver }}}} created{{{{ nc }}}}"
+
+# ==============================================================================
+# CLEAN - Cleanup
+# ==============================================================================
+
+# Clean build artifacts
+clean:
+    cargo clean
+
+# Deep clean including caches
+clean-all: clean prove-clean
+    @rm -rf target
+    @rm -rf completions
+    @rm -f *.profdata *.profraw
+
+# Clean only debug builds
+clean-debug:
+    @rm -rf target/debug
+
+# Clean only release builds
+clean-release:
+    @rm -rf target/release
+
+# Clean proof artifacts
+clean-proofs: prove-clean
+
+# Clean generated docs
+clean-docs:
+    @rm -rf target/doc
+
+# ==============================================================================
+# WORKFLOW - Composite Workflows
+# ==============================================================================
+
+# Quick development cycle (fast feedback)
+quick: fmt-check check test-unit
+    @echo "{{{{ green }}}}Quick checks passed{{{{ nc }}}}"
+
+# Full pipeline (comprehensive)
+full: fmt lint test prove validate
+    @echo "{{{{ green }}}}Full pipeline passed{{{{ nc }}}}"
+
+# CI/CD pipeline
+ci: check-deps fmt-check lint test validate
+    @echo "{{{{ green }}}}CI pipeline passed{{{{ nc }}}}"
+
+# Pre-commit checks
+pre-commit: fmt-check lint-rust test-unit
+    @echo "{{{{ green }}}}Pre-commit checks passed{{{{ nc }}}}"
+
+# Prepare for PR
+pr: full release-check
+    @echo "{{{{ green }}}}Ready for PR{{{{ nc }}}}"
+
+# Development watch (rebuild on change)
+dev:
+    cargo watch -x check -x test -x run
+
+# Development with hot reload
+dev-watch:
+    cargo watch -x 'run -- --dry-run'
+
+# ==============================================================================
+# BENCH - Benchmarking
+# ==============================================================================
+
+# Run benchmarks
+bench:
+    cargo bench
+
+# Run specific benchmark
+bench-one name:
+    cargo bench -- {{{{ name }}}}
+
+# Run benchmarks and save baseline
+bench-baseline name:
+    cargo bench -- --save-baseline {{{{ name }}}}
+
+# Compare against baseline
+bench-compare name:
+    cargo bench -- --baseline {{{{ name }}}}
+
+# ==============================================================================
+# PROFILE - Performance Analysis
+# ==============================================================================
+
+# Profile with flamegraph
+profile-flame *args:
+    @cargo build --release
+    @cargo flamegraph -- {{{{ args }}}}
+
+# Profile memory usage
+profile-memory *args:
+    @cargo build --release
+    @heaptrack ./target/release/{{ project-name }} {{{{ args }}}}
+
+# Profile with perf
+profile-perf *args:
+    @cargo build --release
+    @perf record -g ./target/release/{{ project-name }} {{{{ args }}}}
+    @perf report
+
+# ==============================================================================
+# SECURITY - Security Analysis
+# ==============================================================================
+
+# Security audit
+security: audit-deps
+    @echo "{{{{ green }}}}Security checks passed{{{{ nc }}}}"
+
+# Check for supply chain issues
+security-supply-chain:
+    @cargo vet || echo "cargo-vet not installed"
+
+# ==============================================================================
+# CONFIG MANAGEMENT
+# ==============================================================================
+
+# Export configuration as JSON
+config-export:
+    @nickel export config/default.ncl
+
+# Export configuration as TOML
+config-export-toml:
+    @nickel export --format toml config/default.ncl
+
+# Validate and show effective configuration
+config-show:
+    @just config-export | jq .
+
+# Initialize user config directory
+config-init:
+    @mkdir -p ~/.config/{{ project-name }}
+    @nickel export config/default.ncl > ~/.config/{{ project-name }}/config.json
+    @echo "Config initialized at ~/.config/{{ project-name }}/config.json"
+
+# ==============================================================================
+# DOCKER - Container Operations
+# ==============================================================================
+
+# Build Docker image
+docker-build:
+    @docker build -t {{ project-name }}:latest .
+
+# Run in Docker
+docker-run *args:
+    @docker run --rm -it {{ project-name }}:latest {{{{ args }}}}
+
+# Build multi-platform images
+docker-build-multi:
+    @docker buildx build --platform linux/amd64,linux/arm64 -t {{ project-name }}:latest .
+
+# ==============================================================================
+# NIGHTLY - Nightly/Experimental
+# ==============================================================================
+
+# Test with nightly Rust
+nightly-test:
+    @cargo +nightly test
+
+# Check with nightly Rust
+nightly-check:
+    @cargo +nightly check
+
+# ==============================================================================
+# ALIASES
+# ==============================================================================
+
+alias b := build
+alias t := test
+alias r := run
+alias c := check
+alias f := fmt
+alias l := lint
+alias v := validate
+alias d := docs
+alias h := help

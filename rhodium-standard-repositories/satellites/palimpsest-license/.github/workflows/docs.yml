@@ -1,0 +1,72 @@
+# =============================================================================
+# Docs - Deploy Documentation to GitHub Pages
+# =============================================================================
+# Builds and deploys documentation when changes are pushed to main.
+#
+# Deployment: GitHub Pages (static site)
+# Source: Markdown files converted via Jekyll
+#
+# The site will be available at:
+#   https://hyperpolymath.github.io/palimpsest-license/
+# =============================================================================
+
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'GUIDES_v0.4/**'
+      - 'LICENSES/**'
+      - '**.md'
+      - '_config.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment at a time
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build - Generate static site
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./
+          destination: ./_site
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+
+  # ---------------------------------------------------------------------------
+  # Deploy - Publish to GitHub Pages
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Pages
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

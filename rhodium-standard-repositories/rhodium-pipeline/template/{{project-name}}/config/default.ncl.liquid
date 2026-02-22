@@ -1,0 +1,148 @@
+# {{ project-name }} Default Configuration
+#
+# This is the main configuration entry point.
+# Merge with presets or override values as needed.
+#
+# Usage:
+#   nickel export config/default.ncl
+#   nickel export --field config config/default.ncl
+
+let schema = import "schema.ncl" in
+let presets = import "presets.ncl" in
+
+# =============================================================================
+# ENVIRONMENT HELPERS
+# =============================================================================
+
+let env = {
+  # Get environment variable with default
+  get_or = fun name default =>
+    let val = std.env.get name in
+    if val == null then default else val,
+
+  # Get boolean from environment
+  get_bool = fun name default =>
+    let val = std.env.get name in
+    if val == null then
+      default
+    else if std.array.elem val ["true", "1", "yes", "on"] then
+      true
+    else if std.array.elem val ["false", "0", "no", "off"] then
+      false
+    else
+      default,
+
+  # Get number from environment
+  get_num = fun name default =>
+    let val = std.env.get name in
+    if val == null then
+      default
+    else
+      std.string.to_number val,
+}
+in
+
+# =============================================================================
+# DEFAULT CONFIGURATION
+# =============================================================================
+
+let default_config = {
+  input = {
+    path = env.get_or "{{ PROJECT_NAME }}_INPUT" ".",
+    format = 'auto,
+    encoding = "utf-8",
+    recursive = true,
+    follow_symlinks = false,
+  },
+
+  output = {
+    path = env.get_or "{{ PROJECT_NAME }}_OUTPUT" "./output",
+    format = 'auto,
+    encoding = "utf-8",
+    overwrite = env.get_bool "{{ PROJECT_NAME }}_OVERWRITE" false,
+    create_parents = true,
+    mode = "644",
+    preserve_metadata = false,
+  },
+
+  processing = {
+    algorithm = 'default,
+    threads = env.get_num "{{ PROJECT_NAME }}_THREADS" {{ default_threads }},
+    batch_size = env.get_num "{{ PROJECT_NAME }}_BATCH_SIZE" 1000,
+    buffer_size = 8388608,
+    memory_limit = 0,
+    streaming = false,
+    mmap = false,
+  },
+
+  validation = {
+    level = env.get_or "{{ PROJECT_NAME }}_VALIDATION" "standard",
+    strict = env.get_bool "{{ PROJECT_NAME }}_STRICT" false,
+    tolerance = 0.01,
+    check_proofs = false,
+  },
+
+  checksum = {
+    algorithm = env.get_or "{{ PROJECT_NAME }}_CHECKSUM" "shake256",
+    extension = ".shake256",
+    auto_verify = false,
+    auto_generate = true,
+  },
+
+  logging = {
+    level = env.get_or "{{ PROJECT_NAME }}_LOG_LEVEL" "warn",
+    format = env.get_or "{{ PROJECT_NAME }}_LOG_FORMAT" "pretty",
+    timestamps = true,
+  },
+}
+in
+
+# =============================================================================
+# PRESET SELECTION
+# =============================================================================
+
+let preset_name = env.get_or "{{ PROJECT_NAME }}_PRESET" "default" in
+
+let selected_preset =
+  if preset_name == "dev" then
+    presets.dev
+  else if preset_name == "prod" then
+    presets.prod
+  else if preset_name == "ci" then
+    presets.ci
+  else if preset_name == "paranoid" then
+    presets.paranoid
+  else
+    {}
+in
+
+# =============================================================================
+# MERGED CONFIGURATION
+# =============================================================================
+
+let config = std.record.merge_all [default_config, selected_preset] in
+
+# =============================================================================
+# EXPORTS
+# =============================================================================
+
+{
+  # The merged configuration
+  config | schema.Config,
+
+  # Access to schema for validation
+  schema,
+
+  # Access to presets for composition
+  presets,
+
+  # Environment helpers
+  env,
+
+  # Metadata
+  meta = {
+    version = "{{ "{{" }} version {{ "}}" }}",
+    generated_from = "rhodium-pipeline-template",
+    preset = preset_name,
+  },
+}

@@ -1,0 +1,221 @@
+= avow-lib: Formal Verification Library for Avow Protocol
+Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+:toc:
+:idris2-version: 0.7.0
+:zig-version: 0.13.0
+
+== Overview
+
+*avow-lib* is the core verification library for the Avow protocol (formerly STAMP). It uses *dependent types* to provide *mathematical proofs* of compliance properties that are impossible with traditional type systems.
+
+== The Core Innovation
+
+=== What Makes Avow Different?
+
+[cols="1,1,1,1"]
+|===
+|Approach |Type Safety |Memory Safety |*Provable Properties*
+
+|JSON/CSV
+|✗
+|✗
+|✗
+
+|Rust/Go
+|✓
+|✓
+|✗
+
+|Haskell/OCaml
+|✓
+|~
+|✗
+
+|*Idris2* (Avow)
+|✓
+|✓
+|*✓*
+|===
+
+=== Example: Unsubscribe Link Verification
+
+*Without dependent types (Rust):*
+[source,rust]
+----
+struct UnsubscribeLink {
+    url: String,
+    tested: bool,  // ✗ Can be set to true without testing
+}
+----
+
+*With dependent types (Idris2):*
+[source,idris]
+----
+record UnsubscribeLink where
+  url : URL
+  testedAt : Timestamp
+  response : HTTPResponse
+  {auto 0 recentTest : TimeDiff testedAt Now 60000}
+  {auto 0 success : response.code = OK}
+  {auto 0 fastResponse : response.responseTime < 200}
+----
+
+*Result:* You literally cannot compile code that creates an invalid unsubscribe link.
+
+== Architecture
+
+Following the hyperpolymath ABI/FFI universal standard:
+
+----
+avow-lib/
+├── src/
+│   ├── abi/              # Idris2 ABI definitions (CORE)
+│   │   ├── Types.idr     # Foundational types
+│   │   ├── Unsubscribe.idr  # Unsubscribe verification
+│   │   ├── Consent.idr   # Consent chain proofs
+│   │   └── RateLimit.idr # Rate limiting proofs
+│   └── lib/              # Additional library code
+│
+├── ffi/
+│   └── zig/              # Zig FFI implementation
+│       ├── build.zig
+│       └── src/
+│           └── main.zig  # C ABI wrapper
+│
+├── generated/
+│   └── abi/
+│       └── *.h           # C headers (for compatibility)
+│
+└── examples/
+    └── basic_verification.idr
+----
+
+== What Gets Proven
+
+=== 1. Unsubscribe Verification
+
+* ✓ URL was tested (not just claimed)
+* ✓ Test was recent (< 60 seconds old)
+* ✓ Server responded with 200 OK
+* ✓ Response was fast (< 200ms)
+* ✓ Cryptographically signed
+
+=== 2. Consent Chain Verification
+
+* ✓ User actually opted in (double opt-in)
+* ✓ Confirmation happened AFTER request
+* ✓ Confirmation was timely (< 24 hours)
+* ✓ Token is cryptographically valid
+
+=== 3. Rate Limiting
+
+* ✓ Sender hasn't exceeded daily limit
+* ✓ Limit appropriate for trust level
+* ✓ Cannot bypass at runtime
+
+=== 4. Content Safety
+
+* ✓ No malware detected
+* ✓ No dark patterns
+* ✓ Policy compliance verified
+
+== Why Not Other Languages?
+
+[cols="1,3"]
+|===
+|Language |Limitation
+
+|Haskell
+|Strong types, but cannot prove URL actually works
+
+|Rust
+|Memory safe, but cannot prove algorithmic properties
+
+|Go
+|Simple, but weak type system, no proofs
+
+|OCaml
+|Good types, but not dependent types
+
+|Coq/Agda
+|Theorem provers, not practical for systems programming
+
+|Idris2
+|*Dependent types + practical systems programming*
+|===
+
+== Building
+
+*Requirements:*
+
+* Idris2 {idris2-version}+
+* Zig {zig-version}+
+
+*Build:*
+[source,bash]
+----
+# Build Idris2 ABI
+cd src/abi
+idris2 --build
+
+# Build Zig FFI
+cd ../../ffi/zig
+zig build
+----
+
+== Usage Example
+
+*Rust/Go/Python code using avow-lib via FFI:*
+
+[source,rust]
+----
+// Rust code calling Idris2 verification via Zig FFI
+extern "C" {
+    fn stamp_verify_unsubscribe(
+        url: *const c_char,
+        tested_at: u64,
+        response_code: u16,
+        response_time: u32,
+        token: *const c_char,
+        signature: *const c_char,
+    ) -> bool;
+}
+
+// This returns false if proofs don't hold
+let valid = unsafe {
+    stamp_verify_unsubscribe(
+        c_str("https://example.com/unsub"),
+        1706630400000,
+        200,  // OK
+        87,   // 87ms
+        c_str("token..."),
+        c_str("signature..."),
+    )
+};
+
+if valid {
+    // Proofs checked, message can be delivered
+    deliver_message(msg);
+}
+----
+
+== Status
+
+*Current:* Proof of concept
+
+* [x] Core types defined
+* [x] Unsubscribe verification
+* [x] Consent chain verification
+* [ ] Rate limiting verification
+* [ ] Content safety verification
+* [ ] Zig FFI implementation
+* [ ] C header generation
+* [ ] Integration tests
+
+== License
+
+AGPL-3.0-or-later
+
+== Author
+
+Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>

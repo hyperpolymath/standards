@@ -1,0 +1,356 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= A2ML v1.0.0 Specification
+:version: 1.0.0
+:date: 2026-01-30
+:status: Stable
+:toc:
+:toclevels: 3
+:icons: font
+:sectnums:
+
+[abstract]
+== Abstract
+
+A2ML (Attested Markup Language) is a lightweight markup format that compiles to a typed, verifiable core with formal proof obligations. This specification defines the v1.0 surface grammar, typed core semantics, and validation modes (lax, checked, attested). A2ML enables progressive strictness: from permissive authoring to formally verified structural invariants.
+
+**Media Type:** `text/a2ml` (registration pending)
+**File Extension:** `.a2ml`
+**Version:** 1.0.0 (Stable)
+**Date:** 2026-01-30
+
+== 1. Introduction
+
+=== 1.1 Motivation
+
+Existing markup formats (Markdown, AsciiDoc, reStructuredText) prioritize ease of authoring but provide no formal guarantees about document structure. A2ML addresses this gap by:
+
+1. **Progressive strictness**: Start lax, enforce rules when needed
+2. **Formal verification**: Dependent types prove structural invariants
+3. **Opaque fidelity**: Byte-for-byte preservation of critical payloads
+4. **Renderer independence**: Not tied to HTML/PDF/LaTeX
+
+=== 1.2 Design Principles
+
+* **Lightweight authoring**: Djot-like surface syntax
+* **Strong guarantees**: Idris2 dependent types for typed core
+* **Proof obligations**: Decidable checks (unique IDs, resolved refs, required sections)
+* **Non-negotiable fidelity**: Opaque payloads preserved exactly
+* **Mode flexibility**: Lax (warnings) / Checked (errors) / Attested (proofs required)
+
+=== 1.3 Conformance
+
+A conforming A2ML implementation MUST:
+
+* Parse Module 0 grammar (Section 2)
+* Translate surface AST to typed core (Section 3)
+* Support lax and checked modes (Section 4)
+* Preserve opaque payloads byte-for-byte (Section 5.4)
+* Implement invariant checks (Section 6)
+
+Attested mode (proof obligations) is RECOMMENDED but not required for v1.0 conformance.
+
+== 2. Surface Grammar (Module 0)
+
+=== 2.1 Lexical Rules
+
+[source,ebnf]
+----
+Line         ::= CharSeq LF | CharSeq EOF
+BlankLine    ::= Whitespace* LF
+Identifier   ::= [A-Za-z][A-Za-z0-9:_-]*
+String       ::= '"' ( '\\' Any | [^"] )* '"'
+               | "'" ( '\\' Any | [^'] )* "'"
+Number       ::= '-'? [0-9]+ ( '.' [0-9]+ )?
+Whitespace   ::= ' ' | '\t'
+LF           ::= '\n'
+----
+
+=== 2.2 Document Structure
+
+[source,ebnf]
+----
+Document     ::= Block*
+
+Block        ::= Heading
+              | DirectiveBlock
+              | List
+              | CodeBlock
+              | Paragraph
+              | BlankLine+
+
+Heading      ::= HeadingMarker SP+ TextLine LF
+HeadingMarker::= '#'{1,5}
+HeadingLevel ::= length(HeadingMarker)
+
+DirectiveBlock ::= '@' Identifier Attrs? ':' LF DirectiveBody '@end' LF
+Attrs        ::= '(' Attr ( ',' Attr )* ')'
+Attr         ::= Identifier '=' ( Identifier | String | Number )
+
+DirectiveBody ::= Block*
+
+List         ::= ListItem ( LF ListItem )*
+ListItem     ::= ( '-' | '*' ) SP+ Inline
+
+Paragraph    ::= Inline ( LF Inline )* LF
+
+CodeBlock    ::= '```' LangSpec? LF RawLine* '```' LF
+LangSpec     ::= [A-Za-z0-9_+-]+
+RawLine      ::= ( [^\n] )* LF
+----
+
+=== 2.3 Inline Syntax
+
+[source,ebnf]
+----
+Inline       ::= InlineAtom ( SP InlineAtom )*
+
+InlineAtom   ::= Emph | Strong | Link | Ref | Text
+
+Emph         ::= '*' TextInline '*'
+Strong       ::= '**' TextInline '**'
+Link         ::= '[' TextInline ']' '(' URL ')'
+Ref          ::= '@ref(' Identifier ')'
+
+TextInline   ::= ( TextChar | '\\' Any )+
+TextChar     ::= [^*\[\]@\n]
+URL          ::= [^ )\n]+
+----
+
+=== 2.4 Core Directives (Module 0)
+
+[cols="2,3,2",options="header"]
+|===
+| Directive | Purpose | Attributes
+
+| `@abstract` | Document abstract | `id` (optional)
+| `@refs` | Reference list | `id` (optional)
+| `@fig` | Figure block | `id`, `ref` (optional)
+| `@table` | Table block | `id` (optional)
+| `@opaque` | Byte-preserved payload | `id`, `lang` (optional)
+| `@requires` | Structural dependency | `section` (required)
+|===
+
+== 3. Typed Core Semantics
+
+=== 3.1 Core Types (Idris2)
+
+[source,idris]
+----
+record Id where
+  constructor MkId
+  raw : String
+
+data Block
+  = Section Sec
+  | Para String
+  | Bullet (List String)
+  | Figure Fig
+  | Table Tbl
+  | Refs (List Ref)
+  | Opaque Payload
+
+record Doc where
+  constructor MkDoc
+  blocks : List Block
+
+record Sec where
+  constructor MkSec
+  id : Id
+  title : String
+  body : List Block
+
+record Fig where
+  constructor MkFig
+  id : Id
+  caption : String
+  ref : Maybe Id
+
+record Payload where
+  constructor MkPayload
+  id : Maybe Id
+  lang : Maybe String
+  bytes : String  -- Preserved exactly
+----
+
+=== 3.2 Translation Rules
+
+Surface AST translates to typed core:
+
+1. **Headings** → `Section` with generated or explicit `id`
+2. **Directives** → Typed blocks based on directive name
+3. **Lists** → `Bullet` with inline text extracted
+4. **Paragraphs** → `Para` with inline formatting collapsed to text
+5. **@opaque** → `Payload` with raw bytes preserved
+
+== 4. Validation Modes
+
+=== 4.1 Lax Mode
+
+* Parses all valid surface syntax
+* Warnings for missing IDs, unresolved refs
+* No errors unless syntax invalid
+* **Use case**: Authoring, prototyping
+
+=== 4.2 Checked Mode
+
+* All IDs required on `@fig`, `@table`, `@section`
+* All `@ref(...)` must resolve to existing IDs
+* Unknown directives rejected
+* **Use case**: Production documents
+
+=== 4.3 Attested Mode
+
+* All checked mode requirements
+* **Proof obligations must hold**:
+  - `UniqueIds : Doc -> Type`
+  - `RefsResolve : Doc -> Type`
+  - `HasAbstract : Doc -> Type` (if required)
+* **Use case**: Formal verification, critical documents
+
+== 5. Invariants
+
+=== 5.1 Unique IDs
+
+**Invariant**: All `id` attributes in a document must be unique.
+
+[source,idris]
+----
+UniqueIds : Doc -> Type
+UniqueIds doc = uniqueIdsB doc = True
+
+uniqueIdsDec : (doc : Doc) -> Dec (UniqueIds doc)
+----
+
+=== 5.2 Resolved References
+
+**Invariant**: All `@ref(id)` and `ref="id"` attributes must reference existing IDs.
+
+[source,idris]
+----
+RefsResolve : Doc -> Type
+RefsResolve doc = refsResolveB doc = True
+
+refsResolveDec : (doc : Doc) -> Dec (RefsResolve doc)
+----
+
+=== 5.3 Required Sections
+
+**Invariant** (configurable): Specific sections must be present.
+
+[source,idris]
+----
+HasAbstract : Doc -> Type
+HasAbstract doc = hasAbstractB doc = True
+
+hasAbstractDec : (doc : Doc) -> Dec (HasAbstract doc)
+----
+
+=== 5.4 Opaque Payload Fidelity
+
+**Invariant** (non-negotiable): Opaque payloads MUST be preserved byte-for-byte.
+
+Parsers and renderers:
+* MUST NOT modify opaque payload bytes
+* MUST preserve encoding (UTF-8 default)
+* MAY transform for output format (PDF escaping) but MUST document transformations
+* MUST support round-trip: parse → serialize → parse produces identical payload
+
+== 6. Security Considerations
+
+=== 6.1 Injection Attacks
+
+* Opaque payloads may contain arbitrary content
+* Renderers MUST escape/sanitize for target format
+* HTML output: escape `<script>`, `<iframe>`, etc.
+* LaTeX output: escape `\input`, `\write`, etc.
+
+=== 6.2 Resource Exhaustion
+
+* Deeply nested directives can cause stack overflow
+* Implementations SHOULD limit nesting depth (recommended: 100)
+* Large opaque payloads may exhaust memory
+* Implementations SHOULD set size limits
+
+=== 6.3 Reference Cycles
+
+* Circular references via `@requires` can cause infinite loops
+* Checked mode MUST detect cycles
+
+== 7. Interoperability
+
+=== 7.1 Parser Implementations
+
+Reference implementations:
+* Idris2 parser (compiles to JavaScript)
+* ReScript prototype (legacy, Module 0 only)
+
+Third-party implementations MUST pass conformance test suite.
+
+=== 7.2 Rendering Targets
+
+A2ML is renderer-independent. Common targets:
+* HTML5
+* LaTeX/PDF
+* Markdown (lossy: proof obligations not preserved)
+
+=== 7.3 Version Compatibility
+
+* Breaking changes increment major version (1.x → 2.x)
+* Grammar changes increment minor version (1.0 → 1.1)
+* Proof obligations additions increment minor version
+* Module additions (Module 1, 2, ...) are backward-compatible
+
+== 8. IANA Considerations
+
+**Proposed Media Type**: `text/a2ml`
+**File Extension**: `.a2ml`
+**Magic Number**: None (text format)
+**Fragment Identifier**: `#section-id` (references section IDs)
+
+See separate IANA registration document for full details.
+
+== 9. Conformance Testing
+
+Test vectors available at: `tests/vectors/`
+
+Conformance requires:
+* All Module 0 syntax tests pass
+* Opaque round-trip fidelity tests pass
+* Proof obligation tests execute (attested mode)
+
+== 10. References
+
+* RFC 6838: Media Type Specifications and Registration Procedures
+* Djot specification: https://djot.net
+* Idris2 documentation: https://idris2.readthedocs.io
+* A2ML repository: https://github.com/hyperpolymath/a2ml
+
+== Appendix A: Grammar Summary
+
+Complete EBNF grammar available in `docs/GRAMMAR.adoc`.
+
+== Appendix B: Change Log
+
+=== From v0.6.0 to v1.0.0
+
+* Formalize specification status (Draft → Stable)
+* Add Idris2 parser with decidable proofs
+* Clarify opaque payload fidelity requirements
+* Add security considerations
+* Define conformance criteria
+* Add IANA considerations section
+
+== Appendix C: Future Directions (v1.1+)
+
+* WASM compilation target (when Idris2 WASM stabilizes)
+* Additional modules (tables syntax, citations, math)
+* Policy bundles (domain-specific invariants)
+* Signed attestation metadata
+* Canonical hash format for documents
+
+---
+
+**Version**: 1.0.0
+**Status**: Stable
+**Date**: 2026-01-30
+**License**: PMPL-1.0-or-later

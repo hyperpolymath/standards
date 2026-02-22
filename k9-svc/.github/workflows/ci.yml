@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+name: K9 SVC CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: read-all
+
+jobs:
+  validate:
+    name: Validate Schemas
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Install Nickel
+        run: |
+          curl -fsSL https://github.com/tweag/nickel/releases/latest/download/nickel-x86_64-linux -o nickel
+          chmod +x nickel
+          sudo mv nickel /usr/local/bin/
+
+      - name: Install Just
+        run: |
+          curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+      - name: Validate schemas
+        run: |
+          nickel typecheck pedigree.ncl
+          nickel typecheck register.ncl
+          nickel typecheck leash.ncl
+
+      - name: Check environment
+        run: ./must status
+
+  container:
+    name: Build Container
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Build with Podman
+        run: |
+          podman build -t k9-svc:ci .
+
+      - name: Test container
+        run: |
+          podman run --rm k9-svc:ci status
+          podman run --rm k9-svc:ci run typecheck
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Install Nickel
+        run: |
+          curl -fsSL https://github.com/tweag/nickel/releases/latest/download/nickel-x86_64-linux -o nickel
+          chmod +x nickel
+          sudo mv nickel /usr/local/bin/
+
+      - name: Install Just
+        run: |
+          curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+      - name: Run test suite
+        run: ./test.sh
+
+  mime:
+    name: Validate MIME Files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Validate XML
+        run: |
+          xmllint --noout mime/k9.xml
+          xmllint --noout mime/k9.uti.plist
+
+      - name: Check magic file syntax
+        run: |
+          file --compile mime/k9.magic || true

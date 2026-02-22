@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+name: Idris2 Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Cache Idris2
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.2.0
+        with:
+          path: ~/.idris2
+          key: idris2-${{ runner.os }}-0.7.0
+
+      - name: Install Idris2
+        run: |
+          if [ ! -f ~/.idris2/bin/idris2 ]; then
+            echo "Installing Idris2 0.7.0..."
+            curl -L https://github.com/idris-lang/Idris2/releases/download/v0.7.0/idris2-0.7.0-x86_64-linux.tar.gz -o idris2.tar.gz
+            tar xf idris2.tar.gz
+            cd idris2-0.7.0
+            PREFIX=$HOME/.idris2 make install
+          fi
+          echo "$HOME/.idris2/bin" >> $GITHUB_PATH
+
+      - name: Verify Idris2 installation
+        run: |
+          idris2 --version
+          echo "Idris2 installed successfully"
+
+      - name: Type check A2ML parser
+        run: |
+          cd src
+          idris2 --check --source-dir . A2ML/Parser.idr
+          idris2 --check --source-dir . A2ML/TypedCore.idr
+          idris2 --check --source-dir . A2ML/Proofs.idr
+
+      - name: Build parser tests
+        run: |
+          cd src
+          idris2 --build a2ml.ipkg
+
+      - name: Run parser tests
+        run: |
+          cd src
+          idris2 --codegen node --source-dir . A2ML/ParserTests.idr -o ../build/exec/parser-tests.js
+          node ../build/exec/parser-tests.js
+
+      - name: Run proof obligations
+        run: |
+          cd src
+          echo "Testing proof obligations..."
+          # Proof checks are part of type checking - if it compiles, proofs hold
+          idris2 --check --source-dir . A2ML/Proofs.idr
+          echo "✓ All proof obligations validated"
+
+      - name: Test compilation to JavaScript
+        run: |
+          cd src
+          idris2 --codegen node --source-dir . A2ML/Parser.idr -o ../build/exec/parser.js
+          test -f ../build/exec/parser.js
+          SIZE=$(stat -c%s ../build/exec/parser.js)
+          echo "Parser compiled to JavaScript: ${SIZE} bytes"
+
+          # Verify it's valid JavaScript
+          node -c ../build/exec/parser.js
+          echo "✓ Generated JavaScript is valid"

@@ -1,0 +1,117 @@
+(*
+  {{ ProjectName }}_Ratio.thy
+
+  Ratio tolerance proofs for {{ project-name }}.
+
+  This theory verifies that ratio computations remain within
+  specified tolerance bounds throughout the pipeline.
+
+  Part of Rhodium Pipeline Template methodology.
+*)
+
+theory {{ ProjectName }}_Ratio
+  imports
+    {{ ProjectName }}_Prelude
+begin
+
+section \<open>Ratio Invariants\<close>
+
+text \<open>
+  Ratios are used for expressing split proportions, sampling rates,
+  and validation thresholds. This theory proves tolerance is maintained.
+\<close>
+
+text \<open>A ratio specification with target and tolerance.\<close>
+
+record ratio_spec =
+  target :: real
+  tolerance :: real
+
+definition valid_ratio_spec :: "ratio_spec \<Rightarrow> bool" where
+  "valid_ratio_spec spec \<equiv>
+    0 \<le> target spec \<and> target spec \<le> 1 \<and>
+    0 \<le> tolerance spec"
+
+section \<open>Tolerance Verification\<close>
+
+text \<open>
+  Verify that an actual ratio falls within tolerance of target.
+\<close>
+
+definition satisfies_ratio :: "ratio_spec \<Rightarrow> real \<Rightarrow> bool" where
+  "satisfies_ratio spec actual \<equiv>
+    within_tol (target spec) actual (tolerance spec)"
+
+lemma satisfies_ratio_exact:
+  "satisfies_ratio \<lparr> target = t, tolerance = \<epsilon> \<rparr> t"
+  unfolding satisfies_ratio_def within_tol_def by simp
+
+lemma satisfies_ratio_bound:
+  assumes "satisfies_ratio \<lparr> target = t, tolerance = \<epsilon> \<rparr> a"
+  shows "t - \<epsilon> \<le> a \<and> a \<le> t + \<epsilon>"
+  using assms unfolding satisfies_ratio_def within_tol_def by auto
+
+section \<open>Ratio Preservation Under Operations\<close>
+
+text \<open>
+  Key property: combining operations preserves ratio bounds.
+\<close>
+
+lemma ratio_compose_tolerance:
+  assumes "\<bar>a - t\<bar> \<le> \<epsilon>1"
+  assumes "\<bar>b - a\<bar> \<le> \<epsilon>2"
+  shows "\<bar>b - t\<bar> \<le> \<epsilon>1 + \<epsilon>2"
+  using assms by auto
+
+text \<open>Sequential pipeline stages accumulate tolerance.\<close>
+
+theorem pipeline_ratio_tolerance:
+  assumes "within_tol t1 a1 \<epsilon>1"
+  assumes "within_tol a1 a2 \<epsilon>2"
+  shows "within_tol t1 a2 (\<epsilon>1 + \<epsilon>2)"
+  using assms unfolding within_tol_def by auto
+
+section \<open>Dataset Ratio Invariants\<close>
+
+text \<open>
+  Ratio invariants for dataset operations.
+\<close>
+
+definition dataset_ratio :: "dataset \<Rightarrow> (record \<Rightarrow> bool) \<Rightarrow> real" where
+  "dataset_ratio ds P \<equiv>
+    (if fcard ds = 0 then 0
+     else real (fcard (ffilter P ds)) / real (fcard ds))"
+
+text \<open>The ratio is always between 0 and 1.\<close>
+
+lemma dataset_ratio_bounds:
+  "0 \<le> dataset_ratio ds P \<and> dataset_ratio ds P \<le> 1"
+  unfolding dataset_ratio_def
+  by (auto simp: fcard_mono)
+
+text \<open>Complement ratio property.\<close>
+
+lemma dataset_ratio_complement:
+  "dataset_ratio ds P + dataset_ratio ds (\<lambda>r. \<not> P r) = 1"
+  sorry \<comment> \<open>Requires ffilter complement lemma\<close>
+
+section \<open>Sampling Ratio Verification\<close>
+
+text \<open>
+  Verify that sampling operations maintain ratio invariants.
+\<close>
+
+definition valid_sample :: "dataset \<Rightarrow> dataset \<Rightarrow> ratio_spec \<Rightarrow> bool" where
+  "valid_sample original sampled spec \<equiv>
+    sampled |\<subseteq>| original \<and>
+    satisfies_ratio spec (real (fcard sampled) / real (fcard original))"
+
+lemma sample_ratio_valid:
+  assumes "valid_sample ds sample \<lparr> target = r, tolerance = \<epsilon> \<rparr>"
+  assumes "fcard ds > 0"
+  shows "r - \<epsilon> \<le> real (fcard sample) / real (fcard ds) \<and>
+         real (fcard sample) / real (fcard ds) \<le> r + \<epsilon>"
+  using assms unfolding valid_sample_def satisfies_ratio_def within_tol_def
+  by auto
+
+end

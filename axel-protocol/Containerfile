@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+#
+# Containerfile for AXEL Service
+
+# Build stage
+FROM cgr.dev/chainguard/python:3.11 as builder
+
+# Install build dependencies
+RUN pip install --no-cache-dir \
+    vllm==0.4.0 \
+    sentencepiece==0.1.99 \
+    huggingface-hub==0.20.2 \
+    fastapi==0.110.0 \
+    uvicorn==0.29.0
+
+# Runtime stage
+FROM cgr.dev/chainguard/wolfi-base:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    firewalld \
+    nodejs \
+    openssl \
+    python3 \
+    py3-pip \
+    && npm install -g rescript@latest
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+
+# Set up application directory
+WORKDIR /app
+
+# Copy AXEL validator and configuration
+COPY axelSts.res .
+COPY firewalld-axel.xml /etc/firewalld/zones/
+
+# Build ReScript validator
+RUN rescript build -with-dunebuild axelSts.res
+
+# Configure firewalld
+RUN firewall-offline-cmd --add-zone=axel && \
+    firewall-offline-cmd --zone=axel --add-service=http && \
+    firewall-offline-cmd --zone=axel --add-port=459/tcp && \
+    firewall-offline-cmd --zone=axel --add-port=459/udp
+
+# Expose AXEL port
+EXPOSE 459/tcp 459/udp
+
+# Run as non-root user
+USER 1000:1000
+
+# Start firewalld
+CMD ["firewalld", "--debug"]

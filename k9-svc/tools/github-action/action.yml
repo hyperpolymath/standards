@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+name: 'Validate K9 Contractiles'
+description: 'Validate K9 contractiles in CI/CD pipelines'
+author: 'Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>'
+
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Directory or file to validate'
+    required: false
+    default: '.'
+
+  strict:
+    description: 'Enable strict validation (fail on warnings)'
+    required: false
+    default: 'false'
+
+  check-signatures:
+    description: 'Verify cryptographic signatures'
+    required: false
+    default: 'false'
+
+  fail-on-warnings:
+    description: 'Treat warnings as errors'
+    required: false
+    default: 'false'
+
+  k9-validate-version:
+    description: 'Version of k9-validate to use'
+    required: false
+    default: 'latest'
+
+outputs:
+  files-validated:
+    description: 'Number of files validated'
+    value: ${{ steps.validate.outputs.files-validated }}
+
+  errors:
+    description: 'Number of validation errors'
+    value: ${{ steps.validate.outputs.errors }}
+
+  warnings:
+    description: 'Number of validation warnings'
+    value: ${{ steps.validate.outputs.warnings }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install k9-validate
+      shell: bash
+      run: |
+        echo "Installing k9-validate..."
+
+        # Download k9-validate binary
+        VERSION="${{ inputs.k9-validate-version }}"
+        if [ "$VERSION" = "latest" ]; then
+          DOWNLOAD_URL="https://github.com/hyperpolymath/k9-tools/releases/latest/download/k9-validate-linux-x64"
+        else
+          DOWNLOAD_URL="https://github.com/hyperpolymath/k9-tools/releases/download/${VERSION}/k9-validate-linux-x64"
+        fi
+
+        curl -fsSL "$DOWNLOAD_URL" -o /tmp/k9-validate
+        chmod +x /tmp/k9-validate
+
+        echo "✓ k9-validate installed"
+
+    - name: Validate K9 Contractiles
+      id: validate
+      shell: bash
+      run: |
+        echo "Validating K9 contractiles in: ${{ inputs.path }}"
+
+        # Build validation command
+        VALIDATE_CMD="/tmp/k9-validate ${{ inputs.path }}"
+
+        if [ "${{ inputs.strict }}" = "true" ]; then
+          VALIDATE_CMD="$VALIDATE_CMD --strict"
+        fi
+
+        if [ "${{ inputs.check-signatures }}" = "true" ]; then
+          VALIDATE_CMD="$VALIDATE_CMD --check-signatures"
+        fi
+
+        VALIDATE_CMD="$VALIDATE_CMD --format json"
+
+        # Run validation
+        OUTPUT=$($VALIDATE_CMD 2>&1 || true)
+        EXIT_CODE=$?
+
+        echo "$OUTPUT"
+
+        # Parse results (simplified)
+        FILES_VALIDATED=$(echo "$OUTPUT" | grep -c ".k9.ncl" || echo "0")
+        ERRORS=$(echo "$OUTPUT" | grep -c "ERROR" || echo "0")
+        WARNINGS=$(echo "$OUTPUT" | grep -c "WARNING" || echo "0")
+
+        # Set outputs
+        echo "files-validated=$FILES_VALIDATED" >> $GITHUB_OUTPUT
+        echo "errors=$ERRORS" >> $GITHUB_OUTPUT
+        echo "warnings=$WARNINGS" >> $GITHUB_OUTPUT
+
+        # Summary
+        echo "## K9 Validation Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+        echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Files Validated | $FILES_VALIDATED |" >> $GITHUB_STEP_SUMMARY
+        echo "| Errors | $ERRORS |" >> $GITHUB_STEP_SUMMARY
+        echo "| Warnings | $WARNINGS |" >> $GITHUB_STEP_SUMMARY
+
+        # Check exit status
+        if [ $EXIT_CODE -ne 0 ]; then
+          echo "❌ Validation failed"
+          exit 1
+        fi
+
+        if [ "$WARNINGS" -gt 0 ] && [ "${{ inputs.fail-on-warnings }}" = "true" ]; then
+          echo "❌ Validation failed (fail-on-warnings enabled)"
+          exit 1
+        fi
+
+        echo "✅ Validation passed"

@@ -1,0 +1,310 @@
+# K9 Meta-Dogfooding Demo Script
+
+**Duration:** 10 minutes
+**Purpose:** Demonstrate K9 releasing itself using release-k9.k9.ncl
+**Audience:** Developers interested in infrastructure automation
+
+---
+
+## Setup (Before Demo)
+
+**Requirements:**
+```bash
+# Verify tools installed
+command -v git
+command -v gh
+command -v just
+command -v nickel
+```
+
+**Repo state:**
+```bash
+cd ~/Documents/hyperpolymath-repos/k9-svc
+git status  # Clean working tree
+git branch  # On main
+git log -1  # Note current version
+```
+
+**Have ready:**
+- Terminal with large font
+- Browser tab: https://github.com/hyperpolymath/k9-svc/releases
+- release-k9.k9.ncl open in editor
+
+---
+
+## Act 1: Show the Contractile (2 minutes)
+
+**Narration:**
+"This is release-k9.k9.ncl—a K9 contractile that releases K9 itself. Let me walk through its three sections."
+
+**Show code:**
+```bash
+cat release-k9.k9.ncl
+```
+
+**Point out (while scrolling):**
+
+1. **must section:**
+   ```nickel
+   must = {
+     check = ''
+       #!/usr/bin/env bash
+       command -v git &> /dev/null || exit 1
+       command -v gh &> /dev/null || exit 1
+       git diff --quiet || exit 1
+     '',
+   }
+   ```
+   "Before doing anything, K9 validates prerequisites: git installed, gh CLI installed, no uncommitted changes."
+
+2. **just section:**
+   ```nickel
+   just = {
+     recipes = {
+       "bump-version" = { ... },
+       test = { ... },
+       release = {
+         dependencies = ["bump-version", "test"],
+         commands = [
+           "git commit -m 'chore: bump version'",
+           "git tag v1.0.0",
+           "git push origin main --tags",
+           "gh release create v1.0.0 --generate-notes",
+         ],
+       },
+     },
+   }
+   ```
+   "Three recipes: bump-version, test, and release. Notice 'release' depends on the other two—K9 ensures they run first."
+
+3. **nickel section:**
+   ```nickel
+   nickel = {
+     config = {
+       current_version = "0.9.0",
+       new_version = "1.0.0",
+       github_repo = "hyperpolymath/k9-svc",
+     },
+   }
+   ```
+   "Configuration with type contracts. If we forget 'github_repo', Nickel fails at parse time, not mid-release."
+
+---
+
+## Act 2: Validation Catches Errors (3 minutes)
+
+**Narration:**
+"Let's see what happens when prerequisites aren't met. First, I'll intentionally break something."
+
+**Create uncommitted change:**
+```bash
+echo "# Test change" >> README.adoc
+git status
+```
+
+**Output shows:**
+```
+modified:   README.adoc
+```
+
+**Run must validation:**
+```bash
+just -f release-k9.k9.ncl must
+```
+
+**Expected output:**
+```
+✗ Prerequisite check failed
+Error: Uncommitted changes detected
+```
+
+**Narration:**
+"K9 caught it! The release didn't even start. Let's fix it."
+
+**Revert change:**
+```bash
+git checkout README.adoc
+git status  # Clean
+```
+
+**Narration:**
+"Now let's simulate missing the gh CLI."
+
+**Temporarily rename gh:**
+```bash
+sudo mv /usr/local/bin/gh /usr/local/bin/gh.bak
+```
+
+**Run validation again:**
+```bash
+just -f release-k9.k9.ncl must
+```
+
+**Expected output:**
+```
+✗ Prerequisite check failed
+Error: gh command not found
+```
+
+**Narration:**
+"Again, K9 stops before doing anything dangerous. This is fail-fast validation in action."
+
+**Restore gh:**
+```bash
+sudo mv /usr/local/bin/gh.bak /usr/local/bin/gh
+```
+
+**Run validation successfully:**
+```bash
+just -f release-k9.k9.ncl must
+```
+
+**Expected output:**
+```
+✓ All prerequisites met
+```
+
+---
+
+## Act 3: The Release (Dry-Run) (4 minutes)
+
+**Narration:**
+"Prerequisites validated. Now let's do a dry-run release to see what K9 would do."
+
+**Explain dry-run approach:**
+"I'll modify the contractile temporarily to add '--dry-run' flags so we can see the execution flow without actually creating a release."
+
+**Show modified release recipe:**
+```nickel
+release = {
+  dependencies = ["bump-version", "test"],
+  commands = [
+    "git commit --dry-run -m 'chore: bump version to 1.0.0'",
+    "echo '[DRY-RUN] Would create tag: v1.0.0'",
+    "echo '[DRY-RUN] Would push to origin main --tags'",
+    "echo '[DRY-RUN] Would run: gh release create v1.0.0'",
+  ],
+},
+```
+
+**Execute:**
+```bash
+just -f release-k9.k9.ncl release
+```
+
+**Expected output (narrate as it runs):**
+```
+==> Running recipe: bump-version
+sed -i 's/version = "0.9.0"/version = "1.0.0"/' Cargo.toml
+git add Cargo.toml
+✓ Version bumped to 1.0.0
+
+==> Running recipe: test
+cargo test --all
+   Compiling k9-tools...
+   Running tests...
+✓ All tests passed
+
+==> Running recipe: release
+[DRY-RUN] Would create commit: chore: bump version to 1.0.0
+[DRY-RUN] Would create tag: v1.0.0
+[DRY-RUN] Would push to origin main --tags
+[DRY-RUN] Would run: gh release create v1.0.0
+
+✓ Release complete
+```
+
+**Narration during output:**
+1. "First, bump-version runs—updates Cargo.toml"
+2. "Then tests run—K9 won't release broken code"
+3. "Finally, release runs—commit, tag, push, GitHub release"
+4. "Notice the dependency order: bump → test → release. K9 enforces this automatically."
+
+**Revert Cargo.toml:**
+```bash
+git checkout Cargo.toml
+```
+
+---
+
+## Act 4: Show Real Release Artifacts (1 minute)
+
+**Narration:**
+"This isn't just a demo. K9 v1.0.0 was actually released using this exact contractile."
+
+**Open browser to GitHub releases:**
+https://github.com/hyperpolymath/k9-svc/releases/tag/v1.0.0
+
+**Point out:**
+- Release notes (auto-generated by gh)
+- Tag created by release-k9.k9.ncl
+- Commit message: "chore: bump version to 1.0.0"
+
+**Show git log:**
+```bash
+git log --oneline -5
+```
+
+**Point to release commit:**
+```
+abc1234 chore: bump version to 1.0.0
+```
+
+**Narration:**
+"This commit was created by K9 releasing itself. Meta-dogfooding in action."
+
+---
+
+## Conclusion (1 minute)
+
+**Summary points:**
+
+1. **Self-validation works**: must.check caught missing tools, uncommitted changes
+2. **Dependencies work**: Recipes ran in order (bump → test → release)
+3. **The abstraction works**: If K9 can release itself, it can handle complex workflows
+
+**Call to action:**
+"K9 is open source. Try it for your projects:"
+```bash
+git clone https://github.com/hyperpolymath/k9-tools
+cd k9-tools
+make build
+./src/k9-init/target/release/k9-init --template minimal
+```
+
+**Final thought:**
+"If your automation tool can't automate itself, what does that say about the abstraction? K9 proves it works by dogfooding itself—all the way to releases."
+
+---
+
+## Troubleshooting
+
+**If validation fails unexpectedly:**
+- Check `git status` for uncommitted changes
+- Verify gh CLI authenticated: `gh auth status`
+- Ensure on main branch: `git branch --show-current`
+
+**If tests fail:**
+- May need to skip test step in demo (focus on validation + release flow)
+- Alternative: Use a minimal contractile example instead
+
+**If dry-run modification is too complex:**
+- Just explain what would happen instead of running
+- Show GitHub release page as proof it worked
+
+---
+
+## Variants
+
+**Short version (5 min):**
+- Skip Act 2 (error demonstrations)
+- Show contractile → run must → show release artifacts
+
+**Extended version (15 min):**
+- Add Act 5: Live k9-init demo (scaffold new contractile)
+- Add Act 6: Show k9-validate catching dangerous patterns (rm -rf /)
+
+**Interactive workshop version:**
+- Attendees run their own k9-init
+- Create a simple contractile together
+- Have them validate it with k9-validate

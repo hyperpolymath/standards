@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: MPL-2.0-or-later
+# SPDX-FileCopyrightText: 2024-2025 Palimpsest Stewardship Council
+
+name: 'Palimpsest License Validator'
+description: 'Validate Palimpsest License metadata in your repository'
+author: 'Palimpsest License Contributors'
+
+branding:
+  icon: 'layers'
+  color: 'blue'
+
+inputs:
+  license-file:
+    description: 'Path to license file (default: LICENSE.md)'
+    required: false
+    default: 'LICENSE.md'
+
+  metadata-file:
+    description: 'Path to metadata file (JSON-LD format)'
+    required: false
+    default: 'metadata/palimpsest.jsonld'
+
+  check-html:
+    description: 'Check HTML files for license metadata'
+    required: false
+    default: 'true'
+
+  html-pattern:
+    description: 'Glob pattern for HTML files to check'
+    required: false
+    default: '**/*.html'
+
+  fail-on-missing:
+    description: 'Fail workflow if license metadata is missing'
+    required: false
+    default: 'false'
+
+  generate-badge:
+    description: 'Generate a license badge in README'
+    required: false
+    default: 'true'
+
+outputs:
+  license-valid:
+    description: 'Whether the license metadata is valid'
+    value: ${{ steps.validate.outputs.valid }}
+
+  metadata-found:
+    description: 'Number of files with license metadata'
+    value: ${{ steps.validate.outputs.found }}
+
+  errors:
+    description: 'Validation errors (if any)'
+    value: ${{ steps.validate.outputs.errors }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate Palimpsest License
+      id: validate
+      shell: bash
+      run: |
+        echo "::group::Checking Palimpsest License metadata"
+
+        # Check if license file exists
+        if [ ! -f "${{ inputs.license-file }}" ]; then
+          echo "::warning::License file not found: ${{ inputs.license-file }}"
+          echo "valid=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # Check license content
+        if grep -q "Palimpsest" "${{ inputs.license-file }}"; then
+          echo "✓ License file contains Palimpsest License"
+        else
+          echo "::error::License file does not reference Palimpsest License"
+          echo "valid=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+        # Check metadata file
+        if [ -f "${{ inputs.metadata-file }}" ]; then
+          echo "✓ Metadata file found: ${{ inputs.metadata-file }}"
+
+          # Validate JSON-LD
+          if command -v jq &> /dev/null; then
+            if jq empty "${{ inputs.metadata-file }}" 2>/dev/null; then
+              echo "✓ Metadata file is valid JSON"
+
+              # Check required fields
+              LICENSE_URL=$(jq -r '.license // empty' "${{ inputs.metadata-file }}")
+              AUTHOR_NAME=$(jq -r '.author.name // empty' "${{ inputs.metadata-file }}")
+
+              if [ -z "$LICENSE_URL" ]; then
+                echo "::error::Missing required field: license"
+                echo "valid=false" >> $GITHUB_OUTPUT
+                exit 1
+              fi
+
+              if [ -z "$AUTHOR_NAME" ]; then
+                echo "::error::Missing required field: author.name"
+                echo "valid=false" >> $GITHUB_OUTPUT
+                exit 1
+              fi
+
+              echo "✓ Required metadata fields present"
+            else
+              echo "::error::Metadata file is not valid JSON"
+              echo "valid=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          else
+            echo "::warning::jq not available, skipping JSON validation"
+          fi
+        else
+          echo "::warning::Metadata file not found: ${{ inputs.metadata-file }}"
+        fi
+
+        # Check HTML files if requested
+        if [ "${{ inputs.check-html }}" = "true" ]; then
+          echo "Checking HTML files for license metadata..."
+
+          FOUND=0
+          while IFS= read -r -d '' file; do
+            if grep -q "palimpsest" "$file" || grep -q "Palimpsest" "$file"; then
+              echo "  ✓ $file contains license metadata"
+              ((FOUND++))
+            fi
+          done < <(find . -name "${{ inputs.html-pattern }}" -type f -print0)
+
+          echo "found=$FOUND" >> $GITHUB_OUTPUT
+          echo "Found license metadata in $FOUND HTML file(s)"
+        fi
+
+        echo "valid=true" >> $GITHUB_OUTPUT
+        echo "::endgroup::"
+
+    - name: Generate Badge
+      if: inputs.generate-badge == 'true'
+      shell: bash
+      run: |
+        echo "::group::Generating license badge"
+
+        BADGE_URL="https://img.shields.io/badge/License-Palimpsest%200.4-blue"
+        BADGE_MD="[![Palimpsest License](${BADGE_URL})](https://palimpsestlicense.org/v0.4)"
+
+        echo "Add this badge to your README:"
+        echo "$BADGE_MD"
+
+        echo "::endgroup::"
+
+    - name: Summary
+      shell: bash
+      run: |
+        echo "## Palimpsest License Validation" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ steps.validate.outputs.valid }}" = "true" ]; then
+          echo "✅ **License validation passed**" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **License validation failed**" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Details" >> $GITHUB_STEP_SUMMARY
+        echo "- License file: \`${{ inputs.license-file }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Metadata file: \`${{ inputs.metadata-file }}\`" >> $GITHUB_STEP_SUMMARY
+
+        if [ -n "${{ steps.validate.outputs.found }}" ]; then
+          echo "- HTML files with metadata: ${{ steps.validate.outputs.found }}" >> $GITHUB_STEP_SUMMARY
+        fi
