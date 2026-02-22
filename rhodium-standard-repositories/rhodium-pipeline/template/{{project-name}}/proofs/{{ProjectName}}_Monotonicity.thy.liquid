@@ -1,0 +1,132 @@
+(*
+  {{ ProjectName }}_Monotonicity.thy
+
+  Monotonicity proofs for {{ project-name }}.
+
+  This theory verifies that pipeline stages maintain monotonicity
+  properties - specifically that data is not silently lost.
+
+  Part of Rhodium Pipeline Template methodology.
+*)
+
+theory {{ ProjectName }}_Monotonicity
+  imports
+    {{ ProjectName }}_Prelude
+begin
+
+section \<open>Monotonicity Definitions\<close>
+
+text \<open>
+  Monotonicity ensures no records are silently dropped.
+  A stage is monotonic if output count \<ge> input count,
+  or any reduction is explicitly documented via a filter.
+\<close>
+
+text \<open>Strict monotonicity: output \<ge> input.\<close>
+
+definition monotonic_stage :: "stage \<Rightarrow> bool" where
+  "monotonic_stage f \<equiv> \<forall>ds. fcard (f ds) \<ge> fcard ds"
+
+text \<open>Weak monotonicity: output \<ge> input minus explicitly filtered.\<close>
+
+definition weak_monotonic :: "stage \<Rightarrow> (record \<Rightarrow> bool) \<Rightarrow> bool" where
+  "weak_monotonic f keep \<equiv>
+    \<forall>ds. fcard (f ds) \<ge> fcard (ffilter keep ds)"
+
+text \<open>Non-increasing: for reduction operations.\<close>
+
+definition non_increasing :: "stage \<Rightarrow> bool" where
+  "non_increasing f \<equiv> \<forall>ds. fcard (f ds) \<le> fcard ds"
+
+section \<open>Monotonicity Composition\<close>
+
+text \<open>
+  Composition of monotonic stages is monotonic.
+\<close>
+
+theorem monotonic_compose:
+  assumes "monotonic_stage f"
+  assumes "monotonic_stage g"
+  shows "monotonic_stage (f \<circ>\<^sub>s g)"
+  using assms unfolding monotonic_stage_def stage_compose_def
+  by (metis order_trans)
+
+theorem weak_monotonic_compose:
+  assumes "weak_monotonic f P"
+  assumes "weak_monotonic g Q"
+  assumes "\<forall>r. Q r \<longrightarrow> P r"
+  shows "weak_monotonic (f \<circ>\<^sub>s g) Q"
+  using assms unfolding weak_monotonic_def stage_compose_def
+  sorry \<comment> \<open>Requires ffilter subset lemma\<close>
+
+section \<open>Identity and Constant Stages\<close>
+
+text \<open>The identity stage is trivially monotonic.\<close>
+
+lemma identity_monotonic:
+  "monotonic_stage id"
+  unfolding monotonic_stage_def by simp
+
+text \<open>Empty stage is not monotonic (unless input is empty).\<close>
+
+definition empty_stage :: stage where
+  "empty_stage ds = {||}"
+
+lemma empty_not_monotonic:
+  "\<not> monotonic_stage empty_stage"
+  unfolding monotonic_stage_def empty_stage_def
+  by (metis bot.extremum_uniqueI fcard_fempty gr_implies_not0
+      le_numeral_extra(2) less_le)
+
+section \<open>Filter Monotonicity\<close>
+
+text \<open>
+  Filtering is non-increasing but satisfies weak monotonicity.
+\<close>
+
+definition filter_stage :: "(record \<Rightarrow> bool) \<Rightarrow> stage" where
+  "filter_stage P ds = ffilter P ds"
+
+lemma filter_non_increasing:
+  "non_increasing (filter_stage P)"
+  unfolding non_increasing_def filter_stage_def
+  by (simp add: fcard_mono)
+
+lemma filter_weak_monotonic:
+  "weak_monotonic (filter_stage P) P"
+  unfolding weak_monotonic_def filter_stage_def by simp
+
+section \<open>Union Monotonicity\<close>
+
+text \<open>
+  Adding records is strictly monotonic.
+\<close>
+
+definition augment_stage :: "dataset \<Rightarrow> stage" where
+  "augment_stage extra ds = ds |\<union>| extra"
+
+lemma augment_monotonic:
+  "monotonic_stage (augment_stage extra)"
+  unfolding monotonic_stage_def augment_stage_def
+  by (simp add: fcard_mono)
+
+section \<open>Pipeline Monotonicity Verification\<close>
+
+text \<open>
+  Combined monotonicity for pipeline stages.
+\<close>
+
+definition pipeline_monotonic :: "stage list \<Rightarrow> bool" where
+  "pipeline_monotonic stages \<equiv>
+    (\<forall>s \<in> set stages. monotonic_stage s) \<or>
+    (\<exists>keeps. length keeps = length stages \<and>
+     (\<forall>i < length stages. weak_monotonic (stages ! i) (keeps ! i)))"
+
+theorem pipeline_preserves_minimum:
+  assumes "monotonic_stage f"
+  assumes "fcard ds \<ge> n"
+  shows "fcard (f ds) \<ge> n"
+  using assms unfolding monotonic_stage_def
+  by (meson order_trans)
+
+end

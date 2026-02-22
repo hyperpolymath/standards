@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= Web Rendering Options
+
+A2ML can be rendered on the web without browser changes.
+
+== 1) Build-Time Rendering (Best UX)
+
+* A2ML -> HTML during CI/SSG build
+* Works everywhere, no client-side cost
+
+== 2) Server-Side Rendering
+
+* A2ML -> HTML on request
+* Useful for dynamic content and gateways
+
+== 3) Client-Side Rendering
+
+* JS/Rescript parser + renderer in the browser
+* Suitable for interactive docs and embedded widgets
+
+== Minimal ReScript API (Sketch)
+
+[source,rescript]
+----
+module Ast: {
+  type doc
+  type block
+}
+
+type parseMode = Lax | Checked
+
+let parse: (~mode: parseMode=?, string) => result<Ast.doc, string>
+let renderHtml: Ast.doc => string
+----
+
+== Prototype (ReScript)
+
+See `prototype/rescript/` for a minimal Module 0 parser + HTML renderer sketch.
+See `docs/demo.html` for a preview generated via ddraig-ssg.
+
+== Prototype (ReScript + WASM)
+
+See `prototype/wasm/` for a direct-to-WASM sketch using `rescript-wasm-runtime`.
+
+== Demo Generation (ddraig-ssg)
+
+The demo page is generated from `prototype/ddraig/content/demo.md` using
+`scripts/build-demo-ddraig.sh`, which compiles and runs a small Idris driver
+against the `ddraig-ssg` repo.
+
+[source,bash]
+----
+just demo
+----
+
+== Browser Usage (Plain JS)
+
+[source,html]
+----
+<script type="module">
+  import {parse, renderHtml} from "/a2ml.js";
+
+  const src = document.getElementById("doc").textContent;
+  const doc = parse(src, {mode: "Checked"});
+  if (doc.ok) {
+    document.getElementById("out").innerHTML = renderHtml(doc.value);
+  } else {
+    document.getElementById("out").textContent = doc.error;
+  }
+</script>
+
+<script id="doc" type="application/vnd.a2ml">
+# A2ML Overview
+
+@abstract:
+A2ML is a typed, attested markup format.
+@end
+</script>
+
+<div id="out"></div>
+----
+
+== Media Type Notes
+
+For interim usage, serve A2ML with `Content-Type: application/vnd.a2ml`.
+Use `charset=utf-8` only when the document is purely textual.
+
+== Web Component Idea
+
+[source,js]
+----
+class A2MLDoc extends HTMLElement {
+  async connectedCallback() {
+    const src = this.textContent;
+    const {parse, renderHtml} = await import("/a2ml.js");
+    const doc = parse(src, {mode: "Checked"});
+    this.innerHTML = doc.ok ? renderHtml(doc.value) : `<pre>${doc.error}</pre>`;
+  }
+}
+customElements.define("a2ml-doc", A2MLDoc);
+----
+
+Usage:
+
+[source,html]
+----
+<a2ml-doc>
+# A2ML Overview
+@abstract:
+A2ML is a typed, attested markup format.
+@end
+</a2ml-doc>
+----

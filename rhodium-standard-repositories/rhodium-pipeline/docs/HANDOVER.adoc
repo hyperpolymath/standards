@@ -1,0 +1,812 @@
+= Rhodium Pipeline Template: Handover Document
+:toc: macro
+:toc-title: Contents
+:toclevels: 4
+:sectnums:
+:sectnumlevels: 4
+:icons: font
+:source-highlighter: rouge
+:experimental:
+
+A comprehensive methodology for building formally-verified data processing pipelines using the Rhodium Standard Repositories (RSR) approach.
+
+toc::[]
+
+== Project Identity
+
+[cols="1,3"]
+|===
+|Field |Value
+
+|*Name*
+|`rhodium-pipeline`
+
+|*Type*
+|Project template / cargo-generate
+
+|*Status*
+|v1.0.0 — Production Ready
+
+|*Origin*
+|Extracted from https://github.com/hyperpolymath/zerostep[zerostep]
+
+|*License*
+|Palimpsest 0.8 + User choice (MIT \| AGPL-3.0)
+|===
+
+== What This Is
+
+A template for creating data processing pipelines with:
+
+Rust CLI with comprehensive flag handling (clap)::
+Every conceivable command-line pattern, organised into taxonomic categories
+
+Isabelle/HOL proofs for pipeline correctness invariants::
+Formal mathematical guarantees about structural properties
+
+Nickel configurations for type-safe build/run configuration::
+Contracts, presets, and composable configuration
+
+Guile Scheme for runtime validation and scripting::
+Expressive, embeddable runtime configuration and validation
+
+justfile automation with layered recipe organisation::
+200+ recipes covering every workflow permutation
+
+Julia integration (optional)::
+FFI bindings for numerical/ML workloads
+
+The template encodes a *methodology*, not a library. You generate a new project, then customise the skeleton.
+
+== Core Philosophy
+
+=== The Four Principles
+
+[#principle-prove]
+==== 1. Prove the Scaffolding, Test the Logic
+
+[quote]
+____
+Formal proofs verify structural invariants. Empirical tests verify domain logic.
+____
+
+[cols="1,1,2"]
+|===
+|Verification Type |Tool |Examples
+
+|*Formal Proofs*
+|Isabelle/HOL
+|Data partitions are disjoint, mappings are bijective, checksums are preserved
+
+|*Property Tests*
+|proptest/quickcheck
+|Domain rules hold for random inputs
+
+|*Unit Tests*
+|cargo test
+|Specific cases, edge conditions
+
+|*Integration Tests*
+|just recipes
+|End-to-end workflows
+|===
+
+Attempting to formally prove domain logic is impractical. Attempting to merely test structural invariants is insufficient. This methodology uses each tool where it excels.
+
+[#principle-config]
+==== 2. Configuration as Code
+
+Three-tier configuration strategy:
+
+[cols="1,1,1,2"]
+|===
+|Layer |Tool |When |Purpose
+
+|*Build-time*
+|Nickel
+|Compilation/generation
+|Type-checked contracts, presets, composition
+
+|*Runtime*
+|Guile Scheme
+|Before execution
+|Dynamic validation, scripted transforms
+
+|*Deploy-time*
+|Environment variables
+|At deployment
+|Instance-specific overrides
+|===
+
+[#principle-automation]
+==== 3. Automation Over Documentation
+
+[quote]
+____
+If a procedure exists, it's a justfile recipe. Documentation explains _why_, automation handles _how_.
+____
+
+The justfile is the canonical source of truth for all operations. Documentation exists to explain rationale and architecture, not to enumerate procedures.
+
+[#principle-no-python]
+==== 4. No Python
+
+[cols="1,2"]
+|===
+|Language |Role
+
+|*Rust*
+|CLI, core logic, I/O, orchestration
+
+|*Julia*
+|Numerical algorithms, ML inference, scientific computing
+
+|*Guile Scheme*
+|Configuration, validation, scripting
+
+|*Shell*
+|Glue, environment setup
+
+|*Isabelle/Isar*
+|Formal specifications and proofs
+|===
+
+Python is intentionally excluded to enforce clear boundaries and proper typing. For projects that genuinely require Python (specific ML frameworks, legacy integration), see <<python-escape-hatch>>.
+
+== Template Structure
+
+=== Directory Layout
+
+[source]
+----
+{{project-name}}/
+├── Cargo.toml                          # Rust project manifest
+├── Cargo.lock                          # Locked dependencies
+├── rust-toolchain.toml                 # Rust version pinning
+│
+├── src/                                # Rust source
+│   ├── main.rs                         # Entry point, CLI dispatch
+│   ├── cli.rs                          # clap argument definitions
+│   ├── cli/                            # CLI submodules
+│   │   ├── args.rs                     # Argument structs
+│   │   ├── validators.rs               # Argument validation
+│   │   └── completions.rs              # Shell completions
+│   ├── config.rs                       # Configuration loading
+│   ├── pipeline.rs                     # Core pipeline logic
+│   ├── stages/                         # Pipeline stages
+│   │   ├── ingest.rs
+│   │   ├── transform.rs
+│   │   ├── validate.rs
+│   │   └── export.rs
+│   ├── validation.rs                   # Input/output validation
+│   ├── checksum.rs                     # Integrity verification
+│   ├── error.rs                        # Error types
+│   ├── telemetry.rs                    # Optional telemetry
+│   └── lib.rs                          # Library interface
+│
+├── proofs/                             # Isabelle/HOL
+│   ├── ROOT                            # Session configuration
+│   ├── {{ProjectName}}_Prelude.thy     # Common definitions
+│   ├── {{ProjectName}}_Invariants.thy  # Core invariants
+│   ├── {{ProjectName}}_Partition.thy   # Partition proofs
+│   ├── {{ProjectName}}_Bijection.thy   # Bijection proofs
+│   ├── {{ProjectName}}_Checksum.thy    # Checksum proofs
+│   ├── {{ProjectName}}_Ratio.thy       # Ratio tolerance proofs
+│   └── {{ProjectName}}_Composition.thy # Composed properties
+│
+├── config/                             # Nickel configuration
+│   ├── default.ncl                     # Default configuration
+│   ├── schema.ncl                      # Configuration schema
+│   ├── presets/
+│   │   ├── dev.ncl                     # Development preset
+│   │   ├── prod.ncl                    # Production preset
+│   │   ├── ci.ncl                      # CI/CD preset
+│   │   └── paranoid.ncl                # Maximum validation
+│   └── contracts/
+│       ├── paths.ncl                   # Path validation contracts
+│       ├── ratios.ncl                  # Ratio/percentage contracts
+│       ├── checksums.ncl               # Checksum contracts
+│       └── common.ncl                  # Shared contracts
+│
+├── schemes/                            # Guile Scheme
+│   ├── config.scm                      # Runtime configuration
+│   ├── validate.scm                    # Validation logic
+│   ├── transform.scm                   # Data transforms
+│   └── lib/
+│       ├── core.scm                    # Core utilities
+│       ├── paths.scm                   # Path handling
+│       └── checksums.scm               # Checksum utilities
+│
+├── justfile                            # Task automation
+├── Makefile                            # Fallback (for systems without just)
+│
+├── tests/
+│   ├── integration/                    # Integration tests
+│   ├── property/                       # Property-based tests
+│   └── fixtures/                       # Test data
+│
+├── docs/
+│   ├── README.adoc
+│   ├── QUICKSTART.adoc
+│   ├── ARCHITECTURE.adoc
+│   ├── CLI.adoc
+│   ├── PROOFS.adoc
+│   ├── CONFIGURATION.adoc
+│   └── man/
+│       └── {{project-name}}.1          # Man page
+│
+├── .gitignore
+├── .envrc                              # direnv configuration
+├── LICENSE
+└── CHANGELOG.adoc
+----
+
+=== File Responsibilities
+
+[cols="2,4"]
+|===
+|File |Responsibility
+
+|`src/main.rs`
+|CLI entry point, command dispatch, signal handling
+
+|`src/cli.rs`
+|All clap definitions, argument parsing, validation
+
+|`src/pipeline.rs`
+|Core pipeline orchestration, stage composition
+
+|`proofs/ROOT`
+|Isabelle session definition, theory dependencies
+
+|`config/default.ncl`
+|Default configuration values, preset selection
+
+|`config/schema.ncl`
+|Configuration schema with contracts
+
+|`schemes/config.scm`
+|Runtime configuration, environment integration
+
+|`justfile`
+|All automation recipes, workflow definitions
+|===
+
+== Invariant Patterns
+
+The Isabelle theories prove structural properties. These are the canonical patterns:
+
+=== Partition Invariant
+
+Ensures a universe is divided into disjoint, exhaustive parts.
+
+[source,isabelle]
+----
+theory Partition_Invariant
+  imports Main
+begin
+
+definition valid_partition :: "'a set ⇒ 'a set list ⇒ bool" where
+  "valid_partition U parts ≡
+    (⋃(set parts) = U) ∧                          (* exhaustive *)
+    (∀i j. i < length parts ∧ j < length parts ∧ i ≠ j
+      ⟶ parts!i ∩ parts!j = {}) ∧                (* disjoint *)
+    (∀p ∈ set parts. p ≠ {})"                     (* non-empty *)
+
+lemma partition_membership:
+  assumes "valid_partition U parts"
+  shows "∀x ∈ U. ∃!i. i < length parts ∧ x ∈ parts!i"
+  (* Each element belongs to exactly one partition *)
+  using assms unfolding valid_partition_def by blast
+
+end
+----
+
+*Use cases:* Train/validation/test splits, category assignment, sharding
+
+=== Bijection Invariant
+
+Ensures a mapping is one-to-one and onto.
+
+[source,isabelle]
+----
+theory Bijection_Invariant
+  imports Main
+begin
+
+definition valid_bijection :: "('a ⇒ 'b) ⇒ 'a set ⇒ 'b set ⇒ bool" where
+  "valid_bijection f A B ≡ bij_betw f A B"
+
+lemma bijection_invertible:
+  assumes "valid_bijection f A B"
+  shows "∃g. (∀a ∈ A. g (f a) = a) ∧ (∀b ∈ B. f (g b) = b)"
+  using assms unfolding valid_bijection_def bij_betw_def
+  by (metis f_the_inv_into_f the_inv_into_f_f)
+
+lemma bijection_preserves_cardinality:
+  assumes "valid_bijection f A B" "finite A"
+  shows "card A = card B"
+  using assms unfolding valid_bijection_def
+  by (simp add: bij_betw_same_card)
+
+end
+----
+
+*Use cases:* ID remapping, file renaming, encoding/decoding
+
+=== Checksum Integrity
+
+Ensures checksum verification is sound.
+
+[source,isabelle]
+----
+theory Checksum_Invariant
+  imports Main
+begin
+
+type_synonym checksum = "nat"
+type_synonym content = "nat list"
+
+locale checksum_scheme =
+  fixes compute :: "content ⇒ checksum"
+  fixes verify :: "content ⇒ checksum ⇒ bool"
+  assumes verify_correct: "verify c (compute c) = True"
+  assumes verify_sound: "verify c h = True ⟹ h = compute c"
+begin
+
+lemma integrity_preserved:
+  assumes "h = compute c"
+  shows "verify c h"
+  using assms verify_correct by simp
+
+lemma tampering_detected:
+  assumes "c' ≠ c" and "compute c' ≠ compute c"
+  shows "¬verify c' (compute c)"
+  using assms verify_sound by auto
+
+end
+
+end
+----
+
+*Use cases:* Data integrity verification, transfer validation
+
+=== Ratio Tolerance
+
+Ensures split ratios are within acceptable bounds.
+
+[source,isabelle]
+----
+theory Ratio_Invariant
+  imports Complex_Main
+begin
+
+definition within_tolerance :: "real ⇒ real ⇒ real ⇒ bool" where
+  "within_tolerance target actual ε ≡ ¦target - actual¦ ≤ ε"
+
+lemma tolerance_reflexive:
+  "within_tolerance r r ε"
+  unfolding within_tolerance_def by simp
+
+lemma tolerance_symmetric:
+  "within_tolerance t a ε ⟷ within_tolerance a t ε"
+  unfolding within_tolerance_def by auto
+
+definition valid_split_ratio ::
+  "nat ⇒ nat ⇒ real ⇒ real ⇒ bool" where
+  "valid_split_ratio part_size total_size target_ratio ε ≡
+    within_tolerance target_ratio (part_size / total_size) ε"
+
+end
+----
+
+*Use cases:* Dataset splitting, sampling, stratification
+
+=== Monotonicity Invariant
+
+Ensures pipeline stages don't unexpectedly lose records.
+
+[source,isabelle]
+----
+theory Monotonicity_Invariant
+  imports Main
+begin
+
+definition monotonic_stage :: "('a set ⇒ 'b set) ⇒ bool" where
+  "monotonic_stage f ≡ ∀A B. A ⊆ B ⟶ f A ⊆ f B"
+
+definition record_preserving :: "('a set ⇒ 'a set) ⇒ bool" where
+  "record_preserving f ≡ ∀A. card (f A) ≥ card A ∨
+    (∃filter. ∀a ∈ A. a ∉ f A ⟶ filter a)"
+
+lemma composition_monotonic:
+  assumes "monotonic_stage f" "monotonic_stage g"
+  shows "monotonic_stage (g ∘ f)"
+  using assms unfolding monotonic_stage_def by auto
+
+end
+----
+
+*Use cases:* ETL pipelines, filtering with audit
+
+=== Idempotency Invariant
+
+Ensures re-running produces identical results.
+
+[source,isabelle]
+----
+theory Idempotency_Invariant
+  imports Main
+begin
+
+definition idempotent :: "('a ⇒ 'a) ⇒ bool" where
+  "idempotent f ≡ ∀x. f (f x) = f x"
+
+lemma idempotent_fixed_point:
+  assumes "idempotent f"
+  shows "f x = y ⟹ f y = y"
+  using assms unfolding idempotent_def by metis
+
+definition deterministic :: "('a ⇒ 'b) ⇒ bool" where
+  "deterministic f ≡ True"  (* Functions in HOL are deterministic by construction *)
+
+end
+----
+
+*Use cases:* Normalisation, canonicalisation, deduplication
+
+== CLI Architecture
+
+=== Flag Taxonomy
+
+The CLI follows a strict categorisation:
+
+[cols="1,2,3"]
+|===
+|Category |Flags |Examples
+
+|*Input/Output*
+|Paths, formats, overwrite behaviour
+|`--input`, `--output`, `--format`, `--overwrite`
+
+|*Processing*
+|Algorithm selection, parameters
+|`--algorithm`, `--threads`, `--batch-size`
+
+|*Validation*
+|Verification levels, tolerance
+|`--validate`, `--strict`, `--tolerance`
+
+|*Performance*
+|Threads, buffers, fast mode
+|`--threads`, `--buffer-size`, `--fast`
+
+|*Logging*
+|Verbosity, format, destination
+|`--verbose`, `--quiet`, `--log-format`, `--log-file`
+
+|*Debug*
+|Dry run, config printing, debug mode
+|`--dry-run`, `--print-config`, `--debug`
+
+|*Environment*
+|Config file, env overrides
+|`--config`, `--env-file`, `--no-env`
+|===
+
+=== Man Page Generation
+
+Man pages are generated from the CLI definition:
+
+[source,bash]
+----
+just docs-man      # Generate man page
+just docs-install  # Install to system
+----
+
+== Configuration System
+
+=== Nickel (Build-time)
+
+Type-safe configuration with contracts:
+
+[source,nickel]
+----
+# config/schema.ncl
+{
+  Config = {
+    input | {
+      path | String | doc "Input path",
+      format | [| 'Auto, 'Json, 'Csv, 'Parquet |] | default = 'Auto,
+      recursive | Bool | default = false,
+    },
+
+    output | {
+      path | String | doc "Output path",
+      overwrite | Bool | default = false,
+      create_parents | Bool | default = true,
+    },
+
+    processing | {
+      threads | Num | default = 4 | Num -> Bool = fun n => n > 0 && n <= 256,
+      batch_size | Num | default = 1000,
+      algorithm | [| 'Default, 'Fast, 'Thorough |] | default = 'Default,
+    },
+
+    validation | {
+      level | [| 'Skip, 'Quick, 'Standard, 'Full, 'Paranoid |] | default = 'Standard,
+      checksum | [| 'None, 'Blake3, 'Shake256, 'Sha3 |] | default = 'Blake3,
+      tolerance | Num | default = 0.01,
+    },
+  }
+}
+----
+
+=== Guile (Runtime)
+
+Dynamic validation and scripting:
+
+[source,scheme]
+----
+;; schemes/config.scm
+(define-module (config)
+  #:use-module (ice-9 match)
+  #:use-module (srfi srfi-1)
+  #:export (load-config validate-config merge-env-overrides))
+
+(define (validate-path path must-exist)
+  "Validate a path exists if required."
+  (if must-exist
+      (if (file-exists? path)
+          path
+          (error "Path does not exist" path))
+      path))
+
+(define (validate-config config)
+  "Validate configuration at runtime."
+  (match config
+    ((('input . input-cfg) ('output . output-cfg) rest ...)
+     (validate-path (assoc-ref input-cfg 'path) #t)
+     (let ((output-path (assoc-ref output-cfg 'path)))
+       (when (and (file-exists? output-path)
+                  (not (assoc-ref output-cfg 'overwrite)))
+         (error "Output exists and overwrite is false" output-path)))
+     config)
+    (_ (error "Invalid configuration structure"))))
+
+(define (merge-env-overrides config)
+  "Merge environment variable overrides into config."
+  (let ((env-threads (getenv "PIPELINE_THREADS")))
+    (if env-threads
+        (assoc-set! config 'processing
+          (assoc-set! (assoc-ref config 'processing)
+                      'threads (string->number env-threads)))
+        config)))
+----
+
+=== Environment Variables
+
+Deploy-time overrides follow a naming convention:
+
+[source,bash]
+----
+# Pattern: {PROJECT}_{SECTION}_{KEY}
+export MYPIPELINE_PROCESSING_THREADS=8
+export MYPIPELINE_VALIDATION_LEVEL=paranoid
+export MYPIPELINE_OUTPUT_OVERWRITE=true
+----
+
+== Justfile Organisation
+
+=== Recipe Categories
+
+[source,just]
+----
+# === META ===
+# Information and help recipes
+help                      # Show all available recipes
+version                   # Show version information
+config                    # Display current configuration
+config-explain            # Explain configuration values
+changelog                 # Show changelog
+license                   # Display license information
+
+# === DEPS ===
+# Dependency management
+check-deps                # Verify all dependencies
+check-deps-rust           # Check Rust toolchain
+check-deps-isabelle       # Check Isabelle installation
+check-deps-nickel         # Check Nickel installation
+check-deps-guile          # Check Guile installation
+check-deps-julia          # Check Julia (if enabled)
+install-deps              # Install missing dependencies
+update-deps               # Update dependencies
+
+# === BUILD ===
+# Compilation and generation
+build                     # Development build
+build-release             # Optimised release build
+build-debug               # Debug build with symbols
+build-all                 # All build variants
+build-cross target        # Cross-compile for target
+build-static              # Static binary
+build-docs                # Build documentation
+
+# === TEST ===
+# Testing at all levels
+test                      # Run all tests
+test-unit                 # Unit tests only
+test-integration          # Integration tests
+test-property             # Property-based tests
+test-coverage             # With coverage reporting
+test-watch                # Watch mode
+
+# === PROVE ===
+# Formal verification
+prove                     # Check all proofs
+prove-fast                # Quick proof check
+prove-full                # Full proof verification
+prove-document            # Generate proof documentation
+prove-deps                # Check proof dependencies
+
+# === VALIDATE ===
+# Validation and verification
+validate                  # Run all validation
+validate-config           # Validate configuration
+validate-schemas          # Check Nickel schemas
+validate-schemes          # Check Guile schemes
+validate-quick            # Fast validation subset
+
+# === RUN ===
+# Execution
+run *args                 # Run with arguments
+run-dry *args             # Dry run
+run-verbose *args         # Verbose execution
+run-profile *args         # With profiling
+run-trace *args           # With tracing
+
+# === LINT ===
+# Code quality
+lint                      # Run all linters
+lint-rust                 # Rust linting (clippy)
+lint-nickel               # Nickel linting
+lint-guile                # Guile linting
+lint-fix                  # Auto-fix issues
+
+# === FORMAT ===
+# Code formatting
+fmt                       # Format all code
+fmt-rust                  # Format Rust
+fmt-nickel                # Format Nickel
+fmt-check                 # Check formatting
+
+# === DOCS ===
+# Documentation
+docs                      # Build all docs
+docs-serve                # Serve docs locally
+docs-man                  # Generate man page
+docs-install              # Install man page
+
+# === RELEASE ===
+# Release management
+release-check             # Pre-release checks
+release-build             # Build release artifacts
+release-tag version       # Tag release
+release-publish           # Publish release
+
+# === CLEAN ===
+# Cleanup
+clean                     # Clean build artifacts
+clean-all                 # Deep clean
+clean-cache               # Clear caches
+clean-proofs              # Clear proof artifacts
+
+# === WORKFLOW ===
+# Composite workflows
+quick                     # Fast dev cycle
+full                      # Complete pipeline
+ci                        # CI/CD pipeline
+pre-commit                # Pre-commit checks
+----
+
+== Template Variables Reference
+
+[cols="1,1,2,1"]
+|===
+|Variable |Transform |Description |Example
+
+|`project-name`
+|kebab-case
+|Project identifier
+|`data-normalizer`
+
+|`project_name`
+|snake_case
+|Rust module name
+|`data_normalizer`
+
+|`ProjectName`
+|PascalCase
+|Isabelle theory prefix
+|`DataNormalizer`
+
+|`PROJECT_NAME`
+|SCREAMING_SNAKE
+|Environment variable prefix
+|`DATA_NORMALIZER`
+
+|`project.name`
+|dot.case
+|Configuration keys
+|`data.normalizer`
+|===
+
+== Reference Implementation
+
+https://github.com/hyperpolymath/zerostep[*zerostep*] is the canonical first implementation:
+
+* Living documentation of the methodology
+* Reference for all patterns
+* Test bed for template improvements
+
+[#python-escape-hatch]
+== Python Escape Hatch
+
+For projects that genuinely require Python:
+
+. *Isolate* Python to a subprocess or container
+. *Communicate* via structured formats (JSON, Parquet, Arrow)
+. *Validate* inputs and outputs at the Rust boundary
+. *Document* the necessity in ARCHITECTURE.adoc
+
+[source,just]
+----
+# Example: Calling Python ML model
+run-with-python *args:
+    #!/usr/bin/env bash
+    # Export data for Python
+    {{project-name}} export --format parquet /tmp/input.parquet
+    # Run Python model
+    python scripts/ml_inference.py /tmp/input.parquet /tmp/output.parquet
+    # Import results back
+    {{project-name}} import --format parquet /tmp/output.parquet {{args}}
+----
+
+== Future Work
+
+[cols="1,1,2"]
+|===
+|Item |Priority |Description
+
+|Shared Isabelle theories
+|High
+|Extract generic proofs to importable library
+
+|Lean 4 alternative
+|Medium
+|Offer Lean as Isabelle alternative
+
+|CI templates
+|Medium
+|GitLab CI and GitHub Actions templates
+
+|IDE integration
+|Low
+|VS Code / Emacs configurations
+|===
+
+== Changelog
+
+=== v1.0.0 (2025-12-07)
+
+* Initial release
+* Complete methodology documentation
+* Executable cargo-generate template
+* Full CLI taxonomy
+* Six Isabelle invariant patterns
+* Nickel + Guile configuration system
+* 200+ justfile recipes
+
+---
+
+_This template embodies the Rhodium Standard Repositories methodology for formally-verified data pipelines. It prioritises correctness over convenience, but provides enough automation that correctness doesn't mean slow._

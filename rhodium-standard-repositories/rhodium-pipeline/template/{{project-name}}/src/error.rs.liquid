@@ -1,0 +1,201 @@
+//! Error types for {{ project-name }}
+//!
+//! Follows the Rhodium Pipeline error taxonomy:
+//! - Configuration errors (exit code 2)
+//! - Validation errors (exit code 3)
+//! - I/O errors (exit code 4)
+//! - Pipeline errors (exit code 5)
+
+use std::path::PathBuf;
+use thiserror::Error;
+
+/// Result type alias for {{ project-name }}
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Main error type
+#[derive(Error, Debug)]
+pub enum Error {
+    // -------------------------------------------------------------------------
+    // CONFIGURATION ERRORS (exit code 2)
+    // -------------------------------------------------------------------------
+
+    #[error("Configuration file not found: {path}")]
+    ConfigNotFound { path: PathBuf },
+
+    #[error("Invalid configuration: {message}")]
+    ConfigInvalid { message: String },
+
+    #[error("Configuration parse error: {source}")]
+    ConfigParse {
+        #[from]
+        source: toml::de::Error,
+    },
+
+    #[error("Missing required configuration: {field}")]
+    ConfigMissing { field: String },
+
+    #[error("Configuration type error: expected {expected}, got {actual} for {field}")]
+    ConfigType {
+        field: String,
+        expected: String,
+        actual: String,
+    },
+
+    // -------------------------------------------------------------------------
+    // VALIDATION ERRORS (exit code 3)
+    // -------------------------------------------------------------------------
+
+    #[error("Validation failed: {message}")]
+    ValidationFailed { message: String },
+
+    #[error("Schema validation error: {message}")]
+    SchemaViolation { message: String },
+
+    #[error("Checksum mismatch for {path}: expected {expected}, got {actual}")]
+    ChecksumMismatch {
+        path: PathBuf,
+        expected: String,
+        actual: String,
+    },
+
+    #[error("Invariant violation: {invariant}")]
+    InvariantViolation { invariant: String },
+
+    #[error("Ratio out of tolerance: {name} is {actual}, expected {expected} ± {tolerance}")]
+    RatioOutOfTolerance {
+        name: String,
+        expected: f64,
+        actual: f64,
+        tolerance: f64,
+    },
+
+    #[error("Partition invariant violated: element {element} found in {count} partitions")]
+    PartitionViolation { element: String, count: usize },
+
+    #[error("Bijection invariant violated: {message}")]
+    BijectionViolation { message: String },
+
+    // -------------------------------------------------------------------------
+    // I/O ERRORS (exit code 4)
+    // -------------------------------------------------------------------------
+
+    #[error("File not found: {path}")]
+    FileNotFound { path: PathBuf },
+
+    #[error("Directory not found: {path}")]
+    DirectoryNotFound { path: PathBuf },
+
+    #[error("Permission denied: {path}")]
+    PermissionDenied { path: PathBuf },
+
+    #[error("Path already exists: {path}")]
+    PathExists { path: PathBuf },
+
+    #[error("I/O error: {source}")]
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
+
+    #[error("Read error for {path}: {message}")]
+    ReadError { path: PathBuf, message: String },
+
+    #[error("Write error for {path}: {message}")]
+    WriteError { path: PathBuf, message: String },
+
+    #[error("Encoding error: {message}")]
+    EncodingError { message: String },
+
+    // -------------------------------------------------------------------------
+    // PIPELINE ERRORS (exit code 5)
+    // -------------------------------------------------------------------------
+
+    #[error("Pipeline stage failed: {stage} - {message}")]
+    StageFailed { stage: String, message: String },
+
+    #[error("Transform error: {message}")]
+    TransformError { message: String },
+
+    #[error("Processing error: {message}")]
+    ProcessingError { message: String },
+
+    #[error("Resource exhausted: {resource}")]
+    ResourceExhausted { resource: String },
+
+    #[error("Timeout after {seconds} seconds")]
+    Timeout { seconds: u64 },
+
+    #[error("Cancelled by user")]
+    Cancelled,
+
+    #[error("Maximum errors exceeded: {count} errors (limit: {limit})")]
+    MaxErrorsExceeded { count: usize, limit: usize },
+
+    // -------------------------------------------------------------------------
+    // INTERNAL ERRORS
+    // -------------------------------------------------------------------------
+
+    #[error("Internal error: {message}")]
+    Internal { message: String },
+
+    #[error(transparent)]
+    Other(#[from] color_eyre::eyre::Error),
+}
+
+impl Error {
+    /// Get the exit code for this error type
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            // Configuration errors
+            Error::ConfigNotFound { .. }
+            | Error::ConfigInvalid { .. }
+            | Error::ConfigParse { .. }
+            | Error::ConfigMissing { .. }
+            | Error::ConfigType { .. } => 2,
+
+            // Validation errors
+            Error::ValidationFailed { .. }
+            | Error::SchemaViolation { .. }
+            | Error::ChecksumMismatch { .. }
+            | Error::InvariantViolation { .. }
+            | Error::RatioOutOfTolerance { .. }
+            | Error::PartitionViolation { .. }
+            | Error::BijectionViolation { .. } => 3,
+
+            // I/O errors
+            Error::FileNotFound { .. }
+            | Error::DirectoryNotFound { .. }
+            | Error::PermissionDenied { .. }
+            | Error::PathExists { .. }
+            | Error::Io { .. }
+            | Error::ReadError { .. }
+            | Error::WriteError { .. }
+            | Error::EncodingError { .. } => 4,
+
+            // Pipeline errors
+            Error::StageFailed { .. }
+            | Error::TransformError { .. }
+            | Error::ProcessingError { .. }
+            | Error::ResourceExhausted { .. }
+            | Error::Timeout { .. }
+            | Error::Cancelled
+            | Error::MaxErrorsExceeded { .. } => 5,
+
+            // Internal/other
+            Error::Internal { .. } | Error::Other(_) => 1,
+        }
+    }
+
+    /// Check if error is recoverable
+    pub fn is_recoverable(&self) -> bool {
+        matches!(
+            self,
+            Error::Timeout { .. }
+            | Error::ResourceExhausted { .. }
+            | Error::Io { .. }
+        )
+    }
+}
+
+/// Alias for pipeline-specific errors
+pub type PipelineError = Error;

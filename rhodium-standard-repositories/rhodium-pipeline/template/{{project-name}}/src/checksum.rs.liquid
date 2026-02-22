@@ -1,0 +1,286 @@
+//! Checksum computation and verification
+//!
+//! Supports the Rhodium cryptographic suite:
+//! - SHAKE3-256 (primary, default)
+//! - BLAKE3 (secondary, fast)
+//! - SHA3-256/512
+//! - XXHash (non-cryptographic, fastest)
+
+use std::fs::File;
+use std::io::{BufReader, Read};
+use std::path::Path;
+use sha3::{Shake256, digest::{Update, ExtendableOutput, XofReader}};
+use digest::Digest;
+
+use crate::cli::{ChecksumArgs, ChecksumAction, ChecksumAlgorithm, ChecksumOutputFormat, GlobalArgs};
+use crate::error::{Error, Result};
+
+/// Checksum algorithm implementation
+#[derive(Debug, Clone)]
+pub enum Hasher {
+    Shake256,
+    Blake3,
+    Sha3_256,
+    Sha3_512,
+    XxHash,
+}
+
+impl From<ChecksumAlgorithm> for Hasher {
+    fn from(algo: ChecksumAlgorithm) -> Self {
+        match algo {
+            ChecksumAlgorithm::None => Hasher::Shake256, // Default fallback
+            ChecksumAlgorithm::Shake256 => Hasher::Shake256,
+            ChecksumAlgorithm::Blake3 => Hasher::Blake3,
+            ChecksumAlgorithm::Sha3_256 => Hasher::Sha3_256,
+            ChecksumAlgorithm::Sha3_512 => Hasher::Sha3_512,
+            ChecksumAlgorithm::Xxhash => Hasher::XxHash,
+        }
+    }
+}
+
+/// Compute checksum of a file
+pub fn compute_file_checksum(path: &Path, hasher: Hasher) -> Result<String> {
+    let file = File::open(path).map_err(|e| Error::ReadError {
+        path: path.to_path_buf(),
+        message: e.to_string(),
+    })?;
+    let mut reader = BufReader::new(file);
+    compute_reader_checksum(&mut reader, hasher)
+}
+
+/// Compute checksum from a reader
+pub fn compute_reader_checksum<R: Read>(reader: &mut R, hasher: Hasher) -> Result<String> {
+    let mut buffer = [0u8; 8192];
+
+    match hasher {
+        Hasher::Shake256 => {
+            let mut shake = Shake256::default();
+            loop {
+                let bytes_read = reader.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                shake.update(&buffer[..bytes_read]);
+            }
+            let mut output = [0u8; 32]; // 256 bits
+            shake.finalize_xof().read(&mut output);
+            Ok(hex::encode(output))
+        }
+        Hasher::Blake3 => {
+            let mut blake = blake3::Hasher::new();
+            loop {
+                let bytes_read = reader.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                blake.update(&buffer[..bytes_read]);
+            }
+            Ok(blake.finalize().to_hex().to_string())
+        }
+        Hasher::Sha3_256 => {
+            let mut sha = sha3::Sha3_256::new();
+            loop {
+                let bytes_read = reader.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                sha.update(&buffer[..bytes_read]);
+            }
+            Ok(hex::encode(sha.finalize()))
+        }
+        Hasher::Sha3_512 => {
+            let mut sha = sha3::Sha3_512::new();
+            loop {
+                let bytes_read = reader.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                sha.update(&buffer[..bytes_read]);
+            }
+            Ok(hex::encode(sha.finalize()))
+        }
+        Hasher::XxHash => {
+            // Using xxhash via a simple implementation
+            // In production, use the xxhash crate
+            let mut total: u64 = 0;
+            loop {
+                let bytes_read = reader.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                for byte in &buffer[..bytes_read] {
+                    total = total.wrapping_add(*byte as u64);
+                    total = total.wrapping_mul(0x517cc1b727220a95);
+                }
+            }
+            Ok(format!("{:016x}", total))
+        }
+    }
+}
+
+/// Compute checksum of bytes
+pub fn compute_bytes_checksum(data: &[u8], hasher: Hasher) -> String {
+    let mut cursor = std::io::Cursor::new(data);
+    compute_reader_checksum(&mut cursor, hasher).unwrap()
+}
+
+/// Verify a file against a checksum
+pub fn verify_file_checksum(path: &Path, expected: &str, hasher: Hasher) -> Result<bool> {
+    let actual = compute_file_checksum(path, hasher)?;
+    Ok(actual.eq_ignore_ascii_case(expected))
+}
+
+/// Checksum writer for output files
+pub struct ChecksumWriter {
+    hasher: Hasher,
+    shake: Option<Shake256>,
+    blake: Option<blake3::Hasher>,
+}
+
+impl ChecksumWriter {
+    pub fn new(hasher: Hasher) -> Self {
+        match &hasher {
+            Hasher::Shake256 => Self {
+                hasher,
+                shake: Some(Shake256::default()),
+                blake: None,
+            },
+            Hasher::Blake3 => Self {
+                hasher,
+                shake: None,
+                blake: Some(blake3::Hasher::new()),
+            },
+            _ => Self {
+                hasher,
+                shake: Some(Shake256::default()),
+                blake: None,
+            },
+        }
+    }
+
+    pub fn update(&mut self, data: &[u8]) {
+        if let Some(shake) = &mut self.shake {
+            shake.update(data);
+        }
+        if let Some(blake) = &mut self.blake {
+            blake.update(data);
+        }
+    }
+
+    pub fn finalize(self) -> String {
+        if let Some(shake) = self.shake {
+            let mut output = [0u8; 32];
+            shake.finalize_xof().read(&mut output);
+            hex::encode(output)
+        } else if let Some(blake) = self.blake {
+            blake.finalize().to_hex().to_string()
+        } else {
+            String::new()
+        }
+    }
+}
+
+/// Format checksum for output
+pub fn format_checksum(checksum: &str, path: &Path, format: ChecksumOutputFormat) -> String {
+    match format {
+        ChecksumOutputFormat::Hex => checksum.to_string(),
+        ChecksumOutputFormat::Base64 => {
+            use base64::{Engine as _, engine::general_purpose};
+            let bytes = hex::decode(checksum).unwrap_or_default();
+            general_purpose::STANDARD.encode(&bytes)
+        }
+        ChecksumOutputFormat::Binary => checksum.to_string(), // Would need different handling
+        ChecksumOutputFormat::Bsd => {
+            format!("SHAKE256 ({}) = {}", path.display(), checksum)
+        }
+        ChecksumOutputFormat::Gnu => {
+            format!("{}  {}", checksum, path.display())
+        }
+    }
+}
+
+/// Handle checksum subcommand
+pub async fn handle(args: ChecksumArgs, global: &GlobalArgs) -> Result<()> {
+    match args.action {
+        ChecksumAction::Compute { paths, algorithm, format, write, recursive } => {
+            let hasher: Hasher = algorithm.into();
+
+            for path in paths {
+                if path.is_dir() && recursive {
+                    for entry in walkdir::WalkDir::new(&path) {
+                        let entry = entry?;
+                        if entry.file_type().is_file() {
+                            let checksum = compute_file_checksum(entry.path(), hasher.clone())?;
+                            let output = format_checksum(&checksum, entry.path(), format.clone());
+                            println!("{}", output);
+
+                            if write {
+                                let checksum_path = entry.path().with_extension(
+                                    format!("{}.shake256",
+                                        entry.path().extension().unwrap_or_default().to_string_lossy()
+                                    )
+                                );
+                                std::fs::write(checksum_path, &checksum)?;
+                            }
+                        }
+                    }
+                } else {
+                    let checksum = compute_file_checksum(&path, hasher.clone())?;
+                    let output = format_checksum(&checksum, &path, format.clone());
+                    println!("{}", output);
+
+                    if write {
+                        let checksum_path = path.with_extension(
+                            format!("{}.shake256",
+                                path.extension().unwrap_or_default().to_string_lossy()
+                            )
+                        );
+                        std::fs::write(checksum_path, &checksum)?;
+                    }
+                }
+            }
+        }
+
+        ChecksumAction::Verify { path, algorithm, strict } => {
+            let hasher: Hasher = algorithm.unwrap_or(ChecksumAlgorithm::Shake256).into();
+
+            // Read expected checksum from .shake256 file
+            let checksum_path = path.with_extension("shake256");
+            let expected = std::fs::read_to_string(&checksum_path)?
+                .trim()
+                .to_string();
+
+            let valid = verify_file_checksum(&path, &expected, hasher)?;
+
+            if valid {
+                println!("{}: OK", path.display());
+            } else {
+                println!("{}: FAILED", path.display());
+                if strict {
+                    return Err(Error::ChecksumMismatch {
+                        path: path.clone(),
+                        expected,
+                        actual: "mismatch".to_string(),
+                    });
+                }
+            }
+        }
+
+        ChecksumAction::Compare { path1, path2, algorithm } => {
+            let hasher: Hasher = algorithm.into();
+
+            let checksum1 = compute_file_checksum(&path1, hasher.clone())?;
+            let checksum2 = compute_file_checksum(&path2, hasher)?;
+
+            if checksum1 == checksum2 {
+                println!("Files are identical (checksum: {})", checksum1);
+            } else {
+                println!("Files differ:");
+                println!("  {}: {}", path1.display(), checksum1);
+                println!("  {}: {}", path2.display(), checksum2);
+            }
+        }
+    }
+
+    Ok(())
+}

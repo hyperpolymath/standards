@@ -1,0 +1,467 @@
+;;; {{ project-name }} Configuration Module
+;;;
+;;; Guile Scheme runtime configuration and validation.
+;;; Complements Nickel's build-time configuration with runtime checks.
+;;;
+;;; Part of Rhodium Pipeline Template methodology.
+
+(define-module ({{ project_name }} config)
+  #:use-module (ice-9 match)
+  #:use-module (ice-9 optargs)
+  #:use-module (ice-9 rdelim)
+  #:use-module (srfi srfi-1)
+  #:use-module (srfi srfi-9)
+  #:use-module (srfi srfi-11)
+  #:use-module (srfi srfi-26)
+  #:use-module (json)
+  #:export (
+    ;; Configuration record
+    <config>
+    make-config
+    config?
+    config-input
+    config-output
+    config-processing
+    config-validation
+    config-checksum
+    config-logging
+
+    ;; Loading and validation
+    load-config
+    validate-config
+    merge-configs
+    apply-env-overrides
+
+    ;; Accessors
+    get-config-value
+    set-config-value
+
+    ;; Utilities
+    config->json
+    json->config
+    print-config
+  ))
+
+;;; ============================================================================
+;;; Configuration Record Types
+;;; ============================================================================
+
+(define-record-type <input-config>
+  (make-input-config path format encoding recursive follow-symlinks max-depth glob)
+  input-config?
+  (path input-path)
+  (format input-format)
+  (encoding input-encoding)
+  (recursive input-recursive?)
+  (follow-symlinks input-follow-symlinks?)
+  (max-depth input-max-depth)
+  (glob input-glob))
+
+(define-record-type <output-config>
+  (make-output-config path format encoding overwrite create-parents mode preserve-metadata)
+  output-config?
+  (path output-path)
+  (format output-format)
+  (encoding output-encoding)
+  (overwrite output-overwrite?)
+  (create-parents output-create-parents?)
+  (mode output-mode)
+  (preserve-metadata output-preserve-metadata?))
+
+(define-record-type <processing-config>
+  (make-processing-config algorithm threads batch-size buffer-size memory-limit streaming mmap)
+  processing-config?
+  (algorithm processing-algorithm)
+  (threads processing-threads)
+  (batch-size processing-batch-size)
+  (buffer-size processing-buffer-size)
+  (memory-limit processing-memory-limit)
+  (streaming processing-streaming?)
+  (mmap processing-mmap?))
+
+(define-record-type <validation-config>
+  (make-validation-config level strict tolerance schema check-proofs)
+  validation-config?
+  (level validation-level)
+  (strict validation-strict?)
+  (tolerance validation-tolerance)
+  (schema validation-schema)
+  (check-proofs validation-check-proofs?))
+
+(define-record-type <checksum-config>
+  (make-checksum-config algorithm extension auto-verify auto-generate)
+  checksum-config?
+  (algorithm checksum-algorithm)
+  (extension checksum-extension)
+  (auto-verify checksum-auto-verify?)
+  (auto-generate checksum-auto-generate?))
+
+(define-record-type <logging-config>
+  (make-logging-config level format file timestamps)
+  logging-config?
+  (level logging-level)
+  (format logging-format)
+  (file logging-file)
+  (timestamps logging-timestamps?))
+
+(define-record-type <config>
+  (make-config input output processing validation checksum logging)
+  config?
+  (input config-input)
+  (output config-output)
+  (processing config-processing)
+  (validation config-validation)
+  (checksum config-checksum)
+  (logging config-logging))
+
+;;; ============================================================================
+;;; Default Configuration
+;;; ============================================================================
+
+(define (default-input-config)
+  (make-input-config
+    "."              ; path
+    'auto            ; format
+    "utf-8"          ; encoding
+    #t               ; recursive
+    #f               ; follow-symlinks
+    #f               ; max-depth
+    #f))             ; glob
+
+(define (default-output-config)
+  (make-output-config
+    "./output"       ; path
+    'auto            ; format
+    "utf-8"          ; encoding
+    #f               ; overwrite
+    #t               ; create-parents
+    "644"            ; mode
+    #f))             ; preserve-metadata
+
+(define (default-processing-config)
+  (make-processing-config
+    'default         ; algorithm
+    {{ default_threads }}  ; threads
+    1000             ; batch-size
+    8388608          ; buffer-size (8MB)
+    0                ; memory-limit
+    #f               ; streaming
+    #f))             ; mmap
+
+(define (default-validation-config)
+  (make-validation-config
+    "standard"       ; level
+    #f               ; strict
+    0.01             ; tolerance
+    #f               ; schema
+    #f))             ; check-proofs
+
+(define (default-checksum-config)
+  (make-checksum-config
+    "shake256"       ; algorithm
+    ".shake256"      ; extension
+    #f               ; auto-verify
+    #t))             ; auto-generate
+
+(define (default-logging-config)
+  (make-logging-config
+    "warn"           ; level
+    "pretty"         ; format
+    #f               ; file
+    #t))             ; timestamps
+
+(define (default-config)
+  "Create a configuration with all default values."
+  (make-config
+    (default-input-config)
+    (default-output-config)
+    (default-processing-config)
+    (default-validation-config)
+    (default-checksum-config)
+    (default-logging-config)))
+
+;;; ============================================================================
+;;; Validation
+;;; ============================================================================
+
+(define (valid-checksum-algorithm? algo)
+  "Check if checksum algorithm is valid."
+  (member algo '("shake256" "blake3" "sha3-256" "sha3-512" "xxhash" "none")))
+
+(define (valid-validation-level? level)
+  "Check if validation level is valid."
+  (member level '("skip" "quick" "standard" "full" "paranoid")))
+
+(define (valid-log-level? level)
+  "Check if log level is valid."
+  (member level '("trace" "debug" "info" "warn" "error")))
+
+(define (valid-log-format? fmt)
+  "Check if log format is valid."
+  (member fmt '("pretty" "compact" "json" "full")))
+
+(define (valid-file-mode? mode)
+  "Check if file mode is valid octal string."
+  (and (string? mode)
+       (string-match "^[0-7]{3,4}$" mode)))
+
+(define (validate-input-config cfg)
+  "Validate input configuration. Returns (values valid? errors)."
+  (let ((errors '()))
+    (when (string-null? (input-path cfg))
+      (set! errors (cons "input.path must not be empty" errors)))
+    (values (null? errors) errors)))
+
+(define (validate-output-config cfg)
+  "Validate output configuration."
+  (let ((errors '()))
+    (when (string-null? (output-path cfg))
+      (set! errors (cons "output.path must not be empty" errors)))
+    (unless (valid-file-mode? (output-mode cfg))
+      (set! errors (cons "output.mode must be valid octal (e.g., 644)" errors)))
+    (values (null? errors) errors)))
+
+(define (validate-processing-config cfg)
+  "Validate processing configuration."
+  (let ((errors '()))
+    (when (< (processing-threads cfg) 1)
+      (set! errors (cons "processing.threads must be >= 1" errors)))
+    (when (> (processing-threads cfg) 256)
+      (set! errors (cons "processing.threads must be <= 256" errors)))
+    (when (< (processing-batch-size cfg) 1)
+      (set! errors (cons "processing.batch_size must be >= 1" errors)))
+    (values (null? errors) errors)))
+
+(define (validate-validation-config cfg)
+  "Validate validation configuration."
+  (let ((errors '()))
+    (unless (valid-validation-level? (validation-level cfg))
+      (set! errors (cons "validation.level must be skip|quick|standard|full|paranoid" errors)))
+    (when (or (< (validation-tolerance cfg) 0)
+              (> (validation-tolerance cfg) 1))
+      (set! errors (cons "validation.tolerance must be 0.0-1.0" errors)))
+    (values (null? errors) errors)))
+
+(define (validate-checksum-config cfg)
+  "Validate checksum configuration."
+  (let ((errors '()))
+    (unless (valid-checksum-algorithm? (checksum-algorithm cfg))
+      (set! errors (cons "checksum.algorithm must be shake256|blake3|sha3-256|sha3-512|xxhash|none" errors)))
+    (values (null? errors) errors)))
+
+(define (validate-logging-config cfg)
+  "Validate logging configuration."
+  (let ((errors '()))
+    (unless (valid-log-level? (logging-level cfg))
+      (set! errors (cons "logging.level must be trace|debug|info|warn|error" errors)))
+    (unless (valid-log-format? (logging-format cfg))
+      (set! errors (cons "logging.format must be pretty|compact|json|full" errors)))
+    (values (null? errors) errors)))
+
+(define (validate-config cfg)
+  "Validate complete configuration. Returns (values valid? errors)."
+  (let ((all-errors '()))
+    ;; Validate each section
+    (let-values (((valid errors) (validate-input-config (config-input cfg))))
+      (set! all-errors (append all-errors errors)))
+    (let-values (((valid errors) (validate-output-config (config-output cfg))))
+      (set! all-errors (append all-errors errors)))
+    (let-values (((valid errors) (validate-processing-config (config-processing cfg))))
+      (set! all-errors (append all-errors errors)))
+    (let-values (((valid errors) (validate-validation-config (config-validation cfg))))
+      (set! all-errors (append all-errors errors)))
+    (let-values (((valid errors) (validate-checksum-config (config-checksum cfg))))
+      (set! all-errors (append all-errors errors)))
+    (let-values (((valid errors) (validate-logging-config (config-logging cfg))))
+      (set! all-errors (append all-errors errors)))
+
+    (values (null? all-errors) all-errors)))
+
+;;; ============================================================================
+;;; Environment Overrides
+;;; ============================================================================
+
+(define (getenv-or name default)
+  "Get environment variable or default value."
+  (or (getenv name) default))
+
+(define (getenv-bool name default)
+  "Get boolean environment variable."
+  (let ((val (getenv name)))
+    (cond
+      ((not val) default)
+      ((member val '("true" "1" "yes" "on")) #t)
+      ((member val '("false" "0" "no" "off")) #f)
+      (else default))))
+
+(define (getenv-number name default)
+  "Get numeric environment variable."
+  (let ((val (getenv name)))
+    (if val
+        (string->number val)
+        default)))
+
+(define (apply-env-overrides cfg)
+  "Apply environment variable overrides to configuration."
+  (let* ((proc (config-processing cfg))
+         (val (config-validation cfg))
+         (chk (config-checksum cfg))
+         (log (config-logging cfg)))
+
+    ;; Apply overrides
+    (make-config
+      (config-input cfg)
+      (config-output cfg)
+      (make-processing-config
+        (processing-algorithm proc)
+        (getenv-number "{{ PROJECT_NAME }}_THREADS" (processing-threads proc))
+        (getenv-number "{{ PROJECT_NAME }}_BATCH_SIZE" (processing-batch-size proc))
+        (processing-buffer-size proc)
+        (processing-memory-limit proc)
+        (processing-streaming? proc)
+        (processing-mmap? proc))
+      (make-validation-config
+        (getenv-or "{{ PROJECT_NAME }}_VALIDATION" (validation-level val))
+        (getenv-bool "{{ PROJECT_NAME }}_STRICT" (validation-strict? val))
+        (validation-tolerance val)
+        (validation-schema val)
+        (validation-check-proofs? val))
+      (make-checksum-config
+        (getenv-or "{{ PROJECT_NAME }}_CHECKSUM" (checksum-algorithm chk))
+        (checksum-extension chk)
+        (checksum-auto-verify? chk)
+        (checksum-auto-generate? chk))
+      (make-logging-config
+        (getenv-or "{{ PROJECT_NAME }}_LOG_LEVEL" (logging-level log))
+        (getenv-or "{{ PROJECT_NAME }}_LOG_FORMAT" (logging-format log))
+        (logging-file log)
+        (logging-timestamps? log)))))
+
+;;; ============================================================================
+;;; Loading
+;;; ============================================================================
+
+(define* (load-config #:key (path #f) (apply-env #t))
+  "Load configuration from file with optional environment overrides."
+  (let ((cfg (if path
+                 (json->config (call-with-input-file path json->scm))
+                 (default-config))))
+    (if apply-env
+        (apply-env-overrides cfg)
+        cfg)))
+
+;;; ============================================================================
+;;; JSON Conversion
+;;; ============================================================================
+
+(define (json->config json)
+  "Convert JSON object to config record."
+  (make-config
+    (let ((input (assoc-ref json "input")))
+      (make-input-config
+        (or (assoc-ref input "path") ".")
+        (string->symbol (or (assoc-ref input "format") "auto"))
+        (or (assoc-ref input "encoding") "utf-8")
+        (or (assoc-ref input "recursive") #t)
+        (or (assoc-ref input "follow_symlinks") #f)
+        (assoc-ref input "max_depth")
+        (assoc-ref input "glob")))
+    (let ((output (assoc-ref json "output")))
+      (make-output-config
+        (or (assoc-ref output "path") "./output")
+        (string->symbol (or (assoc-ref output "format") "auto"))
+        (or (assoc-ref output "encoding") "utf-8")
+        (or (assoc-ref output "overwrite") #f)
+        (or (assoc-ref output "create_parents") #t)
+        (or (assoc-ref output "mode") "644")
+        (or (assoc-ref output "preserve_metadata") #f)))
+    (let ((proc (assoc-ref json "processing")))
+      (make-processing-config
+        (string->symbol (or (assoc-ref proc "algorithm") "default"))
+        (or (assoc-ref proc "threads") {{ default_threads }})
+        (or (assoc-ref proc "batch_size") 1000)
+        (or (assoc-ref proc "buffer_size") 8388608)
+        (or (assoc-ref proc "memory_limit") 0)
+        (or (assoc-ref proc "streaming") #f)
+        (or (assoc-ref proc "mmap") #f)))
+    (let ((val (assoc-ref json "validation")))
+      (make-validation-config
+        (or (assoc-ref val "level") "standard")
+        (or (assoc-ref val "strict") #f)
+        (or (assoc-ref val "tolerance") 0.01)
+        (assoc-ref val "schema")
+        (or (assoc-ref val "check_proofs") #f)))
+    (let ((chk (assoc-ref json "checksum")))
+      (make-checksum-config
+        (or (assoc-ref chk "algorithm") "shake256")
+        (or (assoc-ref chk "extension") ".shake256")
+        (or (assoc-ref chk "auto_verify") #f)
+        (or (assoc-ref chk "auto_generate") #t)))
+    (let ((log (assoc-ref json "logging")))
+      (make-logging-config
+        (or (assoc-ref log "level") "warn")
+        (or (assoc-ref log "format") "pretty")
+        (assoc-ref log "file")
+        (or (assoc-ref log "timestamps") #t)))))
+
+(define (config->json cfg)
+  "Convert config record to JSON object."
+  `(("input" .
+     (("path" . ,(input-path (config-input cfg)))
+      ("format" . ,(symbol->string (input-format (config-input cfg))))
+      ("encoding" . ,(input-encoding (config-input cfg)))
+      ("recursive" . ,(input-recursive? (config-input cfg)))
+      ("follow_symlinks" . ,(input-follow-symlinks? (config-input cfg)))))
+    ("output" .
+     (("path" . ,(output-path (config-output cfg)))
+      ("format" . ,(symbol->string (output-format (config-output cfg))))
+      ("encoding" . ,(output-encoding (config-output cfg)))
+      ("overwrite" . ,(output-overwrite? (config-output cfg)))
+      ("create_parents" . ,(output-create-parents? (config-output cfg)))
+      ("mode" . ,(output-mode (config-output cfg)))))
+    ("processing" .
+     (("algorithm" . ,(symbol->string (processing-algorithm (config-processing cfg))))
+      ("threads" . ,(processing-threads (config-processing cfg)))
+      ("batch_size" . ,(processing-batch-size (config-processing cfg)))
+      ("buffer_size" . ,(processing-buffer-size (config-processing cfg)))))
+    ("validation" .
+     (("level" . ,(validation-level (config-validation cfg)))
+      ("strict" . ,(validation-strict? (config-validation cfg)))
+      ("tolerance" . ,(validation-tolerance (config-validation cfg)))))
+    ("checksum" .
+     (("algorithm" . ,(checksum-algorithm (config-checksum cfg)))
+      ("extension" . ,(checksum-extension (config-checksum cfg)))
+      ("auto_verify" . ,(checksum-auto-verify? (config-checksum cfg)))
+      ("auto_generate" . ,(checksum-auto-generate? (config-checksum cfg)))))
+    ("logging" .
+     (("level" . ,(logging-level (config-logging cfg)))
+      ("format" . ,(logging-format (config-logging cfg)))
+      ("timestamps" . ,(logging-timestamps? (config-logging cfg)))))))
+
+;;; ============================================================================
+;;; Utility Functions
+;;; ============================================================================
+
+(define (print-config cfg)
+  "Print configuration in human-readable format."
+  (format #t "{{ project-name }} Configuration~%")
+  (format #t "================================~%")
+  (format #t "~%Input:~%")
+  (format #t "  path: ~a~%" (input-path (config-input cfg)))
+  (format #t "  format: ~a~%" (input-format (config-input cfg)))
+  (format #t "  recursive: ~a~%" (input-recursive? (config-input cfg)))
+  (format #t "~%Output:~%")
+  (format #t "  path: ~a~%" (output-path (config-output cfg)))
+  (format #t "  format: ~a~%" (output-format (config-output cfg)))
+  (format #t "  overwrite: ~a~%" (output-overwrite? (config-output cfg)))
+  (format #t "~%Processing:~%")
+  (format #t "  threads: ~a~%" (processing-threads (config-processing cfg)))
+  (format #t "  batch_size: ~a~%" (processing-batch-size (config-processing cfg)))
+  (format #t "~%Validation:~%")
+  (format #t "  level: ~a~%" (validation-level (config-validation cfg)))
+  (format #t "  strict: ~a~%" (validation-strict? (config-validation cfg)))
+  (format #t "~%Checksum:~%")
+  (format #t "  algorithm: ~a~%" (checksum-algorithm (config-checksum cfg)))
+  (format #t "~%Logging:~%")
+  (format #t "  level: ~a~%" (logging-level (config-logging cfg)))
+  (format #t "  format: ~a~%" (logging-format (config-logging cfg))))

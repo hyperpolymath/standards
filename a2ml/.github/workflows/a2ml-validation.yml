@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: A2ML Validation and Generation
+
+permissions: read-all
+
+on:
+  push:
+    paths:
+      - '**.a2ml'
+      - 'cli/**'
+      - 'src/A2ML/**'
+  pull_request:
+    paths:
+      - '**.a2ml'
+      - 'cli/**'
+      - 'src/A2ML/**'
+  workflow_dispatch:
+
+jobs:
+  validate-a2ml:
+    name: Validate A2ML Files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Install Idris2
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/idris-lang/Idris2/main/bootstrap-build.sh | bash
+          echo "$HOME/.idris2/bin" >> $GITHUB_PATH
+
+      - name: Build A2ML CLI
+        run: |
+          cd cli
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Validate README.a2ml
+        run: |
+          if [ -f README.a2ml ]; then
+            ../build/exec/a2ml validate README.a2ml
+          fi
+
+      - name: Validate SPEC.a2ml
+        run: |
+          if [ -f SPEC.a2ml ]; then
+            ../build/exec/a2ml validate SPEC.a2ml
+          fi
+
+      - name: Validate IANA-MEDIA-TYPE.a2ml
+        run: |
+          if [ -f docs/IANA-MEDIA-TYPE.a2ml ]; then
+            ../build/exec/a2ml validate docs/IANA-MEDIA-TYPE.a2ml
+          fi
+
+      - name: Find and validate all .a2ml files
+        run: |
+          find . -name "*.a2ml" -type f | while read file; do
+            echo "Validating: $file"
+            ../build/exec/a2ml validate "$file" || exit 1
+          done
+
+  generate-outputs:
+    name: Generate HTML and Markdown
+    runs-on: ubuntu-latest
+    needs: validate-a2ml
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Install Idris2
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/idris-lang/Idris2/main/bootstrap-build.sh | bash
+          echo "$HOME/.idris2/bin" >> $GITHUB_PATH
+
+      - name: Build A2ML CLI
+        run: |
+          cd cli
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Generate HTML from A2ML files
+        run: |
+          mkdir -p generated/html
+          find . -name "*.a2ml" -type f | while read file; do
+            basename="${file%.a2ml}"
+            echo "Converting $file to HTML..."
+            ../build/exec/a2ml convert a2ml html "$file" > "generated/html/$(basename $basename).html"
+          done
+
+      - name: Generate Markdown from A2ML files
+        run: |
+          mkdir -p generated/markdown
+          find . -name "*.a2ml" -type f | while read file; do
+            basename="${file%.a2ml}"
+            echo "Converting $file to Markdown..."
+            ../build/exec/a2ml convert a2ml md "$file" > "generated/markdown/$(basename $basename).md"
+          done
+
+      - name: Generate LaTeX from A2ML files
+        run: |
+          mkdir -p generated/latex
+          find . -name "*.a2ml" -type f | while read file; do
+            basename="${file%.a2ml}"
+            echo "Converting $file to LaTeX..."
+            ../build/exec/a2ml convert a2ml tex "$file" > "generated/latex/$(basename $basename).tex"
+          done
+
+      - name: Upload generated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2ml-generated-docs
+          path: generated/
+          retention-days: 30
+
+      - name: Commit generated files (if on main)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add generated/ || true
+          git commit -m "chore: regenerate A2ML outputs [skip ci]" || true
+          git push || true

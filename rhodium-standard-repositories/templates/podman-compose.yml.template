@@ -1,0 +1,106 @@
+# podman-compose.yml - Container orchestration for {project-name}
+# Use with: podman-compose up
+# *REMINDER: Customize for your specific services*
+
+version: '3.8'
+
+services:
+  # Main application service
+  app:
+    # *REMINDER: Use Chainguard Wolfi base images for minimal attack surface*
+    image: cgr.dev/chainguard/wolfi-base:latest
+    container_name: {project-name}-app
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        PROJECT_NAME: "{project-name}"
+        VERSION: "{version}"
+    ports:
+      - "8000:8000"  # *REMINDER: Update with actual ports*
+    volumes:
+      # Development: mount source code
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+    environment:
+      # *REMINDER: Add environment variables*
+      - ENV=development
+      - LOG_LEVEL=info
+    # Security: rootless containers
+    userns_mode: "keep-id"
+    # Resource limits
+    mem_limit: 512m
+    cpus: "1.0"
+    # Restart policy
+    restart: unless-stopped
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Database (if applicable)
+  # *REMINDER: Uncomment and customize if project needs a database*
+  # db:
+  #   image: cgr.dev/chainguard/postgres:latest
+  #   container_name: {project-name}-db
+  #   environment:
+  #     - POSTGRES_USER={db-user}
+  #     - POSTGRES_PASSWORD={db-password}
+  #     - POSTGRES_DB={db-name}
+  #   volumes:
+  #     - db-data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U {db-user}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # Cache (if applicable)
+  # *REMINDER: Uncomment if project needs Redis/Memcached*
+  # cache:
+  #   image: cgr.dev/chainguard/redis:latest
+  #   container_name: {project-name}-cache
+  #   ports:
+  #     - "6379:6379"
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+# Networks
+networks:
+  default:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+
+# Volumes
+volumes:
+  db-data:
+    driver: local
+
+# Development override (use with: podman-compose -f podman-compose.yml -f podman-compose.dev.yml up)
+# Create podman-compose.dev.yml with:
+# services:
+#   app:
+#     build:
+#       target: development
+#     volumes:
+#       - .:/app
+#     environment:
+#       - ENV=development
+#       - DEBUG=true

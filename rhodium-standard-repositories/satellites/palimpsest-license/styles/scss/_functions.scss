@@ -1,0 +1,296 @@
+// _functions.scss
+// Utility functions for Palimpsest License styling system
+
+@use 'sass:math';
+@use 'sass:string';
+@use 'sass:color';
+@use 'sass:list';
+@use 'sass:map';
+
+// ============================================================================
+// Unit Conversion Functions
+// ============================================================================
+
+// Remove unit from a value
+@function strip-unit($value) {
+  @if type-of($value) == 'number' and not unitless($value) {
+    @return math.div($value, ($value * 0 + 1));
+  }
+  @return $value;
+}
+
+// Convert px to rem
+@function px-to-rem($px, $base: 16px) {
+  @return math.div(strip-unit($px), strip-unit($base)) * 1rem;
+}
+
+// Convert rem to px
+@function rem-to-px($rem, $base: 16px) {
+  @return strip-unit($rem) * strip-unit($base) * 1px;
+}
+
+// ============================================================================
+// Colour Functions
+// ============================================================================
+
+// Lighten a colour (wrapper around color.scale for consistency)
+@function lighten-colour($colour, $amount) {
+  @return color.scale($colour, $lightness: $amount);
+}
+
+// Darken a colour
+@function darken-colour($colour, $amount) {
+  @return color.scale($colour, $lightness: -$amount);
+}
+
+// Add transparency to a colour
+@function transparentise-colour($colour, $amount) {
+  @return color.scale($colour, $alpha: -$amount);
+}
+
+// Get colour with specific opacity
+@function colour-opacity($colour, $opacity) {
+  @return rgba($colour, $opacity);
+}
+
+// Calculate contrast ratio between two colours (WCAG formula)
+@function contrast-ratio($colour1, $colour2) {
+  $l1: luminance($colour1);
+  $l2: luminance($colour2);
+
+  @if $l1 > $l2 {
+    @return math.div($l1 + 0.05, $l2 + 0.05);
+  } @else {
+    @return math.div($l2 + 0.05, $l1 + 0.05);
+  }
+}
+
+// Calculate relative luminance of a colour
+@function luminance($colour) {
+  $red: color.red($colour);
+  $green: color.green($colour);
+  $blue: color.blue($colour);
+
+  $red: math.div($red, 255);
+  $green: math.div($green, 255);
+  $blue: math.div($blue, 255);
+
+  $red: if($red <= 0.03928, math.div($red, 12.92), math.pow(math.div($red + 0.055, 1.055), 2.4));
+  $green: if($green <= 0.03928, math.div($green, 12.92), math.pow(math.div($green + 0.055, 1.055), 2.4));
+  $blue: if($blue <= 0.03928, math.div($blue, 12.92), math.pow(math.div($blue + 0.055, 1.055), 2.4));
+
+  @return 0.2126 * $red + 0.7152 * $green + 0.0722 * $blue;
+}
+
+// Check if colour meets WCAG contrast requirements
+@function meets-contrast-requirement($foreground, $background, $level: 'AA', $size: 'normal') {
+  $ratio: contrast-ratio($foreground, $background);
+  $required-ratio: 4.5; // Default to AA normal text
+
+  @if $level == 'AAA' {
+    $required-ratio: if($size == 'large', 4.5, 7);
+  } @else if $level == 'AA' {
+    $required-ratio: if($size == 'large', 3, 4.5);
+  }
+
+  @return $ratio >= $required-ratio;
+}
+
+// Get accessible text colour (black or white) for a given background
+@function accessible-text-colour($background-colour, $light: #ffffff, $dark: #000000) {
+  $light-contrast: contrast-ratio($light, $background-colour);
+  $dark-contrast: contrast-ratio($dark, $background-colour);
+
+  @return if($light-contrast > $dark-contrast, $light, $dark);
+}
+
+// ============================================================================
+// Spacing Functions
+// ============================================================================
+
+// Generate spacing value based on a multiplier
+@function spacing($multiplier) {
+  $base-spacing: 1rem;
+  @return $base-spacing * $multiplier;
+}
+
+// Get spacing from a scale (xs, sm, md, lg, xl, etc.)
+@function get-spacing($size) {
+  $spacing-map: (
+    'xs': 0.25rem,
+    'sm': 0.5rem,
+    'md': 1rem,
+    'lg': 1.5rem,
+    'xl': 2rem,
+    '2xl': 3rem,
+    '3xl': 4rem,
+    '4xl': 6rem
+  );
+
+  @if map.has-key($spacing-map, $size) {
+    @return map.get($spacing-map, $size);
+  } @else {
+    @warn "Unknown spacing size: #{$size}. Returning default.";
+    @return 1rem;
+  }
+}
+
+// ============================================================================
+// Typography Functions
+// ============================================================================
+
+// Calculate line height based on font size to maintain rhythm
+@function line-height-from-size($font-size, $baseline: 1.5) {
+  @return math.ceil(strip-unit($font-size) * $baseline) / strip-unit($font-size);
+}
+
+// Fluid typography calculation
+@function fluid-size($min-size, $max-size, $min-width: 20rem, $max-width: 80rem) {
+  $size-diff: strip-unit($max-size) - strip-unit($min-size);
+  $width-diff: strip-unit($max-width) - strip-unit($min-width);
+
+  @return calc(#{$min-size} + #{$size-diff} * ((100vw - #{$min-width}) / #{$width-diff}));
+}
+
+// ============================================================================
+// String Functions
+// ============================================================================
+
+// Capitalise first letter of a string
+@function str-capitalise($string) {
+  @return string.to-upper-case(string.slice($string, 1, 1)) + string.slice($string, 2);
+}
+
+// Replace substring in a string
+@function str-replace($string, $search, $replace: '') {
+  $index: string.index($string, $search);
+
+  @if $index {
+    @return string.slice($string, 1, $index - 1) + $replace + str-replace(string.slice($string, $index + string.length($search)), $search, $replace);
+  }
+
+  @return $string;
+}
+
+// ============================================================================
+// List and Map Functions
+// ============================================================================
+
+// Get value from nested map
+@function map-deep-get($map, $keys...) {
+  @each $key in $keys {
+    @if type-of($map) != 'map' or not map.has-key($map, $key) {
+      @warn "Key '#{$key}' not found in map.";
+      @return null;
+    }
+    $map: map.get($map, $key);
+  }
+  @return $map;
+}
+
+// Merge maps deeply
+@function map-deep-merge($map1, $map2) {
+  $result: $map1;
+
+  @each $key, $value in $map2 {
+    @if type-of($value) == 'map' and type-of(map.get($result, $key)) == 'map' {
+      $result: map.merge($result, ($key: map-deep-merge(map.get($result, $key), $value)));
+    } @else {
+      $result: map.merge($result, ($key: $value));
+    }
+  }
+
+  @return $result;
+}
+
+// ============================================================================
+// Sizing Functions
+// ============================================================================
+
+// Calculate percentage
+@function percentage($value, $total) {
+  @return math.div($value, $total) * 100%;
+}
+
+// Calculate aspect ratio padding
+@function aspect-ratio-padding($width, $height) {
+  @return percentage($height, $width);
+}
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+// Clamp a value between min and max
+@function clamp-value($value, $min, $max) {
+  @return math.max($min, math.min($value, $max));
+}
+
+// Check if value is a colour
+@function is-colour($value) {
+  @return type-of($value) == 'color';
+}
+
+// Check if value is a number
+@function is-number($value) {
+  @return type-of($value) == 'number';
+}
+
+// Convert to list
+@function to-list($value) {
+  @if type-of($value) == 'list' {
+    @return $value;
+  }
+  @return ($value,);
+}
+
+// ============================================================================
+// Z-index Management
+// ============================================================================
+
+// Get z-index from named layers
+@function z-index($layer) {
+  $z-layers: (
+    'base': 0,
+    'dropdown': 1000,
+    'sticky': 1020,
+    'fixed': 1030,
+    'modal-backdrop': 1040,
+    'modal': 1050,
+    'popover': 1060,
+    'tooltip': 1070
+  );
+
+  @if map.has-key($z-layers, $layer) {
+    @return map.get($z-layers, $layer);
+  } @else {
+    @warn "Unknown z-index layer: #{$layer}. Returning 0.";
+    @return 0;
+  }
+}
+
+// ============================================================================
+// Border Functions
+// ============================================================================
+
+// Generate border shorthand
+@function border($width: 1px, $style: solid, $colour: currentColor) {
+  @return $width $style $colour;
+}
+
+// ============================================================================
+// Shadow Functions
+// ============================================================================
+
+// Combine multiple box shadows
+@function box-shadows($shadows...) {
+  $result: ();
+
+  @each $shadow in $shadows {
+    @if type-of($shadow) == 'list' {
+      $result: list.append($result, $shadow, comma);
+    }
+  }
+
+  @return $result;
+}

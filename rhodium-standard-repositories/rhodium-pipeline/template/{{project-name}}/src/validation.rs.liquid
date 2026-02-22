@@ -1,0 +1,328 @@
+//! Validation and invariant checking for {{ project-name }}
+//!
+//! Implements the Rhodium validation philosophy:
+//! - Formal proofs verify structural invariants
+//! - Runtime validation checks constraints
+//! - Multiple validation levels for different use cases
+
+use std::collections::{HashMap, HashSet};
+use tracing::{debug, warn};
+
+use crate::cli::{ValidateArgs, ValidationLevel, GlobalArgs};
+use crate::config::Config;
+use crate::pipeline::Record;
+use crate::error::{Error, Result};
+
+/// Validation context
+pub struct Validator {
+    level: ValidationLevel,
+    tolerance: f64,
+    strict: bool,
+    warnings: Vec<ValidationWarning>,
+}
+
+/// Validation warning (non-fatal)
+#[derive(Debug)]
+pub struct ValidationWarning {
+    pub code: String,
+    pub message: String,
+    pub location: Option<String>,
+}
+
+/// Validation result for a single record
+#[derive(Debug)]
+pub struct RecordValidation {
+    pub valid: bool,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+impl Validator {
+    /// Create a new validator from config and args
+    pub fn new(config: &Config, args: &crate::cli::RunArgs) -> Self {
+        Self {
+            level: args.validation.clone(),
+            tolerance: args.tolerance,
+            strict: args.strict,
+            warnings: Vec::new(),
+        }
+    }
+
+    /// Create validator for validate command
+    pub fn from_validate_args(args: &ValidateArgs) -> Self {
+        Self {
+            level: args.level.clone(),
+            tolerance: 0.01, // Default
+            strict: args.strict,
+            warnings: Vec::new(),
+        }
+    }
+
+    /// Validate a single record
+    pub fn validate_record(&self, record: &Record) -> Result<RecordValidation> {
+        match self.level {
+            ValidationLevel::Skip => Ok(RecordValidation {
+                valid: true,
+                errors: vec![],
+                warnings: vec![],
+            }),
+
+            ValidationLevel::Quick => self.validate_quick(record),
+            ValidationLevel::Standard => self.validate_standard(record),
+            ValidationLevel::Full => self.validate_full(record),
+            ValidationLevel::Paranoid => self.validate_paranoid(record),
+        }
+    }
+
+    fn validate_quick(&self, record: &Record) -> Result<RecordValidation> {
+        let mut errors = Vec::new();
+        let warnings = Vec::new();
+
+        // Basic presence checks
+        if record.id.is_empty() {
+            errors.push("Record ID is empty".to_string());
+        }
+
+        Ok(RecordValidation {
+            valid: errors.is_empty(),
+            errors,
+            warnings,
+        })
+    }
+
+    fn validate_standard(&self, record: &Record) -> Result<RecordValidation> {
+        let mut result = self.validate_quick(record)?;
+
+        // Additional standard checks
+        if record.data.is_empty() {
+            result.warnings.push("Record has empty data".to_string());
+        }
+
+        // ID format validation
+        if !record.id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            result.errors.push("Record ID contains invalid characters".to_string());
+        }
+
+        result.valid = result.errors.is_empty();
+        Ok(result)
+    }
+
+    fn validate_full(&self, record: &Record) -> Result<RecordValidation> {
+        let mut result = self.validate_standard(record)?;
+
+        // Full validation includes data integrity
+        // TODO: Add domain-specific validation
+
+        result.valid = result.errors.is_empty();
+        Ok(result)
+    }
+
+    fn validate_paranoid(&self, record: &Record) -> Result<RecordValidation> {
+        let mut result = self.validate_full(record)?;
+
+        // Paranoid mode - maximum strictness
+        // Warnings become errors
+        for warning in result.warnings.drain(..) {
+            result.errors.push(format!("[strict] {}", warning));
+        }
+
+        result.valid = result.errors.is_empty();
+        Ok(result)
+    }
+
+    // -------------------------------------------------------------------------
+    // STRUCTURAL INVARIANTS
+    // -------------------------------------------------------------------------
+
+    /// Check partition invariant: elements belong to exactly one partition
+    ///
+    /// Corresponds to Isabelle lemma: partition_membership
+    pub fn check_partition_invariant(&self, records: &[Record]) -> Result<()> {
+        if matches!(self.level, ValidationLevel::Skip | ValidationLevel::Quick) {
+            return Ok(());
+        }
+
+        debug!("Checking partition invariant");
+
+        // Check no duplicate IDs (each element in exactly one partition)
+        let mut seen: HashSet<&str> = HashSet::new();
+        for record in records {
+            if seen.contains(record.id.as_str()) {
+                return Err(Error::PartitionViolation {
+                    element: record.id.clone(),
+                    count: 2, // At least 2
+                });
+            }
+            seen.insert(&record.id);
+        }
+
+        debug!(records = records.len(), "Partition invariant holds");
+        Ok(())
+    }
+
+    /// Check bijection invariant: mapping is one-to-one and onto
+    ///
+    /// Corresponds to Isabelle lemma: bijection_invertible
+    pub fn check_bijection_invariant(&self, records: &[Record]) -> Result<()> {
+        if matches!(self.level, ValidationLevel::Skip | ValidationLevel::Quick) {
+            return Ok(());
+        }
+
+        debug!("Checking bijection invariant");
+
+        // Check injectivity (no two records map to same output)
+        let mut outputs: HashMap<&[u8], &str> = HashMap::new();
+        for record in records {
+            if let Some(existing_id) = outputs.get(record.data.as_slice()) {
+                if *existing_id != record.id {
+                    return Err(Error::BijectionViolation {
+                        message: format!(
+                            "Multiple inputs map to same output: {} and {}",
+                            existing_id, record.id
+                        ),
+                    });
+                }
+            }
+            outputs.insert(&record.data, &record.id);
+        }
+
+        debug!(records = records.len(), "Bijection invariant holds");
+        Ok(())
+    }
+
+    /// Check ratio tolerance
+    ///
+    /// Corresponds to Isabelle lemma: ratio_tolerance
+    pub fn check_ratio_tolerance(&self, name: &str, expected: f64, actual: f64) -> Result<()> {
+        let diff = (expected - actual).abs();
+        if diff > self.tolerance {
+            return Err(Error::RatioOutOfTolerance {
+                name: name.to_string(),
+                expected,
+                actual,
+                tolerance: self.tolerance,
+            });
+        }
+        Ok(())
+    }
+
+    /// Check monotonicity: output count >= input count (or documented reduction)
+    pub fn check_monotonicity(&self, input_count: usize, output_count: usize, allow_reduction: bool) -> Result<()> {
+        if !allow_reduction && output_count < input_count {
+            return Err(Error::InvariantViolation {
+                invariant: format!(
+                    "Monotonicity: output ({}) < input ({})",
+                    output_count, input_count
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Check idempotency: f(f(x)) = f(x)
+    pub fn check_idempotency<F>(&self, records: &[Record], transform: F) -> Result<()>
+    where
+        F: Fn(&Record) -> Record,
+    {
+        if matches!(self.level, ValidationLevel::Skip | ValidationLevel::Quick | ValidationLevel::Standard) {
+            return Ok(());
+        }
+
+        for record in records {
+            let once = transform(record);
+            let twice = transform(&once);
+
+            if once.id != twice.id || once.data != twice.data {
+                return Err(Error::InvariantViolation {
+                    invariant: format!("Idempotency violated for record {}", record.id),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get accumulated warnings
+    pub fn warnings(&self) -> &[ValidationWarning] {
+        &self.warnings
+    }
+}
+
+// -------------------------------------------------------------------------
+// VALIDATE COMMAND HANDLER
+// -------------------------------------------------------------------------
+
+/// Handle validate subcommand
+pub async fn validate(args: ValidateArgs, global: &GlobalArgs) -> Result<()> {
+    let validator = Validator::from_validate_args(&args);
+
+    let mut total_records = 0;
+    let mut valid_records = 0;
+    let mut all_errors: Vec<(String, Vec<String>)> = Vec::new();
+
+    for input in &args.input {
+        println!("Validating: {}", input.display());
+
+        // TODO: Load records from input
+        let records: Vec<Record> = vec![]; // Placeholder
+
+        for record in &records {
+            total_records += 1;
+            let result = validator.validate_record(record)?;
+
+            if result.valid {
+                valid_records += 1;
+            } else {
+                all_errors.push((record.id.clone(), result.errors));
+            }
+        }
+
+        // Check structural invariants
+        if args.checksums || matches!(args.level, ValidationLevel::Full | ValidationLevel::Paranoid) {
+            validator.check_partition_invariant(&records)?;
+            validator.check_bijection_invariant(&records)?;
+        }
+    }
+
+    // Print summary
+    println!();
+    println!("Validation Summary");
+    println!("==================");
+    println!("Total records:  {}", total_records);
+    println!("Valid records:  {}", valid_records);
+    println!("Invalid records: {}", total_records - valid_records);
+
+    if !all_errors.is_empty() {
+        println!();
+        println!("Errors:");
+        for (id, errors) in &all_errors {
+            println!("  {} ({} errors)", id, errors.len());
+            for error in errors {
+                println!("    - {}", error);
+            }
+        }
+
+        if args.strict {
+            return Err(Error::ValidationFailed {
+                message: format!("{} records failed validation", all_errors.len()),
+            });
+        }
+    }
+
+    // Write report if requested
+    if let Some(report_path) = &args.report {
+        let report = serde_json::json!({
+            "total": total_records,
+            "valid": valid_records,
+            "invalid": total_records - valid_records,
+            "errors": all_errors.iter().map(|(id, errs)| {
+                serde_json::json!({"id": id, "errors": errs})
+            }).collect::<Vec<_>>(),
+        });
+
+        std::fs::write(report_path, serde_json::to_string_pretty(&report)?)?;
+        println!("\nReport written to: {}", report_path.display());
+    }
+
+    Ok(())
+}

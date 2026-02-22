@@ -1,0 +1,251 @@
+= php-aegis
+:toc:
+:toc-title: Contents
+:sectnums:
+:source-highlighter: highlight.js
+
+image:https://img.shields.io/badge/PHP-8.1+-blue.svg[PHP 8.1+]
+image:https://img.shields.io/badge/License-MPL_2.0-blue.svg[MPL-2.0-or-later,link="https://opensource.org/licenses/MPL-2.0"]
+image:https://img.shields.io/badge/RSR-Compliant-gold.svg[RSR Compliant]
+
+**A PHP security and hardening toolkit providing input validation, sanitization, and security utilities.**
+
+== Overview
+
+php-aegis provides a collection of security-focused utilities for PHP applications. Named after the mythological shield of Zeus, it aims to protect your applications from common web vulnerabilities.
+
+=== Key Features
+
+* **Input Validation** - Strict validation for emails, URLs, and common data formats
+* **XSS Prevention** - HTML sanitization with proper encoding
+* **Type Safety** - Full `strict_types` enforcement throughout
+* **Modern PHP** - Requires PHP 8.1+ for latest security features
+* **Zero Dependencies** - Core library has no external dependencies
+* **PSR-12 Compliant** - Follows PHP-FIG coding standards
+
+=== Philosophy
+
+[quote]
+Defense in depth: multiple layers of validation and sanitization.
+
+php-aegis follows the principle that security should be:
+
+. **Simple** - Easy to use correctly, hard to misuse
+. **Strict** - Fail closed rather than fail open
+. **Composable** - Combine utilities for layered protection
+
+== Installation
+
+=== Via Composer
+
+[source,bash]
+----
+composer require hyperpolymath/php-aegis
+----
+
+=== Requirements
+
+* PHP 8.1 or higher
+* No additional extensions required
+
+== Quick Start
+
+[source,php]
+----
+<?php
+
+declare(strict_types=1);
+
+use PhpAegis\Validator;
+use PhpAegis\Sanitizer;
+
+$validator = new Validator();
+$sanitizer = new Sanitizer();
+
+// Validate user input
+$email = $_POST['email'] ?? '';
+if (!$validator->email($email)) {
+    throw new InvalidArgumentException('Invalid email address');
+}
+
+// Sanitize for HTML output
+$userContent = $_POST['comment'] ?? '';
+$safeHtml = $sanitizer->html($userContent);
+echo "<p>{$safeHtml}</p>";
+----
+
+== API Reference
+
+=== Validator
+
+The `Validator` class provides strict input validation methods.
+
+==== `email(string $email): bool`
+
+Validates email addresses using PHP's `FILTER_VALIDATE_EMAIL`.
+
+[source,php]
+----
+$validator = new Validator();
+
+$validator->email('user@example.com');  // true
+$validator->email('invalid');           // false
+$validator->email('');                  // false
+----
+
+==== `url(string $url): bool`
+
+Validates URLs using PHP's `FILTER_VALIDATE_URL`.
+
+[source,php]
+----
+$validator = new Validator();
+
+$validator->url('https://example.com');     // true
+$validator->url('ftp://files.example.com'); // true
+$validator->url('not-a-url');               // false
+----
+
+=== Sanitizer
+
+The `Sanitizer` class provides input sanitization for safe output.
+
+==== `html(string $input): string`
+
+Sanitizes strings for safe HTML output, preventing XSS attacks.
+
+* Encodes `<`, `>`, `&`, `"`, `'`
+* Uses UTF-8 encoding
+* HTML5 compliant
+
+[source,php]
+----
+$sanitizer = new Sanitizer();
+
+$sanitizer->html('<script>alert("xss")</script>');
+// Returns: &lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;
+
+$sanitizer->html("It's safe & secure");
+// Returns: It&#039;s safe &amp; secure
+----
+
+==== `stripTags(string $input): string`
+
+Removes all HTML and PHP tags from input.
+
+[source,php]
+----
+$sanitizer = new Sanitizer();
+
+$sanitizer->stripTags('<p>Hello <b>World</b></p>');
+// Returns: Hello World
+
+$sanitizer->stripTags('<?php echo "test"; ?>');
+// Returns: (empty string)
+----
+
+== Security Considerations
+
+=== What php-aegis Does
+
+* Validates input formats (email, URL, etc.)
+* Sanitizes output for HTML contexts
+* Enforces type safety
+
+=== What php-aegis Does NOT Do
+
+* SQL injection prevention (use PDO prepared statements)
+* CSRF protection (use framework tokens)
+* Authentication/Authorization
+* Encryption/Hashing (use `password_hash()`, `sodium_*`)
+
+=== Best Practices
+
+[source,php]
+----
+// Always validate before processing
+if (!$validator->email($input)) {
+    // Reject early
+    return;
+}
+
+// Always sanitize before output
+echo $sanitizer->html($userContent);
+
+// Layer your defenses
+$clean = $sanitizer->stripTags($input);  // Remove tags
+$safe = $sanitizer->html($clean);         // Then encode
+----
+
+== Development
+
+=== Setup
+
+[source,bash]
+----
+git clone https://github.com/hyperpolymath/php-aegis.git
+cd php-aegis
+composer install
+----
+
+=== Commands
+
+[source,bash]
+----
+# Using just (recommended)
+just test      # Run tests
+just analyze   # Static analysis
+just lint      # Check formatting
+just fmt       # Fix formatting
+
+# Using composer directly
+vendor/bin/phpunit
+vendor/bin/phpstan analyse src
+vendor/bin/php-cs-fixer fix --dry-run
+----
+
+== Roadmap
+
+Planned features for future releases:
+
+=== v0.2.0 - Extended Validators
+* [ ] `Validator::ip()` - IPv4/IPv6 validation
+* [ ] `Validator::uuid()` - UUID format validation
+* [ ] `Validator::slug()` - URL slug validation
+* [ ] `Validator::phone()` - Phone number validation
+
+=== v0.3.0 - Security Headers
+* [ ] `Headers::csp()` - Content Security Policy helper
+* [ ] `Headers::hsts()` - HSTS header helper
+* [ ] `Headers::noSniff()` - X-Content-Type-Options
+* [ ] `Headers::frameOptions()` - X-Frame-Options
+
+=== v0.4.0 - Rate Limiting
+* [ ] `RateLimiter` - Token bucket implementation
+* [ ] Redis/APCu backend support
+
+=== Future
+* [ ] CSRF token generation and validation
+* [ ] Input filtering chains
+* [ ] Audit logging utilities
+
+== Related Projects
+
+* https://github.com/hyperpolymath/wp-audit-toolkit[wp-audit-toolkit] - WordPress security auditing
+* https://github.com/hyperpolymath/proof-of-work[proof-of-work] - Proof-of-work spam prevention
+
+== License
+
+MIT License - See link:LICENSE.txt[LICENSE.txt] for details.
+
+== Contributing
+
+Contributions welcome! Please read link:CONTRIBUTING.adoc[CONTRIBUTING.adoc] first.
+
+For security vulnerabilities, see link:SECURITY.adoc[SECURITY.adoc].
+
+== RSR Compliance
+
+This repository follows https://github.com/hyperpolymath/rhodium-standard-repositories[Rhodium Standard Repository] guidelines.
+
+PHP is permitted under RSR as a Tier Exception for security-specific tooling.

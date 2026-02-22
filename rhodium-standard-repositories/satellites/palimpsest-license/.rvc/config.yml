@@ -1,0 +1,520 @@
+# Robot Vacuum Cleaner (RVC) Configuration
+# Automated tidying and maintenance for Palimpsest License project
+# SPDX-License-Identifier: MPL-2.0-or-later
+# Version: 0.4.0
+
+---
+rvc:
+  version: "1.0"
+  project: "palimpsest-license"
+  description: "Automated repository maintenance and cleanup"
+  enabled: true
+  schedule: "daily"  # Options: hourly, daily, weekly, manual
+
+# ============================================================================
+# GIT CLEANUP
+# ============================================================================
+
+git:
+  enabled: true
+
+  # Clean untracked files (with safety)
+  clean_untracked:
+    enabled: false  # Disabled by default for safety
+    dry_run: true
+    exclude:
+      - ".env*"
+      - "*.backup"
+      - "TODO.md"
+      - "NOTES.md"
+    confirm: true
+
+  # Garbage collection
+  gc:
+    enabled: true
+    aggressive: false
+    auto: true
+    prune: "30 days"  # Prune objects older than 30 days
+
+  # Repack repository
+  repack:
+    enabled: true
+    full: false
+    depth: 50
+    window: 250
+
+  # Remove stale branches
+  prune_branches:
+    enabled: false  # Manual only
+    merged_only: true
+    exclude:
+      - "main"
+      - "master"
+      - "develop"
+      - "claude/*"
+    confirm: true
+
+  # Reflog cleanup
+  reflog:
+    enabled: true
+    expire: "90 days"
+    expire_unreachable: "30 days"
+
+# ============================================================================
+# BUILD ARTIFACT CLEANUP
+# ============================================================================
+
+build_artifacts:
+  enabled: true
+
+  # Node.js artifacts
+  nodejs:
+    enabled: true
+    remove:
+      - "node_modules/.cache"
+      - "npm-debug.log*"
+      - "yarn-debug.log*"
+      - "yarn-error.log*"
+      - ".npm"
+      - ".eslintcache"
+      - ".stylelintcache"
+    preserve:
+      - "node_modules"  # Don't remove entire node_modules
+      - "package-lock.json"
+
+  # Haskell artifacts
+  haskell:
+    enabled: true
+    remove:
+      - "TOOLS/validation/haskell/dist/"
+      - "TOOLS/validation/haskell/dist-newstyle/"
+      - "TOOLS/validation/haskell/.ghc.environment.*"
+      - "**/*.hi"
+      - "**/*.o"
+    preserve:
+      - "cabal.project.freeze"
+
+  # CSS/SCSS artifacts
+  styles:
+    enabled: true
+    remove:
+      - "styles/css/*.css.map"
+      - "**/.sass-cache"
+    preserve:
+      - "styles/css/*.css"  # Keep compiled CSS
+
+  # ReScript artifacts
+  rescript:
+    enabled: true
+    remove:
+      - "rescript/lib/bs/.ninja_log"
+      - "rescript/lib/bs/.bsbuild"
+    preserve:
+      - "rescript/lib/bs"  # Keep compiled output
+
+  # General artifacts
+  general:
+    enabled: true
+    remove:
+      - "**/*.log"
+      - "**/*.tmp"
+      - "**/.DS_Store"
+      - "**/Thumbs.db"
+      - "**/*.swp"
+      - "**/*.swo"
+      - "**/*~"
+
+# ============================================================================
+# CACHE CLEANUP
+# ============================================================================
+
+cache:
+  enabled: true
+
+  # Development caches
+  dev_cache:
+    enabled: true
+    max_age: "30 days"
+    paths:
+      - ".cache"
+      - ".parcel-cache"
+      - ".next/cache"
+      - ".nuxt"
+
+  # Package manager caches
+  package_cache:
+    enabled: false  # Keep for faster installs
+    npm:
+      path: "~/.npm"
+      max_size: "1GB"
+    cabal:
+      path: "~/.cabal/store"
+      max_size: "2GB"
+
+# ============================================================================
+# DOCUMENTATION REGENERATION
+# ============================================================================
+
+documentation:
+  enabled: true
+
+  # Regenerate table of contents
+  toc:
+    enabled: true
+    files:
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "GOVERNANCE.md"
+      - "GUIDES_v0.4/User_Guide.md"
+      - "GUIDES_v0.4/Developer_Guide.md"
+    tool: "markdown-toc"
+
+  # Update timestamps
+  timestamps:
+    enabled: false  # Manual only to avoid conflicts
+    files:
+      - "RSR_COMPLIANCE.md"
+      - "CHANGELOG.md"
+
+  # Validate links
+  link_validation:
+    enabled: true
+    check_external: false  # Only internal links
+    fix_broken: false  # Report only, don't auto-fix
+    report_file: ".rvc/link-report.txt"
+
+# ============================================================================
+# CODE FORMATTING
+# ============================================================================
+
+formatting:
+  enabled: true
+  auto_fix: false  # Report only by default
+
+  # Prettier
+  prettier:
+    enabled: true
+    extensions:
+      - "md"
+      - "json"
+      - "yml"
+      - "yaml"
+    exclude:
+      - "node_modules"
+      - "dist"
+      - "lib"
+      - ".git"
+
+  # Markdown lint
+  markdownlint:
+    enabled: true
+    auto_fix: false
+    config: ".markdownlint.json"
+
+# ============================================================================
+# DEPENDENCY UPDATES
+# ============================================================================
+
+dependencies:
+  enabled: true
+  auto_update: false  # Manual review required
+
+  # npm dependencies
+  npm:
+    enabled: true
+    check_outdated: true
+    security_audit: true
+    report_file: ".rvc/npm-outdated.txt"
+
+  # Haskell dependencies
+  cabal:
+    enabled: true
+    check_outdated: true
+    report_file: ".rvc/cabal-outdated.txt"
+
+  # Nix dependencies
+  nix:
+    enabled: true
+    update_flake: false  # Manual only
+    check_updates: true
+
+# ============================================================================
+# SECURITY SCANNING
+# ============================================================================
+
+security:
+  enabled: true
+
+  # Secret scanning
+  secrets:
+    enabled: true
+    tool: "gitleaks"  # or "trufflehog"
+    config: ".rvc/gitleaks.toml"
+    report_file: ".rvc/secrets-report.txt"
+
+  # Vulnerability scanning
+  vulnerabilities:
+    enabled: true
+    npm_audit: true
+    severity_threshold: "high"  # Report high and critical
+
+  # License compliance
+  license_check:
+    enabled: true
+    allowed_licenses:
+      - "Palimpsest-0.4"
+      - "MIT"
+      - "Apache-2.0"
+      - "BSD-3-Clause"
+      - "CC-BY-SA-4.0"
+    report_file: ".rvc/license-report.txt"
+
+# ============================================================================
+# METADATA VALIDATION
+# ============================================================================
+
+metadata:
+  enabled: true
+
+  # JSON validation
+  json:
+    enabled: true
+    validate_schema: true
+    pretty_print: false
+    paths:
+      - "METADATA_v0.4/**/*.json"
+      - ".well-known/*.json"
+      - "package.json"
+
+  # YAML validation
+  yaml:
+    enabled: true
+    paths:
+      - ".github/**/*.yml"
+      - ".rvc/*.yml"
+
+  # SPDX headers
+  spdx:
+    enabled: true
+    check_presence: true
+    auto_add: false
+    file_types:
+      - "*.hs"
+      - "*.res"
+      - "*.js"
+      - "*.ncl"
+
+# ============================================================================
+# STATISTICS & REPORTING
+# ============================================================================
+
+statistics:
+  enabled: true
+
+  # Generate statistics
+  generate:
+    enabled: true
+    output: ".rvc/stats.txt"
+    include:
+      - "line_count"
+      - "file_count"
+      - "commit_count"
+      - "contributor_count"
+      - "test_coverage"
+
+  # Visualisations
+  visualisations:
+    enabled: false
+    tools:
+      - "git-stats"
+      - "cloc"
+
+# ============================================================================
+# BACKUP & ARCHIVAL
+# ============================================================================
+
+backup:
+  enabled: true
+
+  # Create snapshots
+  snapshots:
+    enabled: true
+    frequency: "weekly"
+    retention: "4 weeks"
+    destination: ".rvc/snapshots"
+    compress: true
+    exclude:
+      - "node_modules"
+      - "dist-newstyle"
+      - ".git"
+
+  # Export artifacts
+  export:
+    enabled: false
+    formats:
+      - "tar.gz"
+      - "zip"
+    destination: "dist/exports"
+
+# ============================================================================
+# NOTIFICATIONS
+# ============================================================================
+
+notifications:
+  enabled: true
+
+  # Console output
+  console:
+    enabled: true
+    verbosity: "info"  # debug, info, warn, error
+    colour: true
+
+  # File reports
+  reports:
+    enabled: true
+    directory: ".rvc/reports"
+    formats:
+      - "txt"
+      - "json"
+    retention: "30 days"
+
+  # Email (disabled by default)
+  email:
+    enabled: false
+    recipients: []
+    smtp:
+      host: ""
+      port: 587
+      use_tls: true
+
+# ============================================================================
+# EXECUTION RULES
+# ============================================================================
+
+execution:
+  # Dry run mode (preview changes without applying)
+  dry_run: false
+
+  # Confirmation for destructive operations
+  confirm_destructive: true
+
+  # Parallel execution
+  parallel:
+    enabled: true
+    max_workers: 4
+
+  # Timeouts
+  timeouts:
+    git_gc: "5 minutes"
+    npm_audit: "2 minutes"
+    link_validation: "10 minutes"
+
+  # Error handling
+  error_handling:
+    continue_on_error: true
+    max_errors: 10
+    log_errors: true
+
+# ============================================================================
+# EXCLUSIONS
+# ============================================================================
+
+exclusions:
+  # Paths to never touch
+  never_clean:
+    - "LICENSES/"
+    - "LICENSE_CORE/"
+    - ".git/"
+    - ".well-known/"
+    - "GOVERNANCE.md"
+    - "SECURITY.md"
+    - "CODE_OF_PRACTICE.md"
+
+  # Files to never modify
+  never_modify:
+    - "LICENSES/**/*.md"
+    - "LICENSE_CORE/**/*.md"
+    - "*.gpg"
+    - "*.asc"
+
+  # Patterns to ignore
+  ignore_patterns:
+    - "*.backup"
+    - "*.bak"
+    - "*~"
+    - ".env*"
+
+# ============================================================================
+# CUSTOM SCRIPTS
+# ============================================================================
+
+custom_scripts:
+  enabled: true
+
+  # Pre-cleanup hooks
+  pre_cleanup:
+    - name: "validate-state"
+      script: ".rvc/scripts/pre-cleanup.sh"
+      required: true
+
+  # Post-cleanup hooks
+  post_cleanup:
+    - name: "generate-report"
+      script: ".rvc/scripts/post-cleanup.sh"
+      required: false
+
+  # Custom maintenance tasks
+  maintenance:
+    - name: "update-copyright-years"
+      script: ".rvc/scripts/update-copyright.sh"
+      schedule: "yearly"
+      enabled: false
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+
+logging:
+  enabled: true
+  level: "info"
+  format: "text"  # text or json
+  destination: ".rvc/rvc.log"
+  max_size: "10MB"
+  max_files: 5
+  compress_old: true
+
+# ============================================================================
+# COMPLIANCE
+# ============================================================================
+
+compliance:
+  # RSR compliance checks
+  rsr:
+    enabled: true
+    auto_fix: false
+    checks:
+      - "documentation_complete"
+      - "well_known_present"
+      - "spdx_headers"
+      - "license_files"
+
+  # British English enforcement
+  spelling:
+    enabled: true
+    language: "en-GB"
+    auto_correct: false
+    report_only: true
+
+# ============================================================================
+# VERSION & METADATA
+# ============================================================================
+
+metadata:
+  version: "0.4.0"
+  last_updated: "2025-11-28"
+  author: "Palimpsest Stewardship Council"
+  license: "Palimpsest-0.4 OR MIT"
+  documentation: "https://palimpsest.license/docs/rvc"
+
+---
+# End of RVC Configuration

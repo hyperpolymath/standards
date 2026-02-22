@@ -1,0 +1,369 @@
+# {{ project-name }} Configuration Schema
+#
+# Nickel configuration with contracts for type-safe build configuration.
+# Part of Rhodium Pipeline Template methodology.
+#
+# Usage:
+#   nickel export config/default.ncl
+#   nickel typecheck config/default.ncl
+
+# =============================================================================
+# CONTRACTS
+# =============================================================================
+
+let contracts = {
+  # Path that must be non-empty
+  NonEmptyPath = fun label value =>
+    if std.string.is_match "^.+$" value then
+      value
+    else
+      std.contract.blame_with_message "Path must be non-empty" label,
+
+  # Positive integer
+  PositiveInt = fun label value =>
+    if value > 0 then
+      value
+    else
+      std.contract.blame_with_message "Must be positive" label,
+
+  # Bounded integer
+  BoundedInt = fun min max => fun label value =>
+    if value >= min && value <= max then
+      value
+    else
+      std.contract.blame_with_message "Must be between %{std.to_string min} and %{std.to_string max}" label,
+
+  # Percentage (0-100)
+  Percentage = fun label value =>
+    if value >= 0 && value <= 100 then
+      value
+    else
+      std.contract.blame_with_message "Percentage must be 0-100" label,
+
+  # Ratio (0.0-1.0)
+  Ratio = fun label value =>
+    if value >= 0.0 && value <= 1.0 then
+      value
+    else
+      std.contract.blame_with_message "Ratio must be 0.0-1.0" label,
+
+  # Valid checksum algorithm
+  ChecksumAlgo = fun label value =>
+    if std.array.elem value ["shake256", "blake3", "sha3-256", "sha3-512", "xxhash", "none"] then
+      value
+    else
+      std.contract.blame_with_message "Invalid checksum algorithm" label,
+
+  # Valid validation level
+  ValidationLevel = fun label value =>
+    if std.array.elem value ["skip", "quick", "standard", "full", "paranoid"] then
+      value
+    else
+      std.contract.blame_with_message "Invalid validation level" label,
+
+  # Valid log level
+  LogLevel = fun label value =>
+    if std.array.elem value ["trace", "debug", "info", "warn", "error"] then
+      value
+    else
+      std.contract.blame_with_message "Invalid log level" label,
+
+  # Valid log format
+  LogFormat = fun label value =>
+    if std.array.elem value ["pretty", "compact", "json", "full"] then
+      value
+    else
+      std.contract.blame_with_message "Invalid log format" label,
+
+  # File permissions (octal string)
+  FileMode = fun label value =>
+    if std.string.is_match "^[0-7]{3,4}$" value then
+      value
+    else
+      std.contract.blame_with_message "Invalid file mode (use octal like 644)" label,
+
+  # Non-empty string
+  NonEmptyString = fun label value =>
+    if std.string.length value > 0 then
+      value
+    else
+      std.contract.blame_with_message "String must not be empty" label,
+}
+in
+
+# =============================================================================
+# SCHEMA
+# =============================================================================
+
+let Schema = {
+  # Input configuration
+  Input = {
+    path
+      | String
+      | contracts.NonEmptyPath
+      | doc "Input file or directory path",
+
+    format
+      | [| 'auto, 'json, 'jsonl, 'csv, 'tsv, 'parquet, 'arrow, 'toml, 'yaml |]
+      | default = 'auto
+      | doc "Input data format",
+
+    encoding
+      | String
+      | default = "utf-8"
+      | doc "Text encoding",
+
+    recursive
+      | Bool
+      | default = true
+      | doc "Process directories recursively",
+
+    follow_symlinks
+      | Bool
+      | default = false
+      | doc "Follow symbolic links",
+
+    max_depth
+      | Number
+      | optional
+      | doc "Maximum recursion depth",
+
+    glob
+      | String
+      | optional
+      | doc "File filter pattern",
+  },
+
+  # Output configuration
+  Output = {
+    path
+      | String
+      | contracts.NonEmptyPath
+      | doc "Output file or directory path",
+
+    format
+      | [| 'auto, 'json, 'jsonl, 'csv, 'tsv, 'parquet, 'arrow, 'toml, 'yaml |]
+      | default = 'auto
+      | doc "Output data format",
+
+    encoding
+      | String
+      | default = "utf-8"
+      | doc "Text encoding",
+
+    overwrite
+      | Bool
+      | default = false
+      | doc "Overwrite existing files",
+
+    create_parents
+      | Bool
+      | default = true
+      | doc "Create parent directories",
+
+    mode
+      | String
+      | contracts.FileMode
+      | default = "644"
+      | doc "Output file permissions",
+
+    preserve_metadata
+      | Bool
+      | default = false
+      | doc "Preserve file timestamps and permissions",
+  },
+
+  # Processing configuration
+  Processing = {
+    algorithm
+      | [| 'default, 'fast, 'thorough, 'streaming, 'parallel, 'low_memory |]
+      | default = 'default
+      | doc "Processing algorithm",
+
+    threads
+      | Number
+      | contracts.BoundedInt 1 256
+      | default = {{ default_threads }}
+      | doc "Number of worker threads",
+
+    batch_size
+      | Number
+      | contracts.PositiveInt
+      | default = 1000
+      | doc "Records per batch",
+
+    buffer_size
+      | Number
+      | contracts.PositiveInt
+      | default = 8388608
+      | doc "I/O buffer size in bytes (8MB default)",
+
+    memory_limit
+      | Number
+      | default = 0
+      | doc "Memory limit in bytes (0 = unlimited)",
+
+    streaming
+      | Bool
+      | default = false
+      | doc "Enable streaming mode for large files",
+
+    mmap
+      | Bool
+      | default = false
+      | doc "Use memory-mapped I/O",
+  },
+
+  # Validation configuration
+  Validation = {
+    level
+      | String
+      | contracts.ValidationLevel
+      | default = "standard"
+      | doc "Validation level",
+
+    strict
+      | Bool
+      | default = false
+      | doc "Fail on warnings",
+
+    tolerance
+      | Number
+      | contracts.Ratio
+      | default = 0.01
+      | doc "Tolerance for ratio validation",
+
+    schema
+      | String
+      | optional
+      | doc "Schema file for validation",
+
+    check_proofs
+      | Bool
+      | default = false
+      | doc "Verify Isabelle proofs",
+  },
+
+  # Checksum configuration
+  Checksum = {
+    algorithm
+      | String
+      | contracts.ChecksumAlgo
+      | default = "shake256"
+      | doc "Checksum algorithm",
+
+    extension
+      | String
+      | default = ".shake256"
+      | doc "Checksum file extension",
+
+    auto_verify
+      | Bool
+      | default = false
+      | doc "Verify checksums on read",
+
+    auto_generate
+      | Bool
+      | default = true
+      | doc "Generate checksums on write",
+  },
+
+  # Logging configuration
+  Logging = {
+    level
+      | String
+      | contracts.LogLevel
+      | default = "warn"
+      | doc "Log level",
+
+    format
+      | String
+      | contracts.LogFormat
+      | default = "pretty"
+      | doc "Log format",
+
+    file
+      | String
+      | optional
+      | doc "Log file path",
+
+    timestamps
+      | Bool
+      | default = true
+      | doc "Include timestamps",
+  },
+
+  # Telemetry configuration (optional)
+  Telemetry = {
+    enabled
+      | Bool
+      | default = false
+      | doc "Enable telemetry",
+
+    endpoint
+      | String
+      | optional
+      | doc "Telemetry endpoint URL",
+
+    sample_rate
+      | Number
+      | contracts.Ratio
+      | default = 1.0
+      | doc "Telemetry sample rate",
+  },
+}
+in
+
+# =============================================================================
+# CONFIG TYPE
+# =============================================================================
+
+let Config = {
+  input
+    | Schema.Input
+    | doc "Input configuration",
+
+  output
+    | Schema.Output
+    | doc "Output configuration",
+
+  processing
+    | Schema.Processing
+    | doc "Processing configuration",
+
+  validation
+    | Schema.Validation
+    | doc "Validation configuration",
+
+  checksum
+    | Schema.Checksum
+    | doc "Checksum configuration",
+
+  logging
+    | Schema.Logging
+    | doc "Logging configuration",
+
+  telemetry
+    | Schema.Telemetry
+    | optional
+    | doc "Telemetry configuration",
+}
+in
+
+# =============================================================================
+# EXPORTS
+# =============================================================================
+
+{
+  Schema,
+  Config,
+  contracts,
+
+  # Re-export for convenience
+  Input = Schema.Input,
+  Output = Schema.Output,
+  Processing = Schema.Processing,
+  Validation = Schema.Validation,
+  Checksum = Schema.Checksum,
+  Logging = Schema.Logging,
+}

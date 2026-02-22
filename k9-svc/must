@@ -1,0 +1,331 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# must - Environment shim for the k9 SVC triad
+# Usage: ./must [command]
+#
+# The "must" in must-just-nickel. Detects architecture, ensures
+# dependencies, then hands off to Just for orchestration.
+
+set -eu
+
+K9_VERSION="1.0.0-alpha"
+K9_MAGIC="K9!"
+K9_ALLOW_ROOT="${K9_ALLOW_ROOT:-false}"
+K9_DRY_RUN="${K9_DRY_RUN:-false}"
+
+# ─────────────────────────────────────────────────────────────
+# L0: Security Checks
+# ─────────────────────────────────────────────────────────────
+
+check_root() {
+    # Refuse to run as root unless explicitly allowed
+    if [ "$(id -u)" -eq 0 ]; then
+        if [ "$K9_ALLOW_ROOT" != "true" ]; then
+            echo "╔══════════════════════════════════════════════════════════╗" >&2
+            echo "║  ⚠️  SECURITY WARNING: K9 refuses to run as root       ║" >&2
+            echo "╚══════════════════════════════════════════════════════════╝" >&2
+            echo "" >&2
+            echo "Running K9 components as root is dangerous because:" >&2
+            echo "  • Hunt-level components have full system access" >&2
+            echo "  • Malicious components can compromise your entire system" >&2
+            echo "  • Even signed components can have bugs" >&2
+            echo "" >&2
+            echo "If you absolutely must run as root:" >&2
+            echo "  export K9_ALLOW_ROOT=true" >&2
+            echo "  ./must run <component>" >&2
+            echo "" >&2
+            echo "Or use --allow-root flag:" >&2
+            echo "  ./must --allow-root run <component>" >&2
+            echo "" >&2
+            echo "See: docs/SECURITY-BEST-PRACTICES.adoc" >&2
+            exit 1
+        else
+            echo "⚠️  WARNING: Running K9 as ROOT (explicitly allowed)" >&2
+            echo "This is DANGEROUS. Proceed with extreme caution." >&2
+            sleep 2  # Force user to see warning
+        fi
+    fi
+}
+
+security_warning() {
+    # Display security warning for Hunt-level components
+    local component="$1"
+    echo "╔══════════════════════════════════════════════════════════╗" >&2
+    echo "║  ⚠️  SECURITY: Hunt-level component detected           ║" >&2
+    echo "╚══════════════════════════════════════════════════════════╝" >&2
+    echo "" >&2
+    echo "Component: $component" >&2
+    echo "" >&2
+    echo "Hunt components have FULL SYSTEM ACCESS. Before running:" >&2
+    echo "  ✓ Verify signature: ./must verify $component" >&2
+    echo "  ✓ Review Just recipes: just --list --justfile $component" >&2
+    echo "  ✓ Run in dry-run mode: ./must --dry-run run $component" >&2
+    echo "  ✓ Check for red flags: ./must scan $component" >&2
+    echo "" >&2
+    echo "See: docs/SECURITY-BEST-PRACTICES.adoc" >&2
+    echo "" >&2
+}
+
+# ─────────────────────────────────────────────────────────────
+# L1: The Scent - Environment Detection
+# ─────────────────────────────────────────────────────────────
+
+detect_os() {
+    case "$(uname -s)" in
+        Linux)
+            if [ -f /etc/minix-release ]; then
+                echo "Minix"
+            elif [ -f /system/build.prop ]; then
+                echo "Android"
+            else
+                echo "Linux"
+            fi
+            ;;
+        Darwin)  echo "MacOS" ;;
+        MINIX)   echo "Minix" ;;
+        *)       echo "Unknown" ;;
+    esac
+}
+
+detect_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64)  echo "x86_64" ;;
+        aarch64|arm64) echo "aarch64" ;;
+        armv7l)        echo "armv7" ;;
+        riscv64)       echo "riscv64" ;;
+        *)             echo "$(uname -m)" ;;
+    esac
+}
+
+is_edge() {
+    # Edge detection: low memory or known embedded platforms
+    if [ -f /proc/meminfo ]; then
+        mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        [ "$mem_kb" -lt 1048576 ] && return 0  # < 1GB
+    fi
+    return 1
+}
+
+has_podman() {
+    command -v podman >/dev/null 2>&1
+}
+
+# ─────────────────────────────────────────────────────────────
+# L2: The Brain - Dependency Verification
+# ─────────────────────────────────────────────────────────────
+
+ensure_nickel() {
+    if ! command -v nickel >/dev/null 2>&1; then
+        echo "K9: Nickel not found. Installing..." >&2
+        case "$(detect_os)" in
+            Linux)
+                if command -v cargo >/dev/null 2>&1; then
+                    cargo install nickel-lang-cli
+                else
+                    echo "K9: Requires cargo or manual Nickel installation" >&2
+                    exit 1
+                fi
+                ;;
+            MacOS)
+                if command -v brew >/dev/null 2>&1; then
+                    brew install nickel
+                else
+                    echo "K9: Requires Homebrew or manual Nickel installation" >&2
+                    exit 1
+                fi
+                ;;
+            *)
+                echo "K9: Manual Nickel installation required for $(detect_os)" >&2
+                exit 1
+                ;;
+        esac
+    fi
+}
+
+ensure_just() {
+    if ! command -v just >/dev/null 2>&1; then
+        echo "K9: Just not found. Installing..." >&2
+        case "$(detect_os)" in
+            Linux)
+                if command -v cargo >/dev/null 2>&1; then
+                    cargo install just
+                else
+                    echo "K9: Requires cargo or manual Just installation" >&2
+                    exit 1
+                fi
+                ;;
+            MacOS)
+                if command -v brew >/dev/null 2>&1; then
+                    brew install just
+                else
+                    echo "K9: Requires Homebrew or manual Just installation" >&2
+                    exit 1
+                fi
+                ;;
+            *)
+                echo "K9: Manual Just installation required for $(detect_os)" >&2
+                exit 1
+                ;;
+        esac
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────
+# L3: The Muscle - Handoff to Just
+# ─────────────────────────────────────────────────────────────
+
+export_env() {
+    export K9_OS="$(detect_os)"
+    export K9_ARCH="$(detect_arch)"
+    export K9_VERSION
+    export K9_MAGIC
+    if is_edge; then
+        export K9_EDGE="true"
+    else
+        export K9_EDGE="false"
+    fi
+    if has_podman; then
+        export K9_HAS_PODMAN="true"
+    else
+        export K9_HAS_PODMAN="false"
+    fi
+}
+
+main() {
+    # Parse flags first
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --allow-root)
+                K9_ALLOW_ROOT=true
+                shift
+                ;;
+            --dry-run)
+                K9_DRY_RUN=true
+                shift
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    # Security check: refuse to run as root
+    check_root
+
+    export_env
+
+    case "${1:-status}" in
+        status)
+            echo "K9 Environment Report"
+            echo "────────────────────────"
+            echo "OS:          $K9_OS"
+            echo "Arch:        $K9_ARCH"
+            echo "Edge:        $K9_EDGE"
+            echo "Podman:      $K9_HAS_PODMAN"
+            echo "Version:     $K9_VERSION"
+            echo "Allow Root:  $K9_ALLOW_ROOT"
+            echo "Dry Run:     $K9_DRY_RUN"
+            ;;
+        ensure)
+            echo "K9: Ensuring triad dependencies..." >&2
+            ensure_nickel
+            ensure_just
+            echo "K9: Triad ready." >&2
+            ;;
+        verify)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "Usage: must verify <component.k9.ncl>" >&2
+                exit 1
+            fi
+            if [ ! -f ./sign.sh ]; then
+                echo "ERROR: sign.sh not found. Cannot verify signatures." >&2
+                echo "Ensure you are in the k9-svc repository." >&2
+                exit 1
+            fi
+            ./sign.sh verify "$@"
+            ;;
+        scan)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "Usage: must scan <component.k9.ncl>" >&2
+                exit 1
+            fi
+            if [ ! -f ./k9-scan ]; then
+                echo "ERROR: k9-scan not found. Basic static analysis unavailable." >&2
+                echo "This is a Week 1 security feature. Creating basic scanner..." >&2
+                exit 1
+            fi
+            ./k9-scan "$@"
+            ;;
+        run)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "Usage: must run <component.k9.ncl> [recipe]" >&2
+                exit 1
+            fi
+            component="$1"
+            if [ ! -f "$component" ]; then
+                echo "ERROR: Component file not found: $component" >&2
+                exit 1
+            fi
+            # Check if Hunt-level (contains Just recipes)
+            if grep -q '^\[.*\]' "$component" 2>/dev/null; then
+                security_warning "$component"
+                if [ "$K9_DRY_RUN" != "true" ]; then
+                    printf "Continue with execution? [y/N] " >&2
+                    read -r response
+                    case "$response" in
+                        [yY]|[yY][eE][sS]) ;;
+                        *) echo "Aborted." >&2; exit 1 ;;
+                    esac
+                fi
+            fi
+            ensure_nickel
+            ensure_just
+            if [ "$K9_DRY_RUN" = "true" ]; then
+                echo "═══════════════════════════════════════════════════" >&2
+                echo "  DRY-RUN MODE: Preview only, no execution" >&2
+                echo "═══════════════════════════════════════════════════" >&2
+                echo "" >&2
+                echo "Just recipes that would execute:" >&2
+                just --list --justfile "$component"
+                echo "" >&2
+                echo "⚠️  DRY-RUN MODE - Nothing was executed" >&2
+                echo "To run for real: ./must run $component" >&2
+            else
+                exec just --justfile "$@"
+            fi
+            ;;
+        *)
+            echo "K9 must shim v$K9_VERSION"
+            echo "Usage: must [options] [command] [args]"
+            echo ""
+            echo "Options:"
+            echo "  --allow-root  - Allow running as root (DANGEROUS)"
+            echo "  --dry-run     - Preview actions without execution"
+            echo ""
+            echo "Commands:"
+            echo "  status        - Show environment detection"
+            echo "  ensure        - Install Nickel and Just if missing"
+            echo "  verify <file> - Verify component signature"
+            echo "  scan <file>   - Static analysis for security issues"
+            echo "  run <file>    - Execute K9 component (Hunt level)"
+            echo ""
+            echo "Examples:"
+            echo "  ./must status"
+            echo "  ./must verify component.k9.ncl"
+            echo "  ./must scan component.k9.ncl"
+            echo "  ./must --dry-run run component.k9.ncl"
+            echo "  ./must run component.k9.ncl [recipe]"
+            echo ""
+            echo "Security:"
+            echo "  • Always verify signatures before running Hunt components"
+            echo "  • Use dry-run mode to preview actions"
+            echo "  • Never run as root unless absolutely required"
+            echo "  • See: docs/SECURITY-BEST-PRACTICES.adoc"
+            ;;
+    esac
+}
+
+main "$@"

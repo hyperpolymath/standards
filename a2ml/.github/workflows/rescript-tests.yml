@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+name: ReScript Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@5e01c016a857a4dbb5afe9d0f9733cd472cba985 # v2.0.0
+        with:
+          deno-version: v2.x
+
+      - name: Cache ReScript build
+        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.2.0
+        with:
+          path: |
+            prototype/rescript/lib
+            prototype/rescript/.bsb.lock
+          key: rescript-${{ runner.os }}-${{ hashFiles('prototype/rescript/rescript.json') }}
+
+      - name: Install ReScript
+        working-directory: prototype/rescript
+        run: |
+          deno install
+
+      - name: Build ReScript parser
+        working-directory: prototype/rescript
+        run: |
+          deno run -A npm:rescript build
+
+      - name: Run test vectors
+        working-directory: prototype/rescript
+        run: |
+          # Run all 8 test vectors
+          for vector in ../../tests/vectors/*.a2ml; do
+            echo "Testing: $(basename $vector)"
+            deno run -A src/Cli.res.js "$vector" || exit 1
+          done
+          echo "✓ All test vectors passed"
+
+      - name: Verify compiled output
+        working-directory: prototype/rescript
+        run: |
+          # Check all .res files compiled successfully
+          for res in src/*.res src/**/*.res; do
+            if [ -f "$res" ]; then
+              js_file="${res%.res}.res.js"
+              if [ ! -f "$js_file" ]; then
+                echo "Missing compiled file: $js_file"
+                exit 1
+              fi
+            fi
+          done
+          echo "✓ All ReScript files compiled"
+
+      - name: Type check JavaScript output
+        working-directory: prototype/rescript
+        run: |
+          # Verify generated JS is valid
+          for js in src/*.res.js; do
+            if [ -f "$js" ]; then
+              deno check "$js" || node -c "$js"
+            fi
+          done
+          echo "✓ Generated JavaScript is valid"
+
+      - name: Run demo
+        working-directory: prototype/rescript
+        run: |
+          deno run -A src/Demo.res.js
+          echo "✓ Demo executed successfully"

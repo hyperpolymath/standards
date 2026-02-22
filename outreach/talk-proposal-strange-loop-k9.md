@@ -1,0 +1,298 @@
+# Strange Loop 2026 - Talk Proposal
+
+## Title
+K9: When Your Release Tool Releases Itself (Meta-Dogfooding Infrastructure Automation)
+
+## Speaker
+**Jonathan D.A. Jewell**
+The Open University
+jonathan.jewell@open.ac.uk
+
+## Session Format
+40-minute talk
+
+## Elevator Pitch (300 characters)
+
+Dogfooding is validating. Meta-dogfooding is enlightening. K9 is an infrastructure automation framework that releases itself using its own automation primitives. This talk shows how building a tool that automates itself reveals design flaws invisible to traditional dogfooding.
+
+## Abstract
+
+Every infrastructure automation tool claims to simplify deployments and reduce errors. But how do you validate those claims? By making the tool automate *itself*.
+
+K9 is a self-validating infrastructure framework where each component (called a "contractile") contains three parts:
+
+1. **must** (Bash) - Prerequisites validation
+2. **just** (Justfile) - Execution recipes
+3. **nickel** (Nickel contracts) - Configuration schema
+
+Here's the twist: K9's v1.0.0 release was automated by a K9 contractile (`release-k9.k9.ncl`). The release tool released itself.
+
+This talk explores what happens when you push dogfooding to its logical extreme:
+
+**What We Built:**
+- A framework for self-validating infrastructure components
+- Three security levels (kennel/yard/hunt) inspired by dog behavior
+- Tools to scaffold, validate, and sign contractiles
+- GitHub Actions, VS Code extensions, and CLI tooling
+
+**What We Learned:**
+- Meta-dogfooding catches edge cases regular dogfooding misses
+- Self-validation reveals circular dependency issues
+- Recipe execution order matters more than expected
+- Configuration errors should fail at parse time, not mid-deployment
+
+**Live Demo:**
+We'll watch K9 validate its own release environment, bump version numbers, run tests, create GitHub releases, and publish artifacts—all automated by K9 itself.
+
+This isn't just a clever trick. It's a validation technique that proves the abstraction works for complex, real-world workflows. If your tool can't automate itself, can it really automate production systems?
+
+## Description (Detailed Outline)
+
+### Act 1: The Problem (8 minutes)
+
+**The Infrastructure Automation Landscape:**
+- DevOps has 1000+ tools (Terraform, Ansible, Helm, Make, Just, etc.)
+- Each solves a narrow slice of the problem
+- No standard way to validate prerequisites before execution
+- Configuration errors discovered mid-deployment (the worst time)
+
+**A Real Story:**
+```bash
+$ terraform apply
+# 15 minutes later...
+Error: AWS credentials not configured
+```
+
+That's 15 minutes of wasted time because prerequisite validation happened too late.
+
+**The Core Problem:**
+Infrastructure scripts assume prerequisites are met. When they're not, failures are ugly:
+- Half-applied state
+- Rollback complexity
+- "Works on my machine" syndrome
+
+**What if infrastructure components could validate themselves before execution?**
+
+### Act 2: Enter K9 (10 minutes)
+
+**The Design:**
+
+K9 contractiles are single `.k9.ncl` files containing three sections:
+
+```nickel
+{
+  must = {
+    check = ''
+      #!/usr/bin/env bash
+      # Validate: Docker installed?
+      command -v docker &> /dev/null
+    '',
+  },
+
+  just = {
+    recipes = {
+      deploy = {
+        dependencies = ["build"],
+        commands = ["docker-compose up -d"],
+      },
+    },
+  },
+
+  nickel = {
+    config = {
+      port | Number = 8080,
+      debug_mode | Bool = false,
+    },
+  },
+}
+```
+
+**Execution flow:**
+1. Parse Nickel config → catch schema errors
+2. Run `must.check` → validate prerequisites
+3. Execute `just` recipes → perform operations
+4. All or nothing: failures are loud and early
+
+**Three Security Levels (Dog Metaphors):**
+- **Kennel** (read-only): Safe operations (ls, cat, stat)
+- **Yard** (moderate): File writes, git ops, package installs
+- **Hunt** (full access): Requires Ed25519 cryptographic signatures
+
+Why dogs? Dogs have three behavioral states: confined (kennel), supervised (yard), autonomous (hunt). Infrastructure needs the same gradual trust model.
+
+**Demo 1: Simple K9 Contractile**
+Show a dev environment setup contractile validating Rust installation before running setup.
+
+### Act 3: The Meta-Dogfooding Moment (12 minutes)
+
+**The Challenge:**
+After building K9 and using it for 10 projects, I realized: K9 releases should be automated with K9 itself.
+
+**Enter `release-k9.k9.ncl`:**
+
+```nickel
+{
+  must = {
+    check = ''
+      #!/usr/bin/env bash
+      command -v git &> /dev/null || exit 1
+      command -v gh &> /dev/null || exit 1
+      git diff --quiet || exit 1  # No uncommitted changes
+      [ "$(git branch --show-current)" = "main" ] || exit 1
+    '',
+  },
+
+  just = {
+    recipes = {
+      "bump-version" = {
+        commands = [
+          "sed -i 's/version = \"0.9.0\"/version = \"1.0.0\"/' Cargo.toml",
+          "git add Cargo.toml",
+        ],
+      },
+
+      test = {
+        commands = ["cargo test --all"],
+      },
+
+      release = {
+        dependencies = ["bump-version", "test"],
+        commands = [
+          "git commit -m 'chore: bump version to 1.0.0'",
+          "git tag v1.0.0",
+          "git push origin main --tags",
+          "gh release create v1.0.0 --generate-notes",
+        ],
+      },
+    },
+  },
+}
+```
+
+**What This Proves:**
+
+When `release-k9.k9.ncl` successfully released K9 v1.0.0, it validated:
+
+1. **Self-validation works**: Caught uncommitted changes, missing tools, wrong branch
+2. **Recipe dependencies work**: `release` waited for `bump-version` and `test`
+3. **The format is usable**: If K9 can automate complex releases, it handles simpler tasks
+
+**Demo 2: Live K9 Release**
+Run `just -f release-k9.k9.ncl must` → show validation catching issues
+Run `just -f release-k9.k9.ncl release` → watch K9 release itself (dry-run mode)
+
+### Act 4: Lessons from Meta-Dogfooding (7 minutes)
+
+**Three Critical Insights:**
+
+**1. Validation Before Execution Is Non-Negotiable**
+Every K9 component failed at least once during development. Having `must.check` run before any recipes saved hours of debugging half-executed workflows.
+
+**Example:** Database migration contractile that forgot to check PostgreSQL was running. The `must.check` caught it before applying migrations.
+
+**2. Security Levels Need Clear Boundaries**
+`release-k9.k9.ncl` is yard-level (git writes, tests) but doesn't need hunt-level (system admin). The security model worked without being too restrictive.
+
+Cryptographic signatures (Ed25519) for hunt-level prevent unauthorized escalation.
+
+**3. Nickel Contracts Catch Configuration Errors Early**
+```nickel
+nickel = {
+  config | {
+    current_version | String,
+    new_version | String,
+    github_repo | String,
+  } = {
+    current_version = "0.9.0",
+    new_version = "1.0.0",
+    github_repo = "hyperpolymath/k9-svc",
+  }
+}
+```
+
+Forget to set `github_repo`? Nickel fails at parse time, not when `gh release create` runs.
+
+**Meta-Dogfooding Reveals Edge Cases:**
+- What happens when K9 validates itself? (Recursive checks)
+- How do nested dependencies fail? (Error propagation clarity)
+- Is the format too verbose for its own releases? (No—it's readable)
+
+### Act 5: The K9 Ecosystem (3 minutes)
+
+**Tooling Built:**
+- **k9-init**: Scaffold contractiles from templates (8 templates: web-server, build, deploy, dev-env, ci-cd, backup, monitoring, minimal)
+- **k9-validate**: Standalone validator (schema + dangerous pattern detection)
+- **k9-sign**: Ed25519 signing for hunt-level contractiles
+- **GitHub Action**: CI/CD integration for automated validation
+- **VS Code Extension**: Syntax highlighting, live validation, go-to-definition
+
+**Adoption:**
+10 repos using K9 across the Hyperpolymath ecosystem:
+- Dev environment setup
+- Release automation (including K9 itself)
+- Deployment workflows
+- CI/CD pipelines
+
+**Community:**
+- Open source: https://github.com/hyperpolymath/k9-svc (spec), https://github.com/hyperpolymath/k9-tools (tooling)
+- License: PMPL-1.0 (Polymath Public Meta-License)
+- Built with: Nickel, Rust, Justfile
+
+### Conclusion: Why Meta-Dogfooding Matters (2 minutes)
+
+**The Validation Pyramid:**
+1. **Unit tests** - Do individual functions work?
+2. **Integration tests** - Do components work together?
+3. **Dogfooding** - Does the tool work for real use cases?
+4. **Meta-dogfooding** - Can the tool automate itself?
+
+If your automation tool can't automate itself, you've missed something fundamental about the abstraction.
+
+**K9 proved its abstraction by releasing itself.** That's not just a demo—it's a validation technique that catches design flaws regular testing misses.
+
+**Takeaway:** Next time you build a tool, ask: "Can this tool build/deploy/release itself?" If not, why not? The answer reveals gaps in your design.
+
+**Call to Action:**
+- Try K9: https://github.com/hyperpolymath/k9-tools
+- Read the spec: https://github.com/hyperpolymath/k9-svc
+- Join the meta-dogfooding movement
+
+## Why Strange Loop?
+
+Strange Loop celebrates the intersection of programming, infrastructure, and creative thinking about developer tools. This talk fits because:
+
+1. **Developer Tools Focus**: K9 is infrastructure tooling built for developers
+2. **Meta-Programming**: Self-referential systems (loops!) are core Strange Loop themes
+3. **Practical Impact**: Attendees can use K9 immediately for real projects
+4. **Interesting Constraint**: Meta-dogfooding as a validation technique is novel
+5. **Cross-Cutting**: Touches DevOps, formal methods (Nickel contracts), cryptography (Ed25519), UX design
+
+Strange Loop audiences appreciate tools that make you think differently about problems. K9 makes you reconsider what "validation" means for infrastructure automation.
+
+## Additional Materials
+
+**Live Demos:**
+1. Simple K9 contractile (dev environment setup)
+2. K9 releasing itself (release-k9.k9.ncl execution)
+3. k9-init scaffolding a new contractile
+4. Dangerous pattern detection in k9-validate
+
+**Slides:** Visual diagrams of:
+- must-just-nickel triad
+- Three security levels (kennel/yard/hunt)
+- Execution flow (parse → validate → execute)
+- Meta-dogfooding validation pyramid
+
+**Code availability:** All examples open source, attendees can clone and run during/after talk
+
+## Speaker Bio
+
+Jonathan D.A. Jewell is a researcher at The Open University working on formally verified software systems. He builds tools that prove things—from markup languages with dependent types (A2ML) to self-validating infrastructure (K9). His work focuses on bringing formal methods to everyday programming tasks without sacrificing usability.
+
+Previous projects include Bunsenite (Nickel IDE), Rhodium Standard Repositories (software preservation), and polyglot internationalization systems.
+
+---
+
+**Contact:**
+jonathan.jewell@open.ac.uk
+https://github.com/hyperpolymath

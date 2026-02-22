@@ -1,0 +1,189 @@
+# Meta-Dogfooding with K9: When Your Release Tool Releases Itself
+
+**Author:** Jonathan D.A. Jewell
+**Date:** 2026-01-30
+**Tags:** infrastructure-as-code, meta-programming, nickel, automation
+
+---
+
+## The Ultimate Dogfooding Test
+
+Dogfooding—using your own product—is a time-honored way to validate design decisions. But what if you take it one step further? What if your automation tool automates *itself*?
+
+That's **meta-dogfooding**, and it's exactly what I did with K9.
+
+## What is K9?
+
+K9 is a framework for building self-validating infrastructure components. Each K9 "contractile" (`.k9.ncl` file) contains three parts:
+
+1. **must** (Bash) - Validates prerequisites
+2. **just** (Justfile) - Defines execution recipes
+3. **nickel** (Nickel contracts) - Configuration schema
+
+Here's a simple example:
+
+```nickel
+{
+  must = {
+    check = ''
+      #!/usr/bin/env bash
+      command -v docker &> /dev/null
+    '',
+  },
+
+  just = {
+    recipes = {
+      deploy = {
+        commands = ["docker-compose up -d"],
+      },
+    },
+  },
+
+  nickel = {
+    config = {
+      port = 8080,
+    },
+  },
+}
+```
+
+Before executing `just deploy`, K9 runs the `must.check` script. If Docker isn't installed, it fails fast with a clear error. No more "works on my machine" surprises.
+
+## The Meta-Dogfooding Moment
+
+After building several K9 components (dev environment setup, deployment workflows, etc.), I realized: **K9 releases should be automated with K9 itself**.
+
+So I created `release-k9.k9.ncl` - a K9 contractile that releases K9:
+
+```nickel
+{
+  must = {
+    check = ''
+      #!/usr/bin/env bash
+      # Validate release environment
+      command -v git &> /dev/null || exit 1
+      command -v gh &> /dev/null || exit 1
+      git diff --quiet || exit 1  # No uncommitted changes
+    '',
+  },
+
+  just = {
+    recipes = {
+      "bump-version" = {
+        commands = [
+          "sed -i 's/version = \"0.9.0\"/version = \"1.0.0\"/' Cargo.toml",
+          "git add Cargo.toml",
+        ],
+      },
+
+      release = {
+        dependencies = ["bump-version", "test"],
+        commands = [
+          "git commit -m 'chore: bump version to 1.0.0'",
+          "git tag v1.0.0",
+          "git push origin main --tags",
+          "gh release create v1.0.0 --title 'K9 v1.0.0' --generate-notes",
+        ],
+      },
+    },
+  },
+}
+```
+
+## What This Proves
+
+When `release-k9.k9.ncl` successfully released K9 v1.0.0, it validated three design decisions:
+
+**1. Self-validation works**
+The `must.check` script caught issues before execution:
+- Uncommitted changes → failed fast
+- Missing `gh` CLI → failed with clear error
+- Wrong directory → failed immediately
+
+**2. Recipe dependencies work**
+The `release` recipe correctly waited for `bump-version` and `test` to complete.
+
+**3. The format is usable**
+If K9 can automate its own complex release workflow (version bumping, testing, tagging, GitHub release creation), it can handle simpler tasks for other projects.
+
+## Why Meta-Dogfooding Matters
+
+Meta-dogfooding reveals design flaws that regular dogfooding misses:
+
+- **Recursion edge cases**: What happens when K9 validates itself?
+- **Error propagation**: How do nested recipe dependencies fail?
+- **UX friction**: Is the format too verbose for its own releases?
+
+If your tool can't automate itself, it probably can't automate complex real-world workflows either.
+
+## Three Lessons Learned
+
+### 1. Validation Before Execution Is Critical
+
+Every K9 component failed at least once during development. Having `must.check` run *before* any recipes execute saved hours of debugging half-executed workflows.
+
+### 2. Security Levels Need Clear Boundaries
+
+K9 has three security levels:
+- **Kennel** - Read-only (safe default)
+- **Yard** - File writes, git ops
+- **Hunt** - Full system access (requires signatures)
+
+`release-k9.k9.ncl` is yard-level (writes to git, runs tests) but doesn't need hunt-level privileges (no system administration). The boundaries work.
+
+### 3. Nickel Contracts Catch Configuration Errors
+
+The `nickel` section validates configuration before execution:
+
+```nickel
+nickel = {
+  config | {
+    current_version | String,
+    new_version | String,
+    github_repo | String,
+  } = ...
+}
+```
+
+If you forget to set `github_repo`, Nickel fails at parse time, not mid-release.
+
+## The Result
+
+K9 now has a battle-tested release process:
+
+```bash
+# Validate release environment
+just -f release-k9.k9.ncl must
+
+# Run release
+just -f release-k9.k9.ncl release
+```
+
+No manual steps. No forgotten tags. No "did I run the tests?" anxiety.
+
+## Try It Yourself
+
+K9 is open source:
+
+- **Spec:** https://github.com/hyperpolymath/k9-svc
+- **Tools:** https://github.com/hyperpolymath/k9-tools
+- **Examples:** 10 real-world contractiles across multiple repos
+
+And yes, the tools that help you create K9 contractiles... will eventually be released with K9 too. Meta-dogfooding all the way down.
+
+## Conclusion
+
+If your automation tool can automate itself, you've validated something important: the abstraction works. Not just in theory, not just for toy examples, but for real, complex workflows.
+
+That's the power of meta-dogfooding.
+
+---
+
+**About the Author**
+
+Jonathan D.A. Jewell is a researcher at The Open University working on provable software systems. K9 is part of his broader work on formally verified infrastructure.
+
+**Links:**
+- K9: https://github.com/hyperpolymath/k9-svc
+- A2ML: https://github.com/hyperpolymath/a2ml (formally verified markup language)
+- Email: jonathan.jewell@open.ac.uk

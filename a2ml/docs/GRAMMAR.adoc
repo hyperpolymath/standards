@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= A2ML Grammar Appendix (v0 Draft)
+:toc:
+:toclevels: 2
+
+This appendix provides a complete, consolidated grammar for the v0 surface
+syntax. The core spec remains the normative reference; this appendix is a
+formalization to aid implementers.
+
+== Lexical Tokens
+
+* `NL` = linefeed (\n)
+* `SP` = one or more spaces
+* `ID` = `[A-Za-z][A-Za-z0-9:_-]*`
+* `STRING` = `"..."` or `'...'` with `\\` and escaped quote support
+
+== Grammar (EBNF)
+
+[source]
+----
+Document       ::= Block*
+Block          ::= Heading
+                | DirectiveBlock
+                | List
+                | CodeBlock
+                | Paragraph
+                | Blank
+
+Blank          ::= BlankLine+
+BlankLine      ::= SP* NL
+
+Heading        ::= HeadingLine HeadingBody?
+HeadingLine    ::= HeadingMarker SP TextLine NL
+HeadingMarker  ::= "#" | "##" | "###" | "####" | "#####"
+HeadingBody    ::= Block*      // until next same-or-higher heading or EOF
+
+DirectiveBlock ::= "@" Name Attrs? ":" NL DirectiveBody "@end" NL?
+Name           ::= ID
+Attrs          ::= "(" Attr ("," Attr)* ")"
+Attr           ::= ID "=" (ID | STRING | Number)
+Number         ::= "-"? [0-9]+ ("." [0-9]+)?
+
+DirectiveBody  ::= Block*
+
+List           ::= ListItem (NL ListItem)* NL?
+ListItem       ::= ("-" | "*") SP Inline
+
+CodeBlock      ::= FenceLang NL RawLines FenceEnd NL?
+FenceLang      ::= "```" LangSpec?
+LangSpec       ::= [A-Za-z0-9_+-]+
+FenceEnd       ::= "```"
+
+Paragraph      ::= Inline (NL Inline)* NL?
+Inline         ::= InlineAtom (SP InlineAtom)*
+InlineAtom     ::= Emph | Strong | Link | Ref | Text
+
+Emph           ::= "*" TextInline "*"
+Strong         ::= "**" TextInline "**"
+Link           ::= "[" TextInline "]" "(" URL ")"
+Ref            ::= "@ref(" ID ")"
+
+TextInline     ::= (TextChar | Escaped)+
+TextChar       ::= any char except control, "*", "[", "]", "@", NL
+Escaped        ::= "\\" any
+
+TextLine       ::= (TextChar | Escaped)*
+RawLines       ::= (RawLine NL)*
+RawLine        ::= any char sequence (including punctuation)
+URL            ::= [^ )\n]+
+----
+
+== Determinism Rules
+
+* Parsers MUST be deterministic given identical input bytes.
+* In checked/attested modes, unknown directives MUST be rejected.
+* Opaque payloads MUST be preserved byte-for-byte.
+
+== Notes for Implementers
+
+* Lax mode may infer abstract/refs from headings or labels.
+* Attested mode forbids inference and requires explicit IDs.
+
+== Prototype Deviations (Module 0)
+
+The prototype parser in `prototype/rescript/` intentionally supports a subset:
+
+* Directive headers must end with `:` on a single line.
+* `@refs` content is parsed as one paragraph per non-blank line.
+* `@opaque` content is treated as raw lines until `@end`.
+* Code fences are not implemented.

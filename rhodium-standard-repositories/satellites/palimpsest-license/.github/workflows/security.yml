@@ -1,0 +1,105 @@
+# =============================================================================
+# Security - CodeQL Analysis & Dependency Scanning
+# =============================================================================
+# Comprehensive security scanning for the Palimpsest License project.
+#
+# Jobs:
+#   - codeql: Static analysis for vulnerabilities (JavaScript, Ruby, Actions)
+#   - dependencies: Check for vulnerable dependencies
+#
+# Schedule: Runs weekly (Saturday 18:00 UTC) and on every push to main
+#
+# Note: Python and Rust scanning disabled - code removed from project.
+#       Re-enable if those languages are added back.
+# =============================================================================
+
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan: Saturday at 18:00 UTC
+    - cron: '0 18 * * 6'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  security-events: write  # Required for CodeQL
+  contents: read
+  actions: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # CodeQL - Static Application Security Testing (SAST)
+  # ---------------------------------------------------------------------------
+  # Scans source code for security vulnerabilities and coding errors.
+  # Results appear in GitHub Security tab > Code scanning alerts
+  # ---------------------------------------------------------------------------
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    # Don't fail the whole PR on security scans
+    continue-on-error: true
+    strategy:
+      fail-fast: false  # Continue other languages if one fails
+      matrix:
+        # Languages to scan:
+        # - javascript-typescript: Embed scripts, widgets
+        # - actions: Workflow files themselves
+        #
+        # NOT scanning (code removed):
+        # - ruby: No Ruby code in project
+        # - python: Removed, replaced with Julia if needed
+        # - rust: Removed, was incomplete experiment
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # Using default queries - security-extended adds more checks
+          # but may produce false positives
+          # queries: security-extended
+        continue-on-error: true
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # Dependency Review - Check for vulnerable dependencies
+  # ---------------------------------------------------------------------------
+  # Runs on pull requests to catch vulnerable dependencies before merge.
+  # Uses GitHub's dependency graph to identify known vulnerabilities.
+  # ---------------------------------------------------------------------------
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    # Don't block PRs on dependency review
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          # Fail on critical vulnerabilities only
+          fail-on-severity: critical
+          # Allow specific licenses (add more as needed)
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, LGPL-2.1, LGPL-3.0, Palimpsest-0.4
+        continue-on-error: true

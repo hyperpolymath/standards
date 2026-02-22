@@ -1,0 +1,556 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= K9 SVC User Guide
+:toc: left
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+:imagesdir: assets
+
+== Introduction
+
+K9 SVC (Self-Validating Components) is a file format and tooling system for creating components that validate themselves. It uses the **must-just-nickel triad** architecture:
+
+* **must** - POSIX shell shim for environment detection
+* **just** - Task runner for orchestration (the Muscle)
+* **nickel** - Typed configuration language for validation (the Brain)
+
+image::triad-diagram.svg[The Must-Just-Nickel Triad,600]
+
+=== Key Features
+
+* **Self-describing** - Components declare their own requirements and capabilities
+* **Type-safe** - Nickel contracts ensure configuration validity
+* **Progressive trust** - The Leash security model (Kennel → Yard → Hunt)
+* **Cryptographic verification** - Ed25519 signatures for Hunt-level execution
+* **Cross-platform** - Runs on Linux, macOS, and POSIX systems
+
+== Installation
+
+=== Prerequisites
+
+Install the triad tools:
+
+[source,bash]
+----
+# Nickel (configuration language)
+# See: https://nickel-lang.org/getting-started/
+curl -L https://github.com/tweag/nickel/releases/latest/download/nickel-linux-x86_64 -o nickel
+chmod +x nickel && sudo mv nickel /usr/local/bin/
+
+# Just (task runner)
+# See: https://just.systems/man/en/
+cargo install just
+# OR: brew install just (macOS)
+# OR: pacman -S just (Arch Linux)
+----
+
+=== Quick Install
+
+[source,bash]
+----
+# Clone the repository
+git clone https://github.com/hyperpolymath/k9-svc.git
+cd k9-svc
+
+# Check environment
+./must status
+
+# Run tests
+./test.sh
+
+# Install MIME types (user-level)
+just setup-mime
+----
+
+=== Verify Installation
+
+[source,bash]
+----
+# Check all dependencies
+just check-deps
+
+# Validate schemas
+just typecheck
+
+# Run full dogfood test
+just dogfood
+----
+
+== The Leash Security Model
+
+K9 uses a progressive trust model called "The Leash". Components declare their required trust level, and the system enforces boundaries.
+
+image::leash-diagram.svg[The Leash Security Model,700]
+
+=== Security Levels
+
+[cols="1,2,3"]
+|===
+| Level | Capabilities | Use Case
+
+| `'Kennel`
+| Pure data only. No code execution.
+| Static configuration, data files, templates
+
+| `'Yard`
+| Nickel evaluation (sandboxed). No I/O.
+| Typed configs, validated settings, contracts
+
+| `'Hunt`
+| Full execution. Just recipes, network, filesystem.
+| Deployments, installers, system modifications
+|===
+
+[WARNING]
+====
+**SECURITY NOTICE: Hunt-level components have full system access.**
+
+Before running Hunt components:
+
+1. **Verify digital signature** - Always check Ed25519 signatures
+2. **Review Just recipes** - Audit all commands that will execute
+3. **Use dry-run mode** - Preview actions before execution
+4. **Run as non-root** - Never run as root unless absolutely required
+5. **Sandbox when possible** - Use Docker/Firejail for external components
+
+**See:** link:docs/SECURITY-BEST-PRACTICES.adoc[Security Best Practices] for detailed guidance.
+
+**Current Security Status:** Hunt components are **development use only**. Production deployment requires Tier 1-3 security hardening (see link:docs/SECURITY-ROADMAP.adoc[Security Roadmap]).
+====
+
+=== Checking Security Level
+
+[source,bash]
+----
+# Check a single component
+just leash-level examples/deploy.k9.ncl
+
+# List all example security levels
+just leash-list
+----
+
+== Creating Components
+
+=== Kennel Level (Pure Data)
+
+The simplest component - just data with a magic number.
+
+.examples/hello.k9
+[source]
+----
+K9!
+# This is a Kennel-level component
+# Pure data, no execution
+
+name = "hello-world"
+version = "1.0.0"
+message = "Hello from K9!"
+----
+
+=== Yard Level (Nickel Validation)
+
+Components with typed contracts. Nickel evaluates them safely.
+
+.examples/config.k9.ncl
+[source,nickel]
+----
+let pedigree = import "../pedigree.ncl" in
+
+let component_pedigree = {
+  metadata = {
+    name = "example-config",
+    version = "1.0.0",
+    breed = "application/vnd.k9+nickel",
+    magic_number = "K9!",
+  },
+  security = {
+    trust_level = 'Yard,  # <-- Yard level
+    allow_network = false,
+    allow_filesystem_write = false,
+  },
+  # ... rest of pedigree
+} in
+
+# Configuration with contracts
+let config = {
+  database | {
+    host | String | default = "localhost",
+    port | std.contract.from_predicate (fun p => p > 0 && p < 65536),
+    name | String,
+  } = {
+    host = "db.example.com",
+    port = 5432,
+    name = "myapp",
+  },
+} in
+
+{ pedigree = component_pedigree, config = config }
+----
+
+Validate with:
+
+[source,bash]
+----
+nickel typecheck examples/config.k9.ncl
+just show-config  # Export as JSON
+----
+
+=== Hunt Level (Full Execution)
+
+[CAUTION]
+====
+**⚠️ DANGER ZONE: Hunt-level components have unrestricted system access.**
+
+Hunt components can:
+
+- Execute arbitrary shell commands
+- Modify any file on the system
+- Access network resources
+- Install software packages
+- Change system configuration
+
+**REQUIRED before running Hunt components:**
+
+1. ✅ **Signature verified** - `./must verify component.k9.ncl`
+2. ✅ **Signing key trusted** - Verify fingerprint from 3+ independent sources
+3. ✅ **Code reviewed** - Read every line of Just recipes
+4. ✅ **Dry-run tested** - `./must --dry-run deploy component.k9.ncl`
+5. ✅ **Running as non-root** - Unless absolutely required
+
+**See:** link:docs/SECURITY-BEST-PRACTICES.adoc[Security Best Practices] - Security checklist for Hunt components.
+====
+
+Components that can execute recipes. **Requires cryptographic signature.**
+
+.examples/deploy.k9.ncl
+[source,nickel]
+----
+let pedigree = import "../pedigree.ncl" in
+
+{
+  metadata = {
+    name = "deployment-component",
+    version = "1.0.0",
+  },
+  security = {
+    trust_level = 'Hunt,  # <-- Hunt level (DANGEROUS)
+    allow_network = true,
+    allow_filesystem_write = true,
+    allow_subprocess = true,
+  },
+  validation = {
+    hunt_authorized = true,  # Must be signed!
+    signature = "YOUR_SIGNATURE_HERE",
+  },
+  recipes = {
+    deploy = "podman run --rm k9-svc:latest",
+    rollback = "echo 'Rolling back...'",
+  },
+}
+----
+
+== Signing and Verification
+
+Hunt-level components must be cryptographically signed before execution.
+
+image::signing-workflow.svg[Ed25519 Signing Workflow,800]
+
+=== Generate Keys
+
+[source,bash]
+----
+# Generate a keypair
+just keygen alice
+
+# Keys stored in:
+#   ~/.config/k9/keys/alice.key (private - keep secret!)
+#   ~/.config/k9/keys/alice.pub (public - share this)
+
+# List all keys
+just list-keys
+----
+
+=== Sign a Component
+
+[source,bash]
+----
+# Sign with your key
+just sign examples/deploy.k9.ncl alice
+
+# Creates: examples/deploy.k9.ncl.sig
+# Also outputs signature for embedding in pedigree
+----
+
+=== Trust a Public Key
+
+Recipients must trust the signer's public key:
+
+[source,bash]
+----
+# Add to trusted keys
+just trust /path/to/alice.pub
+
+# Trusted keys stored in:
+#   ~/.config/k9/keys/trusted/
+----
+
+=== Verify Signature
+
+[source,bash]
+----
+# Verify a component
+just verify examples/deploy.k9.ncl
+# Output: ✓ Signature VALID (key: alice)
+----
+
+=== Full Hunt Authorization
+
+[source,bash]
+----
+# Check if component is authorized for execution
+just authorize examples/deploy.k9.ncl
+----
+
+This checks:
+
+1. Component declares `trust_level = 'Hunt`
+2. Valid Ed25519 signature exists
+3. Signature matches a trusted public key
+4. `hunt_authorized = true` in pedigree
+
+== MIME Type Setup
+
+K9 registers a custom MIME type so file managers recognize `.k9` files.
+
+=== Linux (Freedesktop)
+
+[source,bash]
+----
+# User-level installation
+just install-mime
+
+# System-wide (requires sudo)
+just install-mime-system
+
+# Install magic file for file(1) command
+just install-magic
+
+# Verify
+file examples/hello.k9
+# Output: examples/hello.k9: K9 Self-Validating Component
+----
+
+=== macOS
+
+[source,bash]
+----
+# Install UTI definition
+just install-uti
+
+# May require logout/login to take effect
+----
+
+== Container Deployment
+
+K9 includes Podman/Docker support for containerized deployment.
+
+=== Build Container
+
+[source,bash]
+----
+# Build the container image
+just build-container
+
+# Run interactively
+just run-container status
+
+# Run dogfood test in container
+just run-container dogfood
+----
+
+=== Docker Compose
+
+[source,bash]
+----
+# Start development environment
+podman-compose up -d
+
+# Or with Docker
+docker-compose up -d
+----
+
+== Justfile Reference
+
+=== Environment
+
+[source,bash]
+----
+just                  # Show status (default)
+just status           # K9 environment report
+just ensure           # Install missing tools
+just check-deps       # Verify all dependencies
+----
+
+=== Validation
+
+[source,bash]
+----
+just typecheck        # Typecheck all schemas
+just validate FILE    # Validate a component
+just validate-all     # Full validation suite
+----
+
+=== Security
+
+[source,bash]
+----
+just leash-level FILE # Check security level
+just leash-list       # List all example levels
+just keygen NAME      # Generate keypair
+just sign FILE NAME   # Sign component
+just verify FILE      # Verify signature
+just authorize FILE   # Full Hunt authorization
+just trust PUBKEY     # Add trusted key
+just list-keys        # Show all keys
+----
+
+=== MIME
+
+[source,bash]
+----
+just install-mime     # User-level MIME
+just install-magic    # Magic file for file(1)
+just install-uti      # macOS UTI
+just verify-mime      # Check registration
+just setup-mime       # Full MIME setup
+just uninstall-mime   # Remove MIME types
+----
+
+=== Container
+
+[source,bash]
+----
+just build-container  # Build image
+just run-container    # Run interactively
+just deploy-podman    # Deploy via Podman
+just deploy-native    # Deploy without container
+just deploy           # Auto-select method
+----
+
+=== Development
+
+[source,bash]
+----
+just fmt              # Format Nickel files
+just repl             # Nickel REPL with pedigree
+just export-schema    # Export pedigree as JSON
+just export-leash     # Export leash levels as JSON
+just docs             # Generate HTML docs
+just test             # Run test suite
+just test-quick       # Quick validation only
+just dogfood          # Self-validation test
+just clean            # Remove generated files
+----
+
+== Troubleshooting
+
+=== "Nickel not found"
+
+Install Nickel from https://nickel-lang.org/getting-started/
+
+[source,bash]
+----
+# Check version
+nickel --version
+----
+
+=== "Signature verification failed"
+
+1. Ensure the signer's public key is trusted:
++
+[source,bash]
+----
+just trust /path/to/signer.pub
+just list-keys
+----
+
+2. Ensure the .sig file exists alongside the component
+
+3. Check OpenSSL supports Ed25519:
++
+[source,bash]
+----
+openssl genpkey -algorithm Ed25519 -out /dev/null
+----
+
+=== MIME type not recognized
+
+[source,bash]
+----
+# Refresh MIME database
+update-mime-database ~/.local/share/mime
+
+# Check registration
+xdg-mime query filetype examples/hello.k9
+----
+
+=== Container build fails
+
+[source,bash]
+----
+# Ensure Podman is installed
+podman --version
+
+# Or use Docker
+DOCKER_HOST=unix:///var/run/docker.sock just build-container
+----
+
+== Architecture Deep Dive
+
+=== Pedigree Schema
+
+Every K9 component has a **pedigree** - a self-description declaring:
+
+* **metadata** - name, version, breed (MIME type), description
+* **target** - OS, edge deployment, resource requirements
+* **security** - trust level, allowed capabilities
+* **validation** - checksum, signature, authorization status
+* **recipes** - install, validate, deploy, migrate commands
+
+See `pedigree.ncl` for the full schema with contracts.
+
+=== File Extensions
+
+[cols="1,2,2"]
+|===
+| Extension | Meaning | Security Level
+
+| `.k9`
+| Pure data component
+| 'Kennel
+
+| `.k9.ncl`
+| Nickel component (needs evaluation)
+| 'Yard or 'Hunt
+
+| `.k9.ncl.sig`
+| Detached signature
+| (accompanies 'Hunt components)
+|===
+
+=== Key Storage
+
+[source]
+----
+~/.config/k9/
+├── keys/
+│   ├── primary.key      # Your private key
+│   ├── primary.pub      # Your public key
+│   └── trusted/         # Trusted public keys
+│       ├── alice.pub
+│       └── bob.pub
+----
+
+== License
+
+K9 SVC is licensed under AGPL-3.0-or-later. See LICENSE for details.
