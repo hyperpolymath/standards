@@ -1,0 +1,600 @@
+= K9-SVC Optimization Guide
+:toc: preamble
+:toclevels: 2
+:icons: font
+
+Practical optimization strategies for improving K9-SVC performance based on real-world benchmarks and profiling.
+
+== Benchmark Results
+
+=== Current Performance (2026-01-30)
+
+**System:** Linux 6.18.7-200.fc43.x86_64
+
+[cols="3,1,2"]
+|===
+|Operation |Time |Assessment
+
+|`must status`
+|13.76ms
+|✅ Good (feels instant)
+
+|`must --version`
+|13.38ms
+|✅ Good
+
+|`must --help`
+|12.30ms
+|✅ Good
+
+|`k9-scan` (small file)
+|34.45ms
+|✅ Acceptable
+|===
+
+**Key Finding:** All core operations complete in <50ms, meeting our "feels instant" target.
+
+== Optimization Priorities
+
+Based on profiling and usage patterns:
+
+[cols="1,2,1,1"]
+|===
+|Priority |Optimization |Impact |Effort
+
+|**P0**
+|Cache must OS detection
+|10-20% faster
+|Low
+
+|**P1**
+|Optimize k9-scan regex patterns
+|20-30% faster
+|Medium
+
+|**P2**
+|Add Nickel evaluation cache
+|10x faster (repeated)
+|High
+
+|**P3**
+|Batch k9-sign operations
+|50% faster (bulk)
+|Medium
+
+|**P4**
+|Parallel k9-scan checks
+|2x faster
+|High
+|===
+
+== P0: Cache must OS Detection
+
+**Current:** OS detection runs on every invocation (~2-3ms overhead)
+
+**Problem:**
+
+[source,bash]
+----
+# Called on every must invocation
+detect_os() {
+    case "$(uname -s)" in
+        Linux*)   OS="linux" ;;
+        Darwin*)  OS="macos" ;;
+        # ...
+    esac
+}
+----
+
+**Solution:** Cache detection result in memory variable
+
+[source,bash]
+----
+# Cache OS detection (only run once per shell session)
+if [ -z "$K9_OS" ]; then
+    case "$(uname -s)" in
+        Linux*)   export K9_OS="linux" ;;
+        Darwin*)  export K9_OS="macos" ;;
+        # ...
+    esac
+fi
+----
+
+**Expected improvement:** 10-20% faster (13.76ms → 11-12ms)
+
+**Risk:** Very low (OS doesn't change during session)
+
+== P1: Optimize k9-scan Regex Patterns
+
+**Current:** k9-scan uses 8 grep-based checks sequentially (~34ms total)
+
+**Problem:** Multiple file reads, inefficient regex patterns
+
+**Solution 1:** Combine patterns into single pass
+
+[source,bash]
+----
+# Before: 8 separate grep calls
+grep -q "suspicious" "$COMPONENT" && error "..."
+grep -q "dangerous" "$COMPONENT" && error "..."
+# ...
+
+# After: Single awk pass with all patterns
+awk '
+    /suspicious/ { found[1]=1 }
+    /dangerous/  { found[2]=1 }
+    # ...
+    END {
+        if (found[1]) print "ERROR:suspicious"
+        if (found[2]) print "ERROR:dangerous"
+        # ...
+    }
+' "$COMPONENT"
+----
+
+**Expected improvement:** 20-30% faster (34.45ms → 24-27ms)
+
+**Solution 2:** Use ripgrep (rg) if available
+
+[source,bash]
+----
+if command -v rg >/dev/null 2>&1; then
+    # ripgrep is 2-10x faster than grep
+    rg --no-heading --color=never -e 'pattern1|pattern2|...' "$COMPONENT"
+else
+    # fallback to grep
+    grep -E 'pattern1|pattern2|...' "$COMPONENT"
+fi
+----
+
+**Expected improvement:** 50-70% faster with ripgrep (34.45ms → 10-17ms)
+
+== P2: Nickel Evaluation Cache
+
+**Current:** Every Nickel evaluation invokes `nickel export` (~50-200ms)
+
+**Problem:** Repeated evaluations of unchanged configs
+
+**Solution:** Hash-based cache with TTL
+
+[source,bash]
+----
+evaluate_nickel_cached() {
+    local file="$1"
+    local cache_dir="${K9_CACHE_DIR:-$HOME/.cache/k9-svc/eval}"
+    local file_hash=$(sha256sum "$file" | cut -d' ' -f1)
+    local cache_file="$cache_dir/$file_hash.json"
+    local max_age_seconds=86400  # 24 hours
+
+    mkdir -p "$cache_dir"
+
+    # Check cache freshness
+    if [ -f "$cache_file" ]; then
+        local cache_age=$(($(date +%s) - $(stat -c %Y "$cache_file")))
+        if [ $cache_age -lt $max_age_seconds ]; then
+            cat "$cache_file"
+            return 0
+        fi
+    fi
+
+    # Cache miss or stale - evaluate and cache
+    nickel export "$file" | tee "$cache_file"
+}
+----
+
+**Expected improvement:** 10-50x faster for cached evals (200ms → 4-20ms)
+
+**Cache invalidation:**
+- File modification time
+- Nickel version change
+- Manual: `K9_CACHE=0 ./must run recipe`
+
+== P3: Batch k9-sign Operations
+
+**Current:** Sign files one at a time in separate processes
+
+**Problem:** Process startup overhead dominates for small files
+
+**Solution:** Add batch mode to k9-sign
+
+[source,rust]
+----
+// k9-sign/src/main.rs
+fn cmd_sign_batch(files: &[PathBuf], key_name: &str) -> Result<()> {
+    // Load key once
+    let signing_key = load_signing_key(key_name)?;
+
+    // Sign all files in single process
+    for file in files {
+        let data = fs::read(file)?;
+        let signature = signing_key.sign(&data);
+        let sig_path = file.with_extension("sig");
+        fs::write(&sig_path, signature.to_bytes())?;
+        println!("Signed: {}", file.display());
+    }
+
+    Ok(())
+}
+----
+
+**Usage:**
+
+[source,bash]
+----
+# Before: 100 process invocations
+for file in *.k9.ncl; do
+    k9-sign sign "$file" mykey
+done
+
+# After: 1 process invocation
+k9-sign sign-batch --files *.k9.ncl --key mykey
+----
+
+**Expected improvement:** 30-50% faster for bulk operations
+
+== P4: Parallel k9-scan Checks
+
+**Current:** 8 security checks run sequentially
+
+**Problem:** Checks are independent but run serially
+
+**Solution:** Parallel execution with background jobs
+
+[source,bash]
+----
+# k9-scan (parallel version)
+
+check_suspicious_files() {
+    # ... check logic ...
+} &
+
+check_dangerous_commands() {
+    # ... check logic ...
+} &
+
+check_network_exfiltration() {
+    # ... check logic ...
+} &
+
+# Wait for all background checks
+wait
+
+# Collect and report results
+----
+
+**Expected improvement:** 1.5-2x faster on multi-core systems (34ms → 17-23ms)
+
+**Risk:** Race conditions if checks share state (need careful design)
+
+== Optimization Checklist
+
+=== must Script
+
+- [x] Minimize subshells
+- [x] Cache command existence checks
+- [ ] Cache OS detection in env var
+- [ ] Lazy-load Just/Nickel checks
+- [ ] Use builtin commands instead of external tools
+
+=== k9-scan
+
+- [x] Single-pass file reading
+- [ ] Combine regex patterns
+- [ ] Use ripgrep if available
+- [ ] Parallel independent checks
+- [ ] Early exit on critical findings
+- [ ] Incremental scanning (only changed files)
+
+=== k9-sign
+
+- [x] Release build with LTO
+- [x] Strip debug symbols
+- [x] Optimize for size (`opt-level = "z"`)
+- [ ] Batch signing mode
+- [ ] Memory-mapped I/O for large files
+- [ ] SIMD acceleration (if available)
+
+=== Nickel Evaluation
+
+- [ ] Hash-based evaluation cache
+- [ ] TTL-based cache invalidation
+- [ ] Parallel contract evaluation
+- [ ] Lazy field evaluation
+- [ ] AOT compilation (future)
+
+== Performance Regression Prevention
+
+=== Automated Benchmarks
+
+Add to CI pipeline:
+
+[source,yaml]
+----
+# .github/workflows/performance.yml
+name: Performance Regression
+
+on:
+  pull_request:
+    paths:
+      - 'must'
+      - 'k9-sign/**'
+      - 'k9-scan'
+      - 'benchmarks/**'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need history for comparison
+
+      - name: Checkout baseline (main branch)
+        run: |
+          git fetch origin main:main
+          git worktree add baseline main
+
+      - name: Run baseline benchmarks
+        run: |
+          cd baseline
+          ./benchmarks/quick-bench.sh > ../baseline-results.txt
+
+      - name: Run PR benchmarks
+        run: ./benchmarks/quick-bench.sh > pr-results.txt
+
+      - name: Compare results
+        run: |
+          ./benchmarks/compare-results.sh baseline-results.txt pr-results.txt
+          # Fail if any operation is >10% slower
+----
+
+=== Performance Budgets
+
+**Hard limits (CI fails if exceeded):**
+
+[cols="2,1,2"]
+|===
+|Operation |Budget |Rationale
+
+|must status
+|<20ms
+|User-facing, must feel instant
+
+|k9-sign sign 1MB
+|<50ms
+|Security-critical but acceptable
+
+|k9-scan small file
+|<50ms
+|Batch operation, less sensitive
+|===
+
+**Soft limits (warning only):**
+
+[cols="2,1"]
+|===
+|Operation |Warning Threshold
+
+|must --help
+|>15ms
+
+|k9-scan medium file
+|>100ms
+
+|Nickel eval (uncached)
+|>300ms
+|===
+
+== Profiling Techniques
+
+=== Shell Script Profiling
+
+**Method 1: Bash built-in timing**
+
+[source,bash]
+----
+# Enable timing
+PS4='+ $(date "+%s.%N") ${BASH_SOURCE}:${LINENO}: ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
+set -x
+
+./must run recipe
+
+set +x
+----
+
+**Method 2: strace**
+
+[source,bash]
+----
+# Profile system calls
+strace -c ./must status
+
+# Output shows:
+# - syscall counts
+# - time spent in each syscall
+# - most expensive operations
+----
+
+**Method 3: time with granularity**
+
+[source,bash]
+----
+# GNU time with detailed output
+/usr/bin/time -v ./must status
+
+# Output includes:
+# - User time
+# - System time
+# - Max resident set size
+# - Page faults
+----
+
+=== Rust Profiling (k9-sign)
+
+**Method 1: cargo flamegraph**
+
+[source,bash]
+----
+cd k9-sign
+cargo install flamegraph
+
+# Generate flamegraph
+cargo flamegraph --bin k9-sign -- sign test.bin mykey
+
+# Opens flamegraph.svg in browser
+----
+
+**Method 2: perf**
+
+[source,bash]
+----
+# Build with debug symbols
+cargo build --release
+
+# Profile with perf
+perf record --call-graph dwarf ./target/release/k9-sign sign test.bin mykey
+perf report
+----
+
+**Method 3: criterion benchmarks**
+
+[source,bash]
+----
+cd k9-sign
+
+# Add criterion to Cargo.toml [dev-dependencies]
+# criterion = "0.5"
+
+# Run benchmarks
+cargo bench
+
+# HTML report at target/criterion/report/index.html
+----
+
+== Implementation Plan
+
+=== Phase 1: Quick Wins (Week 1)
+
+1. ✅ Create benchmark suite
+2. ✅ Document current performance
+3. ⏳ Implement must OS detection cache
+4. ⏳ Optimize k9-scan regex patterns
+
+**Expected:** 15-25% overall speedup
+
+=== Phase 2: Caching (Week 2-3)
+
+1. ⏳ Implement Nickel evaluation cache
+2. ⏳ Add cache invalidation logic
+3. ⏳ Test cache correctness
+4. ⏳ Document cache behavior
+
+**Expected:** 10-50x speedup for repeated operations
+
+=== Phase 3: Batch Operations (Week 4-5)
+
+1. ⏳ Add batch mode to k9-sign
+2. ⏳ Update documentation
+3. ⏳ Add tests for batch operations
+4. ⏳ Optimize for batch use cases
+
+**Expected:** 30-50% speedup for bulk operations
+
+=== Phase 4: Parallelization (Month 2)
+
+1. ⏳ Parallel k9-scan checks
+2. ⏳ Parallel Nickel contract evaluation
+3. ⏳ Parallel organization scanning
+4. ⏳ Load testing and stability
+
+**Expected:** 1.5-2x speedup on multi-core systems
+
+== Monitoring Performance
+
+=== Add Performance Metrics
+
+**Option 1: Structured logging**
+
+[source,bash]
+----
+# must script
+log_performance() {
+    local operation="$1"
+    local duration_ms="$2"
+
+    if [ "${K9_PERF_LOG:-}" = "1" ]; then
+        echo "{\"op\":\"$operation\",\"ms\":$duration_ms,\"ts\":$(date +%s)}" \
+            >> "$HOME/.k9-perf.jsonl"
+    fi
+}
+
+# Usage
+start=$(date +%s%3N)
+./must run recipe
+end=$(date +%s%3N)
+log_performance "must_run_recipe" $((end - start))
+----
+
+**Option 2: Prometheus metrics**
+
+[source,rust]
+----
+// k9-sign
+use prometheus::{Counter, Histogram};
+
+lazy_static! {
+    static ref SIGN_DURATION: Histogram = register_histogram!(
+        "k9_sign_duration_seconds",
+        "Time to sign a file"
+    ).unwrap();
+
+    static ref SIGN_COUNT: Counter = register_counter!(
+        "k9_sign_total",
+        "Total files signed"
+    ).unwrap();
+}
+
+// In signing function
+let timer = SIGN_DURATION.start_timer();
+// ... perform signing ...
+timer.observe_duration();
+SIGN_COUNT.inc();
+----
+
+=== Performance Dashboard
+
+Create simple dashboard:
+
+[source,bash]
+----
+# benchmarks/dashboard.sh
+#!/bin/bash
+
+echo "K9-SVC Performance Dashboard"
+echo ""
+
+# Latest benchmark results
+if [ -f "results/latest.json" ]; then
+    echo "Latest Benchmarks:"
+    jq -r '.benchmarks[] | "\(.name): \(.avg_ms)ms"' results/latest.json
+fi
+
+echo ""
+
+# Historical trend
+echo "Performance Trend (last 7 days):"
+find results/ -name "benchmark-*.json" -mtime -7 \
+    | xargs jq -r '.benchmarks[] | select(.name=="must_status") | .avg_ms' \
+    | awk '{sum+=$1; count++} END {print "Average must status:", sum/count, "ms"}'
+----
+
+== Conclusion
+
+K9-SVC's current performance is **good** for most use cases, with all operations completing in <50ms. The optimization opportunities identified here can improve performance by 20-100% depending on usage patterns, while maintaining security guarantees.
+
+**Key takeaway:** Optimize where it matters (user-facing operations, bulk tasks), but never compromise security for speed.
+
+---
+
+**Last updated:** 2026-01-30
+**Benchmarks:** Fedora Linux 43, Intel/AMD64

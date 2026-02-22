@@ -1,0 +1,173 @@
+(*
+  {{ ProjectName }}_Bijection.thy
+
+  Bijection invariant proofs for {{ project-name }}.
+
+  Bijections ensure one-to-one mappings between sets.
+  Essential for ID remapping, renaming, encoding/decoding.
+
+  Part of Rhodium Pipeline Template methodology.
+*)
+
+theory {{ ProjectName }}_Bijection
+  imports {{ ProjectName }}_Prelude
+begin
+
+section \<open>Bijection Definition\<close>
+
+text \<open>
+  A bijection between sets A and B is a function that is both
+  injective (one-to-one) and surjective (onto).
+\<close>
+
+definition is_bijection :: "('a \<Rightarrow> 'b) \<Rightarrow> 'a set \<Rightarrow> 'b set \<Rightarrow> bool" where
+  "is_bijection f A B \<equiv> bij_betw f A B"
+
+text \<open>Bijection for finite sets.\<close>
+
+definition is_fbijection :: "('a \<Rightarrow> 'b) \<Rightarrow> 'a fset \<Rightarrow> 'b fset \<Rightarrow> bool" where
+  "is_fbijection f A B \<equiv> bij_betw f (fset A) (fset B)"
+
+section \<open>Fundamental Bijection Theorems\<close>
+
+text \<open>Bijections preserve cardinality.\<close>
+
+theorem bijection_preserves_card:
+  assumes "is_fbijection f A B"
+  shows "fcard A = fcard B"
+  using assms unfolding is_fbijection_def
+  by (simp add: bij_betw_same_card)
+
+text \<open>Bijections have inverses.\<close>
+
+theorem bijection_has_inverse:
+  assumes "is_bijection f A B"
+  shows "\<exists>g. is_bijection g B A \<and> (\<forall>a \<in> A. g (f a) = a) \<and> (\<forall>b \<in> B. f (g b) = b)"
+proof -
+  from assms have "bij_betw f A B"
+    unfolding is_bijection_def by simp
+
+  define g where "g = the_inv_into A f"
+
+  have "bij_betw g B A"
+    using \<open>bij_betw f A B\<close> bij_betw_the_inv_into by blast
+
+  moreover have "\<forall>a \<in> A. g (f a) = a"
+    using \<open>bij_betw f A B\<close> g_def bij_betw_imp_inj_on the_inv_into_f_f by fastforce
+
+  moreover have "\<forall>b \<in> B. f (g b) = b"
+    using \<open>bij_betw f A B\<close> g_def f_the_inv_into_f bij_betw_imp_surj_on by blast
+
+  ultimately show ?thesis
+    unfolding is_bijection_def by blast
+qed
+
+text \<open>Composition of bijections is a bijection.\<close>
+
+theorem bijection_compose:
+  assumes "is_bijection f A B"
+  assumes "is_bijection g B C"
+  shows "is_bijection (g \<circ> f) A C"
+  using assms unfolding is_bijection_def
+  by (simp add: bij_betw_trans)
+
+section \<open>Record ID Remapping\<close>
+
+text \<open>
+  Model ID remapping as a bijection on identifiers.
+\<close>
+
+definition remap_ids :: "(identifier \<Rightarrow> identifier) \<Rightarrow> dataset \<Rightarrow> dataset" where
+  "remap_ids f ds = fimage (\<lambda>(id, data). (f id, data)) ds"
+
+text \<open>ID remapping with a bijection preserves dataset structure.\<close>
+
+theorem remap_preserves_structure:
+  assumes "wf_dataset ds"
+  assumes "is_fbijection f (fimage fst ds) B"
+  shows "wf_dataset (remap_ids f ds)"
+proof -
+  from assms(2) have inj: "inj_on f (fset (fimage fst ds))"
+    unfolding is_fbijection_def bij_betw_def by simp
+
+  have "inj_on fst (fset (remap_ids f ds))"
+  proof (rule inj_onI)
+    fix x y
+    assume "x \<in> fset (remap_ids f ds)" "y \<in> fset (remap_ids f ds)"
+    assume "fst x = fst y"
+
+    from \<open>x \<in> fset (remap_ids f ds)\<close>
+    obtain id1 data1 where x_def: "x = (f id1, data1)" "(id1, data1) |\<in>| ds"
+      unfolding remap_ids_def by auto
+
+    from \<open>y \<in> fset (remap_ids f ds)\<close>
+    obtain id2 data2 where y_def: "y = (f id2, data2)" "(id2, data2) |\<in>| ds"
+      unfolding remap_ids_def by auto
+
+    from \<open>fst x = fst y\<close> x_def y_def have "f id1 = f id2"
+      by simp
+
+    with inj x_def(2) y_def(2) have "id1 = id2"
+      by (metis fimageI fst_conv inj_onD notin_fset)
+
+    with assms(1) x_def(2) y_def(2) have "(id1, data1) = (id2, data2)"
+      unfolding wf_dataset_def record_id_def by auto
+
+    with x_def y_def show "x = y" by simp
+  qed
+
+  thus ?thesis
+    by (simp add: wf_dataset_alt remap_ids_def record_id_def)
+qed
+
+theorem remap_preserves_card:
+  assumes "is_fbijection f (fimage fst ds) B"
+  shows "fcard (remap_ids f ds) = fcard ds"
+  using assms unfolding remap_ids_def is_fbijection_def
+  by (simp add: fcard_fimage_inj bij_betw_imp_inj_on)
+
+section \<open>Encoding/Decoding\<close>
+
+text \<open>
+  Model encoding and decoding as inverse bijections.
+\<close>
+
+definition valid_codec ::
+  "('a \<Rightarrow> 'b) \<Rightarrow> ('b \<Rightarrow> 'a) \<Rightarrow> 'a set \<Rightarrow> 'b set \<Rightarrow> bool" where
+  "valid_codec encode decode A B \<equiv>
+    is_bijection encode A B \<and>
+    (\<forall>a \<in> A. decode (encode a) = a) \<and>
+    (\<forall>b \<in> B. encode (decode b) = b)"
+
+theorem codec_roundtrip:
+  assumes "valid_codec encode decode A B"
+  assumes "a \<in> A"
+  shows "decode (encode a) = a"
+  using assms unfolding valid_codec_def by simp
+
+theorem codec_inverse_roundtrip:
+  assumes "valid_codec encode decode A B"
+  assumes "b \<in> B"
+  shows "encode (decode b) = b"
+  using assms unfolding valid_codec_def by simp
+
+section \<open>Identifier Normalization\<close>
+
+text \<open>
+  Sometimes we need to map arbitrary identifiers to a canonical form.
+\<close>
+
+definition normalize_ids :: "dataset \<Rightarrow> (identifier \<times> identifier) fset \<times> dataset" where
+  "normalize_ids ds = (
+    let ids = sorted_list_of_fset (fimage fst ds) in
+    let mapping = fset_of_list (zip ids (map (\<lambda>i. ''id_'' @ show i) [0..<length ids])) in
+    let new_ds = remap_ids (\<lambda>id. snd (the (ffilter (\<lambda>(old,_). old = id) mapping))) ds in
+    (mapping, new_ds)
+  )"
+
+theorem normalize_creates_bijection:
+  assumes "wf_dataset ds"
+  shows "\<exists>f. is_fbijection f (fimage fst ds) (fimage fst (snd (normalize_ids ds)))"
+  sorry \<comment> \<open>Proof depends on sorted_list_of_fset properties\<close>
+
+end

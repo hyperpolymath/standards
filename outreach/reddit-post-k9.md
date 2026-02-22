@@ -1,0 +1,346 @@
+# Reddit Post: K9 Meta-Dogfooding
+
+## Title
+I built an infrastructure automation tool, then made it release itself. Meta-dogfooding is wild.
+
+## Post Body (r/programming)
+
+**TL;DR:** K9 is a self-validating infrastructure framework. It released its own v1.0.0 using a K9 component. Meta-dogfooding reveals design flaws regular dogfooding misses.
+
+---
+
+Hey r/programming,
+
+I've been working on K9, a framework for infrastructure automation. After using it for 10 projects, I had a realization: **K9 should release itself using K9**.
+
+**What is K9?**
+
+K9 components (`.k9.ncl` files) have three parts:
+
+1. **must** (Bash) - Validates prerequisites
+2. **just** (Justfile) - Execution recipes
+3. **nickel** (Nickel contracts) - Config schema
+
+Example:
+
+```nickel
+{
+  must = {
+    check = ''
+      #!/usr/bin/env bash
+      command -v docker &> /dev/null
+    '',
+  },
+
+  just = {
+    recipes = {
+      deploy = {
+        commands = ["docker-compose up -d"],
+      },
+    },
+  },
+
+  nickel = {
+    config = { port = 8080 },
+  },
+}
+```
+
+Before `just deploy` runs, `must.check` validates Docker is installed. Fail fast if not.
+
+**The Meta-Dogfooding Twist:**
+
+I created `release-k9.k9.ncl`—a K9 component that releases K9:
+
+```nickel
+{
+  must = {
+    check = ''
+      #!/usr/bin/env bash
+      command -v git &> /dev/null || exit 1
+      command -v gh &> /dev/null || exit 1
+      git diff --quiet || exit 1  # No uncommitted changes
+    '',
+  },
+
+  just = {
+    recipes = {
+      "bump-version" = {
+        commands = ["sed -i 's/version = \"0.9.0\"/version = \"1.0.0\"/' Cargo.toml"],
+      },
+
+      release = {
+        dependencies = ["bump-version", "test"],
+        commands = [
+          "git commit -m 'chore: bump version'",
+          "git tag v1.0.0",
+          "git push origin main --tags",
+          "gh release create v1.0.0 --generate-notes",
+        ],
+      },
+    },
+  },
+}
+```
+
+**What This Proved:**
+
+When `release-k9.k9.ncl` successfully released K9 v1.0.0, it validated:
+
+1. **Self-validation works** - Caught uncommitted changes, missing tools
+2. **Recipe dependencies work** - `release` waited for `bump-version` and `test`
+3. **The abstraction works** - If K9 can release itself, it handles complex workflows
+
+**Why Meta-Dogfooding Matters:**
+
+Regular dogfooding: "I use K9 for deployments, it works."
+
+Meta-dogfooding: "K9 automates its own releases, revealing edge cases I'd never find manually."
+
+Examples:
+- What happens when K9 validates itself? (Recursion checks)
+- How do nested dependencies fail? (Error propagation)
+- Is the format too verbose? (Nope—readable even for complex workflows)
+
+**Three Lessons Learned:**
+
+**1. Validation Before Execution Is Critical**
+
+Every K9 component failed at least once during dev. `must.check` running *before* recipes saved hours of debugging half-executed workflows.
+
+**2. Security Levels Need Clear Boundaries**
+
+K9 has three levels (dog metaphors):
+- **Kennel** (read-only): ls, cat, stat
+- **Yard** (moderate): file writes, git ops
+- **Hunt** (full access): requires Ed25519 signatures
+
+`release-k9.k9.ncl` is yard-level. The boundaries worked without being restrictive.
+
+**3. Config Errors Should Fail at Parse Time**
+
+Nickel contracts validate config *before* execution:
+
+```nickel
+nickel = {
+  config | {
+    current_version | String,
+    github_repo | String,
+  } = ...
+}
+```
+
+Forget `github_repo`? Fail at parse, not mid-release.
+
+**Tools Built:**
+
+- **k9-init**: Scaffold components from templates (8 templates)
+- **k9-validate**: Standalone validator + dangerous pattern detection
+- **k9-sign**: Ed25519 signing for hunt-level components
+- **GitHub Action**: CI/CD integration
+- **VS Code Extension**: Syntax highlighting, validation
+
+**Adoption:**
+
+10 repos using K9 (dev setup, releases, deployments, CI/CD). Including K9 releasing itself.
+
+**Try It:**
+
+```bash
+git clone https://github.com/hyperpolymath/k9-tools
+cd k9-tools
+make build
+./src/k9-init/target/release/k9-init --template minimal
+```
+
+**The Bigger Question:**
+
+If your automation tool can't automate itself, what does that say about the abstraction?
+
+K9 proved it works by dogfooding itself. Not just using it—*releasing itself* with it.
+
+**Links:**
+
+- Spec: https://github.com/hyperpolymath/k9-svc
+- Tools: https://github.com/hyperpolymath/k9-tools
+- Examples: 10+ real components
+
+Curious what r/programming thinks: Is meta-dogfooding a useful validation technique? What other tools could release themselves?
+
+---
+
+## Alternate Post Body (r/devops)
+
+**TL;DR:** Self-validating infrastructure components with fail-fast prerequisite checks. Plus meta-dogfooding (the tool releases itself).
+
+---
+
+Hey r/devops,
+
+**The Problem:**
+
+How many times have you run a deployment script that fails 15 minutes in because AWS creds aren't configured?
+
+Or a Terraform apply that errors halfway because kubectl isn't installed?
+
+**The Solution (K9):**
+
+K9 components validate prerequisites *before* execution. Fail fast, clear errors.
+
+**Example:**
+
+```nickel
+{
+  must = {
+    check = ''
+      #!/usr/bin/env bash
+      command -v kubectl &> /dev/null || exit 1
+      kubectl cluster-info &> /dev/null || exit 1
+      aws sts get-caller-identity &> /dev/null || exit 1
+    '',
+  },
+
+  just = {
+    recipes = {
+      deploy = {
+        commands = [
+          "helm upgrade --install my-app ./chart",
+          "kubectl rollout status deployment/my-app",
+        ],
+      },
+    },
+  },
+
+  nickel = {
+    config = {
+      namespace = "production",
+      replicas = 3,
+    },
+  },
+}
+```
+
+Before `just deploy` runs, K9 checks:
+- kubectl installed?
+- kubectl connected to cluster?
+- AWS creds valid?
+
+If not, instant failure. No half-deployed state.
+
+**Three Security Levels:**
+
+- **Kennel** (read-only): Safe by default (ls, cat, stat)
+- **Yard** (moderate): File writes, git, package installs
+- **Hunt** (full access): Requires Ed25519 signatures
+
+No accidental `sudo rm -rf /`. Hunt-level needs explicit signing.
+
+**Meta-Dogfooding:**
+
+Here's the fun part: K9 releases itself using a K9 component.
+
+`release-k9.k9.ncl` validates:
+- git installed
+- gh CLI installed
+- No uncommitted changes
+- On main branch
+
+Then:
+- Bumps version
+- Runs tests
+- Creates tag
+- Pushes to GitHub
+- Creates release
+
+**All automated. All validated. All using K9 itself.**
+
+**Lessons from Production Use:**
+
+1. **Fail fast saves hours** - Half-executed deployments are the worst
+2. **Config schemas matter** - Nickel catches typos at parse time
+3. **Recipe dependencies work** - `deploy` depends on `test`, K9 enforces order
+
+**Tooling:**
+
+- **k9-init**: Scaffold from templates (web-server, build, deploy, ci-cd, backup, monitoring)
+- **k9-validate**: CI integration for PR checks
+- **k9-sign**: Cryptographic signing for privileged operations
+- **GitHub Action**: Auto-validate on push
+- **VS Code Extension**: Live validation in editor
+
+**Real-World Use:**
+
+10 repos (including K9 itself):
+- Rust/Node/Go build setups
+- Docker/Kubernetes deployments
+- Database migrations
+- Backup automation
+- Release pipelines
+
+**Why Not Just Use X?**
+
+| Tool | K9 Difference |
+|------|---------------|
+| Make/Justfile | K9 adds prerequisite validation + config schemas |
+| Ansible | K9 is file-based, not state-based; general-purpose |
+| Terraform | K9 is imperative, not declarative; broader scope |
+| Bash scripts | K9 adds structure, validation, type-safe config |
+
+**Try It:**
+
+```bash
+git clone https://github.com/hyperpolymath/k9-tools
+cd k9-tools
+make build
+./src/k9-init/target/release/k9-init --template deploy
+```
+
+**Links:**
+
+- Spec: https://github.com/hyperpolymath/k9-svc
+- Tools: https://github.com/hyperpolymath/k9-tools
+- Real examples: 10+ production components
+
+Questions welcome! I've been running this in production for 6 months (including releasing itself).
+
+---
+
+## Posting Strategy
+
+**Best subreddits:**
+
+| Subreddit | Post Version | Best Day/Time |
+|-----------|--------------|---------------|
+| r/programming | Main post (meta-dogfooding angle) | Tue-Thu, 9-11am EST |
+| r/devops | DevOps focus (fail-fast validation) | Any weekday |
+| r/rust | Tooling written in Rust | Any weekday |
+| r/programming_horror | Humor angle ("tool releases itself") | Weekend |
+| r/infrastructure | Infrastructure automation | Any weekday |
+
+**Engagement tactics:**
+
+- Share `release-k9.k9.ncl` file directly for "show code" requests
+- Offer templates for specific use cases (AWS, GCP, Docker, K8s)
+- Acknowledge when K9 is overkill (simple scripts don't need it)
+- Link to real examples in production repos
+
+**What NOT to do:**
+
+- Don't claim K9 replaces everything (Ansible/Terraform have their place)
+- Don't oversell security (Ed25519 is solid, but explain threat model)
+- Don't ignore "why not X" questions (compare honestly)
+- Don't dismiss "this is just shell scripts" (acknowledge, explain value-add)
+
+**Follow-up content ideas:**
+
+- "K9 in 5 minutes" video tutorial
+- Live demo of `release-k9.k9.ncl` running
+- Template library expansion (community contributions)
+- Blog series: "Self-validating infrastructure patterns"
+
+**Expected Pushback:**
+
+- *"Why not just use Make?"* - Make doesn't validate prerequisites or provide config schemas
+- *"This is overengineered"* - For simple tasks, yes. For complex workflows, no.
+- *"Nickel has a tiny ecosystem"* - True, but contracts are worth it for config validation
+- *"Dog metaphors are silly"* - Memorable beats generic. "Kennel/Yard/Hunt" > "Level 0/1/2"

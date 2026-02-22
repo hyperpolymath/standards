@@ -1,0 +1,441 @@
+# SPDX-License-Identifier: MPL-2.0-or-later
+# SPDX-FileCopyrightText: 2024-2025 Palimpsest Stewardship Council
+
+openapi: 3.1.0
+info:
+  title: Palimpsest License API
+  version: 0.4.0
+  description: |
+    API for validating and retrieving Palimpsest License metadata.
+
+    The Palimpsest License is a future-proof, layered licensing framework designed for
+    creative work in the age of AI. This API provides endpoints for license validation,
+    metadata retrieval, and compliance checking.
+
+  contact:
+    name: Palimpsest License Team
+    email: hello@palimpsestlicense.org
+    url: https://palimpsestlicense.org
+
+  license:
+    name: Palimpsest-0.4
+    url: https://palimpsestlicense.org/v0.4
+
+servers:
+  - url: https://api.palimpsestlicense.org/v1
+    description: Production server
+  - url: https://staging-api.palimpsestlicense.org/v1
+    description: Staging server
+  - url: http://localhost:3000/v1
+    description: Development server
+
+tags:
+  - name: License
+    description: License information and validation
+  - name: Metadata
+    description: License metadata operations
+  - name: Validation
+    description: Validation and compliance checking
+
+paths:
+  /licenses/{version}:
+    get:
+      tags:
+        - License
+      summary: Get license information
+      description: Retrieve information about a specific version of the Palimpsest License
+      operationId: getLicenseVersion
+      parameters:
+        - name: version
+          in: path
+          required: true
+          description: License version (e.g., "0.4")
+          schema:
+            type: string
+            pattern: '^\d+\.\d+$'
+            example: "0.4"
+        - name: format
+          in: query
+          description: Response format
+          schema:
+            type: string
+            enum: [json, markdown, html, text]
+            default: json
+      responses:
+        '200':
+          description: License information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LicenseInfo'
+        '404':
+          description: License version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /validate/metadata:
+    post:
+      tags:
+        - Validation
+      summary: Validate license metadata
+      description: Validate JSON-LD metadata for Palimpsest License compliance
+      operationId: validateMetadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Metadata'
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /validate/url:
+    post:
+      tags:
+        - Validation
+      summary: Validate URL for license metadata
+      description: Check if a URL contains valid Palimpsest License metadata
+      operationId: validateUrl
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: URL to validate
+                  example: https://example.com
+                checkHtml:
+                  type: boolean
+                  description: Check HTML meta tags
+                  default: true
+                checkJsonLd:
+                  type: boolean
+                  description: Check JSON-LD metadata
+                  default: true
+      responses:
+        '200':
+          description: URL validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UrlValidationResult'
+        '400':
+          description: Invalid URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /metadata/generate:
+    post:
+      tags:
+        - Metadata
+      summary: Generate license metadata
+      description: Generate Palimpsest License metadata in various formats
+      operationId: generateMetadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetadataGenerationRequest'
+      responses:
+        '200':
+          description: Metadata generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedMetadata'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /compliance/check:
+    post:
+      tags:
+        - Validation
+      summary: Check compliance status
+      description: Comprehensive compliance check for Palimpsest License
+      operationId: checkCompliance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - metadata
+              properties:
+                metadata:
+                  $ref: '#/components/schemas/Metadata'
+                strictMode:
+                  type: boolean
+                  description: Enable strict validation
+                  default: false
+      responses:
+        '200':
+          description: Compliance check result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceResult'
+
+components:
+  schemas:
+    LicenseInfo:
+      type: object
+      required:
+        - version
+        - name
+        - identifier
+        - url
+      properties:
+        version:
+          type: string
+          example: "0.4"
+        name:
+          type: string
+          example: "Palimpsest License v0.4"
+        identifier:
+          type: string
+          example: "Palimpsest-0.4"
+        url:
+          type: string
+          format: uri
+          example: "https://palimpsestlicense.org/v0.4"
+        fullText:
+          type: string
+          description: Full license text
+        summary:
+          type: string
+          description: Brief summary of the license
+        features:
+          type: array
+          items:
+            type: string
+          example:
+            - "Emotional lineage protection"
+            - "AGI consent requirements"
+            - "Metadata preservation"
+
+    Metadata:
+      type: object
+      required:
+        - "@type"
+        - license
+        - author
+      properties:
+        "@context":
+          type: string
+          example: "https://schema.org"
+        "@type":
+          type: string
+          enum: [CreativeWork]
+        name:
+          type: string
+          description: Work title
+        license:
+          type: string
+          format: uri
+          description: License URL
+        author:
+          type: object
+          required:
+            - name
+          properties:
+            "@type":
+              type: string
+              enum: [Person, Organization]
+            name:
+              type: string
+            url:
+              type: string
+              format: uri
+        additionalProperty:
+          type: array
+          items:
+            $ref: '#/components/schemas/PropertyValue'
+
+    PropertyValue:
+      type: object
+      required:
+        - "@type"
+        - name
+        - value
+      properties:
+        "@type":
+          type: string
+          enum: [PropertyValue]
+        name:
+          type: string
+          example: "Palimpsest:Version"
+        value:
+          oneOf:
+            - type: string
+            - type: boolean
+            - type: number
+
+    ValidationResult:
+      type: object
+      required:
+        - valid
+        - errors
+        - warnings
+      properties:
+        valid:
+          type: boolean
+          description: Whether metadata is valid
+        errors:
+          type: array
+          items:
+            type: string
+          description: Validation errors
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Validation warnings
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+
+    UrlValidationResult:
+      type: object
+      required:
+        - url
+        - valid
+        - metadataFound
+      properties:
+        url:
+          type: string
+          format: uri
+        valid:
+          type: boolean
+        metadataFound:
+          type: boolean
+        metadata:
+          $ref: '#/components/schemas/Metadata'
+        errors:
+          type: array
+          items:
+            type: string
+        sources:
+          type: array
+          items:
+            type: string
+            enum: [html-meta, jsonld, http-headers]
+
+    MetadataGenerationRequest:
+      type: object
+      required:
+        - workTitle
+        - authorName
+      properties:
+        workTitle:
+          type: string
+        authorName:
+          type: string
+        authorUrl:
+          type: string
+          format: uri
+        emotionalLineage:
+          type: string
+        version:
+          type: string
+          default: "0.4"
+        agiConsentRequired:
+          type: boolean
+          default: true
+        format:
+          type: string
+          enum: [jsonld, html-meta, http-headers, all]
+          default: jsonld
+
+    GeneratedMetadata:
+      type: object
+      properties:
+        jsonld:
+          type: string
+          description: JSON-LD metadata
+        htmlMeta:
+          type: string
+          description: HTML meta tags
+        httpHeaders:
+          type: object
+          additionalProperties:
+            type: string
+          description: HTTP headers
+
+    ComplianceResult:
+      type: object
+      required:
+        - compliant
+        - checks
+      properties:
+        compliant:
+          type: boolean
+        checks:
+          type: object
+          properties:
+            metadataPresent:
+              type: boolean
+            requiredFieldsPresent:
+              type: boolean
+            emotionalLineageDeclared:
+              type: boolean
+            agiConsentSpecified:
+              type: boolean
+        recommendations:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: string
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+        details:
+          type: object
+
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+
+security:
+  - ApiKey: []

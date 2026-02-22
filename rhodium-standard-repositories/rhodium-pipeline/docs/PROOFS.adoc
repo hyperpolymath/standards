@@ -1,0 +1,375 @@
+= Formal Proofs Guide
+:toc: macro
+:toc-title: Contents
+:toclevels: 3
+:sectnums:
+:icons: font
+:source-highlighter: rouge
+
+Guide to the Isabelle/HOL formal proofs in Rhodium Pipeline Template.
+
+toc::[]
+
+== Overview
+
+Rhodium Pipeline Template uses Isabelle/HOL to formally verify structural invariants. This approach follows the principle:
+
+[quote]
+____
+Prove the scaffolding, test the logic.
+____
+
+=== What We Prove
+
+* *Structural invariants* — Data integrity properties that hold regardless of domain
+* *Composition properties* — How invariants combine through pipeline stages
+* *Tolerance bounds* — Mathematical guarantees on ratio computations
+
+=== What We Test
+
+* *Domain logic* — Business rules specific to your application
+* *I/O correctness* — File parsing, network communication
+* *Performance characteristics* — Timing, resource usage
+
+== Theory Structure
+
+=== Dependency Hierarchy
+
+[source]
+----
+Prelude          ← Base types, definitions
+  │
+  ├── Partition  ← Disjoint set properties
+  ├── Bijection  ← One-to-one mappings
+  └── Checksum   ← Integrity verification
+        │
+        ├── Ratio        ← Tolerance bounds
+        ├── Monotonicity ← No silent data loss
+        └── Idempotency  ← Normalization stability
+              │
+              └── Composition ← Combined properties
+                    │
+                    └── Invariants ← Pipeline correctness
+----
+
+=== File Naming Convention
+
+[source]
+----
+proofs/
+├── ROOT                           # Isabelle session configuration
+├── ProjectName_Prelude.thy        # Common definitions
+├── ProjectName_Partition.thy      # Partition proofs
+├── ProjectName_Bijection.thy      # Bijection proofs
+├── ProjectName_Checksum.thy       # Checksum proofs
+├── ProjectName_Ratio.thy          # Ratio tolerance proofs
+├── ProjectName_Monotonicity.thy   # Monotonicity proofs
+├── ProjectName_Idempotency.thy    # Idempotency proofs
+├── ProjectName_Composition.thy    # Composition proofs
+└── ProjectName_Invariants.thy     # Combined invariants
+----
+
+== Core Invariants
+
+=== Partition Invariant
+
+**Property:** Dataset elements belong to exactly one partition.
+
+**Formal Definition:**
+[source,isabelle]
+----
+definition is_partition :: "dataset ⇒ dataset list ⇒ bool" where
+  "is_partition ds parts ≡
+    (⋃ (set (map fset parts)) = fset ds) ∧
+    pairwise_disjoint parts"
+----
+
+**Runtime Check:** `validation.rs:check_partition_invariant()`
+
+**Use Cases:**
+
+* Train/test/validation splits
+* Sharding large datasets
+* Categorization operations
+
+=== Bijection Invariant
+
+**Property:** Mapping between input and output is one-to-one and onto.
+
+**Formal Definition:**
+[source,isabelle]
+----
+definition bijective_stage :: "stage ⇒ bool" where
+  "bijective_stage f ≡
+    ∀ds. (∃g. ∀r. r |∈| ds ⟷ r |∈| g (f ds))"
+----
+
+**Runtime Check:** `validation.rs:check_bijection_invariant()`
+
+**Use Cases:**
+
+* ID transformations
+* Reversible encodings
+* Lossless format conversions
+
+=== Checksum Invariant
+
+**Property:** Checksums correctly identify data integrity.
+
+**Formal Definition:**
+[source,isabelle]
+----
+locale ideal_checksum =
+  fixes hash :: "payload ⇒ checksum"
+  assumes collision_free: "hash x = hash y ⟹ x = y"
+----
+
+**Runtime Check:** `checksum.rs:verify_file_checksum()`
+
+**Use Cases:**
+
+* Data transfer verification
+* Cache invalidation
+* Duplicate detection
+
+=== Ratio Tolerance
+
+**Property:** Computed ratios remain within specified tolerance.
+
+**Formal Definition:**
+[source,isabelle]
+----
+definition within_tol :: "real ⇒ real ⇒ real ⇒ bool" where
+  "within_tol target actual tol ≡ |target - actual| ≤ tol"
+
+theorem pipeline_ratio_tolerance:
+  assumes "within_tol t1 a1 ε1"
+  assumes "within_tol a1 a2 ε2"
+  shows "within_tol t1 a2 (ε1 + ε2)"
+----
+
+**Runtime Check:** `validation.rs:check_ratio_tolerance()`
+
+**Use Cases:**
+
+* Sampling rate verification
+* Split ratio validation
+* Statistical bounds checking
+
+=== Monotonicity
+
+**Property:** No records are silently dropped (output ≥ input, or explicit filter).
+
+**Formal Definition:**
+[source,isabelle]
+----
+definition monotonic_stage :: "stage ⇒ bool" where
+  "monotonic_stage f ≡ ∀ds. fcard (f ds) ≥ fcard ds"
+
+definition weak_monotonic :: "stage ⇒ (record ⇒ bool) ⇒ bool" where
+  "weak_monotonic f keep ≡
+    ∀ds. fcard (f ds) ≥ fcard (ffilter keep ds)"
+----
+
+**Runtime Check:** Compare input/output counts, log any reduction.
+
+**Use Cases:**
+
+* ETL pipeline validation
+* Data cleaning auditing
+* Loss detection
+
+=== Idempotency
+
+**Property:** Applying a stage multiple times equals applying it once.
+
+**Formal Definition:**
+[source,isabelle]
+----
+definition idempotent :: "stage ⇒ bool" where
+  "idempotent f ≡ ∀ds. f (f ds) = f ds"
+----
+
+**Runtime Check:** `validation.rs:check_idempotency()`
+
+**Use Cases:**
+
+* Normalization stages
+* Cleanup operations
+* Retry safety
+
+== Proof Patterns
+
+=== Basic Lemma Structure
+
+[source,isabelle]
+----
+lemma property_name:
+  assumes "precondition1"
+  assumes "precondition2"
+  shows "conclusion"
+proof -
+  (* Structured proof steps *)
+  have step1: "intermediate_fact" using assms by auto
+  have step2: "another_fact" using step1 by simp
+  show ?thesis using step2 by blast
+qed
+----
+
+=== Composition Proofs
+
+[source,isabelle]
+----
+theorem compose_preserves_property:
+  assumes "property f"
+  assumes "property g"
+  shows "property (f ∘⇩s g)"
+  using assms
+  unfolding property_def stage_compose_def
+  by auto
+----
+
+=== Locale Instantiation
+
+[source,isabelle]
+----
+(* Define abstract locale *)
+locale checksum_function =
+  fixes compute :: "payload ⇒ checksum"
+
+(* Instantiate with concrete function *)
+interpretation shake256: checksum_function shake256_impl
+  by standard
+----
+
+== Running Proofs
+
+=== Prerequisites
+
+* Isabelle 2024 (or version specified in project)
+* HOL-Library session
+
+=== Build Commands
+
+[source,bash]
+----
+# Using just
+just prove          # Build all theories
+just prove-fast     # Quick check (skip slow proofs)
+just prove-check    # Check without building
+
+# Direct Isabelle
+isabelle build -d proofs/ ProjectName
+
+# Interactive editing
+isabelle jedit -d proofs/ ProjectName_Invariants.thy
+----
+
+=== Continuous Integration
+
+[source,yaml]
+----
+# .github/workflows/proofs.yml
+prove:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    - name: Install Isabelle
+      run: |
+        wget https://isabelle.in.tum.de/...
+        tar xzf Isabelle2024...
+    - name: Build proofs
+      run: isabelle build -d proofs/ ProjectName
+----
+
+== Extending Proofs
+
+=== Adding a New Invariant
+
+1. **Define in Prelude:**
++
+[source,isabelle]
+----
+definition my_invariant :: "dataset ⇒ bool" where
+  "my_invariant ds ≡ ∀r ∈ ds. my_property r"
+----
+
+2. **Prove preservation:**
++
+[source,isabelle]
+----
+lemma stage_preserves_my_invariant:
+  assumes "my_invariant ds"
+  shows "my_invariant (my_stage ds)"
+----
+
+3. **Add to combined invariants:**
++
+[source,isabelle]
+----
+definition complete_invariant :: "dataset ⇒ bool" where
+  "complete_invariant ds ≡
+    wf_dataset ds ∧ my_invariant ds"
+----
+
+4. **Implement runtime check:**
++
+[source,rust]
+----
+fn check_my_invariant(&self, records: &[Record]) -> Result<()> {
+    for record in records {
+        if !my_property(record) {
+            return Err(Error::InvariantViolation { ... });
+        }
+    }
+    Ok(())
+}
+----
+
+=== Handling `sorry`
+
+The `sorry` command marks unfinished proofs:
+
+[source,isabelle]
+----
+lemma unfinished:
+  shows "complex_property"
+  sorry ‹Requires additional lemmas›
+----
+
+**For Development:** `sorry` is acceptable during iteration.
+
+**For Release:** All `sorry` commands should be eliminated or explicitly documented as assumptions.
+
+Check for `sorry` usage:
+
+[source,bash]
+----
+grep -r "sorry" proofs/*.thy
+----
+
+== Best Practices
+
+=== Documentation
+
+* Add theory-level comments explaining purpose
+* Document non-obvious proof steps
+* Reference corresponding runtime code
+
+=== Proof Style
+
+* Prefer structured Isar proofs over apply scripts
+* Use meaningful lemma names
+* Break complex proofs into smaller lemmas
+
+=== Maintenance
+
+* Keep proofs synchronized with code changes
+* Run proof builds in CI
+* Review proof changes during code review
+
+== See Also
+
+* link:ARCHITECTURE.adoc[ARCHITECTURE.adoc] — System architecture
+* link:HANDOVER.adoc[HANDOVER.adoc] — Complete methodology
+* https://isabelle.in.tum.de/documentation.html[Isabelle Documentation]

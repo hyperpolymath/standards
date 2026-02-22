@@ -1,0 +1,159 @@
+# K9: Self-Validating Components for Nickel
+
+**Posted to:** Nickel Discord #show-and-tell, Nickel GitHub Discussions
+**Author:** Jonathan D.A. Jewell
+**Date:** 2026-01-30
+
+---
+
+Hi Nickel community! 👋
+
+I've been working on **K9**, a framework for building self-validating infrastructure components using Nickel, and I wanted to share it with you since Nickel is at the heart of the design.
+
+## What is K9?
+
+K9 (pronounced "canine") is a format for infrastructure automation that combines:
+- **must** (Bash) - System validation
+- **just** (Justfile) - Execution recipes
+- **nickel** (Nickel contracts) - Configuration schema
+
+All wrapped in a single `.k9.ncl` file that's valid Nickel code.
+
+## Example: Setting Up Rust Development
+
+```nickel
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# setup-rust-env.k9.ncl
+
+{
+  metadata = {
+    name = "rust-dev-env",
+    version = "1.0.0",
+    security_level = "yard",
+  },
+
+  must = {
+    check = ''
+      #!/usr/bin/env bash
+      # Validate: Is Rust installed?
+      command -v rustc &> /dev/null
+    '',
+  },
+
+  just = {
+    recipes = {
+      install = {
+        description = "Install Rust toolchain",
+        commands = [
+          "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y",
+          "source $HOME/.cargo/env",
+        ],
+      },
+    },
+  },
+
+  nickel = {
+    config | {
+      rust_version | String = "stable",
+      components | List String = ["rustfmt", "clippy"],
+    } = {
+      rust_version = "stable",
+      components = ["rustfmt", "clippy", "rust-analyzer"],
+    },
+  },
+}
+```
+
+## Why Nickel?
+
+I chose Nickel for K9 because:
+
+1. **Gradual typing** - Start simple, add contracts as needed
+2. **Configuration validation** - Catch errors before execution
+3. **Merging** - Compose configurations naturally
+4. **JSON output** - Easy integration with other tools
+
+The `nickel` section of K9 contractiles uses Nickel contracts to validate configuration before any execution happens. This prevents common infrastructure errors.
+
+## Meta-Dogfooding
+
+Here's where it gets fun: **K9 releases itself using a K9 component**!
+
+See: https://github.com/hyperpolymath/k9-svc/blob/main/release-k9.k9.ncl
+
+This contractile:
+- Validates the build environment
+- Bumps version numbers
+- Runs tests
+- Creates GitHub releases
+- All automated via the must-just-nickel triad
+
+## Three Security Levels
+
+K9 has three security levels inspired by dog behavior:
+
+- **Kennel** (read-only) - Safe operations only (ls, cat, stat)
+- **Yard** (moderate) - File writes, git ops, package installs
+- **Hunt** (full access) - Requires cryptographic signatures
+
+## Tools
+
+I've built a complete tooling suite:
+
+- **k9-init** - Scaffold new K9 contractiles from templates
+- **k9-validate** - Standalone validator
+- **k9-sign** - Ed25519 signing for hunt-level contractiles
+- **GitHub Action** - CI/CD integration
+- **VS Code Extension** - Syntax highlighting + validation
+
+See: https://github.com/hyperpolymath/k9-tools
+
+## Current Adoption
+
+K9 is being used in 10 repos across the Hyperpolymath ecosystem:
+- Development environment setup
+- Release automation
+- Deployment workflows
+- CI/CD pipelines
+- And K9 releasing itself!
+
+## Try It
+
+```bash
+# Clone and try k9-tools
+git clone https://github.com/hyperpolymath/k9-tools.git
+cd k9-tools
+
+# Build tools
+make build
+
+# Create a new K9 contractile
+./src/k9-init/target/release/k9-init --template minimal
+
+# Validate it
+./src/k9-validate/target/release/k9-validate my-contractile.k9.ncl
+```
+
+## Feedback Welcome!
+
+I'd love to hear thoughts from the Nickel community:
+
+1. **Does this feel natural in Nickel?** The `nickel` section uses standard Nickel contracts
+2. **Contract improvements?** How can I better leverage Nickel's type system?
+3. **Integration ideas?** What else could integrate with K9?
+
+## Links
+
+- **K9 Specification:** https://github.com/hyperpolymath/k9-svc
+- **K9 Tools:** https://github.com/hyperpolymath/k9-tools
+- **Examples:** https://github.com/hyperpolymath/k9-svc/tree/main/examples
+
+Thanks for building such an excellent configuration language! K9 wouldn't be possible without Nickel's solid foundation.
+
+---
+
+**Jonathan D.A. Jewell**
+The Open University
+jonathan.jewell@open.ac.uk
+
+P.S. - If you're interested in formally verified markup languages, check out A2ML (Attested Markup Language), which uses Idris2 dependent types: https://github.com/hyperpolymath/a2ml

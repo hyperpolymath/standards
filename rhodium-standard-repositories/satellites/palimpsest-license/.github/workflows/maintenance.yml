@@ -1,0 +1,78 @@
+# =============================================================================
+# Maintenance - Automated Repository Housekeeping
+# =============================================================================
+# Handles routine maintenance tasks:
+#   - Marks stale issues/PRs after 60 days of inactivity
+#   - Closes them after 7 more days if no response
+#
+# Schedule: Runs daily at 01:30 UTC
+#
+# Exemptions: Issues/PRs with these labels are never marked stale:
+#   - security, wip, pinned, discussion
+# =============================================================================
+
+name: Maintenance
+
+on:
+  schedule:
+    # Daily at 01:30 UTC
+    - cron: '30 1 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stale - Mark and close inactive issues/PRs
+  # ---------------------------------------------------------------------------
+  stale:
+    name: Stale Issues
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark stale issues and PRs
+        uses: actions/stale@v10
+        with:
+          # Authentication
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+          # Timing
+          days-before-stale: 60      # Mark stale after 60 days
+          days-before-close: 7       # Close 7 days after stale label
+
+          # Messages
+          stale-issue-message: |
+            This issue has been automatically marked as stale because it has not had
+            recent activity. It will be closed in 7 days if no further activity occurs.
+
+            If this issue is still relevant:
+            - Remove the `stale` label, or
+            - Add a comment with an update
+
+          stale-pr-message: |
+            This PR has been automatically marked as stale because it has not had
+            recent activity. It will be closed in 7 days if no further activity occurs.
+
+            If this PR is still needed:
+            - Remove the `stale` label, or
+            - Push new commits, or
+            - Add a comment with an update
+
+          close-issue-message: |
+            This issue was closed due to inactivity. Feel free to reopen if still relevant.
+
+          close-pr-message: |
+            This PR was closed due to inactivity. Feel free to reopen if still needed.
+
+          # Labels
+          stale-issue-label: stale
+          stale-pr-label: stale
+
+          # Exemptions - never mark these as stale
+          exempt-issue-labels: 'security,wip,pinned,discussion,in-progress'
+          exempt-pr-labels: 'security,wip,pinned,dependencies,in-progress'
+
+          # Safety limits
+          operations-per-run: 100    # Prevent runaway API calls

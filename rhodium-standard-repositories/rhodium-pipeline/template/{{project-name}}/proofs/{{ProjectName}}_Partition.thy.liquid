@@ -1,0 +1,178 @@
+(*
+  {{ ProjectName }}_Partition.thy
+
+  Partition invariant proofs for {{ project-name }}.
+
+  A partition divides a universe into disjoint, exhaustive parts.
+  This is essential for train/validation/test splits.
+
+  Part of Rhodium Pipeline Template methodology.
+*)
+
+theory {{ ProjectName }}_Partition
+  imports {{ ProjectName }}_Prelude
+begin
+
+section \<open>Partition Definition\<close>
+
+text \<open>
+  A partition of a universe U is a collection of sets that:
+  1. Cover U completely (exhaustive)
+  2. Are pairwise disjoint
+  3. Are all non-empty
+\<close>
+
+definition is_partition :: "'a fset \<Rightarrow> 'a fset list \<Rightarrow> bool" where
+  "is_partition U parts \<equiv>
+    (ffUnion (fset_of_list parts) = U) \<and>
+    (\<forall>i j. i < length parts \<longrightarrow> j < length parts \<longrightarrow> i \<noteq> j \<longrightarrow>
+      parts ! i |\<inter>| parts ! j = {||}) \<and>
+    (\<forall>p \<in> set parts. p \<noteq> {||})"
+
+text \<open>Alternative definition using membership.\<close>
+
+definition valid_partition :: "'a fset \<Rightarrow> 'a fset list \<Rightarrow> bool" where
+  "valid_partition U parts \<equiv>
+    (\<forall>x. x |\<in>| U \<longleftrightarrow> (\<exists>!i. i < length parts \<and> x |\<in>| parts ! i))"
+
+section \<open>Fundamental Partition Theorems\<close>
+
+text \<open>Every element belongs to exactly one partition.\<close>
+
+theorem partition_unique_membership:
+  assumes "is_partition U parts"
+  assumes "x |\<in>| U"
+  shows "\<exists>!i. i < length parts \<and> x |\<in>| parts ! i"
+proof -
+  from assms(1) have cover: "ffUnion (fset_of_list parts) = U"
+    unfolding is_partition_def by simp
+
+  from assms(2) cover have "\<exists>p \<in> set parts. x |\<in>| p"
+    by (metis ffUnion.rep_eq fset_of_list.rep_eq)
+
+  then obtain i where i_bound: "i < length parts" and x_in: "x |\<in>| parts ! i"
+    by (metis in_set_conv_nth)
+
+  moreover have "\<forall>j. j < length parts \<and> j \<noteq> i \<longrightarrow> x |\<notin>| parts ! j"
+  proof (intro allI impI)
+    fix j
+    assume "j < length parts \<and> j \<noteq> i"
+    with assms(1) have "parts ! i |\<inter>| parts ! j = {||}"
+      unfolding is_partition_def by auto
+    with x_in show "x |\<notin>| parts ! j"
+      by auto
+  qed
+
+  ultimately show ?thesis
+    by (metis less_linear)
+qed
+
+text \<open>Partition preserves cardinality.\<close>
+
+theorem partition_card_sum:
+  assumes "is_partition U parts"
+  shows "fcard U = sum_list (map fcard parts)"
+proof -
+  from assms have disj: "\<forall>i j. i < length parts \<longrightarrow> j < length parts \<longrightarrow> i \<noteq> j \<longrightarrow>
+    parts ! i |\<inter>| parts ! j = {||}"
+    unfolding is_partition_def by simp
+
+  from assms have cover: "ffUnion (fset_of_list parts) = U"
+    unfolding is_partition_def by simp
+
+  show ?thesis
+    using disj cover
+    by (induction parts arbitrary: U) (auto simp: fcard_union_disjoint)
+qed
+
+section \<open>Partition Refinement\<close>
+
+text \<open>A partition can be refined by splitting parts.\<close>
+
+definition refines :: "'a fset list \<Rightarrow> 'a fset list \<Rightarrow> bool" where
+  "refines fine coarse \<equiv>
+    \<forall>p \<in> set fine. \<exists>q \<in> set coarse. p |\<subseteq>| q"
+
+theorem refinement_preserves_partition:
+  assumes "is_partition U coarse"
+  assumes "refines fine coarse"
+  assumes "is_partition U fine"
+  shows "\<forall>p \<in> set coarse. \<exists>S \<subseteq> set fine. p = ffUnion (fset_of_list (filter (\<lambda>f. f |\<subseteq>| p) fine))"
+  sorry \<comment> \<open>Complete proof for production\<close>
+
+section \<open>Dataset Partitioning\<close>
+
+text \<open>
+  Partition a dataset by some criterion (e.g., train/val/test split).
+\<close>
+
+definition partition_by_pred ::
+  "dataset \<Rightarrow> (record \<Rightarrow> nat) \<Rightarrow> nat \<Rightarrow> dataset list" where
+  "partition_by_pred ds classifier n =
+    map (\<lambda>i. ffilter (\<lambda>r. classifier r = i) ds) [0..<n]"
+
+theorem partition_by_pred_valid:
+  assumes "\<forall>r. r |\<in>| ds \<longrightarrow> classifier r < n"
+  assumes "n > 0"
+  shows "is_partition ds (partition_by_pred ds classifier n)"
+  unfolding is_partition_def partition_by_pred_def
+  sorry \<comment> \<open>Complete proof for production\<close>
+
+section \<open>Ratio-Constrained Partitioning\<close>
+
+text \<open>
+  Split a dataset into parts with target ratios.
+\<close>
+
+definition ratio_partition ::
+  "dataset \<Rightarrow> real list \<Rightarrow> dataset list" where
+  "ratio_partition ds ratios = undefined" \<comment> \<open>Implementation-dependent\<close>
+
+text \<open>
+  The actual ratios should be within tolerance of the targets.
+\<close>
+
+definition ratios_within_tolerance ::
+  "dataset list \<Rightarrow> real list \<Rightarrow> real \<Rightarrow> bool" where
+  "ratios_within_tolerance parts targets tol \<equiv>
+    length parts = length targets \<and>
+    (\<forall>i < length parts.
+      let total = sum_list (map fcard parts) in
+      let actual = real (fcard (parts ! i)) / real total in
+      within_tol (targets ! i) actual tol)"
+
+theorem ratio_partition_correct:
+  assumes "sum_list ratios = 1"
+  assumes "\<forall>r \<in> set ratios. r > 0"
+  assumes "tol > 0"
+  assumes "fcard ds \<ge> 100" \<comment> \<open>Minimum size for meaningful ratios\<close>
+  shows "\<exists>parts. is_partition ds parts \<and>
+    ratios_within_tolerance parts ratios tol"
+  sorry \<comment> \<open>Constructive proof for production\<close>
+
+section \<open>Stratified Partitioning\<close>
+
+text \<open>
+  Partition that preserves distribution of some property.
+\<close>
+
+definition stratified_partition ::
+  "dataset \<Rightarrow> (record \<Rightarrow> 'a) \<Rightarrow> real list \<Rightarrow> dataset list" where
+  "stratified_partition ds strat ratios = undefined"
+
+text \<open>
+  After stratified partitioning, each part has similar distribution.
+\<close>
+
+definition distribution :: "dataset \<Rightarrow> (record \<Rightarrow> 'a) \<Rightarrow> 'a \<Rightarrow> real" where
+  "distribution ds f v =
+    real (fcard (ffilter (\<lambda>r. f r = v) ds)) / real (fcard ds)"
+
+theorem stratified_preserves_distribution:
+  assumes "is_partition ds (stratified_partition ds strat ratios)"
+  assumes "p \<in> set (stratified_partition ds strat ratios)"
+  assumes "fcard p > 0"
+  shows "\<bar>distribution ds strat v - distribution p strat v\<bar> \<le> \<epsilon>"
+  sorry \<comment> \<open>Requires specification of \<epsilon>\<close>
+
+end

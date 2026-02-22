@@ -1,0 +1,335 @@
+= php-aegis Documentation
+:toc:
+:toc-title: Contents
+:sectnums:
+
+== Introduction
+
+This documentation covers security best practices and advanced usage of php-aegis.
+
+== OWASP Top 10 Coverage
+
+php-aegis helps mitigate several OWASP Top 10 vulnerabilities:
+
+[cols="1,2,2"]
+|===
+|OWASP Category |Risk |php-aegis Mitigation
+
+|A03:2021 Injection
+|XSS, Command Injection
+|`Sanitizer::html()`, `Sanitizer::stripTags()`
+
+|A07:2021 Auth Failures
+|Weak credential validation
+|`Validator::email()` for username validation
+
+|===
+
+== Input Validation Strategies
+
+=== Allowlist vs Blocklist
+
+Always prefer allowlist validation:
+
+[source,php]
+----
+// GOOD: Allowlist - only accept known-good values
+$allowedRoles = ['user', 'admin', 'moderator'];
+if (!in_array($role, $allowedRoles, true)) {
+    throw new InvalidArgumentException('Invalid role');
+}
+
+// BAD: Blocklist - trying to block bad values
+$blockedChars = ['<', '>', '"'];  // Will miss attack vectors
+----
+
+=== Validation Order
+
+. **Type validation** - Ensure correct PHP type
+. **Format validation** - Match expected pattern (email, URL, etc.)
+. **Range validation** - Within acceptable bounds
+. **Business validation** - Meets domain requirements
+
+[source,php]
+----
+function validateAge(mixed $input): int
+{
+    // 1. Type validation
+    if (!is_numeric($input)) {
+        throw new TypeError('Age must be numeric');
+    }
+
+    $age = (int) $input;
+
+    // 2. Range validation
+    if ($age < 0 || $age > 150) {
+        throw new RangeException('Age out of valid range');
+    }
+
+    return $age;
+}
+----
+
+== Output Encoding
+
+=== Context-Aware Encoding
+
+Different contexts require different encoding:
+
+[cols="1,2,2"]
+|===
+|Context |Risk |Solution
+
+|HTML Body
+|XSS
+|`Sanitizer::html()`
+
+|HTML Attribute
+|Attribute injection
+|`Sanitizer::html()` + quote attributes
+
+|JavaScript
+|JS injection
+|`json_encode()` with flags
+
+|URL Parameter
+|Parameter injection
+|`urlencode()`
+
+|CSS
+|CSS injection
+|Avoid user input in CSS
+
+|===
+
+=== HTML Context Examples
+
+[source,php]
+----
+$sanitizer = new Sanitizer();
+$userInput = '<script>alert("xss")</script>';
+
+// HTML body - use html()
+echo '<p>' . $sanitizer->html($userInput) . '</p>';
+
+// HTML attribute - quote and encode
+echo '<input value="' . $sanitizer->html($userInput) . '">';
+
+// JavaScript context - use json_encode
+echo '<script>var data = ' . json_encode($userInput, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) . ';</script>';
+----
+
+== Common Attack Patterns
+
+=== XSS (Cross-Site Scripting)
+
+==== Reflected XSS
+
+[source,php]
+----
+// VULNERABLE
+echo "Hello, " . $_GET['name'];
+
+// SAFE
+$sanitizer = new Sanitizer();
+echo "Hello, " . $sanitizer->html($_GET['name'] ?? '');
+----
+
+==== Stored XSS
+
+[source,php]
+----
+// When storing user content
+$content = $_POST['comment'];
+// Validate first
+if (strlen($content) > 10000) {
+    throw new LengthException('Comment too long');
+}
+// Store as-is, encode on output
+
+// When displaying
+$sanitizer = new Sanitizer();
+echo $sanitizer->html($storedContent);
+----
+
+=== Email Header Injection
+
+[source,php]
+----
+$validator = new Validator();
+
+// VULNERABLE - allows header injection
+$to = $_POST['email'];
+mail($to, "Subject", "Body");
+
+// SAFE - validate email format
+$email = $_POST['email'] ?? '';
+if (!$validator->email($email)) {
+    throw new InvalidArgumentException('Invalid email');
+}
+// Also check for newlines
+if (preg_match('/[\r\n]/', $email)) {
+    throw new InvalidArgumentException('Invalid characters in email');
+}
+mail($email, "Subject", "Body");
+----
+
+== Integration Patterns
+
+=== With Frameworks
+
+==== Laravel
+
+[source,php]
+----
+// In a Form Request
+use PhpAegis\Validator;
+
+public function rules(): array
+{
+    return [
+        'email' => ['required', function ($attribute, $value, $fail) {
+            $validator = new Validator();
+            if (!$validator->email($value)) {
+                $fail('Invalid email format');
+            }
+        }],
+    ];
+}
+----
+
+==== Symfony
+
+[source,php]
+----
+// Custom constraint validator
+use PhpAegis\Validator as AegisValidator;
+
+class AegisEmailValidator extends ConstraintValidator
+{
+    public function validate($value, Constraint $constraint): void
+    {
+        $validator = new AegisValidator();
+        if (!$validator->email($value)) {
+            $this->context->buildViolation($constraint->message)
+                ->addViolation();
+        }
+    }
+}
+----
+
+=== Middleware Pattern
+
+[source,php]
+----
+use PhpAegis\Sanitizer;
+
+class SanitizeMiddleware
+{
+    private Sanitizer $sanitizer;
+
+    public function __construct()
+    {
+        $this->sanitizer = new Sanitizer();
+    }
+
+    public function handle(Request $request, callable $next): Response
+    {
+        // Sanitize specific input fields
+        $sanitized = [];
+        foreach (['name', 'comment', 'bio'] as $field) {
+            if ($request->has($field)) {
+                $sanitized[$field] = $this->sanitizer->stripTags(
+                    $request->input($field)
+                );
+            }
+        }
+        $request->merge($sanitized);
+
+        return $next($request);
+    }
+}
+----
+
+== Testing Security
+
+=== Test Vectors
+
+Include these test cases for XSS prevention:
+
+[source,php]
+----
+public function xssTestVectors(): array
+{
+    return [
+        ['<script>alert(1)</script>'],
+        ['<img src=x onerror=alert(1)>'],
+        ['<svg onload=alert(1)>'],
+        ["javascript:alert('xss')"],
+        ['"><script>alert(1)</script>'],
+        ["'><script>alert(1)</script>"],
+        ['<iframe src="javascript:alert(1)">'],
+        ['<body onload=alert(1)>'],
+        ['<input onfocus=alert(1) autofocus>'],
+        ['<marquee onstart=alert(1)>'],
+    ];
+}
+
+/**
+ * @dataProvider xssTestVectors
+ */
+public function test_sanitizer_prevents_xss(string $attack): void
+{
+    $sanitizer = new Sanitizer();
+    $result = $sanitizer->html($attack);
+
+    // Result should not contain executable script elements
+    $this->assertStringNotContainsString('<script', $result);
+    $this->assertStringNotContainsString('onerror', $result);
+    $this->assertStringNotContainsString('onload', $result);
+}
+----
+
+== Performance Considerations
+
+=== Caching Validation Results
+
+For expensive validations, consider caching:
+
+[source,php]
+----
+class CachedValidator
+{
+    private Validator $validator;
+    private array $cache = [];
+
+    public function email(string $email): bool
+    {
+        $key = 'email:' . md5($email);
+
+        if (!isset($this->cache[$key])) {
+            $this->cache[$key] = $this->validator->email($email);
+        }
+
+        return $this->cache[$key];
+    }
+}
+----
+
+=== Batch Processing
+
+[source,php]
+----
+$validator = new Validator();
+$sanitizer = new Sanitizer();
+
+// Process array of inputs efficiently
+$emails = ['user1@example.com', 'invalid', 'user2@example.com'];
+$valid = array_filter($emails, [$validator, 'email']);
+----
+
+== Further Reading
+
+* https://cheatsheetseries.owasp.org/[OWASP Cheat Sheet Series]
+* https://www.php-fig.org/psr/psr-12/[PSR-12: Extended Coding Style]
+* https://www.php.net/manual/en/book.filter.php[PHP Filter Functions]

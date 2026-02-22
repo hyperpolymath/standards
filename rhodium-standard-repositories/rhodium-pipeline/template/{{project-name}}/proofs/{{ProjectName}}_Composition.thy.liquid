@@ -1,0 +1,179 @@
+(*
+  {{ ProjectName }}_Composition.thy
+
+  Composition proofs for {{ project-name }}.
+
+  This theory verifies properties of composed pipeline stages
+  and establishes that invariants are preserved through composition.
+
+  Part of Rhodium Pipeline Template methodology.
+*)
+
+theory {{ ProjectName }}_Composition
+  imports
+    {{ ProjectName }}_Invariants
+    {{ ProjectName }}_Ratio
+    {{ ProjectName }}_Monotonicity
+    {{ ProjectName }}_Idempotency
+begin
+
+section \<open>Pipeline Composition Framework\<close>
+
+text \<open>
+  A complete pipeline is a composition of stages.
+  Each stage maintains its own invariants.
+  The composition preserves combined invariants.
+\<close>
+
+text \<open>A pipeline specification.\<close>
+
+record pipeline_spec =
+  stages :: "stage list"
+  invariant :: "dataset \<Rightarrow> bool"
+
+text \<open>Execute a pipeline.\<close>
+
+fun execute_pipeline :: "stage list \<Rightarrow> dataset \<Rightarrow> dataset" where
+  "execute_pipeline [] ds = ds" |
+  "execute_pipeline (s # ss) ds = execute_pipeline ss (s ds)"
+
+text \<open>Alternative: fold-based execution.\<close>
+
+definition run_pipeline :: "stage list \<Rightarrow> stage" where
+  "run_pipeline stages = fold (\<circ>\<^sub>s) stages id"
+
+lemma pipeline_equivalence:
+  "execute_pipeline stages ds = run_pipeline stages ds"
+  sorry \<comment> \<open>Requires fold/stage_compose lemma\<close>
+
+section \<open>Invariant Preservation\<close>
+
+text \<open>
+  If each stage preserves an invariant, the composition does too.
+\<close>
+
+definition preserves :: "stage \<Rightarrow> (dataset \<Rightarrow> bool) \<Rightarrow> bool" where
+  "preserves f I \<equiv> \<forall>ds. I ds \<longrightarrow> I (f ds)"
+
+theorem composition_preserves:
+  assumes "\<forall>s \<in> set stages. preserves s I"
+  assumes "I ds"
+  shows "I (execute_pipeline stages ds)"
+  using assms
+proof (induction stages arbitrary: ds)
+  case Nil
+  then show ?case by simp
+next
+  case (Cons s ss)
+  have "I (s ds)"
+    using Cons.prems unfolding preserves_def by simp
+  then show ?case
+    using Cons by simp
+qed
+
+section \<open>Combined Property Preservation\<close>
+
+text \<open>
+  A pipeline maintains multiple properties if each stage does.
+\<close>
+
+definition maintains_all :: "stage \<Rightarrow> (dataset \<Rightarrow> bool) list \<Rightarrow> bool" where
+  "maintains_all f Is \<equiv> \<forall>I \<in> set Is. preserves f I"
+
+theorem pipeline_maintains_all:
+  assumes "\<forall>s \<in> set stages. maintains_all s Is"
+  assumes "\<forall>I \<in> set Is. I ds"
+  shows "\<forall>I \<in> set Is. I (execute_pipeline stages ds)"
+  using assms composition_preserves
+  unfolding maintains_all_def by blast
+
+section \<open>Composition with Correctness\<close>
+
+context pipeline_invariants
+begin
+
+text \<open>
+  A correct pipeline composition preserves all core invariants.
+\<close>
+
+definition full_composition_correct :: "stage list \<Rightarrow> bool" where
+  "full_composition_correct stages \<equiv>
+    (\<forall>s \<in> set stages. correct_pipeline s) \<and>
+    (\<forall>s \<in> set stages. preserves s wf_dataset)"
+
+theorem full_composition_wf:
+  assumes "full_composition_correct stages"
+  assumes "wf_dataset ds"
+  shows "wf_dataset (execute_pipeline stages ds)"
+  using assms composition_preserves
+  unfolding full_composition_correct_def by blast
+
+end
+
+section \<open>Specific {{ ProjectName }} Composition\<close>
+
+text \<open>
+  Define the standard {{ project-name }} pipeline composition.
+\<close>
+
+text \<open>Standard pipeline stages.\<close>
+
+definition ingest_stage :: stage where
+  "ingest_stage ds = ds" \<comment> \<open>Placeholder\<close>
+
+definition transform_stage :: stage where
+  "transform_stage ds = ds" \<comment> \<open>Placeholder\<close>
+
+definition validate_stage :: stage where
+  "validate_stage ds = ds" \<comment> \<open>Placeholder\<close>
+
+definition export_stage :: stage where
+  "export_stage ds = ds" \<comment> \<open>Placeholder\<close>
+
+definition standard_pipeline :: "stage list" where
+  "standard_pipeline = [ingest_stage, transform_stage,
+                        validate_stage, export_stage]"
+
+text \<open>Standard pipeline is well-formed.\<close>
+
+lemma standard_stages_preserve_wf:
+  "preserves ingest_stage wf_dataset"
+  "preserves transform_stage wf_dataset"
+  "preserves validate_stage wf_dataset"
+  "preserves export_stage wf_dataset"
+  unfolding preserves_def ingest_stage_def transform_stage_def
+    validate_stage_def export_stage_def by auto
+
+theorem standard_pipeline_preserves_wf:
+  assumes "wf_dataset ds"
+  shows "wf_dataset (execute_pipeline standard_pipeline ds)"
+  using assms standard_stages_preserve_wf
+  unfolding standard_pipeline_def
+  by (simp add: composition_preserves)
+
+section \<open>Error Handling in Composition\<close>
+
+text \<open>
+  Model fallible stages with option type.
+\<close>
+
+type_synonym fallible_stage = "dataset \<Rightarrow> dataset option"
+
+definition lift_stage :: "stage \<Rightarrow> fallible_stage" where
+  "lift_stage f ds = Some (f ds)"
+
+definition compose_fallible ::
+  "fallible_stage \<Rightarrow> fallible_stage \<Rightarrow> fallible_stage" where
+  "compose_fallible f g ds = (case f ds of
+    None \<Rightarrow> None |
+    Some ds' \<Rightarrow> g ds')"
+
+text \<open>Fallible composition is associative.\<close>
+
+lemma fallible_assoc:
+  "compose_fallible (compose_fallible f g) h =
+   compose_fallible f (compose_fallible g h)"
+  unfolding compose_fallible_def
+  by (auto split: option.splits)
+
+end

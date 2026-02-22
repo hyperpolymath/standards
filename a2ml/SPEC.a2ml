@@ -1,0 +1,197 @@
+# A2ML v0 Specification (Draft)
+
+@abstract:
+A2ML (Attested Markup Language) is a lightweight markup format with a typed, formally verified core. This specification defines the surface syntax, typed core, and semantic mapping.
+@end
+
+## Overview
+
+A2ML has two layers:
+
+- **Surface syntax**: Lightweight markup (this document)
+- **Typed core**: Idris2 model with proof obligations (src/A2ML/TypedCore.idr)
+
+The surface grammar is independent from Idris; Idris is the semantic core. Multiple surface syntaxes may compile to the same typed core.
+
+## Example Applications
+
+A2ML is agnostic about delivery pipelines. Projects like stateful-artefacts-for-gitforges are example applications that demonstrate event-chain workflows (metadata updates → attested compile → rendered artifacts). A2ML itself remains independent of that ecosystem and can be used in other pipelines.
+
+## Lexical Rules
+
+- **Line**: a sequence of characters ending in LF or EOF
+- **Blank line**: line containing only whitespace
+- **Identifier**: `ID = [A-Za-z][A-Za-z0-9:_-]*`
+- **String**: `"..."` or `'...'` with `\\` and escaped quote support
+
+## Surface Grammar (EBNF)
+
+@opaque(lang="ebnf", id="surface-grammar"):
+Document     ::= Block*
+Block        ::= Heading
+              | DirectiveBlock
+              | List
+              | CodeBlock
+              | Paragraph
+              | Blank
+
+Blank        ::= BlankLine+
+
+Heading      ::= HeadingLine HeadingBody?
+HeadingLine  ::= HeadingMarker SP TextLine
+HeadingMarker::= "#" | "##" | "###" | "####" | "#####"
+HeadingBody  ::= Block*         // until next same-or-higher heading or EOF
+
+DirectiveBlock ::= "@" Name Attrs? ":" NL DirectiveBody "@end"
+Name          ::= ID
+Attrs         ::= "(" Attr ("," Attr)* ")"
+Attr          ::= ID "=" (ID | STRING | Number)
+Number        ::= "-"? [0-9]+ ("." [0-9]+)?
+
+DirectiveBody ::= Block*         // nested blocks allowed
+
+List         ::= ListItem (NL ListItem)*
+ListItem     ::= ("-" | "*") SP Inline
+
+CodeBlock    ::= FenceLang? NL RawLines FenceEnd
+FenceLang    ::= "```" LangSpec?
+LangSpec     ::= [A-Za-z0-9_+-]+
+FenceEnd     ::= "```"
+
+Paragraph    ::= Inline (NL Inline)*
+Inline       ::= InlineAtom (SP InlineAtom)*
+InlineAtom   ::= Emph | Strong | Link | Ref | Text
+
+Emph         ::= "*" TextInline "*"
+Strong       ::= "**" TextInline "**"
+Link         ::= "[" TextInline "]" "(" URL ")"
+Ref          ::= "@ref(" ID ")"
+
+TextInline   ::= (TextChar | Escaped)+
+TextChar     ::= any char except control, "*", "[", "]", "@", NL
+Escaped      ::= "\\" any
+
+TextLine     ::= (TextChar | Escaped)*
+
+RawLines     ::= (RawLine NL)*
+RawLine      ::= any char sequence (including punctuation)
+URL          ::= [^ )\n]+
+SP           ::= " "+
+NL           ::= "\n"
+@end
+
+## Core Directives (v0)
+
+- **@abstract**: Declares the abstract section
+- **@refs**: Declares references list
+- **@fig**: Figure block with caption and optional ID
+- **@table**: Table block with caption and optional ID
+- **@requires**: Structural dependencies
+- **@opaque**: Byte-for-byte payload preservation
+
+## Inline Parsing (Prototype)
+
+The v0 prototype supports inline emphasis, strong, and links:
+
+- `*text*` → emphasis
+- `**text**` → strong
+- `[label](url)` → link
+
+See docs/INLINE-RULES.adoc for the prototype rules.
+
+## Prototype Coverage Notes (Module 0)
+
+The Module 0 prototype in `prototype/rescript/` is intentionally small:
+
+- Directive headers MUST be on a single line and end with `:`
+- `@refs` content is parsed as one paragraph per non-blank line
+- `@opaque` content is treated as raw lines until `@end` and preserved verbatim
+- Heading bodies are not nested; headings are standalone blocks
+- Code fences are not implemented in the prototype
+
+## Semantics (Surface → Typed Core)
+
+1. Headings become `Section` nodes
+2. Directives map to typed core nodes with parameters
+3. References must resolve in checked/attested modes
+4. Opaque payloads are preserved byte-for-byte
+5. Attested mode enforces structural invariants (e.g., required sections)
+
+## Modes
+
+- **Lax**: Best-effort parsing, warnings only
+- **Checked**: IDs required, references must resolve, no unknown directives
+- **Attested**: Typed core + proof obligations must discharge
+
+## Typed Core (Idris2 Outline)
+
+@opaque(lang="idris", id="typed-core"):
+data Doc : Type where
+  MkDoc : Meta -> List Block -> Doc
+
+data Block : Type where
+  Section  : Sec -> Block
+  Para     : List Inline -> Block
+  List     : List (List Inline) -> Block
+  Figure   : Fig -> Block
+  Table    : Tbl -> Block
+  Refs     : RefList -> Block
+  Opaque   : OpaquePayload -> Block
+
+data Sec : Type where
+  MkSec : (id : Id) -> (title : Text) -> (reqs : List Req) -> (body : List Block) -> Sec
+
+data Fig : Type where
+  MkFig : (id : Id) -> (caption : Text) -> (ref : Maybe Id) -> Fig
+
+data RefList : Type where
+  MkRefs : List Ref -> RefList
+
+data OpaquePayload : Type where
+  MkOpaque : (id : Maybe Id) -> (lang : Maybe Lang) -> (bytes : ByteString) -> OpaquePayload
+@end
+
+## Invariants (Attested Mode)
+
+The Idris2 core enforces these invariants with dependent types and proofs:
+
+- **Unique IDs**: `Unique ids` proof across the document (see src/A2ML/Proofs.idr)
+- **Reference Resolution**: `AllIn refs ids` proof that all references resolve (see src/A2ML/Proofs.idr)
+- **Required Sections**: Policy-configurable required sections
+- **Optional Rules**: e.g., each figure must be referenced
+
+### Formal Proofs
+
+The following theorems are proven in src/A2ML/Proofs.idr:
+
+1. **Unique IDs Decidable**: `decUnique : (xs : List Id) -> Dec (Unique xs)`
+2. **AllIn Decidable**: `decAllIn : (refs : List Id) -> (ids : List Id) -> Dec (AllIn refs ids)`
+3. **Document Validation**: `validateDocument : (doc : Doc) -> (ids : List Id) -> (refs : List Id) -> Either (List ValidationError) ValidatedDoc`
+4. **Attestation**: `attestDocument : ValidatedDoc -> Attestation`
+
+## Opaque Payloads (Non-Negotiable)
+
+Opaque payloads MUST be preserved byte-for-byte in the typed core. Renderers MAY transform only when the target format requires it, and must report transformations.
+
+### Attestation
+
+@opaque(lang="idris", id="opaque-attestation"):
+record OpaqueAttestation where
+  constructor MkOpaqueAttestation
+  originalBytes : ByteString
+  signature : Ed25519Signature
+  timestamp : Timestamp
+@end
+
+## Non-Goals (v0)
+
+- No semantic-web ontology requirements
+- No runtime execution in documents
+- No dependency on a single output format
+
+@refs:
+[1] Attested Markup Language v0 - This document
+[2] A2ML Idris2 Core - src/A2ML/TypedCore.idr
+[3] A2ML Formal Proofs - src/A2ML/Proofs.idr
+[4] A2ML Parser - src/A2ML/Parser.idr
+@end

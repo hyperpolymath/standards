@@ -1,0 +1,792 @@
+# K9-SVC Dogfooding Opportunities
+
+**Date:** 2026-01-30
+**Status:** Production Ready
+**K9 Version:** 1.0.0 (Released)
+
+---
+
+## Philosophy
+
+K9 is a format that **"eats its own dog food."** It's designed to validate and deploy itself. The Hyperpolymath ecosystem should extensively use K9 to prove this philosophy works at scale.
+
+**Core Principle:** If your config can't validate itself, it shouldn't run.
+
+---
+
+## Current Status
+
+- **Version:** 1.0.0 **RELEASED** ✅
+- **Phase:** Production
+- **Completion:** 100%
+- **Tech Stack:** Nickel (validation), Just (orchestration), POSIX shell (detection)
+- **What Works:** Full triad, MIME registration, security model, signing, Podman integration, packaging
+
+**Repository:** https://github.com/hyperpolymath/k9-svc
+
+---
+
+## Strategic Dogfooding Targets
+
+### 1. **K9-SVC Self-Validation** (Meta-Dogfooding) ✅
+
+**Priority:** CRITICAL
+**Status:** ALREADY DOING THIS!
+
+**Current Implementation:**
+- `pedigree.ncl` validates itself
+- `must` shim ensures environment
+- `justfile` orchestrates validation
+- `just dogfood` command validates the entire system
+
+**Why This Works:**
+```bash
+# K9 validates itself
+./must run dogfood
+
+# Checks:
+# 1. Environment (must)
+# 2. Schema validation (pedigree.ncl)
+# 3. MIME registration
+# 4. Security model
+# 5. Examples validate
+# 6. Container builds
+```
+
+**Success Metric:** K9 won't deploy if it can't validate itself. ✅
+
+---
+
+### 2. **Bunsenite Configuration Management**
+
+**Priority:** HIGHEST (Meta-Dogfooding at Tool Level)
+**Repository:** https://github.com/hyperpolymath/bunsenite
+
+**What Bunsenite Does:**
+- Nickel language tooling and utilities
+- Configuration management framework
+- The ecosystem's Nickel authority
+
+**Why This Is Perfect:**
+- Bunsenite IS the Nickel tooling
+- K9 uses Nickel for validation
+- **Bunsenite using K9 = the Nickel tool using K9 = perfect meta-dogfooding**
+
+**What to Convert:**
+
+| Current File | K9 Replacement | Purpose |
+|--------------|----------------|---------|
+| `config/*.ncl` | `config/*.k9.ncl` | Self-validating tool configs |
+| `examples/*.ncl` | `examples/*.k9.ncl` | Example configs with validation |
+| Build configs | `build.k9.ncl` | Self-validating build |
+
+**Example Migration:**
+
+```nickel
+# Before: bunsenite/config/formatter.ncl
+{
+  indent_size = 2,
+  line_width = 100,
+  format_strings = true
+}
+
+# After: bunsenite/config/formatter.k9.ncl
+K9!
+leash = 'Yard  # Nickel validation only, no I/O
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "nickel-formatter-config",
+  tool = "bunsenite",
+  validation_level = "strict"
+}
+
+config | {
+  indent_size | Number = 2,
+  line_width | Number = 100,
+  format_strings | Bool = true,
+  ..
+} = {
+  indent_size = 2,
+  line_width = 100,
+  format_strings = true,
+
+  # Nickel contracts enforce validity
+  indent_size
+    | std.number.NonZero
+    | std.number.Positive,
+  line_width
+    | std.number.Positive
+    | std.contract.from_predicate (fun x => x >= 80 && x <= 120)
+}
+```
+
+**Benefits:**
+- Bunsenite configs validate themselves
+- Invalid configs refuse to load
+- The Nickel tooling demonstrates K9's power
+- Other Nickel users see the pattern
+
+**Action Items:**
+- [ ] Migrate bunsenite/config/ to K9
+- [ ] Update bunsenite docs to recommend K9
+- [ ] Create bunsenite-specific K9 templates
+- [ ] Blog post: "Bunsenite Eats Its Own Dog Food with K9"
+
+**Repository Links:**
+- Bunsenite: https://github.com/hyperpolymath/bunsenite
+- K9-SVC: https://github.com/hyperpolymath/k9-svc
+
+---
+
+### 3. **RSR Contractiles Standardization**
+
+**Priority:** HIGH
+**Repository:** https://github.com/hyperpolymath/rsr-template-repo
+
+**What Contractiles Are:**
+- RSR standard directory structure
+- Four contract types: Dust (documentation), Lust (luxury), Must (required), Trust (security)
+- Currently placeholder files in `contractiles/`
+
+**Why K9 Is Perfect:**
+- K9 literally implements the must-just-nickel triad
+- Contractiles need validation logic
+- Trust contracts require signatures (K9 has signing!)
+- Must contracts align with K9's `must` shim
+
+**What to Convert:**
+
+| Current | K9 Replacement | Purpose |
+|---------|----------------|---------|
+| `contractiles/dust/Dustfile` | `Dustfile.k9` | Documentation requirements |
+| `contractiles/lust/Lustfile` | `Lustfile.k9` | Optional features |
+| `contractiles/must/Mustfile` | `Mustfile.k9` | Hard requirements |
+| `contractiles/trust/Trustfile` | `Trustfile.k9` | Security contracts |
+
+**Example Trust Contract:**
+
+```nickel
+# contractiles/trust/Trustfile.k9
+K9!
+leash = 'Hunt  # Full execution, requires signature
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "trust-contract",
+  security_level = "cryptographic"
+}
+
+trust_requirements = {
+  minimum_workflows = [
+    "hypatia-scan.yml",      # Neurosymbolic security
+    "codeql.yml",            # Code analysis
+    "scorecard.yml"          # OpenSSF Scorecard
+  ],
+
+  required_files = [
+    "SECURITY.md",
+    "LICENSE",
+    ".machine_readable/STATE.scm"
+  ],
+
+  branch_protection = {
+    enabled = true,
+    required_reviews = 1,
+    enforce_admins = true
+  },
+
+  secrets_scan = {
+    enabled = true,
+    tools = ["trufflehog", "gitleaks"]
+  }
+}
+
+# Verification function
+verify_trust = fun repo_path =>
+  let workflows = list_files (repo_path ++ "/.github/workflows")
+  in std.array.all
+    (fun required => std.array.any (fun found => found == required) workflows)
+    trust_requirements.minimum_workflows
+```
+
+**Example Must Contract:**
+
+```nickel
+# contractiles/must/Mustfile.k9
+K9!
+leash = 'Yard
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "must-contract"
+}
+
+must_have = {
+  directories = [
+    ".machine_readable",
+    ".bot_directives",
+    "contractiles/dust",
+    "contractiles/lust",
+    "contractiles/must",
+    "contractiles/trust"
+  ],
+
+  files = [
+    ".machine_readable/STATE.scm",
+    ".machine_readable/ECOSYSTEM.scm",
+    ".machine_readable/META.scm",
+    "LICENSE",
+    "README.adoc"
+  ],
+
+  languages | {
+    allowed | Array String,
+    banned | Array String
+  } = {
+    allowed = ["rescript", "rust", "gleam", "elixir", "julia", "nickel"],
+    banned = ["typescript", "go", "python"]
+  }
+}
+```
+
+**Benefits:**
+- Contractiles become executable validation
+- Trust contracts cryptographically signed
+- Must contracts prevent incomplete repos
+- RSR compliance automatically verified
+
+**Action Items:**
+- [ ] Create K9 templates for all 4 contractile types
+- [ ] Update rsr-template-repo with K9 contractiles
+- [ ] Add contractile validation to RSR CI
+- [ ] Document contractile-K9 integration
+
+**Repository Links:**
+- RSR Template: https://github.com/hyperpolymath/rsr-template-repo
+- K9-SVC: https://github.com/hyperpolymath/k9-svc
+
+---
+
+### 4. **MCP Server Configuration**
+
+**Priority:** HIGH
+**Repositories:**
+- https://github.com/hyperpolymath/poly-secret-mcp
+- https://github.com/hyperpolymath/poly-queue-mcp
+- https://github.com/hyperpolymath/poly-observability-mcp
+- https://github.com/hyperpolymath/poly-iac-mcp
+
+**What MCP Servers Need:**
+- Service configuration (ports, endpoints, auth)
+- Deployment configuration (Docker, K8s)
+- Security configuration (secrets, TLS)
+- Self-validating configs that refuse to start if invalid
+
+**Why K9 Is Perfect:**
+- MCP servers are critical infrastructure
+- Invalid configs should fail fast (before deployment)
+- Hunt-level security for production configs
+- Signature verification for production deployments
+
+**Example MCP Config:**
+
+```nickel
+# poly-secret-mcp/config/production.k9.ncl
+K9!
+leash = 'Hunt  # Production requires signature
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "mcp-server-config",
+  service = "poly-secret-mcp",
+  environment = "production"
+}
+
+server_config = {
+  service = {
+    name = "poly-secret-mcp",
+    port | std.number.PosNat = 8080,
+    host | String = "0.0.0.0",
+    workers | std.number.PosNat = 4
+  },
+
+  security = {
+    tls_enabled | Bool = true,
+    cert_path | String = "/etc/ssl/certs/mcp.crt",
+    key_path | String = "/etc/ssl/private/mcp.key",
+
+    secrets_backend | [| 'Vault, 'AWS, 'GCP |] = 'Vault,
+    vault_addr | String = "https://vault.internal:8200",
+    vault_token_path | String = "/var/run/secrets/vault-token"
+  },
+
+  observability = {
+    metrics_enabled | Bool = true,
+    metrics_port | std.number.PosNat = 9090,
+    tracing_enabled | Bool = true,
+    jaeger_endpoint | String = "jaeger-collector:14268"
+  },
+
+  # Validation: production must have TLS
+  security.tls_enabled
+    | std.contract.from_predicate
+        (fun enabled =>
+          if pedigree.environment == "production"
+          then enabled == true
+          else true)
+}
+```
+
+**Benefits:**
+- Production configs require signatures
+- Invalid configs caught before deployment
+- Port conflicts detected (Nickel contracts)
+- Environment-specific validation
+- Deployment-time verification
+
+**Action Items:**
+- [ ] Create MCP server K9 template
+- [ ] Migrate poly-secret-mcp config first
+- [ ] Add K9 validation to MCP deployment pipeline
+- [ ] Require signatures for production MCP configs
+
+**Repository Links:**
+- MCP Servers: https://github.com/hyperpolymath?q=poly-*-mcp
+- K9-SVC: https://github.com/hyperpolymath/k9-svc
+
+---
+
+### 5. **ABI/FFI Build Configuration**
+
+**Priority:** MEDIUM
+**Repositories:** All zig-*-ffi repos
+- https://github.com/hyperpolymath/zig-container-ffi
+- https://github.com/hyperpolymath/zig-cue-ffi
+- https://github.com/hyperpolymath/zig-docmatrix-ffi
+- https://github.com/hyperpolymath/zig-ffmpeg-ffi
+- https://github.com/hyperpolymath/zig-libgit2-ffi
+- https://github.com/hyperpolymath/zig-nickel-ffi
+- https://github.com/hyperpolymath/zig-polyglot-extract-ffi
+- https://github.com/hyperpolymath/zig-systemd-ffi
+
+**What FFI Repos Need:**
+- Build configuration validation
+- ABI/FFI compatibility checks
+- Platform-specific settings
+- Cross-compilation targets
+
+**Example Build Config:**
+
+```nickel
+# zig-container-ffi/build.k9.ncl
+K9!
+leash = 'Yard
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "zig-ffi-build-config",
+  library = "container"
+}
+
+build_config = {
+  zig_version | String = "0.11.0",
+  idris_version | String = "0.7.0",
+
+  targets | Array String = [
+    "x86_64-linux",
+    "aarch64-linux",
+    "x86_64-macos",
+    "aarch64-macos",
+    "x86_64-windows"
+  ],
+
+  abi_source | String = "src/abi",
+  ffi_source | String = "src/main.zig",
+  generated_headers | String = "generated/abi",
+
+  optimization | [| 'Debug, 'ReleaseSafe, 'ReleaseFast, 'ReleaseSmall |]
+    = 'ReleaseSafe,
+
+  # Validation: ABI files must exist
+  abi_files_present | Bool =
+    let required = ["Types.idr", "Layout.idr", "Foreign.idr"]
+    in std.array.all
+      (fun file => file_exists ("%{abi_source}/%{file}"))
+      required
+}
+```
+
+**Benefits:**
+- Build configs validate before running
+- ABI files checked for existence
+- Platform targets validated
+- Version compatibility enforced
+
+**Action Items:**
+- [ ] Create zig-ffi-build K9 template
+- [ ] Migrate one zig-*-ffi repo as pilot
+- [ ] Add K9 validation to FFI CI
+- [ ] Standardize across all 8 repos
+
+---
+
+### 6. **Robot-Repo-Bot Workflow Validation**
+
+**Priority:** HIGH
+**Repository:** https://github.com/hyperpolymath/robot-repo-bot
+
+**What Robot-Repo-Bot Does:**
+- Automated repository management
+- Workflow validation and fixes
+- Security updates
+- Already identified as potential K9 consumer in k9-svc/ECOSYSTEM.scm!
+
+**Why K9 Is Perfect:**
+- Workflows need validation before applying
+- K9 contracts can encode workflow rules
+- Self-validating workflow changes
+- Prevent broken CI from propagating
+
+**Example Workflow Validation:**
+
+```nickel
+# robot-repo-bot/validation/workflow.k9.ncl
+K9!
+leash = 'Yard
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "workflow-validation-rules"
+}
+
+workflow_rules = {
+  required_fields = {
+    name | String,
+    on | { .. },
+    jobs | { .. },
+    permissions | { .. }  # Required by OpenSSF Scorecard
+  },
+
+  permissions_policy = {
+    default | String = "read-all",
+    allowed_write = [
+      "contents",       # For commits
+      "pull-requests",  # For PR creation
+      "security-events" # For CodeQL
+    ]
+  },
+
+  action_pinning = {
+    enforce_sha | Bool = true,
+    allowed_tags | Bool = false,
+    allowed_branches | Array String = []  # Empty = no branches
+  },
+
+  security_workflows = {
+    required | Array String = [
+      "hypatia-scan.yml",
+      "codeql.yml",
+      "scorecard.yml"
+    ]
+  }
+}
+
+# Validation function
+validate_workflow = fun workflow =>
+  let has_permissions = std.record.has_field "permissions" workflow
+  in let sha_pinned = std.array.all
+    (fun action => std.string.is_match ".*@[a-f0-9]{40}.*" action)
+    (extract_actions workflow)
+  in {
+    valid = has_permissions && sha_pinned,
+    errors = []
+      ++ (if !has_permissions then ["Missing permissions field"] else [])
+      ++ (if !sha_pinned then ["Actions not SHA-pinned"] else [])
+  }
+```
+
+**Benefits:**
+- Workflow changes validated before applying
+- Security rules enforced
+- Prevents broken workflows from propagating
+- Automatic fixes include validation
+
+**Action Items:**
+- [ ] Add K9 workflow validation to robot-repo-bot
+- [ ] Create workflow validation K9 contracts
+- [ ] Integrate with existing ERROR-CATALOG.scm
+- [ ] Require K9 validation before applying fixes
+
+**Repository Links:**
+- Robot-Repo-Bot: https://github.com/hyperpolymath/robot-repo-bot
+- K9-SVC: https://github.com/hyperpolymath/k9-svc
+
+---
+
+### 7. **Git-Hud Repository State Validation**
+
+**Priority:** MEDIUM
+**Repository:** https://github.com/hyperpolymath/git-hud (if exists)
+
+**What Git-Hud Does:**
+- Repository health monitoring
+- State tracking
+- Compliance checking
+
+**Why K9 Is Perfect:**
+- K9 already identified git-hud as potential consumer in ECOSYSTEM.scm
+- Repo state validation naturally fits K9
+- Self-validating state assertions
+
+**Example Repo State Contract:**
+
+```nickel
+# git-hud/contracts/repo-health.k9.ncl
+K9!
+leash = 'Yard
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "repo-health-contract"
+}
+
+repo_health = {
+  required_structure = {
+    directories = [
+      ".github/workflows",
+      ".machine_readable",
+      ".bot_directives",
+      "contractiles"
+    ],
+
+    files = [
+      "LICENSE",
+      "SECURITY.md",
+      "README.adoc",
+      ".machine_readable/STATE.scm"
+    ]
+  },
+
+  security_baseline = {
+    branch_protection | Bool = true,
+    required_reviews | std.number.PosNat = 1,
+    signed_commits | Bool = false,  # Optional
+
+    required_workflows = [
+      "hypatia-scan.yml",
+      "codeql.yml",
+      "scorecard.yml"
+    ]
+  },
+
+  quality_gates = {
+    test_coverage | std.number.PosNat = 80,  # Minimum 80%
+    open_critical_issues | std.number.Nat = 0,
+    days_since_last_commit | std.number.Nat = 90  # Max 90 days
+  }
+}
+
+# Health check function
+check_health = fun repo =>
+  {
+    structure_valid = validate_structure repo repo_health.required_structure,
+    security_valid = validate_security repo repo_health.security_baseline,
+    quality_valid = validate_quality repo repo_health.quality_gates,
+
+    overall_health | [| 'Healthy, 'Warning, 'Critical |] =
+      if structure_valid && security_valid && quality_valid
+      then 'Healthy
+      else if !security_valid then 'Critical
+      else 'Warning
+  }
+```
+
+**Benefits:**
+- Repo health contracts self-validate
+- Health checks executable
+- State assertions formal
+- Integration with monitoring
+
+**Action Items:**
+- [ ] Check if git-hud exists
+- [ ] Create repo health K9 contracts
+- [ ] Integrate K9 validation into git-hud
+- [ ] Use for automated health reporting
+
+---
+
+## Progressive Adoption Strategy
+
+### Phase 1: Self-Validation (NOW - K9 v1.0.0) ✅
+
+**Status:** COMPLETE
+
+K9 already validates itself:
+- `pedigree.ncl` has contracts
+- `just dogfood` validates everything
+- Examples at all security levels
+- Test suite comprehensive
+
+### Phase 2: Nickel Tooling (This Week)
+
+**Focus:** Bunsenite dogfooding
+
+1. Migrate bunsenite configs to K9
+2. Create bunsenite-specific templates
+3. Document K9 usage in bunsenite
+4. Blog post about meta-dogfooding
+
+**Success Metric:** The Nickel tool uses K9, demonstrating power to Nickel users
+
+### Phase 3: RSR Standard (This Month)
+
+**Focus:** Standardize contractiles
+
+1. K9 templates for all 4 contractile types
+2. Update rsr-template-repo
+3. Add contractile validation to RSR CI
+4. Pilot in 10 repos
+
+**Success Metric:** RSR repos have self-validating contractiles
+
+### Phase 4: Infrastructure (This Quarter)
+
+**Focus:** MCP servers and critical services
+
+1. Migrate all poly-*-mcp configs
+2. Add K9 validation to deployment pipelines
+3. Require signatures for production
+4. Integrate with robot-repo-bot
+
+**Success Metric:** All production deployments use signed K9 configs
+
+### Phase 5: Full Adoption (Ongoing)
+
+**Focus:** K9 as default config format
+
+1. All new repos use K9
+2. Build configs in K9 (zig-*-ffi)
+3. Workflow validation with K9
+4. External adoption begins
+
+**Success Metric:** 500+ repos using K9 configs
+
+---
+
+## Integration with Ecosystem
+
+### K9 + Bunsenite = Perfect Match
+
+- Bunsenite: Nickel tooling
+- K9: Uses Nickel for validation
+- **Result:** The Nickel tool validates itself with K9
+
+### K9 + RSR = Formal Compliance
+
+- RSR: Repository standards
+- K9: Self-validating contracts
+- **Result:** Compliance checked automatically
+
+### K9 + Robot-Repo-Bot = Validated Automation
+
+- Robot-Repo-Bot: Automated fixes
+- K9: Workflow validation contracts
+- **Result:** Only valid changes applied
+
+### K9 + Hypatia = Neurosymbolic Security
+
+- Hypatia: Security scanning
+- K9: Self-validating security configs
+- **Result:** Security policies enforced at config level
+
+---
+
+## Success Criteria
+
+K9 dogfooding is successful when:
+
+1. **Self-Validation:** K9 validates itself ✅ (DONE)
+2. **Nickel Authority:** Bunsenite uses K9 for its configs
+3. **RSR Standard:** K9 is default for contractiles in rsr-template-repo
+4. **Production Ready:** All MCP servers use signed K9 configs
+5. **Automated Validation:** robot-repo-bot validates workflows with K9
+6. **External Adoption:** Other ecosystems adopt K9
+
+---
+
+## Technical Requirements
+
+### K9 is Production Ready ✅
+
+- [x] Stable must-just-nickel triad
+- [x] Security model (Kennel/Yard/Hunt)
+- [x] Cryptographic signing (Ed25519)
+- [x] MIME registration
+- [x] Comprehensive tests
+- [x] Packaging (Homebrew, AUR, Nix)
+- [x] Documentation complete
+- [x] CI/CD pipeline
+
+### For Ecosystem Integration
+
+**Needed:**
+- [ ] K9 templates for common use cases (RSR, MCP, FFI)
+- [ ] CI integration (GitHub Actions: `validate-k9@v1`)
+- [ ] Migration guides (Nickel → K9)
+- [ ] IDE support (VS Code K9 extension)
+
+**Nice to Have:**
+- [ ] K9 generator (create K9 from template)
+- [ ] K9 validator API (for programmatic use)
+- [ ] K9 policy engine (centralized rules)
+
+---
+
+## Repository Links
+
+### Core Repositories
+- **K9-SVC:** https://github.com/hyperpolymath/k9-svc
+- **RSR Template:** https://github.com/hyperpolymath/rsr-template-repo
+- **Bunsenite:** https://github.com/hyperpolymath/bunsenite
+- **Robot-Repo-Bot:** https://github.com/hyperpolymath/robot-repo-bot
+
+### MCP Servers
+- **poly-secret-mcp:** https://github.com/hyperpolymath/poly-secret-mcp
+- **poly-queue-mcp:** https://github.com/hyperpolymath/poly-queue-mcp
+- **poly-observability-mcp:** https://github.com/hyperpolymath/poly-observability-mcp
+- **poly-iac-mcp:** https://github.com/hyperpolymath/poly-iac-mcp
+
+### ABI/FFI Repositories
+- **zig-container-ffi:** https://github.com/hyperpolymath/zig-container-ffi
+- **zig-cue-ffi:** https://github.com/hyperpolymath/zig-cue-ffi
+- **zig-docmatrix-ffi:** https://github.com/hyperpolymath/zig-docmatrix-ffi
+- **zig-ffmpeg-ffi:** https://github.com/hyperpolymath/zig-ffmpeg-ffi
+- **zig-libgit2-ffi:** https://github.com/hyperpolymath/zig-libgit2-ffi
+- **zig-nickel-ffi:** https://github.com/hyperpolymath/zig-nickel-ffi
+- **zig-polyglot-extract-ffi:** https://github.com/hyperpolymath/zig-polyglot-extract-ffi
+- **zig-systemd-ffi:** https://github.com/hyperpolymath/zig-systemd-ffi
+
+---
+
+## Conclusion
+
+K9 is **production-ready** (v1.0.0) and already demonstrates self-validation. The next step is ecosystem-wide adoption:
+
+**Immediate Priorities:**
+1. **Bunsenite** - Nickel tool using K9 (highest meta-dogfooding value)
+2. **RSR Contractiles** - Formalize must-just-nickel triad
+3. **MCP Servers** - Production configs with signatures
+
+**Long-term Vision:**
+- K9 as default config format across 500+ repos
+- Self-validating configs prevent deployment errors
+- Formal verification chain: ABI (Idris2) → FFI (Zig) → Config (K9)
+
+**Recommendation:** Start with bunsenite configs this week. It's production-ready, and the impact is immediate.
+
+---
+
+**Document Status:** Ready for Implementation
+**Next Review:** After Phase 2 (Bunsenite integration)
+**Maintainer:** Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>

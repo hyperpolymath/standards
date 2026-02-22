@@ -1,0 +1,200 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://axel-protocol.org/schemas/axel-policy.schema.json",
+  "title": "AXEL Policy Object",
+  "description": "JSON Schema for AXEL Protocol policy documents served at /.well-known/axel-policy",
+  "type": "object",
+  "required": ["version", "id", "scope", "content", "enforcement", "cache"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "AXEL1",
+      "description": "Protocol version. MUST be 'AXEL1'."
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Policy identifier. MUST match the id in the DNS TXT record. Changes when policy content changes."
+    },
+    "scope": {
+      "type": "object",
+      "required": ["hostnames"],
+      "properties": {
+        "hostnames": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9\\-]*[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9\\-]*[a-zA-Z0-9])?)*$"
+          },
+          "minItems": 1,
+          "description": "List of hostnames this policy covers."
+        }
+      },
+      "additionalProperties": false
+    },
+    "content": {
+      "type": "object",
+      "required": ["category", "min_age"],
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": ["adult", "mature", "gambling", "alcohol", "tobacco", "cannabis", "custom"],
+          "description": "Content category."
+        },
+        "min_age": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum age for access."
+        }
+      },
+      "additionalProperties": false
+    },
+    "enforcement": {
+      "type": "object",
+      "required": ["profiles", "proof_required"],
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["AXEL-O", "AXEL-N"]
+          },
+          "minItems": 1,
+          "contains": {
+            "const": "AXEL-O"
+          },
+          "description": "Supported enforcement profiles. MUST include 'AXEL-O'."
+        },
+        "proof_required": {
+          "type": "boolean",
+          "description": "Whether proof of eligibility is required for access."
+        },
+        "browser_flow": {
+          "type": "object",
+          "properties": {
+            "gate_url": {
+              "type": "string",
+              "format": "uri",
+              "description": "URL to redirect browsers for proof."
+            }
+          },
+          "additionalProperties": false
+        },
+        "api_flow": {
+          "type": "object",
+          "properties": {
+            "problem_type": {
+              "type": "string",
+              "format": "uri",
+              "description": "RFC 9457 problem type URI."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "isolation": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["L0", "L1", "L1-AUDITED"],
+          "default": "L0",
+          "description": "Isolation level."
+        },
+        "prefixes": {
+          "type": "object",
+          "properties": {
+            "ipv6": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "description": "IPv6 CIDR prefix."
+              }
+            },
+            "ipv4": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "description": "IPv4 CIDR prefix (legacy)."
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "cdn_pool": {
+          "type": "string",
+          "description": "CDN pool identifier for explicit-only hosting."
+        }
+      },
+      "additionalProperties": false
+    },
+    "verifiers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Human-readable verifier name."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "HTTPS URL of the verifier service."
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Supported verification methods."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Discovery metadata for verification services."
+    },
+    "auditing": {
+      "type": "object",
+      "properties": {
+        "statement_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "HTTPS URL of the auditor's statement."
+        },
+        "policy_hash_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 hash of this policy document (hex-encoded)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "cache": {
+      "type": "object",
+      "required": ["max_age_seconds", "stale_if_error_seconds"],
+      "properties": {
+        "max_age_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum cache lifetime in seconds."
+        },
+        "stale_if_error_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Stale-if-error window in seconds."
+        }
+      },
+      "additionalProperties": false
+    },
+    "extensions": {
+      "type": "object",
+      "description": "Vendor/future extensions. Unknown fields SHOULD be placed here.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

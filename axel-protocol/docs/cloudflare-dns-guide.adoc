@@ -1,0 +1,261 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+
+= Cloudflare DNS Configuration for GitHub Pages
+:toc: left
+:toclevels: 2
+:icons: font
+
+Simple guide to point axel-protocol.org to GitHub Pages.
+
+== Overview
+
+*Goal:* Point your Cloudflare-registered domain to GitHub Pages (free hosting)
+
+*Time needed:* 10 minutes setup + 10-30 minutes DNS propagation
+
+*Prerequisites:*
+- Domain registered at Cloudflare (✓ you have this)
+- GitHub repo: hyperpolymath/axel-protocol (✓ you have this)
+- index.html in repo root (✓ you have this)
+
+== Step 1: Access Cloudflare DNS
+
+1. Go to: https://dash.cloudflare.com/
+2. Log in with your account
+3. Click on: `axel-protocol.org`
+4. Left sidebar: Click `DNS` → `Records`
+
+You should see a list of DNS records.
+
+== Step 2: Remove Old Records
+
+*Look for and DELETE these:*
+
+* Any **A records** with Name `@` pointing to your Verpex VPS IP
+* Any **CNAME records** with Name `@`
+
+*KEEP these (don't delete):*
+
+* **MX records** (for email)
+* **TXT records** (for email SPF, domain verification)
+* **CAA records** (if any)
+
+*To delete a record:*
+
+1. Find the record in the list
+2. Click the row to expand
+3. Click `Edit` button
+4. Click `Delete` button
+5. Confirm deletion
+
+== Step 3: Add GitHub Pages A Records
+
+Click `Add record` button, then add **4 separate A records**:
+
+=== Record 1
+----
+Type: A
+Name: @
+IPv4 address: 185.199.108.153
+Proxy status: DNS only (gray cloud)
+TTL: Auto
+----
+Click `Save`
+
+=== Record 2
+----
+Type: A
+Name: @
+IPv4 address: 185.199.109.153
+Proxy status: DNS only (gray cloud)
+TTL: Auto
+----
+Click `Save`
+
+=== Record 3
+----
+Type: A
+Name: @
+IPv4 address: 185.199.110.153
+Proxy status: DNS only (gray cloud)
+TTL: Auto
+----
+Click `Save`
+
+=== Record 4
+----
+Type: A
+Name: @
+IPv4 address: 185.199.111.153
+Proxy status: DNS only (gray cloud)
+TTL: Auto
+----
+Click `Save`
+
+*CRITICAL:* Make sure `Proxy status` shows **DNS only** (gray cloud icon), NOT "Proxied" (orange cloud).
+
+== Step 4: Add WWW Redirect (Optional)
+
+This makes `www.axel-protocol.org` redirect to `axel-protocol.org`.
+
+Click `Add record`:
+
+----
+Type: CNAME
+Name: www
+Target: hyperpolymath.github.io.
+Proxy status: DNS only (gray cloud)
+TTL: Auto
+----
+
+*Note:* Include the trailing dot: `hyperpolymath.github.io.` (not `hyperpolymath.github.io`)
+
+Click `Save`
+
+== Step 5: Configure GitHub Pages
+
+1. Go to: https://github.com/hyperpolymath/axel-protocol
+2. Click `Settings` (top right)
+3. Left sidebar: Click `Pages`
+4. Under "Custom domain", enter: `axel-protocol.org`
+5. Click `Save`
+
+GitHub will:
+- Create a `CNAME` file in your repo
+- Check DNS configuration
+- Start provisioning SSL certificate
+
+== Step 6: Wait for DNS Propagation
+
+DNS changes take time:
+- **Minimum:** 5 minutes
+- **Typical:** 10-30 minutes
+- **Maximum:** 24 hours (rare)
+
+*Check if DNS has propagated:*
+
+[source,bash]
+----
+dig axel-protocol.org A +short
+----
+
+*Expected output:*
+----
+185.199.108.153
+185.199.109.153
+185.199.110.153
+185.199.111.153
+----
+
+If you see your old VPS IP address, wait a few more minutes and try again.
+
+== Step 7: Enable HTTPS
+
+Once DNS propagates:
+
+1. Go to: GitHub repo `Settings` → `Pages`
+2. You'll see: "Certificate is being created..." (wait 10-30 minutes)
+3. Once ready, checkbox appears: `Enforce HTTPS`
+4. Check the box
+5. Click `Save`
+
+== Step 8: Test Everything
+
+*Test in browser:*
+
+- Visit: https://axel-protocol.org
+- Should show: Your AXEL Protocol landing page
+- Should have: Green padlock (valid HTTPS certificate)
+
+*Test www redirect:*
+
+- Visit: https://www.axel-protocol.org
+- Should redirect to: https://axel-protocol.org
+
+*Test from command line:*
+
+[source,bash]
+----
+# Test HTTPS
+curl -I https://axel-protocol.org
+
+# Expected: HTTP/2 200
+----
+
+[source,bash]
+----
+# Test HTTP redirect
+curl -I http://axel-protocol.org
+
+# Expected: 301 redirect to https://
+----
+
+== Troubleshooting
+
+=== "DNS check failed" on GitHub Pages
+
+*Cause:* DNS not propagated yet
+
+*Fix:* Wait 10-30 minutes, try again
+
+=== "Certificate not yet created" for >1 hour
+
+*Cause:* Cloudflare proxy is enabled (orange cloud)
+
+*Fix:*
+1. Go to Cloudflare DNS
+2. Click each A record
+3. Change from "Proxied" to "DNS only"
+4. Wait 10 minutes, check GitHub Pages again
+
+=== Site shows 404 error
+
+*Cause:* Custom domain not configured correctly
+
+*Fix:*
+1. Go to GitHub repo Settings → Pages
+2. Verify "Custom domain" shows: `axel-protocol.org`
+3. Check that `CNAME` file exists in repo root
+4. Content of CNAME file should be: `axel-protocol.org`
+
+=== Old Verpex page still showing
+
+*Cause:* Browser cache or DNS cache
+
+*Fix:*
+1. Try incognito/private browsing window
+2. Clear browser cache
+3. Wait for DNS propagation
+4. Verify DNS with: `dig axel-protocol.org A +short`
+
+=== Email stopped working
+
+*Cause:* Accidentally deleted MX or TXT records
+
+*Fix:*
+1. Go to Cloudflare DNS
+2. Verify these records exist:
+   - MX records (isaac.mx.cloudflare.net, linda.mx.cloudflare.net, amir.mx.cloudflare.net)
+   - TXT record with SPF: `v=spf1 include:_spf.mx.cloudflare.net ~all`
+3. If missing, see: link:email-setup.adoc[email-setup.adoc]
+
+== Summary
+
+After completing these steps, you should have:
+
+* ✅ axel-protocol.org pointing to GitHub Pages
+* ✅ Free HTTPS certificate (Let's Encrypt)
+* ✅ www.axel-protocol.org redirecting to main domain
+* ✅ Email forwarding still working (if configured)
+* ✅ VPS freed up for other projects
+
+Your static website is now hosted on GitHub's global CDN, completely free, with automatic HTTPS and no maintenance required.
+
+== Next Steps
+
+After DNS is working:
+
+1. Set up email forwarding (if not done): link:email-setup.adoc[email-setup.adoc]
+2. Begin outreach campaigns: link:outreach-strategy.adoc[outreach-strategy.adoc]
+3. Follow deployment checklist: link:deployment-checklist.adoc[deployment-checklist.adoc]

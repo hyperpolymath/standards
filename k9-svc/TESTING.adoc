@@ -1,0 +1,422 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= K9 SVC Testing Guide
+:toc: left
+:toclevels: 2
+:icons: font
+
+== Overview
+
+This document describes how to test K9 SVC across different platforms. K9 targets POSIX-compatible systems including Linux, macOS, and Minix.
+
+== Quick Test
+
+[source,bash]
+----
+# Run the full test suite
+./test.sh
+
+# Quick validation only
+just test-quick
+
+# Self-validation (dogfood)
+just dogfood
+----
+
+== Test Suite Components
+
+The `test.sh` script tests:
+
+[cols="1,2,1"]
+|===
+| Section | Tests | Count
+
+| Environment
+| must shim, OS detection, Nickel, Just, OpenSSL
+| 5
+
+| Schema Validation
+| pedigree.ncl, register.ncl, leash.ncl typechecks
+| 3
+
+| Example Components
+| hello.k9 magic, config.k9.ncl, deploy.k9.ncl
+| 4
+
+| MIME Files
+| k9.xml, k9.uti.plist, k9.magic validity
+| 4
+
+| Signing System
+| keygen, list, sign, trust, verify
+| 4
+
+| Container
+| Containerfile, multi-stage build, non-root user
+| 4
+|===
+
+Total: **24 tests**
+
+== Linux Testing
+
+=== Prerequisites
+
+[source,bash]
+----
+# Fedora/RHEL
+sudo dnf install nickel just openssl xmllint podman
+
+# Ubuntu/Debian
+# Nickel: download from https://github.com/tweag/nickel/releases
+sudo apt install just openssl libxml2-utils podman
+
+# Arch Linux
+sudo pacman -S nickel just openssl libxml2 podman
+# OR install from AUR: yay -S k9-svc
+----
+
+=== Run Tests
+
+[source,bash]
+----
+./test.sh
+----
+
+=== MIME Registration Test
+
+[source,bash]
+----
+# Install MIME type
+just setup-mime
+
+# Verify
+xdg-mime query filetype examples/hello.k9
+# Expected: application/vnd.k9
+
+file examples/hello.k9
+# Expected: K9 Self-Validating Component
+----
+
+== macOS Testing
+
+=== Prerequisites
+
+[source,bash]
+----
+# Install via Homebrew
+brew install nickel just openssl@3
+
+# Or install K9 directly (when formula is published)
+# brew tap hyperpolymath/k9
+# brew install k9-svc
+----
+
+=== Run Tests
+
+[source,bash]
+----
+./test.sh
+----
+
+=== Expected Differences
+
+* `xmllint` may not be available by default (install with `brew install libxml2`)
+* OpenSSL path may differ (`/opt/homebrew/opt/openssl@3/bin/openssl`)
+* Podman may need `podman machine init && podman machine start`
+
+=== UTI Registration Test
+
+[source,bash]
+----
+# Install UTI
+just install-uti
+
+# Verify (may require logout/login)
+mdls -name kMDItemContentType examples/hello.k9
+# Expected: com.hyperpolymath.k9
+----
+
+== Minix Testing
+
+=== Prerequisites
+
+Minix 3.x with pkgsrc:
+
+[source,bash]
+----
+# Install prerequisites via pkgsrc
+cd /usr/pkgsrc/lang/nickel && make install  # May need to add
+cd /usr/pkgsrc/devel/just && make install   # May need to add
+pkgin install openssl
+----
+
+NOTE: Nickel and Just may not be in the default pkgsrc tree. You may need to build from source or use the Rust toolchain.
+
+=== Building from Source
+
+[source,bash]
+----
+# Install Rust (if not present)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Build Nickel
+git clone https://github.com/tweag/nickel.git
+cd nickel && cargo build --release
+cp target/release/nickel /usr/local/bin/
+
+# Build Just
+cargo install just
+----
+
+=== Run Tests
+
+[source,bash]
+----
+./test.sh
+----
+
+=== Expected Differences
+
+* `podman` tests will be skipped (no container support)
+* MIME registration via `xdg-mime` won't work (Minix doesn't use Freedesktop)
+* OpenSSL Ed25519 support depends on version
+
+=== Minix-Specific Test
+
+[source,bash]
+----
+# Test core functionality only
+just test-quick
+
+# Verify must shim detects Minix
+./must status
+# Expected: OS: Minix
+----
+
+== CI Testing
+
+GitHub Actions runs tests automatically on push. See `.github/workflows/ci.yml`.
+
+=== CI Matrix
+
+[cols="1,1,2"]
+|===
+| Platform | Runner | Notes
+
+| Linux (x86_64)
+| `ubuntu-latest`
+| Full test suite
+
+| macOS (ARM64)
+| `macos-latest`
+| Full test suite (Podman via machine)
+
+| macOS (x86_64)
+| `macos-13`
+| Legacy Intel support
+|===
+
+=== Running CI Locally
+
+[source,bash]
+----
+# With act (GitHub Actions local runner)
+act -j test
+
+# Or manually replicate CI steps
+./must ensure
+just typecheck
+./test.sh
+----
+
+== Container Testing
+
+=== Build and Test in Container
+
+[source,bash]
+----
+# Build the container
+just build-container
+
+# Run tests inside container
+podman run --rm k9-svc:latest ./test.sh
+
+# Run dogfood inside container
+podman run --rm k9-svc:latest dogfood
+----
+
+=== Test with Docker Compose
+
+[source,bash]
+----
+# Start development environment
+podman-compose up -d
+
+# Execute tests
+podman-compose exec k9 ./test.sh
+
+# Cleanup
+podman-compose down
+----
+
+== Signing System Testing
+
+=== Key Generation
+
+[source,bash]
+----
+# Generate test key
+./sign.sh keygen testkey
+
+# Verify key files exist
+ls ~/.config/k9/keys/
+# Expected: testkey.key testkey.pub
+----
+
+=== Sign and Verify Cycle
+
+[source,bash]
+----
+# Create test file
+echo "test content" > /tmp/testfile
+
+# Sign
+./sign.sh sign /tmp/testfile testkey
+
+# Trust the key
+./sign.sh trust ~/.config/k9/keys/testkey.pub
+
+# Verify
+./sign.sh verify /tmp/testfile
+# Expected: ✓ Signature VALID (key: testkey)
+
+# Cleanup
+rm /tmp/testfile /tmp/testfile.sig
+----
+
+=== Hunt Authorization
+
+[source,bash]
+----
+# Check Hunt component authorization
+./sign.sh authorize examples/deploy.k9.ncl
+# Will fail if not signed by trusted key
+
+# To test fully:
+# 1. Sign deploy.k9.ncl
+# 2. Trust the signing key
+# 3. Run authorize again
+----
+
+== Troubleshooting Tests
+
+=== "nickel: command not found"
+
+Install Nickel or add to PATH:
+
+[source,bash]
+----
+export PATH="$HOME/.cargo/bin:$PATH"
+----
+
+=== "OpenSSL without Ed25519"
+
+OpenSSL 1.1.1+ is required for Ed25519. Check version:
+
+[source,bash]
+----
+openssl version
+# Required: OpenSSL 1.1.1 or newer
+
+# Test Ed25519 support
+openssl genpkey -algorithm Ed25519 -out /dev/null
+----
+
+=== Schema Typecheck Fails
+
+Ensure Nickel version compatibility:
+
+[source,bash]
+----
+nickel --version
+# Recommended: 1.4.0 or newer
+----
+
+=== MIME Tests Skipped
+
+Install xmllint for XML validation:
+
+[source,bash]
+----
+# Fedora
+sudo dnf install libxml2
+
+# macOS
+brew install libxml2
+----
+
+== Adding New Tests
+
+To add tests to `test.sh`:
+
+[source,bash]
+----
+# Use the test utilities
+pass "Test description"   # Green checkmark
+fail "Test description"   # Red X
+skip "Test description"   # Yellow skip
+
+# Create a new section
+section "My Tests"
+
+# Example test function
+test_my_feature() {
+    section "My Feature"
+
+    if some_condition; then
+        pass "Feature works"
+    else
+        fail "Feature broken"
+    fi
+}
+
+# Call from main
+test_my_feature
+----
+
+== Coverage
+
+Current test coverage by component:
+
+[cols="2,1,3"]
+|===
+| Component | Coverage | Notes
+
+| must shim
+| ✓ High
+| Environment detection, status
+
+| pedigree.ncl
+| ✓ High
+| Typecheck validation
+
+| leash.ncl
+| ✓ High
+| Security level contracts
+
+| sign.sh
+| ✓ High
+| Full keygen/sign/verify cycle
+
+| MIME types
+| ✓ Medium
+| XML validity, magic patterns
+
+| Containerfile
+| ✓ Medium
+| Structure checks (no runtime)
+
+| examples/
+| ✓ High
+| All examples typecheck
+|===

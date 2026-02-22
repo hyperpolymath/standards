@@ -1,0 +1,34 @@
+# Maintainers
+
+## Current Maintainers
+
+### Jonathan D.A. Jewell
+
+- **Role**: Project Creator and Lead Maintainer
+- **Responsibilities**: All aspects of the project
+- **Contact**: [via GitLab/GitHub issues]
+
+## Contributors
+
+Special thanks to all contributors who have helped shape STATE.
+
+### Code Contributors
+
+- Claude (Anthropic) - Implementation assistance
+
+### Documentation Contributors
+
+- [Your name here]
+
+## Becoming a Maintainer
+
+See GOVERNANCE.adoc for the process of becoming a core contributor
+or maintainer.
+
+## Historical Maintainers
+
+None yet - this is a new project.
+
+---
+
+*This file is updated when maintainership changes.*

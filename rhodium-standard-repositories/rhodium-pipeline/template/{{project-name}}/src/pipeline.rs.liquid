@@ -1,0 +1,369 @@
+//! Core pipeline orchestration for {{ project-name }}
+//!
+//! The pipeline executes in stages:
+//! 1. Ingest - Read and parse input data
+//! 2. Transform - Apply processing operations
+//! 3. Validate - Verify invariants
+//! 4. Export - Write output with checksums
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+use tracing::{info, debug, warn, instrument, Span};
+use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
+
+use crate::cli::{RunArgs, GlobalArgs};
+use crate::config::Config;
+use crate::error::{Error, Result};
+use crate::checksum::ChecksumWriter;
+use crate::validation::Validator;
+
+/// Pipeline execution context
+pub struct Pipeline {
+    config: Config,
+    args: RunArgs,
+    global: GlobalArgs,
+    progress: Option<MultiProgress>,
+}
+
+/// Pipeline execution result
+#[derive(Debug)]
+pub struct PipelineResult {
+    pub records_processed: usize,
+    pub records_failed: usize,
+    pub bytes_read: u64,
+    pub bytes_written: u64,
+    pub duration_ms: u128,
+    pub checksums: Vec<(PathBuf, String)>,
+}
+
+/// Stage result for pipeline composition
+#[derive(Debug)]
+pub struct StageResult<T> {
+    pub data: T,
+    pub records: usize,
+    pub warnings: Vec<String>,
+}
+
+impl Pipeline {
+    /// Create a new pipeline with configuration
+    pub fn new(config: Config, args: RunArgs, global: GlobalArgs) -> Self {
+        let progress = if global.no_progress {
+            None
+        } else {
+            Some(MultiProgress::new())
+        };
+
+        Self {
+            config,
+            args,
+            global,
+            progress,
+        }
+    }
+
+    /// Execute the pipeline
+    #[instrument(skip(self), fields(pipeline = "{{ project-name }}"))]
+    pub async fn run(&self) -> Result<PipelineResult> {
+        let start = std::time::Instant::now();
+
+        info!(
+            inputs = ?self.args.input,
+            output = ?self.args.output,
+            "Starting pipeline execution"
+        );
+
+        // Validate preconditions
+        self.check_preconditions()?;
+
+        // Stage 1: Ingest
+        let ingested = self.stage_ingest().await?;
+        debug!(records = ingested.records, "Ingest complete");
+
+        // Stage 2: Transform
+        let transformed = self.stage_transform(ingested).await?;
+        debug!(records = transformed.records, "Transform complete");
+
+        // Stage 3: Validate
+        let validated = self.stage_validate(transformed).await?;
+        debug!(records = validated.records, "Validation complete");
+
+        // Stage 4: Export
+        let exported = self.stage_export(validated).await?;
+        debug!(records = exported.records, "Export complete");
+
+        let duration_ms = start.elapsed().as_millis();
+
+        info!(
+            records = exported.records,
+            duration_ms = duration_ms,
+            "Pipeline complete"
+        );
+
+        Ok(PipelineResult {
+            records_processed: exported.records,
+            records_failed: 0,
+            bytes_read: 0,
+            bytes_written: 0,
+            duration_ms,
+            checksums: vec![],
+        })
+    }
+
+    /// Check pipeline preconditions
+    fn check_preconditions(&self) -> Result<()> {
+        // Check inputs exist
+        for input in &self.args.input {
+            if !input.exists() {
+                return Err(Error::FileNotFound { path: input.clone() });
+            }
+        }
+
+        // Check output doesn't exist (unless overwrite)
+        if self.args.output.exists() && !self.args.overwrite {
+            return Err(Error::PathExists { path: self.args.output.clone() });
+        }
+
+        // Create parent directories if needed
+        if self.args.create_parents {
+            if let Some(parent) = self.args.output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Stage 1: Ingest data
+    #[instrument(skip(self))]
+    async fn stage_ingest(&self) -> Result<StageResult<Vec<Record>>> {
+        let pb = self.create_progress_bar("Ingesting", 0);
+
+        let mut records = Vec::new();
+        let mut warnings = Vec::new();
+
+        for input in &self.args.input {
+            let batch = self.ingest_path(input).await?;
+            records.extend(batch);
+
+            if let Some(pb) = &pb {
+                pb.inc(1);
+            }
+        }
+
+        if let Some(pb) = pb {
+            pb.finish_with_message("Ingest complete");
+        }
+
+        Ok(StageResult {
+            records: records.len(),
+            data: records,
+            warnings,
+        })
+    }
+
+    /// Stage 2: Transform data
+    #[instrument(skip(self, input))]
+    async fn stage_transform(&self, input: StageResult<Vec<Record>>) -> Result<StageResult<Vec<Record>>> {
+        let pb = self.create_progress_bar("Transforming", input.records as u64);
+
+        let semaphore = Arc::new(Semaphore::new(self.args.threads));
+        let mut transformed = Vec::with_capacity(input.records);
+        let mut warnings = input.warnings;
+
+        for record in input.data {
+            let permit = semaphore.clone().acquire_owned().await.unwrap();
+
+            let result = self.transform_record(record).await?;
+            transformed.push(result);
+
+            drop(permit);
+
+            if let Some(pb) = &pb {
+                pb.inc(1);
+            }
+        }
+
+        if let Some(pb) = pb {
+            pb.finish_with_message("Transform complete");
+        }
+
+        Ok(StageResult {
+            records: transformed.len(),
+            data: transformed,
+            warnings,
+        })
+    }
+
+    /// Stage 3: Validate data
+    #[instrument(skip(self, input))]
+    async fn stage_validate(&self, input: StageResult<Vec<Record>>) -> Result<StageResult<Vec<Record>>> {
+        if self.args.no_validate {
+            debug!("Validation skipped");
+            return Ok(input);
+        }
+
+        let pb = self.create_progress_bar("Validating", input.records as u64);
+
+        let validator = Validator::new(&self.config, &self.args);
+        let mut warnings = input.warnings;
+
+        for record in &input.data {
+            validator.validate_record(record)?;
+
+            if let Some(pb) = &pb {
+                pb.inc(1);
+            }
+        }
+
+        // Check structural invariants
+        validator.check_partition_invariant(&input.data)?;
+        validator.check_bijection_invariant(&input.data)?;
+
+        if let Some(pb) = pb {
+            pb.finish_with_message("Validation complete");
+        }
+
+        Ok(StageResult {
+            records: input.records,
+            data: input.data,
+            warnings,
+        })
+    }
+
+    /// Stage 4: Export data
+    #[instrument(skip(self, input))]
+    async fn stage_export(&self, input: StageResult<Vec<Record>>) -> Result<StageResult<()>> {
+        if self.args.dry_run {
+            info!("Dry run - skipping export");
+            return Ok(StageResult {
+                records: input.records,
+                data: (),
+                warnings: input.warnings,
+            });
+        }
+
+        let pb = self.create_progress_bar("Exporting", input.records as u64);
+
+        // Write data
+        let writer = self.create_writer()?;
+        for record in &input.data {
+            writer.write_record(record)?;
+
+            if let Some(pb) = &pb {
+                pb.inc(1);
+            }
+        }
+        writer.finish()?;
+
+        // Generate checksums if enabled
+        if self.args.generate_checksums {
+            self.generate_output_checksum().await?;
+        }
+
+        if let Some(pb) = pb {
+            pb.finish_with_message("Export complete");
+        }
+
+        Ok(StageResult {
+            records: input.records,
+            data: (),
+            warnings: input.warnings,
+        })
+    }
+
+    // -------------------------------------------------------------------------
+    // HELPERS
+    // -------------------------------------------------------------------------
+
+    async fn ingest_path(&self, path: &PathBuf) -> Result<Vec<Record>> {
+        // TODO: Implement format-specific ingestion
+        Ok(vec![])
+    }
+
+    async fn transform_record(&self, record: Record) -> Result<Record> {
+        // TODO: Implement domain-specific transformation
+        Ok(record)
+    }
+
+    fn create_writer(&self) -> Result<Box<dyn RecordWriter>> {
+        // TODO: Implement format-specific writer
+        Ok(Box::new(DummyWriter))
+    }
+
+    async fn generate_output_checksum(&self) -> Result<()> {
+        let checksum = crate::checksum::compute_file_checksum(
+            &self.args.output,
+            self.args.checksum.clone().into(),
+        )?;
+
+        let checksum_path = self.args.output.with_extension(
+            format!("{}{}",
+                self.args.output.extension().unwrap_or_default().to_string_lossy(),
+                &self.args.checksum_ext
+            )
+        );
+
+        std::fs::write(&checksum_path, &checksum)?;
+        debug!(path = ?checksum_path, checksum = %checksum, "Checksum written");
+
+        Ok(())
+    }
+
+    fn create_progress_bar(&self, message: &str, total: u64) -> Option<ProgressBar> {
+        self.progress.as_ref().map(|mp| {
+            let pb = mp.add(ProgressBar::new(total));
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                    .unwrap()
+                    .progress_chars("#>-")
+            );
+            pb.set_message(message.to_string());
+            pb
+        })
+    }
+}
+
+// -------------------------------------------------------------------------
+// PLACEHOLDER TYPES (to be replaced with domain-specific implementations)
+// -------------------------------------------------------------------------
+
+/// Placeholder record type
+#[derive(Debug, Clone)]
+pub struct Record {
+    pub id: String,
+    pub data: Vec<u8>,
+}
+
+/// Placeholder writer trait
+pub trait RecordWriter {
+    fn write_record(&self, record: &Record) -> Result<()>;
+    fn finish(&self) -> Result<()>;
+}
+
+struct DummyWriter;
+
+impl RecordWriter for DummyWriter {
+    fn write_record(&self, _record: &Record) -> Result<()> {
+        Ok(())
+    }
+
+    fn finish(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Main entry point for run command
+pub async fn run(args: RunArgs, global: &GlobalArgs) -> Result<()> {
+    let config = Config::load(global)?;
+    let pipeline = Pipeline::new(config, args, global.clone());
+    let result = pipeline.run().await?;
+
+    println!("Processed {} records in {}ms",
+        result.records_processed,
+        result.duration_ms
+    );
+
+    Ok(())
+}

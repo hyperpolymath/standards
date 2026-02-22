@@ -1,0 +1,444 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= K9-SVC: Solutions vs Mitigations
+:subtitle: What Actually Eliminates Risks vs What Reduces Them
+:author: Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+:revdate: 2026-01-30
+:toc: left
+:icons: font
+
+== Key Distinction
+
+**MITIGATION:** Reduces risk but attack still possible +
+**SOLUTION:** Eliminates the attack vector entirely
+
+---
+
+== Attack Vector 1: Malicious Hunt-Level Component
+
+=== Current Approach
+
+| Item | Type | Why |
+|------|------|-----|
+| Signature requirement | 🟡 MITIGATION | Assumes key not compromised |
+| Manual trust | 🟡 MITIGATION | Users can be tricked |
+| Dry-run mode | 🟡 MITIGATION | Users can ignore output |
+| k9-scan static analysis | 🟡 MITIGATION | Can be bypassed, false negatives |
+
+=== What Would Actually SOLVE It
+
+| Solution | Eliminates Risk? | Tradeoff |
+|----------|------------------|----------|
+| **Mandatory sandbox** (container/VM) | ✅ YES | Performance overhead, complexity |
+| **Formal verification** of Just recipes | ✅ YES | Extremely difficult, limited expressiveness |
+| **Remove Hunt level entirely** | ✅ YES | Kills primary use case |
+
+**Reality Check:**
+- Hunt-level execution is **inherently risky** by design
+- Can only be MITIGATED, not SOLVED
+- Sandbox is closest to solution (contains damage)
+
+**Recommendation:**
+```
+Accept that Hunt level = full system access.
+Mitigate with: signatures + sandbox + static analysis + warnings.
+Eliminate by: Don't use Hunt level (use Kennel/Yard only).
+```
+
+---
+
+== Attack Vector 2: Key Compromise
+
+=== Current Approach
+
+| Item | Type | Why |
+|------|------|-----|
+| File permissions (600) | 🟡 MITIGATION | Root user can still read |
+| Password-protected keys | 🟡 MITIGATION | Password can be stolen/cracked |
+| Key rotation | 🟡 MITIGATION | Reduces damage window, doesn't prevent |
+| Revocation list | 🟡 MITIGATION | Requires network, can be stale |
+
+=== What Would Actually SOLVE It
+
+| Solution | Eliminates Risk? | Tradeoff |
+|----------|------------------|----------|
+| **HSM/YubiKey** (hardware keys) | ✅ YES (for software theft) | Cost, complexity, USB requirement |
+| **TPM integration** | ✅ YES (for that device) | Device-specific, not portable |
+| **Air-gapped signing** | ✅ YES (for network attacks) | Extremely inconvenient |
+
+**Reality Check:**
+- If attacker has root access, they can steal keys from disk
+- Password protection helps but keys still in memory
+- Only hardware isolation truly eliminates software-based key theft
+
+**Recommendation:**
+```
+SOLUTION: Require HSM/YubiKey for production signing.
+Development keys can use password protection (mitigation).
+Document: "Production keys MUST be hardware-backed."
+```
+
+---
+
+== Attack Vector 3: Signature Verification Bypass
+
+=== Current Approach
+
+| Item | Type | Why |
+|------|------|-----|
+| OpenSSL verification | 🟡 MITIGATION | Assumes OpenSSL has no bugs |
+| Input validation | 🟡 MITIGATION | Can miss edge cases |
+| Timeout | 🟡 MITIGATION | Prevents DoS, not bypass |
+| Fuzz testing | 🟡 MITIGATION | Finds bugs but doesn't prove absence |
+
+=== What Would Actually SOLVE It
+
+| Solution | Eliminates Risk? | Tradeoff |
+|----------|------------------|----------|
+| **Rust rewrite** | ✅ YES (for memory bugs) | Dev time, but no ongoing cost |
+| **Formal verification** (TLA+/Coq) | ✅ YES (proves correctness) | Months of work, ongoing maintenance |
+| **Multiple implementations** | ✅ YES (consensus) | 2-3x development cost |
+
+**Reality Check:**
+- sign.sh (shell script) is fundamentally unsafe
+- Rust eliminates memory safety bugs (buffer overflows, etc.)
+- Formal verification proves logic correctness
+- Multiple independent implementations provide redundancy
+
+**Recommendation:**
+```
+SOLUTION 1 (must do): Rewrite in Rust
+  - Eliminates: memory corruption, injection
+  - Remaining: logic bugs in verification algorithm
+
+SOLUTION 2 (long-term): Formal verification
+  - Eliminates: logic bugs
+  - Remaining: implementation bugs (mitigated by Rust)
+
+Combined: Near-total elimination of bypass risk.
+```
+
+---
+
+== Attack Vector 4: Nickel Evaluation Vulnerabilities
+
+=== Current Approach
+
+| Item | Type | Why |
+|------|------|-----|
+| Timeout on evaluation | 🟡 MITIGATION | Prevents hang, not exploitation |
+| Memory limits | 🟡 MITIGATION | Prevents exhaustion, not escape |
+| Keep Nickel updated | 🟡 MITIGATION | Reactive, not proactive |
+
+=== What Would Actually SOLVE It
+
+| Solution | Eliminates Risk? | Tradeoff |
+|----------|------------------|----------|
+| **Sandbox Nickel process** (seccomp/namespaces) | ✅ YES (for escape) | Complexity, platform-specific |
+| **WASM compilation** (Nickel in WASM) | ✅ YES (WASM sandbox) | Performance, compilation required |
+| **Vendor Nickel** (freeze version) | ✅ YES (for supply chain) | Miss security updates |
+
+**Reality Check:**
+- Nickel is external dependency with unknown vulnerabilities
+- Functional purity helps but doesn't prevent DoS or memory issues
+- Sandboxing Nickel process contains any exploit
+
+**Recommendation:**
+```
+SOLUTION: Run Nickel in isolated process with seccomp filter
+  - No network access
+  - No file I/O (except stdin/stdout)
+  - Memory limit enforced by kernel
+  - Timeout enforced by parent process
+
+Alternative: Compile Nickel to WASM, run in WASM sandbox
+  - Complete isolation
+  - Performance overhead acceptable for validation
+```
+
+---
+
+== Attack Vector 5: Supply Chain Attack
+
+=== Current Approach
+
+| Item | Type | Why |
+|------|------|-----|
+| Dependency pinning | 🟡 MITIGATION | Pinned version can be malicious |
+| Checksum verification | 🟡 MITIGATION | Checksums can be replaced |
+| SBOM | 🟡 MITIGATION | Visibility, not prevention |
+
+=== What Would Actually SOLVE It
+
+| Solution | Eliminates Risk? | Tradeoff |
+|----------|------------------|----------|
+| **Vendor all dependencies** | ✅ YES (external supply chain) | Large repo, manual updates |
+| **Reproducible builds** | ✅ YES (verifiable) | CI complexity, tooling required |
+| **Minimize dependencies** | ✅ YES (fewer targets) | More code to maintain |
+
+**Reality Check:**
+- Every dependency is an attack surface
+- Pinning versions doesn't help if compromised at that version
+- Only elimination of external deps truly solves this
+
+**Recommendation:**
+```
+SOLUTION 1: Vendor critical dependencies
+  - OpenSSL (crypto) - too large, keep external with checksum
+  - Nickel (eval) - vendor or use official binary with sig check
+  - Just (orchestration) - vendor (small, ~100KB binary)
+
+SOLUTION 2: Reproducible builds
+  - Bit-for-bit identical builds from source
+  - Users can verify K9 binary matches published hash
+  - Eliminates trust in build infrastructure
+
+SOLUTION 3: Minimize dependencies
+  - OpenSSL: required (crypto)
+  - Nickel: required (validation)
+  - Just: could be replaced with Rust implementation
+    → Eliminates dependency, gain control
+```
+
+---
+
+== Attack Vector 6: Social Engineering
+
+=== Current Approach
+
+| Item | Type | Why |
+|------|------|-----|
+| Key fingerprints | 🟡 MITIGATION | Users can still trust wrong key |
+| Web of trust | 🟡 MITIGATION | Trust chains can be compromised |
+| Official key repo | 🟡 MITIGATION | Repo itself can be compromised |
+| Warning prompts | 🟡 MITIGATION | Users click through warnings |
+
+=== What Would Actually SOLVE It
+
+| Solution | Eliminates Risk? | Tradeoff |
+|----------|------------------|----------|
+| **Remove manual trust entirely** | ⚠️ NO | Creates new problem (how to trust?) |
+| **Certificate Authority (CA)** | 🟡 MITIGATION | Moves trust to CA |
+| **Keybase-style proof chains** | 🟡 MITIGATION | Complex, user adoption |
+
+**Reality Check:**
+- **You cannot eliminate social engineering through technical means**
+- Users can always be tricked into trusting malicious keys
+- Best you can do: make it harder, more visible, more friction
+
+**Recommendation:**
+```
+ACCEPT: Social engineering cannot be eliminated.
+
+BEST MITIGATION:
+1. Multi-factor key verification:
+   - Fingerprint display (visual)
+   - QR code scan (out-of-band)
+   - DNS TXT record check (network verification)
+   - All three must match to trust
+
+2. Trust ceremony documentation:
+   "To trust production keys, you must:
+    - Verify fingerprint matches published value (3 sources)
+    - Get verbal confirmation from key holder
+    - Document trust decision in audit log"
+
+3. Require attestation:
+   User must type: "I verify this key fingerprint: [hash]"
+   (forces conscious decision, not just click)
+
+This reduces risk ~90% but cannot eliminate.
+```
+
+---
+
+== Attack Vector 7: Privilege Escalation
+
+=== Current Approach
+
+| Item | Type | Why |
+|------|------|-----|
+| Warning if running as root | 🟡 MITIGATION | Users can ignore |
+| Documentation | 🟡 MITIGATION | Users don't read docs |
+
+=== What Would Actually SOLVE It
+
+| Solution | Eliminates Risk? | Tradeoff |
+|----------|------------------|----------|
+| **Refuse to run as root** | ✅ YES | Breaks some legit use cases |
+| **Drop privileges immediately** | ✅ YES (mostly) | Complexity, platform-specific |
+| **Require non-root user** | ✅ YES | Configuration burden |
+
+**Reality Check:**
+- If K9 refuses to run as root, problem eliminated
+- Some legitimate use cases need root (system config, docker, etc.)
+- Can drop privileges after initial setup
+
+**Recommendation:**
+```
+SOLUTION: Hybrid approach
+
+1. Refuse to run as root by default:
+   if [ "$(id -u)" -eq 0 ]; then
+       echo "ERROR: K9 refuses to run as root."
+       echo "Run as regular user or use --allow-root flag."
+       exit 1
+   fi
+
+2. Allow root with explicit flag + confirmation:
+   ./must deploy --allow-root
+
+   Prompt: "⚠️  You are running K9 as ROOT. This is dangerous.
+            Type 'I understand the risks' to continue: "
+
+3. Drop privileges after setup (if possible):
+   - Open privileged ports (< 1024) as root
+   - Drop to unprivileged user for execution
+   - Uses setuid/capabilities (Linux-specific)
+
+Result: 95% elimination (only fails if user explicitly allows root)
+```
+
+---
+
+== Summary Matrix
+
+[cols="3,1,1,2"]
+|===
+| Attack Vector | Best Mitigation | Actual Solution | Tradeoff
+
+| **Malicious Hunt payload**
+| Static analysis + warnings
+| Mandatory sandbox
+| Performance, complexity
+
+| **Key compromise**
+| Password-protected keys
+| HSM/YubiKey (hardware)
+| Cost, USB requirement
+
+| **Signature bypass**
+| Input validation
+| Rust rewrite + formal verification
+| Dev time (months)
+
+| **Nickel vulnerabilities**
+| Timeout + memory limits
+| Process sandbox (seccomp)
+| Platform-specific
+
+| **Supply chain attack**
+| Dependency pinning
+| Vendor deps + reproducible builds
+| Large repo, manual updates
+
+| **Social engineering**
+| Multi-factor verification
+| None (human problem)
+| Cannot eliminate
+
+| **Privilege escalation**
+| Warning prompts
+| Refuse root + drop privileges
+| Breaks some use cases
+|===
+
+---
+
+== Prioritized Action Plan
+
+=== Tier 1: MUST DO (Actual Solutions)
+
+1. **Rewrite sign.sh in Rust** ← Eliminates memory safety bugs
+2. **Refuse to run as root** ← Eliminates privilege escalation
+3. **Vendor Just binary** ← Eliminates one supply chain vector
+
+**Timeline:** 2-4 weeks +
+**Cost:** Development time only +
+**Impact:** Eliminates 3 major attack classes
+
+=== Tier 2: SHOULD DO (Strong Mitigations)
+
+1. **Require HSM for production keys** ← Near-elimination of key theft
+2. **Process sandbox for Nickel** ← Contains Nickel exploits
+3. **Reproducible builds** ← Verifiable supply chain
+
+**Timeline:** 1-2 months +
+**Cost:** HSM hardware ($50-200/key) + dev time +
+**Impact:** 90%+ risk reduction
+
+=== Tier 3: NICE TO HAVE (Defense in Depth)
+
+1. **Formal verification** ← Proves signature logic correct
+2. **Static analysis (k9-scan)** ← Catches obvious malware
+3. **Multi-factor key verification** ← Hardens trust ceremony
+
+**Timeline:** 3-6 months +
+**Cost:** Consulting (formal verification) +
+**Impact:** Additional 5-10% risk reduction
+
+---
+
+== Honest Assessment
+
+=== What Can Be Eliminated
+
+✅ **Memory safety bugs** → Rust rewrite +
+✅ **Privilege escalation** → Refuse root +
+✅ **Some supply chain** → Vendor deps +
+✅ **Some key theft** → Hardware keys
+
+=== What Can Only Be Mitigated
+
+⚠️ **Malicious Hunt payloads** → Sandbox helps but Hunt = dangerous by design +
+⚠️ **Social engineering** → Human problem, no technical fix +
+⚠️ **Key compromise (with root)** → If attacker has root, hardware keys can be proxied +
+⚠️ **All supply chain** → OpenSSL too large to vendor, must trust
+
+=== What Cannot Be Fixed
+
+❌ **Hunt level inherent risk** → Full system access is the feature +
+❌ **Human error** → Users will trust wrong keys, ignore warnings +
+❌ **Zero-day vulnerabilities** → Unknown bugs in OpenSSL, Nickel, kernel
+
+---
+
+== Bottom Line
+
+**Can K9 be made "secure"?**
+
+**YES, if:**
+- Rewrite sign.sh in Rust (eliminate memory bugs)
+- Require HSM for production (eliminate software key theft)
+- Mandatory sandbox for Hunt (contain malicious payloads)
+- Refuse to run as root (eliminate privilege escalation)
+- Vendor dependencies (reduce supply chain)
+
+**BUT:**
+- Hunt level is inherently risky (full system access by design)
+- Users can still be tricked (social engineering)
+- Zero-days in dependencies (OpenSSL, Nickel, kernel)
+
+**Realistic Security Posture:**
+
+```
+After all solutions implemented:
+- Risk reduced by ~95% compared to current state
+- Remaining 5% is irreducible (human error, zero-days, Hunt design)
+- Security comparable to: Docker (signed images), Ansible (signed playbooks)
+- NOT as secure as: Snap/Flatpak (mandatory sandbox)
+```
+
+**Professional Adoption Readiness:**
+
+```
+Current State:        ⚠️  NOT READY (too many solvable risks)
+After Tier 1 (Rust):  🟡 MAYBE (internal use only)
+After Tier 2 (HSM):   ✅ YES (production-ready with caveats)
+After Tier 3 (FV):    ✅ YES (industry-leading security)
+```
+
+---
+
+**Maintainer:** Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk> +
+**Last Updated:** 2026-01-30 +
+**Next Review:** After Tier 1 implementation

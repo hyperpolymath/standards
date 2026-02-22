@@ -1,0 +1,79 @@
+# Seven Tentacles CI/CD Pipeline
+# RSR Compliant Configuration
+
+stages:
+  - validate
+  - build
+  - test
+  - deploy
+
+variables:
+  NODE_VERSION: "20"
+
+# Validate documentation and structure
+validate:
+  stage: validate
+  image: node:${NODE_VERSION}
+  script:
+    - echo "Validating project structure..."
+    - test -f README.adoc
+    - test -f LICENSE.txt
+    - test -f SECURITY.md
+    - test -f CODE_OF_CONDUCT.adoc
+    - test -f CONTRIBUTING.adoc
+    - test -f GOVERNANCE.adoc
+    - test -d curriculum
+    - test -d agents
+    - test -d tools
+    - echo "Structure validation passed!"
+
+# Build documentation
+build:docs:
+  stage: build
+  image: asciidoctor/docker-asciidoctor
+  script:
+    - mkdir -p dist/docs
+    - asciidoctor -D dist/docs README.adoc VISION.adoc
+    - asciidoctor -D dist/docs docs/*.adoc
+  artifacts:
+    paths:
+      - dist/docs/
+    expire_in: 1 week
+
+# Build ReScript (when dependencies are available)
+build:rescript:
+  stage: build
+  image: node:${NODE_VERSION}
+  script:
+    - npm ci
+    - npm run build || echo "ReScript build skipped (optional)"
+  allow_failure: true
+
+# Count curriculum lessons
+test:curriculum:
+  stage: test
+  image: alpine
+  script:
+    - apk add --no-cache findutils
+    - echo "Counting curriculum lessons..."
+    - find curriculum -name "*.adoc" | wc -l
+    - echo "Lessons by stage:"
+    - find curriculum/cuttle -name "*.adoc" 2>/dev/null | wc -l || echo "0"
+    - find curriculum/squidlet -name "*.adoc" 2>/dev/null | wc -l || echo "0"
+    - find curriculum/duet -name "*.adoc" 2>/dev/null | wc -l || echo "0"
+    - find curriculum/octopus -name "*.adoc" 2>/dev/null | wc -l || echo "0"
+
+# Deploy to GitLab Pages (optional)
+pages:
+  stage: deploy
+  image: alpine
+  script:
+    - mkdir -p public
+    - cp -r dist/docs/* public/ 2>/dev/null || true
+    - cp -r tools/*.html public/ 2>/dev/null || true
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
+  when: manual

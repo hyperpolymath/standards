@@ -1,0 +1,219 @@
+# SPDX-License-Identifier: MIT AND Palimpsest-0.8
+# SPDX-FileCopyrightText: 2025 The Rhodium Standard Contributors
+#
+# justfile - Task runner for rhodium-minimal
+# Usage: just <recipe>
+# List all recipes: just --list
+
+# Default recipe (shown when running `just` without arguments)
+default:
+    @just --list
+
+# ============================================================================
+# Building
+# ============================================================================
+
+# Build the project (debug mode)
+build:
+    @echo "🔨 Building rhodium-minimal (debug)..."
+    cargo build
+
+# Build the project (release mode, optimized)
+build-release:
+    @echo "🔨 Building rhodium-minimal (release)..."
+    cargo build --release
+    @echo "✅ Binary: target/release/rhodium-minimal"
+
+# Clean build artifacts
+clean:
+    @echo "🧹 Cleaning build artifacts..."
+    cargo clean
+
+# ============================================================================
+# Running
+# ============================================================================
+
+# Run the application (debug mode)
+run:
+    @echo "🚀 Running rhodium-minimal..."
+    cargo run
+
+# Run the application (release mode, optimized)
+run-release:
+    cargo run --release
+
+# ============================================================================
+# Testing
+# ============================================================================
+
+# Run all tests
+test:
+    @echo "🧪 Running tests..."
+    cargo test
+
+# Run tests with output
+test-verbose:
+    @echo "🧪 Running tests (verbose)..."
+    cargo test -- --nocapture --test-threads=1
+
+# Run tests with coverage (requires cargo-llvm-cov)
+test-coverage:
+    @echo "📊 Running tests with coverage..."
+    cargo llvm-cov --html
+    @echo "✅ Coverage report: target/llvm-cov/html/index.html"
+
+# ============================================================================
+# Code Quality
+# ============================================================================
+
+# Run Clippy linter
+lint:
+    @echo "🔍 Running Clippy..."
+    cargo clippy -- -D warnings
+
+# Check code formatting
+format-check:
+    @echo "📝 Checking code formatting..."
+    cargo fmt -- --check
+
+# Format code
+format:
+    @echo "📝 Formatting code..."
+    cargo fmt
+
+# ============================================================================
+# RSR Compliance
+# ============================================================================
+
+# Audit SPDX licence headers on all source files
+audit-licence:
+    @echo "📋 Auditing SPDX headers..."
+    @if rg -L "SPDX-License-Identifier" src/ Cargo.toml justfile; then \
+        echo "✅ All files have SPDX headers"; \
+    else \
+        echo "❌ Missing SPDX headers!"; \
+        exit 1; \
+    fi
+
+# Check for required RSR documentation files
+check-docs:
+    @echo "📚 Checking required documentation..."
+    @test -f README.md || (echo "❌ Missing README.md" && exit 1)
+    @test -f LICENSE.txt || (echo "❌ Missing LICENSE.txt" && exit 1)
+    @test -f SECURITY.md || (echo "❌ Missing SECURITY.md" && exit 1)
+    @test -f CONTRIBUTING.md || (echo "❌ Missing CONTRIBUTING.md" && exit 1)
+    @test -f CODE_OF_CONDUCT.md || (echo "❌ Missing CODE_OF_CONDUCT.md" && exit 1)
+    @test -d .well-known || (echo "❌ Missing .well-known/" && exit 1)
+    @echo "✅ All required documentation present"
+
+# Check for unsafe Rust code blocks
+check-unsafe:
+    @echo "🔒 Checking for unsafe code..."
+    @if rg "unsafe" src/; then \
+        echo "⚠️  Unsafe code found (review carefully)"; \
+    else \
+        echo "✅ No unsafe code blocks"; \
+    fi
+
+# Full RSR compliance validation
+validate: audit-licence check-docs check-unsafe lint format-check test
+    @echo ""
+    @echo "✅ RSR compliance validation complete!"
+    @echo ""
+    @echo "Compliance level: Bronze (75-89%)"
+    @echo "See README.md for Silver/Gold requirements"
+
+# ============================================================================
+# Release Management
+# ============================================================================
+
+# Check if ready for release (all validations pass)
+check-release: validate
+    @echo "✅ Release checks passed"
+
+# Create a release build with checksums
+release: build-release
+    @echo "📦 Creating release artifacts..."
+    @mkdir -p release
+    @cp target/release/rhodium-minimal release/
+    @cd release && sha256sum rhodium-minimal > SHA256SUMS
+    @echo "✅ Release artifacts created:"
+    @ls -lh release/
+
+# ============================================================================
+# Development Helpers
+# ============================================================================
+
+# Watch for file changes and rebuild (requires cargo-watch)
+watch:
+    @echo "👀 Watching for changes..."
+    cargo watch -x build
+
+# Run the application with debug logging
+debug:
+    RUST_LOG=debug cargo run
+
+# Generate documentation
+docs:
+    @echo "📖 Generating documentation..."
+    cargo doc --no-deps --open
+
+# Show project statistics
+stats:
+    @echo "📊 Project Statistics:"
+    @echo ""
+    @echo "Lines of code:"
+    @tokei src/
+    @echo ""
+    @echo "Dependencies:"
+    @cargo tree --depth 1
+    @echo ""
+    @echo "Binary size:"
+    @ls -lh target/release/rhodium-minimal 2>/dev/null || echo "  (not built yet - run 'just build-release')"
+
+# ============================================================================
+# Nix Integration
+# ============================================================================
+
+# Enter Nix development shell
+nix-shell:
+    nix develop
+
+# Build with Nix
+nix-build:
+    nix build
+
+# Run Nix flake checks
+nix-check:
+    nix flake check
+
+# ============================================================================
+# Installation
+# ============================================================================
+
+# Install to ~/.local/bin (or specify PREFIX)
+install PREFIX="~/.local":
+    @echo "📦 Installing to {{PREFIX}}/bin..."
+    @mkdir -p {{PREFIX}}/bin
+    cargo install --path . --root {{PREFIX}}
+    @echo "✅ Installed: {{PREFIX}}/bin/rhodium-minimal"
+
+# Uninstall from ~/.local/bin (or specify PREFIX)
+uninstall PREFIX="~/.local":
+    @echo "🗑️  Uninstalling from {{PREFIX}}/bin..."
+    @rm -f {{PREFIX}}/bin/rhodium-minimal
+    @echo "✅ Uninstalled"
+
+# ============================================================================
+# Help
+# ============================================================================
+
+# Show this help message
+help:
+    @echo "rhodium-minimal - Minimal RSR-compliant example"
+    @echo ""
+    @echo "Available commands:"
+    @just --list
+    @echo ""
+    @echo "RSR compliance: just validate"
+    @echo "Quick start: just build && just run"

@@ -1,0 +1,455 @@
+//! Configuration management for {{ project-name }}
+//!
+//! Configuration is loaded in order of precedence:
+//! 1. Command-line arguments (highest)
+//! 2. Environment variables ({{ PROJECT_NAME }}_*)
+//! 3. Config file specified by --config
+//! 4. Default config file (~/.config/{{ project-name }}/config.toml)
+//! 5. Built-in defaults (lowest)
+
+use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use directories::ProjectDirs;
+
+use crate::cli::{ConfigArgs, ConfigAction, ConfigFormat, GlobalArgs};
+use crate::error::{Error, Result};
+
+/// Complete configuration structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Config {
+    /// Input configuration
+    pub input: InputConfig,
+
+    /// Output configuration
+    pub output: OutputConfig,
+
+    /// Processing configuration
+    pub processing: ProcessingConfig,
+
+    /// Validation configuration
+    pub validation: ValidationConfig,
+
+    /// Checksum configuration
+    pub checksum: ChecksumConfig,
+
+    /// Logging configuration
+    pub logging: LoggingConfig,
+}
+
+/// Input configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InputConfig {
+    /// Default input format
+    pub format: String,
+
+    /// Default encoding
+    pub encoding: String,
+
+    /// Follow symbolic links
+    pub follow_symlinks: bool,
+
+    /// Maximum recursion depth
+    pub max_depth: Option<usize>,
+}
+
+/// Output configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutputConfig {
+    /// Default output format
+    pub format: String,
+
+    /// Default encoding
+    pub encoding: String,
+
+    /// Default file permissions (octal string)
+    pub mode: String,
+
+    /// Create parent directories
+    pub create_parents: bool,
+}
+
+/// Processing configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProcessingConfig {
+    /// Number of worker threads
+    pub threads: usize,
+
+    /// Batch size for processing
+    pub batch_size: usize,
+
+    /// Buffer size in bytes
+    pub buffer_size: usize,
+
+    /// Memory limit (0 = unlimited)
+    pub memory_limit: usize,
+
+    /// Default algorithm
+    pub algorithm: String,
+}
+
+/// Validation configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ValidationConfig {
+    /// Default validation level
+    pub level: String,
+
+    /// Tolerance for ratio validation
+    pub tolerance: f64,
+
+    /// Strict mode
+    pub strict: bool,
+
+    /// Schema file path
+    pub schema: Option<PathBuf>,
+}
+
+/// Checksum configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChecksumConfig {
+    /// Default algorithm
+    pub algorithm: String,
+
+    /// Checksum file extension
+    pub extension: String,
+
+    /// Auto-verify on read
+    pub auto_verify: bool,
+
+    /// Auto-generate on write
+    pub auto_generate: bool,
+}
+
+/// Logging configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LoggingConfig {
+    /// Log level
+    pub level: String,
+
+    /// Log format
+    pub format: String,
+
+    /// Log file path
+    pub file: Option<PathBuf>,
+
+    /// Include timestamps
+    pub timestamps: bool,
+}
+
+// -------------------------------------------------------------------------
+// DEFAULT IMPLEMENTATIONS
+// -------------------------------------------------------------------------
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            input: InputConfig::default(),
+            output: OutputConfig::default(),
+            processing: ProcessingConfig::default(),
+            validation: ValidationConfig::default(),
+            checksum: ChecksumConfig::default(),
+            logging: LoggingConfig::default(),
+        }
+    }
+}
+
+impl Default for InputConfig {
+    fn default() -> Self {
+        Self {
+            format: "auto".to_string(),
+            encoding: "utf-8".to_string(),
+            follow_symlinks: false,
+            max_depth: None,
+        }
+    }
+}
+
+impl Default for OutputConfig {
+    fn default() -> Self {
+        Self {
+            format: "auto".to_string(),
+            encoding: "utf-8".to_string(),
+            mode: "644".to_string(),
+            create_parents: true,
+        }
+    }
+}
+
+impl Default for ProcessingConfig {
+    fn default() -> Self {
+        Self {
+            threads: {{ default_threads }},
+            batch_size: 1000,
+            buffer_size: 8 * 1024 * 1024, // 8MB
+            memory_limit: 0,
+            algorithm: "default".to_string(),
+        }
+    }
+}
+
+impl Default for ValidationConfig {
+    fn default() -> Self {
+        Self {
+            level: "standard".to_string(),
+            tolerance: 0.01,
+            strict: false,
+            schema: None,
+        }
+    }
+}
+
+impl Default for ChecksumConfig {
+    fn default() -> Self {
+        Self {
+            algorithm: "shake256".to_string(),
+            extension: ".shake256".to_string(),
+            auto_verify: false,
+            auto_generate: true,
+        }
+    }
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: "warn".to_string(),
+            format: "pretty".to_string(),
+            file: None,
+            timestamps: true,
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// LOADING AND SAVING
+// -------------------------------------------------------------------------
+
+impl Config {
+    /// Load configuration from all sources
+    pub fn load(global: &GlobalArgs) -> Result<Self> {
+        let mut config = Config::default();
+
+        // Load from default config file if it exists
+        if let Some(default_path) = Self::default_config_path() {
+            if default_path.exists() {
+                let file_config = Self::load_file(&default_path)?;
+                config = config.merge(file_config);
+            }
+        }
+
+        // Load from specified config file
+        if let Some(path) = &global.config {
+            let file_config = Self::load_file(path)?;
+            config = config.merge(file_config);
+        }
+
+        // Load from environment variables
+        if !global.no_env {
+            config = config.merge_env();
+        }
+
+        // Load from env file if specified
+        if let Some(env_file) = &global.env_file {
+            config = config.merge_env_file(env_file)?;
+        }
+
+        Ok(config)
+    }
+
+    /// Load configuration from a file
+    pub fn load_file(path: &PathBuf) -> Result<Self> {
+        let content = std::fs::read_to_string(path).map_err(|_| Error::ConfigNotFound {
+            path: path.clone(),
+        })?;
+
+        let config: Config = match path.extension().and_then(|e| e.to_str()) {
+            Some("toml") => toml::from_str(&content)?,
+            Some("json") => serde_json::from_str(&content).map_err(|e| Error::ConfigInvalid {
+                message: e.to_string(),
+            })?,
+            Some("yaml") | Some("yml") => {
+                serde_yaml::from_str(&content).map_err(|e| Error::ConfigInvalid {
+                    message: e.to_string(),
+                })?
+            }
+            _ => toml::from_str(&content)?,
+        };
+
+        Ok(config)
+    }
+
+    /// Get default config file path
+    pub fn default_config_path() -> Option<PathBuf> {
+        ProjectDirs::from("dev", "hyperpolymath", "{{ project-name }}")
+            .map(|dirs| dirs.config_dir().join("config.toml"))
+    }
+
+    /// Merge with another config (other takes precedence for non-default values)
+    pub fn merge(self, other: Config) -> Self {
+        // Simple merge - in production, use a proper deep merge
+        Self {
+            input: InputConfig {
+                format: if other.input.format != "auto" { other.input.format } else { self.input.format },
+                encoding: other.input.encoding,
+                follow_symlinks: other.input.follow_symlinks,
+                max_depth: other.input.max_depth.or(self.input.max_depth),
+            },
+            output: OutputConfig {
+                format: if other.output.format != "auto" { other.output.format } else { self.output.format },
+                encoding: other.output.encoding,
+                mode: other.output.mode,
+                create_parents: other.output.create_parents,
+            },
+            processing: other.processing,
+            validation: other.validation,
+            checksum: other.checksum,
+            logging: other.logging,
+        }
+    }
+
+    /// Merge environment variables
+    pub fn merge_env(mut self) -> Self {
+        if let Ok(threads) = std::env::var("{{ PROJECT_NAME }}_THREADS") {
+            if let Ok(t) = threads.parse() {
+                self.processing.threads = t;
+            }
+        }
+
+        if let Ok(level) = std::env::var("{{ PROJECT_NAME }}_VALIDATION") {
+            self.validation.level = level;
+        }
+
+        if let Ok(algo) = std::env::var("{{ PROJECT_NAME }}_CHECKSUM") {
+            self.checksum.algorithm = algo;
+        }
+
+        if let Ok(level) = std::env::var("{{ PROJECT_NAME }}_LOG_LEVEL") {
+            self.logging.level = level;
+        }
+
+        self
+    }
+
+    /// Merge from env file
+    pub fn merge_env_file(self, _path: &PathBuf) -> Result<Self> {
+        // TODO: Implement env file parsing
+        Ok(self)
+    }
+
+    /// Serialize to TOML
+    pub fn to_toml(&self) -> Result<String> {
+        toml::to_string_pretty(self).map_err(|e| Error::ConfigInvalid {
+            message: e.to_string(),
+        })
+    }
+
+    /// Serialize to JSON
+    pub fn to_json(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).map_err(|e| Error::ConfigInvalid {
+            message: e.to_string(),
+        })
+    }
+}
+
+// -------------------------------------------------------------------------
+// COMMAND HANDLER
+// -------------------------------------------------------------------------
+
+/// Handle config subcommand
+pub async fn handle(args: ConfigArgs, global: &GlobalArgs) -> Result<()> {
+    match args.action {
+        ConfigAction::Show { format, section } => {
+            let config = Config::load(global)?;
+
+            let output = match format {
+                ConfigFormat::Toml => config.to_toml()?,
+                ConfigFormat::Json => config.to_json()?,
+                ConfigFormat::Yaml => serde_yaml::to_string(&config).map_err(|e| {
+                    Error::ConfigInvalid { message: e.to_string() }
+                })?,
+            };
+
+            if let Some(section) = section {
+                // Filter to section - simplified
+                println!("[{}] section requested - showing full config", section);
+            }
+
+            println!("{}", output);
+        }
+
+        ConfigAction::Validate { path } => {
+            let path = path.unwrap_or_else(|| {
+                Config::default_config_path().unwrap_or_else(|| PathBuf::from("config.toml"))
+            });
+
+            match Config::load_file(&path) {
+                Ok(_) => println!("Configuration valid: {}", path.display()),
+                Err(e) => {
+                    println!("Configuration invalid: {}", e);
+                    return Err(e);
+                }
+            }
+        }
+
+        ConfigAction::Generate { output, format, full } => {
+            let config = Config::default();
+
+            let content = match format {
+                ConfigFormat::Toml => {
+                    if full {
+                        include_str!("../config/config.toml.template").to_string()
+                    } else {
+                        config.to_toml()?
+                    }
+                }
+                ConfigFormat::Json => config.to_json()?,
+                ConfigFormat::Yaml => serde_yaml::to_string(&config).map_err(|e| {
+                    Error::ConfigInvalid { message: e.to_string() }
+                })?,
+            };
+
+            match output {
+                Some(path) => {
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&path, &content)?;
+                    println!("Configuration written to: {}", path.display());
+                }
+                None => println!("{}", content),
+            }
+        }
+
+        ConfigAction::Edit => {
+            let path = Config::default_config_path().ok_or_else(|| Error::ConfigInvalid {
+                message: "Could not determine config path".to_string(),
+            })?;
+
+            let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+            std::process::Command::new(&editor)
+                .arg(&path)
+                .status()?;
+        }
+
+        ConfigAction::Path => {
+            if let Some(path) = Config::default_config_path() {
+                println!("{}", path.display());
+            } else {
+                println!("No default config path available");
+            }
+        }
+
+        ConfigAction::Explain { option } => {
+            // TODO: Implement option explanation
+            println!("Explanation for '{}' not yet implemented", option);
+        }
+    }
+
+    Ok(())
+}

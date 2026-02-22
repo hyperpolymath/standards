@@ -1,0 +1,258 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# k9-scan - Static analysis tool for K9 components
+# Checks for common security issues and suspicious patterns
+
+set -eu
+
+VERSION="0.1.0-alpha"
+COMPONENT=""
+WARNINGS=0
+ERRORS=0
+
+# Color output (if terminal supports it)
+if [ -t 1 ]; then
+    RED='\033[0;31m'
+    YELLOW='\033[1;33m'
+    GREEN='\033[0;32m'
+    BLUE='\033[0;34m'
+    NC='\033[0m' # No Color
+else
+    RED=''
+    YELLOW=''
+    GREEN=''
+    BLUE=''
+    NC=''
+fi
+
+warn() {
+    WARNINGS=$((WARNINGS + 1))
+    printf "${YELLOW}⚠️  WARNING:${NC} %s\n" "$1" >&2
+}
+
+error() {
+    ERRORS=$((ERRORS + 1))
+    printf "${RED}❌ ERROR:${NC} %s\n" "$1" >&2
+}
+
+info() {
+    printf "${BLUE}ℹ️  INFO:${NC} %s\n" "$1" >&2
+}
+
+ok() {
+    printf "${GREEN}✓${NC} %s\n" "$1" >&2
+}
+
+usage() {
+    cat <<EOF
+k9-scan v$VERSION - Static analysis for K9 components
+
+Usage: k9-scan <component.k9.ncl>
+
+Checks for:
+  • Suspicious file paths (/etc/shadow, /root/.ssh, etc.)
+  • Dangerous commands (rm -rf /, dd, mkfs, etc.)
+  • Network exfiltration patterns
+  • Obfuscation (base64, hex encoding)
+  • Privilege escalation attempts
+  • Missing security declarations
+
+Exit codes:
+  0 - No issues found
+  1 - Warnings found (review recommended)
+  2 - Errors found (DO NOT RUN)
+
+Examples:
+  k9-scan component.k9.ncl
+  k9-scan examples/*.k9.ncl
+
+See: docs/SECURITY-BEST-PRACTICES.adoc
+EOF
+}
+
+check_magic_number() {
+    if ! head -n 1 "$COMPONENT" | grep -q "^K9!"; then
+        error "Missing K9! magic number at start of file"
+    else
+        ok "K9! magic number present"
+    fi
+}
+
+check_security_level() {
+    if ! grep -q "leash.*=" "$COMPONENT"; then
+        error "Missing security level declaration (leash)"
+    else
+        level=$(grep "leash.*=" "$COMPONENT" | head -1)
+        info "Security level: $level"
+        if echo "$level" | grep -q "'Hunt"; then
+            warn "Hunt-level component detected (full system access)"
+        fi
+    fi
+}
+
+check_suspicious_files() {
+    info "Checking for suspicious file paths..."
+
+    # Critical system files
+    if grep -q "/etc/shadow\|/etc/sudoers\|/root/.ssh" "$COMPONENT"; then
+        error "Accesses critical system files (/etc/shadow, /etc/sudoers, /root/.ssh)"
+    fi
+
+    # Sensitive user files
+    if grep -q "\.ssh/id_rsa\|\.gnupg/\|\.aws/credentials" "$COMPONENT"; then
+        warn "Accesses sensitive user files (SSH keys, GPG, AWS credentials)"
+    fi
+
+    # Password/credential files
+    if grep -q "password.*=.*\"\|api_key.*=.*\"\|secret.*=.*\"" "$COMPONENT"; then
+        warn "Contains hardcoded credentials or secrets"
+    fi
+}
+
+check_dangerous_commands() {
+    info "Checking for dangerous commands..."
+
+    # Destructive commands
+    if grep -q "rm -rf /\|dd if=/dev/zero\|mkfs\|fdisk\|parted" "$COMPONENT"; then
+        error "Contains destructive commands (rm -rf /, dd, mkfs)"
+    fi
+
+    # Privilege escalation
+    if grep -q "sudo\|chmod.*[+]s\|setuid\|setgid" "$COMPONENT"; then
+        warn "Contains privilege escalation patterns (sudo, setuid)"
+    fi
+
+    # System modification
+    if grep -q "systemctl.*disable\|systemctl.*mask\|iptables -F\|setenforce 0" "$COMPONENT"; then
+        warn "Disables security features (firewall, SELinux)"
+    fi
+
+    # Reverse shells
+    if grep -q "nc.*-e.*bash\|/dev/tcp/\|bash -i >& /dev/tcp\|python.*-m.*SimpleHTTPServer" "$COMPONENT"; then
+        error "Contains reverse shell or network backdoor patterns"
+    fi
+}
+
+check_network_exfiltration() {
+    info "Checking for network exfiltration..."
+
+    # Data exfiltration patterns
+    if grep -q "curl.*-X POST\|wget.*--post\|nc.*<\|tar.*|.*curl" "$COMPONENT"; then
+        warn "Contains network upload patterns (potential data exfiltration)"
+    fi
+
+    # Unexpected network access
+    if grep -q "curl\|wget\|nc\|ncat\|socat" "$COMPONENT"; then
+        info "Uses network tools (curl, wget, nc) - verify this is expected"
+    fi
+}
+
+check_obfuscation() {
+    info "Checking for obfuscation..."
+
+    # Base64 encoding (often used to hide malicious commands)
+    if grep -q "base64.*-d\|base64 --decode" "$COMPONENT"; then
+        error "Uses base64 decoding (potential obfuscation)"
+    fi
+
+    # Hex encoding
+    if grep -q "\\\\x[0-9a-fA-F][0-9a-fA-F]" "$COMPONENT"; then
+        warn "Contains hex-encoded strings (potential obfuscation)"
+    fi
+
+    # String concatenation (hiding keywords)
+    if grep -q "\$[A-Za-z_][A-Za-z0-9_]*\s*[+][+]\s*\$[A-Za-z_][A-Za-z0-9_]*" "$COMPONENT"; then
+        info "Uses string concatenation (verify not used to hide commands)"
+    fi
+}
+
+check_signature() {
+    if [ -f "${COMPONENT}.sig" ]; then
+        ok "Signature file present: ${COMPONENT}.sig"
+    else
+        error "No signature file found (required for Hunt-level components)"
+    fi
+}
+
+check_pedigree() {
+    info "Checking pedigree section..."
+
+    if ! grep -q "pedigree.*=" "$COMPONENT"; then
+        error "Missing pedigree section"
+        return
+    fi
+
+    # Check for required pedigree fields
+    if ! grep -q "component_type" "$COMPONENT"; then
+        warn "Missing component_type in pedigree"
+    fi
+
+    if ! grep -q "description" "$COMPONENT"; then
+        warn "Missing description in pedigree"
+    fi
+
+    if ! grep -q "author" "$COMPONENT"; then
+        warn "Missing author in pedigree"
+    fi
+
+    # Check for side_effects documentation (Hunt level)
+    if grep -q "'Hunt" "$COMPONENT"; then
+        if ! grep -q "side_effects\|warnings" "$COMPONENT"; then
+            warn "Hunt component missing side_effects or warnings documentation"
+        fi
+    fi
+}
+
+main() {
+    if [ $# -eq 0 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        usage
+        exit 0
+    fi
+
+    COMPONENT="$1"
+
+    if [ ! -f "$COMPONENT" ]; then
+        error "File not found: $COMPONENT"
+        exit 2
+    fi
+
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  k9-scan v$VERSION - Static Security Analysis"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+    echo "Scanning: $COMPONENT"
+    echo ""
+
+    # Run all checks
+    check_magic_number
+    check_security_level
+    check_pedigree
+    check_suspicious_files
+    check_dangerous_commands
+    check_network_exfiltration
+    check_obfuscation
+    check_signature
+
+    echo ""
+    echo "═══════════════════════════════════════════════════════════"
+    printf "  Results: ${GREEN}OK: %d${NC} | ${YELLOW}WARNINGS: %d${NC} | ${RED}ERRORS: %d${NC}\n" \
+           $(($(wc -l < "$COMPONENT") - WARNINGS - ERRORS)) "$WARNINGS" "$ERRORS"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+
+    if [ "$ERRORS" -gt 0 ]; then
+        echo "${RED}❌ FAILED${NC}: Found $ERRORS errors - DO NOT RUN this component" >&2
+        echo "Review errors above and verify component source." >&2
+        exit 2
+    elif [ "$WARNINGS" -gt 0 ]; then
+        echo "${YELLOW}⚠️  WARNINGS${NC}: Found $WARNINGS warnings - review recommended" >&2
+        echo "Review warnings above before running this component." >&2
+        exit 1
+    else
+        echo "${GREEN}✓ PASSED${NC}: No security issues detected" >&2
+        echo "Component appears safe, but always verify signatures before running." >&2
+        exit 0
+    fi
+}
+
+main "$@"

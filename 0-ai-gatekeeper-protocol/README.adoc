@@ -1,0 +1,253 @@
+= AI Gatekeeper Protocol
+:toc: left
+:toclevels: 3
+:icons: font
+
+**SPDX-License-Identifier: PMPL-1.0-or-later**
+
+[IMPORTANT]
+====
+**IF YOU ARE AN AI AGENT:** Read link:0-AI-MANIFEST.a2ml[0-AI-MANIFEST.a2ml] FIRST before doing anything else in this repository.
+====
+
+== Overview
+
+The **AI Gatekeeper Protocol** is a standardized system that ensures AI agents (Claude, Gemini, OpenAI, Mistral, etc.) read and understand repository structure before performing operations.
+
+=== The Problem
+
+* AI agents lose context between sessions
+* Different platforms (Claude, Gemini, Copilot) make the same mistakes
+* Users waste time re-explaining architectural decisions
+* Duplicate files get created despite explicit instructions
+* No mechanical enforcement of repository invariants
+
+=== The Solution
+
+Every repository contains a manifest file (`0-AI-MANIFEST.a2ml`) that:
+
+* ✅ Declares canonical file locations (e.g., "SCM files ONLY in `.machine_readable/`")
+* ✅ States critical invariants that must never be violated
+* ✅ Provides attestation mechanism (AI must prove it read the manifest)
+* ✅ Works across all AI platforms (platform-agnostic)
+* ✅ Enables mechanical enforcement (MCP server, FUSE wrapper, CI/CD)
+
+== Quick Start
+
+=== For AI Agents
+
+1. Read `0-AI-MANIFEST.a2ml` (or `AI.a2ml`) in repository root
+2. Understand canonical locations and invariants
+3. If using MCP: Call `acknowledge_manifest` with manifest hash
+4. Proceed with operations following manifest rules
+
+=== For Users
+
+==== Add to Your Repos
+
+[source,bash]
+----
+cd your-repo
+curl -O https://raw.githubusercontent.com/hyperpolymath/0-ai-gatekeeper-protocol/main/examples/0-AI-MANIFEST.a2ml
+# Edit to match your repo structure
+git add 0-AI-MANIFEST.a2ml
+git commit -m "docs: add AI manifest"
+----
+
+==== Enable MCP Enforcement (Claude)
+
+Add to `~/.claude/config.json`:
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "repo-guardian": {
+      "command": "node",
+      "args": ["~/Documents/hyperpolymath-repos/mcp-repo-guardian/dist/index.js"],
+      "env": {
+        "REPOS_PATH": "~/Documents/hyperpolymath-repos"
+      }
+    }
+  }
+}
+----
+
+==== Enable CI/CD Validation
+
+Copy workflows from `examples/github-workflows/` to `.github/workflows/`
+
+== Components
+
+=== 1. Manifest Files (`0-AI-MANIFEST.a2ml`)
+
+Universal entry point that ALL AI agents must read first.
+
+* Declares canonical locations
+* States invariants
+* Provides checksums for attestation
+* Platform-agnostic (plain text)
+
+See: link:examples/0-AI-MANIFEST.a2ml[Example Manifest]
+
+=== 2. MCP Server (`mcp-repo-guardian`)
+
+Provides hard enforcement for MCP-compatible agents (Claude, etc.):
+
+* Blocks ALL file operations until manifest acknowledged
+* Validates attestation hash
+* Enforces path restrictions
+* Session-based access control
+
+Repository: https://github.com/hyperpolymath/mcp-repo-guardian
+
+=== 3. FUSE Wrapper (`repo-guardian-fs`)
+
+OS-level enforcement for ANY tool/agent:
+
+* Mounts repos through virtual filesystem
+* Intercepts all file access
+* Universal (works with Gemini, OpenAI, Copilot, etc.)
+
+Repository: https://github.com/hyperpolymath/repo-guardian-fs _(coming soon)_
+
+=== 4. CI/CD Validation
+
+GitHub Actions that validate:
+
+* Manifest exists and is valid
+* Invariants not violated
+* No duplicate files in wrong locations
+* All commits follow protocol
+
+See: link:examples/github-workflows/[Example Workflows]
+
+== Documentation
+
+=== Core Documents
+
+* link:docs/RATIONALE.md[RATIONALE.md] - Why this system exists
+* link:docs/ARCHITECTURE.md[ARCHITECTURE.md] - Technical design
+* link:docs/INTEGRATION.md[INTEGRATION.md] - Platform-specific integration guides
+* link:docs/ENFORCEMENT.md[ENFORCEMENT.md] - Enforcement mechanisms
+* link:docs/AI-MANIFEST-SPEC.adoc[AI-MANIFEST-SPEC.adoc] - Formal RFC-style specification
+* link:docs/FEEDBACK-TO-ANTHROPIC.md[FEEDBACK-TO-ANTHROPIC.md] - Proposed improvements for Claude
+
+=== Examples
+
+* link:examples/0-AI-MANIFEST.a2ml[Manifest Template] - Template for new repos
+* link:examples/claude-config.json[Claude MCP Config] - MCP server configuration
+* link:examples/github-workflows/[GitHub Workflows] - CI/CD validation
+
+== Benefits
+
+=== For Users
+
+* No repeated explanations across sessions
+* No repeated explanations across AI platforms
+* Architectural decisions preserved mechanically
+* Reduced frustration, increased productivity
+
+=== For AI Agents
+
+* Clear instructions on repository structure
+* Context preserved across sessions
+* Reduced mistakes
+* Better cross-platform collaboration
+
+=== For Ecosystem
+
+* Standardized AI-repository interaction
+* Platform interoperability
+* Foundation for advanced tooling
+* Open source and adoptable
+
+== Use Cases
+
+=== Use Case 1: Multi-Platform Development
+
+User works with:
+
+* Claude on laptop (Monday-Wednesday)
+* Gemini on phone (Thursday)
+* GitHub Copilot in IDE (Friday)
+
+Without protocol: Each agent makes same mistakes, creates duplicate files.
+
+With protocol: All agents read manifest first, follow same rules.
+
+=== Use Case 2: Session Crashes
+
+Claude crashes mid-session. Context lost.
+
+Without protocol: New session starts fresh, user re-explains everything.
+
+With protocol: New session reads manifest, understands immediately.
+
+=== Use Case 3: Team Collaboration
+
+Multiple team members use different AI tools.
+
+Without protocol: Inconsistent file locations, architectural drift.
+
+With protocol: All tools follow manifest, consistency maintained.
+
+== Adoption
+
+=== Individual Repos
+
+1. Add `0-AI-MANIFEST.a2ml` to repo root
+2. Define canonical locations and invariants
+3. Optional: Enable MCP enforcement
+4. Optional: Add CI/CD validation
+
+=== Organizations
+
+1. Add manifest to all repos (use template)
+2. Deploy MCP server for Claude users
+3. Enable CI/CD validation organization-wide
+4. Train team on protocol
+
+=== Open Source Projects
+
+1. Adopt manifest format
+2. Document in CONTRIBUTING.md
+3. Add validation to CI
+4. Encourage contributors to respect protocol
+
+== Status
+
+*Current Version:* 1.0.0 (2026-02-07)
+
+* ✅ Manifest format designed
+* ✅ MCP server implemented (`mcp-repo-guardian`)
+* ⏳ FUSE wrapper in development (`repo-guardian-fs`)
+* ⏳ Formal specification being written
+* ⏳ CI/CD workflows being standardized
+* ⏳ Platform integrations being explored
+
+== Contributing
+
+See link:CONTRIBUTING.md[CONTRIBUTING.md]
+
+== License
+
+PMPL-1.0-or-later
+
+== Related Projects
+
+* https://github.com/hyperpolymath/mcp-repo-guardian[mcp-repo-guardian] - MCP enforcement server
+* https://github.com/hyperpolymath/repo-guardian-fs[repo-guardian-fs] - FUSE wrapper
+* https://github.com/hyperpolymath/rsr-template-repo[rsr-template-repo] - Repo template with manifest
+
+== Contact
+
+* GitHub Issues: https://github.com/hyperpolymath/0-ai-gatekeeper-protocol/issues
+* Discussions: https://github.com/hyperpolymath/0-ai-gatekeeper-protocol/discussions
+
+---
+
+[IMPORTANT]
+====
+**AI Agents:** After reading this README, proceed to link:0-AI-MANIFEST.a2ml[0-AI-MANIFEST.a2ml] for critical repository-specific information.
+====

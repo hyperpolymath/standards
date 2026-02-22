@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# compose.yaml - K9 SVC Development Environment
+#
+# Usage:
+#   podman-compose up -d      # Start development environment
+#   podman-compose run k9 dogfood   # Run dogfood test
+#   podman-compose down       # Stop environment
+
+services:
+  k9:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: k9-svc
+    volumes:
+      # Mount local components for development
+      - ./components:/home/k9user/k9/components:ro
+      # Mount examples (read-only)
+      - ./examples:/home/k9user/k9/examples:ro
+    environment:
+      # Default to Yard level (safe)
+      K9_DEFAULT_LEASH: "'Yard"
+      # Enable verbose output
+      K9_VERBOSE: "true"
+    # Override entrypoint for interactive use
+    stdin_open: true
+    tty: true
+
+  # Validation service - runs in 'Yard mode only
+  validator:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: k9-validator
+    entrypoint: ["./must", "run", "validate-all"]
+    volumes:
+      - ./components:/home/k9user/k9/components:ro
+    environment:
+      K9_DEFAULT_LEASH: "'Yard"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+  # Documentation generator
+  docs:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: k9-docs
+    entrypoint: ["./must", "run", "docs"]
+    volumes:
+      - ./docs:/home/k9user/k9/docs:rw
+    environment:
+      K9_DEFAULT_LEASH: "'Kennel"

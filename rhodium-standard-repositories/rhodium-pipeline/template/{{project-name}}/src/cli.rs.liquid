@@ -1,0 +1,1166 @@
+//! Command-line interface definitions
+//!
+//! This module defines the complete CLI taxonomy for {{ project-name }}.
+//! Follows the Rhodium Pipeline Template flag organisation:
+//!
+//! - Input/Output: Paths, formats, overwrite behaviour
+//! - Processing: Algorithm selection, parameters
+//! - Validation: Verification levels, tolerance
+//! - Performance: Threads, buffers, fast mode
+//! - Logging: Verbosity, format, destination
+//! - Debug: Dry run, config printing, debug mode
+//! - Environment: Config file, env overrides
+
+use clap::{Args, Parser, Subcommand, ValueEnum, CommandFactory};
+use clap_complete::{generate, Shell};
+use clap_mangen::Man;
+use color_eyre::eyre::Result;
+use std::path::PathBuf;
+use std::io;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+use crate::error::PipelineError;
+
+// ============================================================================
+// TOP-LEVEL CLI
+// ============================================================================
+
+/// {{ description }}
+///
+/// A formally-verified data processing pipeline built with the Rhodium
+/// Standard Repositories (RSR) methodology.
+///
+/// EXAMPLES:
+///
+///     # Basic run with input and output
+///     {{ project-name }} run --input ./data --output ./results
+///
+///     # Dry run with verbose output
+///     {{ project-name }} run --input ./data --output ./results --dry-run -vvv
+///
+///     # Validate data without processing
+///     {{ project-name }} validate --input ./data --strict
+///
+///     # Generate shell completions
+///     {{ project-name }} completions bash > ~/.bash_completion.d/{{ project-name }}
+///
+/// CONFIGURATION:
+///
+///     Configuration is loaded in order of precedence (highest first):
+///
+///     1. Command-line arguments
+///     2. Environment variables ({{ "{{" }} PROJECT_NAME {{ "}}" }}_*)
+///     3. Config file specified by --config
+///     4. Default config file (~/.config/{{ project-name }}/config.toml)
+///     5. Built-in defaults
+///
+/// VALIDATION LEVELS:
+///
+///     skip     - No validation (fastest, dangerous)
+///     quick    - Basic sanity checks only
+///     standard - Default validation suite
+///     full     - Complete validation including expensive checks
+///     paranoid - Maximum validation, formal proof verification
+///
+/// EXIT CODES:
+///
+///     0  - Success
+///     1  - General error
+///     2  - Configuration error
+///     3  - Validation error
+///     4  - I/O error
+///     5  - Pipeline error
+///     64 - Usage error (invalid arguments)
+///
+/// For more information, see: https://gitlab.com/hyperpolymath/{{ project-name }}
+#[derive(Parser, Debug)]
+#[command(
+    name = "{{ project-name }}",
+    author,
+    version,
+    about,
+    long_about = None,
+    propagate_version = true,
+    arg_required_else_help = true,
+    after_help = "Use '{{ project-name }} <command> --help' for more information about a command."
+)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+
+    #[command(flatten)]
+    pub global: GlobalArgs,
+}
+
+// ============================================================================
+// GLOBAL ARGUMENTS
+// ============================================================================
+
+/// Global arguments available to all subcommands
+#[derive(Args, Debug, Clone)]
+pub struct GlobalArgs {
+    // -------------------------------------------------------------------------
+    // LOGGING
+    // -------------------------------------------------------------------------
+
+    /// Increase verbosity level (can be repeated: -v, -vv, -vvv, -vvvv)
+    ///
+    /// Levels:
+    ///   (none) = WARN only
+    ///   -v     = INFO + WARN
+    ///   -vv    = DEBUG + INFO + WARN
+    ///   -vvv   = TRACE + DEBUG + INFO + WARN
+    ///   -vvvv  = TRACE (all) with full backtraces
+    #[arg(
+        short = 'v',
+        long = "verbose",
+        action = clap::ArgAction::Count,
+        global = true,
+        help = "Increase verbosity (-v, -vv, -vvv, -vvvv)"
+    )]
+    pub verbose: u8,
+
+    /// Suppress all output except errors
+    ///
+    /// Overrides --verbose. Only fatal errors will be displayed.
+    #[arg(
+        short = 'q',
+        long = "quiet",
+        global = true,
+        conflicts_with = "verbose",
+        help = "Suppress non-error output"
+    )]
+    pub quiet: bool,
+
+    /// Output log format
+    ///
+    /// Formats:
+    ///   pretty  - Human-readable with colors (default for TTY)
+    ///   compact - Condensed single-line format
+    ///   json    - JSON-structured logs (for log aggregation)
+    ///   full    - Full tracing format with spans
+    #[arg(
+        long = "log-format",
+        value_enum,
+        default_value = "pretty",
+        global = true,
+        env = "{{ PROJECT_NAME }}_LOG_FORMAT",
+        help = "Log output format"
+    )]
+    pub log_format: LogFormat,
+
+    /// Write logs to file instead of stderr
+    ///
+    /// Logs will still respect --verbose/--quiet settings.
+    /// Parent directories will be created if they don't exist.
+    #[arg(
+        long = "log-file",
+        value_name = "PATH",
+        global = true,
+        env = "{{ PROJECT_NAME }}_LOG_FILE",
+        help = "Write logs to file"
+    )]
+    pub log_file: Option<PathBuf>,
+
+    /// Enable logging timestamps
+    #[arg(
+        long = "log-timestamps",
+        global = true,
+        default_value = "true",
+        env = "{{ PROJECT_NAME }}_LOG_TIMESTAMPS",
+        help = "Include timestamps in logs"
+    )]
+    pub log_timestamps: bool,
+
+    // -------------------------------------------------------------------------
+    // CONFIGURATION
+    // -------------------------------------------------------------------------
+
+    /// Path to configuration file
+    ///
+    /// Supported formats: TOML, JSON, YAML (detected by extension).
+    /// Default: ~/.config/{{ project-name }}/config.toml
+    #[arg(
+        short = 'c',
+        long = "config",
+        value_name = "PATH",
+        global = true,
+        env = "{{ PROJECT_NAME }}_CONFIG",
+        help = "Configuration file path"
+    )]
+    pub config: Option<PathBuf>,
+
+    /// Ignore environment variables for configuration
+    ///
+    /// By default, environment variables like {{ PROJECT_NAME }}_* override
+    /// config file settings. This flag disables that behaviour.
+    #[arg(
+        long = "no-env",
+        global = true,
+        help = "Ignore environment variable overrides"
+    )]
+    pub no_env: bool,
+
+    /// Load environment variables from file
+    ///
+    /// Reads key=value pairs from the specified file and applies them
+    /// as if they were set in the environment.
+    #[arg(
+        long = "env-file",
+        value_name = "PATH",
+        global = true,
+        help = "Load environment from file"
+    )]
+    pub env_file: Option<PathBuf>,
+
+    // -------------------------------------------------------------------------
+    // DEBUG
+    // -------------------------------------------------------------------------
+
+    /// Run in debug mode with additional diagnostics
+    ///
+    /// Enables:
+    ///   - Backtrace capture for all errors
+    ///   - Additional internal state logging
+    ///   - Performance timing for operations
+    #[arg(
+        long = "debug",
+        global = true,
+        env = "{{ PROJECT_NAME }}_DEBUG",
+        help = "Enable debug mode"
+    )]
+    pub debug: bool,
+
+    /// Print effective configuration and exit
+    ///
+    /// Shows the merged configuration from all sources without
+    /// executing any command. Useful for debugging config issues.
+    #[arg(
+        long = "print-config",
+        global = true,
+        help = "Print config and exit"
+    )]
+    pub print_config: bool,
+
+    /// Disable colored output
+    ///
+    /// Forces plain text output even when connected to a TTY.
+    /// Automatically disabled when output is piped or redirected.
+    #[arg(
+        long = "no-color",
+        global = true,
+        env = "NO_COLOR",
+        help = "Disable colored output"
+    )]
+    pub no_color: bool,
+
+    // -------------------------------------------------------------------------
+    // PROGRESS
+    // -------------------------------------------------------------------------
+
+    /// Disable progress indicators
+    ///
+    /// Suppresses progress bars and spinners. Useful for non-interactive
+    /// environments or when output is being captured.
+    #[arg(
+        long = "no-progress",
+        global = true,
+        env = "{{ PROJECT_NAME }}_NO_PROGRESS",
+        help = "Disable progress indicators"
+    )]
+    pub no_progress: bool,
+
+    /// Progress update interval in milliseconds
+    #[arg(
+        long = "progress-interval",
+        value_name = "MS",
+        default_value = "100",
+        global = true,
+        help = "Progress update interval (ms)"
+    )]
+    pub progress_interval: u64,
+}
+
+// ============================================================================
+// SUBCOMMANDS
+// ============================================================================
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Run the data processing pipeline
+    ///
+    /// Executes the full pipeline with the specified configuration.
+    /// Stages: ingest → transform → validate → export
+    #[command(visible_alias = "r")]
+    Run(RunArgs),
+
+    /// Validate data without processing
+    ///
+    /// Checks input data against schema and constraints without
+    /// modifying anything. Useful for pre-flight validation.
+    #[command(visible_alias = "v")]
+    Validate(ValidateArgs),
+
+    /// Manage configuration
+    ///
+    /// View, validate, and generate configuration files.
+    #[command(visible_alias = "cfg")]
+    Config(ConfigArgs),
+
+    /// Checksum operations
+    ///
+    /// Compute, verify, and manage data integrity checksums.
+    #[command(visible_alias = "sum")]
+    Checksum(ChecksumArgs),
+
+    /// Generate shell completions
+    ///
+    /// Outputs shell completion scripts for various shells.
+    /// Install with: {{ project-name }} completions bash >> ~/.bashrc
+    Completions(CompletionsArgs),
+
+    /// Generate man page
+    ///
+    /// Outputs a man page in roff format.
+    /// Install with: {{ project-name }} manpage > /usr/local/share/man/man1/{{ project-name }}.1
+    Manpage(ManpageArgs),
+}
+
+// ============================================================================
+// RUN COMMAND
+// ============================================================================
+
+#[derive(Args, Debug)]
+pub struct RunArgs {
+    // -------------------------------------------------------------------------
+    // INPUT
+    // -------------------------------------------------------------------------
+
+    /// Input path (file or directory)
+    ///
+    /// Can be specified multiple times to process multiple inputs.
+    /// Directories are processed recursively by default.
+    #[arg(
+        short = 'i',
+        long = "input",
+        value_name = "PATH",
+        required = true,
+        action = clap::ArgAction::Append,
+        help = "Input path (file or directory)"
+    )]
+    pub input: Vec<PathBuf>,
+
+    /// Input format (auto-detected if not specified)
+    #[arg(
+        long = "input-format",
+        value_enum,
+        default_value = "auto",
+        help = "Input data format"
+    )]
+    pub input_format: DataFormat,
+
+    /// Input encoding
+    #[arg(
+        long = "input-encoding",
+        default_value = "utf-8",
+        help = "Input text encoding"
+    )]
+    pub input_encoding: String,
+
+    /// Glob pattern for filtering input files
+    ///
+    /// Only files matching this pattern will be processed.
+    /// Example: --input-glob "*.json"
+    #[arg(
+        long = "input-glob",
+        value_name = "PATTERN",
+        help = "Filter input files by glob"
+    )]
+    pub input_glob: Option<String>,
+
+    /// Process directories recursively
+    #[arg(
+        long = "recursive",
+        short = 'R',
+        default_value = "true",
+        help = "Process directories recursively"
+    )]
+    pub recursive: bool,
+
+    /// Maximum directory depth for recursive processing
+    #[arg(
+        long = "max-depth",
+        value_name = "N",
+        help = "Maximum recursion depth"
+    )]
+    pub max_depth: Option<usize>,
+
+    /// Follow symbolic links
+    #[arg(
+        long = "follow-symlinks",
+        default_value = "false",
+        help = "Follow symbolic links"
+    )]
+    pub follow_symlinks: bool,
+
+    // -------------------------------------------------------------------------
+    // OUTPUT
+    // -------------------------------------------------------------------------
+
+    /// Output path (file or directory)
+    ///
+    /// If input is multiple files and output is a file, results
+    /// will be concatenated/merged depending on format.
+    #[arg(
+        short = 'o',
+        long = "output",
+        value_name = "PATH",
+        required = true,
+        help = "Output path"
+    )]
+    pub output: PathBuf,
+
+    /// Output format
+    #[arg(
+        long = "output-format",
+        value_enum,
+        default_value = "auto",
+        help = "Output data format"
+    )]
+    pub output_format: DataFormat,
+
+    /// Output encoding
+    #[arg(
+        long = "output-encoding",
+        default_value = "utf-8",
+        help = "Output text encoding"
+    )]
+    pub output_encoding: String,
+
+    /// Overwrite existing output files
+    ///
+    /// Without this flag, the command will fail if the output
+    /// file already exists.
+    #[arg(
+        long = "overwrite",
+        short = 'f',
+        help = "Overwrite existing output"
+    )]
+    pub overwrite: bool,
+
+    /// Create parent directories if they don't exist
+    #[arg(
+        long = "create-parents",
+        short = 'p',
+        default_value = "true",
+        help = "Create parent directories"
+    )]
+    pub create_parents: bool,
+
+    /// Preserve file metadata (timestamps, permissions)
+    #[arg(
+        long = "preserve-metadata",
+        default_value = "false",
+        help = "Preserve file metadata"
+    )]
+    pub preserve_metadata: bool,
+
+    /// Output file permissions (octal)
+    #[arg(
+        long = "output-mode",
+        value_name = "MODE",
+        default_value = "644",
+        help = "Output file permissions"
+    )]
+    pub output_mode: String,
+
+    // -------------------------------------------------------------------------
+    // PROCESSING
+    // -------------------------------------------------------------------------
+
+    /// Processing algorithm
+    #[arg(
+        long = "algorithm",
+        short = 'a',
+        value_enum,
+        default_value = "default",
+        env = "{{ PROJECT_NAME }}_ALGORITHM",
+        help = "Processing algorithm"
+    )]
+    pub algorithm: Algorithm,
+
+    /// Batch size for processing
+    ///
+    /// Number of records to process in each batch.
+    /// Larger batches are faster but use more memory.
+    #[arg(
+        long = "batch-size",
+        short = 'b',
+        value_name = "N",
+        default_value = "1000",
+        env = "{{ PROJECT_NAME }}_BATCH_SIZE",
+        help = "Records per batch"
+    )]
+    pub batch_size: usize,
+
+    /// Buffer size in bytes
+    #[arg(
+        long = "buffer-size",
+        value_name = "BYTES",
+        default_value = "8388608",
+        help = "I/O buffer size (8MB default)"
+    )]
+    pub buffer_size: usize,
+
+    /// Memory limit in bytes (0 = unlimited)
+    #[arg(
+        long = "memory-limit",
+        value_name = "BYTES",
+        default_value = "0",
+        env = "{{ PROJECT_NAME }}_MEMORY_LIMIT",
+        help = "Memory usage limit"
+    )]
+    pub memory_limit: usize,
+
+    // -------------------------------------------------------------------------
+    // PERFORMANCE
+    // -------------------------------------------------------------------------
+
+    /// Number of worker threads
+    ///
+    /// Defaults to number of CPU cores. Set to 1 for deterministic
+    /// single-threaded processing.
+    #[arg(
+        long = "threads",
+        short = 't',
+        value_name = "N",
+        default_value = "{{ default_threads }}",
+        env = "{{ PROJECT_NAME }}_THREADS",
+        help = "Number of threads"
+    )]
+    pub threads: usize,
+
+    /// Enable fast mode (trades accuracy for speed)
+    ///
+    /// Skips some validation and uses faster but less precise
+    /// algorithms where available.
+    #[arg(
+        long = "fast",
+        help = "Enable fast mode"
+    )]
+    pub fast: bool,
+
+    /// Enable streaming mode for large files
+    ///
+    /// Processes data in streaming fashion without loading
+    /// entire files into memory.
+    #[arg(
+        long = "streaming",
+        help = "Enable streaming mode"
+    )]
+    pub streaming: bool,
+
+    /// Enable memory mapping for file I/O
+    #[arg(
+        long = "mmap",
+        help = "Use memory-mapped I/O"
+    )]
+    pub mmap: bool,
+
+    /// Disable parallelism (single-threaded)
+    #[arg(
+        long = "no-parallel",
+        help = "Disable parallel processing"
+    )]
+    pub no_parallel: bool,
+
+    // -------------------------------------------------------------------------
+    // VALIDATION
+    // -------------------------------------------------------------------------
+
+    /// Validation level
+    #[arg(
+        long = "validate",
+        value_enum,
+        default_value = "standard",
+        env = "{{ PROJECT_NAME }}_VALIDATION",
+        help = "Validation level"
+    )]
+    pub validation: ValidationLevel,
+
+    /// Strict mode (fail on any warning)
+    #[arg(
+        long = "strict",
+        help = "Fail on warnings"
+    )]
+    pub strict: bool,
+
+    /// Tolerance for ratio validation (0.0-1.0)
+    #[arg(
+        long = "tolerance",
+        value_name = "RATIO",
+        default_value = "0.01",
+        help = "Validation tolerance"
+    )]
+    pub tolerance: f64,
+
+    /// Schema file for validation
+    #[arg(
+        long = "schema",
+        value_name = "PATH",
+        help = "Validation schema file"
+    )]
+    pub schema: Option<PathBuf>,
+
+    /// Skip validation entirely (dangerous)
+    #[arg(
+        long = "no-validate",
+        help = "Skip all validation"
+    )]
+    pub no_validate: bool,
+
+    // -------------------------------------------------------------------------
+    // CHECKSUM
+    // -------------------------------------------------------------------------
+
+    /// Checksum algorithm
+    #[arg(
+        long = "checksum",
+        value_enum,
+        default_value = "{{ checksum_algo }}",
+        env = "{{ PROJECT_NAME }}_CHECKSUM",
+        help = "Checksum algorithm"
+    )]
+    pub checksum: ChecksumAlgorithm,
+
+    /// Verify checksums before processing
+    #[arg(
+        long = "verify-checksums",
+        help = "Verify input checksums"
+    )]
+    pub verify_checksums: bool,
+
+    /// Generate checksums for output
+    #[arg(
+        long = "generate-checksums",
+        default_value = "true",
+        help = "Generate output checksums"
+    )]
+    pub generate_checksums: bool,
+
+    /// Checksum file extension
+    #[arg(
+        long = "checksum-ext",
+        default_value = ".shake256",
+        help = "Checksum file extension"
+    )]
+    pub checksum_ext: String,
+
+    // -------------------------------------------------------------------------
+    // EXECUTION CONTROL
+    // -------------------------------------------------------------------------
+
+    /// Dry run (don't write anything)
+    ///
+    /// Simulates the operation without making any changes.
+    /// Useful for testing and validation.
+    #[arg(
+        long = "dry-run",
+        short = 'n',
+        help = "Simulate without writing"
+    )]
+    pub dry_run: bool,
+
+    /// Continue on error (skip failed items)
+    #[arg(
+        long = "continue-on-error",
+        short = 'k',
+        help = "Continue after errors"
+    )]
+    pub continue_on_error: bool,
+
+    /// Maximum errors before aborting
+    #[arg(
+        long = "max-errors",
+        value_name = "N",
+        default_value = "10",
+        help = "Max errors before abort"
+    )]
+    pub max_errors: usize,
+
+    /// Retry failed operations
+    #[arg(
+        long = "retries",
+        value_name = "N",
+        default_value = "0",
+        help = "Number of retries"
+    )]
+    pub retries: usize,
+
+    /// Delay between retries (milliseconds)
+    #[arg(
+        long = "retry-delay",
+        value_name = "MS",
+        default_value = "1000",
+        help = "Retry delay (ms)"
+    )]
+    pub retry_delay: u64,
+
+    /// Timeout for operations (seconds, 0 = no timeout)
+    #[arg(
+        long = "timeout",
+        value_name = "SECS",
+        default_value = "0",
+        help = "Operation timeout"
+    )]
+    pub timeout: u64,
+
+    // -------------------------------------------------------------------------
+    // REPORTING
+    // -------------------------------------------------------------------------
+
+    /// Generate report file
+    #[arg(
+        long = "report",
+        value_name = "PATH",
+        help = "Generate report file"
+    )]
+    pub report: Option<PathBuf>,
+
+    /// Report format
+    #[arg(
+        long = "report-format",
+        value_enum,
+        default_value = "json",
+        help = "Report format"
+    )]
+    pub report_format: ReportFormat,
+
+    /// Include statistics in output
+    #[arg(
+        long = "stats",
+        help = "Include statistics"
+    )]
+    pub stats: bool,
+
+    /// Output processing manifest
+    #[arg(
+        long = "manifest",
+        value_name = "PATH",
+        help = "Output manifest file"
+    )]
+    pub manifest: Option<PathBuf>,
+}
+
+// ============================================================================
+// VALIDATE COMMAND
+// ============================================================================
+
+#[derive(Args, Debug)]
+pub struct ValidateArgs {
+    /// Input path(s) to validate
+    #[arg(
+        short = 'i',
+        long = "input",
+        value_name = "PATH",
+        required = true,
+        action = clap::ArgAction::Append,
+        help = "Input path to validate"
+    )]
+    pub input: Vec<PathBuf>,
+
+    /// Input format
+    #[arg(
+        long = "format",
+        value_enum,
+        default_value = "auto",
+        help = "Input format"
+    )]
+    pub format: DataFormat,
+
+    /// Validation level
+    #[arg(
+        long = "level",
+        value_enum,
+        default_value = "standard",
+        help = "Validation level"
+    )]
+    pub level: ValidationLevel,
+
+    /// Schema file
+    #[arg(
+        long = "schema",
+        value_name = "PATH",
+        help = "Schema file"
+    )]
+    pub schema: Option<PathBuf>,
+
+    /// Strict mode
+    #[arg(
+        long = "strict",
+        help = "Fail on warnings"
+    )]
+    pub strict: bool,
+
+    /// Output validation report
+    #[arg(
+        long = "report",
+        value_name = "PATH",
+        help = "Output report file"
+    )]
+    pub report: Option<PathBuf>,
+
+    /// Verify checksums
+    #[arg(
+        long = "checksums",
+        help = "Verify checksums"
+    )]
+    pub checksums: bool,
+
+    /// Verify Isabelle proofs
+    #[arg(
+        long = "proofs",
+        help = "Verify formal proofs"
+    )]
+    pub proofs: bool,
+
+    /// Recursive validation
+    #[arg(
+        short = 'R',
+        long = "recursive",
+        help = "Validate recursively"
+    )]
+    pub recursive: bool,
+}
+
+// ============================================================================
+// CONFIG COMMAND
+// ============================================================================
+
+#[derive(Args, Debug)]
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub action: ConfigAction,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConfigAction {
+    /// Show current configuration
+    Show {
+        /// Output format
+        #[arg(long, value_enum, default_value = "toml")]
+        format: ConfigFormat,
+
+        /// Show only specified section
+        #[arg(long)]
+        section: Option<String>,
+    },
+
+    /// Validate configuration file
+    Validate {
+        /// Config file to validate
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+    },
+
+    /// Generate default configuration
+    Generate {
+        /// Output path
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
+
+        /// Output format
+        #[arg(long, value_enum, default_value = "toml")]
+        format: ConfigFormat,
+
+        /// Include all options with comments
+        #[arg(long)]
+        full: bool,
+    },
+
+    /// Edit configuration interactively
+    Edit,
+
+    /// Show configuration file location
+    Path,
+
+    /// Explain a configuration option
+    Explain {
+        /// Option name (dot-separated path)
+        #[arg(value_name = "OPTION")]
+        option: String,
+    },
+}
+
+// ============================================================================
+// CHECKSUM COMMAND
+// ============================================================================
+
+#[derive(Args, Debug)]
+pub struct ChecksumArgs {
+    #[command(subcommand)]
+    pub action: ChecksumAction,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ChecksumAction {
+    /// Compute checksums for files
+    Compute {
+        /// Input paths
+        #[arg(required = true, action = clap::ArgAction::Append)]
+        paths: Vec<PathBuf>,
+
+        /// Algorithm
+        #[arg(short, long, value_enum, default_value = "{{ checksum_algo }}")]
+        algorithm: ChecksumAlgorithm,
+
+        /// Output format
+        #[arg(long, value_enum, default_value = "hex")]
+        format: ChecksumOutputFormat,
+
+        /// Write checksum files alongside inputs
+        #[arg(long)]
+        write: bool,
+
+        /// Recursive
+        #[arg(short = 'R', long)]
+        recursive: bool,
+    },
+
+    /// Verify checksums
+    Verify {
+        /// Checksum file or directory
+        #[arg(required = true)]
+        path: PathBuf,
+
+        /// Algorithm (auto-detected from extension if not specified)
+        #[arg(short, long, value_enum)]
+        algorithm: Option<ChecksumAlgorithm>,
+
+        /// Strict mode (fail on any mismatch)
+        #[arg(long)]
+        strict: bool,
+    },
+
+    /// Compare two files/directories by checksum
+    Compare {
+        /// First path
+        #[arg(required = true)]
+        path1: PathBuf,
+
+        /// Second path
+        #[arg(required = true)]
+        path2: PathBuf,
+
+        /// Algorithm
+        #[arg(short, long, value_enum, default_value = "{{ checksum_algo }}")]
+        algorithm: ChecksumAlgorithm,
+    },
+}
+
+// ============================================================================
+// COMPLETIONS COMMAND
+// ============================================================================
+
+#[derive(Args, Debug)]
+pub struct CompletionsArgs {
+    /// Shell to generate completions for
+    #[arg(value_enum)]
+    pub shell: Shell,
+
+    /// Output path (stdout if not specified)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+// ============================================================================
+// MANPAGE COMMAND
+// ============================================================================
+
+#[derive(Args, Debug)]
+pub struct ManpageArgs {
+    /// Output path (stdout if not specified)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Include subcommand man pages
+    #[arg(long)]
+    pub subcommands: bool,
+}
+
+// ============================================================================
+// VALUE ENUMS
+// ============================================================================
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum DataFormat {
+    #[default]
+    Auto,
+    Json,
+    Jsonl,
+    Csv,
+    Tsv,
+    Parquet,
+    Arrow,
+    Toml,
+    Yaml,
+    Msgpack,
+    Cbor,
+}
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum Algorithm {
+    #[default]
+    Default,
+    Fast,
+    Thorough,
+    Streaming,
+    Parallel,
+    LowMemory,
+}
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum ValidationLevel {
+    Skip,
+    Quick,
+    #[default]
+    Standard,
+    Full,
+    Paranoid,
+}
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum ChecksumAlgorithm {
+    None,
+    #[default]
+    Shake256,
+    Blake3,
+    Sha3_256,
+    Sha3_512,
+    Xxhash,
+}
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum LogFormat {
+    #[default]
+    Pretty,
+    Compact,
+    Json,
+    Full,
+}
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum ReportFormat {
+    #[default]
+    Json,
+    Yaml,
+    Toml,
+    Csv,
+    Text,
+    Html,
+    Markdown,
+}
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum ConfigFormat {
+    #[default]
+    Toml,
+    Json,
+    Yaml,
+}
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum ChecksumOutputFormat {
+    #[default]
+    Hex,
+    Base64,
+    Binary,
+    Bsd,
+    Gnu,
+}
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/// Initialize logging based on CLI arguments
+pub fn init_logging(cli: &Cli) -> Result<()> {
+    let filter = if cli.global.quiet {
+        "error"
+    } else {
+        match cli.global.verbose {
+            0 => "warn",
+            1 => "info",
+            2 => "debug",
+            _ => "trace",
+        }
+    };
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(filter));
+
+    match cli.global.log_format {
+        LogFormat::Json => {
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(fmt::layer().json())
+                .init();
+        }
+        LogFormat::Compact => {
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(fmt::layer().compact())
+                .init();
+        }
+        LogFormat::Full => {
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(fmt::layer())
+                .init();
+        }
+        LogFormat::Pretty => {
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(fmt::layer().pretty())
+                .init();
+        }
+    }
+
+    Ok(())
+}
+
+/// Generate shell completions
+pub fn generate_completions(args: CompletionsArgs) -> Result<()> {
+    let mut cmd = Cli::command();
+    let name = cmd.get_name().to_string();
+
+    match args.output {
+        Some(path) => {
+            let mut file = std::fs::File::create(&path)?;
+            generate(args.shell, &mut cmd, name, &mut file);
+        }
+        None => {
+            generate(args.shell, &mut cmd, name, &mut io::stdout());
+        }
+    }
+
+    Ok(())
+}
+
+/// Generate man page
+pub fn generate_manpage(args: ManpageArgs) -> Result<()> {
+    let cmd = Cli::command();
+    let man = Man::new(cmd);
+
+    match args.output {
+        Some(path) => {
+            let mut file = std::fs::File::create(&path)?;
+            man.render(&mut file)?;
+        }
+        None => {
+            man.render(&mut io::stdout())?;
+        }
+    }
+
+    Ok(())
+}

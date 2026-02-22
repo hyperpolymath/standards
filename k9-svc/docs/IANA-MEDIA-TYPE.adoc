@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= IANA Media Type Registration: application/vnd.k9+nickel
+
+This is the formal IANA media type registration for K9 SVC (Self-Validating Component) format.
+
+[source]
+----
+Type name: application
+
+Subtype name: vnd.k9+nickel
+
+Required parameters: none
+
+Optional parameters:
+  - charset (default: utf-8)
+  - leash (security level: kennel, yard, or hunt)
+
+Encoding considerations:
+  UTF-8 text format.
+  K9 files are valid Nickel programs with structured metadata in the pedigree block.
+
+Security considerations:
+  K9 documents are executable Nickel programs. Processors MUST respect the 'leash'
+  security level declared in the pedigree:
+
+  - Kennel: Data only, no evaluation (safe for untrusted content)
+  - Yard: Evaluation allowed, no external I/O (sandboxed)
+  - Hunt: Full execution with I/O (requires signature verification)
+
+  K9 files at Hunt level MUST be cryptographically signed with Ed25519 signatures.
+  Processors MUST verify signatures before allowing I/O operations.
+
+  K9 enforces a security model where invalid configurations refuse to execute,
+  preventing misconfiguration-based vulnerabilities.
+
+Interoperability considerations:
+  K9 files are valid Nickel (.ncl) programs that begin with the magic header 'K9!'
+  followed by a pedigree metadata block.
+
+  All K9 files can be processed by standard Nickel tooling, but K9-aware processors
+  provide additional validation and security enforcement.
+
+  The format uses LF (Unix) line endings and UTF-8 encoding.
+
+Published specification:
+  K9 SVC Specification v1.0.0
+  https://github.com/hyperpolymath/k9-svc/blob/main/SPEC.adoc
+
+Applications which use this media type:
+  - K9 validators and processors
+  - Configuration management systems
+  - Build tools (Just, Make)
+  - Container orchestration (Podman, Docker)
+  - Static site generators
+  - CI/CD pipelines
+
+Fragment identifier considerations:
+  Fragments may refer to pedigree fields or config sections using standard
+  Nickel field access notation (e.g., #pedigree.schema_version).
+
+Restrictions on usage:
+  None.
+
+Provisional registration:
+  No. (Vendor-tree registration.)
+
+Additional information:
+
+  Deprecated alias names for this type:
+    None.
+
+  Magic number(s):
+    Files begin with: K9! (0x4B 0x39 0x21)
+
+  File extension(s):
+    .k9.ncl (primary)
+    .k9 (short form)
+
+  Macintosh file type code(s):
+    TEXT
+
+  Object Identifier(s) or OID(s):
+    None.
+
+Intended usage:
+  COMMON
+
+Other information & comments:
+  K9 (Canine) is a self-validating component format built on the must-just-nickel
+  triad. It provides progressive security levels (Kennel/Yard/Hunt) and
+  cryptographic attestation for production deployments.
+
+  The format is designed for mission-critical configuration where invalid configs
+  must fail at validation time, not at runtime.
+
+Recommended HTTP usage:
+
+* `Content-Type: application/vnd.k9+nickel`
+* `Content-Type: application/vnd.k9+nickel; leash=hunt` (with security level)
+* `Content-Type: application/vnd.k9+nickel; charset=utf-8`
+
+Security level negotiation:
+
+Client requests K9 config with specific security requirements:
+[source,http]
+----
+GET /config/production.k9.ncl HTTP/1.1
+Accept: application/vnd.k9+nickel; leash=hunt
+----
+
+Server response includes security level and signature:
+[source,http]
+----
+HTTP/1.1 200 OK
+Content-Type: application/vnd.k9+nickel; leash=hunt
+K9-Signature: ed25519:base64encodedSignature
+K9-Public-Key: ed25519:base64encodedPublicKey
+
+K9!
+leash = 'Hunt
+pedigree = { ... }
+config = { ... }
+----
+
+Example K9 document structure:
+[source,nickel]
+----
+K9!
+leash = 'Yard
+
+pedigree = {
+  schema_version = "1.0.0",
+  component_type = "web-server-config",
+  validation_level = "strict"
+}
+
+config = {
+  server = {
+    port | Number = 8080,
+    host | String = "0.0.0.0",
+    workers | Number = 4
+  },
+
+  # Nickel contracts enforce validity
+  server.port
+    | std.contract.from_predicate (fun p => p >= 1024 && p <= 65535)
+}
+----
+
+Contact person:
+  Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+
+Author/Change controller:
+  Jonathan D.A. Jewell / The Open University
+
+Change history:
+  2026-01-30: Initial registration document created
+  2025-12-XX: K9 SVC v1.0.0 released with MIME support
+----

@@ -1,0 +1,123 @@
+# GitLab CI Template for Palimpsest License Validation
+#
+# Include this template in your .gitlab-ci.yml:
+#
+# include:
+#   - local: 'integrations/platforms/gitlab-ci/.gitlab-ci-palimpsest.yml'
+
+.palimpsest_validation:
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache jq grep findutils bash
+  script:
+    - |
+      echo "=== Palimpsest License Validation ==="
+
+      # Configuration
+      LICENSE_FILE="${LICENSE_FILE:-LICENSE.md}"
+      METADATA_FILE="${METADATA_FILE:-metadata/palimpsest.jsonld}"
+      CHECK_HTML="${CHECK_HTML:-true}"
+      FAIL_ON_MISSING="${FAIL_ON_MISSING:-false}"
+
+      VALIDATION_PASSED=true
+
+      # Check license file
+      if [ ! -f "$LICENSE_FILE" ]; then
+        echo "⚠️  Warning: License file not found: $LICENSE_FILE"
+        [ "$FAIL_ON_MISSING" = "true" ] && exit 1
+      elif ! grep -q "Palimpsest" "$LICENSE_FILE"; then
+        echo "❌ Error: License file does not reference Palimpsest License"
+        VALIDATION_PASSED=false
+      else
+        echo "✅ License file contains Palimpsest License"
+      fi
+
+      # Check metadata file
+      if [ ! -f "$METADATA_FILE" ]; then
+        echo "⚠️  Warning: Metadata file not found: $METADATA_FILE"
+        [ "$FAIL_ON_MISSING" = "true" ] && exit 1
+      else
+        echo "✅ Metadata file found: $METADATA_FILE"
+
+        # Validate JSON-LD
+        if jq empty "$METADATA_FILE" 2>/dev/null; then
+          echo "✅ Metadata file is valid JSON"
+
+          # Check required fields
+          LICENSE_URL=$(jq -r '.license // empty' "$METADATA_FILE")
+          AUTHOR_NAME=$(jq -r '.author.name // empty' "$METADATA_FILE")
+
+          if [ -z "$LICENSE_URL" ]; then
+            echo "❌ Error: Missing required field: license"
+            VALIDATION_PASSED=false
+          fi
+
+          if [ -z "$AUTHOR_NAME" ]; then
+            echo "❌ Error: Missing required field: author.name"
+            VALIDATION_PASSED=false
+          fi
+
+          if [ "$VALIDATION_PASSED" = "true" ]; then
+            echo "✅ Required metadata fields present"
+          fi
+        else
+          echo "❌ Error: Metadata file is not valid JSON"
+          VALIDATION_PASSED=false
+        fi
+      fi
+
+      # Check HTML files
+      if [ "$CHECK_HTML" = "true" ]; then
+        echo ""
+        echo "Checking HTML files for license metadata..."
+
+        FOUND=0
+        for file in $(find . -name "*.html" -type f); do
+          if grep -qi "palimpsest" "$file"; then
+            echo "  ✅ $file contains license metadata"
+            FOUND=$((FOUND + 1))
+          fi
+        done
+
+        echo "Found license metadata in $FOUND HTML file(s)"
+      fi
+
+      # Summary
+      echo ""
+      if [ "$VALIDATION_PASSED" = "true" ]; then
+        echo "✅ Palimpsest License validation passed"
+        exit 0
+      else
+        echo "❌ Palimpsest License validation failed"
+        exit 1
+      fi
+  artifacts:
+    reports:
+      dotenv: palimpsest-validation.env
+    when: always
+    expire_in: 1 week
+
+# Job templates for different scenarios
+
+palimpsest:validate:
+  extends: .palimpsest_validation
+  stage: test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+palimpsest:validate:strict:
+  extends: .palimpsest_validation
+  stage: test
+  variables:
+    FAIL_ON_MISSING: "true"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+palimpsest:validate:html:
+  extends: .palimpsest_validation
+  stage: test
+  variables:
+    CHECK_HTML: "true"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

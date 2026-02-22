@@ -1,0 +1,292 @@
+= Architecture Guide
+:toc: macro
+:toc-title: Contents
+:toclevels: 3
+:sectnums:
+:icons: font
+:source-highlighter: rouge
+
+Technical architecture of the Rhodium Pipeline Template.
+
+toc::[]
+
+== Overview
+
+Rhodium Pipeline Template generates formally-verified data processing pipelines with a layered architecture:
+
+[source]
+----
+┌─────────────────────────────────────────────────────────────┐
+│                      CLI Layer                               │
+│  (clap argument parsing, command dispatch)                   │
+├─────────────────────────────────────────────────────────────┤
+│                    Pipeline Layer                            │
+│  (stage orchestration, progress tracking)                    │
+├─────────────────────────────────────────────────────────────┤
+│                   Processing Layer                           │
+│  (transform, validate, checksum)                             │
+├─────────────────────────────────────────────────────────────┤
+│                 Configuration Layer                          │
+│  (Nickel build-time, Guile runtime, env vars)               │
+├─────────────────────────────────────────────────────────────┤
+│                   Proof Layer                                │
+│  (Isabelle/HOL formal verification)                          │
+└─────────────────────────────────────────────────────────────┘
+----
+
+== Design Principles
+
+=== 1. Prove the Scaffolding, Test the Logic
+
+* *Formal proofs* verify structural invariants (partitions, bijections, checksums)
+* *Empirical tests* verify domain-specific business logic
+* Clear separation between verified and tested components
+
+=== 2. Configuration as Code
+
+Three-tier configuration strategy:
+
+[cols="1,1,2"]
+|===
+|Tier |Tool |Purpose
+
+|Build-time
+|Nickel
+|Type-safe schemas, compile-time validation
+
+|Runtime
+|Guile Scheme
+|Dynamic validation, transforms
+
+|Deploy-time
+|Environment variables
+|Instance-specific overrides
+|===
+
+=== 3. Automation Over Documentation
+
+* All procedures are `just` recipes
+* Documentation explains *why*, not *how*
+* Self-documenting via `--help` flags
+
+== Module Structure
+
+=== Source Files (`src/`)
+
+[source]
+----
+src/
+├── main.rs         # Entry point, CLI dispatch
+├── cli.rs          # Argument definitions (~1000 lines)
+├── lib.rs          # Library interface
+├── config.rs       # Configuration loading
+├── pipeline.rs     # Stage orchestration
+├── validation.rs   # Invariant checking
+├── checksum.rs     # Integrity verification
+└── error.rs        # Error types with exit codes
+----
+
+=== Key Modules
+
+==== `cli.rs` — Command-Line Interface
+
+Defines a comprehensive CLI taxonomy:
+
+* *Input/Output* — Paths, formats, encoding
+* *Processing* — Algorithms, batch sizes, buffers
+* *Validation* — Levels (skip/quick/standard/full/paranoid)
+* *Performance* — Threads, streaming, memory limits
+* *Checksum* — Algorithm selection, verification
+
+==== `pipeline.rs` — Pipeline Orchestration
+
+Four-stage pipeline:
+
+1. **Ingest** — Read and parse input data
+2. **Transform** — Apply processing operations
+3. **Validate** — Verify invariants
+4. **Export** — Write output with checksums
+
+==== `validation.rs` — Invariant Checking
+
+Implements runtime checks corresponding to formal proofs:
+
+* Partition membership (no duplicate IDs)
+* Bijection correctness (injective mappings)
+* Ratio tolerance bounds
+* Custom domain-specific validators
+
+== Proof Architecture
+
+=== Theory Dependency Graph
+
+[source]
+----
+                    ┌─────────────────┐
+                    │    Prelude      │
+                    │ (base types)    │
+                    └────────┬────────┘
+                             │
+           ┌─────────────────┼─────────────────┐
+           │                 │                 │
+           ▼                 ▼                 ▼
+    ┌──────────┐      ┌──────────┐      ┌──────────┐
+    │ Partition │      │ Bijection │      │ Checksum │
+    └─────┬────┘      └─────┬────┘      └─────┬────┘
+          │                 │                 │
+          └─────────────────┼─────────────────┘
+                            │
+           ┌────────────────┼────────────────┐
+           │                │                │
+           ▼                ▼                ▼
+    ┌──────────┐      ┌──────────┐     ┌──────────┐
+    │   Ratio  │      │Monotonic │     │Idempotent│
+    └─────┬────┘      └─────┬────┘     └─────┬────┘
+          │                 │                │
+          └─────────────────┴────────────────┘
+                            │
+                            ▼
+                    ┌───────────────┐
+                    │  Composition  │
+                    └───────┬───────┘
+                            │
+                            ▼
+                    ┌───────────────┐
+                    │  Invariants   │
+                    │  (combined)   │
+                    └───────────────┘
+----
+
+=== Proof Patterns
+
+Each theory follows a standard pattern:
+
+1. **Definitions** — Core types and predicates
+2. **Basic lemmas** — Foundational properties
+3. **Composition** — How properties combine
+4. **Instantiation** — Apply to specific pipeline
+
+See link:PROOFS.adoc[PROOFS.adoc] for detailed proof documentation.
+
+== Configuration Architecture
+
+=== Nickel Schema (`config/`)
+
+[source]
+----
+config/
+├── default.ncl         # Main configuration
+├── schema.ncl          # Type contracts
+└── presets/
+    ├── dev.ncl         # Development: fast, minimal validation
+    ├── prod.ncl        # Production: full validation
+    ├── ci.ncl          # CI/CD: deterministic, verbose
+    └── paranoid.ncl    # Maximum: all checks + proof verification
+----
+
+=== Configuration Precedence
+
+From highest to lowest priority:
+
+1. Command-line arguments
+2. Environment variables (`PROJECT_NAME_*`)
+3. Config file (via `--config`)
+4. Default config (`~/.config/project/config.toml`)
+5. Built-in defaults
+
+== Error Handling
+
+=== Exit Codes
+
+[cols="1,2"]
+|===
+|Code |Meaning
+
+|0 |Success
+|1 |General error
+|2 |Configuration error
+|3 |Validation error
+|4 |I/O error
+|5 |Pipeline error
+|64 |Usage error (invalid arguments)
+|===
+
+=== Error Types
+
+Error taxonomy in `error.rs`:
+
+* `ConfigNotFound`, `ConfigInvalid`, `ConfigParse`
+* `ValidationFailed`, `SchemaViolation`, `ChecksumMismatch`
+* `FileNotFound`, `PermissionDenied`, `PathExists`
+* `StageFailed`, `TransformError`, `Timeout`
+
+== Extension Points
+
+=== Adding a New Stage
+
+1. Define stage function in `pipeline.rs`
+2. Add corresponding theory in `proofs/`
+3. Prove preservation of invariants
+4. Register in `standard_pipeline`
+
+=== Adding a New Invariant
+
+1. Define predicate in `*_Prelude.thy`
+2. Create proof theory showing preservation
+3. Implement runtime check in `validation.rs`
+4. Add CLI flag for enabling/disabling
+
+=== Adding a New Checksum Algorithm
+
+1. Add to `ChecksumAlgorithm` enum in `cli.rs`
+2. Implement in `checksum.rs`
+3. Update `checksum_algo` choices in `cargo-generate.toml`
+4. Document in CLI help text
+
+== Performance Considerations
+
+=== Parallelism
+
+* Configurable worker threads (`--threads`)
+* Semaphore-based concurrency limiting
+* Rayon for data parallelism
+
+=== Memory Management
+
+* Streaming mode for large files (`--streaming`)
+* Configurable buffer sizes (`--buffer-size`)
+* Memory limit enforcement (`--memory-limit`)
+
+=== Checksum Performance
+
+Algorithm speed comparison (approximate):
+
+[cols="1,1,1"]
+|===
+|Algorithm |Speed |Security
+
+|XXHash |Fastest |Non-cryptographic
+|BLAKE3 |Very fast |Cryptographic
+|SHAKE3-256 |Fast |Cryptographic (default)
+|SHA3-256 |Moderate |Cryptographic
+|===
+
+== Testing Strategy
+
+=== Unit Tests
+
+* Pure function tests in each module
+* Property-based tests with `proptest`
+
+=== Integration Tests
+
+* Full pipeline execution tests
+* CLI invocation tests with `assert_cmd`
+
+=== Proof Verification
+
+* Isabelle theory compilation
+* Proof step verification
+* `sorry`-free builds for release
+
+See link:HANDOVER.adoc[HANDOVER.adoc] for complete methodology documentation.

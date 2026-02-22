@@ -1,0 +1,149 @@
+= Sanctify-PHP
+:author: Jonathan D.A. Jewell
+:email: jonathan.jewell@gmail.com
+:toc:
+:icons: font
+
+Haskell-based PHP hardening and security analysis tool.
+
+== Overview
+
+Sanctify-PHP transforms PHP code to be safer and more robust:
+
+* Adds `declare(strict_types=1)` declarations
+* Infers and adds type hints
+* Detects security vulnerabilities (SQLi, XSS, CSRF, command injection)
+* Enforces WordPress-specific constraints
+* Performs taint tracking analysis
+* Generates reports in JSON/SARIF/HTML formats
+* Exports infrastructure recommendations (php.ini, nginx, Guix)
+
+== Installation
+
+[source,bash]
+----
+# Using Cabal
+cabal build
+cabal install
+
+# Using Nix
+nix build
+
+# Using Guix
+guix build -f guix.scm
+----
+
+== Usage
+
+[source,bash]
+----
+# Analyze files
+sanctify analyze ./wp-content/plugins/my-plugin/
+
+# Auto-fix safe issues
+sanctify fix ./src/
+
+# Generate report
+sanctify report ./theme/ > report.json
+
+# Export infrastructure config
+sanctify export --php-ini ./project/ >> php.ini
+sanctify export --nginx ./project/ >> security.conf
+sanctify export --guix ./project/ >> overrides.scm
+----
+
+== Transformation Categories
+
+=== Fully Automatic (Zero Risk)
+
+* Add `declare(strict_types=1)`
+* Add ABSPATH check for WordPress files
+* Add missing text domains to i18n functions
+* Wrap echo with `esc_html()` for variables
+* Add `exit;` after `wp_redirect()`
+* Convert `rand()` → `random_int()`
+
+=== Semi-Automatic (Review Recommended)
+
+* Wrap superglobals with sanitizers
+* Replace `$wpdb->query()` with `$wpdb->prepare()`
+* Infer return types from function body
+* Add nonce verification to form handlers
+
+=== Advisory Only
+
+* SQL injection in complex queries
+* Hardcoded secrets detection
+* CSRF in AJAX handlers
+* Capability escalation patterns
+
+== Container Integration
+
+Sanctify-PHP integrates with the `aegis` container orchestrator to provide infrastructure-level hardening. See `guix/wordpress-container.scm` for an example hardened WordPress container.
+
+[source,bash]
+----
+# Generate container config based on analysis
+sanctify export --guix ./project/ | aegis apply
+----
+
+== Architecture
+
+[source]
+----
+┌─────────────────────────────────────────────────────┐
+│                    sanctify-php                      │
+├─────────────────────────────────────────────────────┤
+│  Parser → AST → Analysis → Transform → Emit         │
+├──────────┬──────────┬──────────┬────────────────────┤
+│ CLI      │ LSP      │ WP Plugin│ Library API        │
+│ (batch)  │ (IDE)    │ (scan)   │ (integration)      │
+└──────────┴──────────┴──────────┴────────────────────┘
+----
+
+== Modules
+
+[cols="1,3"]
+|===
+| Module | Purpose
+
+| `Sanctify.Parser`
+| PHP parsing using Megaparsec
+
+| `Sanctify.AST`
+| Complete PHP AST representation
+
+| `Sanctify.Analysis.Security`
+| Security vulnerability detection
+
+| `Sanctify.Analysis.Types`
+| Type inference engine
+
+| `Sanctify.Analysis.Taint`
+| Taint tracking for data flow
+
+| `Sanctify.WordPress.Constraints`
+| WordPress-specific security rules
+
+| `Sanctify.WordPress.Hooks`
+| WordPress hook analysis
+
+| `Sanctify.Transform.*`
+| Code transformation passes
+
+| `Sanctify.Emit`
+| PHP code generation
+
+| `Sanctify.Report`
+| Multi-format report generation
+|===
+
+== License
+
+AGPL-3.0-or-later
+
+== Related Projects
+
+* https://github.com/hyperpolymath/aegis[aegis] - Container orchestrator
+* https://github.com/hyperpolymath/wordpress-wharf[wordpress-wharf] - WordPress deployment
+* https://github.com/hyperpolymath/wp-audit-toolkit[wp-audit-toolkit] - WordPress auditing

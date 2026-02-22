@@ -1,0 +1,562 @@
+= A2ML Migration Guide
+:toc: preamble
+:toclevels: 2
+:icons: font
+
+Complete guide for migrating to A2ML v1.0.0 from previous versions or other markup formats.
+
+== Quick Start
+
+=== From v0.6.0 to v1.0.0
+
+[source,bash]
+----
+# 1. Update directive syntax (add colons)
+sed -i 's/@abstract$/@abstract:/' *.a2ml
+sed -i 's/@refs$/@refs:/' *.a2ml
+
+# 2. Validate documents
+a2ml validate *.a2ml
+
+# 3. Fix any validation errors
+# (see error messages for specific fixes)
+----
+
+=== From Markdown
+
+[source,bash]
+----
+# 1. Copy Markdown file
+cp document.md document.a2ml
+
+# 2. Update code blocks
+sed -i 's/^```\(.*\)$/@opaque(lang="\1"):/' document.a2ml
+sed -i 's/^```$/@end/' document.a2ml
+
+# 3. Add @abstract block at top
+
+# 4. Add @refs block at bottom
+
+# 5. Validate
+a2ml validate document.a2ml
+----
+
+== Detailed Migration Guides
+
+=== From v0.6.0
+
+==== Breaking Changes
+
+1. **Directive syntax**: `@abstract` → `@abstract:`
+2. **Stricter validation**: References must resolve
+3. **Idris2 required**: Install from https://idris-lang.org
+4. **Exit codes**: Proper error codes (1=validation, 2=parse, 3=not found)
+
+==== Migration Steps
+
+===== 1. Install Idris2
+
+[source,bash]
+----
+# Fedora
+sudo dnf install idris2
+
+# Ubuntu
+sudo apt install idris2
+
+# macOS
+brew install idris2
+
+# From source
+curl -fsSL https://raw.githubusercontent.com/idris-lang/Idris2/main/bootstrap-build.sh | bash
+----
+
+===== 2. Build A2ML v1.0.0
+
+[source,bash]
+----
+cd a2ml/cli
+./build.sh
+sudo cp ../build/exec/a2ml /usr/local/bin/
+----
+
+===== 3. Update Directive Syntax
+
+[source,bash]
+----
+# Automated fix for common cases
+find . -name "*.a2ml" -type f -exec sed -i \
+  -e 's/@abstract$/@abstract:/' \
+  -e 's/@refs$/@refs:/' \
+  -e 's/@fig$/@fig:/' \
+  -e 's/@table$/@table:/' \
+  -e 's/@opaque$/@opaque:/' \
+  {} \;
+----
+
+**Manual fixes needed for**:
+- Directives with attributes: `@fig(id="f1")` → `@fig(id="f1"):`
+- Multi-line directives (verify they end with `@end`)
+
+===== 4. Validate and Fix Errors
+
+[source,bash]
+----
+# Validate all documents
+for file in *.a2ml; do
+  echo "Validating $file..."
+  if ! a2ml validate "$file"; then
+    echo "FAILED: $file"
+  fi
+done
+----
+
+**Common errors and fixes**:
+
+| Error | Fix |
+|-------|-----|
+| `Unresolved reference 'sec:foo'` | Add section with `## Foo {#sec:foo}` or fix reference |
+| `Duplicate ID 'intro'` | Rename one of the duplicate IDs |
+| `Missing required section '@abstract'` | Add `@abstract:` block |
+
+===== 5. Update Build Scripts
+
+[source,diff]
+----
+- # v0.6.0
+- node prototype/rescript/src/cli.bs.js validate doc.a2ml
+- node prototype/rescript/src/cli.bs.js convert doc.a2ml > doc.html
+
++ # v1.0.0
++ a2ml validate doc.a2ml
++ a2ml convert a2ml html doc.a2ml > doc.html
+----
+
+===== 6. Update CI
+
+[source,yaml]
+----
+# .github/workflows/validate-docs.yml
+- name: Validate A2ML docs
+  run: |
+    for file in docs/*.a2ml; do
+      a2ml validate "$file"
+    done
+
+- name: Generate HTML
+  run: |
+    mkdir -p generated/html
+    for file in docs/*.a2ml; do
+      a2ml convert a2ml html "$file" > "generated/html/$(basename ${file%.a2ml}).html"
+    done
+----
+
+=== From Markdown
+
+==== When to Migrate
+
+**Good candidates**:
+- Long-term documentation
+- Academic papers
+- Specifications/RFCs
+- Documents with formal structure
+
+**Not recommended**:
+- Temporary notes
+- GitHub READMEs (Markdown is fine)
+- Quick drafts
+
+==== Migration Steps
+
+===== 1. Initial Conversion
+
+[source,bash]
+----
+# Start with Markdown file
+cp document.md document.a2ml
+----
+
+===== 2. Convert Code Blocks
+
+**Markdown**:
+[source,markdown]
+----
+```python
+def hello():
+    print("Hello, world!")
+```
+----
+
+**A2ML**:
+[source,a2ml]
+----
+@opaque(lang="python"):
+def hello():
+    print("Hello, world!")
+@end
+----
+
+**Automated conversion**:
+[source,bash]
+----
+# Convert triple backticks to @opaque blocks
+sed -i 's/^```\(.*\)$/@opaque(lang="\1"):/' document.a2ml
+
+# Convert closing backticks
+sed -i 's/^```$/@end/' document.a2ml
+
+# Manual fix: First @end after title should be kept as @end (for @abstract)
+----
+
+===== 3. Add Structure
+
+**Add abstract**:
+[source,a2ml]
+----
+# Document Title
+
+@abstract:
+This document explains...
+(Move first paragraph here)
+@end
+
+## Introduction
+...
+----
+
+**Add references**:
+[source,a2ml]
+----
+@refs:
+[1] Author (Year). Title. Publication.
+[2] Another reference.
+@end
+----
+
+===== 4. Handle Markdown-Specific Features
+
+| Markdown Feature | A2ML Equivalent |
+|------------------|-----------------|
+| Inline code `foo` | Same: `foo` |
+| Bold `**text**` | Same: `**text**` |
+| Italic `*text*` | Same: `*text*` |
+| Links `[text](url)` | Same: `[text](url)` |
+| Images `![alt](url)` | `@fig(caption="alt", src="url"):` |
+| Tables | `@table(caption="..."):` |
+| Footnotes | `@refs:` block |
+
+===== 5. Validate
+
+[source,bash]
+----
+a2ml validate document.a2ml
+----
+
+Fix any errors (typically missing colons on directives).
+
+===== 6. Test Rendering
+
+[source,bash]
+----
+# Generate HTML
+a2ml convert a2ml html document.a2ml > output.html
+
+# Compare with Markdown rendering
+cmark document.md > markdown.html
+
+# Visually compare outputs
+diff output.html markdown.html
+----
+
+=== From AsciiDoc
+
+==== When to Migrate
+
+**Good candidates**:
+- Documents needing formal verification
+- Projects wanting typed core guarantees
+- Documents with complex references
+
+**Keep AsciiDoc for**:
+- Books (AsciiDoc has better book support)
+- Complex tables (AsciiDoc table syntax richer)
+- Existing large projects (migration cost high)
+
+==== Migration Steps
+
+===== 1. Convert Headings
+
+[source,bash]
+----
+# AsciiDoc uses = for headings
+# A2ML uses #
+
+sed -i 's/^= /# /' document.a2ml
+sed -i 's/^== /## /' document.a2ml
+sed -i 's/^=== /### /' document.a2ml
+----
+
+===== 2. Convert Lists
+
+AsciiDoc lists already use `-` or `*`, so no changes needed.
+
+===== 3. Convert Code Blocks
+
+**AsciiDoc**:
+[source,asciidoc]
+----
+[source,python]
+----
+def hello():
+    pass
+----
+----
+
+**A2ML**:
+[source,a2ml]
+----
+@opaque(lang="python"):
+def hello():
+    pass
+@end
+----
+
+===== 4. Convert Tables
+
+**AsciiDoc**:
+[source,asciidoc]
+----
+|===
+|Header 1|Header 2
+|Cell 1|Cell 2
+|===
+----
+
+**A2ML**:
+[source,a2ml]
+----
+@table(caption="Table description"):
+|Header 1|Header 2|
+|--------|--------|
+|Cell 1|Cell 2|
+@end
+----
+
+(Note: A2ML v1.0.0 table syntax is simplified; full table support in v1.1)
+
+===== 5. Convert Attributes
+
+AsciiDoc attributes become A2ML directive parameters:
+
+[source,diff]
+----
+- [NOTE]
+- ====
+- This is a note
+- ====
+
++ @note:
++ This is a note
++ @end
+----
+
+(Note: `@note` not in v1.0.0; use emphasis or custom directives)
+
+=== From LaTeX
+
+==== Migration Strategy
+
+LaTeX → A2ML is lossy. Use A2ML for structure, keep LaTeX in `@opaque` blocks.
+
+===== 1. Extract Structure
+
+[source,bash]
+----
+# Extract \section, \subsection as A2ML headings
+# Keep math, complex formatting in @opaque blocks
+----
+
+===== 2. Preserve Math
+
+[source,a2ml]
+----
+@opaque(lang="latex", id="eq-pythagorean"):
+\begin{equation}
+a^2 + b^2 = c^2
+\end{equation}
+@end
+----
+
+===== 3. Convert Bibliography
+
+**BibTeX**:
+[source,bibtex]
+----
+@article{key,
+  author = {Author},
+  title = {Title},
+  year = {2025}
+}
+----
+
+**A2ML**:
+[source,a2ml]
+----
+@refs:
+[1] Author (2025). Title. Journal.
+@end
+----
+
+== Automation Tools
+
+=== Conversion Scripts
+
+[source,bash]
+----
+# md2a2ml.sh - Markdown to A2ML converter
+#!/bin/bash
+input="$1"
+output="${input%.md}.a2ml"
+
+sed 's/^```\(.*\)$/@opaque(lang="\1"):/' "$input" | \
+sed 's/^```$/@end/' > "$output"
+
+echo "Converted $input → $output"
+----
+
+=== Batch Migration
+
+[source,bash]
+----
+# migrate-all.sh - Migrate entire docs directory
+#!/bin/bash
+for md in docs/*.md; do
+  a2ml="${md%.md}.a2ml"
+  ./md2a2ml.sh "$md"
+  a2ml validate "$a2ml" || echo "FAILED: $a2ml"
+done
+----
+
+== Validation Checklist
+
+After migration, verify:
+
+- [ ] All `.a2ml` files validate: `a2ml validate *.a2ml`
+- [ ] HTML renders correctly: `a2ml convert a2ml html doc.a2ml`
+- [ ] No broken references
+- [ ] Code blocks preserved exactly (`@opaque` with correct lang)
+- [ ] References/citations complete
+- [ ] CI passes with new validation
+
+== Troubleshooting
+
+=== Common Migration Errors
+
+==== "Unresolved reference"
+
+**Cause**: `@ref(sec:foo)` but no section with `id="sec:foo"`
+
+**Fix**: Add section or fix reference:
+[source,a2ml]
+----
+## Foo Section
+
+or
+
+@fig(id="sec:foo", caption="Foo"):
+...
+@end
+----
+
+==== "Duplicate ID"
+
+**Cause**: Two sections/figures with same ID
+
+**Fix**: Make IDs unique:
+[source,diff]
+----
+- ## Introduction
+- ## Introduction  # Duplicate!
+
++ ## Introduction
++ ## Introduction Part 2  # Different heading
+----
+
+==== "Missing directive end"
+
+**Cause**: `@abstract:` but no `@end`
+
+**Fix**: Add `@end` after block content:
+[source,a2ml]
+----
+@abstract:
+This is the abstract.
+@end
+----
+
+==== "Parse error: unexpected character"
+
+**Cause**: Special characters not escaped
+
+**Fix**: Escape with backslash:
+[source,diff]
+----
+- This costs $5 and uses 100% power.
++ This costs \$5 and uses 100\% power.
+----
+
+=== Getting Help
+
+- **Issues**: https://github.com/hyperpolymath/a2ml/issues
+- **Discussions**: https://github.com/hyperpolymath/a2ml/discussions
+- **Email**: jonathan.jewell@open.ac.uk
+
+== Best Practices
+
+=== Incremental Migration
+
+1. **Start small**: Migrate one document first
+2. **Test thoroughly**: Validate and render
+3. **Iterate**: Apply lessons to remaining docs
+4. **Automate**: Script repetitive tasks
+
+=== Keeping Both Formats
+
+During transition, keep both `.md` and `.a2ml`:
+
+[source,bash]
+----
+# Generate Markdown from A2ML for GitHub
+a2ml convert a2ml md document.a2ml > README.md
+
+# Keep canonical version in A2ML
+git add document.a2ml
+git commit -m "docs: migrate to A2ML (canonical), generate MD for GitHub"
+----
+
+=== CI Integration
+
+[source,yaml]
+----
+# Validate A2ML, generate Markdown for compatibility
+- name: Validate A2ML
+  run: a2ml validate docs/*.a2ml
+
+- name: Generate Markdown
+  run: |
+    for a2ml in docs/*.a2ml; do
+      md="${a2ml%.a2ml}.md"
+      a2ml convert a2ml md "$a2ml" > "$md"
+    done
+
+- name: Commit generated Markdown
+  run: |
+    git add docs/*.md
+    git commit -m "docs: regenerate Markdown from A2ML [skip ci]" || true
+----
+
+---
+
+**Created:** 2026-01-30
+**Author:** Jonathan D.A. Jewell
+**Co-Authored-By:** Claude Sonnet 4.5

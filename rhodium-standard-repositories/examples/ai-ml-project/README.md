@@ -1,0 +1,218 @@
+# AI/ML Project
+
+**Rhodium Level Compliance Example (Aspirational)**
+
+[![Rhodium Compliance](https://img.shields.io/badge/rhodium-rhodium-9C27B0)](https://github.com/Hyperpolymath/rhodium-standard-repositories)
+image:https://img.shields.io/badge/License-MPL_2.0-blue.svg[MPL-2.0-or-later,link="https://opensource.org/licenses/MPL-2.0"]
+
+A comprehensive AI/ML project demonstrating **Rhodium** level compliance - the highest tier of the Rhodium Framework. This example showcases:
+
+- Multi-language support (Rust + Python)
+- ML model development and deployment
+- Automated compliance checking
+- Complete observability and monitoring
+- AI/ML specific best practices
+- Full DevOps automation
+
+## Features
+
+### Multi-Language Architecture
+
+- **Rust**: High-performance inference engine and API server
+- **Python**: Model training, data processing, and experimentation
+- **Polyglot Integration**: Seamless Rust-Python interop via PyO3
+
+### Machine Learning Pipeline
+
+1. **Data Processing**: Python scripts for data preparation
+2. **Training**: Model training with experiment tracking
+3. **Inference**: Rust-based high-performance inference engine
+4. **Serving**: REST API for model serving
+5. **Monitoring**: Model performance monitoring
+
+### AI/ML Specific Features
+
+- Model versioning and registry
+- Experiment tracking
+- Data validation
+- Model validation
+- A/B testing support
+- Model explainability
+- Bias detection
+- Performance benchmarking
+
+## Quick Start
+
+```bash
+# Setup Python environment
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Build Rust components
+cargo build --release
+
+# Run tests
+make test
+
+# Train model
+python python/train.py
+
+# Start inference server
+cargo run --bin inference-server
+
+# Check Rhodium compliance
+rhodium check --level rhodium
+```
+
+## Project Structure
+
+```
+ai-ml-project/
+├── src/              # Rust inference engine
+├── python/           # Python ML code
+├── models/           # Trained models
+├── data/            # Dataset storage
+├── notebooks/       # Jupyter notebooks
+├── tests/           # All tests
+├── scripts/         # Automation scripts
+├── .rhodium/        # Rhodium config
+└── docs/            # Documentation
+```
+
+## Rhodium Level Compliance
+
+This project demonstrates **Rhodium** level - the highest compliance tier:
+
+```bash
+rhodium check --level rhodium --strict
+```
+
+### All Compliance Levels Met
+
+#### Bronze Level ✓
+- README, LICENSE, CODE_OF_CONDUCT
+- Basic tests
+- Version control
+
+#### Silver Level ✓
+- CHANGELOG, CONTRIBUTING, CITATION
+- Issue/PR templates
+- >70% test coverage
+- API documentation
+
+#### Gold Level ✓
+- ARCHITECTURE.md, SECURITY.md
+- ADRs
+- SBOM, provenance tracking
+- Performance benchmarks
+- CI/CD pipelines
+
+#### Rhodium Level ✓
+- Multi-language support
+- Advanced automation
+- ML-specific governance
+- Complete observability
+- Automated compliance checks
+- Model cards
+- Dataset cards
+- Fairness assessment
+- Carbon footprint tracking
+
+## ML-Specific Documentation
+
+- [MODEL_CARD.md](MODEL_CARD.md) - Model documentation
+- [DATA_CARD.md](DATA_CARD.md) - Dataset documentation
+- [FAIRNESS.md](FAIRNESS.md) - Bias and fairness assessment
+- [docs/ml-pipeline.md](docs/ml-pipeline.md) - ML pipeline documentation
+
+## Development
+
+### Training a Model
+
+```bash
+# Prepare data
+python python/prepare_data.py
+
+# Train model
+python python/train.py --config configs/model_config.yaml
+
+# Evaluate model
+python python/evaluate.py --model-path models/latest
+```
+
+### Inference
+
+```bash
+# Start server
+cargo run --bin inference-server
+
+# Make prediction
+curl -X POST http://localhost:8080/predict \
+  -H "Content-Type: application/json" \
+  -d '{"features": [1.0, 2.0, 3.0]}'
+```
+
+### Testing
+
+```bash
+# All tests
+make test
+
+# Rust tests
+cargo test
+
+# Python tests
+pytest python/tests/
+
+# Integration tests
+./scripts/integration_tests.sh
+```
+
+## Monitoring
+
+- **Metrics**: Prometheus metrics endpoint
+- **Tracing**: Distributed tracing with Jaeger
+- **Logging**: Structured logging
+- **Model Metrics**: Prediction accuracy, latency, drift detection
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for:
+- Model security
+- Data privacy
+- Adversarial robustness
+- Supply chain security
+
+## Compliance Automation
+
+Automated checks in CI/CD:
+- Code quality (Rust: clippy, Python: ruff)
+- Test coverage (>80%)
+- Security scanning
+- License compliance
+- Documentation completeness
+- Model validation
+- Data validation
+- Fairness metrics
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
+
+## License
+
+Licensed under MIT OR Apache-2.0.
+
+## Citation
+
+```bibtex
+@software{ai_ml_project,
+  title = {AI/ML Project: Rhodium Compliance Example},
+  author = {Rhodium Framework Contributors},
+  year = {2025},
+  url = {https://github.com/Hyperpolymath/rhodium-standard-repositories}
+}
+```
+
+See [CITATION.cff](CITATION.cff) for more details.

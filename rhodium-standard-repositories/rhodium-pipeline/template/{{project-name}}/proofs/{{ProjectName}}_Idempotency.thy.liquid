@@ -1,0 +1,138 @@
+(*
+  {{ ProjectName }}_Idempotency.thy
+
+  Idempotency proofs for {{ project-name }}.
+
+  This theory verifies that certain pipeline stages are idempotent,
+  meaning applying them multiple times has the same effect as once.
+
+  Part of Rhodium Pipeline Template methodology.
+*)
+
+theory {{ ProjectName }}_Idempotency
+  imports
+    {{ ProjectName }}_Prelude
+begin
+
+section \<open>Idempotency Definitions\<close>
+
+text \<open>
+  A stage is idempotent if f(f(x)) = f(x).
+  This is important for normalization and cleanup stages.
+\<close>
+
+definition idempotent :: "stage \<Rightarrow> bool" where
+  "idempotent f \<equiv> \<forall>ds. f (f ds) = f ds"
+
+text \<open>Weak idempotency: same cardinality on repeated application.\<close>
+
+definition weak_idempotent :: "stage \<Rightarrow> bool" where
+  "weak_idempotent f \<equiv> \<forall>ds. fcard (f (f ds)) = fcard (f ds)"
+
+text \<open>Eventually idempotent after n applications.\<close>
+
+fun iterate :: "stage \<Rightarrow> nat \<Rightarrow> stage" where
+  "iterate f 0 = id" |
+  "iterate f (Suc n) = f \<circ>\<^sub>s (iterate f n)"
+
+definition eventually_idempotent :: "stage \<Rightarrow> nat \<Rightarrow> bool" where
+  "eventually_idempotent f n \<equiv>
+    \<forall>ds. (iterate f n) ((iterate f n) ds) = (iterate f n) ds"
+
+section \<open>Basic Idempotency Lemmas\<close>
+
+lemma idempotent_implies_weak:
+  "idempotent f \<Longrightarrow> weak_idempotent f"
+  unfolding idempotent_def weak_idempotent_def by simp
+
+lemma identity_idempotent:
+  "idempotent id"
+  unfolding idempotent_def by simp
+
+lemma constant_idempotent:
+  "idempotent (\<lambda>_. c)"
+  unfolding idempotent_def by simp
+
+section \<open>Composition and Idempotency\<close>
+
+text \<open>
+  Composition of idempotent stages is NOT generally idempotent.
+  However, under certain conditions it can be.
+\<close>
+
+text \<open>If f and g commute and are both idempotent, so is f \<circ> g.\<close>
+
+theorem commuting_idempotent_compose:
+  assumes "idempotent f"
+  assumes "idempotent g"
+  assumes "\<forall>ds. f (g ds) = g (f ds)"
+  shows "idempotent (f \<circ>\<^sub>s g)"
+proof -
+  have "\<forall>ds. (f \<circ>\<^sub>s g) ((f \<circ>\<^sub>s g) ds) = (f \<circ>\<^sub>s g) ds"
+  proof
+    fix ds
+    have "(f \<circ>\<^sub>s g) ((f \<circ>\<^sub>s g) ds) = g (f (g (f ds)))"
+      unfolding stage_compose_def by simp
+    also have "... = g (g (f (f ds)))"
+      using assms(3) by metis
+    also have "... = g (f (f ds))"
+      using assms(2) unfolding idempotent_def by simp
+    also have "... = g (f ds)"
+      using assms(1) unfolding idempotent_def by simp
+    also have "... = (f \<circ>\<^sub>s g) ds"
+      unfolding stage_compose_def by simp
+    finally show "(f \<circ>\<^sub>s g) ((f \<circ>\<^sub>s g) ds) = (f \<circ>\<^sub>s g) ds" .
+  qed
+  thus ?thesis unfolding idempotent_def by simp
+qed
+
+section \<open>Filter Idempotency\<close>
+
+text \<open>Filtering is idempotent.\<close>
+
+lemma filter_idempotent:
+  "idempotent (filter_stage P)"
+  unfolding idempotent_def filter_stage_def
+  by auto
+
+section \<open>Normalization Idempotency\<close>
+
+text \<open>
+  A normalization function transforms records to a canonical form.
+  It should be idempotent: normalizing already-normalized data is a no-op.
+\<close>
+
+definition normalize_stage :: "(record \<Rightarrow> record) \<Rightarrow> stage" where
+  "normalize_stage norm ds = fimage norm ds"
+
+lemma normalize_idempotent_if:
+  assumes "\<forall>r. norm (norm r) = norm r"
+  shows "idempotent (normalize_stage norm)"
+  using assms unfolding idempotent_def normalize_stage_def
+  by (simp add: fimage_fimage)
+
+section \<open>Practical Idempotency Verification\<close>
+
+text \<open>
+  Verify idempotency for {{ project-name }} pipeline stages.
+\<close>
+
+text \<open>Cleanup/normalization should be idempotent.\<close>
+
+definition cleanup_correct :: "(record \<Rightarrow> record) \<Rightarrow> bool" where
+  "cleanup_correct cleanup \<equiv>
+    (\<forall>r. cleanup (cleanup r) = cleanup r) \<and>
+    (\<forall>r. record_id (cleanup r) = record_id r)"
+
+lemma cleanup_preserves_id:
+  assumes "cleanup_correct cleanup"
+  shows "\<forall>r. record_id (cleanup r) = record_id r"
+  using assms unfolding cleanup_correct_def by simp
+
+lemma cleanup_idempotent:
+  assumes "cleanup_correct cleanup"
+  shows "idempotent (normalize_stage cleanup)"
+  using assms normalize_idempotent_if
+  unfolding cleanup_correct_def by blast
+
+end

@@ -1,0 +1,139 @@
+(*
+  {{ ProjectName }}_Invariants.thy
+
+  Main invariants theory for {{ project-name }}.
+
+  This theory combines all invariant patterns and defines
+  the overall pipeline correctness properties.
+
+  Part of Rhodium Pipeline Template methodology.
+*)
+
+theory {{ ProjectName }}_Invariants
+  imports
+    {{ ProjectName }}_Partition
+    {{ ProjectName }}_Bijection
+    {{ ProjectName }}_Checksum
+begin
+
+section \<open>Pipeline Invariants\<close>
+
+text \<open>
+  The complete set of invariants that {{ project-name }} maintains.
+\<close>
+
+locale pipeline_invariants =
+  checksum: ideal_checksum hash
+  for hash :: "payload \<Rightarrow> checksum"
+begin
+
+text \<open>The input dataset must be well-formed.\<close>
+
+definition input_invariant :: "dataset \<Rightarrow> bool" where
+  "input_invariant ds \<equiv> wf_dataset ds"
+
+text \<open>Processing preserves the well-formedness property.\<close>
+
+definition processing_invariant :: "stage \<Rightarrow> bool" where
+  "processing_invariant f \<equiv> \<forall>ds. wf_dataset ds \<longrightarrow> wf_dataset (f ds)"
+
+text \<open>No records are lost during processing (unless explicitly filtered).\<close>
+
+definition no_loss_invariant :: "stage \<Rightarrow> bool" where
+  "no_loss_invariant f \<equiv> \<forall>ds. fcard (f ds) \<ge> fcard ds \<or>
+    (\<exists>filter. \<forall>r. r |\<in>| ds \<and> r |\<notin>| f ds \<longrightarrow> filter r)"
+
+text \<open>Checksums are preserved through the pipeline.\<close>
+
+definition checksum_invariant :: "checksummed_dataset \<Rightarrow> bool" where
+  "checksum_invariant cds \<equiv> checksum.verify_dataset cds"
+
+text \<open>Output is a valid partition of input.\<close>
+
+definition partition_output_invariant ::
+  "dataset \<Rightarrow> dataset list \<Rightarrow> bool" where
+  "partition_output_invariant input outputs \<equiv>
+    is_partition input outputs"
+
+section \<open>Combined Pipeline Correctness\<close>
+
+text \<open>
+  A pipeline is correct if it maintains all invariants.
+\<close>
+
+definition correct_pipeline :: "stage \<Rightarrow> bool" where
+  "correct_pipeline f \<equiv>
+    processing_invariant f \<and>
+    no_loss_invariant f"
+
+theorem correct_pipeline_preserves_wf:
+  assumes "correct_pipeline f"
+  assumes "wf_dataset ds"
+  shows "wf_dataset (f ds)"
+  using assms unfolding correct_pipeline_def processing_invariant_def
+  by simp
+
+section \<open>Pipeline Composition\<close>
+
+text \<open>Composition of correct pipelines is correct.\<close>
+
+theorem compose_correct:
+  assumes "correct_pipeline f"
+  assumes "correct_pipeline g"
+  shows "correct_pipeline (f \<circ>\<^sub>s g)"
+proof -
+  have "processing_invariant (f \<circ>\<^sub>s g)"
+    using assms unfolding correct_pipeline_def processing_invariant_def
+      stage_compose_def by auto
+
+  moreover have "no_loss_invariant (f \<circ>\<^sub>s g)"
+    using assms unfolding correct_pipeline_def no_loss_invariant_def
+      stage_compose_def by fastforce
+
+  ultimately show ?thesis
+    unfolding correct_pipeline_def by simp
+qed
+
+section \<open>Specific {{ ProjectName }} Invariants\<close>
+
+text \<open>
+  Add domain-specific invariants here.
+  These should correspond to the properties verified by your pipeline.
+\<close>
+
+text \<open>Example: All records have valid format.\<close>
+
+definition valid_format :: "record \<Rightarrow> bool" where
+  "valid_format r \<equiv> record_data r \<noteq> []"
+
+definition format_invariant :: "dataset \<Rightarrow> bool" where
+  "format_invariant ds \<equiv> fBall ds valid_format"
+
+text \<open>Example: Processing preserves format validity.\<close>
+
+lemma processing_preserves_format:
+  assumes "format_invariant ds"
+  assumes "correct_pipeline f"
+  assumes "\<forall>r. valid_format r \<longrightarrow> valid_format (transform r)"
+  shows "format_invariant (f ds)"
+  sorry \<comment> \<open>Requires specification of transform\<close>
+
+end \<comment> \<open>locale pipeline_invariants\<close>
+
+section \<open>Instantiation\<close>
+
+text \<open>
+  Instantiate the pipeline_invariants locale with SHAKE3-256.
+\<close>
+
+definition shake256 :: "payload \<Rightarrow> checksum" where
+  "shake256 p = undefined" \<comment> \<open>External implementation\<close>
+
+text \<open>
+  For verification, we assume shake256 is collision-free on our data.
+\<close>
+
+interpretation {{ project_name }}: pipeline_invariants shake256
+  sorry \<comment> \<open>Requires collision-freedom assumption\<close>
+
+end

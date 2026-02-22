@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Maintainer: hyperpolymath <hyperpolymath@users.noreply.github.com>
+# AUR PKGBUILD for K9 SVC
+
+pkgname=k9-svc
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Self-Validating Components - a file format that eats its own dog food"
+arch=('any')
+url="https://github.com/hyperpolymath/k9-svc"
+license=('AGPL3')
+depends=('nickel' 'just' 'openssl')
+optdepends=(
+    'podman: container deployment'
+    'asciidoctor: documentation generation'
+)
+makedepends=('git')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/hyperpolymath/$pkgname/archive/v$pkgver.tar.gz")
+sha256sums=('82e51dec2891728d233392f6e84004e5d6060bf2c936dd47445d59ca66c09f94')
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+
+    # Install scripts
+    install -Dm755 must "$pkgdir/usr/bin/k9-must"
+    install -Dm755 sign.sh "$pkgdir/usr/bin/k9-sign"
+
+    # Install schemas
+    install -Dm644 pedigree.ncl "$pkgdir/usr/share/k9/pedigree.ncl"
+    install -Dm644 register.ncl "$pkgdir/usr/share/k9/register.ncl"
+    install -Dm644 leash.ncl "$pkgdir/usr/share/k9/leash.ncl"
+    install -Dm644 justfile "$pkgdir/usr/share/k9/justfile"
+
+    # Install examples
+    install -dm755 "$pkgdir/usr/share/k9/examples"
+    install -m644 examples/*.k9 "$pkgdir/usr/share/k9/examples/" 2>/dev/null || true
+    install -m644 examples/*.k9.ncl "$pkgdir/usr/share/k9/examples/" 2>/dev/null || true
+
+    # Install assets
+    install -dm755 "$pkgdir/usr/share/k9/assets"
+    install -m644 assets/*.svg "$pkgdir/usr/share/k9/assets/" 2>/dev/null || true
+
+    # Install MIME type
+    install -Dm644 mime/k9.xml "$pkgdir/usr/share/mime/packages/k9.xml"
+
+    # Install documentation
+    install -Dm644 README.adoc "$pkgdir/usr/share/doc/$pkgname/README.adoc"
+    install -Dm644 SPEC.adoc "$pkgdir/usr/share/doc/$pkgname/SPEC.adoc"
+    install -Dm644 GUIDE.adoc "$pkgdir/usr/share/doc/$pkgname/GUIDE.adoc"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+    # Create wrapper script
+    cat > "$pkgdir/usr/bin/k9" << 'EOF'
+#!/bin/sh
+# K9 SVC wrapper - runs just with K9 recipes
+exec just --justfile /usr/share/k9/justfile "$@"
+EOF
+    chmod 755 "$pkgdir/usr/bin/k9"
+}
+
+post_install() {
+    # Update MIME database
+    update-mime-database /usr/share/mime &>/dev/null || true
+    echo "K9 SVC installed. Run 'k9 setup-mime' for user-level MIME setup."
+}
+
+post_upgrade() {
+    post_install
+}
+
+post_remove() {
+    # Update MIME database
+    update-mime-database /usr/share/mime &>/dev/null || true
+}

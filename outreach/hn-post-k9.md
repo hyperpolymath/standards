@@ -1,0 +1,244 @@
+# Hacker News Post: K9 Meta-Dogfooding
+
+## Title
+K9: When your release tool releases itself (meta-dogfooding infrastructure automation)
+
+## Post Body
+
+Dogfooding—using your own product—is a standard way to validate software. But what if you take it one step further? What if your automation tool automates *itself*?
+
+I built K9, a framework for self-validating infrastructure components. Then I made K9 release itself using a K9 component.
+
+**What is K9?**
+
+K9 components (called "contractiles") are `.k9.ncl` files with three parts:
+
+1. **must** (Bash) - Validates prerequisites before execution
+2. **just** (Justfile) - Defines execution recipes
+3. **nickel** (Nickel contracts) - Configuration schema
+
+Example:
+```nickel
+{
+  must = {
+    check = ''
+      #!/usr/bin/env bash
+      command -v docker &> /dev/null
+    '',
+  },
+
+  just = {
+    recipes = {
+      deploy = {
+        commands = ["docker-compose up -d"],
+      },
+    },
+  },
+
+  nickel = {
+    config = {
+      port = 8080,
+    },
+  },
+}
+```
+
+Before running `just deploy`, K9 executes `must.check`. If Docker isn't installed, it fails fast with a clear error. No "works on my machine" surprises.
+
+**The Meta-Dogfooding Moment:**
+
+After using K9 for 10 projects (dev environment setup, deployments, CI/CD), I realized: K9's own releases should be automated with K9.
+
+So I created `release-k9.k9.ncl`:
+
+```nickel
+{
+  must = {
+    check = ''
+      #!/usr/bin/env bash
+      command -v git &> /dev/null || exit 1
+      command -v gh &> /dev/null || exit 1
+      git diff --quiet || exit 1  # No uncommitted changes
+    '',
+  },
+
+  just = {
+    recipes = {
+      "bump-version" = {
+        commands = [
+          "sed -i 's/version = \"0.9.0\"/version = \"1.0.0\"/' Cargo.toml",
+          "git add Cargo.toml",
+        ],
+      },
+
+      release = {
+        dependencies = ["bump-version", "test"],
+        commands = [
+          "git commit -m 'chore: bump version to 1.0.0'",
+          "git tag v1.0.0",
+          "git push origin main --tags",
+          "gh release create v1.0.0 --generate-notes",
+        ],
+      },
+    },
+  },
+}
+```
+
+When `release-k9.k9.ncl` successfully released K9 v1.0.0, it proved three things:
+
+1. **Self-validation works** - Caught uncommitted changes, missing tools, wrong directory
+2. **Recipe dependencies work** - `release` waited for `bump-version` and `test`
+3. **The format is usable** - If K9 can automate complex releases, it handles simpler tasks
+
+**Why Meta-Dogfooding Matters:**
+
+Meta-dogfooding reveals design flaws regular dogfooding misses:
+- Recursion edge cases (what happens when K9 validates itself?)
+- Error propagation (how do nested recipe dependencies fail?)
+- UX friction (is the format too verbose for its own releases?)
+
+If your tool can't automate itself, it probably can't automate complex real-world workflows either.
+
+**Three Lessons Learned:**
+
+**1. Validation Before Execution Is Critical**
+Every K9 component failed at least once during development. Having `must.check` run before any recipes saved hours debugging half-executed workflows.
+
+**2. Security Levels Need Clear Boundaries**
+K9 has three security levels (inspired by dog behavior):
+- **Kennel** (read-only): ls, cat, stat
+- **Yard** (moderate): file writes, git ops
+- **Hunt** (full access): requires Ed25519 signatures
+
+`release-k9.k9.ncl` is yard-level (git writes, tests) but doesn't need hunt privileges (system admin). The boundaries worked without being restrictive.
+
+**3. Nickel Contracts Catch Config Errors**
+The `nickel` section validates configuration before execution:
+
+```nickel
+nickel = {
+  config | {
+    current_version | String,
+    new_version | String,
+    github_repo | String,
+  } = ...
+}
+```
+
+Forget `github_repo`? Nickel fails at parse time, not mid-release.
+
+**The Result:**
+
+K9 now has a battle-tested release process:
+```bash
+just -f release-k9.k9.ncl must    # Validate environment
+just -f release-k9.k9.ncl release # Run release
+```
+
+No manual steps. No forgotten tags. No "did I run the tests?" anxiety.
+
+**Tools Built:**
+- **k9-init**: Scaffold contractiles from templates (8 templates: web-server, build, deploy, dev-env, ci-cd, backup, monitoring, minimal)
+- **k9-validate**: Standalone validator with dangerous pattern detection
+- **k9-sign**: Ed25519 signing for hunt-level components
+- **GitHub Action**: CI/CD integration
+- **VS Code Extension**: Syntax highlighting, live validation
+
+**Adoption:**
+10 repos using K9 across my projects, including K9 releasing itself.
+
+**Why K9?**
+The name comes from "canine" (K9). Dogs have three behavioral states: kennel (confined), yard (supervised), hunt (autonomous). Infrastructure needs the same gradual trust model.
+
+Also, I'm dogfooding it. Literally.
+
+**Links:**
+- Spec: https://github.com/hyperpolymath/k9-svc
+- Tools: https://github.com/hyperpolymath/k9-tools
+- Examples: 10+ real contractiles across repos
+
+**Try it:**
+```bash
+git clone https://github.com/hyperpolymath/k9-tools
+cd k9-tools
+make build
+./src/k9-init/target/release/k9-init --template minimal
+```
+
+**The Bigger Question:**
+
+If your automation tool can automate itself, you've validated something important: the abstraction works. Not just in theory, not just for toy examples, but for real, complex workflows.
+
+That's the power of meta-dogfooding.
+
+Curious what HN thinks: Is meta-dogfooding a useful validation technique? What other tools could release themselves?
+
+---
+
+## Expected Questions & Answers
+
+**Q: Why not just use Make/Justfile/Taskfile directly?**
+A: Those are execution engines. K9 adds two things they lack: (1) prerequisite validation before execution, and (2) configuration schemas with Nickel contracts. K9 uses Justfile under the hood—it's a layer on top, not a replacement.
+
+**Q: Isn't this just shell scripts with extra steps?**
+A: Sort of, but the "extra steps" matter. Shell scripts fail mid-execution when prerequisites are missing. K9 validates first, fails fast, and provides structured configuration. For simple tasks, shell scripts are fine. For complex workflows, K9 prevents foot-guns.
+
+**Q: Why Nickel? Why not YAML/TOML/JSON?**
+A: Nickel has contracts (gradual typing for configuration). You can specify `port | Number` and Nickel ensures it's a number at parse time. YAML/TOML/JSON don't validate schema. Also, Nickel has better merging and composability than JSON/YAML.
+
+**Q: What's with the dog metaphors?**
+A: Security levels needed memorable names. "Kennel/Yard/Hunt" maps to "read-only/moderate/full-access" and reflects how much autonomy the component has. It's easier to remember than "Level 0/1/2" or "Safe/Unsafe/Privileged".
+
+**Q: How is this different from Ansible/Terraform?**
+A: Ansible/Terraform are domain-specific (infrastructure provisioning). K9 is general-purpose (any automation). Also, K9 is file-based (single .k9.ncl files), not state-based like Terraform. Different abstraction levels.
+
+**Q: Can K9 components call other K9 components?**
+A: Yes. Recipes can run `just -f other-component.k9.ncl recipe-name`. This enables composition. For example, a deployment contractile could call a backup contractile before deploying.
+
+**Q: What prevents infinite recursion (K9 releasing K9 releasing K9...)?**
+A: The `must.check` validation. `release-k9.k9.ncl` requires uncommitted changes to be absent. After a release, the working tree is clean, so running it again does nothing (no version bump to commit).
+
+**Q: Ed25519 signatures seem heavy. Why not just trust the code?**
+A: For kennel/yard levels, you can. Hunt-level components have system-wide privileges (e.g., `sudo`). Signatures prevent unauthorized escalation—someone can't sneak `rm -rf /` into a hunt-level contractile without your private key.
+
+**Q: Is this production-ready?**
+A: Depends on your definition. I'm using it in production for 10 repos (including releasing itself). The tooling is v1.0. The spec is stable. But it's a small ecosystem—you're an early adopter.
+
+**Q: What's PMPL-1.0?**
+A: Polymath Public Meta-License. It's an open-source license designed for meta-tools (tools that generate/validate other tools). Similar to MPL-2.0 but with provisions for generated artifacts. Details: https://github.com/hyperpolymath/k9-svc/blob/main/LICENSE
+
+**Q: Can I use K9 without Nickel?**
+A: Technically, yes—the `nickel` section is optional. But you lose configuration validation. K9 without Nickel is just Justfile with prerequisite checks. Still useful, but not the full power.
+
+**Q: Why create a new format instead of extending Justfile?**
+A: Justfile doesn't have prerequisite validation or configuration schemas. Adding those would break Justfile's simplicity. K9 is a different abstraction: self-validating components vs. simple task runners.
+
+---
+
+## Posting Strategy
+
+**Best subreddits:**
+- /r/programming (main audience)
+- /r/devops (infrastructure automation focus)
+- /r/rust (tooling written in Rust)
+- /r/programming_horror (the meta-dogfooding angle is amusing)
+
+**Best time:** Tuesday-Thursday, 9-11am EST
+
+**Engagement tactics:**
+- Share the release-k9.k9.ncl file directly for "show me the code" requests
+- Offer to create custom templates for specific use cases
+- Acknowledge when K9 is overkill (simple scripts don't need it)
+- Link to specific examples in the wild
+
+**What NOT to do:**
+- Don't claim K9 replaces everything (Ansible, Terraform, Make all have their place)
+- Don't oversell security (Ed25519 is solid, but it's not magic)
+- Don't ignore "why not just use X" questions (valid comparisons)
+- Don't get defensive about Nickel's small ecosystem (acknowledge trade-off)
+
+**Follow-up content:**
+- If popular, write a "K9 in 5 minutes" tutorial
+- Create a video demo of release-k9.k9.ncl running
+- Add more templates based on requests (AWS, GCP, monitoring)

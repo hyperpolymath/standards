@@ -1,0 +1,145 @@
+(*
+  {{ ProjectName }}_Prelude.thy
+
+  Common definitions and utilities for {{ project-name }} proofs.
+
+  This theory establishes the foundational types and predicates
+  used throughout the {{ ProjectName }} verification.
+
+  Part of Rhodium Pipeline Template methodology.
+*)
+
+theory {{ ProjectName }}_Prelude
+  imports
+    Main
+    "HOL-Library.Multiset"
+    "HOL-Library.FSet"
+begin
+
+section \<open>Basic Types\<close>
+
+text \<open>
+  We model records as pairs of identifiers and data.
+  In the implementation, these correspond to the Rust Record type.
+\<close>
+
+type_synonym identifier = string
+type_synonym payload = "nat list"
+type_synonym record = "identifier \<times> payload"
+
+text \<open>Extract components of a record.\<close>
+
+definition record_id :: "record \<Rightarrow> identifier" where
+  "record_id r = fst r"
+
+definition record_data :: "record \<Rightarrow> payload" where
+  "record_data r = snd r"
+
+text \<open>A dataset is a finite set of records.\<close>
+
+type_synonym dataset = "record fset"
+
+section \<open>Well-formedness\<close>
+
+text \<open>
+  A dataset is well-formed if all record identifiers are unique.
+  This is a fundamental invariant maintained throughout the pipeline.
+\<close>
+
+definition unique_ids :: "record list \<Rightarrow> bool" where
+  "unique_ids rs \<equiv> distinct (map fst rs)"
+
+definition wf_dataset :: "dataset \<Rightarrow> bool" where
+  "wf_dataset ds \<equiv> \<forall>r1 r2. r1 |\<in>| ds \<longrightarrow> r2 |\<in>| ds \<longrightarrow>
+    record_id r1 = record_id r2 \<longrightarrow> r1 = r2"
+
+lemma wf_dataset_alt:
+  "wf_dataset ds \<longleftrightarrow> inj_on record_id (fset ds)"
+  unfolding wf_dataset_def record_id_def inj_on_def
+  by auto
+
+section \<open>Checksums\<close>
+
+text \<open>
+  Abstract checksum type and operations.
+  The implementation uses SHAKE3-256 by default.
+\<close>
+
+type_synonym checksum = "nat"
+
+text \<open>
+  We model checksums as an abstract function from payloads to checksums.
+  Key property: the function is deterministic.
+\<close>
+
+locale checksum_function =
+  fixes compute :: "payload \<Rightarrow> checksum"
+begin
+
+lemma deterministic:
+  "compute p = compute p"
+  by simp
+
+end
+
+section \<open>Ratios and Tolerances\<close>
+
+text \<open>
+  Ratio type for expressing proportions (between 0 and 1).
+\<close>
+
+typedef ratio = "{r::real. 0 \<le> r \<and> r \<le> 1}"
+  by (rule exI[of _ 0], simp)
+
+setup_lifting type_definition_ratio
+
+lift_definition ratio_of_real :: "real \<Rightarrow> ratio" is
+  "\<lambda>r. max 0 (min 1 r)"
+  by auto
+
+lift_definition real_of_ratio :: "ratio \<Rightarrow> real" is id .
+
+text \<open>Tolerance predicate for ratio comparisons.\<close>
+
+definition within_tol :: "real \<Rightarrow> real \<Rightarrow> real \<Rightarrow> bool" where
+  "within_tol target actual tol \<equiv> \<bar>target - actual\<bar> \<le> tol"
+
+lemma within_tol_refl: "within_tol r r tol"
+  unfolding within_tol_def by simp
+
+lemma within_tol_sym: "within_tol t a tol \<longleftrightarrow> within_tol a t tol"
+  unfolding within_tol_def by auto
+
+section \<open>Pipeline Stages\<close>
+
+text \<open>
+  Model pipeline stages as functions on datasets.
+  Each stage has associated properties we verify.
+\<close>
+
+type_synonym stage = "dataset \<Rightarrow> dataset"
+
+text \<open>Composition of stages.\<close>
+
+definition stage_compose :: "stage \<Rightarrow> stage \<Rightarrow> stage" (infixl "\<circ>\<^sub>s" 55) where
+  "f \<circ>\<^sub>s g \<equiv> \<lambda>ds. g (f ds)"
+
+lemma stage_compose_assoc:
+  "(f \<circ>\<^sub>s g) \<circ>\<^sub>s h = f \<circ>\<^sub>s (g \<circ>\<^sub>s h)"
+  unfolding stage_compose_def by auto
+
+section \<open>Utility Lemmas\<close>
+
+text \<open>Useful lemmas for working with fsets.\<close>
+
+lemma fset_partition:
+  assumes "A |\<subseteq>| U" and "B |\<subseteq>| U" and "A |\<inter>| B = {||}"
+  shows "fcard A + fcard B \<le> fcard U"
+  using assms by (simp add: fcard_mono fcard_union_disjoint)
+
+lemma fset_exhaust:
+  assumes "\<forall>x. x |\<in>| U \<longrightarrow> x |\<in>| A \<or> x |\<in>| B"
+  shows "U |\<subseteq>| A |\<union>| B"
+  using assms by auto
+
+end

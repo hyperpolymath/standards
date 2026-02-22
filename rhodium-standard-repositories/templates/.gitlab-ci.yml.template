@@ -1,0 +1,340 @@
+# .gitlab-ci.yml - GitLab CI/CD Pipeline for RSR-compliant {project-name}
+# *REMINDER: Customize for your specific project*
+
+# Workflow rules
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+# Global variables
+variables:
+  # *REMINDER: Update with actual values*
+  PROJECT_NAME: "{project-name}"
+  LANGUAGE: "{primary-language}"
+  # Use Chainguard Wolfi for minimal, secure base images
+  BASE_IMAGE: "cgr.dev/chainguard/wolfi-base:latest"
+  RUST_VERSION: "1.75.0"  # If using Rust
+  ELIXIR_VERSION: "1.15.7"  # If using Elixir
+  CACHE_COMPRESSION_LEVEL: "fastest"
+
+# Default image (use language-specific images per job)
+image: $BASE_IMAGE
+
+# Cache dependencies
+cache:
+  key:
+    files:
+      - flake.lock  # Nix
+      - Cargo.lock  # Rust
+      - mix.lock    # Elixir
+  paths:
+    - .cargo/
+    - deps/
+    - _build/
+    - obj/
+
+# Stages
+stages:
+  - validate
+  - build
+  - test
+  - security
+  - deploy
+
+# === Validation Stage ===
+
+spdx-audit:
+  stage: validate
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache ripgrep
+  script:
+    - echo "Auditing SPDX headers..."
+    - |
+      if rg -L "SPDX-License-Identifier" src/; then
+        echo "✓ All files have SPDX headers"
+      else
+        echo "❌ Missing SPDX headers!"
+        exit 1
+      fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+lint:
+  stage: validate
+  # *REMINDER: Use language-specific image*
+  image: rust:${RUST_VERSION}  # Or elixir:${ELIXIR_VERSION}, etc.
+  script:
+    - echo "Running linter..."
+    # *REMINDER: Add language-specific linting*
+    # For Rust: cargo clippy -- -D warnings
+    # For Elixir: mix credo --strict
+    # For Ada: gnatcheck
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+format-check:
+  stage: validate
+  # *REMINDER: Use language-specific image*
+  image: rust:${RUST_VERSION}
+  script:
+    - echo "Checking code formatting..."
+    # *REMINDER: Add language-specific format check*
+    # For Rust: cargo fmt -- --check
+    # For Elixir: mix format --check-formatted
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+link-validation:
+  stage: validate
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache cargo
+    - cargo install lychee
+  script:
+    - echo "Validating documentation links..."
+    - lychee --verbose --no-progress docs/ *.md *.adoc README.* || true
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# === Build Stage ===
+
+build-debug:
+  stage: build
+  # *REMINDER: Use language-specific image*
+  image: rust:${RUST_VERSION}
+  script:
+    - echo "Building ${PROJECT_NAME} (debug)..."
+    # *REMINDER: Add build commands*
+    # For Rust: cargo build
+    # For Elixir: mix compile
+    # For Ada: gprbuild -P ${PROJECT_NAME}.gpr
+  artifacts:
+    paths:
+      - target/debug/  # Rust
+      - _build/  # Elixir
+      - bin/  # Ada
+    expire_in: 1 day
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+build-release:
+  stage: build
+  # *REMINDER: Use language-specific image*
+  image: rust:${RUST_VERSION}
+  script:
+    - echo "Building ${PROJECT_NAME} (release)..."
+    # *REMINDER: Add release build commands*
+    # For Rust: cargo build --release
+    # For Elixir: MIX_ENV=prod mix compile
+    # For Ada: gprbuild -P ${PROJECT_NAME}.gpr -XMODE=release
+  artifacts:
+    paths:
+      - target/release/  # Rust
+      - _build/prod/  # Elixir
+      - bin/  # Ada
+    expire_in: 7 days
+  only:
+    - main
+    - tags
+
+# === Test Stage ===
+
+test-unit:
+  stage: test
+  # *REMINDER: Use language-specific image*
+  image: rust:${RUST_VERSION}
+  dependencies:
+    - build-debug
+  script:
+    - echo "Running unit tests..."
+    # *REMINDER: Add test commands*
+    # For Rust: cargo test --lib
+    # For Elixir: mix test --only unit
+    # For Ada: ./bin/${PROJECT_NAME}_test
+  coverage: '/\d+\.\d+% coverage/'
+  artifacts:
+    reports:
+      junit: test-results.xml  # Generate JUnit-compatible report
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+test-integration:
+  stage: test
+  # *REMINDER: Use language-specific image*
+  image: rust:${RUST_VERSION}
+  dependencies:
+    - build-debug
+  script:
+    - echo "Running integration tests..."
+    # *REMINDER: Add integration test commands*
+    # For Rust: cargo test --test '*'
+    # For Elixir: mix test --only integration
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# === Security Stage ===
+
+dependency-audit:
+  stage: security
+  image: rust:${RUST_VERSION}
+  script:
+    - echo "Auditing dependencies for vulnerabilities..."
+    # *REMINDER: Add security audit commands*
+    # For Rust: cargo audit
+    # For Elixir: mix deps.audit
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+secret-scanning:
+  stage: security
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache ripgrep
+  script:
+    - echo "Scanning for secrets..."
+    - |
+      if rg -i "api[_-]?key|secret|password|token" src/; then
+        echo "❌ Potential secrets found!"
+        exit 1
+      else
+        echo "✓ No secrets detected"
+      fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+sbom-generation:
+  stage: security
+  image: rust:${RUST_VERSION}
+  dependencies:
+    - build-release
+  script:
+    - echo "Generating SBOM..."
+    # *REMINDER: Add SBOM generation*
+    # For Rust: cargo sbom > sbom.json
+    # Manual SPDX generation for other languages
+  artifacts:
+    paths:
+      - sbom.json
+    expire_in: 30 days
+  only:
+    - main
+    - tags
+
+# === Deploy Stage ===
+
+pages:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - echo "Deploying documentation to GitLab Pages..."
+    - mkdir -p public
+    - cp -r docs/* public/ || echo "No docs/ directory"
+    # *REMINDER: Add documentation generation if needed*
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
+
+release:
+  stage: deploy
+  image: alpine:latest
+  dependencies:
+    - build-release
+    - sbom-generation
+  script:
+    - echo "Creating release ${CI_COMMIT_TAG}..."
+    # *REMINDER: Add release artifact creation*
+    - mkdir -p release
+    - cp target/release/${PROJECT_NAME} release/ || true  # Rust
+    - cp sbom.json release/
+    # Generate checksums
+    - cd release && sha256sum * > SHA256SUMS
+  artifacts:
+    paths:
+      - release/
+  only:
+    - tags
+
+# === RSR Compliance Check ===
+
+rsr-compliance:
+  stage: validate
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache ripgrep just
+  script:
+    - echo "Running RSR compliance validation..."
+    - just validate || echo "⚠️  Compliance issues found"
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# === Container Build (Optional) ===
+
+container:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:latest
+    entrypoint: [""]
+  script:
+    - echo "Building container image..."
+    - |
+      /kaniko/executor \
+        --context ${CI_PROJECT_DIR} \
+        --dockerfile ${CI_PROJECT_DIR}/Containerfile \
+        --destination ${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG:-latest} \
+        --destination ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
+  only:
+    - main
+    - tags
+
+# === Accessibility Testing (for web projects) ===
+
+accessibility:
+  stage: test
+  image: node:lts-alpine
+  before_script:
+    - npm install -g pa11y-ci
+  script:
+    - echo "Running accessibility audit..."
+    # *REMINDER: Add URLs to test*
+    - pa11y-ci --sitemap http://example.com/sitemap.xml || true
+  allow_failure: true
+  only:
+    - main
+
+# === Performance Testing (optional) ===
+
+benchmarks:
+  stage: test
+  image: rust:${RUST_VERSION}
+  dependencies:
+    - build-release
+  script:
+    - echo "Running benchmarks..."
+    # *REMINDER: Add benchmark commands*
+    # For Rust: cargo bench
+  artifacts:
+    paths:
+      - target/criterion/
+  only:
+    - main
+  when: manual

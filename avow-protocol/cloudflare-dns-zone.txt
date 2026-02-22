@@ -1,0 +1,85 @@
+; SPDX-License-Identifier: PMPL-1.0-or-later
+; Cloudflare DNS Zone File for avow-protocol.org (Jonathan D.A. Jewell)
+; Security-hardened, GitHub Pages + Cloudflare + Zero Trust/SDP
+; All records active and optimized for security/dependability
+
+@       IN  SOA     ns1.cloudflare.com. jonathan.jewell@open.ac.uk. (
+            2026020401  ; Serial (YYYYMMDDNN)
+            10800       ; Refresh
+            3600        ; Retry
+            604800      ; Expire
+            3600        ; Minimum TTL
+        )
+
+; --- Core Records (Proxied) ---
+@       IN  A        192.0.2.1      ; Root domain (proxied via Cloudflare)
+@       IN  AAAA     2001:db8::1    ; IPv6 for root (proxied)
+www     IN  A        192.0.2.1      ; www (proxied)
+www     IN  AAAA     2001:db8::1    ; IPv6 for www (proxied)
+static  IN  CNAME    avow-protocol.org.  ; Static assets (proxied)
+assets  IN  CNAME    avow-protocol.org.  ; Dedicated assets subdomain (proxied)
+cdn     IN  CNAME    avow-protocol.org.  ; CDN subdomain (proxied)
+
+; --- GitHub Pages (Required) ---
+gh-pages IN  CNAME   hyperpolymath.github.io.  ; GitHub Pages source (NOT proxied)
+
+; --- Security & Compliance ---
+@       IN  TXT     "v=spf1 include:_spf.github.com ~all"  ; SPF for GitHub Pages
+@       IN  TXT     "github-pages-challenge-hyperpolymath=avow-protocol-verification"  ; GitHub verification
+@       IN  TXT     "v=DMARC1; p=reject; rua=mailto:jonathan.jewell@open.ac.uk"  ; DMARC
+_dmarc  IN  TXT     "v=DMARC1; p=reject; rua=mailto:jonathan.jewell@open.ac.uk"
+@       IN  CAA     0 issue "letsencrypt.org"  ; CAA for Let's Encrypt
+@       IN  CAA     0 issue "digicert.com"     ; Fallback CA
+@       IN  CAA     0 iodef "mailto:jonathan.jewell@open.ac.uk"  ; Incident reporting
+
+; --- HTTPS Enforcement ---
+@       IN  TXT     "https-only-standard=max-age=63072000; includeSubDomains; preload"  ; Force HTTPS
+
+; --- Mail (MX + Security) ---
+@       IN  MX      10 mail.avow-protocol.org.  ; Primary mail server
+@       IN  MX      20 fallback-mail.avow-protocol.org.  ; Fallback mail server
+_smtp._tls  IN  TLSA  3 1 1 d2abde240d7cd3ee6b4b28c54df034b97983a1d16e8a410e4561cb106618e971  ; TLSA for SMTP (SHA256)
+_mta-sts    IN  TXT   "v=STSv1; id=2026020401; mode=enforce"  ; MTA-STS policy
+_smtp._tls IN  TXT   "v=TLSRPTv1; rua=mailto:tls-rpt@avow-protocol.org"  ; TLS-RPT
+_smimea   IN  TXT   "v=SMIMEA1; cert=base64-encoded-cert; alg=sha256; usage=email"  ; SMIMEA
+
+; --- SSHFP (Root Access + Git Cloning) ---
+@       IN  SSHFP   1 1 123456789abcdef67890123456789abcdef67890  ; SHA1 (legacy support)
+@       IN  SSHFP   1 2 123456789abcdef67890123456789abcdef67890123456789abcdef67890  ; SHA256
+@       IN  SSHFP   2 1 123456789abcdef67890123456789abcdef67890  ; Backup key (SHA1)
+@       IN  SSHFP   2 2 123456789abcdef67890123456789abcdef67890123456789abcdef67890  ; Backup key (SHA256)
+
+; --- OpenPGP (Keybase/GitHub) ---
+openpgp IN  TXT     "url=https://avow-protocol.org/openpgp.asc"  ; OpenPGP key URL
+openpgp IN  URI     10 1 "https://github.com/hyperpolymath.gpg"  ; URI for GitHub-hosted PGP
+
+; --- SFTP/URI (GitHub Files) ---
+sftp    IN  URI     10 1 "sftp://hyperpolymath@github.com/hyperpolymath/avow-protocol"  ; SFTP access URI
+
+; --- Zero Trust/SDP (Cloudflare Tunnel) ---
+dashboard.internal  IN  CNAME  tunnel-id.cfargotunnel.com.  ; Internal dashboard
+ci.internal         IN  CNAME  tunnel-id.cfargotunnel.com.  ; CI/CD access
+db.internal         IN  CNAME  tunnel-id.cfargotunnel.com.  ; Private DB access
+
+; --- Communication (Discourse/Zulip) ---
+discourse  IN  CNAME  avow-protocol.org.  ; Discourse forum (proxied)
+zulip      IN  CNAME  avow-protocol.org.  ; Zulip chat (proxied)
+members    IN  CNAME  avow-protocol.org.  ; Members subdomain (proxied)
+
+; --- Automation & Monitoring ---
+ci        IN  CNAME  avow-protocol.org.  ; CI/CD status (proxied)
+status    IN  CNAME  avow-protocol.org.  ; Public status page (proxied)
+logs      IN  CNAME  avow-protocol.org.  ; Log aggregation (proxied)
+
+; --- Advanced Security (WASM/Proxy) ---
+api      IN  CNAME  avow-protocol.org.  ; API gateway (proxied, WASM fronted)
+auth     IN  CNAME  avow-protocol.org.  ; Auth service (proxied)
+wasm     IN  CNAME  avow-protocol.org.  ; WASM proxy endpoint (proxied)
+
+; --- Fallback/Redundancy ---
+fallback  IN  CNAME  backup-hosting.com.  ; Fallback hosting (NOT proxied)
+secondary IN  CNAME  secondary-dns-provider.com.  ; Secondary DNS (NOT proxied)
+
+; --- External Integrations ---
+linkedin  IN  CNAME  avow-protocol.org.  ; LinkedIn showcase (proxied)
+rss      IN  CNAME  avow-protocol.org.  ; RSS feed aggregator (proxied)
