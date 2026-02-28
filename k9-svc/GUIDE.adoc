@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
 = K9 SVC User Guide
 :toc: left
 :toclevels: 3
@@ -551,6 +552,170 @@ See `pedigree.ncl` for the full schema with contracts.
 │       └── bob.pub
 ----
 
+== Container Deployment with k9-svc
+
+This section covers how k9-svc wraps container deployments using the Leash
+security model, selur-compose, and Nickel typed configuration.
+
+=== When to Use k9-svc for Containers
+
+k9-svc is designed for **operational deployment components** — things that
+orchestrate, validate, and deploy container stacks. It is NOT a replacement
+for `Cargo.toml`, `mix.exs`, or other build-time manifests.
+
+Use k9-svc when you need:
+
+* **Typed deployment configs** — Nickel contracts catch invalid port numbers,
+  missing environment variables, and impossible resource limits at eval time,
+  before any container starts.
+* **Security-level enforcement** — The Leash system prevents accidental
+  execution of destructive deployment recipes.
+* **Signed deployment artifacts** — Ed25519 signatures ensure only authorized
+  operators can run deployment scripts.
+* **Self-validating components** — The dogfooding principle means each
+  deployment component can validate its own configuration.
+
+=== Security Level Selection Guide
+
+Choosing the correct security level is the most important decision when
+creating a k9 container deployment component.
+
+[cols="1,2,3"]
+|===
+| Level | Use When | Container Example
+
+| `'Kennel`
+| The component is pure data with no execution.
+| A static list of container image tags and their SHA256 digests. No commands, no evaluation. Just data.
+
+| `'Yard`
+| The component needs Nickel evaluation but performs no I/O.
+| A typed configuration that validates port ranges, memory limits, and environment variable shapes. It produces validated JSON output but does not start any containers.
+
+| `'Hunt`
+| The component executes commands, accesses the network, or writes files.
+| A deployment component that generates selur-compose files, pulls images, starts services, runs health checks, and performs rollback on failure.
+|===
+
+[IMPORTANT]
+====
+**Rule of thumb:** If your component runs `selur-compose`, `podman`, or any
+shell command, it MUST be `'Hunt` level. If it only evaluates Nickel
+expressions and produces output, use `'Yard`. If it is pure data (a list of
+images, a set of environment variables), use `'Kennel`.
+
+**Never use `'Hunt` for read-only operations.** If your component only reads
+and displays data, `'Kennel` or `'Yard` is correct. Hunt requires
+cryptographic signatures and should be reserved for components with real
+side effects.
+====
+
+=== Example: Container Deployment as a Hunt Component
+
+The `container-deploy.k9.ncl` example demonstrates a realistic multi-service
+deployment component. It deploys an app + database + cache stack across
+dev/staging/production environments.
+
+[source,nickel]
+----
+# Security: Hunt level because this component:
+# - Runs selur-compose commands (subprocess)
+# - Pulls container images (network)
+# - Writes deployment state files (filesystem)
+security = {
+  trust_level = 'Hunt,
+  allow_network = true,
+  allow_filesystem_write = true,
+  allow_subprocess = true,
+  signature = "REAL-ED25519-SIGNATURE-HERE",
+},
+----
+
+Key features of this component:
+
+* **Environment-specific overrides** — Dev (1 replica, debug logging),
+  staging (2 replicas, info logging), production (3 replicas, warn logging).
+  All validated by Nickel contracts.
+* **Rolling deployment** — Replaces one replica at a time, waits for health
+  checks, and automatically rolls back on failure.
+* **Image signature verification** — Before deploying to staging or
+  production, verifies that container images are signed with cerro-torre.
+* **Self-validation** — The component typechecks itself before deployment.
+
+See: `examples/container-deploy.k9.ncl` for the complete implementation.
+
+=== Example: Config Validator as a Yard Component
+
+Not every container-related component needs Hunt level. A configuration
+validator that checks deployment configs without executing anything is a
+perfect Yard-level component.
+
+[source,nickel]
+----
+# Security: Yard level because this component:
+# - Evaluates Nickel contracts (typed validation)
+# - Produces validated JSON output
+# - Does NOT execute commands, access network, or write files
+security = {
+  trust_level = 'Yard,
+  allow_network = false,
+  allow_filesystem_write = false,
+  allow_subprocess = false,
+},
+----
+
+This component can:
+
+* Validate that container port mappings do not conflict
+* Check that resource limits are within acceptable ranges
+* Verify that environment variables match expected patterns
+* Export validated config as JSON for consumption by other tools
+
+See: `examples/config.k9.ncl` for a Yard-level configuration example.
+
+=== How k9-svc Wraps selur-compose
+
+The typical workflow for a k9-svc container deployment:
+
+[source]
+----
+1. Author writes .k9.ncl with Nickel-typed service definitions
+2. nickel typecheck validates the configuration (Yard-level eval)
+3. nickel export generates selur-compose.toml from the typed config
+4. The Hunt-level deploy script:
+   a. Verifies component signature (Ed25519)
+   b. Verifies container image signatures (cerro-torre)
+   c. Runs selur-compose up with the generated config
+   d. Monitors health checks
+   e. Rolls back on failure
+----
+
+The key insight is that steps 1-3 are **Yard-level** operations — they only
+evaluate Nickel expressions and produce data. Step 4 is a **Hunt-level**
+operation that requires the cryptographic handshake. This separation means
+you can validate configs without any security ceremony, but execution always
+requires authorization.
+
+=== Anti-Pattern Warnings
+
+Before wrapping something in k9-svc, read link:examples/NOT-a-good-fit.adoc[NOT-a-good-fit.adoc].
+
+Common mistakes:
+
+* **Do NOT** wrap plain config files in k9 pedigree. A `config.toml` is
+  already Kennel-level by nature. Adding pedigree overhead provides zero
+  security benefit.
+* **Do NOT** use k9-svc to manage library dependencies. Libraries are
+  build-time artifacts, not deployment components. Use `Cargo.toml` or
+  `mix.exs`.
+* **Do NOT** use Hunt level for read-only operations. If your component
+  only reads data, use Kennel or Yard.
+* **Do NOT** wrap every directory in a2ml manifests. One at the repo root
+  is sufficient for most projects.
+
+See: link:examples/NOT-a-good-fit.adoc[Comparison, Deprecation Analysis, and Anti-Patterns]
+for the full analysis.
+
 == License
 
-K9 SVC is licensed under AGPL-3.0-or-later. See LICENSE for details.
+K9 SVC is licensed under PMPL-1.0-or-later. See LICENSE for details.
