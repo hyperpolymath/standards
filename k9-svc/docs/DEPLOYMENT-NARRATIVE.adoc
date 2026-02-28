@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+= K9-SVC Deployment Narrative: Where Contracts Help and Where They Don't
+:toc: left
+:toclevels: 2
+:icons: font
+:sectnums:
+
+== Purpose
+
+This document summarises the practical deployment experience of K9-SVC contracts
+across two production Elixir services: the **http-capability-gateway** (HTTP
+routing) and the **hybrid-automation-router** (IaC dispatch). The full narrative
+lives in those repos; this is the cross-reference and key takeaways for spec
+readers.
+
+== Full Narratives
+
+The complete deployment stories (7 chapters each, walking through real failure
+modes and lessons) live in the consumer repos:
+
+* `http-capability-gateway/docs/K9-SVC-EXPLAINED.adoc`
+* `hybrid-automation-router/docs/K9-SVC-EXPLAINED.adoc`
+
+These are not spec documents. They are experience reports written for someone who
+has read the spec and wants to know what actually happens when you deploy K9
+contracts in a real system.
+
+== Key Findings
+
+=== Where K9 Contracts Shine
+
+[horizontal]
+HTTP gateway per-route SLAs:: Contracts replace scattered timeout config,
+  ad-hoc case statements, and TODO comments with a single struct carrying
+  service name, route pattern, trust threshold, latency ceiling, and breach
+  policy. Content-addressable via SHA-256.
+
+Automation router decision timing:: The routing pipeline (pattern match →
+  circuit breaker → health filter → policy filter → select) gets wrapped in
+  `timed_enforce/3`. If the _decision_ (not the backend execution) exceeds
+  50ms, the contract breaches. This catches quadratic regex filters, TCP
+  timeouts in health checkers, and pathological graph traversal.
+
+Graduated breach response:: The four-level policy (`:log` → `:alert` →
+  `:degrade` → `:circuit_break`) prevents the most common failure: an
+  aggressive circuit breaker converting a degraded service into an unavailable
+  one. Start with `:log` for new contracts, escalate as you learn the baseline.
+
+=== Where K9 Contracts Are Pointless
+
+[horizontal]
+CI/CD step-level enforcement:: GitHub Actions (and similar platforms) already
+  have `timeout-minutes`, retry policies, and success/failure signals. Wrapping
+  them in K9 contracts adds indirection without capability. K9 is for _runtime
+  service governance_, not _build pipeline orchestration_.
+
+Health checks and static responses:: Endpoints with trivial, predictable
+  sub-millisecond latency do not need SLA contracts. The overhead of the ETS
+  lookup and timing measurement exceeds the value of the measurement.
+
+Anything identical for every request:: If the "contract" would be the same
+  for every route (same timeout, same breach policy), just set a global
+  timeout. K9 is for per-route differentiation.
+
+=== The Two Layers
+
+K9-SVC has two distinct layers that are often confused:
+
+[cols="1,2,2"]
+|===
+| Layer | Purpose | Where it works
+
+| **K9-SVC file format** (.k9)
+| Self-validating components with typed contracts (Nickel), security levels,
+  pedigree tracking
+| CI/CD validation, config management, deployment orchestration
+
+| **K9 contract enforcement**
+| Runtime SLA measurement with breach policies, ETS-backed per-request timing
+| HTTP gateways, service routers, backend proxies — anywhere you _time a response_
+|===
+
+The file format is useful in CI/CD. The enforcement layer is not. Do not
+conflate them.
+
+== Relationship to a2ml
+
+K9-SVC and a2ml attestations are complementary:
+
+* **K9** answers: "Was it within spec, and what do we do if not?"
+* **a2ml** answers: "What happened, and can I prove it?"
+
+K9 fires breach policies. a2ml records that K9 fired them. They are independent
+systems that compose naturally. See `a2ml/docs/DEPLOYMENT-NARRATIVE.adoc` for
+the a2ml side.
+
+== Comparison with Alternatives
+
+[cols="1,2,1"]
+|===
+| Alternative | What it does | Where K9 differs
+
+| SLA monitoring (Datadog, Prometheus)
+| Observes aggregate trends over time
+| K9 _enforces_ per-request, not per-window
+
+| Service mesh (Istio, Linkerd)
+| Infrastructure-level retry, mTLS, load balancing
+| K9 is application-level, trust-aware, per-route
+
+| API gateway rate limiting (Kong, Envoy)
+| Request counting
+| K9 adds latency SLA + breach policy graduation
+
+| Contract testing (Pact)
+| Schema compliance at test time
+| K9 enforces SLA at runtime
+
+| OpenSLO
+| Declarative SLO definitions for monitoring
+| K9 has active enforcement, not just definition
+|===
+
+== Spec Cross-References
+
+* Formal specification: `SPEC.adoc` (this repo)
+* Anti-patterns and comparison tables: `examples/NOT-a-good-fit.adoc`
+* Security analysis: `SECURITY-ANALYSIS.adoc`
+* Dogfooding opportunities: `DOGFOODING-OPPORTUNITIES.adoc`
