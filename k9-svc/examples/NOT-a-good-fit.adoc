@@ -1,0 +1,340 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// NOT-a-good-fit.adoc - Honest comparison, deprecation analysis, and anti-patterns
+//
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// This is the definitive guide for understanding where k9-svc and a2ml
+// outperform alternatives, where they do NOT, and what should or should
+// not be deprecated. Honesty over advocacy.
+= k9-svc and a2ml: Comparison, Deprecation Analysis, and Anti-Patterns
+:toc: left
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+:sectnums:
+
+== Purpose
+
+This document answers three questions:
+
+1. **Where does k9-svc or a2ml genuinely outperform alternatives?** Deprecate those alternatives.
+2. **Where are alternatives equal or superior?** Keep them. Do not force k9-svc where it adds nothing.
+3. **What are the anti-patterns?** Things people will try that they should not.
+
+The goal is intellectual honesty. k9-svc is good at specific things. It is not a universal replacement for everything.
+
+== Section 1: k9-svc vs. Alternatives -- Where k9-svc Wins
+
+These are use cases where k9-svc provides genuine, measurable improvement over the next-best alternative. For each, we recommend deprecating the alternative.
+
+[cols="1,2,2,2,1"]
+|===
+| Use Case | k9-svc Approach | Next-Best Alternative | Why k9-svc Wins | Deprecate?
+
+| **Container deployment orchestration**
+| Hunt-level `.k9.ncl` with pedigree, signed recipes, selur-compose generation
+| `docker-compose.yml` + Makefile targets
+| Nickel contracts catch invalid configs at eval time (before any container starts). Security levels prevent accidental execution of destructive recipes. Pedigree provides machine-readable provenance. Makefile deploy targets have no type safety, no security model, and no self-validation.
+| **YES** -- deprecate raw Makefile deploy targets
+
+| **Configuration validation for deployments**
+| Yard-level `.k9.ncl` with Nickel type contracts
+| JSON Schema + ajv validator
+| Nickel contracts are more expressive than JSON Schema: they support computed defaults, dependent constraints (`if x then y must be > z`), and first-class functions. JSON Schema can validate shapes but cannot express business logic. k9-svc Yard-level evaluation catches errors that JSON Schema cannot.
+| **YES** -- deprecate standalone JSON Schema for deployment configs
+
+| **Signed release artifacts**
+| `.k9` component + cerro-torre `.ctp` signature bundles
+| Manual `SHA256SUMS` file + detached GPG signature
+| k9-svc integrates supply chain verification into the component itself. The pedigree carries the checksum, the Leash system enforces signature verification before execution, and cerro-torre bundles are machine-verifiable without manual steps. Manual hash files require humans to remember to check them.
+| **YES** -- deprecate manual SHA256SUMS files for operational artifacts
+
+| **CI/CD pipeline component wrapping**
+| `.k9` components at appropriate security level (Kennel for config, Yard for validation, Hunt for execution)
+| Raw YAML workflow files (GitHub Actions, GitLab CI)
+| k9-svc components are self-documenting (pedigree), security-level-aware (Leash), and composable (Nickel imports). A `.k9.ncl` component that wraps a deployment step is type-checked, signed, and auditable. Raw YAML is stringly-typed and has no security model.
+| **PARTIAL** -- k9 wraps but does not replace GitHub Actions YAML. You still need the YAML; k9 makes the steps within it safer.
+
+| **Multi-environment deployment config**
+| Nickel records with environment-specific overrides and contracts
+| Helm `values.yaml` / Kustomize overlays
+| Nickel is a real programming language with types, functions, and contracts. Helm uses Go templates (stringly-typed, error-prone). Kustomize uses YAML patches (limited expressiveness). For non-Kubernetes deployments, Helm and Kustomize are irrelevant. k9-svc works with any container runtime.
+| **DEPENDS** -- see note below
+
+| **Component self-validation (dogfooding)**
+| Built-in: every `.k9` component can validate itself via `just validate`
+| External linters, CI-only validation
+| k9-svc components carry their own validation contracts. They do not depend on external tooling being configured correctly. The dogfooding principle means the repo itself uses `.k9` to manage itself.
+| **YES** -- deprecate external-only config validation for deployment components
+|===
+
+[NOTE]
+====
+**On Helm/Kustomize:** If your deployment target is Kubernetes, Helm and Kustomize have deep ecosystem integration (chart repositories, operator patterns, Argo CD integration) that k9-svc cannot match today. k9-svc is superior for Podman-first, non-K8s, and multi-runtime deployments. For pure K8s shops, keep Helm/Kustomize and consider k9-svc for the _validation layer_ around your Helm values.
+====
+
+== Section 2: Where k9-svc Does NOT Fit -- Keep the Alternative
+
+These are anti-patterns. People will try these because k9-svc looks powerful, but forcing it into these use cases adds overhead with zero benefit.
+
+[cols="1,2,2,2,1"]
+|===
+| Anti-Pattern | Why People Try It | Why It Fails | What To Use Instead | Can k9-svc Ever Outperform?
+
+| **Wrapping simple config files**
+| "Everything should be `.k9`"
+| Security levels are irrelevant for pure data. A `config.toml` is already Kennel-level by nature -- it has no execution capability. Wrapping it in a `.k9` pedigree adds metadata overhead and import complexity for zero security benefit. The Leash system has nothing to enforce.
+| Plain TOML, Nickel (without k9 pedigree), or JSON
+| **NO** -- pure data does not benefit from security levels or pedigree. The overhead is permanent and the benefit is zero.
+
+| **Wrapping library code**
+| "My Rust crate / Gleam package should be a k9 component"
+| Libraries do not deploy themselves. k9-svc is for *operational components* -- things that run, deploy, validate, or configure. A library is consumed by a build system, not by a deployment pipeline. Pedigree fields like `target.os`, `security.allow_network`, and `recipes.deploy` are meaningless for a library.
+| `Cargo.toml`, `mix.exs`, `gleam.toml`, `deno.json` -- the native package manifest for that ecosystem
+| **NO** -- libraries are a fundamentally different abstraction. They are build-time dependencies, not runtime deployment units.
+
+| **Wrapping documentation**
+| "Our `.adoc` files should have pedigree and security levels"
+| Documentation is Kennel-level by definition -- it is pure data with no execution. Adding a k9 pedigree to a documentation file tells you what you already know (it is safe to read) and nothing you do not know. The pedigree fields are almost entirely irrelevant.
+| Plain `.adoc` or `.md` files
+| **NO** -- documentation needs readability and discoverability, not typed deployment contracts.
+
+| **Wrapping individual source files**
+| "Each `.rs` or `.res` file should be a self-validating component"
+| k9-svc is for *self-contained deployable units*, not build artifacts. A single source file is meaningless without its build context. The `recipes` fields make no sense for something that is compiled as part of a larger project.
+| The build system (`cargo`, `mix`, `just`, `deno`)
+| **NO** -- source files are not deployment units. The granularity is wrong.
+
+| **Replacing README with k9 pedigree**
+| "The pedigree metadata has name, version, description -- that is a README"
+| The pedigree is machine-readable metadata for the k9 runtime. The README is human-readable documentation for developers. They serve entirely different audiences. A pedigree cannot contain installation guides, architecture diagrams, or usage examples in a human-friendly way.
+| `README.adoc` for humans, k9 pedigree for machines
+| **NO** -- different audiences require different formats. This will never change.
+
+| **Using Hunt level for read-only operations**
+| "I want the full triad for my config viewer"
+| Hunt level requires cryptographic signatures, key management, and careful security review. If your component only reads and displays data, it should be Kennel or Yard. Using Hunt for read-only operations is like requiring a passport to read a menu. It creates friction with no security benefit.
+| Kennel (pure data) or Yard (if Nickel evaluation is needed)
+| **NO** -- the Leash system is designed for graduated trust. Overriding it defeats the purpose.
+
+| **Wrapping third-party tools**
+| "Nickel itself should be a k9 component"
+| k9-svc describes _your_ components that _you_ deploy. Third-party tools have their own installation, versioning, and update mechanisms. Wrapping them in k9 pedigree creates a maintenance burden (you must update the wrapper every time the tool updates) with no benefit (you cannot validate their internals).
+| System package managers (`apk`, `rpm-ostree`), `asdf`, or Guix/Nix
+| **NO** -- package management is a solved problem. k9-svc is not a package manager.
+|===
+
+== Section 3: a2ml vs. Alternatives -- Where a2ml Wins
+
+`0-AI-MANIFEST.a2ml` is the universal AI agent entry point. It tells agents what a directory or repository contains and how to interact with it.
+
+[cols="1,2,2,2,1"]
+|===
+| Use Case | a2ml Approach | Next-Best Alternative | Why a2ml Wins | Deprecate?
+
+| **Multi-service orchestration discovery**
+| `0-AI-MANIFEST.a2ml` in `test-infra/` or repo root describing available services, ports, and commands
+| `README.md` + inline comments in `compose.yml`
+| a2ml is structured and machine-parseable. An agent can read it and know exactly what services are available, how to start them, and what health checks exist, without parsing natural language from a README or YAML comments.
+| **NO** -- a2ml _complements_ README, it does not replace it. Humans need README. Agents need a2ml. Ship both.
+
+| **Complex config directory mapping**
+| a2ml describing file relationships, load order, and override semantics
+| `README.md` listing files with descriptions
+| Machine-actionable: agents can auto-discover which config file controls what, without parsing prose. The structured format means agents from any vendor (Claude, Gemini, GPT) can consume it identically.
+| **NO** -- keep the README for humans. Add a2ml for agents.
+
+| **Repo entry point for AI agents**
+| `0-AI-MANIFEST.a2ml` at repository root with lifecycle hooks (on-enter, on-exit)
+| `.claude/CLAUDE.md` + `README.adoc`
+| a2ml is universal (vendor-neutral, structured, machine-parseable). `.claude/CLAUDE.md` is Claude-specific. a2ml works with any AI agent that supports the protocol.
+| **PARTIAL** -- a2ml is universal, CLAUDE.md is Claude-specific. Keep both. They serve overlapping but distinct purposes.
+
+| **Capability advertisement**
+| a2ml listing available tools, APIs, and commands a project exposes
+| No standard alternative exists
+| Nothing else fills this role. README is for humans. package.json/Cargo.toml describes build deps, not operational capabilities. a2ml is the only structured format for telling agents "here is what you can do with this project."
+| **N/A** -- no alternative to deprecate. a2ml fills a gap.
+|===
+
+== Section 4: Where a2ml Does NOT Fit
+
+[cols="1,2,2"]
+|===
+| Anti-Pattern | Why It Fails | What To Use Instead
+
+| **Single-file directories**
+| A directory containing one `Containerfile` does not need a manifest. The agent can read the file directly. An a2ml file that says "this directory contains a Containerfile" adds a layer of indirection with no information gain.
+| Direct file reading. If there is only one file, the agent will find it.
+
+| **Code directories (`lib/`, `src/`)**
+| Module-level documentation (docstrings, module comments, type signatures) describes code far better than an external manifest. a2ml cannot express function signatures, type hierarchies, or implementation details. Agents understand code natively.
+| Inline documentation, module docstrings, type annotations. Let the code speak for itself.
+
+| **Replacing human documentation**
+| a2ml is for machines. Putting human-readable tutorials, architecture explanations, or onboarding guides in a2ml format makes them harder for humans to read and no easier for machines (which can already parse Markdown/AsciiDoc).
+| `README.adoc` for humans. `0-AI-MANIFEST.a2ml` for machines. Never mix the audiences.
+
+| **Deeply nested directories**
+| Placing a2ml in every subdirectory (e.g., `src/utils/a2ml`, `src/models/a2ml`) creates maintenance overhead. The root a2ml should describe the project structure; subdirectories should be self-explanatory from their contents and naming.
+| One `0-AI-MANIFEST.a2ml` at repo root. Maybe one more in complex subdirectories (like `test-infra/` or `deploy/`). No more.
+
+| **Version-pinning dependencies**
+| a2ml describes capabilities, not dependency versions. Using it as a lockfile or version manifest duplicates information from `Cargo.lock`, `deno.lock`, or `guix.scm` and will drift out of sync.
+| Native lockfiles for the ecosystem (`Cargo.lock`, `deno.lock`, etc.).
+|===
+
+== Section 5: Deprecation Recommendations Summary
+
+The definitive table. Sorted by recommendation.
+
+=== DEPRECATE -- k9-svc/a2ml is genuinely better
+
+[cols="2,1,3"]
+|===
+| Format / Tool | Status | Reason
+
+| Makefile deploy targets (`make deploy`, `make rollback`)
+| **DEPRECATE**
+| k9-svc Hunt components are typed (Nickel contracts), signed (Ed25519), and self-validating. Makefile targets are untyped, unsigned, and provide no security model. Replace with `.k9.ncl` Hunt components + `justfile` recipes.
+
+| Manual `SHA256SUMS` files
+| **DEPRECATE**
+| cerro-torre `.ctp` bundles + k9-svc pedigree checksums provide integrated, machine-verifiable supply chain security. Manual hash files require humans to remember to check them and can be silently tampered with.
+
+| `docker-compose.yml` for deployment orchestration
+| **DEPRECATE**
+| Replace with `selur-compose.toml` generated by k9-svc. Docker Compose YAML is untyped and allows invalid configurations that fail at runtime. k9-svc generates compose files from typed Nickel configs that are validated at evaluation time.
+
+| Standalone JSON Schema for deployment configs
+| **DEPRECATE**
+| Nickel contracts in `.k9.ncl` are strictly more expressive than JSON Schema. They support computed defaults, dependent validation, and first-class functions. JSON Schema cannot express "if environment is production, replicas must be >= 3."
+
+| External-only config validation (CI linters, ad-hoc scripts)
+| **DEPRECATE**
+| k9-svc components carry their own validation. The dogfooding principle means validation is embedded, not bolted on. If the component cannot validate itself, it refuses to run.
+|===
+
+=== KEEP -- alternatives are equal or superior
+
+[cols="2,1,3"]
+|===
+| Format / Tool | Status | Reason
+
+| Helm `values.yaml`
+| **KEEP**
+| Kubernetes ecosystem integration (chart repos, Argo CD, Flux, operator pattern) that k9-svc cannot match. For pure K8s shops, Helm is the right tool. Consider k9-svc for the validation layer _around_ Helm values.
+
+| Kustomize overlays
+| **KEEP**
+| Kubernetes-native, built into `kubectl`. Better for pure K8s shops that want to avoid templating. k9-svc adds nothing if you are already in the K8s ecosystem and do not need Podman-first deployment.
+
+| `Cargo.toml` / `mix.exs` / `gleam.toml` / `deno.json`
+| **KEEP**
+| Library manifests for build-time dependencies. k9-svc is for deployment-time components. These are fundamentally different abstraction levels.
+
+| GitHub Actions YAML
+| **KEEP**
+| k9-svc can _wrap_ steps within a workflow (making them typed and signed) but cannot replace the workflow engine itself. GitHub Actions YAML is the CI/CD platform config; k9-svc is the component standard within it.
+
+| `README.adoc` / `README.md`
+| **KEEP**
+| Human audience. Pedigree and a2ml are machine-readable complements, not replacements. Humans need prose, diagrams, and examples. Machines need structured metadata. Both are necessary.
+
+| `.claude/CLAUDE.md`
+| **KEEP**
+| Claude-specific instructions that `0-AI-MANIFEST.a2ml` complements but does not replace. CLAUDE.md has Claude-specific features (memory integration, tool configuration) that a2ml's vendor-neutral format cannot express.
+
+| TOML / JSON / Nickel for app config
+| **KEEP**
+| Pure data configuration does not benefit from security levels, pedigree, or recipes. A `config.toml` is already Kennel-level by nature. Wrapping it in k9-svc adds overhead with zero benefit.
+
+| Inline code documentation
+| **KEEP**
+| Docstrings, module comments, and type signatures are better for code comprehension than any external manifest. a2ml describes project-level capabilities, not function-level documentation.
+
+| System package managers (`apk`, Guix, Nix, `rpm-ostree`)
+| **KEEP**
+| Package management is a solved problem. k9-svc is not a package manager and should never pretend to be one.
+
+| Lockfiles (`Cargo.lock`, `deno.lock`)
+| **KEEP**
+| Dependency version pinning is the lockfile's job. k9-svc pedigree tracks _component_ versions, not _dependency_ versions. These are different concerns.
+|===
+
+== Section 6: Decision Flowchart
+
+Use this to decide whether k9-svc or a2ml is appropriate for your use case.
+
+....
+Is it a deployable operational component?
+├── YES: Does it need execution (subprocess, network, filesystem)?
+│   ├── YES → Hunt-level .k9.ncl (sign it!)
+│   └── NO: Does it need Nickel evaluation for validation?
+│       ├── YES → Yard-level .k9.ncl
+│       └── NO → Plain data file (TOML/JSON/Nickel). Do NOT use k9-svc.
+└── NO: Is it a library, documentation, or source code?
+    └── YES → Do NOT use k9-svc. Use the native format for that domain.
+
+Should you add a 0-AI-MANIFEST.a2ml?
+├── Is it a repo root? → YES, always.
+├── Is it a complex multi-file directory (test-infra/, deploy/, configs/)?
+│   → YES, agents benefit from the map.
+├── Is it a single-file directory? → NO, the agent can read the file directly.
+├── Is it a code directory (lib/, src/)? → NO, code documents itself.
+└── Default → Probably not. One a2ml at repo root covers most cases.
+....
+
+== Section 7: Real-World Examples
+
+=== Good: k9-svc wrapping a deployment
+
+A multi-service deployment with environment-specific configs, health checks, and rollback. This is exactly what k9-svc was designed for.
+
+See: `examples/container-deploy.k9.ncl`
+
+=== Good: a2ml at repo root
+
+A `0-AI-MANIFEST.a2ml` telling agents what the repo contains, how to build it, and what services are available. Universal, structured, vendor-neutral.
+
+=== Bad: k9 wrapping a config file
+
+[source,nickel]
+----
+# DON'T DO THIS -- pure data doesn't need pedigree
+let pedigree = import "../pedigree.ncl" in
+pedigree.K9Pedigree & {
+  metadata = { name = "my-toml-config", version = "1.0.0" },
+  target = { os = 'Linux },
+  security = { trust_level = 'Kennel },  # <-- always Kennel = pointless
+  validation = { checksum = "..." },
+  recipes = { deploy = "cp config.toml /etc/myapp/" },  # <-- this is a Hunt recipe in Kennel clothing
+}
+----
+
+This is wrong for two reasons:
+
+1. The security level is `'Kennel` but the recipe runs a shell command (`cp`), which requires `'Hunt`. The Leash system will reject this.
+2. Even if corrected to `'Hunt`, the overhead of Ed25519 signing for a config file copy is absurd.
+
+**Just use:** `config.toml` + a `justfile` recipe.
+
+=== Bad: a2ml in every directory
+
+....
+src/
+├── 0-AI-MANIFEST.a2ml    # NO
+├── utils/
+│   ├── 0-AI-MANIFEST.a2ml  # NO
+│   └── helpers.rs
+├── models/
+│   ├── 0-AI-MANIFEST.a2ml  # NO
+│   └── user.rs
+└── handlers/
+    ├── 0-AI-MANIFEST.a2ml  # NO
+    └── api.rs
+....
+
+This is maintenance overhead with no benefit. The agent can read `helpers.rs`, `user.rs`, and `api.rs` directly and understand them from their code, docstrings, and type signatures.
+
+**Just use:** One `0-AI-MANIFEST.a2ml` at the repo root.
