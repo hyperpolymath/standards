@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+= A2ML Attestation Deployment Narrative: Where Attestations Help and Where They Don't
+:toc: left
+:toclevels: 2
+:icons: font
+:sectnums:
+
+== Purpose
+
+This document summarises the practical deployment experience of a2ml attestations
+across two production Elixir services: the **http-capability-gateway** (HTTP
+routing) and the **hybrid-automation-router** (IaC dispatch). The full narrative
+lives in those repos; this is the cross-reference and key takeaways for spec
+readers.
+
+== Full Narratives
+
+The complete deployment stories (7 chapters each, walking through real failure
+modes and lessons) live in the consumer repos:
+
+* `http-capability-gateway/docs/A2ML-EXPLAINED.adoc`
+* `hybrid-automation-router/docs/A2ML-EXPLAINED.adoc`
+
+These are not spec documents. They are experience reports written for someone who
+has read the spec and wants to know what actually happens when you deploy a2ml
+attestations in a production audit system.
+
+== Key Findings
+
+=== Where a2ml Attestations Shine
+
+[horizontal]
+Access denials:: Every 403 needs a provable reason. The attestation records the
+  exact trust level, exposure requirement, path, method, verdict, and policy hash.
+  The `decision_hash` (SHA-256) proves the record has not been tampered with.
+
+Routing decisions in infrastructure automation:: In the automation router, every
+  routing decision determines which backend runs which infrastructure operation.
+  A wrong routing decision can destroy a production environment. The cost of one
+  SHA-256 per routing decision is negligible compared to the cost of an
+  unauditable deployment mistake.
+
+Policy changes:: When the policy rules change, the old and new `policy_hash`
+  values are attested. If you later discover the policy was wrong, you can find
+  every decision made under that policy by searching for its hash.
+
+Cross-service propagation:: When mirroring commits across forges (GitHub →
+  GitLab → Codeberg), a2ml attests the propagation decision: source hash,
+  destination hash, match status. Git proves content integrity per-commit; a2ml
+  proves the _mirroring decision_ was faithful.
+
+=== Where a2ml Attestations Are Overkill
+
+[horizontal]
+Every request at high volume:: At 1000 req/s, every-request attestation produces
+  86.4 million records per day. SHA-256 is fast but storage and query cost at that
+  volume is real. Attest _decisions that matter_, not every request.
+
+Anything git already hashes:: A git commit IS a content-addressable record.
+  Attesting "who committed what" duplicates git's built-in audit trail. a2ml adds
+  value for the _automation around git_ (CI/CD decisions, merge policies,
+  cross-forge propagation), not git itself.
+
+Health checks, metrics, static assets:: Low-stakes, high-volume requests where
+  tamper-evidence adds no operational value.
+
+=== Critical Pitfall: Sensitive Data
+
+The attestation layer MUST redact sensitive parameters before hashing. Without
+redaction, credentials (API keys, access tokens, passwords) end up in
+content-addressable audit records — a security failure created by the system
+designed to improve security.
+
+The implementation maintains a list of sensitive key patterns. Values matching
+these patterns are replaced with `"[REDACTED]"` before hash computation. The
+hash proves _structure_ (which backend, which target, how many parameters) but
+not _values_ of sensitive parameters. This is a deliberate trade-off.
+
+== Relationship to K9-SVC
+
+a2ml attestations and K9-SVC contracts are complementary:
+
+[cols="1,2,2"]
+|===
+| | a2ml Attestation | K9-SVC Contract
+
+| **Question answered**
+| "What happened and can I prove it?"
+| "Was it within spec and what do we do if not?"
+
+| **When it acts**
+| After a decision (records the outcome)
+| Before and after execution (enforces the SLA)
+
+| **What it produces**
+| A content-addressable audit record
+| A breach/success signal with enforcement action
+
+| **Failure mode**
+| If attestation fails, the request still succeeds (audit gap)
+| If contract breaches, the breach policy fires
+
+| **Storage**
+| Audit log (Redis, database, IPFS)
+| ETS table (in-memory, per-node)
+|===
+
+The attestation records that K9 fired a breach policy. K9 does not know or care
+about attestations. They are independent systems that compose naturally.
+
+See `k9-svc/docs/DEPLOYMENT-NARRATIVE.adoc` for the K9 side.
+
+== Key Terminology
+
+[cols="1,3"]
+|===
+| Term | Plain English
+
+| **attestation** | A record that says "at time T, system S made decision D
+  based on inputs I." Carries a hash proving it has not been modified.
+
+| **content-addressable** | The attestation's identity IS its content. SHA-256
+  of the decision payload. Same inputs → same hash.
+
+| **decision_hash** | SHA-256 of the canonically serialised decision payload.
+  Recompute and compare to verify authenticity.
+
+| **policy_hash** | SHA-256 of the policy rules in effect. Find all decisions
+  under a bad policy by searching for its hash.
+
+| **envelope** | Wrapper: version, type, issuer, issued_at, decision_hash.
+  Envelope metadata is NOT included in the decision_hash.
+
+| **redaction** | Replacing sensitive values with `"[REDACTED]"` before hashing.
+  Proves structure, not sensitive values.
+|===
+
+== What a2ml Attestations Are Not
+
+* **Not a replacement for logs.** Logs are for humans at 3am. Attestations are
+  for auditors, regulators, and post-incident review.
+* **Not a blockchain.** No blocks, no proof-of-work, no consensus. A hash in a
+  JSON envelope.
+* **Not encryption.** Proves integrity (not modified), not confidentiality (not
+  readable).
+
+== Spec Cross-References
+
+* Formal specification: `SPEC.adoc` (this repo)
+* Format spec v1.0: `SPEC-v1.0.adoc`
+* Conformance plan: `CONFORMANCE-PLAN-v1.adoc`
+* Comparison with other formats: `COMPARISON.adoc`
+* Dogfooding opportunities: `DOGFOODING-OPPORTUNITIES.adoc`
