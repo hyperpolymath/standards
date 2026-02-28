@@ -6,7 +6,7 @@
       (version . "1.0.0")
       (schema-version . "1.0.0")
       (created . "2026-01-16")
-      (updated . "2026-01-18")
+      (updated . "2026-02-28")
       (project . "k9-svc")
       (repo . "https://github.com/hyperpolymath/k9-svc"))
 
@@ -60,7 +60,11 @@
         "AUR PKGBUILD"
         "Nix flake"
         "Comprehensive user guide (GUIDE.adoc)"
-        "Cross-platform testing guide (TESTING.adoc)"))
+        "Cross-platform testing guide (TESTING.adoc)"
+        "Container deployment example (Hunt-level multi-service with rolling deploy and rollback)"
+        "Deprecation analysis: honest comparison vs alternatives (5 DEPRECATE, 10 KEEP)"
+        "Containerfile on Chainguard wolfi-base (migrated from Debian)"
+        "GUIDE.adoc container deployment section with security level selection guide"))
 
     (route-to-mvp
       (milestone "Core Triad"
@@ -126,7 +130,15 @@
           ("Makefile for install/uninstall" . done)
           ("Homebrew formula" . done)
           ("AUR PKGBUILD" . done)
-          ("Nix flake" . done))))
+          ("Nix flake" . done)))
+      (milestone "Phase 2: Container Deployment & Ecosystem Analysis"
+        (status . "complete")
+        (items
+          ("container-deploy.k9.ncl (Hunt-level, 3 envs, rolling deploy/rollback)" . done)
+          ("NOT-a-good-fit.adoc (deprecation analysis, 5 DEPRECATE + 10 KEEP)" . done)
+          ("GUIDE.adoc container deployment section (~165 lines)" . done)
+          ("Containerfile migrated Debian -> Chainguard wolfi-base" . done)
+          ("License references fixed AGPL -> PMPL" . done))))
 
     (blockers-and-issues
       (critical)
@@ -139,7 +151,9 @@
 
     (critical-next-actions
       (immediate
-        "Submit to AUR (requires AUR account)")
+        "Submit to AUR (requires AUR account)"
+        "Review NOT-a-good-fit.adoc deprecation recommendations with ecosystem users"
+        "Test container-deploy.k9.ncl against real selur-compose stack")
       (this-week
         "Test MIME registration on macOS"
         "Test Homebrew formula on macOS")
@@ -203,7 +217,14 @@
           "Published Homebrew tap (brew tap hyperpolymath/k9)"
           "Created AUR .SRCINFO and submission guide"
           "Phase: release-candidate -> released"
-          "K9 SVC v1.0.0 officially released!")))))
+          "K9 SVC v1.0.0 officially released!"))
+      (snapshot "2026-02-28"
+        (accomplishments
+          "Created container-deploy.k9.ncl (Hunt-level, 3 environments, rolling deploy/rollback, cerro-torre verification)"
+          "Created NOT-a-good-fit.adoc (k9-svc/a2ml vs alternatives, 5 DEPRECATE + 10 KEEP, decision flowchart)"
+          "Added Container Deployment section to GUIDE.adoc (~165 lines, security level selection guide)"
+          "Fixed Containerfile: Debian bookworm-slim -> Chainguard wolfi-base, apt-get -> apk"
+          "Fixed AGPL-3.0-or-later -> PMPL-1.0-or-later in Containerfile and GUIDE.adoc")))))
 
 ; Helper: Get overall completion
 (define (get-completion)
