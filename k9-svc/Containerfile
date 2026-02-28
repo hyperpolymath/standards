@@ -1,68 +1,104 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: PMPL-1.0-or-later
 # Containerfile - K9 SVC Runtime Container
+#
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+#
+# Uses Chainguard base images for minimal attack surface:
+# - Builder stage: Rust toolchain on wolfi-base for compiling nickel and just
+# - Runtime stage: wolfi-base with only the binaries needed to run k9 components
+#
+# Chainguard images have no shell (in static variants), no package manager
+# bloat, and minimal CVE surface. We use wolfi-base (not static) because
+# k9-svc needs a shell for the must shim and Just recipes.
 #
 # Build:  podman build -t k9-svc:latest .
 # Run:    podman run --rm -it k9-svc:latest status
 # Mount:  podman run --rm -it -v ./components:/k9/components k9-svc:latest validate-all
 
-FROM docker.io/library/rust:slim-bookworm AS builder
+# ─────────────────────────────────────────────────────────────────────
+# Builder Stage
+#
+# Compiles nickel-lang-cli and just from source using Rust.
+# This stage is discarded after the binaries are copied out.
+# ─────────────────────────────────────────────────────────────────────
+FROM cgr.dev/chainguard/wolfi-base:latest AS builder
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install build dependencies via apk (wolfi's package manager).
+# - rust and cargo for compiling nickel and just
+# - curl and ca-certificates for downloading crate dependencies
+# - gcc and musl-dev for linking native code
+RUN apk update && apk add --no-cache \
+    rust \
+    cargo \
     curl \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    gcc \
+    musl-dev
 
-# Install Nickel
+# Install Nickel (the typed configuration language that powers k9 validation)
 RUN cargo install nickel-lang-cli --locked
 
-# Install Just
+# Install Just (the task runner that powers k9 recipes)
 RUN cargo install just --locked
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────
 # Runtime Stage
-# ─────────────────────────────────────────────────────────────
-FROM docker.io/library/debian:bookworm-slim
+#
+# Minimal Chainguard image with only the binaries and files needed
+# to run k9 components. No build tools, no package manager bloat.
+# ─────────────────────────────────────────────────────────────────────
+FROM cgr.dev/chainguard/wolfi-base:latest
 
 LABEL org.opencontainers.image.title="K9 SVC Runtime"
 LABEL org.opencontainers.image.description="Self-Validating Component runtime environment"
 LABEL org.opencontainers.image.version="1.0.0-alpha"
 LABEL org.opencontainers.image.vendor="hyperpolymath"
-LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
+LABEL org.opencontainers.image.licenses="PMPL-1.0-or-later"
 LABEL org.opencontainers.image.source="https://github.com/hyperpolymath/k9-svc"
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install minimal runtime dependencies via apk.
+# - ca-certificates: for TLS verification when Hunt components access network
+# - file: for MIME type detection (used by `file --mime-type` in k9 validation)
+# - libgcc: runtime library needed by compiled Rust binaries
+RUN apk update && apk add --no-cache \
     ca-certificates \
     file \
-    && rm -rf /var/lib/apt/lists/*
+    libgcc
 
-# Copy binaries from builder
-COPY --from=builder /usr/local/cargo/bin/nickel /usr/local/bin/nickel
-COPY --from=builder /usr/local/cargo/bin/just /usr/local/bin/just
-
-# Create non-root user for security
-RUN useradd -m -s /bin/sh k9user
+# Create non-root user for security.
+# k9 components should never run as root unless explicitly required
+# by a Hunt-level component (and even then, avoid it).
+RUN adduser -D -s /bin/sh k9user
 USER k9user
 WORKDIR /home/k9user/k9
 
-# Copy K9 SVC files
+# Copy binaries from builder stage.
+# Only nickel and just are needed at runtime — no Rust toolchain.
+COPY --from=builder /root/.cargo/bin/nickel /usr/local/bin/nickel
+COPY --from=builder /root/.cargo/bin/just /usr/local/bin/just
+
+# Copy K9 SVC files into the container.
+# These are the core schemas, the must shim, and the examples.
 COPY --chown=k9user:k9user must justfile pedigree.ncl register.ncl leash.ncl ./
 COPY --chown=k9user:k9user mime/ ./mime/
 COPY --chown=k9user:k9user examples/ ./examples/
 
-# Verify the triad is functional
+# Verify the triad is functional.
+# This is the dogfooding step: the container validates itself during build.
+# If any of these fail, the build fails — no broken images ship.
 RUN ./must status && \
     nickel typecheck pedigree.ncl && \
     nickel typecheck register.ncl && \
     nickel typecheck leash.ncl
 
-# Default: show status
+# Default entrypoint: the must shim, which detects the environment
+# and delegates to just/nickel as appropriate.
 ENTRYPOINT ["./must"]
 CMD ["status"]
 
-# Volume for mounting external components
+# Volume for mounting external components.
+# Users mount their .k9 and .k9.ncl files here for validation/deployment.
 VOLUME ["/home/k9user/k9/components"]
 
-# Expose nothing by default (K9 is not a server)
-# Components can override if they need ports
+# Expose nothing by default (K9 is not a server).
+# Hunt-level components that need ports can override this.
