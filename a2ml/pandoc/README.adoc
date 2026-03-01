@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+
+= A2ML Pandoc Custom Reader
+:author: Jonathan D.A. Jewell
+:revdate: 2026-03-01
+
+== Overview
+
+`a2ml.lua` is a https://pandoc.org/custom-readers.html[Pandoc custom reader]
+that converts A2ML (Attested Markup Language) surface syntax into the Pandoc
+AST. This enables converting A2ML documents to any format Pandoc supports:
+HTML, Markdown, LaTeX, PDF, DOCX, EPUB, and dozens more.
+
+== Usage
+
+[source,sh]
+----
+# A2ML → HTML
+pandoc -f a2ml.lua input.a2ml -o output.html
+
+# A2ML → Markdown
+pandoc -f a2ml.lua input.a2ml -t markdown
+
+# A2ML → PDF (via LaTeX)
+pandoc -f a2ml.lua input.a2ml -o output.pdf
+
+# A2ML → DOCX
+pandoc -f a2ml.lua input.a2ml -o output.docx
+
+# A2ML → JSON AST (for programmatic use)
+pandoc -f a2ml.lua input.a2ml -t json
+----
+
+== Supported A2ML Features
+
+[cols="1,3"]
+|===
+| Feature | Pandoc Mapping
+
+| `# Heading` through `##### Heading`
+| `Header` (levels 1-5) with auto-generated IDs
+
+| `@directive(attrs): ... @end`
+| `Div` with `data-a2ml` attribute and CSS classes
+
+| `@opaque(lang="x"): ... @end`
+| `CodeBlock` preserving bytes exactly
+
+| `**bold**`
+| `Strong`
+
+| `*italic*`
+| `Emph`
+
+| `[label](url)`
+| `Link`
+
+| `@ref(id)`
+| `Link` targeting `#id` (internal cross-reference)
+
+| `- list items`
+| `BulletList`
+
+| `\`\`\`lang ... \`\`\``
+| `CodeBlock` with language annotation
+
+| Paragraphs (blank-line separated)
+| `Para`
+|===
+
+== Directive Handling
+
+A2ML directives are rendered as Pandoc `Div` elements with:
+
+- `id` from the directive's `id` attribute (if present)
+- CSS class `a2ml-<name>` (e.g. `a2ml-abstract`, `a2ml-fig`)
+- `data-a2ml` HTML attribute matching the directive name
+- Additional attributes as `data-*` pairs
+
+The `@opaque` directive is special: its body is rendered as a `CodeBlock`
+to preserve byte-exact content, matching the A2ML spec requirement for
+deterministic round-tripping.
+
+== Requirements
+
+- Pandoc 3.0+ with Lua support (`+lua` feature)
+
+== Spec Compliance
+
+This reader implements the A2ML v1.0.0 surface syntax as specified in
+`SPEC-v1.0.adoc`. Test vectors in `tests/vectors/` validate correct
+output for all core constructs.

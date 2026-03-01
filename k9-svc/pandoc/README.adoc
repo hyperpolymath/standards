@@ -1,0 +1,125 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+
+= K9 Pandoc Custom Reader
+:author: Jonathan D.A. Jewell
+:revdate: 2026-03-01
+
+== Overview
+
+`k9.lua` is a https://pandoc.org/custom-readers.html[Pandoc custom reader]
+that converts K9 Self-Validating Component files (`.k9` and `.k9.ncl`) into
+the Pandoc AST. This enables converting K9 pedigree documents to any format
+Pandoc supports: HTML, Markdown, LaTeX, PDF, DOCX, and dozens more.
+
+== Usage
+
+[source,sh]
+----
+# K9 (YAML) → HTML
+pandoc -f k9.lua hello.k9 -o output.html
+
+# K9 (Nickel) → HTML
+pandoc -f k9.lua config.k9.ncl -o output.html
+
+# K9 → Markdown
+pandoc -f k9.lua deploy.k9.ncl -t markdown
+
+# K9 → PDF (via LaTeX)
+pandoc -f k9.lua config.k9.ncl -o output.pdf
+
+# K9 → JSON AST (for programmatic use)
+pandoc -f k9.lua hello.k9 -t json
+----
+
+== Supported K9 Features
+
+=== Auto-Detection
+
+The reader automatically detects:
+
+- **Syntax**: YAML (`.k9`) vs Nickel (`.k9.ncl`) based on content patterns
+- **Security level**: Kennel / Yard / Hunt from `trust_level` or content analysis
+- **Magic number**: `K9!` presence at file start
+- **SPDX license**: Extracted from comment headers
+
+=== Pedigree Extraction
+
+Every K9 document produces a structured pedigree summary:
+
+[cols="1,3"]
+|===
+| Field | Source
+
+| Title
+| `metadata.name` with security badge `[Kennel]` / `[Yard]` / `[Hunt]`
+
+| Version
+| `metadata.version`
+
+| Description
+| `metadata.description`
+
+| Security level
+| `security.trust_level` or inferred from content
+
+| License
+| SPDX header comment
+|===
+
+=== YAML Content (Kennel Level)
+
+- Top-level keys → `Header` (level 3) section headers
+- Key-value pairs → `DefinitionList` entries
+- YAML block scalars (`\|`) → preserved as definition values
+- List items → definition list entries
+- Comments → skipped (not structural)
+
+=== Nickel Content (Yard/Hunt Level)
+
+- `let ... = { ... } in` → `Header` (level 2) + `DefinitionList`
+- Contract annotations (`\| Type`) → displayed alongside field names
+- `import` statements → rendered as import declarations
+- Comment blocks → `Div` with `.k9-comment` class
+- Multiline strings (`m%"..."%`) → `CodeBlock`
+- Record nesting → recursive `DefinitionList`
+- Recipe blocks → definition lists with command values
+
+=== Source Appendix
+
+Every converted document includes the full raw source as a fenced code block
+at the end, enabling round-trip inspection.
+
+== Pandoc Metadata
+
+The reader sets these metadata fields (accessible via `$meta.field$` in templates):
+
+- `k9-format`: `"yaml"` or `"nickel"`
+- `k9-security-level`: `"Kennel"`, `"Yard"`, or `"Hunt"`
+- `k9-magic`: `true` / `false`
+- `spdx-license`: License identifier string
+- `title`: Component name
+- `version`: Component version
+
+== CSS Classes
+
+For HTML output, the reader emits semantic CSS classes:
+
+- `.k9-pedigree` — pedigree summary block
+- `.k9-security-badge` — security level badge
+- `.k9-kennel` / `.k9-yard` / `.k9-hunt` — security level variants
+- `.k9-section` — YAML section header
+- `.k9-binding` — Nickel `let` binding header
+- `.k9-contract` — Nickel type contract annotation
+- `.k9-comment` — comment block
+- `.k9-source` — raw source section
+- `.k9-export` — top-level export record
+
+== Requirements
+
+- Pandoc 3.0+ with Lua support (`+lua` feature)
+
+== Spec Compliance
+
+This reader implements K9 pedigree extraction as specified in `SPEC.adoc`
+and the `pedigree.ncl` contract schema. Tested against all example files
+in `examples/` and PanLL layout presets.
