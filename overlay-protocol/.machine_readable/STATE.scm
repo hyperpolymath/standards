@@ -5,12 +5,12 @@
   ((metadata
      ((version . "1.0.0-draft")
       (last-updated . "2026-03-07")
-      (completion . "90%")))
+      (completion . "95%")))
 
    (current-position
      ((phase . "draft")
       (milestone . "v1.0.0-draft")
-      (description . "Initial specification written with both peer types defined, core invariants formalised, ECOSYSTEM.scm declaration format specified, and conformance checklist provided.")))
+      (description . "Full specification with Idris2 ABI proofs, Zig FFI implementation, conformance checker, and two reference implementations adopted.")))
 
    (components
      ((spec-document
@@ -28,14 +28,17 @@
         ((status . "complete")
          (file . "src/abi/OverlayProtocol.idr")
          (description . "Formal type-level proofs of all five overlay invariants, composition, and chaining")))
+      (zig-ffi
+        ((status . "complete")
+         (file . "ffi/zig/src/main.zig")
+         (description . "C-compatible FFI implementing all five invariant checks, composition, full conformance, 14 unit tests + 8 integration tests, builds with Zig 0.15")))
       (examples
         ((status . "exists-externally")
-         (description . "HOL-o-extension and aggregate-library serve as reference implementations")))))
+         (description . "HOL-o-extension (FULLY CONFORMANT) and aggregate-library (CONFORMANT) serve as reference implementations")))))
 
    (blockers-and-issues ())
 
    (critical-next-actions
-     ((1 . "Review spec against both reference implementations for completeness")
-      (2 . "Create conformance validation script (echidnabot integration)")
-      (3 . "Write Idris2 ABI formalising overlay invariants as dependent types")
-      (4 . "Promote from draft to accepted after ecosystem review")))))
+     ((1 . "Promote from draft to accepted after ecosystem review")
+      (2 . "Generate C headers from Zig FFI for non-Zig consumers")
+      (3 . "Integrate conformance checker into echidnabot workflow")))))
