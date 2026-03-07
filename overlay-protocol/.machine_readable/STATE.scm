@@ -5,7 +5,7 @@
   ((metadata
      ((version . "1.0.0-draft")
       (last-updated . "2026-03-07")
-      (completion . "70%")))
+      (completion . "80%")))
 
    (current-position
      ((phase . "draft")
@@ -24,8 +24,9 @@
         ((status . "planned")
          (description . "Automated conformance validation script")))
       (idris2-abi
-        ((status . "planned")
-         (description . "Formal type-level proofs of overlay invariants")))
+        ((status . "complete")
+         (file . "src/abi/OverlayProtocol.idr")
+         (description . "Formal type-level proofs of all five overlay invariants, composition, and chaining")))
       (examples
         ((status . "exists-externally")
          (description . "HOL-o-extension and aggregate-library serve as reference implementations")))))
