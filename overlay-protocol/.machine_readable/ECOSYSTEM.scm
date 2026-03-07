@@ -1,0 +1,60 @@
+;; SPDX-License-Identifier: PMPL-1.0-or-later
+;; ECOSYSTEM.scm — Overlay Protocol specification ecosystem position
+
+(ecosystem
+  ((metadata
+     ((version . "1.0.0-draft")
+      (name . "overlay-protocol")
+      (type . "standard")
+      (purpose . "Formal specification for the Overlay Protocol: non-invasive extension pattern with two peer types (o-extension, aggregate-library)")))
+
+   (position-in-ecosystem
+     ((role . "architectural-standard")
+      (layer . "design-patterns")
+      (description
+        "The Overlay Protocol is a reusable architectural pattern for extending software projects without modification. It unifies two peer types — o-extension (flag-based, adds new capabilities) and aggregate-library (dependency-based, curates existing APIs) — under a shared set of invariants: non-modification, additive-only, switchable, and declared relationship.")))
+
+   (related-projects
+     ((reference-implementations
+        ((hol-o-extension
+           ((relationship . "reference-implementation")
+            (peer-type . "o-extension")
+            (repo . "https://github.com/hyperpolymath/echidna")
+            (path . "echidna/HOL-o-extension")
+            (description . "First o-extension implementation: custom HOL4 theories for ECHIDNA")))
+
+         (aggregate-library
+           ((relationship . "reference-implementation")
+            (peer-type . "aggregate-library")
+            (repo . "https://github.com/hyperpolymath/developer-ecosystem")
+            (path . "developer-ecosystem/aggregate-library")
+            (description . "Methods lab demonstrating aggregate-library pattern with specs and conformance tests")))))
+
+      (enforcement
+        ((echidnabot
+           ((relationship . "validator")
+            (description . "Can validate overlay-protocol conformance in CI/CD")))
+
+         (hypatia
+           ((relationship . "scanner")
+            (description . "Neurosymbolic scanner that can detect overlay-protocol declarations")))))
+
+      (standards-peers
+        ((rhodium-standard-repositories
+           ((relationship . "sibling-standard")
+            (description . "RSR defines repository structure; Overlay Protocol defines extension patterns within that structure")))
+
+         (a2ml
+           ((relationship . "consumed-by")
+            (description . "AI manifests in overlays use A2ML format to declare non-modification invariants")))))))
+
+   (what-this-is
+     ("A formal specification for the Overlay Protocol architectural pattern"
+      "Defines two peer types: o-extension and aggregate-library"
+      "Provides ECOSYSTEM.scm declaration format for machine-readable overlay relationships"
+      "Includes conformance checklist and validation criteria"))
+
+   (what-this-is-not
+     ("Not a build tool or runtime library"
+      "Not prescriptive about which languages or frameworks to use"
+      "Not a replacement for package managers — overlays operate at the project level"))))
