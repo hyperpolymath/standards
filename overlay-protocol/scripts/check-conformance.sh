@@ -263,7 +263,7 @@ if [ -n "$MANIFEST_FILE" ]; then
   pass "AI manifest found: ${MANIFEST_FILE#"$OVERLAY_DIR"/}"
 
   # Check for non-modification invariant declaration
-  if grep -qi 'never\s*modify\|non.modification\|modifies-base\|untouched\|never\s*touch' "$MANIFEST_FILE" 2>/dev/null; then
+  if grep -qiP 'never\s*modif|non.modification|modifies.base|untouched|never\s*touch|never\s*change' "$MANIFEST_FILE" 2>/dev/null; then
     pass "AI manifest declares non-modification invariant"
   else
     warn "AI manifest does not explicitly declare non-modification invariant"
