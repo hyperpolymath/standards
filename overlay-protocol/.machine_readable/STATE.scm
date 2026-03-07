@@ -5,7 +5,7 @@
   ((metadata
      ((version . "1.0.0-draft")
       (last-updated . "2026-03-07")
-      (completion . "80%")))
+      (completion . "90%")))
 
    (current-position
      ((phase . "draft")
@@ -21,8 +21,9 @@
         ((status . "complete")
          (description . "Machine-readable ecosystem position")))
       (conformance-tooling
-        ((status . "planned")
-         (description . "Automated conformance validation script")))
+        ((status . "complete")
+         (file . "scripts/check-conformance.sh")
+         (description . "Automated conformance validation script — 7 check categories, tested against both reference implementations")))
       (idris2-abi
         ((status . "complete")
          (file . "src/abi/OverlayProtocol.idr")
