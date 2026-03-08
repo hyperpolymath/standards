@@ -3,20 +3,20 @@
 
 (state
   ((metadata
-     ((version . "1.0.0-draft")
-      (last-updated . "2026-03-07")
-      (completion . "95%")))
+     ((version . "1.0.0")
+      (last-updated . "2026-03-08")
+      (completion . "100%")))
 
    (current-position
-     ((phase . "draft")
-      (milestone . "v1.0.0-draft")
-      (description . "Full specification with Idris2 ABI proofs, Zig FFI implementation, conformance checker, and two reference implementations adopted.")))
+     ((phase . "accepted")
+      (milestone . "v1.0.0")
+      (description . "Specification promoted to accepted. Full ABI proofs, FFI implementation, conformance checker, and two reference implementations verified.")))
 
    (components
      ((spec-document
         ((status . "complete")
          (file . "OVERLAY-PROTOCOL-SPEC.md")
-         (description . "Full specification document")))
+         (description . "Full specification document (v1.0.0 accepted)")))
       (ecosystem-scm
         ((status . "complete")
          (description . "Machine-readable ecosystem position")))
@@ -33,12 +33,11 @@
          (file . "ffi/zig/src/main.zig")
          (description . "C-compatible FFI implementing all five invariant checks, composition, full conformance, 14 unit tests + 8 integration tests, builds with Zig 0.15")))
       (examples
-        ((status . "exists-externally")
-         (description . "HOL-o-extension (FULLY CONFORMANT) and aggregate-library (CONFORMANT) serve as reference implementations")))))
+        ((status . "verified")
+         (description . "HOL-o-extension (FULLY CONFORMANT) and aggregate-library (CONFORMANT) — both reference implementations active")))))
 
    (blockers-and-issues ())
 
    (critical-next-actions
-     ((1 . "Promote from draft to accepted after ecosystem review")
-      (2 . "Generate C headers from Zig FFI for non-Zig consumers")
-      (3 . "Integrate conformance checker into echidnabot workflow")))))
+     ((1 . "Generate C headers from Zig FFI for non-Zig consumers")
+      (2 . "Integrate conformance checker into echidnabot workflow")))))
