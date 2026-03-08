@@ -5,7 +5,7 @@ Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk
 
 # Overlay Protocol Specification
 
-**Version**: 1.0.0-draft
+**Version**: 1.0.0
 **Author**: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 **License**: PMPL-1.0-or-later
 **Status**: Draft
