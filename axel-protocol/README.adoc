@@ -1,27 +1,269 @@
-image:https://img.shields.io/badge/License-MPL_2.0-blue.svg[MPL-2.0-or-later]
-image:https://img.shields.io/badge/Idris-Inside-5E5086[Idris Inside,link="https://github.com/hyperpolymath/proven"]
-
 = AXEL Protocol
-:toc: auto
+:toc:
+:toclevels: 3
+:sectanchors:
+:source-highlighter: rouge
 
-**AXEL** = **A**ccess for e**X**plicit **E**nforcement & **L**abeling
+AXEL stands for *Access for eXplicit Enforcement & Labeling*.
 
-An IPv6-based protocol for isolating age-restricted content using DNS-based enforcement mechanisms, authorized IP prefix lists, and privacy-preserving attestation. AXEL addresses the failures of voluntary content labeling systems (ICRA, PICS) by providing technical enforcement at the network layer.
+AXEL is a protocol and reference implementation for *machine-readable age-gating policy*, *privacy-preserving age assurance*, and *multi-layer enforcement* for age-restricted online content.
 
-== Key Features
+Rather than relying on vague self-declared labels or fragile application-specific heuristics, AXEL defines a clear, auditable way for services to:
 
-* **AXEL-STS**: Strict Transport Security for age-restricted content
-* **APL Records**: DNS-based authorized IP prefix lists
-* **Privacy-Preserving Attestation**: Zero-knowledge proofs for age verification
-* **IPv6-First**: Designed for modern internet infrastructure
-* **Network-Level Enforcement**: DNS and firewall integration
+* declare that content is age-restricted,
+* publish enforcement metadata,
+* request privacy-preserving proof of eligibility,
+* and interoperate with browsers, apps, operating systems, and optional network policy tools.
 
-== Architecture
+AXEL is designed to address a real deployment gap: content providers, client software, and policy-enforcement systems all need a common language for age-restriction signals, but existing approaches are fragmented, inconsistent, or trivially bypassed.
 
-* *ReScript* - Type-safe AXEL-STS validator
-* *Deno* - Modern runtime (no Node.js)
-* *proven* - Formally verified domain validation (Idris2)
-* *Zig FFI* - C-compatible implementation layer
+== Why AXEL Exists
+
+Age-restricted content online is usually handled badly.
+
+Common approaches fail in predictable ways:
+
+* *Self-attested checkboxes* are trivial to bypass.
+* *Opaque proprietary filters* do not interoperate.
+* *Legacy labeling efforts* depended too heavily on voluntary semantics without meaningful enforcement hooks.
+* *Pure network blocking* is often too coarse, too invasive, or too easy to evade.
+* *Hard identity checks* can be disproportionate, privacy-hostile, and risky to centralize.
+
+AXEL takes a different approach.
+
+It defines an interoperable framework for:
+
+* *explicit labeling* of age-restricted resources,
+* *cryptographically verifiable policy publication*,
+* *privacy-preserving threshold proofs* such as “18+” without unnecessary identity disclosure,
+* and *layered enforcement profiles* across service, device, and optional network environments.
+
+AXEL is not a moral panic project.
+It is an engineering project for reducing ambiguity, improving interoperability, and making age-gating less ad hoc, less invasive, and more technically accountable.
+
+== Design Principles
+
+AXEL is guided by the following principles:
+
+=== 1. Explicitness over guesswork
+
+If a resource is age-restricted, that fact should be published in a structured, machine-readable form.
+
+=== 2. Threshold proofs over identity hoarding
+
+A service often does not need to know *who* a user is.
+It usually only needs to know whether the user satisfies a policy threshold such as `18+`.
+
+=== 3. Layered enforcement over single-point fantasy
+
+There is no one perfect enforcement point.
+AXEL supports enforcement at multiple layers:
+
+* service/application,
+* client/device,
+* and optionally managed network boundaries.
+
+=== 4. Privacy by design
+
+AXEL aims to minimize unnecessary disclosure and avoid turning age-gating into a general-purpose identity surveillance scheme.
+
+=== 5. Incremental deployability
+
+AXEL is designed to be adopted in stages, rather than requiring a flag day for the whole internet.
+
+== What AXEL Is
+
+AXEL is:
+
+* a *policy publication format* for age-restricted content,
+* a *validation model* for clients and enforcement tools,
+* an *attestation profile* for privacy-preserving proof of age eligibility,
+* a *deployment framework* for layered enforcement.
+
+AXEL includes several protocol elements, including:
+
+* *AXEL-STS* — policy publication and transport/security requirements for age-restricted origins,
+* *AXEL labels* — structured age/category declarations,
+* *attestation flows* — proof that a client satisfies an age threshold,
+* *enforcement profiles* — service, device, and optional network policy behavior.
+
+== What AXEL Is Not
+
+AXEL is *not*:
+
+* a claim that the network alone can perfectly determine the meaning of all content,
+* a demand for full legal identity disclosure for every access attempt,
+* a replacement for all moderation, classification, or legal compliance frameworks,
+* a promise that DNS and firewalls magically solve every age-gating problem.
+
+AXEL does not assume that a single mechanism can solve classification, consent, jurisdiction, and user intent all at once.
+
+Instead, it tries to define a sane, composable substrate.
+
+== Protocol Overview
+
+At a high level, AXEL works like this:
+
+. A service publishes AXEL policy metadata indicating that some content or resources are age-restricted.
+. A client, browser extension, or enforcement intermediary discovers that policy.
+. The policy specifies the threshold or category requirements for access.
+. The client obtains or presents a privacy-preserving attestation satisfying the relevant threshold.
+. The origin validates the attestation and grants or denies access.
+. Optional device or managed-network tooling may consume the same metadata to apply local policy.
+
+This separates three concerns that are too often muddled together:
+
+* *labeling* — what kind of restriction applies,
+* *attestation* — whether the user satisfies a threshold,
+* *enforcement* — where the decision is applied.
+
+== Core Components
+
+=== AXEL Labels
+
+AXEL labels are machine-readable declarations describing restricted material.
+
+Examples include:
+
+* age threshold: `16+`, `18+`, `21+`
+* category: explicit sexual content, gambling, graphic violence, regulated commerce
+* scope: whole origin, path subtree, asset class, or protected endpoint
+* policy semantics: advisory, required for access, jurisdiction-conditioned
+
+AXEL labels are designed to be explicit enough for automation while still being implementable by real systems.
+
+=== AXEL-STS
+
+AXEL-STS is the policy publication mechanism for AXEL-aware origins.
+
+It allows an origin to publish:
+
+* whether AXEL enforcement is active,
+* which policy version applies,
+* which attestation profile is supported,
+* whether insecure downgrade paths are permitted,
+* cache lifetime and policy scope,
+* optional discovery endpoints.
+
+AXEL-STS plays a role conceptually similar to transport-security policy publication: it makes enforcement expectations explicit and machine-consumable.
+
+=== Attestation
+
+AXEL separates *proof of eligibility* from *proof of identity*.
+
+The long-term direction is privacy-preserving attestation, including threshold proofs such as:
+
+* “the user is over 18”
+* “the user is over 16”
+* “the user satisfies jurisdiction-specific age threshold X”
+
+without requiring the relying party to learn full identity attributes unless explicitly required by law or deployment profile.
+
+AXEL is compatible with multiple attestation models, including:
+
+* zero-knowledge or selective-disclosure credential systems,
+* privacy-preserving token issuance flows,
+* wallet-backed verifiable credential profiles,
+* higher-assurance regulated deployments where stronger verification is required.
+
+=== Enforcement Profiles
+
+AXEL supports multiple enforcement profiles.
+
+==== Service-Enforced
+
+The origin or application validates AXEL attestation directly before granting access.
+
+This is the primary and most robust deployment model.
+
+==== Device-Enforced
+
+A browser, app, operating system, parental-control tool, or extension consumes AXEL policy metadata and applies user- or administrator-defined policy locally.
+
+==== Network-Assisted
+
+A managed gateway, firewall, or resolver consumes AXEL metadata and applies coarse-grained policy where appropriate.
+
+This profile is explicitly secondary.
+It is useful in some managed environments, but AXEL does not pretend that network-layer controls are always precise or sufficient on their own.
+
+== Optional DNS Integration
+
+AXEL may use DNS as a discovery and policy distribution surface where appropriate.
+
+This includes:
+
+* bootstrap discovery records,
+* policy advertisement,
+* optional deployment metadata,
+* experimental authorized-prefix hints for tightly controlled environments.
+
+DNS support is *part of the deployment story*, not the entirety of the protocol.
+
+AXEL does not assume that IP topology alone is a reliable semantic representation of content boundaries on the modern web.
+
+== Why IPv6 Matters
+
+AXEL is IPv6-aware and IPv6-friendly, but not IPv6-dogmatic.
+
+IPv6 matters because it enables cleaner addressing models, simpler policy expression in some managed deployments, and future-facing infrastructure assumptions.
+
+However, AXEL is fundamentally about *policy publication and threshold enforcement*, not about romanticizing one network layer.
+
+The protocol should remain useful even when the most important enforcement decision happens at the service or device layer.
+
+== Reference Implementation
+
+This repository contains a reference implementation of the AXEL model and surrounding tooling.
+
+Current technology choices include:
+
+* *ReScript* — type-safe validator and policy handling
+* *Deno* — modern runtime and tooling
+* *proven* — formalized validation components in Idris2 where applicable
+* *Zig FFI* — C-compatible systems integration layer
+
+The implementation is intended to demonstrate:
+
+* AXEL-STS parsing and validation
+* policy discovery
+* attestation flow integration points
+* deployment tooling for managed environments
+* reference firewall and policy-consumer integration
+
+== Repository Goals
+
+This repository aims to provide:
+
+* a readable protocol specification,
+* a reference validator,
+* deployment examples,
+* formalized validation logic where feasible,
+* integration guidance for downstream adopters.
+
+It is both a research vehicle and an implementation scaffold.
+
+== Status
+
+*Status:* Draft / active design and reference implementation work
+
+As of 2026-01-31:
+
+* ✅ AXEL Protocol specification, draft baseline
+* ✅ AXEL-STS validator in ReScript
+* ✅ Initial deployment tooling and containerization
+* ✅ Baseline security hardening work
+* ⏳ Reference attestation service
+* ⏳ Browser and client integration
+* ⏳ Formal interoperability test vectors
+* ⏳ Policy publication and discovery hardening
+* ⏳ External review and standards alignment
+
+AXEL should currently be understood as:
+
+* *promising for experimentation*,
+* *useful for prototype deployments*,
+* *not yet a finished ecosystem standard*.
 
 == Development
 
@@ -31,38 +273,131 @@ deno task build
 deno task watch
 ----
 
-== Status (2026-01-31)
+== Architecture Notes
 
-* ✅ AXEL Protocol Specification (v1.0.0-draft)
-* ✅ ReScript AXEL-STS validator
-* ✅ Firewall configuration (firewalld)
-* ✅ Containerfile for deployment
-* ✅ Security hardening complete
-* ⏳ IANA port assignment request (port 459)
-* ⏳ Production attestation service
-* ⏳ Browser extension for client-side enforcement
+AXEL is intentionally split into separable layers.
+
+=== Layer 1: Labeling
+
+How a service declares that something is age-restricted.
+
+=== Layer 2: Publication
+
+How that declaration is made available in a verifiable and machine-readable form.
+
+=== Layer 3: Attestation
+
+How a client proves it satisfies a policy threshold.
+
+=== Layer 4: Enforcement
+
+How a decision is applied at the service, device, or managed network layer.
+
+This decomposition matters.
+Many failed systems collapsed these into one vague blob and then overpromised.
+
+AXEL tries not to.
+
+== Threat Model
+
+AXEL is designed to improve assurance against:
+
+* trivial self-attestation bypass,
+* inconsistent or missing labeling,
+* silent downgrade to non-enforced policy,
+* ad hoc policy interpretation across clients,
+* unnecessary disclosure of user identity attributes.
+
+AXEL does *not* claim to eliminate:
+
+* all evasion via VPNs or unmanaged devices,
+* misclassification by content publishers,
+* every jurisdictional ambiguity,
+* every abuse case in hostile or negligent deployments.
+
+A serious protocol states what it cannot guarantee.
+
+== Non-Goals
+
+AXEL does not aim to be:
+
+* a universal internet censorship substrate,
+* a substitute for content classification policy,
+* a comprehensive identity platform,
+* a guarantee of legal compliance in every jurisdiction,
+* a magical network-only solution to human governance problems.
 
 == Roadmap
 
-=== Phase 1: Specification & Reference Implementation (Current)
-* [x] AXEL Protocol specification document
-* [x] DNS record formats (AXEL-STS, APL)
-* [x] ReScript validator implementation
-* [ ] Reference attestation service
-* [ ] IANA registrations (.well-known URI, port 459, flow label)
+=== Phase 1: Specification & Reference Core
 
-=== Phase 2: Deployment Tools
-* [ ] firewalld integration
-* [ ] DNS zone file generators
-* [ ] Terraform/Ansible deployment scripts
-* [ ] Browser extension for AXEL enforcement
+* finalize AXEL label semantics
+* finalize AXEL-STS publication format
+* harden validator behavior and test vectors
+* publish example policies and fixtures
+* document threat model and security considerations
 
-=== Phase 3: Ecosystem Integration
-* [ ] CDN provider integration (Cloudflare, Fastly)
-* [ ] CMS plugins (WordPress, Drupal)
-* [ ] OpenSSF Scorecard compliance
-* [ ] Public AXEL registry
+=== Phase 2: Attestation & Client Tooling
+
+* reference attestation service
+* browser extension / client integration
+* device-enforcement proof of concept
+* threshold-proof profile documentation
+* interoperability fixtures for relying parties
+
+=== Phase 3: Deployment Tooling
+
+* DNS helpers and policy generators
+* Terraform / Ansible deployment modules
+* containerized policy services
+* firewalld and managed-gateway integration
+* logging / audit guidance for privacy-preserving deployments
+
+=== Phase 4: Ecosystem & Standardization
+
+* external review
+* protocol simplification based on deployment experience
+* public registry and conformance guidance
+* CMS and CDN integration experiments
+* standards-track alignment where warranted
+
+== Why This Approach Has a Chance
+
+AXEL’s thesis is simple:
+
+[quote]
+____
+Age-gating works best when content restriction is explicit, policy is machine-readable, proof of eligibility is privacy-preserving, and enforcement can happen at more than one layer.
+____
+
+That is a narrower and more realistic claim than “the network will solve this.”
+It is also a much more interesting one.
+
+== Contributing
+
+Contributions are welcome, especially in the following areas:
+
+* protocol review
+* adversarial analysis
+* security and privacy critique
+* formalization work
+* interoperability testing
+* deployment ergonomics
+* accessibility and client UX for enforcement flows
+
+Critical feedback is useful here.
+This repository is not trying to protect a fantasy from scrutiny; it is trying to refine a real design under pressure.
 
 == License
 
-PMPL-1.0-or-later
+See the link:LICENSE[LICENSE] file.
+
+== Project Maturity Note
+
+AXEL is a serious draft effort, not a finished standard.
+
+Some parts are already implementable.
+Some parts are still better understood as research questions.
+That is normal.
+
+The point of this repository is to make the idea concrete enough to test, criticize, simplify, and either harden into something real or discard with clarity.
