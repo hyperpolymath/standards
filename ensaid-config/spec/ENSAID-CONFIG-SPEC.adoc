@@ -1,0 +1,821 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= ENSAID_CONFIG.a2ml Specification
+:doctype: book
+:toc: left
+:toclevels: 4
+:sectnums:
+:source-highlighter: highlight.js
+:icons: font
+
+[.text-center]
+*RFC-Style Specification* +
+*Version 1.0.0-draft.1* +
+*March 2026*
+
+== Abstract
+
+`.machine_readable/ENSAID_CONFIG.a2ml` is a single configuration file placed in
+a repository's `.machine_readable/` directory alongside other machine-readable
+artefacts (STATE.a2ml, META.a2ml, ECOSYSTEM.a2ml, etc.). It declares
+configuration preferences for eNSAID-compatible development environments.
+eNSAID (**Environment for NeSy-Agentic Integrated Development**) is the paradigm
+underpinning PanLL and any future tool that treats panels, clades, workflows,
+and ambient substrates as first-class development concepts.
+
+Any eNSAID tool reads this file to configure panel visibility, workspace modes,
+automation workflows, clade overrides, and integration endpoints. When the file
+is absent, tools MUST apply sensible defaults. When present, the file's sections
+override those defaults on a per-section, per-field basis.
+
+The file uses UPPERCASE with underscores (`ENSAID_CONFIG`) following the
+hyperpolymath naming convention for non-executable machine-readable files.
+
+== Status of This Memo
+
+This document specifies an experimental standard for the hyperpolymath
+ecosystem. Discussion and suggestions for improvement are requested.
+
+Distribution of this memo is unlimited.
+
+== Copyright Notice
+
+Copyright (c) 2026 Jonathan D.A. Jewell. PMPL-1.0-or-later.
+
+== Terminology
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD",
+"SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be
+interpreted as described in https://datatracker.ietf.org/doc/html/rfc2119[RFC 2119].
+
+eNSAID::
+  Environment for NeSy-Agentic Integrated Development. The paradigm for
+  neurosymbolic development environments.
+
+Panel::
+  A discrete UI/functional unit in an eNSAID tool (e.g. a shell, a build
+  dashboard, a game preview). Panels are typed by clades.
+
+Clade::
+  A category of panel behaviour defined by traits and capabilities.
+
+Portfolio::
+  A named collection of panels forming a workspace configuration.
+
+A2ML::
+  AI-Accessible Markup Language. A TOML-compatible configuration format
+  used across the hyperpolymath ecosystem.
+
+
+== Introduction
+
+=== Problem
+
+Development environments increasingly integrate multiple tools: terminals,
+build systems, preview servers, network monitors, release managers, and
+AI-assisted reasoning panels. Each repository has different needs. A game
+project needs a preview panel and level editor. A database project needs a
+query inspector and topology view. A standards repo may need only a shell
+and documentation viewer.
+
+Currently, eNSAID tools must either show everything (overwhelming) or require
+manual per-session configuration (repetitive). There is no standard way for a
+repository to declare its preferred development environment layout.
+
+=== Solution
+
+`.machine_readable/ENSAID_CONFIG.a2ml` provides a single drop-in file that any
+eNSAID-compatible tool reads at repository load time. It is:
+
+* **Declarative** -- pure configuration, no executable code
+* **Optional** -- repositories without it work with defaults
+* **Consolidated** -- all eNSAID config in one file with clear TOML sections
+* **Consistent** -- lives in `.machine_readable/` alongside STATE.a2ml, META.a2ml, etc.
+* **Versionable** -- checked into version control alongside the code it configures
+
+
+== File Structure
+
+`ENSAID_CONFIG.a2ml` is a single TOML-compatible A2ML file containing the
+following sections. All sections are OPTIONAL. Missing sections mean "use tool
+defaults for that concern."
+
+[source,toml]
+----
+[ensaid]           # Core identity and version
+[workspace]        # Workspace mode, protection, execution
+[preferences]      # Display and behaviour preferences
+[panels]           # Panel enablement, isolation, endpoints, env vars
+[workflows]        # Automation router rules (event → condition → action)
+[clades]           # Clade overrides: capabilities, custom traits
+[portfolios]       # Custom portfolio definitions for this repo context
+----
+
+Tools MUST ignore unrecognised sections and fields. This allows
+forward-compatible extensions.
+
+
+== Section Specifications
+
+=== [ensaid], [workspace], [preferences]
+
+Core workspace configuration. Controls the overall mode, protection level,
+and execution behaviour of the eNSAID environment when this repository is
+loaded.
+
+[source,toml]
+----
+[ensaid]
+version = "1.0.0"
+tool = "panll"
+
+[workspace]
+mode = "rhodium"           # rhodium | everything | code | bespoke
+protection = "open"        # open | readonly | sandboxed | language-locked
+                           #   | transpilation-guarded | production-gated
+execution = "live"         # live | dry-run | simulation | emulation
+
+[workspace.language-lock]
+extensions = [".idr", ".v"]  # Only when protection = "language-locked"
+
+[preferences]
+theme = "dark"
+humidity = "medium"          # low | medium | high (ambient substrate intensity)
+default-arrangement = "default-3-panel"
+auto-connect = true          # Auto-connect panels with backends on load
+----
+
+==== Fields
+
+[cols="2,1,1,4"]
+|===
+|Field |Type |Required |Description
+
+|`ensaid.version`
+|String
+|YES
+|Specification version this file conforms to. Semantic versioning.
+
+|`ensaid.tool`
+|String
+|NO
+|Hint for which eNSAID tool authored this config. Informational only.
+Tools MUST NOT reject configs with a different `tool` value.
+
+|`workspace.mode`
+|Enum
+|NO
+|Workspace layout mode. Default: tool-specific.
+
+|`workspace.protection`
+|Enum
+|NO
+|Protection level controlling what operations are permitted. Default: `"open"`.
+
+|`workspace.execution`
+|Enum
+|NO
+|Execution mode for commands and builds. Default: `"live"`.
+
+|`workspace.language-lock.extensions`
+|Array of String
+|NO
+|File extensions permitted when `protection = "language-locked"`. Tools SHOULD
+warn (not error) if files outside this set are edited.
+
+|`preferences.theme`
+|String
+|NO
+|UI theme hint. Tools MAY ignore this if they have their own theme system.
+
+|`preferences.humidity`
+|Enum
+|NO
+|Ambient substrate intensity level. Default: `"medium"`.
+
+|`preferences.default-arrangement`
+|String
+|NO
+|Default panel arrangement/layout name. Default: tool-specific.
+
+|`preferences.auto-connect`
+|Boolean
+|NO
+|Whether panels should auto-connect to their backends on load. Default: `true`.
+|===
+
+==== Workspace Modes
+
+[cols="1,3"]
+|===
+|Mode |Description
+
+|`rhodium`
+|Full Rhodium Standard Repository mode. All RSR conventions enforced.
+
+|`everything`
+|All available panels shown. No filtering.
+
+|`code`
+|Minimal code-focused layout: editor, shell, build output only.
+
+|`bespoke`
+|Entirely custom. Layout determined by the `[panels]` and `[portfolios]` sections.
+|===
+
+==== Protection Levels
+
+[cols="1,3"]
+|===
+|Level |Description
+
+|`open`
+|No restrictions. Full read-write access to all files and operations.
+
+|`readonly`
+|Files are read-only. Panels that modify files are disabled.
+
+|`sandboxed`
+|Operations run in an isolated environment. No host filesystem writes.
+
+|`language-locked`
+|Only files matching `workspace.language-lock.extensions` may be edited.
+
+|`transpilation-guarded`
+|Source files are editable but transpilation/compilation output is protected.
+
+|`production-gated`
+|Deployment and release operations require explicit confirmation.
+|===
+
+==== Execution Modes
+
+[cols="1,3"]
+|===
+|Mode |Description
+
+|`live`
+|Commands execute normally against the real environment.
+
+|`dry-run`
+|Commands are displayed but not executed. Tools show what would happen.
+
+|`simulation`
+|Commands run against a simulated environment. No real side effects.
+
+|`emulation`
+|Commands run in an emulated target environment (e.g. different OS/arch).
+|===
+
+
+=== [panels]
+
+Panel configuration for this repository. Declares which panels should be
+available, their isolation tier, connection endpoints, and environment
+variables.
+
+[source,toml]
+----
+[panels]
+version = "1.0.0"
+
+# Enable only panels relevant to this repo
+[[panels.enabled]]
+id = "valence-shell"
+isolation = "native"
+auto-connect = true
+
+[[panels.enabled]]
+id = "game-preview"
+isolation = "native"
+endpoint = "http://localhost:8080"
+auto-connect = true
+env = { VITE_PORT = "8080" }
+
+[[panels.enabled]]
+id = "build-dashboard"
+isolation = "native"
+
+# Panels explicitly disabled for this repo context
+[panels.disabled]
+ids = ["cloudguard", "aerie", "plaza"]
+----
+
+==== Panel Entry Fields
+
+[cols="2,1,1,4"]
+|===
+|Field |Type |Required |Description
+
+|`id`
+|String
+|YES
+|Panel identifier. Must match a known clade or panel registration.
+
+|`isolation`
+|Enum
+|NO
+|Isolation tier: `"native"`, `"container"`, `"vm"`, `"remote"`. Default: `"native"`.
+
+|`endpoint`
+|String (URL)
+|NO
+|Backend endpoint URL for panels that connect to a service.
+
+|`auto-connect`
+|Boolean
+|NO
+|Whether this panel auto-connects on workspace load. Default: inherits
+from `[preferences]` `auto-connect`.
+
+|`env`
+|Table
+|NO
+|Environment variables to set for this panel's processes. Values MUST be
+strings. Tools MUST NOT expose these to other panels.
+|===
+
+==== Disabled Panels
+
+The `[panels.disabled]` section lists panel IDs that SHOULD NOT be shown in
+this repository context, even if they would normally be available. This is
+useful for reducing clutter.
+
+Tools MUST respect disabled panels. Users MAY override disabled panels
+through the tool's UI if the tool supports it.
+
+
+=== [workflows]
+
+Automation router rules. Each rule defines a trigger (event), an optional
+condition, and an action. Rules allow repositories to declare cross-panel
+automation without writing code.
+
+[source,toml]
+----
+[workflows]
+version = "1.0.0"
+
+[[workflows.rule]]
+name = "build-on-save"
+trigger = { event = "file-changed", pattern = "src/**/*.res" }
+condition = { panel = "build-dashboard", field = "watchMode", equals = true }
+action = { panel = "build-dashboard", message = "TriggerBuild", args = { target = "game" } }
+
+[[workflows.rule]]
+name = "changelog-on-release"
+trigger = { event = "panel-message", panel = "release-manager", message = "PublishRelease" }
+action = { panel = "release-manager", message = "GenerateChangelog" }
+priority = "before"
+
+[[workflows.rule]]
+name = "notify-on-build-fail"
+trigger = { event = "panel-message", panel = "build-dashboard", message = "BuildTriggered", result = "error" }
+action = { panel = "valence-shell", message = "SubmitInput", args = { text = "echo 'Build failed!'" } }
+
+[[workflows.rule]]
+name = "open-error-in-editor"
+trigger = { event = "panel-message", panel = "build-dashboard", message = "BuildTriggered", result = "ok" }
+condition = { panel = "build-dashboard", field = "messages", count-gt = 0 }
+action = { panel = "editor-bridge", message = "RefreshDiagnostics" }
+----
+
+==== Rule Fields
+
+[cols="2,1,1,4"]
+|===
+|Field |Type |Required |Description
+
+|`name`
+|String
+|YES
+|Human-readable rule name. Must be unique within the file.
+
+|`trigger`
+|Table
+|YES
+|Event that activates this rule. See <<Trigger Types>>.
+
+|`condition`
+|Table
+|NO
+|Additional condition that must be true for the action to fire.
+
+|`action`
+|Table
+|YES
+|Action to perform when the trigger fires and condition (if any) is met.
+
+|`priority`
+|Enum
+|NO
+|Execution priority relative to the triggering event: `"before"`, `"after"`,
+`"concurrent"`. Default: `"after"`.
+|===
+
+[[trigger-types]]
+==== Trigger Types
+
+[cols="1,3"]
+|===
+|Event |Description
+
+|`file-changed`
+|A file matching `pattern` (glob) was saved or modified.
+
+|`panel-message`
+|A panel emitted a message matching `panel` + `message` (and optionally `result`).
+
+|`workspace-loaded`
+|The workspace finished loading. Fires once per session.
+
+|`panel-connected`
+|A panel's backend connected. Matched by `panel` ID.
+
+|`panel-disconnected`
+|A panel's backend disconnected. Matched by `panel` ID.
+|===
+
+
+=== [clades]
+
+Clade customisation per repository. Allows overriding default traits and
+capabilities of panel clades without modifying the global clade registry.
+
+[source,toml]
+----
+[clades]
+version = "1.0.0"
+
+[[clades.override]]
+id = "game-preview"
+traits = { has-persistence = true }    # Override default trait
+capabilities-add = ["CustomOverlay"]   # Add capability
+capabilities-remove = []               # Remove capability
+
+[[clades.override]]
+id = "build-dashboard"
+traits = { has-work-items = true }
+----
+
+==== Override Fields
+
+[cols="2,1,1,4"]
+|===
+|Field |Type |Required |Description
+
+|`id`
+|String
+|YES
+|Clade identifier to override.
+
+|`traits`
+|Table
+|NO
+|Trait key-value pairs to set or override. Values are booleans or strings.
+
+|`capabilities-add`
+|Array of String
+|NO
+|Capabilities to add to this clade in this repo context.
+
+|`capabilities-remove`
+|Array of String
+|NO
+|Capabilities to remove from this clade in this repo context.
+|===
+
+Overrides are scoped to the repository. They do NOT modify the global clade
+registry. If a clade ID is not recognised by the tool, the override MUST be
+silently ignored.
+
+
+=== [portfolios]
+
+Custom portfolio definitions. A portfolio is a named collection of panels
+forming a workspace configuration. Repos can define portfolios tailored to
+their specific development workflows.
+
+[source,toml]
+----
+[portfolios]
+version = "1.0.0"
+
+[[portfolios.custom]]
+id = "idaptik-dev"
+name = "IDApTIK Development"
+description = "Full IDApTIK game development suite"
+panels = [
+  "valence-shell", "game-preview", "vm-inspector",
+  "network-topology", "level-architect", "coprocessors",
+  "multiplayer-monitor", "dlc-workshop",
+  "editor-bridge", "build-dashboard", "release-manager"
+]
+default-isolation = "native"
+----
+
+==== Portfolio Fields
+
+[cols="2,1,1,4"]
+|===
+|Field |Type |Required |Description
+
+|`id`
+|String
+|YES
+|Portfolio identifier. Must be unique within the file.
+
+|`name`
+|String
+|YES
+|Human-readable portfolio name.
+
+|`description`
+|String
+|NO
+|Description of what this portfolio is for.
+
+|`panels`
+|Array of String
+|YES
+|Ordered list of panel IDs included in this portfolio.
+
+|`default-isolation`
+|Enum
+|NO
+|Default isolation tier for panels in this portfolio: `"native"`,
+`"container"`, `"vm"`, `"remote"`. Default: `"native"`.
+Panels with explicit isolation in `[panels]` override this.
+|===
+
+
+== Discovery and Precedence
+
+=== Discovery Algorithm
+
+eNSAID tools MUST discover `ENSAID_CONFIG.a2ml` using the following algorithm:
+
+1. Look for `.machine_readable/ENSAID_CONFIG.a2ml` in the repository root (the
+   directory containing `.git/` or `.git`).
+2. If not found, look in parent directories' `.machine_readable/` up to (but not
+   beyond) the nearest git root. This supports monorepo structures where a
+   subdirectory project inherits configuration from the monorepo root.
+3. If not found anywhere, use tool defaults.
+
+Tools MUST NOT search beyond the git root. Tools MUST NOT search the user's
+home directory as part of discovery (user-level config uses a separate path;
+see <<User-Level Defaults>>).
+
+=== Precedence Order
+
+Settings are merged with the following precedence (highest to lowest):
+
+1. **Repository `.machine_readable/ENSAID_CONFIG.a2ml`** -- highest precedence. Per-repo overrides.
+2. **User-level `~/.config/ensaid/ENSAID_CONFIG.a2ml`** -- global defaults for the user.
+3. **Tool built-in defaults** -- lowest precedence. Hardcoded sensible defaults.
+
+[[user-level-defaults]]
+=== User-Level Defaults
+
+Users MAY place an `ENSAID_CONFIG.a2ml` file in `~/.config/ensaid/` using the
+same schema. This provides personal defaults that apply when a repository does
+not specify a value.
+
+User-level configuration MUST NOT override repository configuration. It
+serves only as a fallback.
+
+=== Merging Rules
+
+Merging is performed per-section, per-field:
+
+* **Scalar fields** (strings, numbers, booleans): repo value wins if present.
+* **Arrays**: repo value replaces the default entirely (no element-level merge).
+* **Tables**: merged recursively. Repo keys override default keys.
+* **`panels.disabled.ids`**: union of repo and user-level disabled lists.
+
+
+== Versioning
+
+Each section in `ENSAID_CONFIG.a2ml` that supports versioning declares its own
+`version` field using
+https://semver.org/[Semantic Versioning 2.0.0].
+
+=== Compatibility Rules
+
+[cols="1,3"]
+|===
+|Version Change |Requirement
+
+|Major (e.g. 1.x to 2.x)
+|Tools MUST reject files with a major version they do not support.
+Breaking changes to field semantics or removal of fields.
+
+|Minor (e.g. 1.0 to 1.1)
+|Backward-compatible additions. New optional fields. Tools MUST accept
+files with a minor version higher than they support (ignoring unknown fields).
+
+|Patch (e.g. 1.0.0 to 1.0.1)
+|Clarifications and typo fixes to the spec. No schema changes.
+|===
+
+=== Version Negotiation
+
+When a tool encounters a `version` field:
+
+1. Parse the major version.
+2. If the major version is unsupported, emit a diagnostic and skip the file.
+   The tool SHOULD continue loading other files.
+3. If the minor version is higher than supported, emit an informational
+   diagnostic and proceed, ignoring unrecognised fields.
+
+
+== Relationship to Other Standards
+
+[cols="2,4"]
+|===
+|Standard |Relationship
+
+|`.editorconfig`
+|Controls editor formatting (tab size, charset, line endings). `.machine_readable/ENSAID_CONFIG.a2ml`
+operates at a higher level: development environment orchestration, panel
+layout, automation workflows. Both can coexist.
+
+|`.machine_readable/` (STATE.scm, META.scm, etc.)
+|Project state, governance, and metadata. `.machine_readable/ENSAID_CONFIG.a2ml` is for tooling
+preferences, not project semantics. A tool reads `.machine_readable/` to
+understand the project and `.machine_readable/ENSAID_CONFIG.a2ml` to understand how to present it.
+
+|`0-AI-MANIFEST.a2ml`
+|AI agent entry point declaring canonical locations and invariants.
+`.machine_readable/ENSAID_CONFIG.a2ml` is for eNSAID tool configuration specifically.
+`0-AI-MANIFEST.a2ml` MAY reference `.machine_readable/ENSAID_CONFIG.a2ml` as a canonical location.
+
+|`PANELS.a2ml` (root-level)
+|Some repos use a root-level `PANELS.a2ml` as a panel manifest.
+If `.machine_readable/ENSAID_CONFIG.a2ml [panels]` exists, it supersedes the root-level file.
+Tools SHOULD emit a deprecation warning when both are present.
+|===
+
+
+== Security Considerations
+
+=== Endpoint URLs
+
+The `[panels]` section allows specifying `endpoint` URLs. Tools MUST:
+
+* Validate that endpoints are well-formed URLs.
+* Default to `localhost` connections only. Remote endpoints SHOULD require
+  explicit user confirmation.
+* Never auto-connect to endpoints over plaintext HTTP on non-localhost
+  addresses.
+
+=== Environment Variables
+
+The `[panels]` section allows setting `env` variables per panel. Tools MUST:
+
+* Scope environment variables to the panel's processes only.
+* Never leak panel-scoped environment variables to other panels.
+* Warn users if environment variable names match known secret patterns
+  (e.g. `*_TOKEN`, `*_SECRET`, `*_KEY`, `*_PASSWORD`).
+
+=== Workflow Actions
+
+The `[workflows]` section can trigger actions across panels. Tools MUST:
+
+* Never execute shell commands from workflow actions without user-visible
+  confirmation or an explicit execution mode of `"live"`.
+* Log all workflow-triggered actions for auditability.
+* Respect the `workspace.protection` level when evaluating whether an
+  action is permitted.
+
+
+== Examples
+
+=== Minimal Configuration
+
+A repository that only wants to set the workspace mode:
+
+[source,toml]
+----
+# .machine_readable/ENSAID_CONFIG.a2ml
+[ensaid]
+version = "1.0.0"
+
+[workspace]
+mode = "code"
+----
+
+No other files needed. Panels, workflows, clades, and portfolios all use
+tool defaults.
+
+=== Game Development Repository
+
+[source,toml]
+----
+# .machine_readable/ENSAID_CONFIG.a2ml
+[ensaid]
+version = "1.0.0"
+tool = "panll"
+
+[workspace]
+mode = "bespoke"
+protection = "open"
+execution = "live"
+
+[preferences]
+humidity = "high"
+auto-connect = true
+----
+
+[source,toml]
+----
+# .machine_readable/ENSAID_CONFIG.a2ml [panels]
+[panels]
+version = "1.0.0"
+
+[[panels.enabled]]
+id = "valence-shell"
+isolation = "native"
+
+[[panels.enabled]]
+id = "game-preview"
+isolation = "native"
+endpoint = "http://localhost:8080"
+auto-connect = true
+env = { VITE_PORT = "8080" }
+
+[[panels.enabled]]
+id = "build-dashboard"
+isolation = "native"
+
+[panels.disabled]
+ids = ["cloudguard", "aerie", "plaza"]
+----
+
+[source,toml]
+----
+# .machine_readable/ENSAID_CONFIG.a2ml [workflows]
+[workflows]
+version = "1.0.0"
+
+[[workflows.rule]]
+name = "build-on-save"
+trigger = { event = "file-changed", pattern = "src/**/*.res" }
+condition = { panel = "build-dashboard", field = "watchMode", equals = true }
+action = { panel = "build-dashboard", message = "TriggerBuild", args = { target = "game" } }
+----
+
+=== Read-Only Standards Repository
+
+[source,toml]
+----
+# .machine_readable/ENSAID_CONFIG.a2ml
+[ensaid]
+version = "1.0.0"
+
+[workspace]
+mode = "code"
+protection = "readonly"
+
+[preferences]
+humidity = "low"
+----
+
+=== Formal Verification Project
+
+[source,toml]
+----
+# .machine_readable/ENSAID_CONFIG.a2ml
+[ensaid]
+version = "1.0.0"
+
+[workspace]
+mode = "rhodium"
+protection = "language-locked"
+
+[workspace.language-lock]
+extensions = [".idr", ".v", ".lean"]
+----
+
+
+== IANA Considerations
+
+This document has no IANA actions at this time. Future versions may register
+a media type for `.a2ml` files.
+
+
+== Acknowledgements
+
+The `.machine_readable/ENSAID_CONFIG.a2ml` standard draws inspiration from `.editorconfig`,
+`.vscode/settings.json`, and Nix flake configuration. The eNSAID paradigm
+and PanLL architecture were designed by Jonathan D.A. Jewell.
+
+
+== Author
+
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+
+== License
+
+Palimpsest License v1.0 (PMPL-1.0-or-later).
+Copyright (c) 2026 Jonathan D.A. Jewell.
