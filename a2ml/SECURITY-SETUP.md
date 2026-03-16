@@ -224,7 +224,7 @@ https://securityheaders.com/?q=a2ml.net
 Instead:
 1. Email: security@a2ml.net
 2. GitHub Security Advisory: https://github.com/hyperpolymath/a2ml/security/advisories/new
-3. PGP encrypted: https://keys.openpgp.org/search?q=jonathan.jewell@open.ac.uk
+3. PGP encrypted: https://keys.openpgp.org/search?q=j.d.a.jewell@open.ac.uk
 
 We aim to respond within 48 hours.
 

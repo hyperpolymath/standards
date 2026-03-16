@@ -154,6 +154,6 @@ Thanks for building such an excellent configuration language! K9 wouldn't be pos
 
 **Jonathan D.A. Jewell**
 The Open University
-jonathan.jewell@open.ac.uk
+j.d.a.jewell@open.ac.uk
 
 P.S. - If you're interested in formally verified markup languages, check out A2ML (Attested Markup Language), which uses Idris2 dependent types: https://github.com/hyperpolymath/a2ml

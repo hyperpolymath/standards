@@ -245,7 +245,7 @@ hyperpolymath-repos/
 
 **Project:** STAMP Protocol
 **Maintainer:** Jonathan D.A. Jewell
-**Email:** jonathan.jewell@open.ac.uk
+**Email:** j.d.a.jewell@open.ac.uk
 **Website:** https://stamp-protocol.org
 **Telegram:** @stamp_demo_bot
 

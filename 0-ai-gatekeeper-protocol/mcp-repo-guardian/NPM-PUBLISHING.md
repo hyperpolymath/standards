@@ -15,7 +15,7 @@ This document describes how to publish `@hyperpolymath/mcp-repo-guardian` to npm
 - [x] Package.json properly configured
   - [x] Name: `@hyperpolymath/mcp-repo-guardian`
   - [x] Version: `0.1.0`
-  - [x] Author: Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+  - [x] Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
   - [x] License: PMPL-1.0-or-later
   - [x] Repository, bugs, homepage URLs
   - [x] Keywords for discoverability

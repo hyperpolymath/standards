@@ -224,7 +224,7 @@ https://securityheaders.com/?q=axel-protocol.org
 Instead:
 1. Email: security@axel-protocol.org
 2. GitHub Security Advisory: https://github.com/hyperpolymath/axel-protocol/security/advisories/new
-3. PGP encrypted: https://keys.openpgp.org/search?q=jonathan.jewell@open.ac.uk
+3. PGP encrypted: https://keys.openpgp.org/search?q=j.d.a.jewell@open.ac.uk
 
 We aim to respond within 48 hours.
 

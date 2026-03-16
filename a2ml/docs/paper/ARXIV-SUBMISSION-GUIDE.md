@@ -1,7 +1,7 @@
 # arXiv Submission Guide: A2ML Paper
 
 **Paper:** A2ML: A Lightweight Markup Language with Formal Proof Obligations
-**Author:** Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+**Author:** Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 **Submission Package:** `a2ml-arxiv-submission.tar.gz` (5.9 KB)
 
 ---
@@ -26,7 +26,7 @@
 **URL:** https://arxiv.org/user/login
 
 - Click "Register" if you don't have an account
-- Use your academic email: `jonathan.jewell@open.ac.uk`
+- Use your academic email: `j.d.a.jewell@open.ac.uk`
 - Verify email address
 - Complete profile (name, affiliation, etc.)
 
@@ -235,7 +235,7 @@ After arXiv acceptance:
 | **Title** | A2ML: A Lightweight Markup Language with Formal Proof Obligations |
 | **Author** | Jonathan D.A. Jewell |
 | **Affiliation** | The Open University |
-| **Email** | jonathan.jewell@open.ac.uk |
+| **Email** | j.d.a.jewell@open.ac.uk |
 | **Primary Subject** | cs.PL (Programming Languages) |
 | **Secondary Subject** | cs.LO (Logic in Computer Science) |
 | **Submission Package** | `a2ml-arxiv-submission.tar.gz` (5.9 KB) |

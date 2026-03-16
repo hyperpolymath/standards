@@ -1,12 +1,12 @@
 <!--
 SPDX-License-Identifier: PMPL-1.0-or-later
-SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 -->
 
 # AXEL-O: Origin/Edge Enforcement Profile
 
 **Version**: 1.1.0-draft
-**Author**: Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+**Author**: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 **License**: PMPL-1.0-or-later
 **Status**: Normative
 

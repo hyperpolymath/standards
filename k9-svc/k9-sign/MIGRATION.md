@@ -426,7 +426,7 @@ A: Yes. It has:
 
 - **Issues:** https://github.com/hyperpolymath/k9-svc/issues
 - **Docs:** `../docs/SECURITY-BEST-PRACTICES.adoc`
-- **Email:** jonathan.jewell@open.ac.uk
+- **Email:** j.d.a.jewell@open.ac.uk
 
 ---
 

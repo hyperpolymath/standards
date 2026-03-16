@@ -136,7 +136,7 @@ Contact us to integrate STAMP into your platform.
 
 - [GitHub](https://github.com/hyperpolymath/libstamp)
 - [Demo Bot](https://t.me/stamp_demo_bot)
-- [Contact](mailto:jonathan.jewell@open.ac.uk)
+- [Contact](mailto:j.d.a.jewell@open.ac.uk)
 
 ---
 

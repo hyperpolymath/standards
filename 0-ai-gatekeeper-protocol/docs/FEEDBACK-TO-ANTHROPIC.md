@@ -299,7 +299,7 @@ We'd welcome the opportunity to discuss this further and collaborate on implemen
 **Contact:**
 - GitHub: https://github.com/hyperpolymath/0-ai-gatekeeper-protocol
 - Issues: https://github.com/hyperpolymath/0-ai-gatekeeper-protocol/issues
-- Email: jonathan.jewell@open.ac.uk
+- Email: j.d.a.jewell@open.ac.uk
 
 **References:**
 - [RATIONALE.md](RATIONALE.md) - Detailed problem/solution explanation

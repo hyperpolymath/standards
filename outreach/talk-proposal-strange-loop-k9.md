@@ -6,7 +6,7 @@ K9: When Your Release Tool Releases Itself (Meta-Dogfooding Infrastructure Autom
 ## Speaker
 **Jonathan D.A. Jewell**
 The Open University
-jonathan.jewell@open.ac.uk
+j.d.a.jewell@open.ac.uk
 
 ## Session Format
 40-minute talk
@@ -294,5 +294,5 @@ Previous projects include Bunsenite (Nickel IDE), Rhodium Standard Repositories 
 ---
 
 **Contact:**
-jonathan.jewell@open.ac.uk
+j.d.a.jewell@open.ac.uk
 https://github.com/hyperpolymath

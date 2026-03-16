@@ -321,7 +321,7 @@ AGPL-3.0-or-later
 
 ## Author
 
-Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
 ## Learn More
 
