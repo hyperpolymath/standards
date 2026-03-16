@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: PMPL-1.0-or-later
 # sign.sh - Ed25519 signing and verification for K9 Hunt-level components
 #
 # Uses OpenSSL for cryptographic operations.
