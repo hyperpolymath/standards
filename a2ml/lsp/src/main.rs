@@ -7,6 +7,7 @@
 //
 // Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
+#![forbid(unsafe_code)]
 mod completions;
 mod diagnostics;
 mod hover;
