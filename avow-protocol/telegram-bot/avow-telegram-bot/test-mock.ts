@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: PMPL-1.0-or-later
 // Test script for mock STAMP library
 
 import * as stamp from "./src/stamp-mock.ts";

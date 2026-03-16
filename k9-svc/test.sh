@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: PMPL-1.0-or-later
 # test.sh - K9 SVC Test Suite
 #
 # Runs all tests for the K9 Self-Validating Component system.
