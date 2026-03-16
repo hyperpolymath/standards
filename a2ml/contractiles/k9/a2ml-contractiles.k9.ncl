@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: PMPL-1.0-or-later
 # a2ml-contractiles.k9.ncl - Yard-level K9 component for A2ML contractiles
 # Validates A2ML contractiles files with the A2ML CLI.
 
