@@ -7,6 +7,7 @@
 //!
 //! Universal enforcement for ANY AI agent (not just MCP-compatible).
 
+#![forbid(unsafe_code)]
 use anyhow::{Context, Result};
 use clap::Parser;
 use fuse3::path::Session;

@@ -9,6 +9,7 @@
 //   k9-lsp          # Start LSP server on stdin/stdout
 //   k9-lsp --help   # Show usage information
 
+#![forbid(unsafe_code)]
 mod completions;
 mod diagnostics;
 mod hover;
