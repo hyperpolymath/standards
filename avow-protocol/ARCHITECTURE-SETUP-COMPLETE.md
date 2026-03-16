@@ -256,7 +256,7 @@ AGPL-3.0 references have been replaced throughout the codebase.
 
 All files correctly attribute:
 - **Name:** Jonathan D.A. Jewell
-- **Email:** jonathan.jewell@open.ac.uk
+- **Email:** j.d.a.jewell@open.ac.uk
 
 ## Proven Library Integration
 
@@ -290,5 +290,5 @@ AVOW Protocol implements **belt-and-suspenders** security:
 
 For questions about this setup:
 - Jonathan D.A. Jewell
-- jonathan.jewell@open.ac.uk
+- j.d.a.jewell@open.ac.uk
 - GitHub: @hyperpolymath

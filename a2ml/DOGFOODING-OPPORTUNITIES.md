@@ -693,4 +693,4 @@ A2ML dogfooding is **essential** for proving the format's viability. By using it
 
 **Document Status:** Ready for Implementation
 **Next Review:** After A2ML v1.0.0 release
-**Maintainer:** Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+**Maintainer:** Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>

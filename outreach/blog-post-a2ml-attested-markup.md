@@ -282,4 +282,4 @@ For documents that matter—papers, specs, standards—that's worth a bit of ext
 **About the Author:**
 Jonathan D.A. Jewell is a researcher at The Open University working on formal methods for software preservation. He builds things that prove things.
 
-Email: jonathan.jewell@open.ac.uk
+Email: j.d.a.jewell@open.ac.uk

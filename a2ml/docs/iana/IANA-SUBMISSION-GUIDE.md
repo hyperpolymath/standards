@@ -68,7 +68,7 @@ Please let me know if you need any additional information or clarifications.
 Best regards,
 Jonathan D.A. Jewell
 The Open University
-jonathan.jewell@open.ac.uk
+j.d.a.jewell@open.ac.uk
 ```
 
 **Attachment:** `application-vnd.a2ml-registration.txt`
@@ -106,7 +106,7 @@ Please let me know if you need any additional information or clarifications.
 Best regards,
 Jonathan D.A. Jewell
 The Open University
-jonathan.jewell@open.ac.uk
+j.d.a.jewell@open.ac.uk
 ```
 
 **Attachment:** `application-vnd.k9+nickel-registration.txt`
@@ -317,7 +317,7 @@ Content-Type: application/vnd.k9+nickel; security-level=hunt; validation-mode=va
 
 **Submitter:**
 - Jonathan D.A. Jewell
-- Email: jonathan.jewell@open.ac.uk
+- Email: j.d.a.jewell@open.ac.uk
 - Institution: The Open University
 
 ---

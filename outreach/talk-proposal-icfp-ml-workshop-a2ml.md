@@ -6,7 +6,7 @@ A2ML: Proving Markup Language Invariants with Dependent Types
 ## Presenters
 **Jonathan D.A. Jewell**
 The Open University
-jonathan.jewell@open.ac.uk
+j.d.a.jewell@open.ac.uk
 
 ## Format
 25-minute talk + 5-minute Q&A
@@ -172,5 +172,5 @@ This aligns with the workshop's themes of type system innovation and practical a
 
 **Contact:**
 Jonathan D.A. Jewell
-jonathan.jewell@open.ac.uk
+j.d.a.jewell@open.ac.uk
 https://github.com/hyperpolymath/a2ml
