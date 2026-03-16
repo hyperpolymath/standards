@@ -116,6 +116,131 @@ The writer produces:
 - `a2ml-reader.lua` — Standalone reader (189 lines)
 - `a2ml-writer.lua` — Standalone writer (153 lines)
 
+== Filter: a2ml-filter.lua
+
+`a2ml-filter.lua` is a Pandoc Lua filter that provides post-processing
+passes over the AST produced by the A2ML reader. Run it with `--lua-filter`:
+
+[source,sh]
+----
+# Full pipeline: read + filter + template
+pandoc -f a2ml.lua input.a2ml \
+  --lua-filter=a2ml-filter.lua \
+  --template=a2ml.html \
+  -o output.html
+----
+
+=== Capabilities
+
+[cols="1,3"]
+|===
+| Feature | Description
+
+| Cross-reference resolver
+| `@ref(id)` links are validated against actual heading anchors. Resolved refs
+  get a tooltip; unresolved refs produce a warning and red styling.
+
+| Include directive
+| `@include(file.a2ml)` Div elements are replaced with the parsed content of
+  the referenced file via `pandoc.read()`. Missing files produce a visible
+  error block rather than silent failure.
+
+| TOC generator
+| Auto-generates a Table of Contents from all document headings. Inserted
+  after the first level-1 heading (or at the top if none exists).
+
+| Diagram rendering
+| Code blocks tagged `mermaid` or `graphviz`/`dot` are rendered to inline SVG
+  via `pandoc.pipe()`. Falls back gracefully to showing source code if the
+  external tool (mmdc, dot) is not installed.
+
+| SPDX validator
+| Checks for `SPDX-License-Identifier` in metadata or early document blocks.
+  Warns if missing (can be disabled via `a2ml-validate: false` in metadata).
+
+| Metadata enrichment
+| Populates `version`, `date`, and `author` from git (`git describe`,
+  `git log`, `git config`) when not already present in the document.
+|===
+
+=== Disabling Capabilities
+
+Set metadata flags to disable individual features:
+
+[source,yaml]
+----
+---
+a2ml-includes: false
+a2ml-diagrams: false
+a2ml-validate: false
+---
+----
+
+== HTML Template: a2ml.html
+
+`a2ml.html` is a Pandoc HTML5 template purpose-built for A2ML documents:
+
+[source,sh]
+----
+pandoc -f a2ml.lua input.a2ml \
+  --lua-filter=a2ml-filter.lua \
+  --template=a2ml.html \
+  -o output.html
+----
+
+=== Template Features
+
+- **SPDX badge** in the document header showing the license identifier
+- **Directive styling**: `@abstract` (blue), `@opaque` (amber), `@fig` (green),
+  `@note` (orange), `@warning` (red) — each with distinct borders, backgrounds,
+  and auto-generated labels
+- **Responsive layout**: fluid max-width container, mobile breakpoints
+- **Print-friendly**: clean monochrome output, URLs expanded inline
+- **Syntax highlighting**: full Pandoc highlight token coverage
+- **TOC styling**: collapsible grey box for the generated table of contents
+- **Diagram blocks**: centred SVG container with fallback source display
+- **Cross-reference colouring**: resolved refs in blue, unresolved in red
+
+=== Template Variables
+
+The template consumes these Pandoc metadata fields:
+
+- `$title$` — document title
+- `$author$` — author name
+- `$date$` — document date
+- `$version$` — document version
+- `$spdx-license$` — SPDX license identifier
+- `$a2ml-format$` — A2ML format version
+
+== Extensions Table
+
+Both the reader and filter advertise an extensions table:
+
+[cols="1,3"]
+|===
+| Extension | Purpose
+
+| `+smart`
+| Typographic quotes (SmartyPants processing)
+
+| `+includes`
+| File inclusion via `@include` directives
+
+| `+diagrams`
+| Diagram rendering (mermaid, graphviz/dot)
+
+| `+validate`
+| Structural validation (SPDX, cross-references)
+|===
+
+== Files
+
+- `a2ml.lua` — Combined reader (360 lines)
+- `a2ml-reader.lua` — Standalone reader (189 lines)
+- `a2ml-writer.lua` — Standalone writer (153 lines)
+- `a2ml-filter.lua` — Lua filter with 6 post-processing passes
+- `a2ml.html` — HTML5 template with A2ML-specific CSS
+
 == Spec Compliance
 
 This reader implements the A2ML v1.0.0 surface syntax as specified in
