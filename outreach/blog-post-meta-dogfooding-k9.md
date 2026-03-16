@@ -186,4 +186,4 @@ Jonathan D.A. Jewell is a researcher at The Open University working on provable 
 **Links:**
 - K9: https://github.com/hyperpolymath/k9-svc
 - A2ML: https://github.com/hyperpolymath/a2ml (formally verified markup language)
-- Email: jonathan.jewell@open.ac.uk
+- Email: j.d.a.jewell@open.ac.uk

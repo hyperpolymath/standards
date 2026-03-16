@@ -130,7 +130,7 @@ Add these critical records manually:
 |------|------|---------|
 | CAA | @ | `0 issue "letsencrypt.org"` |
 | CAA | @ | `0 issue "digicert.com"` |
-| CAA | @ | `0 iodef "mailto:jonathan.jewell@open.ac.uk"` |
+| CAA | @ | `0 iodef "mailto:j.d.a.jewell@open.ac.uk"` |
 | TXT | @ | `v=spf1 include:_spf.github.com ~all` |
 | TXT | @ | `github-pages-challenge-hyperpolymath=avow-protocol-verification` |
 
@@ -138,7 +138,7 @@ Add these critical records manually:
 
 | Type | Name | Content |
 |------|------|---------|
-| TXT | _dmarc | `v=DMARC1; p=reject; rua=mailto:jonathan.jewell@open.ac.uk` |
+| TXT | _dmarc | `v=DMARC1; p=reject; rua=mailto:j.d.a.jewell@open.ac.uk` |
 | MX | @ | `10 mail.avow-protocol.org` |
 
 ### Step 2.3: Configure Custom Domain for Pages
@@ -310,7 +310,7 @@ In Cloudflare DNS, add:
 **Add policy:**
 - Policy name: `AVOW Team Access`
 - Action: Allow
-- Include: Emails: `jonathan.jewell@open.ac.uk`
+- Include: Emails: `j.d.a.jewell@open.ac.uk`
 - Click **"Next"** → **"Add application"**
 
 ---
@@ -481,7 +481,7 @@ sudo dscacheutil -flushcache
 - Cloudflare Tunnel: https://developers.cloudflare.com/cloudflare-one/
 
 **Contact:**
-- Jonathan D.A. Jewell: jonathan.jewell@open.ac.uk
+- Jonathan D.A. Jewell: j.d.a.jewell@open.ac.uk
 - GitHub Issues: https://github.com/hyperpolymath/avow-protocol/issues
 
 ---

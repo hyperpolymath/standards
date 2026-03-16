@@ -804,7 +804,7 @@ Production Ready:    YES ✅
 
 ---
 
-**Maintainer:** Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+**Maintainer:** Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 **Date:** 2026-01-30
 **Status:** Tier 1 security implementation COMPLETE
 **Next:** Deploy to production, begin Tier 2

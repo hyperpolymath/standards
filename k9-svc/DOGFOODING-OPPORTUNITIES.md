@@ -789,4 +789,4 @@ K9 is **production-ready** (v1.0.0) and already demonstrates self-validation. Th
 
 **Document Status:** Ready for Implementation
 **Next Review:** After Phase 2 (Bunsenite integration)
-**Maintainer:** Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>
+**Maintainer:** Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
