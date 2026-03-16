@@ -1,0 +1,596 @@
+<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) -->
+<!-- A2ML Showcase — built with ddraig-ssg (Idris 2) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Specification — A2ML: Attested Markup Language</title>
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset & base                                                       */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue-900: #1a237e;
+      --blue-800: #283593;
+      --blue-700: #303f9f;
+      --blue-600: #3949ab;
+      --blue-100: #c5cae9;
+      --blue-50:  #e8eaf6;
+      --gold-500: #ffd600;
+      --gold-400: #ffea00;
+      --gold-200: #fff9c4;
+      --gray-900: #212121;
+      --gray-700: #616161;
+      --gray-400: #bdbdbd;
+      --gray-100: #f5f5f5;
+      --white:    #ffffff;
+      --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+      --max-width: 52rem;
+      --nav-height: 3.5rem;
+    }
+
+    html { font-size: 16px; scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-sans);
+      color: var(--gray-900);
+      background: var(--white);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Navigation                                                         */
+    /* ------------------------------------------------------------------ */
+    .site-nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--blue-900);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    }
+
+    .nav-inner {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      height: var(--nav-height);
+      padding: 0 1.5rem;
+      gap: 0.25rem;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-right: auto;
+      text-decoration: none;
+      color: var(--white);
+      font-weight: 700;
+      font-size: 1.15rem;
+      letter-spacing: 0.02em;
+    }
+
+    /* Dragon motif — stylised ddraig mark */
+    .nav-brand .dragon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.7rem;
+      height: 1.7rem;
+      border-radius: 0.35rem;
+      background: var(--gold-500);
+      color: var(--blue-900);
+      font-weight: 900;
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    .nav-links { display: flex; gap: 0.15rem; }
+
+    .nav-links a {
+      display: inline-block;
+      padding: 0.45rem 0.85rem;
+      color: var(--blue-100);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      border-radius: 0.35rem;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .nav-links a:hover,
+    .nav-links a:focus-visible {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--white);
+    }
+
+    .nav-links a.active {
+      background: rgba(255, 214, 0, 0.15);
+      color: var(--gold-500);
+    }
+
+    /* Mobile nav */
+    .nav-toggle { display: none; }
+    .nav-toggle-label {
+      display: none;
+      cursor: pointer;
+      padding: 0.5rem;
+      color: var(--white);
+    }
+    .nav-toggle-label span,
+    .nav-toggle-label span::before,
+    .nav-toggle-label span::after {
+      display: block;
+      width: 1.4rem;
+      height: 2px;
+      background: currentColor;
+      position: relative;
+      transition: transform 0.25s;
+    }
+    .nav-toggle-label span::before,
+    .nav-toggle-label span::after {
+      content: "";
+      position: absolute;
+    }
+    .nav-toggle-label span::before { top: -6px; }
+    .nav-toggle-label span::after  { top:  6px; }
+
+    @media (max-width: 48rem) {
+      .nav-inner { flex-wrap: wrap; }
+      .nav-toggle-label { display: block; }
+      .nav-links {
+        display: none;
+        flex-basis: 100%;
+        flex-direction: column;
+        padding-bottom: 0.75rem;
+      }
+      .nav-toggle:checked ~ .nav-links { display: flex; }
+      .nav-links a { padding: 0.6rem 0.85rem; }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Main content                                                       */
+    /* ------------------------------------------------------------------ */
+    .page-content {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem 4rem;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Typography                                                         */
+    /* ------------------------------------------------------------------ */
+    h1, h2, h3, h4 {
+      color: var(--blue-900);
+      line-height: 1.25;
+      margin-top: 2.25rem;
+      margin-bottom: 0.75rem;
+    }
+
+    h1 { font-size: 2.25rem; margin-top: 0; }
+    h2 { font-size: 1.55rem; border-bottom: 2px solid var(--blue-50); padding-bottom: 0.4rem; }
+    h3 { font-size: 1.2rem; }
+
+    p { margin-bottom: 1rem; }
+
+    a { color: var(--blue-700); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    a:hover { color: var(--blue-900); }
+
+    ul, ol { margin: 0 0 1rem 1.5rem; }
+    li { margin-bottom: 0.35rem; }
+
+    strong { font-weight: 650; }
+
+    blockquote {
+      border-left: 4px solid var(--gold-500);
+      background: var(--gold-200);
+      padding: 1rem 1.25rem;
+      margin: 1.25rem 0;
+      border-radius: 0 0.35rem 0.35rem 0;
+      color: var(--gray-900);
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid var(--gray-400);
+      margin: 2rem 0;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Code                                                               */
+    /* ------------------------------------------------------------------ */
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.88em;
+      background: var(--gray-100);
+      padding: 0.15em 0.4em;
+      border-radius: 0.25rem;
+    }
+
+    pre {
+      background: var(--gray-900);
+      color: #e0e0e0;
+      padding: 1.25rem 1.5rem;
+      border-radius: 0.5rem;
+      overflow-x: auto;
+      margin: 1.25rem 0;
+      line-height: 1.55;
+      font-size: 0.88rem;
+    }
+
+    pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+    }
+
+    /* Syntax hints */
+    pre .kw  { color: #ce93d8; }  /* keyword */
+    pre .str { color: #a5d6a7; }  /* string  */
+    pre .cmt { color: #78909c; }  /* comment */
+    pre .dir { color: #ffd600; }  /* directive */
+
+    /* ------------------------------------------------------------------ */
+    /* Hero (home page only)                                              */
+    /* ------------------------------------------------------------------ */
+    .hero {
+      background: linear-gradient(135deg, var(--blue-900) 0%, var(--blue-700) 100%);
+      color: var(--white);
+      padding: 4rem 1.5rem;
+      text-align: center;
+      margin: -2.5rem -1.5rem 2.5rem;
+      border-radius: 0 0 1rem 1rem;
+    }
+
+    .hero h1 {
+      color: var(--white);
+      font-size: 2.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .hero .tagline {
+      color: var(--gold-500);
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1.25rem;
+    }
+
+    .hero p { color: var(--blue-100); max-width: 36rem; margin: 0 auto 1rem; }
+
+    .hero .cta {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.75rem 2rem;
+      background: var(--gold-500);
+      color: var(--blue-900);
+      font-weight: 700;
+      border-radius: 0.4rem;
+      text-decoration: none;
+      transition: background 0.15s, transform 0.15s;
+    }
+
+    .hero .cta:hover { background: var(--gold-400); transform: translateY(-1px); }
+
+    /* ------------------------------------------------------------------ */
+    /* Cards / feature grid                                               */
+    /* ------------------------------------------------------------------ */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+      gap: 1.25rem;
+      margin: 2rem 0;
+    }
+
+    .feature-card {
+      background: var(--blue-50);
+      border-radius: 0.5rem;
+      padding: 1.25rem 1.5rem;
+      border-left: 4px solid var(--gold-500);
+    }
+
+    .feature-card h3 {
+      margin-top: 0;
+      font-size: 1.05rem;
+      color: var(--blue-900);
+    }
+
+    .feature-card p { font-size: 0.92rem; color: var(--gray-700); margin-bottom: 0; }
+
+    /* ------------------------------------------------------------------ */
+    /* Integration list                                                   */
+    /* ------------------------------------------------------------------ */
+    .integration-item {
+      padding: 1.25rem 0;
+      border-bottom: 1px solid var(--gray-100);
+    }
+
+    .integration-item:last-child { border-bottom: none; }
+
+    .integration-item h3 { margin-top: 0; }
+
+    .badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.15em 0.55em;
+      border-radius: 1rem;
+      vertical-align: middle;
+      margin-left: 0.4rem;
+    }
+
+    .badge-live    { background: #c8e6c9; color: #2e7d32; }
+    .badge-pending { background: var(--gold-200); color: #f57f17; }
+    .badge-soon    { background: var(--blue-50); color: var(--blue-700); }
+
+    /* ------------------------------------------------------------------ */
+    /* Steps / walkthrough                                                */
+    /* ------------------------------------------------------------------ */
+    .step {
+      position: relative;
+      padding-left: 2.75rem;
+      margin-bottom: 2rem;
+    }
+
+    .step::before {
+      content: attr(data-step);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 2rem;
+      height: 2rem;
+      background: var(--blue-900);
+      color: var(--gold-500);
+      font-weight: 700;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Footer                                                             */
+    /* ------------------------------------------------------------------ */
+    .site-footer {
+      background: var(--gray-100);
+      border-top: 1px solid var(--gray-400);
+      padding: 1.5rem;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--gray-700);
+    }
+
+    .site-footer a { color: var(--blue-700); }
+
+    .footer-dragon {
+      display: inline-block;
+      color: var(--gold-500);
+      font-weight: 900;
+      margin-right: 0.15rem;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Utilities                                                          */
+    /* ------------------------------------------------------------------ */
+    .muted { color: var(--gray-700); }
+    .text-gold { color: var(--gold-500); }
+    .mt-0 { margin-top: 0; }
+  </style>
+</head>
+<body class="page-specification">
+
+  <!-- Navigation -->
+  <nav class="site-nav" aria-label="Primary">
+    <div class="nav-inner">
+      <a class="nav-brand" href="index.html">
+        <span class="dragon" aria-hidden="true">&#x1F432;</span>
+        A2ML
+      </a>
+      <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-hidden="true">
+      <label for="nav-toggle" class="nav-toggle-label" aria-label="Toggle navigation">
+        <span></span>
+      </label>
+      <div class="nav-links">
+              <li><a href="index.html">A2ML</a></li>
+      <li><a href="specification.html" class="active">Specification</a></li>
+      <li><a href="examples.html">Examples</a></li>
+      <li><a href="integrations.html">Integrations</a></li>
+      <li><a href="getting-started.html">Get Started</a></li>
+
+      </div>
+    </div>
+  </nav>
+
+  <!-- Page content -->
+  <main class="page-content" id="specification">
+    <h1>A2ML Specification</h1>
+<h2>Overview</h2>
+<p>A2ML (Attested Markup Language) is a text-based document format that combines human-readable markup with machine-verifiable attestation blocks. This page describes the format as currently implemented in the [pandoc-a2ml](https://github.com/hyperpolymath/pandoc-a2ml) toolchain.</p>
+<h2>File Format</h2>
+<ul>
+<li><strong>Extension:</strong> <code>.a2ml</code></li>
+<li><strong>Media type:</strong> <code>application/vnd.a2ml</code> (IANA registration pending)</li>
+<li><strong>Encoding:</strong> UTF-8</li>
+<li><strong>Line endings:</strong> LF (Unix-style) recommended; CRLF accepted</li>
+</ul>
+<h2>Basic Syntax</h2>
+<p>A2ML uses a Markdown-like syntax with additional constructs for attestation and structured metadata.</p>
+<h3>Headings</h3>
+<pre><code># Top-level heading
+## Second-level heading
+### Third-level heading
+</code></pre>
+<h3>Inline Formatting</h3>
+<pre><code>**Bold text** for emphasis
+*Italic text* for secondary emphasis
+[Link text](https://example.com) for hyperlinks
+@ref(section-id) for internal cross-references
+`inline code` for identifiers
+</code></pre>
+<h3>Lists</h3>
+<pre><code>- Unordered list item
+- Another item
+* Asterisk syntax also works
+
+1. Ordered list item
+2. Another item
+</code></pre>
+<h3>Code Blocks</h3>
+<pre><code></code></pre>
+<p>code goes here</p>
+<pre><code></code></pre>
+<h3>Comments</h3>
+<pre><code>;; Scheme-style comments are stripped during parsing.
+;; Use these for notes that should not appear in output.
+</code></pre>
+<h2>Directive Blocks</h2>
+<p>Directives are the core extension that distinguishes A2ML from plain Markdown. They carry structured, machine-readable content within annotated blocks.</p>
+<h3>Syntax</h3>
+<pre><code>@directive-name:
+Content of the directive.
+Can span multiple lines.
+@end
+</code></pre>
+<p>The parser collects everything between <code>@directive-name:</code> and <code>@end</code> into a named container (rendered as a <code><div></code> with <code>class="directive-name"</code> in HTML output).</p>
+<h3>Standard Directives</h3>
+<p>The following directives have conventional meaning across the A2ML ecosystem. Tooling may validate or enforce these.</p>
+<h4><code>@abstract</code></h4>
+<p>A short summary of the document's purpose. Typically one to three sentences.</p>
+<pre><code>@abstract:
+A2ML is a typed, attested markup format for AI agent identity.
+@end
+</code></pre>
+<h4><code>@attestation</code></h4>
+<p>A trust claim with structured fields. This is the fundamental unit of the A2ML trust model.</p>
+<pre><code>@attestation:
+agent-id: hypatia-scanner-v3
+attested-by: rhodibot
+trust-level: verified
+timestamp: 2026-03-16T14:30:00Z
+signature: sha256:9f86d08...
+capabilities:
+  - static-analysis
+  - secret-detection
+  - dependency-audit
+scope: repository
+@end
+</code></pre>
+<p><strong>Fields:</strong></p>
+<p>| Field | Required | Description | |-------|----------|-------------| | <code>agent-id</code> | Yes | Unique identifier for the agent being attested | | <code>attested-by</code> | Yes | Identifier of the attesting authority | | <code>trust-level</code> | Yes | One of: <code>self-declared</code>, <code>peer-reviewed</code>, <code>verified</code>, <code>audited</code> | | <code>timestamp</code> | Yes | ISO 8601 timestamp of the attestation | | <code>signature</code> | Recommended | Cryptographic signature (algorithm:hash) | | <code>capabilities</code> | Yes | List of declared capabilities | | <code>scope</code> | No | Scope of the attestation (e.g., <code>repository</code>, <code>organization</code>, <code>global</code>) |</p>
+<h4><code>@refs</code></h4>
+<p>References and citations. Used for linking to external specifications, standards, or related documents.</p>
+<pre><code>@refs:
+[1] Attested Markup Language Specification (draft), 2026
+[2] SLSA Supply Chain Framework, https://slsa.dev
+@end
+</code></pre>
+<h4><code>@policy</code></h4>
+<p>Declares a policy constraint that tooling should enforce.</p>
+<pre><code>@policy:
+require: attestation.trust-level &gt;= verified
+enforce: ci-pipeline
+action: block-merge
+@end
+</code></pre>
+<h4><code>@provenance</code></h4>
+<p>Records the origin and lineage of the document.</p>
+<pre><code>@provenance:
+created-by: Jonathan D.A. Jewell
+created: 2026-01-15
+last-modified: 2026-03-16
+source: https://github.com/hyperpolymath/a2ml-spec
+version: 0.3.0
+@end
+</code></pre>
+<h2>Attestation Chains</h2>
+<p>The real power of A2ML comes from <strong>attestation chains</strong> — sequences of attestations where each one references or builds upon previous ones.</p>
+<pre><code>;; Agent declares its own capabilities
+@attestation:
+agent-id: codebot-v2
+attested-by: codebot-v2
+trust-level: self-declared
+capabilities:
+  - code-review
+  - style-checking
+@end
+
+;; Security team verifies the agent
+@attestation:
+agent-id: codebot-v2
+attested-by: security-team
+trust-level: verified
+verifies: codebot-v2/self-declared/2026-03-10
+signature: sha256:a3f2c8...
+@end
+
+;; Auditor provides highest-level attestation
+@attestation:
+agent-id: codebot-v2
+attested-by: external-auditor
+trust-level: audited
+verifies: codebot-v2/verified/2026-03-12
+audit-report: https://audits.example.com/codebot-v2
+signature: sha256:7b1e4d...
+@end
+</code></pre>
+<p>Each successive attestation raises the trust level and creates an auditable trail from <code>self-declared</code> through <code>verified</code> to <code>audited</code>.</p>
+<h2>Trust Levels</h2>
+<p>| Level | Meaning | Typical Attester | |-------|---------|------------------| | <code>self-declared</code> | Agent claims its own capabilities | The agent itself | | <code>peer-reviewed</code> | Another agent or team has reviewed the claims | A peer agent or team lead | | <code>verified</code> | A security or operations team has validated behaviour | Security team, CI system | | <code>audited</code> | An independent audit has confirmed the claims | External auditor |</p>
+<h2>Canonical File Locations</h2>
+<p>In repositories following the [Rhodium Standard](https://github.com/hyperpolymath/rhodium-standard-repositories), A2ML files live in the <code>.machine_readable/</code> directory:</p>
+<pre><code>.machine_readable/
+  STATE.a2ml         # Project state and progress
+  META.a2ml          # Architecture decisions, governance
+  ECOSYSTEM.a2ml     # Position in ecosystem, relationships
+  AGENTIC.a2ml       # AI agent interaction patterns
+  NEUROSYM.a2ml      # Neurosymbolic integration config
+  PLAYBOOK.a2ml      # Operational runbook
+  anchors/
+    ANCHOR.a2ml      # Canonical authority declaration
+  policies/
+    MAINTENANCE-AXES.a2ml
+    MAINTENANCE-CHECKLIST.a2ml
+</code></pre>
+<p>The top-level <code>0-AI-MANIFEST.a2ml</code> serves as the entry point that all AI agents must read first.</p>
+<h2>Pandoc Integration</h2>
+<p>A2ML is a first-class Pandoc format. Convert between A2ML and any Pandoc-supported format:</p>
+<pre><code># A2ML to HTML
+pandoc -f a2ml-reader.lua input.a2ml -o output.html
+
+# A2ML to PDF (via LaTeX)
+pandoc -f a2ml-reader.lua input.a2ml -o output.pdf
+
+# Markdown to A2ML
+pandoc input.md -t a2ml-writer.lua -o output.a2ml
+
+# A2ML to A2ML (normalise)
+pandoc -f a2ml-reader.lua input.a2ml -t a2ml-writer.lua -o normalised.a2ml
+</code></pre>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <p>
+      <span class="footer-dragon" aria-hidden="true">&#x1F432;</span>
+      Built with <a href="https://github.com/hyperpolymath/ddraig-ssg">ddraig-ssg</a> (Idris 2)
+      &middot;
+      A2ML is part of the
+      <a href="https://github.com/hyperpolymath">hyperpolymath</a>
+      standards ecosystem
+    </p>
+    <p class="muted">
+      Copyright &copy; 2026 Jonathan D.A. Jewell (hyperpolymath).
+      Licensed under PMPL-1.0-or-later.
+    </p>
+  </footer>
+
+</body>
+</html>
