@@ -15,7 +15,7 @@
     license = "PMPL-1.0-or-later",
     author = {
       name = "Jonathan D.A. Jewell",
-      email = "jonathan.jewell@open.ac.uk",
+      email = "j.d.a.jewell@open.ac.uk",
     },
 
     keywords = [
