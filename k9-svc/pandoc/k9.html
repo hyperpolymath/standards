@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<!--
+  SPDX-License-Identifier: PMPL-1.0-or-later
+  Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+  k9.html — Pandoc HTML5 template for K9 Self-Validating Component documents.
+
+  Usage:
+    pandoc -f k9.lua input.k9.ncl \-\-lua-filter=k9-filter.lua \-\-template=k9.html -o output.html
+
+  Features:
+    - Security level colour scheme (Kennel=green, Yard=amber, Hunt=red)
+    - Contract annotations in monospace with type colours
+    - Pedigree summary card at top
+    - Recipe blocks with copy-to-clipboard styling
+    - Extensions: +smart, +includes, +diagrams, +validate
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="generator" content="pandoc + k9.lua" />
+$if(title)$
+  <title>$title$ — K9 Component</title>
+$else$
+  <title>K9 Component</title>
+$endif$
+$if(version)$
+  <meta name="version" content="$version$" />
+$endif$
+$if(k9-security-level)$
+  <meta name="k9-security-level" content="$k9-security-level$" />
+$endif$
+$for(css)$
+  <link rel="stylesheet" href="$css$" />
+$endfor$
+$for(header-includes)$
+  $header-includes$
+$endfor$
+  <style>
+    /* ================================================================
+       K9 Base Styles — Security-Aware Component Layout
+       ================================================================ */
+
+    :root {
+      /* Security level palettes */
+      --k9-kennel-primary: #2d6a2e;
+      --k9-kennel-bg: #e8f5e9;
+      --k9-kennel-border: #1a4d1b;
+      --k9-kennel-light: #c8e6c9;
+
+      --k9-yard-primary: #b8860b;
+      --k9-yard-bg: #fff8e1;
+      --k9-yard-border: #8b6508;
+      --k9-yard-light: #ffecb3;
+
+      --k9-hunt-primary: #c0392b;
+      --k9-hunt-bg: #ffebee;
+      --k9-hunt-border: #962d22;
+      --k9-hunt-light: #ffcdd2;
+
+      /* Base colours */
+      --k9-bg: #ffffff;
+      --k9-bg-alt: #f8f9fa;
+      --k9-text: #2c3e50;
+      --k9-text-muted: #7f8c8d;
+      --k9-border: #dce1e5;
+      --k9-code-bg: #f4f6f8;
+      --k9-link: #2e86c1;
+
+      /* Contract type colours */
+      --k9-type-string: #27ae60;
+      --k9-type-number: #2980b9;
+      --k9-type-bool: #e67e22;
+      --k9-type-record: #2c3e50;
+      --k9-type-array: #8e44ad;
+      --k9-type-default: #6c3483;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      font-size: 16px;
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.7;
+      color: var(--k9-text);
+      background-color: var(--k9-bg);
+      max-width: 52rem;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    /* ================================================================
+       Security-Level Header Bar
+       The header colour adapts to the K9 trust level:
+       Kennel = green (safe), Yard = amber (guarded), Hunt = red (elevated)
+       ================================================================ */
+
+    .k9-header {
+      border-radius: 8px 8px 0 0;
+      padding: 1.5rem 2rem;
+      margin-bottom: 0;
+      color: #ffffff;
+    }
+
+    /* Default to Kennel (green) */
+    .k9-header {
+      background: linear-gradient(135deg, var(--k9-kennel-primary), #388e3c);
+      border-bottom: 3px solid var(--k9-kennel-border);
+    }
+
+    .k9-header.k9-yard-header {
+      background: linear-gradient(135deg, var(--k9-yard-primary), #d4a017);
+      border-bottom: 3px solid var(--k9-yard-border);
+    }
+
+    .k9-header.k9-hunt-header {
+      background: linear-gradient(135deg, var(--k9-hunt-primary), #e74c3c);
+      border-bottom: 3px solid var(--k9-hunt-border);
+    }
+
+    .k9-header h1 {
+      color: #ffffff;
+      margin: 0;
+      font-size: 1.8rem;
+      font-weight: 700;
+    }
+
+    .k9-header-meta {
+      opacity: 0.9;
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+
+    .k9-header-meta span {
+      margin-right: 1.5rem;
+    }
+
+    /* ================================================================
+       Pedigree Summary Card
+       ================================================================ */
+
+    .k9-pedigree-card {
+      background-color: var(--k9-bg-alt);
+      border: 1px solid var(--k9-border);
+      border-radius: 0 0 8px 8px;
+      padding: 1.25rem 2rem;
+      margin-bottom: 2rem;
+    }
+
+    .k9-pedigree-card h2 {
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--k9-text-muted);
+      margin: 0 0 0.75rem 0;
+      border: none;
+      padding: 0;
+    }
+
+    #k9-pedigree-summary {
+      background-color: var(--k9-bg-alt);
+      border: 1px solid var(--k9-border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin: 1.5rem 0;
+    }
+
+    .k9-pedigree ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0.5rem;
+    }
+
+    .k9-pedigree li {
+      padding: 0.3rem 0;
+    }
+
+    /* ================================================================
+       Security Badges (inline)
+       ================================================================ */
+
+    .k9-security-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 4px;
+      font-weight: bold;
+      font-size: 0.85em;
+      letter-spacing: 0.05em;
+    }
+
+    .k9-kennel {
+      background-color: var(--k9-kennel-primary);
+      color: #ffffff;
+      border: 1px solid var(--k9-kennel-border);
+    }
+
+    .k9-yard {
+      background-color: var(--k9-yard-primary);
+      color: #ffffff;
+      border: 1px solid var(--k9-yard-border);
+    }
+
+    .k9-hunt {
+      background-color: var(--k9-hunt-primary);
+      color: #ffffff;
+      border: 1px solid var(--k9-hunt-border);
+    }
+
+    /* ================================================================
+       Typography
+       ================================================================ */
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--k9-text);
+      margin: 2rem 0 0.5rem 0;
+    }
+
+    h2 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: var(--k9-text);
+      border-bottom: 1px solid var(--k9-border);
+      padding-bottom: 0.4rem;
+      margin-top: 2.5rem;
+      margin-bottom: 1rem;
+    }
+
+    h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: var(--k9-text);
+      margin-top: 2rem;
+      margin-bottom: 0.8rem;
+    }
+
+    p { margin: 0 0 1rem 0; }
+
+    a {
+      color: var(--k9-link);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    /* ================================================================
+       Contract Annotations (Nickel type contracts)
+       ================================================================ */
+
+    .k9-contract {
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.9em;
+      color: var(--k9-type-default);
+      background-color: var(--k9-code-bg);
+      padding: 1px 5px;
+      border-radius: 3px;
+      border: 1px solid var(--k9-border);
+    }
+
+    /* Type-specific colours (applied by k9-filter.lua) */
+    .k9-contract-string  { color: var(--k9-type-string); }
+    .k9-contract-number  { color: var(--k9-type-number); }
+    .k9-contract-bool    { color: var(--k9-type-bool); }
+    .k9-contract-record  { color: var(--k9-type-record); }
+    .k9-contract-array   { color: var(--k9-type-array); }
+
+    /* ================================================================
+       Code Blocks & Recipes
+       ================================================================ */
+
+    code {
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.88em;
+      background-color: var(--k9-code-bg);
+      padding: 2px 6px;
+      border-radius: 3px;
+      border: 1px solid var(--k9-border);
+    }
+
+    pre {
+      background-color: var(--k9-code-bg);
+      border: 1px solid var(--k9-border);
+      border-radius: 6px;
+      padding: 1.25rem;
+      overflow-x: auto;
+      line-height: 1.5;
+      margin: 1.5rem 0;
+      position: relative;
+    }
+
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 0.88em;
+    }
+
+    /* Recipe block styling — distinct from plain code */
+    .k9-recipe-block {
+      position: relative;
+      border-left: 4px solid var(--k9-kennel-primary);
+    }
+
+    .k9-recipe-block::before {
+      content: "Recipe";
+      position: absolute;
+      top: 0;
+      right: 0;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 4px 10px;
+      background-color: var(--k9-kennel-primary);
+      color: #ffffff;
+      border-radius: 0 5px 0 6px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+    }
+
+    /* Copy button styling (requires JS) */
+    .k9-copy-btn {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      background: var(--k9-bg-alt);
+      border: 1px solid var(--k9-border);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s;
+      font-family: 'Inter', sans-serif;
+    }
+
+    pre:hover .k9-copy-btn {
+      opacity: 1;
+    }
+
+    .k9-copy-btn:hover {
+      background-color: var(--k9-border);
+    }
+
+    /* Pandoc syntax highlighting tokens */
+    .sourceCode .kw { color: #0077aa; font-weight: 600; }
+    .sourceCode .dt { color: #2e86c1; }
+    .sourceCode .dv { color: #098658; }
+    .sourceCode .st { color: #a31515; }
+    .sourceCode .co { color: #7f8c8d; font-style: italic; }
+    .sourceCode .fu { color: #6f42c1; }
+    .sourceCode .er { color: #e74c3c; font-weight: bold; }
+    .sourceCode .va { color: #2c3e50; }
+    .sourceCode .cf { color: #0077aa; font-weight: 600; }
+    .sourceCode .op { color: #2c3e50; }
+    .sourceCode .bu { color: #2e86c1; }
+
+    /* ================================================================
+       K9 Section Styling
+       ================================================================ */
+
+    .k9-section {
+      color: var(--k9-text);
+    }
+
+    .k9-binding {
+      color: var(--k9-text);
+    }
+
+    .k9-comment {
+      background-color: var(--k9-bg-alt);
+      border-left: 3px solid var(--k9-text-muted);
+      padding: 0.5rem 1rem;
+      margin: 0.5rem 0;
+      color: var(--k9-text-muted);
+      font-style: italic;
+    }
+
+    .k9-source {
+      margin-top: 3rem;
+      padding-top: 1rem;
+      border-top: 2px dashed var(--k9-border);
+    }
+
+    /* ================================================================
+       Definition Lists (K9 records)
+       ================================================================ */
+
+    dl {
+      margin: 0.5rem 0 1rem 0;
+    }
+
+    dt {
+      font-weight: 600;
+      margin-top: 0.6rem;
+    }
+
+    dd {
+      margin-left: 1.5rem;
+      margin-bottom: 0.3rem;
+    }
+
+    /* ================================================================
+       Responsive Layout
+       ================================================================ */
+
+    @media (max-width: 768px) {
+      body {
+        padding: 1rem;
+        font-size: 15px;
+      }
+
+      .k9-header {
+        padding: 1rem 1.25rem;
+        border-radius: 6px 6px 0 0;
+      }
+
+      .k9-header h1 { font-size: 1.4rem; }
+
+      .k9-pedigree ul {
+        grid-template-columns: 1fr;
+      }
+
+      pre {
+        padding: 0.75rem;
+        font-size: 0.82em;
+      }
+    }
+
+    /* ================================================================
+       Print Styles
+       ================================================================ */
+
+    @media print {
+      body {
+        max-width: none;
+        padding: 0;
+        font-size: 11pt;
+        color: #000;
+      }
+
+      .k9-header {
+        background: #fff !important;
+        color: #000 !important;
+        border: 2px solid #000;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+
+      .k9-header h1 { color: #000 !important; }
+
+      .k9-security-badge {
+        border: 1px solid #000;
+        background: #fff !important;
+        color: #000 !important;
+      }
+
+      .k9-copy-btn { display: none; }
+
+      pre, code {
+        border-color: #ccc;
+        background-color: #f9f9f9;
+      }
+
+      h2, h3 { break-after: avoid; }
+      pre { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Security-level header bar -->
+  <header class="k9-header$if(k9-security-level)$ k9-$k9-security-level$-header$endif$">
+$if(title)$
+    <h1>
+      $title$
+$if(k9-security-level)$
+      <span class="k9-security-badge k9-$k9-security-level$">$k9-security-level$</span>
+$endif$
+    </h1>
+$else$
+    <h1>K9 Component</h1>
+$endif$
+    <div class="k9-header-meta">
+$if(version)$
+      <span><strong>Version:</strong> $version$</span>
+$endif$
+$if(k9-format)$
+      <span><strong>Format:</strong> $k9-format$</span>
+$endif$
+$if(spdx-license)$
+      <span><strong>License:</strong> $spdx-license$</span>
+$endif$
+    </div>
+  </header>
+
+  <!-- Pedigree summary card -->
+  <div class="k9-pedigree-card">
+    <h2>Pedigree</h2>
+    <table style="width:100%; border-collapse:collapse;">
+$if(title)$
+      <tr>
+        <td style="font-weight:600; padding:4px 12px 4px 0; width:120px; vertical-align:top;">Name</td>
+        <td style="padding:4px 0;">$title$</td>
+      </tr>
+$endif$
+$if(version)$
+      <tr>
+        <td style="font-weight:600; padding:4px 12px 4px 0; vertical-align:top;">Version</td>
+        <td style="padding:4px 0;">$version$</td>
+      </tr>
+$endif$
+$if(k9-security-level)$
+      <tr>
+        <td style="font-weight:600; padding:4px 12px 4px 0; vertical-align:top;">Security</td>
+        <td style="padding:4px 0;">
+          <span class="k9-security-badge k9-$k9-security-level$">$k9-security-level$</span>
+        </td>
+      </tr>
+$endif$
+$if(k9-format)$
+      <tr>
+        <td style="font-weight:600; padding:4px 12px 4px 0; vertical-align:top;">Syntax</td>
+        <td style="padding:4px 0;">$k9-format$</td>
+      </tr>
+$endif$
+$if(spdx-license)$
+      <tr>
+        <td style="font-weight:600; padding:4px 12px 4px 0; vertical-align:top;">License</td>
+        <td style="padding:4px 0; font-family:monospace;">$spdx-license$</td>
+      </tr>
+$endif$
+$if(k9-magic)$
+      <tr>
+        <td style="font-weight:600; padding:4px 12px 4px 0; vertical-align:top;">Magic</td>
+        <td style="padding:4px 0;">K9!</td>
+      </tr>
+$endif$
+    </table>
+  </div>
+
+  <main>
+$body$
+  </main>
+
+  <footer style="margin-top:3rem; padding-top:1rem; border-top:1px solid var(--k9-border); font-size:0.85rem; color:var(--k9-text-muted);">
+    <p>
+      Generated from K9 source by
+      <a href="https://pandoc.org">Pandoc</a> +
+      <a href="https://github.com/hyperpolymath/standards/tree/main/k9-svc/pandoc">k9.lua</a>
+    </p>
+  </footer>
+
+  <!-- Copy-to-clipboard for recipe/code blocks -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('pre').forEach(function(pre) {
+        var btn = document.createElement('button');
+        btn.className = 'k9-copy-btn';
+        btn.textContent = 'Copy';
+        btn.addEventListener('click', function() {
+          var code = pre.querySelector('code');
+          var text = code ? code.textContent : pre.textContent;
+          navigator.clipboard.writeText(text).then(function() {
+            btn.textContent = 'Copied';
+            setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+          });
+        });
+        pre.style.position = 'relative';
+        pre.appendChild(btn);
+      });
+    });
+  </script>
+
+$for(include-after)$
+  $include-after$
+$endfor$
+</body>
+</html>
