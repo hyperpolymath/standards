@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= A2ML LSP Server
+:toc: preamble
+:toclevels: 2
+:icons: font
+
+Language Server Protocol implementation for A2ML (Attested Markup Language),
+written in Rust using the `tower-lsp` framework.
+
+== Features
+
+=== Diagnostics (linting)
+
+[cols="1,1,3"]
+|===
+|Code |Severity |Description
+
+|`missing-spdx`
+|Warning
+|Missing `SPDX-License-Identifier:` header in the first 5 lines
+
+|`unclosed-directive`
+|Error
+|`@directive:` block without a matching `@end`
+
+|`mismatched-end`
+|Error
+|`@end` without a matching `@directive:` opener
+
+|`unresolved-ref`
+|Warning
+|`@ref(target)` where `target` has no `id="target"` in the document
+
+|`missing-metadata-field`
+|Info
+|`[metadata]` section missing a required field (`project`, `version`, `status`)
+
+|`duplicate-heading`
+|Warning
+|Two headings with the same level and text
+
+|`malformed-kv`
+|Error
+|Line inside a `[section]` without a `key = value` structure
+
+|`unclosed-quote`
+|Error
+|Unclosed `"` or `'` in a key-value line
+
+|`unknown-section`
+|Info
+|`[section]` header not in the known section catalogue
+|===
+
+=== Completions
+
+Triggered by `@` and `[`:
+
+* **Directive names** — after `@`: `@abstract`, `@opaque`, `@fig`, `@ref`, etc.
+  with snippet insert text and documentation.
+* **Section headers** — after `[`: `[metadata]`, `[project-context]`, etc.
+* **Key names** — on a new line inside a `[section]` block (e.g. `project`,
+  `version`, `status` inside `[metadata]`).
+* **`@ref()` targets** — inside `@ref(`: completes from declared `id="…"`
+  attributes in the current document.
+
+=== Hover
+
+* **Directive documentation** — hover over `@abstract`, `@opaque`, etc. to see
+  spec-derived docs with examples.
+* **Section schema** — hover over `[metadata]`, `[dependencies]`, etc. to see
+  required/optional fields.
+
+== Building
+
+Requires Rust 1.70+ (stable).
+
+[source,bash]
+----
+cd a2ml/lsp
+cargo build --release
+----
+
+The binary is produced at `target/release/a2ml-lsp`.
+
+== Running
+
+The server communicates over stdio (JSON-RPC):
+
+[source,bash]
+----
+a2ml-lsp --stdio
+----
+
+Or simply launch it — the server reads from stdin and writes to stdout by
+default.
+
+== Editor Integration
+
+=== VS Code
+
+See the VS Code extension at link:../editors/vscode/[editors/vscode/].  Point
+the `a2ml.server.path` setting to the `a2ml-lsp` binary.
+
+=== Neovim (nvim-lspconfig)
+
+[source,lua]
+----
+local lspconfig = require('lspconfig')
+local configs = require('lspconfig.configs')
+
+if not configs.a2ml_lsp then
+  configs.a2ml_lsp = {
+    default_config = {
+      cmd = {'a2ml-lsp'},
+      filetypes = {'a2ml'},
+      root_dir = lspconfig.util.root_pattern('.git'),
+    }
+  }
+end
+
+lspconfig.a2ml_lsp.setup{}
+----
+
+=== Emacs (lsp-mode / eglot)
+
+[source,elisp]
+----
+(with-eval-after-load 'lsp-mode
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection '("a2ml-lsp"))
+    :major-modes '(a2ml-mode)
+    :server-id 'a2ml-lsp)))
+----
+
+== Related Resources
+
+* **A2ML Specification (draft):** link:../SPEC.a2ml[SPEC.a2ml]
+* **A2ML Specification v1.0:** link:../SPEC-v1.0.adoc[SPEC-v1.0.adoc]
+* **AsciiDoc spec:** link:../SPEC.adoc[SPEC.adoc]
+* **Pandoc adapters:** link:../pandoc/README.adoc[pandoc/README.adoc]
+* **TextMate grammar:** link:../editors/a2ml.tmLanguage.json[editors/a2ml.tmLanguage.json]
+* **VS Code extension:** link:../editors/vscode/[editors/vscode/]
+* **Design document:** link:A2ML-LSP.adoc[A2ML-LSP.adoc] (original Idris2 design)
+
+== Testing
+
+[source,bash]
+----
+cd a2ml/lsp
+cargo test
+----
+
+== License
+
+PMPL-1.0-or-later
+
+Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
