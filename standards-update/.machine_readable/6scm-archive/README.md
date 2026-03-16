@@ -1,0 +1,12 @@
+# 6scm-archive
+
+**Historical archive.** This directory contains the original Guile Scheme (`.scm`)
+versions of the 6 machine-readable metadata files. These have been superseded by
+the A2ML (TOML-like) format.
+
+The live files are now:
+- `../*.a2ml` (parent directory)
+
+These `.scm` files are preserved for reference only. Do not edit them.
+
+Migrated: 2026-03-16
