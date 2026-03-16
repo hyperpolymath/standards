@@ -50,7 +50,7 @@ if [ ! -f "$IPKG_FILE" ]; then
 package a2ml
 
 version = $VERSION
-authors = "Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>"
+authors = "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"
 license = "PMPL-1.0-or-later"
 
 sourcedir = "src"

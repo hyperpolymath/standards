@@ -202,7 +202,7 @@ fn build_config_interactive(args: &Args) -> Result<ContractileConfig> {
     // Author
     let author = Input::<String>::new()
         .with_prompt("Author")
-        .default("Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>".to_string())
+        .default("Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>".to_string())
         .interact_text()?;
 
     Ok(ContractileConfig {
@@ -227,7 +227,7 @@ fn build_config_non_interactive(args: &Args) -> Result<ContractileConfig> {
     } else {
         Template::Minimal // Default
     };
-    let author = "Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>".to_string();
+    let author = "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>".to_string();
 
     Ok(ContractileConfig {
         name,

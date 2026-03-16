@@ -34,7 +34,7 @@ defmodule Lol.MixProject do
   defp package do
     [
       licenses: ["PMPL-1.0-or-later"],
-      maintainers: ["Jonathan D.A. Jewell <jonathan.jewell@open.ac.uk>"]
+      maintainers: ["Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"]
     ]
   end
 end
