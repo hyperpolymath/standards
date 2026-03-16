@@ -9,6 +9,7 @@
 //!
 //! Uses ed25519-dalek for cryptographic operations instead of shelling out to OpenSSL.
 
+#![forbid(unsafe_code)]
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use clap::{Parser, Subcommand};

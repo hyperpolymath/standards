@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
 //! k9-init: Scaffold new K9 contractiles from templates
 
+#![forbid(unsafe_code)]
 use anyhow::{Context, Result};
 use clap::Parser;
 use dialoguer::{Input, Select};

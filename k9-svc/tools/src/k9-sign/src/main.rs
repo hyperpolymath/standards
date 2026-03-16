@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
 //! k9-sign: Sign and verify K9 contractiles with Ed25519
 
+#![forbid(unsafe_code)]
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};

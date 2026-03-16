@@ -21,6 +21,7 @@
 #![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#![forbid(unsafe_code)]
 #[cfg(feature = "serialization")]
 use serde::{Deserialize, Serialize};
 
