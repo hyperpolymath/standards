@@ -1,0 +1,316 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= A2ML Atomicity Protocol (AAP v1.0)
+:toc:
+:toclevels: 3
+:icons: font
+
+== Problem Statement
+
+The 6 A2ML files in `.machine_readable/` are written to by multiple actors:
+
+* **AI agents** (Claude, Gemini, etc.) — update STATE.a2ml at session end
+* **Bots** (rhodibot, echidnabot, sustainabot, etc.) — automated updates
+* **Human editors** — manual corrections and reviews
+* **CI/CD pipelines** — automated state transitions
+
+Without coordination, these actors can:
+
+1. **Overwrite each other** — Agent B writes STATE.a2ml while Agent A's changes are uncommitted
+2. **Read stale state** — Bot reads STATE.a2ml, makes decisions, but state changed since read
+3. **Corrupt structure** — Partial write interrupted by another actor
+4. **Create merge conflicts** — Two actors commit changes to the same file on the same branch
+
+== Design Principles
+
+1. **Advisory, not mandatory** — The protocol is cooperative; it cannot physically prevent writes
+2. **Visible to humans** — Lock state is readable in plain text, not hidden in binary
+3. **Self-healing** — Stale locks expire automatically via TTL
+4. **Git-native** — Works with git's existing concurrency model
+5. **Zero dependencies** — No external lock server, database, or daemon required
+
+== Protocol: Three Layers
+
+=== Layer 1: A2ML Header (Audit Trail)
+
+Every A2ML file MUST include a `[provenance]` section as the LAST section:
+
+[source,toml]
+----
+[provenance]
+# Who last modified this file and when.
+# Human-readable audit trail — NOT a lock mechanism.
+last-modified-by = "claude-opus-4.6"       # Agent/human identifier
+last-modified-at = "2026-03-16T02:30:00Z"  # ISO 8601 UTC
+last-session-id = "sess_abc123"            # Optional: session correlation
+git-sha-at-read = "fe58ae5"               # Git SHA when file was read (for OCC)
+modification-summary = "Updated completion to 45% after level-3 integration"
+----
+
+**Rules:**
+
+* Writers MUST update `[provenance]` on every write
+* Writers MUST record `git-sha-at-read` when they first read the file
+* Readers SHOULD check `last-modified-at` to detect recent changes
+* This section is informational — it does not prevent writes
+
+=== Layer 2: Lock Files (Advisory Locking)
+
+Before writing to any A2ML file, an actor SHOULD acquire an advisory lock.
+
+==== Lock File Location
+
+For each A2ML file, the lock file is:
+
+----
+.machine_readable/.locks/<FILENAME>.lock
+----
+
+Example: Writing to `STATE.a2ml` → acquire `.machine_readable/.locks/STATE.a2ml.lock`
+
+==== Lock File Format
+
+[source,toml]
+----
+# A2ML Advisory Lock — DO NOT EDIT MANUALLY
+# This lock expires automatically after the TTL.
+holder = "claude-opus-4.6"
+holder-type = "agent"          # agent | bot | human | ci
+acquired-at = "2026-03-16T02:30:00Z"
+ttl-seconds = 300              # Lock expires after 5 minutes
+purpose = "Updating STATE.a2ml with session outcomes"
+pid = "12345"                  # Optional: process ID (for local actors)
+----
+
+==== Lock Acquisition Protocol
+
+[source]
+----
+ACQUIRE(file):
+  lock_path = .machine_readable/.locks/{file}.lock
+
+  1. IF lock_path EXISTS:
+     a. Read lock file
+     b. Parse acquired-at and ttl-seconds
+     c. IF now() > acquired-at + ttl-seconds:
+        → Lock is STALE. Delete it, proceed to step 2.
+     d. IF holder == self:
+        → Lock is OURS (re-entrant). Update acquired-at, proceed.
+     e. ELSE:
+        → Lock is HELD by another actor.
+        → WAIT up to 30 seconds, polling every 2 seconds.
+        → IF still held after 30s: ABORT with clear error message.
+          (Do NOT force-remove a live lock.)
+
+  2. Create lock_path with:
+     - holder = <self identifier>
+     - acquired-at = now()
+     - ttl-seconds = 300 (default, agents may use longer)
+     - purpose = <description of intended change>
+
+  3. VERIFY: Re-read lock_path to confirm we are the holder.
+     (Prevents race between step 1 check and step 2 create.)
+     IF holder != self: → Another actor won the race. Go to step 1.
+
+  4. Lock acquired. Proceed with read-modify-write.
+----
+
+==== Lock Release Protocol
+
+[source]
+----
+RELEASE(file):
+  lock_path = .machine_readable/.locks/{file}.lock
+
+  1. Read lock file
+  2. IF holder == self:
+     → Delete lock_path
+  3. IF holder != self:
+     → WARNING: Lock was stolen or expired. Do NOT delete.
+     → Log this as an anomaly.
+----
+
+==== TTL Recommendations
+
+[cols="1,1,2", options="header"]
+|===
+|Actor Type |Default TTL |Rationale
+
+|AI Agent (interactive)
+|300s (5 min)
+|Agent sessions can pause for user input
+
+|Bot (automated)
+|60s (1 min)
+|Bots should be fast and deterministic
+
+|Human (editor)
+|1800s (30 min)
+|Humans may review before saving
+
+|CI/CD Pipeline
+|120s (2 min)
+|Pipelines should be quick
+|===
+
+==== Gitignore Consideration
+
+Lock files SHOULD be gitignored to avoid committing transient state:
+
+[source]
+----
+# .gitignore
+.machine_readable/.locks/
+----
+
+However, if lock files are NOT gitignored (e.g., for distributed visibility),
+they MUST be cleaned up before commit.
+
+=== Layer 3: Optimistic Concurrency Control (OCC)
+
+Git SHA-based validation ensures no lost writes across commits.
+
+==== Protocol
+
+[source]
+----
+WRITE_WITH_OCC(file):
+  1. Read file content AND record current git SHA:
+     sha_at_read = git rev-parse HEAD
+
+  2. Make modifications to file content
+
+  3. Before committing, check if file changed since read:
+     current_sha = git rev-parse HEAD
+     IF current_sha != sha_at_read:
+       → File MAY have been modified by another commit.
+       → git diff sha_at_read..HEAD -- .machine_readable/{file}
+       → IF file was modified:
+         → CONFLICT. Re-read file, merge changes, retry.
+       → IF file was NOT modified:
+         → Safe to proceed (other files changed, not ours).
+
+  4. Update [provenance] section with git-sha-at-read = sha_at_read
+
+  5. Commit and push.
+     IF push fails (remote has new commits):
+       → git pull --rebase
+       → Check for conflicts in A2ML files
+       → IF conflict: resolve using MERGE STRATEGY (below)
+       → Retry push
+----
+
+==== Merge Strategy for A2ML Conflicts
+
+When two actors modify the same A2ML file:
+
+[cols="1,2", options="header"]
+|===
+|Section |Strategy
+
+|`[metadata]`
+|Take LATER timestamp. Merge version: increment patch.
+
+|`[provenance]`
+|Always take the CURRENT writer's values.
+
+|`[completion]` / numeric fields
+|Take the HIGHER value (progress never goes backward unless explicitly reset).
+
+|`[blockers]` / list fields
+|UNION of both lists (append, deduplicate).
+
+|`[session-history]`
+|APPEND both entries (chronological order).
+
+|Other sections
+|If both modified the same key: take the LATER modification (by timestamp).
+If different keys modified: merge both.
+|===
+
+== Human-in-the-Loop Protection
+
+When a human is viewing/editing an A2ML file:
+
+1. **Editor integration**: Editors (VS Code, Kate, etc.) should check for lock files
+   on open and create a lock with `holder-type = "human"` and extended TTL.
+
+2. **Pre-commit hook**: Before committing A2ML changes, the pre-commit hook
+   SHOULD verify no lock is held by another actor.
+
+3. **Visual indicator**: When a lock exists, agents SHOULD note this in their
+   output: `"STATE.a2ml is currently locked by [holder] since [time]. Skipping update."`
+
+4. **Never force**: Agents MUST NOT force-remove a human-held lock.
+   Only humans can remove human locks (or wait for TTL expiry).
+
+== Implementation Checklist
+
+For tool authors implementing AAP:
+
+* [ ] Read and update `[provenance]` on every A2ML write
+* [ ] Create `.machine_readable/.locks/` directory if absent
+* [ ] Acquire lock before writing (advisory — warn if unable, don't crash)
+* [ ] Check TTL on existing locks before declaring "held"
+* [ ] Release lock after write completes (even on error — use try/finally)
+* [ ] Record `git-sha-at-read` for OCC
+* [ ] Handle push conflicts with rebase + merge strategy
+* [ ] Never force-remove a lock held by `holder-type = "human"`
+* [ ] Log all lock acquisitions and releases for audit
+
+== Example: Full Write Cycle
+
+[source,bash]
+----
+# 1. Agent starts session, reads STATE.a2ml
+SHA_AT_READ=$(git rev-parse HEAD)
+cat .machine_readable/STATE.a2ml
+
+# 2. Agent acquires lock
+mkdir -p .machine_readable/.locks
+cat > .machine_readable/.locks/STATE.a2ml.lock << 'EOF'
+holder = "claude-opus-4.6"
+holder-type = "agent"
+acquired-at = "2026-03-16T02:30:00Z"
+ttl-seconds = 300
+purpose = "Session end — updating completion percentage"
+EOF
+
+# 3. Agent modifies STATE.a2ml (updates [provenance] too)
+# ... edit file ...
+
+# 4. Agent checks for concurrent changes
+CURRENT_SHA=$(git rev-parse HEAD)
+if [ "$CURRENT_SHA" != "$SHA_AT_READ" ]; then
+  # Check if STATE.a2ml specifically was modified
+  if git diff "$SHA_AT_READ"..HEAD -- .machine_readable/STATE.a2ml | grep -q .; then
+    echo "CONFLICT: STATE.a2ml modified since read. Re-reading and merging."
+    # Re-read, merge, retry
+  fi
+fi
+
+# 5. Commit
+git add .machine_readable/STATE.a2ml
+git commit -m "state: update completion to 45%"
+
+# 6. Release lock
+rm .machine_readable/.locks/STATE.a2ml.lock
+
+# 7. Push (with retry on conflict)
+git push || { git pull --rebase && git push; }
+----
+
+== Versioning
+
+This protocol is versioned independently:
+
+* **AAP v1.0** — This document (2026-03-16)
+* Future versions MUST be backward-compatible within major version
+* Lock file format changes increment minor version
+* Breaking changes increment major version
+
+== References
+
+* A2ML Specification: https://github.com/hyperpolymath/a2ml/blob/main/SPEC.a2ml
+* 0-AI-MANIFEST Protocol: https://github.com/hyperpolymath/0-ai-gatekeeper-protocol
+* Git Optimistic Concurrency: inherent in git's push/pull model

@@ -2,14 +2,14 @@
 
 ## Machine-Readable Artefacts
 
-Every Hyperpolymath repo must have `.machine_readable/` with these 6 SCM files:
+Every Hyperpolymath repo must have `.machine_readable/` with these 6 A2ML files:
 
-- `STATE.scm` - Current project state and progress
-- `META.scm` - Architecture decisions and development practices
-- `ECOSYSTEM.scm` - Position in the ecosystem and related projects
-- `AGENTIC.scm` - AI agent interaction patterns
-- `NEUROSYM.scm` - Neurosymbolic integration config
-- `PLAYBOOK.scm` - Operational runbook
+- `STATE.a2ml` - Current project state and progress
+- `META.a2ml` - Architecture decisions and development practices
+- `ECOSYSTEM.a2ml` - Position in the ecosystem and related projects
+- `AGENTIC.a2ml` - AI agent interaction patterns
+- `NEUROSYM.a2ml` - Neurosymbolic integration config
+- `PLAYBOOK.a2ml` - Operational runbook
 
 See: https://github.com/hyperpolymath/standards
 
@@ -30,7 +30,7 @@ See: https://github.com/hyperpolymath/standards
 | **Bash/POSIX Shell** | Scripts, automation | Keep minimal |
 | **JavaScript** | Only where ReScript cannot | MCP protocol glue, Deno APIs |
 | **Nickel** | Configuration language | For complex configs |
-| **Guile Scheme** | State/meta files | STATE.scm, META.scm, etc. |
+| **A2ML** | State/meta files | STATE.a2ml, META.a2ml, etc. (TOML-like format) |
 | **Julia** | Batch scripts, data processing | Per RSR |
 | **OCaml** | AffineScript compiler | Language-specific |
 | **Ada** | Safety-critical systems | Where required |
