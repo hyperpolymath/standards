@@ -57,7 +57,7 @@ When releasing a new version:
 - **Version**: 1.0.0
 - **Dependencies**: nickel, just, openssl
 - **Optional**: podman, asciidoctor
-- **License**: AGPL-3.0-or-later
+- **License**: PMPL-1.0-or-later
 
 ## Testing
 

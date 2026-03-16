@@ -228,7 +228,7 @@ avow-protocol/
 
 ## License
 
-AGPL-3.0-or-later
+PMPL-1.0-or-later
 
 ## Related Projects
 
