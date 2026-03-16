@@ -12,7 +12,7 @@
     homepage = "https://axel-protocol.org",
     repository = "https://github.com/hyperpolymath/axel-protocol",
 
-    license = "AGPL-3.0-or-later",
+    license = "PMPL-1.0-or-later",
     author = {
       name = "Jonathan D.A. Jewell",
       email = "jonathan.jewell@open.ac.uk",
