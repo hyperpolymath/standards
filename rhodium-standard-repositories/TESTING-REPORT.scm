@@ -207,7 +207,7 @@
         (passed 5)
         (total 6)
         (failures
-          ("SPDX identifier format" "MIT OR AGPL-3.0-or-later vs expected pattern")))
+          ("SPDX identifier format" "MIT OR PMPL-1.0-or-later vs expected pattern")))
       (cognitive-ergonomics
         (passed 2)
         (total 2))
