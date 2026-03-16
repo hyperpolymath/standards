@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= K9 LSP Server
+:author: Jonathan D.A. Jewell
+:revdate: 2026-03-16
+:toc: left
+:toclevels: 2
+:icons: font
+:source-highlighter: rouge
+
+Language Server Protocol (LSP) server for K9 Self-Validating Component files
+(`.k9` and `.k9.ncl`).
+
+== Overview
+
+The K9 LSP server provides real-time feedback when editing K9 files in any
+LSP-compatible editor (VS Code, Neovim, Helix, Emacs, etc.). It communicates
+over stdio using JSON-RPC, the standard LSP transport.
+
+=== Features
+
+Diagnostics (linting)::
+Ten diagnostic rules covering magic numbers, SPDX headers, security level
+validation, pedigree completeness, Nickel syntax, and recipe hygiene.
+
+Completions::
+Context-aware completions for pedigree fields, security settings, trust level
+values, recipe names, and Nickel standard library imports.
+
+Hover::
+Documentation on hover for security levels, pedigree fields, and contract types.
+
+== Building
+
+[source,bash]
+----
+cd lsp/
+cargo build --release
+----
+
+The binary is produced at `target/release/k9-lsp`.
+
+== Usage
+
+The LSP server is designed to be launched by your editor, not run directly.
+
+=== VS Code
+
+See the link:../editors/vscode/[VS Code extension] for integration. Add to
+your `settings.json`:
+
+[source,json]
+----
+{
+  "k9.lsp.path": "/path/to/k9-lsp"
+}
+----
+
+=== Neovim (nvim-lspconfig)
+
+[source,lua]
+----
+local lspconfig = require('lspconfig')
+local configs = require('lspconfig.configs')
+
+configs.k9_lsp = {
+  default_config = {
+    cmd = { '/path/to/k9-lsp' },
+    filetypes = { 'k9', 'nickel' },
+    root_dir = lspconfig.util.root_pattern('pedigree.ncl', 'justfile', '.git'),
+    settings = {},
+  },
+}
+
+lspconfig.k9_lsp.setup({})
+----
+
+=== Helix
+
+Add to `~/.config/helix/languages.toml`:
+
+[source,toml]
+----
+[[language]]
+name = "k9"
+scope = "source.k9"
+file-types = ["k9", "k9.ncl"]
+language-servers = ["k9-lsp"]
+
+[language-server.k9-lsp]
+command = "/path/to/k9-lsp"
+----
+
+== Diagnostics Reference
+
+[cols="1,1,2,1"]
+|===
+| Code | Severity | Description | Trigger
+
+| K9-D001 | Warning | Missing K9! magic number | No `K9!` or `magic_number` in file
+| K9-D002 | Warning | Missing SPDX header | No `SPDX-License-Identifier` in first 10 lines
+| K9-D003 | Error | Invalid security level | `trust_level` is not 'Kennel, 'Yard, or 'Hunt
+| K9-D004 | Warning | Security level mismatch | `'Hunt` declared but no `signature` field
+| K9-D005 | Error | Missing pedigree fields | `name` or `version` absent from pedigree
+| K9-D006 | Error | Unclosed Nickel records | Unbalanced `{` / `}`
+| K9-D007 | Warning | Invalid contract annotation | `\|` followed by unrecognised type
+| K9-D008 | Info | Non-standard recipe tool | Recipe command uses unknown executable
+| K9-D009 | Warning | Hunt without subprocess | `'Hunt` but `allow_subprocess` not `true`
+| K9-D010 | Info | Deprecated Kennel YAML syntax | YAML-style `key: value` instead of `key = value`
+|===
+
+== Related Resources
+
+K9 Specification::
+link:../SPEC.adoc[SPEC.adoc] — The full K9 SVC specification.
+
+Pedigree Contract::
+link:../pedigree.ncl[pedigree.ncl] — The Nickel contract defining component structure.
+
+Pandoc Adapters::
+link:../pandoc/README.adoc[pandoc/README.adoc] — Pandoc reader/writer for K9 files.
+
+TextMate Grammar::
+link:../editors/k9.tmLanguage.json[editors/k9.tmLanguage.json] — Syntax highlighting grammar.
+
+Notepad++ UDL::
+link:../editors/k9-notepadpp.xml[editors/k9-notepadpp.xml] — Notepad++ User Defined Language.
+
+VS Code Extension::
+link:../editors/vscode/[editors/vscode/] — VS Code extension for K9 files.
+
+== Architecture
+
+[source]
+----
+lsp/
+├── Cargo.toml          # Workspace-independent build configuration
+├── README.adoc         # This file
+└── src/
+    ├── main.rs         # Entry point, stdio transport, LSP trait impl
+    ├── diagnostics.rs  # 10 diagnostic checks (K9-D001 through K9-D010)
+    ├── completions.rs  # Context-aware completion provider
+    └── hover.rs        # Hover documentation provider
+----
+
+== License
+
+PMPL-1.0-or-later. See link:../LICENSE[LICENSE].
