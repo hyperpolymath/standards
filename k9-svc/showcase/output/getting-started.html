@@ -1,0 +1,1109 @@
+<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) -->
+<!--
+  template.html — ddraig-ssg template for K9 showcase site.
+
+  Placeholders:
+    Get Started      — Page title from frontmatter
+    <p><!-- SPDX-License-Identifier: PMPL-1.0-or-later --> <!-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) --></p>
+<h1>Get Started</h1>
+<p>From zero to a validated K9 component in six steps.</p>
+<p>---</p>
+<h2>Prerequisites</h2>
+<p>You will need:</p>
+<ul>
+<li><strong>Pandoc</strong> 3.1 or later — [pandoc.org/installing.html](https://pandoc.org/installing.html)</li>
+<li><strong>Nickel</strong> 1.5 or later — [nickel-lang.org](https://nickel-lang.org/) (for Yard/Hunt levels)</li>
+<li>A text editor (VS Code recommended for syntax highlighting)</li>
+</ul>
+<p>---</p>
+<p><ol class="steps"></p>
+<p><li></p>
+<h3>Install pandoc-k9</h3>
+<p>Clone the pandoc-k9 repository and make the Lua files available to Pandoc:</p>
+<pre><code>git clone https://github.com/hyperpolymath/pandoc-k9.git
+cd pandoc-k9
+
+# Copy the Lua reader, writer, and filter to your Pandoc data directory
+cp k9-reader.lua k9-writer.lua k9-filter.lua k9.lua \
+   ~/.local/share/pandoc/
+cp k9.html ~/.local/share/pandoc/templates/
+</code></pre>
+<p>Verify the installation:</p>
+<pre><code>pandoc --list-input-formats | grep k9
+</code></pre>
+<p></li></p>
+<p><li></p>
+<h3>Install the VS Code extension (optional)</h3>
+<p>For syntax highlighting in VS Code:</p>
+<pre><code># From the VS Code marketplace
+code --install-extension hyperpolymath.vscode-k9
+</code></pre>
+<p>This gives you security-level-aware highlighting: Kennel keywords in green, Yard in amber, Hunt in red. It also provides bracket matching and folding for K9 structures.</p>
+<p></li></p>
+<p><li></p>
+<h3>Create your first Kennel-level file</h3>
+<p>Create a file called <code>hello.k9</code>:</p>
+<pre><code>K9!
+# hello.k9 — My first K9 component
+# Security Level: Kennel (pure data, no execution)
+
+---
+metadata:
+  name: hello-k9
+  version: 1.0.0
+  description: My first self-validating component
+  author: Your Name
+  license: PMPL-1.0-or-later
+
+content:
+  greeting: &quot;Hello from K9!&quot;
+  message: |
+    This is a Kennel-level component.
+    It contains only data — no code, no execution.
+    Safe to parse from any source.
+
+tags:
+  - example
+  - kennel
+  - hello-world
+</code></pre>
+<p>This is the simplest possible K9 file. It starts with <code>K9!</code>, carries a pedigree in the <code>metadata</code> section, and contains structured data. Nothing more.</p>
+<p></li></p>
+<p><li></p>
+<h3>Convert it with Pandoc</h3>
+<p>Use the K9 reader to convert your file to HTML:</p>
+<pre><code>pandoc -f k9.lua hello.k9 \
+       --lua-filter=k9-filter.lua \
+       --template=k9.html \
+       -o hello.html
+</code></pre>
+<p>Open <code>hello.html</code> in a browser. You will see a formatted K9 document with a security-level header bar (green for Kennel), a pedigree summary card, and styled content sections.</p>
+<p>Convert to other formats just as easily:</p>
+<pre><code># To Markdown
+pandoc -f k9.lua hello.k9 -t markdown -o hello.md
+
+# To JSON (Pandoc AST)
+pandoc -f k9.lua hello.k9 -t json -o hello.json
+</code></pre>
+<p></li></p>
+<p><li></p>
+<h3>Graduate to Yard level with Nickel contracts</h3>
+<p>Create a file called <code>config.k9.ncl</code>:</p>
+<pre><code># config.k9.ncl — Yard-level configuration with contracts
+# Security Level: Yard (contracts and types, no execution)
+
+let pedigree = import &quot;pedigree.ncl&quot; in
+
+pedigree.K9Pedigree &amp; {
+  metadata = {
+    name = &quot;my-service-config&quot;,
+    version = &quot;1.0.0&quot;,
+    description = &quot;Service configuration with validated contracts&quot;,
+  },
+
+  security = {
+    trust_level = 'Yard,
+    allow_network = false,
+    allow_filesystem_write = false,
+    allow_subprocess = false,
+  },
+
+  # The | operator applies a Nickel contract
+  config = {
+    port | std.number.Nat
+         | std.contract.from_predicate (fun x =&gt; x &gt;= 1024 &amp;&amp; x &lt;= 65535)
+         = 8443,
+
+    log_level | [| 'debug, 'info, 'warn, 'error |]
+              = 'info,
+
+    max_connections | std.number.Nat = 100,
+  },
+
+  validation = {
+    checksum = &quot;...&quot;,
+    pedigree_version = &quot;1.0.0&quot;,
+    hunt_authorized = false,
+  },
+}
+</code></pre>
+<p>Type-check it with Nickel:</p>
+<pre><code>nickel typecheck config.k9.ncl
+</code></pre>
+<p>If you change <code>port</code> to <code>80</code> (below 1024) or <code>log_level</code> to <code>'verbose</code> (not in the enum), Nickel will reject the configuration at type-check time — before it ever reaches a running service.</p>
+<p></li></p>
+<p><li></p>
+<h3>Validate with the Contractile CLI</h3>
+<p>If you have the Contractile CLI installed:</p>
+<pre><code># Install contractile
+cargo install contractile
+
+# Create the k9 symlink
+ln -sf $(which contractile) ~/.local/bin/k9
+
+# Evaluate a K9 component
+k9 eval hello.k9           # Kennel: validates pedigree
+k9 eval config.k9.ncl      # Yard: validates pedigree + contracts
+</code></pre>
+<p>The <code>k9 eval</code> command checks pedigree structure, runs Nickel type checking (for Yard/Hunt), and verifies signatures (for Hunt). It reports the security level, any contract violations, and whether the component is valid.</p>
+<p></li></p>
+<p></ol></p>
+<p>---</p>
+<h2>What Next?</h2>
+<ul>
+<li><strong>Read the [Security Levels](security-levels.html) page</strong> to understand the</li>
+<p>trust model in depth.</p>
+<li><strong>Browse the [Examples](examples.html)</strong> for real-world K9 files at each level.</li>
+<li><strong>Check the [Integrations](integrations.html)</strong> to see how K9 fits into your</li>
+<p>existing toolchain.</p>
+<li><strong>Explore the [pandoc-k9 repository](https://github.com/hyperpolymath/pandoc-k9)</strong></li>
+<p>for the full source, tests, and documentation.</p>
+</ul>
+<p>---</p>
+<h2>Common Patterns</h2>
+<h3>Using K9 in CI/CD</h3>
+<p>Add K9 validation as a CI step:</p>
+<pre><code># .github/workflows/k9-validate.yml
+name: K9 Validation
+on: [push, pull_request]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Nickel
+        run: cargo install nickel-lang-cli
+      - name: Validate K9 components
+        run: |
+          for f in $(find . -name '*.k9' -o -name '*.k9.ncl'); do
+            echo &quot;Validating $f...&quot;
+            k9 eval &quot;$f&quot;
+          done
+</code></pre>
+<h3>Using K9 for Container Manifests</h3>
+<p>Pair K9 with the Stapeln container ecosystem:</p>
+<pre><code>K9!
+# my-service.k9 — Container deployment manifest
+
+---
+metadata:
+  name: my-service
+  version: 2.0.0
+  description: Production deployment for my-service
+  license: PMPL-1.0-or-later
+
+container:
+  image: cgr.dev/my-org/my-service:2.0.0
+  replicas: 3
+  health_check:
+    path: /healthz
+    interval_seconds: 15
+</code></pre>
+<h3>Using K9 for Project Configuration</h3>
+<p>Replace your <code>config.yaml</code> or <code>settings.json</code> with a self-describing K9 file:</p>
+<pre><code>K9!
+# app-config.k9 — Application configuration
+
+---
+metadata:
+  name: app-config
+  version: 1.0.0
+  description: Runtime configuration for the application
+  license: PMPL-1.0-or-later
+
+database:
+  host: localhost
+  port: 5432
+  name: app_production
+  pool_size: 10
+
+cache:
+  backend: redis
+  ttl_seconds: 300
+</code></pre>
+<p>The advantage over plain YAML: every tool that encounters this file knows exactly what it is, who authored it, and what version it represents — without parsing comments or guessing from file paths.</p>
+    — Rendered Markdown body
+          <li><a href="index.html">K9</a></li>
+      <li><a href="security-levels.html">Security Levels</a></li>
+      <li><a href="examples.html">Examples</a></li>
+      <li><a href="integrations.html">Integrations</a></li>
+      <li><a href="getting-started.html" class="active">Get Started</a></li>
+        — Auto-generated navigation tabs
+    page-getting-started — CSS class derived from page
+    getting-started       — URL slug for the page
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="generator" content="ddraig-ssg (Idris 2)" />
+  <title>Get Started — K9 Self-Validating Components</title>
+  <style>
+    /* ================================================================
+       K9 Showcase — Three-Tone Security Palette
+       Kennel #2e7d32 (green)  — safe / pure data
+       Yard   #f57f17 (amber)  — evaluated / contracts
+       Hunt   #c62828 (red)    — executable / signed
+       ================================================================ */
+
+    :root {
+      --k9-kennel:       #2e7d32;
+      --k9-kennel-light: #e8f5e9;
+      --k9-kennel-dark:  #1b5e20;
+
+      --k9-yard:         #f57f17;
+      --k9-yard-light:   #fff8e1;
+      --k9-yard-dark:    #e65100;
+
+      --k9-hunt:         #c62828;
+      --k9-hunt-light:   #ffebee;
+      --k9-hunt-dark:    #8e0000;
+
+      --k9-bg:           #ffffff;
+      --k9-bg-alt:       #f8f9fa;
+      --k9-text:         #1a1a2e;
+      --k9-text-muted:   #6b7280;
+      --k9-border:       #e2e8f0;
+      --k9-code-bg:      #f1f5f9;
+      --k9-link:         #1e40af;
+      --k9-link-hover:   #1d4ed8;
+
+      --k9-gradient:     linear-gradient(135deg, var(--k9-kennel), var(--k9-yard), var(--k9-hunt));
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html {
+      font-size: 16px;
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      line-height: 1.7;
+      color: var(--k9-text);
+      background-color: var(--k9-bg-alt);
+      margin: 0;
+      padding: 0;
+    }
+
+    /* ================================================================
+       Header — Gradient bar with K9 branding
+       ================================================================ */
+
+    .site-header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #ffffff;
+      padding: 2rem 1.5rem 1rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .site-header::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: var(--k9-gradient);
+    }
+
+    .header-inner {
+      max-width: 960px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .k9-logo {
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1;
+    }
+
+    .k9-logo .k9-k {
+      color: var(--k9-kennel);
+    }
+
+    .k9-logo .k9-9 {
+      color: var(--k9-hunt);
+    }
+
+    .k9-logo-sub {
+      font-size: 0.85rem;
+      color: #94a3b8;
+      font-weight: 400;
+      margin-top: 0.25rem;
+    }
+
+    /* Subtle wolf silhouette watermark */
+    .site-header::after {
+      content: '';
+      position: absolute;
+      right: 2rem;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 80px;
+      height: 80px;
+      opacity: 0.06;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M15 85 L25 45 L30 25 L35 15 L40 25 L45 20 L50 10 L55 20 L60 25 L65 15 L70 25 L75 45 L85 85 Z' fill='white'/%3E%3Ccircle cx='42' cy='42' r='3' fill='white'/%3E%3Ccircle cx='58' cy='42' r='3' fill='white'/%3E%3Cpath d='M45 55 L50 60 L55 55' stroke='white' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-size: contain;
+    }
+
+    /* ================================================================
+       Navigation Tabs
+       ================================================================ */
+
+    .site-nav {
+      background: #ffffff;
+      border-bottom: 1px solid var(--k9-border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .nav-inner {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+      display: flex;
+      gap: 0;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .nav-inner a {
+      display: block;
+      padding: 0.85rem 1.25rem;
+      color: var(--k9-text-muted);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.9rem;
+      white-space: nowrap;
+      border-bottom: 3px solid transparent;
+      transition: color 0.2s, border-color 0.2s;
+    }
+
+    .nav-inner a:hover {
+      color: var(--k9-text);
+      border-bottom-color: var(--k9-border);
+    }
+
+    .nav-inner a.active {
+      color: var(--k9-kennel);
+      border-bottom-color: var(--k9-kennel);
+      font-weight: 600;
+    }
+
+    /* ================================================================
+       Main Content Area
+       ================================================================ */
+
+    .site-main {
+      max-width: 960px;
+      margin: 2rem auto;
+      padding: 0 1.5rem;
+    }
+
+    .content-card {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 2.5rem 3rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+      border: 1px solid var(--k9-border);
+    }
+
+    /* ================================================================
+       Typography
+       ================================================================ */
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--k9-text);
+      margin: 0 0 1rem 0;
+      line-height: 1.3;
+    }
+
+    h2 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: var(--k9-text);
+      margin: 2.5rem 0 1rem 0;
+      padding-bottom: 0.4rem;
+      border-bottom: 2px solid var(--k9-border);
+    }
+
+    h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: var(--k9-text);
+      margin: 2rem 0 0.75rem 0;
+    }
+
+    h4 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 1.5rem 0 0.5rem 0;
+    }
+
+    p {
+      margin: 0 0 1rem 0;
+    }
+
+    a {
+      color: var(--k9-link);
+      text-decoration: none;
+    }
+
+    a:hover {
+      color: var(--k9-link-hover);
+      text-decoration: underline;
+    }
+
+    ul, ol {
+      margin: 0 0 1rem 0;
+      padding-left: 1.5rem;
+    }
+
+    li {
+      margin-bottom: 0.35rem;
+    }
+
+    strong {
+      font-weight: 600;
+    }
+
+    blockquote {
+      border-left: 4px solid var(--k9-kennel);
+      background: var(--k9-kennel-light);
+      padding: 1rem 1.25rem;
+      margin: 1.5rem 0;
+      border-radius: 0 8px 8px 0;
+      color: var(--k9-kennel-dark);
+      font-style: italic;
+    }
+
+    hr {
+      border: none;
+      border-top: 2px solid var(--k9-border);
+      margin: 2rem 0;
+    }
+
+    /* ================================================================
+       Security Level Badges
+       ================================================================ */
+
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 0.8rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      vertical-align: middle;
+    }
+
+    .badge-kennel {
+      background: var(--k9-kennel);
+      color: #ffffff;
+    }
+
+    .badge-yard {
+      background: var(--k9-yard);
+      color: #ffffff;
+    }
+
+    .badge-hunt {
+      background: var(--k9-hunt);
+      color: #ffffff;
+    }
+
+    /* ================================================================
+       Security Level Cards (used on security-levels page)
+       ================================================================ */
+
+    .level-card {
+      border-radius: 10px;
+      padding: 1.5rem 2rem;
+      margin: 1.5rem 0;
+      border-left: 5px solid;
+    }
+
+    .level-card-kennel {
+      background: var(--k9-kennel-light);
+      border-color: var(--k9-kennel);
+    }
+
+    .level-card-yard {
+      background: var(--k9-yard-light);
+      border-color: var(--k9-yard);
+    }
+
+    .level-card-hunt {
+      background: var(--k9-hunt-light);
+      border-color: var(--k9-hunt);
+    }
+
+    .level-card h3 {
+      margin-top: 0;
+    }
+
+    /* ================================================================
+       Code Blocks
+       ================================================================ */
+
+    code {
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.875em;
+      background: var(--k9-code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--k9-border);
+    }
+
+    pre {
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      overflow-x: auto;
+      line-height: 1.6;
+      margin: 1.5rem 0;
+      border: 1px solid #1e293b;
+    }
+
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: inherit;
+      font-size: 0.875em;
+    }
+
+    /* Syntax highlighting tokens */
+    .k9-comment { color: #64748b; font-style: italic; }
+    .k9-key     { color: #7dd3fc; }
+    .k9-string  { color: #86efac; }
+    .k9-number  { color: #fbbf24; }
+    .k9-keyword { color: #c4b5fd; font-weight: 600; }
+    .k9-type    { color: #f9a8d4; }
+
+    /* ================================================================
+       Comparison Table
+       ================================================================ */
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      font-size: 0.95rem;
+    }
+
+    thead {
+      background: var(--k9-bg-alt);
+    }
+
+    th {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      font-weight: 600;
+      border-bottom: 2px solid var(--k9-border);
+      color: var(--k9-text);
+    }
+
+    td {
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--k9-border);
+      vertical-align: top;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    /* ================================================================
+       Hero Section (index page)
+       ================================================================ */
+
+    .hero {
+      text-align: center;
+      padding: 1rem 0 2rem;
+    }
+
+    .hero h1 {
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .hero .tagline {
+      font-size: 1.2rem;
+      color: var(--k9-text-muted);
+      margin-bottom: 1.5rem;
+      font-weight: 400;
+    }
+
+    .hero-levels {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin: 2rem 0;
+      flex-wrap: wrap;
+    }
+
+    .hero-level {
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+      min-width: 180px;
+      text-align: center;
+      color: #ffffff;
+      font-weight: 600;
+    }
+
+    .hero-level-kennel { background: var(--k9-kennel); }
+    .hero-level-yard   { background: var(--k9-yard); }
+    .hero-level-hunt   { background: var(--k9-hunt); }
+
+    .hero-level .level-name {
+      font-size: 1.1rem;
+      display: block;
+    }
+
+    .hero-level .level-desc {
+      font-size: 0.8rem;
+      opacity: 0.9;
+      font-weight: 400;
+      margin-top: 0.25rem;
+      display: block;
+    }
+
+    /* ================================================================
+       Integration Grid (integrations page)
+       ================================================================ */
+
+    .integration-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+      margin: 1.5rem 0;
+    }
+
+    .integration-item {
+      background: var(--k9-bg-alt);
+      border: 1px solid var(--k9-border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      transition: box-shadow 0.2s;
+    }
+
+    .integration-item:hover {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    .integration-item h4 {
+      margin: 0 0 0.5rem 0;
+      font-size: 1rem;
+    }
+
+    .integration-item p {
+      margin: 0;
+      font-size: 0.9rem;
+      color: var(--k9-text-muted);
+    }
+
+    /* ================================================================
+       Steps (getting-started page)
+       ================================================================ */
+
+    .steps {
+      counter-reset: step-counter;
+      list-style: none;
+      padding: 0;
+    }
+
+    .steps li {
+      counter-increment: step-counter;
+      position: relative;
+      padding-left: 3rem;
+      margin-bottom: 2rem;
+    }
+
+    .steps li::before {
+      content: counter(step-counter);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 2rem;
+      height: 2rem;
+      background: var(--k9-kennel);
+      color: #ffffff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+
+    /* ================================================================
+       Footer
+       ================================================================ */
+
+    .site-footer {
+      max-width: 960px;
+      margin: 3rem auto 2rem;
+      padding: 1.5rem;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--k9-text-muted);
+      border-top: 1px solid var(--k9-border);
+    }
+
+    .site-footer a {
+      color: var(--k9-text-muted);
+      text-decoration: underline;
+    }
+
+    .footer-gradient {
+      height: 3px;
+      background: var(--k9-gradient);
+      border-radius: 2px;
+      margin-bottom: 1rem;
+    }
+
+    /* ================================================================
+       Responsive
+       ================================================================ */
+
+    @media (max-width: 768px) {
+      .content-card {
+        padding: 1.5rem;
+        border-radius: 8px;
+      }
+
+      .hero h1 {
+        font-size: 1.8rem;
+      }
+
+      .hero-levels {
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .hero-level {
+        width: 100%;
+        max-width: 300px;
+      }
+
+      .site-header::after {
+        display: none;
+      }
+
+      .nav-inner {
+        padding: 0 0.75rem;
+      }
+
+      .nav-inner a {
+        padding: 0.75rem 0.85rem;
+        font-size: 0.85rem;
+      }
+
+      h1 { font-size: 1.6rem; }
+      h2 { font-size: 1.2rem; }
+
+      table {
+        font-size: 0.85rem;
+      }
+
+      th, td {
+        padding: 0.5rem 0.65rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .integration-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* ================================================================
+       Print
+       ================================================================ */
+
+    @media print {
+      body { background: #fff; }
+      .site-nav { display: none; }
+      .content-card { box-shadow: none; border: none; padding: 0; }
+      .site-header { background: #fff !important; color: #000 !important; }
+      .site-header::before, .site-header::after { display: none; }
+      .k9-logo .k9-k, .k9-logo .k9-9 { color: #000; }
+      .k9-logo-sub { color: #666; }
+      pre { background: #f5f5f5; color: #000; border: 1px solid #ccc; }
+      a { color: #000; text-decoration: underline; }
+    }
+  </style>
+</head>
+<body class="page-getting-started">
+  <header class="site-header">
+    <div class="header-inner">
+      <div>
+        <div class="k9-logo"><span class="k9-k">K</span><span class="k9-9">9</span></div>
+        <div class="k9-logo-sub">Self-Validating Components</div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="site-nav" role="navigation" aria-label="Primary navigation">
+    <div class="nav-inner">
+            <li><a href="index.html">K9</a></li>
+      <li><a href="security-levels.html">Security Levels</a></li>
+      <li><a href="examples.html">Examples</a></li>
+      <li><a href="integrations.html">Integrations</a></li>
+      <li><a href="getting-started.html" class="active">Get Started</a></li>
+
+    </div>
+  </nav>
+
+  <main class="site-main" role="main">
+    <article class="content-card" data-slug="getting-started">
+      <p><!-- SPDX-License-Identifier: PMPL-1.0-or-later --> <!-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) --></p>
+<h1>Get Started</h1>
+<p>From zero to a validated K9 component in six steps.</p>
+<p>---</p>
+<h2>Prerequisites</h2>
+<p>You will need:</p>
+<ul>
+<li><strong>Pandoc</strong> 3.1 or later — [pandoc.org/installing.html](https://pandoc.org/installing.html)</li>
+<li><strong>Nickel</strong> 1.5 or later — [nickel-lang.org](https://nickel-lang.org/) (for Yard/Hunt levels)</li>
+<li>A text editor (VS Code recommended for syntax highlighting)</li>
+</ul>
+<p>---</p>
+<p><ol class="steps"></p>
+<p><li></p>
+<h3>Install pandoc-k9</h3>
+<p>Clone the pandoc-k9 repository and make the Lua files available to Pandoc:</p>
+<pre><code>git clone https://github.com/hyperpolymath/pandoc-k9.git
+cd pandoc-k9
+
+# Copy the Lua reader, writer, and filter to your Pandoc data directory
+cp k9-reader.lua k9-writer.lua k9-filter.lua k9.lua \
+   ~/.local/share/pandoc/
+cp k9.html ~/.local/share/pandoc/templates/
+</code></pre>
+<p>Verify the installation:</p>
+<pre><code>pandoc --list-input-formats | grep k9
+</code></pre>
+<p></li></p>
+<p><li></p>
+<h3>Install the VS Code extension (optional)</h3>
+<p>For syntax highlighting in VS Code:</p>
+<pre><code># From the VS Code marketplace
+code --install-extension hyperpolymath.vscode-k9
+</code></pre>
+<p>This gives you security-level-aware highlighting: Kennel keywords in green, Yard in amber, Hunt in red. It also provides bracket matching and folding for K9 structures.</p>
+<p></li></p>
+<p><li></p>
+<h3>Create your first Kennel-level file</h3>
+<p>Create a file called <code>hello.k9</code>:</p>
+<pre><code>K9!
+# hello.k9 — My first K9 component
+# Security Level: Kennel (pure data, no execution)
+
+---
+metadata:
+  name: hello-k9
+  version: 1.0.0
+  description: My first self-validating component
+  author: Your Name
+  license: PMPL-1.0-or-later
+
+content:
+  greeting: &quot;Hello from K9!&quot;
+  message: |
+    This is a Kennel-level component.
+    It contains only data — no code, no execution.
+    Safe to parse from any source.
+
+tags:
+  - example
+  - kennel
+  - hello-world
+</code></pre>
+<p>This is the simplest possible K9 file. It starts with <code>K9!</code>, carries a pedigree in the <code>metadata</code> section, and contains structured data. Nothing more.</p>
+<p></li></p>
+<p><li></p>
+<h3>Convert it with Pandoc</h3>
+<p>Use the K9 reader to convert your file to HTML:</p>
+<pre><code>pandoc -f k9.lua hello.k9 \
+       --lua-filter=k9-filter.lua \
+       --template=k9.html \
+       -o hello.html
+</code></pre>
+<p>Open <code>hello.html</code> in a browser. You will see a formatted K9 document with a security-level header bar (green for Kennel), a pedigree summary card, and styled content sections.</p>
+<p>Convert to other formats just as easily:</p>
+<pre><code># To Markdown
+pandoc -f k9.lua hello.k9 -t markdown -o hello.md
+
+# To JSON (Pandoc AST)
+pandoc -f k9.lua hello.k9 -t json -o hello.json
+</code></pre>
+<p></li></p>
+<p><li></p>
+<h3>Graduate to Yard level with Nickel contracts</h3>
+<p>Create a file called <code>config.k9.ncl</code>:</p>
+<pre><code># config.k9.ncl — Yard-level configuration with contracts
+# Security Level: Yard (contracts and types, no execution)
+
+let pedigree = import &quot;pedigree.ncl&quot; in
+
+pedigree.K9Pedigree &amp; {
+  metadata = {
+    name = &quot;my-service-config&quot;,
+    version = &quot;1.0.0&quot;,
+    description = &quot;Service configuration with validated contracts&quot;,
+  },
+
+  security = {
+    trust_level = 'Yard,
+    allow_network = false,
+    allow_filesystem_write = false,
+    allow_subprocess = false,
+  },
+
+  # The | operator applies a Nickel contract
+  config = {
+    port | std.number.Nat
+         | std.contract.from_predicate (fun x =&gt; x &gt;= 1024 &amp;&amp; x &lt;= 65535)
+         = 8443,
+
+    log_level | [| 'debug, 'info, 'warn, 'error |]
+              = 'info,
+
+    max_connections | std.number.Nat = 100,
+  },
+
+  validation = {
+    checksum = &quot;...&quot;,
+    pedigree_version = &quot;1.0.0&quot;,
+    hunt_authorized = false,
+  },
+}
+</code></pre>
+<p>Type-check it with Nickel:</p>
+<pre><code>nickel typecheck config.k9.ncl
+</code></pre>
+<p>If you change <code>port</code> to <code>80</code> (below 1024) or <code>log_level</code> to <code>'verbose</code> (not in the enum), Nickel will reject the configuration at type-check time — before it ever reaches a running service.</p>
+<p></li></p>
+<p><li></p>
+<h3>Validate with the Contractile CLI</h3>
+<p>If you have the Contractile CLI installed:</p>
+<pre><code># Install contractile
+cargo install contractile
+
+# Create the k9 symlink
+ln -sf $(which contractile) ~/.local/bin/k9
+
+# Evaluate a K9 component
+k9 eval hello.k9           # Kennel: validates pedigree
+k9 eval config.k9.ncl      # Yard: validates pedigree + contracts
+</code></pre>
+<p>The <code>k9 eval</code> command checks pedigree structure, runs Nickel type checking (for Yard/Hunt), and verifies signatures (for Hunt). It reports the security level, any contract violations, and whether the component is valid.</p>
+<p></li></p>
+<p></ol></p>
+<p>---</p>
+<h2>What Next?</h2>
+<ul>
+<li><strong>Read the [Security Levels](security-levels.html) page</strong> to understand the</li>
+<p>trust model in depth.</p>
+<li><strong>Browse the [Examples](examples.html)</strong> for real-world K9 files at each level.</li>
+<li><strong>Check the [Integrations](integrations.html)</strong> to see how K9 fits into your</li>
+<p>existing toolchain.</p>
+<li><strong>Explore the [pandoc-k9 repository](https://github.com/hyperpolymath/pandoc-k9)</strong></li>
+<p>for the full source, tests, and documentation.</p>
+</ul>
+<p>---</p>
+<h2>Common Patterns</h2>
+<h3>Using K9 in CI/CD</h3>
+<p>Add K9 validation as a CI step:</p>
+<pre><code># .github/workflows/k9-validate.yml
+name: K9 Validation
+on: [push, pull_request]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Nickel
+        run: cargo install nickel-lang-cli
+      - name: Validate K9 components
+        run: |
+          for f in $(find . -name '*.k9' -o -name '*.k9.ncl'); do
+            echo &quot;Validating $f...&quot;
+            k9 eval &quot;$f&quot;
+          done
+</code></pre>
+<h3>Using K9 for Container Manifests</h3>
+<p>Pair K9 with the Stapeln container ecosystem:</p>
+<pre><code>K9!
+# my-service.k9 — Container deployment manifest
+
+---
+metadata:
+  name: my-service
+  version: 2.0.0
+  description: Production deployment for my-service
+  license: PMPL-1.0-or-later
+
+container:
+  image: cgr.dev/my-org/my-service:2.0.0
+  replicas: 3
+  health_check:
+    path: /healthz
+    interval_seconds: 15
+</code></pre>
+<h3>Using K9 for Project Configuration</h3>
+<p>Replace your <code>config.yaml</code> or <code>settings.json</code> with a self-describing K9 file:</p>
+<pre><code>K9!
+# app-config.k9 — Application configuration
+
+---
+metadata:
+  name: app-config
+  version: 1.0.0
+  description: Runtime configuration for the application
+  license: PMPL-1.0-or-later
+
+database:
+  host: localhost
+  port: 5432
+  name: app_production
+  pool_size: 10
+
+cache:
+  backend: redis
+  ttl_seconds: 300
+</code></pre>
+<p>The advantage over plain YAML: every tool that encounters this file knows exactly what it is, who authored it, and what version it represents — without parsing comments or guessing from file paths.</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-gradient"></div>
+    <p>
+      Built with <a href="https://github.com/hyperpolymath/ddraig-ssg">ddraig-ssg</a> (Idris 2)
+      &middot; K9 is part of the
+      <a href="https://github.com/hyperpolymath">hyperpolymath standards ecosystem</a>
+    </p>
+    <p>&copy; 2026 Jonathan D.A. Jewell. SPDX-License-Identifier: PMPL-1.0-or-later</p>
+  </footer>
+</body>
+</html>
