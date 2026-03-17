@@ -79,7 +79,7 @@ The `nickel` section of K9 contractiles uses Nickel contracts to validate config
 
 Here's where it gets fun: **K9 releases itself using a K9 component**!
 
-See: https://github.com/hyperpolymath/k9-svc/blob/main/release-k9.k9.ncl
+See: https://github.com/hyperpolymath/standards/blob/main/k9-svc/release-k9.k9.ncl
 
 This contractile:
 - Validates the build environment
@@ -144,7 +144,7 @@ I'd love to hear thoughts from the Nickel community:
 
 ## Links
 
-- **K9 Specification:** https://github.com/hyperpolymath/k9-svc
+- **K9 Specification:** https://github.com/hyperpolymath/standards/tree/main/k9-svc
 - **K9 Tools:** https://github.com/hyperpolymath/k9-tools
 - **Examples:** https://github.com/hyperpolymath/k9-svc/tree/main/examples
 
@@ -156,4 +156,4 @@ Thanks for building such an excellent configuration language! K9 wouldn't be pos
 The Open University
 j.d.a.jewell@open.ac.uk
 
-P.S. - If you're interested in formally verified markup languages, check out A2ML (Attested Markup Language), which uses Idris2 dependent types: https://github.com/hyperpolymath/a2ml
+P.S. - If you're interested in formally verified markup languages, check out A2ML (Attested Markup Language), which uses Idris2 dependent types: https://github.com/hyperpolymath/standards/tree/main/a2ml

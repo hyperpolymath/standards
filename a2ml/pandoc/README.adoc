@@ -1,50 +1,70 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 
-= A2ML Pandoc Reader & Writer
+= A2ML Pandoc Reader, Writer & Filter
 :author: Jonathan D.A. Jewell
-:revdate: 2026-03-01
+:toc: preamble
+:icons: font
 
 == Overview
 
-`a2ml.lua` is a https://pandoc.org/custom-readers.html[Pandoc custom reader]
-that converts A2ML (Attested Markup Language) surface syntax into the Pandoc
-AST. This enables converting A2ML documents to any format Pandoc supports:
-HTML, Markdown, LaTeX, PDF, DOCX, EPUB, and dozens more.
+Pandoc custom reader, writer, and Lua filter for
+https://github.com/hyperpolymath/standards/tree/main/a2ml[A2ML (Attested Markup Language)].
+These components let you convert A2ML documents to and from any format that
+https://pandoc.org[Pandoc] supports: HTML, PDF, DOCX, Markdown, LaTeX, EPUB, and dozens more.
 
-== Usage
+== Installation
+
+Copy the Lua files into your project or a shared filters directory:
 
 [source,sh]
 ----
-# A2ML → HTML
-pandoc -f a2ml.lua input.a2ml -o output.html
+# Minimal: reader + writer
+cp a2ml-reader.lua a2ml-writer.lua /path/to/your/project/
 
-# A2ML → Markdown
-pandoc -f a2ml.lua input.a2ml -t markdown
+# Full suite: reader + writer + filter + template
+cp a2ml-reader.lua a2ml-writer.lua a2ml-filter.lua a2ml.html /path/to/your/project/
 
-# A2ML → PDF (via LaTeX)
-pandoc -f a2ml.lua input.a2ml -o output.pdf
-
-# A2ML → DOCX
-pandoc -f a2ml.lua input.a2ml -o output.docx
-
-# A2ML → JSON AST (for programmatic use)
-pandoc -f a2ml.lua input.a2ml -t json
+# Combined reader (includes writer logic)
+cp a2ml.lua /path/to/your/project/
 ----
 
-== Supported A2ML Features
+Requires Pandoc 3.0+ with Lua support.
+
+== Reader: A2ML to Anything
+
+The reader parses `.a2ml` files into the Pandoc AST, enabling conversion to any output
+format.
+
+[source,sh]
+----
+# A2ML to HTML
+pandoc -f a2ml-reader.lua input.a2ml -o output.html
+
+# A2ML to Markdown
+pandoc -f a2ml-reader.lua input.a2ml -t markdown
+
+# A2ML to PDF (via LaTeX)
+pandoc -f a2ml-reader.lua input.a2ml -o output.pdf
+
+# A2ML to DOCX
+pandoc -f a2ml-reader.lua input.a2ml -o output.docx
+
+# A2ML to JSON AST (for programmatic use)
+pandoc -f a2ml-reader.lua input.a2ml -t json
+----
+
+=== Syntax Mapping
 
 [cols="1,3"]
 |===
-| Feature | Pandoc Mapping
+| A2ML Syntax | Pandoc AST Element
 
 | `# Heading` through `##### Heading`
-| `Header` (levels 1-5) with auto-generated IDs
+| `Header` (levels 1--5) with auto-generated IDs
 
 | `@directive(attrs): ... @end`
-| `Div` with `data-a2ml` attribute and CSS classes
-
-| `@opaque(lang="x"): ... @end`
-| `CodeBlock` preserving bytes exactly
+| `Div` with CSS classes `a2ml-directive` and `a2ml-<name>`
 
 | `**bold**`
 | `Strong`
@@ -52,81 +72,60 @@ pandoc -f a2ml.lua input.a2ml -t json
 | `*italic*`
 | `Emph`
 
-| `[label](url)`
+| `[text](url)`
 | `Link`
 
 | `@ref(id)`
 | `Link` targeting `#id` (internal cross-reference)
 
-| `- list items`
+| `- list items` / `* list items`
 | `BulletList`
 
-| `\`\`\`lang ... \`\`\``
+| +```lang ... ```+
 | `CodeBlock` with language annotation
 
-| Paragraphs (blank-line separated)
+| `;; comment`
+| Stripped (Scheme-style comments)
+
+| Blank-line-separated text
 | `Para`
 |===
 
-== Directive Handling
+== Writer: Anything to A2ML
 
-A2ML directives are rendered as Pandoc `Div` elements with:
-
-- `id` from the directive's `id` attribute (if present)
-- CSS class `a2ml-<name>` (e.g. `a2ml-abstract`, `a2ml-fig`)
-- `data-a2ml` HTML attribute matching the directive name
-- Additional attributes as `data-*` pairs
-
-The `@opaque` directive is special: its body is rendered as a `CodeBlock`
-to preserve byte-exact content, matching the A2ML spec requirement for
-deterministic round-tripping.
-
-== Requirements
-
-- Pandoc 3.0+ with Lua support (`+lua` feature)
-
-== Writer Usage
-
-`a2ml-writer.lua` converts any Pandoc-supported format to A2ML:
+The writer converts any Pandoc-supported input format to A2ML surface syntax.
 
 [source,sh]
 ----
-# Markdown → A2ML
+# Markdown to A2ML
 pandoc input.md -t a2ml-writer.lua -o output.a2ml
 
-# HTML → A2ML
+# HTML to A2ML
 pandoc input.html -t a2ml-writer.lua -o output.a2ml
 
-# Round-trip: A2ML → AST → A2ML
-pandoc -f a2ml.lua input.a2ml -t a2ml-writer.lua -o roundtrip.a2ml
+# Round-trip: A2ML to AST to A2ML
+pandoc -f a2ml-reader.lua input.a2ml -t a2ml-writer.lua -o roundtrip.a2ml
 ----
 
 The writer produces:
 
-- `#` headings from `Header` elements
-- `@directive: ... @end` from `Div` elements with `a2ml-*` classes
-- `@abstract: ... @end` from `BlockQuote` elements
-- Fenced code blocks with language annotations
-- `@ref()` for internal cross-references
-- SPDX header on all output
-
-== Files
-
-- `a2ml.lua` — Combined reader (360 lines)
-- `a2ml-reader.lua` — Standalone reader (189 lines)
-- `a2ml-writer.lua` — Standalone writer (153 lines)
+* `#` headings from `Header` elements
+* `@directive: ... @end` from `Div` elements with `a2ml-*` classes
+* `@abstract: ... @end` from `BlockQuote` elements
+* Fenced code blocks with language annotations
+* `@ref()` for internal cross-references (links targeting `#id`)
+* Ordered and unordered lists
+* SPDX header on all output
 
 == Filter: a2ml-filter.lua
 
-`a2ml-filter.lua` is a Pandoc Lua filter that provides post-processing
-passes over the AST produced by the A2ML reader. Run it with `--lua-filter`:
+A Lua filter providing six post-processing passes over the AST. Run it with `--lua-filter`
+after the reader:
 
 [source,sh]
 ----
-# Full pipeline: read + filter + template
-pandoc -f a2ml.lua input.a2ml \
+pandoc -f a2ml-reader.lua input.a2ml \
   --lua-filter=a2ml-filter.lua \
-  --template=a2ml.html \
   -o output.html
 ----
 
@@ -137,35 +136,34 @@ pandoc -f a2ml.lua input.a2ml \
 | Feature | Description
 
 | Cross-reference resolver
-| `@ref(id)` links are validated against actual heading anchors. Resolved refs
-  get a tooltip; unresolved refs produce a warning and red styling.
+| `@ref(id)` links are validated against actual heading anchors. Resolved refs get a
+  tooltip; unresolved refs produce a warning and are marked with a CSS class.
 
 | Include directive
-| `@include(file.a2ml)` Div elements are replaced with the parsed content of
-  the referenced file via `pandoc.read()`. Missing files produce a visible
-  error block rather than silent failure.
+| `@include(file.a2ml)` directives are replaced with the parsed content of the referenced
+  file via `pandoc.read()`. Missing files produce a visible error block.
 
 | TOC generator
-| Auto-generates a Table of Contents from all document headings. Inserted
-  after the first level-1 heading (or at the top if none exists).
+| Auto-generates a Table of Contents from all document headings. Inserted after the first
+  level-1 heading (or at the top if none exists). Wrapped in a Div with id `a2ml-toc`.
 
 | Diagram rendering
-| Code blocks tagged `mermaid` or `graphviz`/`dot` are rendered to inline SVG
-  via `pandoc.pipe()`. Falls back gracefully to showing source code if the
-  external tool (mmdc, dot) is not installed.
+| Code blocks tagged `mermaid` or `graphviz`/`dot` are rendered to inline SVG via
+  `pandoc.pipe()`. Falls back to showing source code if the external tool is unavailable.
 
 | SPDX validator
-| Checks for `SPDX-License-Identifier` in metadata or early document blocks.
-  Warns if missing (can be disabled via `a2ml-validate: false` in metadata).
+| Checks for `SPDX-License-Identifier` in metadata or early document blocks. Warns if
+  missing.
 
 | Metadata enrichment
-| Populates `version`, `date`, and `author` from git (`git describe`,
-  `git log`, `git config`) when not already present in the document.
+| Populates `version`, `date`, and `author` from git (`git describe`, `git log`,
+  `git config`) when not already present in the document metadata.
 |===
 
 === Disabling Capabilities
 
-Set metadata flags to disable individual features:
+Set metadata flags in your document or a YAML metadata block to disable individual
+features:
 
 [source,yaml]
 ----
@@ -173,48 +171,39 @@ Set metadata flags to disable individual features:
 a2ml-includes: false
 a2ml-diagrams: false
 a2ml-validate: false
+a2ml-smart: false
 ---
 ----
 
-== HTML Template: a2ml.html
+== Full Pipeline
 
-`a2ml.html` is a Pandoc HTML5 template purpose-built for A2ML documents:
+Combine reader, filter, and HTML template for the best output:
 
 [source,sh]
 ----
-pandoc -f a2ml.lua input.a2ml \
+pandoc -f a2ml-reader.lua input.a2ml \
   --lua-filter=a2ml-filter.lua \
   --template=a2ml.html \
   -o output.html
 ----
 
-=== Template Features
+=== HTML Template Features
 
-- **SPDX badge** in the document header showing the license identifier
-- **Directive styling**: `@abstract` (blue), `@opaque` (amber), `@fig` (green),
-  `@note` (orange), `@warning` (red) — each with distinct borders, backgrounds,
-  and auto-generated labels
-- **Responsive layout**: fluid max-width container, mobile breakpoints
-- **Print-friendly**: clean monochrome output, URLs expanded inline
-- **Syntax highlighting**: full Pandoc highlight token coverage
-- **TOC styling**: collapsible grey box for the generated table of contents
-- **Diagram blocks**: centred SVG container with fallback source display
-- **Cross-reference colouring**: resolved refs in blue, unresolved in red
+The bundled `a2ml.html` template provides:
 
-=== Template Variables
+* SPDX badge in the document header
+* Directive styling: `@abstract` (blue), `@opaque` (amber), `@fig` (green), `@note` (orange), `@warning` (red)
+* Responsive layout with mobile breakpoints
+* Print-friendly monochrome output
+* Syntax highlighting for code blocks
+* Collapsible TOC box
+* Cross-reference colouring (resolved in blue, unresolved in red)
 
-The template consumes these Pandoc metadata fields:
-
-- `$title$` — document title
-- `$author$` — author name
-- `$date$` — document date
-- `$version$` — document version
-- `$spdx-license$` — SPDX license identifier
-- `$a2ml-format$` — A2ML format version
+Template variables: `$title$`, `$author$`, `$date$`, `$version$`, `$spdx-license$`, `$a2ml-format$`.
 
 == Extensions Table
 
-Both the reader and filter advertise an extensions table:
+Both the reader and filter advertise extension flags:
 
 [cols="1,3"]
 |===
@@ -227,22 +216,53 @@ Both the reader and filter advertise an extensions table:
 | File inclusion via `@include` directives
 
 | `+diagrams`
-| Diagram rendering (mermaid, graphviz/dot)
+| Diagram rendering (Mermaid, Graphviz/Dot)
 
 | `+validate`
-| Structural validation (SPDX, cross-references)
+| Structural validation (SPDX headers, cross-references)
 |===
 
 == Files
 
-- `a2ml.lua` — Combined reader (360 lines)
-- `a2ml-reader.lua` — Standalone reader (189 lines)
-- `a2ml-writer.lua` — Standalone writer (153 lines)
-- `a2ml-filter.lua` — Lua filter with 6 post-processing passes
-- `a2ml.html` — HTML5 template with A2ML-specific CSS
+[cols="1,1,2"]
+|===
+| File | Lines | Purpose
+
+| `a2ml.lua`
+| ~360
+| Combined reader (alternative to using reader + writer separately)
+
+| `a2ml-reader.lua`
+| 189
+| Standalone reader: A2ML source to Pandoc AST
+
+| `a2ml-writer.lua`
+| 153
+| Standalone writer: Pandoc AST to A2ML surface syntax
+
+| `a2ml-filter.lua`
+| 465
+| Lua filter with 6 post-processing passes
+
+| `a2ml.html`
+| --
+| HTML5 template with A2ML-specific CSS
+|===
 
 == Spec Compliance
 
 This reader implements the A2ML v1.0.0 surface syntax as specified in
-`SPEC-v1.0.adoc`. Test vectors in `tests/vectors/` validate correct
-output for all core constructs.
+`SPEC-v1.0.adoc`. Test vectors in `tests/vectors/` validate correct output for all core
+constructs. Media type: `application/vnd.a2ml` (IANA registration pending).
+
+== Licensing
+
+SPDX-License-Identifier: PMPL-1.0-or-later
+
+See link:LICENSE[LICENSE] for the full text.
+
+== Part of the A2ML Ecosystem
+
+This directory is part of the link:../README.adoc[A2ML specification and tooling] in the
+https://github.com/hyperpolymath/standards[standards monorepo]. See the parent directory
+for language bindings, the validation GitHub Action, editor integrations, and the CLI.

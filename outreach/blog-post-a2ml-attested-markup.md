@@ -233,7 +233,8 @@ That's a trade-off: slight verbosity (explicit IDs, `@ref()` syntax) for strong 
 
 ```bash
 # Clone repository
-git clone https://github.com/hyperpolymath/a2ml.git
+git clone https://github.com/hyperpolymath/standards.git
+# Note: A2ML is located in standards/a2ml
 cd a2ml
 
 # Build CLI
@@ -243,7 +244,7 @@ cd cli && ./build.sh
 echo "# Hello, A2ML" | ../build/exec/a2ml check -
 ```
 
-Or read the spec (written in A2ML, of course): https://github.com/hyperpolymath/a2ml/blob/main/SPEC.a2ml
+Or read the spec (written in A2ML, of course): https://github.com/hyperpolymath/standards/blob/main/a2ml/SPEC.a2ml
 
 ## What's Next
 
@@ -274,8 +275,8 @@ For documents that matter—papers, specs, standards—that's worth a bit of ext
 ---
 
 **Links:**
-- A2ML v1.0.0: https://github.com/hyperpolymath/a2ml/releases/tag/v1.0.0
-- Specification: https://github.com/hyperpolymath/a2ml/blob/main/SPEC.a2ml
+- A2ML v1.0.0: https://github.com/hyperpolymath/standards/tree/main/a2ml/releases/tag/v1.0.0
+- Specification: https://github.com/hyperpolymath/standards/blob/main/a2ml/SPEC.a2ml
 - arXiv Paper: arXiv:XXXX.XXXXX (pending acceptance)
 - Try the REPL: https://github.com/hyperpolymath/a2ml/tree/main/repl
 

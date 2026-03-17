@@ -1,27 +1,49 @@
-= a2ml-validate-action
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+= Validate A2ML Manifests -- GitHub Action
+:author: Jonathan D.A. Jewell
 :toc: preamble
 :icons: font
 
 == Overview
 
-**GitHub Action to validate A2ML manifest files in your repository.**
+GitHub Action that scans a repository for `.a2ml` files and validates their structure,
+required fields, and compliance with the
+https://github.com/hyperpolymath/standards/tree/main/a2ml[A2ML specification].
 
-A2ML (Agnostic Agent Markup Language) is a manifest format used across RSR
-(Rhodium Standard Repository) projects to declare machine-readable metadata,
-AI agent instructions, and project state. This action scans for `.a2ml` files
-and validates their structure and required fields.
+A2ML (Attested Markup Language) is the manifest format used across
+https://github.com/hyperpolymath/standards[RSR (Rhodium Standard Repository)] projects to
+declare machine-readable metadata, AI agent instructions, attestation provenance, and
+project state.
 
-== Checks Performed
+== What It Validates
 
-1. **SPDX header** — Verifies `SPDX-License-Identifier` is present in the first 10 lines
-2. **Identity fields** — Requires `agent-id`, `name`, or `project` field (relaxed for AI-MANIFEST files)
-3. **Version field** — Checks for `version` or `schema_version`
-4. **Attestation blocks** — If an `[attestation]` section exists, validates it contains `proof`, `signature`, or `hash` fields
-5. **Section syntax** — Warns on malformed `[section]` headings with unclosed brackets
+[cols="1,3"]
+|===
+| Check | Description
+
+| SPDX header
+| Verifies `SPDX-License-Identifier` is present in the first 10 lines of each file.
+
+| Identity fields
+| Requires at least one of `agent-id`, `name`, or `project` at the top level. Relaxed for
+  files matching `*AI-MANIFEST*` which use free-form markdown-style headers.
+
+| Version field
+| Checks for `version` or `schema_version` (warning if missing).
+
+| Attestation blocks
+| If an `[attestation]` or `## Attestation` section exists, validates it contains at least
+  one of `proof`, `signature`, `hash`, or `verified` fields.
+
+| Section syntax
+| Warns on `[section]` headings with unclosed brackets (catches malformed sections).
+|===
 
 == Usage
 
-Add to your workflow:
+Add this step to any GitHub Actions workflow:
 
 [source,yaml]
 ----
@@ -32,11 +54,11 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  validate-a2ml:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: hyperpolymath/a2ml-validate-action@v1
+      - uses: hyperpolymath/standards/a2ml/actions/validate@main
         with:
           path: '.'        # Directory to scan (default: repo root)
           strict: 'false'  # Promote warnings to errors (default: false)
@@ -50,11 +72,12 @@ jobs:
 
 | `path`
 | `.`
-| Directory path to scan for `.a2ml` files
+| Directory path to scan for `.a2ml` files. The scan is recursive, excluding `.git/`.
 
 | `strict`
 | `false`
-| When `true`, warnings become errors and the action fails on any issue
+| When `true`, all warnings are promoted to errors and the action fails on any validation
+  issue. Recommended for repositories that require full A2ML compliance.
 |===
 
 === Outputs
@@ -64,27 +87,53 @@ jobs:
 | Output | Description
 
 | `files-scanned`
-| Number of `.a2ml` files processed
+| Number of `.a2ml` files discovered and processed.
 
 | `errors`
-| Count of validation errors
+| Count of validation errors. The action exits with code 1 if this is non-zero.
 
 | `warnings`
-| Count of validation warnings
+| Count of validation warnings. In strict mode, these are counted as errors instead.
+|===
+
+== Exit Codes
+
+[cols="1,3"]
+|===
+| Code | Meaning
+
+| `0`
+| All files valid (or only warnings in non-strict mode). Also returned when no `.a2ml`
+  files are found (with a `::notice::` annotation).
+
+| `1`
+| One or more validation errors were found. In strict mode, this includes promoted warnings.
 |===
 
 == Strict Mode
 
-In strict mode (`strict: 'true'`), all warnings are promoted to errors. This
-is useful for repositories that require full A2ML compliance, such as those
-following the RSR standard.
+In strict mode (`strict: 'true'`), all warnings are promoted to errors:
 
-== Author
+* Missing SPDX header becomes a blocking error
+* Missing version field becomes a blocking error
+* Empty attestation blocks become a blocking error
 
-Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+This is the recommended setting for repositories following the RSR standard.
 
-== License
+== GitHub Annotations
+
+The action produces GitHub annotations (errors, warnings, notices) that appear inline in
+pull request diffs and the Actions summary. Each annotation includes the file path, line
+number, and a description of the issue.
+
+== Licensing
 
 SPDX-License-Identifier: PMPL-1.0-or-later
 
-See link:LICENSE[LICENSE] for details.
+See link:LICENSE[LICENSE] for the full text.
+
+== Part of the A2ML Ecosystem
+
+This action is part of the link:../../README.adoc[A2ML specification and tooling] in the
+https://github.com/hyperpolymath/standards[standards monorepo]. See the parent directory
+for language bindings, Pandoc support, editor integrations, and the CLI.

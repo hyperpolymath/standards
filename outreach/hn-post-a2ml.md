@@ -87,9 +87,9 @@ Dependent types can bring formal guarantees to everyday programming tasks beyond
 You write `@ref(methods)` instead of "Section 5", and you need explicit IDs (`{#methods}`). Slight verbosity for strong guarantees: broken references become compile errors, not runtime surprises.
 
 **Links:**
-- Repo: https://github.com/hyperpolymath/a2ml
-- v1.0.0 Release: https://github.com/hyperpolymath/a2ml/releases/tag/v1.0.0
-- Spec (written in A2ML): https://github.com/hyperpolymath/a2ml/blob/main/SPEC.a2ml
+- Repo: https://github.com/hyperpolymath/standards/tree/main/a2ml
+- v1.0.0 Release: https://github.com/hyperpolymath/standards/tree/main/a2ml/releases/tag/v1.0.0
+- Spec (written in A2ML): https://github.com/hyperpolymath/standards/blob/main/a2ml/SPEC.a2ml
 - arXiv paper: pending acceptance (cs.PL)
 
 **License:** PMPL-1.0 (Polymath Public Meta-License) - open source
