@@ -234,7 +234,7 @@ Forget to set `github_repo`? Nickel fails at parse time, not when `gh release cr
 - CI/CD pipelines
 
 **Community:**
-- Open source: https://github.com/hyperpolymath/k9-svc (spec), https://github.com/hyperpolymath/k9-tools (tooling)
+- Open source: https://github.com/hyperpolymath/standards/tree/main/k9-svc (spec), https://github.com/hyperpolymath/k9-tools (tooling)
 - License: PMPL-1.0 (Polymath Public Meta-License)
 - Built with: Nickel, Rust, Justfile
 
@@ -254,7 +254,7 @@ If your automation tool can't automate itself, you've missed something fundament
 
 **Call to Action:**
 - Try K9: https://github.com/hyperpolymath/k9-tools
-- Read the spec: https://github.com/hyperpolymath/k9-svc
+- Read the spec: https://github.com/hyperpolymath/standards/tree/main/k9-svc
 - Join the meta-dogfooding movement
 
 ## Why Strange Loop?

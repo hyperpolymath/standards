@@ -122,7 +122,7 @@ Successfully deployed **10 K9 components** across **9 unique repositories** in t
   - Changelog automation
 - **Demonstrates:** Ultimate dogfooding, complex multi-stage workflows, cryptographic signing
 
-**Repository:** https://github.com/hyperpolymath/k9-svc
+**Repository:** https://github.com/hyperpolymath/standards/tree/main/k9-svc
 **Commit:** 2fcbb39
 
 ---

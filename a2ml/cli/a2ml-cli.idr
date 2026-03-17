@@ -36,7 +36,7 @@ Attested Markup Language - Command Line Interface
 Copyright (c) 2026 Jonathan D.A. Jewell
 
 License: PMPL-1.0-or-later
-Repository: https://github.com/hyperpolymath/a2ml
+Repository: https://github.com/hyperpolymath/standards/tree/main/a2ml
 """
 
 -- ============================================================================
@@ -127,7 +127,7 @@ ENVIRONMENT:
 SEE ALSO:
     Documentation: https://a2ml.org/docs
     Specification: https://a2ml.org/spec
-    Report bugs: https://github.com/hyperpolymath/a2ml/issues
+    Report bugs: https://github.com/hyperpolymath/standards/tree/main/a2ml/issues
 """
 
 -- ============================================================================

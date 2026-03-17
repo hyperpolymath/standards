@@ -115,7 +115,7 @@ evaluate Nickel can still identify and read `'Kennel`-level files as data.
 ## Published Specification
 
 - **K9 SVC Specification (v1.0.0-alpha):**
-  https://github.com/hyperpolymath/k9-svc/blob/main/SPEC.adoc
+  https://github.com/hyperpolymath/standards/blob/main/k9-svc/SPEC.adoc
 
 - **Nickel configuration language:**
   https://nickel-lang.org/
@@ -136,7 +136,7 @@ K9 SVC files are used by:
 - Build systems that need typed, verifiable configuration
 - Archival systems requiring active document permanence
 
-Reference implementation: https://github.com/hyperpolymath/k9-svc
+Reference implementation: https://github.com/hyperpolymath/standards/tree/main/k9-svc
 
 ---
 
@@ -263,7 +263,7 @@ to `application/vnd.k9+nickel`.
 ## Published Specification
 
 - **K9 SVC Specification (v1.0.0-alpha):**
-  https://github.com/hyperpolymath/k9-svc/blob/main/SPEC.adoc
+  https://github.com/hyperpolymath/standards/blob/main/k9-svc/SPEC.adoc
 
 ---
 
@@ -333,7 +333,7 @@ syntax is known.
    https://www.rfc-editor.org/rfc/rfc6839.html
 
 3. K9 SVC Specification (v1.0.0-alpha)
-   https://github.com/hyperpolymath/k9-svc/blob/main/SPEC.adoc
+   https://github.com/hyperpolymath/standards/blob/main/k9-svc/SPEC.adoc
 
 4. Nickel Configuration Language
    https://nickel-lang.org/

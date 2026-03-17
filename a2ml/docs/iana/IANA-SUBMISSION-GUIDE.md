@@ -59,8 +59,8 @@ documents requiring structural guarantees. It combines ease of authoring
 The complete registration template is attached as plain text.
 
 Key references:
-- Specification: https://github.com/hyperpolymath/a2ml/blob/main/SPEC.a2ml
-- Reference implementation: https://github.com/hyperpolymath/a2ml
+- Specification: https://github.com/hyperpolymath/standards/blob/main/a2ml/SPEC.a2ml
+- Reference implementation: https://github.com/hyperpolymath/standards/tree/main/a2ml
 - Documentation: https://github.com/hyperpolymath/a2ml/tree/main/docs
 
 Please let me know if you need any additional information or clarifications.
@@ -97,9 +97,9 @@ three security levels (kennel/yard/hunt) and cryptographic attestation.
 The complete registration template is attached as plain text.
 
 Key references:
-- Specification: https://github.com/hyperpolymath/k9-svc/blob/main/docs/SPECIFICATION.md
-- Reference implementation: https://github.com/hyperpolymath/k9-svc
-- Security documentation: https://github.com/hyperpolymath/k9-svc/blob/main/docs/SECURITY.md
+- Specification: https://github.com/hyperpolymath/standards/blob/main/k9-svc/docs/SPECIFICATION.md
+- Reference implementation: https://github.com/hyperpolymath/standards/tree/main/k9-svc
+- Security documentation: https://github.com/hyperpolymath/standards/blob/main/k9-svc/docs/SECURITY.md
 
 Please let me know if you need any additional information or clarifications.
 

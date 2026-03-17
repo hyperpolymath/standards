@@ -10,8 +10,8 @@
 
 class K9Svc < Formula
   desc "Self-Validating Components - a file format that eats its own dog food"
-  homepage "https://github.com/hyperpolymath/k9-svc"
-  url "https://github.com/hyperpolymath/k9-svc/archive/refs/tags/v1.0.0.tar.gz"
+  homepage "https://github.com/hyperpolymath/standards/tree/main/k9-svc"
+  url "https://github.com/hyperpolymath/standards/tree/main/k9-svc/archive/refs/tags/v1.0.0.tar.gz"
   sha256 "82e51dec2891728d233392f6e84004e5d6060bf2c936dd47445d59ca66c09f94"
   license "PMPL-1.0-or-later"
   head "https://github.com/hyperpolymath/k9-svc.git", branch: "main"

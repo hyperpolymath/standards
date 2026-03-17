@@ -28,7 +28,7 @@ The implementation uses GADTs to represent document structure, indexed types to 
 
 We evaluate A2ML on real-world documents (RFCs, academic papers, specifications) and show that compile-time verification catches errors undetectable by traditional markup parsers, with performance within 2-3x of CommonMark.
 
-This work demonstrates that dependent types can bring formal guarantees to everyday programming tasks beyond traditional verification domains. A2ML is open source (PMPL-1.0) and available at https://github.com/hyperpolymath/a2ml.
+This work demonstrates that dependent types can bring formal guarantees to everyday programming tasks beyond traditional verification domains. A2ML is open source (PMPL-1.0) and available at https://github.com/hyperpolymath/standards/tree/main/a2ml.
 
 ## Detailed Description
 
@@ -140,7 +140,7 @@ Overhead entirely from richer semantic validation—worth it for guarantees.
 - Theorem prover backend (export A2ML structure to Coq/Lean)
 - Richer semantics (e.g., prove figure references appear after figure definitions)
 
-**Call to action:** A2ML v1.0.0 released today. Try it: https://github.com/hyperpolymath/a2ml
+**Call to action:** A2ML v1.0.0 released today. Try it: https://github.com/hyperpolymath/standards/tree/main/a2ml
 
 ## Why This Talk Fits the ML Workshop
 
@@ -173,4 +173,4 @@ This aligns with the workshop's themes of type system innovation and practical a
 **Contact:**
 Jonathan D.A. Jewell
 j.d.a.jewell@open.ac.uk
-https://github.com/hyperpolymath/a2ml
+https://github.com/hyperpolymath/standards/tree/main/a2ml
