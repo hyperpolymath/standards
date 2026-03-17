@@ -112,10 +112,10 @@ interoperability across different use cases (authoring vs. publication).
 ## Published Specification
 
 - **Primary specification (v1.0.0, Stable):**
-  https://github.com/hyperpolymath/a2ml/blob/main/SPEC-v1.0.adoc
+  https://github.com/hyperpolymath/standards/blob/main/a2ml/SPEC-v1.0.adoc
 
 - **Surface grammar specification (v0, Draft):**
-  https://github.com/hyperpolymath/a2ml/blob/main/SPEC.adoc
+  https://github.com/hyperpolymath/standards/blob/main/a2ml/SPEC.adoc
 
 - **Formal verification (Idris2 core):**
   https://github.com/hyperpolymath/a2ml/tree/main/src/A2ML
@@ -134,7 +134,7 @@ A2ML is used by:
 - Standards bodies requiring attested document integrity
 - AI agent manifest files (0-AI-MANIFEST.a2ml, AI.a2ml)
 
-Reference implementation: https://github.com/hyperpolymath/a2ml
+Reference implementation: https://github.com/hyperpolymath/standards/tree/main/a2ml
 
 ---
 
@@ -210,7 +210,7 @@ attestation and byte-for-byte opaque payload fidelity.
    https://www.rfc-editor.org/rfc/rfc6838.html
 
 2. A2ML Specification (v1.0.0, Stable)
-   https://github.com/hyperpolymath/a2ml/blob/main/SPEC-v1.0.adoc
+   https://github.com/hyperpolymath/standards/blob/main/a2ml/SPEC-v1.0.adoc
 
 3. A2ML Idris2 Core Implementation
    https://github.com/hyperpolymath/a2ml/tree/main/src/A2ML

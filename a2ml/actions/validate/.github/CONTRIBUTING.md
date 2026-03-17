@@ -1,5 +1,6 @@
 # Clone the repository
-git clone https://github.com/hyperpolymath/a2ml-validate-action.git
+git clone https://github.com/hyperpolymath/standards.git
+# Note: A2ML is located in standards/a2ml-validate-action.git
 cd a2ml-validate-action
 
 # Using Nix (recommended for reproducibility)

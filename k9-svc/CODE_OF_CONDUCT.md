@@ -310,7 +310,7 @@ We thank these communities for their leadership in creating welcoming spaces.
 
 If you have questions about this Code of Conduct:
 
-- Open a [Discussion](https://github.com/hyperpolymath/k9-svc/discussions) (for general questions)
+- Open a [Discussion](https://github.com/hyperpolymath/standards/tree/main/k9-svc/discussions) (for general questions)
 - Email {{CONDUCT_EMAIL}} (for private questions)
 - Contact any maintainer directly
 

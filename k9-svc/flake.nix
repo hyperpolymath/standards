@@ -84,7 +84,7 @@
 
           meta = with pkgs.lib; {
             description = "Self-Validating Components - a file format that eats its own dog food";
-            homepage = "https://github.com/hyperpolymath/k9-svc";
+            homepage = "https://github.com/hyperpolymath/standards/tree/main/k9-svc";
             license = licenses.agpl3Plus;
             maintainers = [];
             platforms = platforms.unix;

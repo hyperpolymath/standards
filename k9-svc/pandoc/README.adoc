@@ -1,197 +1,199 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 
-= K9 Pandoc Reader & Writer
+= K9 Pandoc Reader, Writer, and Filter
 :author: Jonathan D.A. Jewell
-:revdate: 2026-03-01
+:revdate: 2026-03-17
+:toc: preamble
+:icons: font
 
-== Overview
+Pandoc custom reader, writer, and filter for K9 Self-Validating Component files.
+Convert K9 pedigree documents to HTML, Markdown, LaTeX, PDF, DOCX, and any
+other format Pandoc supports -- or convert other formats into K9 Nickel.
 
-`k9.lua` is a https://pandoc.org/custom-readers.html[Pandoc custom reader]
-that converts K9 Self-Validating Component files (`.k9` and `.k9.ncl`) into
-the Pandoc AST. This enables converting K9 pedigree documents to any format
-Pandoc supports: HTML, Markdown, LaTeX, PDF, DOCX, and dozens more.
+== Installation
 
-== Usage
-
-[source,sh]
-----
-# K9 (YAML) → HTML
-pandoc -f k9.lua hello.k9 -o output.html
-
-# K9 (Nickel) → HTML
-pandoc -f k9.lua config.k9.ncl -o output.html
-
-# K9 → Markdown
-pandoc -f k9.lua deploy.k9.ncl -t markdown
-
-# K9 → PDF (via LaTeX)
-pandoc -f k9.lua config.k9.ncl -o output.pdf
-
-# K9 → JSON AST (for programmatic use)
-pandoc -f k9.lua hello.k9 -t json
-----
-
-== Supported K9 Features
-
-=== Auto-Detection
-
-The reader automatically detects:
-
-- **Syntax**: YAML (`.k9`) vs Nickel (`.k9.ncl`) based on content patterns
-- **Security level**: Kennel / Yard / Hunt from `trust_level` or content analysis
-- **Magic number**: `K9!` presence at file start
-- **SPDX license**: Extracted from comment headers
-
-=== Pedigree Extraction
-
-Every K9 document produces a structured pedigree summary:
-
-[cols="1,3"]
-|===
-| Field | Source
-
-| Title
-| `metadata.name` with security badge `[Kennel]` / `[Yard]` / `[Hunt]`
-
-| Version
-| `metadata.version`
-
-| Description
-| `metadata.description`
-
-| Security level
-| `security.trust_level` or inferred from content
-
-| License
-| SPDX header comment
-|===
-
-=== YAML Content (Kennel Level)
-
-- Top-level keys → `Header` (level 3) section headers
-- Key-value pairs → `DefinitionList` entries
-- YAML block scalars (`\|`) → preserved as definition values
-- List items → definition list entries
-- Comments → skipped (not structural)
-
-=== Nickel Content (Yard/Hunt Level)
-
-- `let ... = { ... } in` → `Header` (level 2) + `DefinitionList`
-- Contract annotations (`\| Type`) → displayed alongside field names
-- `import` statements → rendered as import declarations
-- Comment blocks → `Div` with `.k9-comment` class
-- Multiline strings (`m%"..."%`) → `CodeBlock`
-- Record nesting → recursive `DefinitionList`
-- Recipe blocks → definition lists with command values
-
-=== Source Appendix
-
-Every converted document includes the full raw source as a fenced code block
-at the end, enabling round-trip inspection.
-
-== Pandoc Metadata
-
-The reader sets these metadata fields (accessible via `$meta.field$` in templates):
-
-- `k9-format`: `"yaml"` or `"nickel"`
-- `k9-security-level`: `"Kennel"`, `"Yard"`, or `"Hunt"`
-- `k9-magic`: `true` / `false`
-- `spdx-license`: License identifier string
-- `title`: Component name
-- `version`: Component version
-
-== CSS Classes
-
-For HTML output, the reader emits semantic CSS classes:
-
-- `.k9-pedigree` — pedigree summary block
-- `.k9-security-badge` — security level badge
-- `.k9-kennel` / `.k9-yard` / `.k9-hunt` — security level variants
-- `.k9-section` — YAML section header
-- `.k9-binding` — Nickel `let` binding header
-- `.k9-contract` — Nickel type contract annotation
-- `.k9-comment` — comment block
-- `.k9-source` — raw source section
-- `.k9-export` — top-level export record
-
-== Requirements
-
-- Pandoc 3.0+ with Lua support (`+lua` feature)
-
-== Writer Usage
-
-`k9-writer.lua` converts any Pandoc-supported format to K9 Nickel:
+=== From LuaRocks
 
 [source,sh]
 ----
-# Markdown → K9 Nickel
-pandoc input.md -t k9-writer.lua -o component.k9.ncl
-
-# HTML → K9 Nickel
-pandoc input.html -t k9-writer.lua -o config.k9.ncl
-
-# Round-trip: K9 → AST → K9
-pandoc -f k9.lua input.k9.ncl -t k9-writer.lua -o roundtrip.k9.ncl
+luarocks install pandoc-k9
 ----
 
-The writer produces valid K9 Nickel with:
+=== Manual
 
-- `pedigree` block from document metadata and bullet list fields
-- `security` block with trust level and permission flags
-- `recipes` block from code blocks under recipe sections
-- `config` record from definition lists
-- Proper Nickel multiline strings (`m%"..."%`) for shell scripts
-- SPDX header and K9 magic comments
+Copy the Lua files into your Pandoc data directory or reference them by path:
+
+[source,sh]
+----
+cp k9.lua k9-reader.lua k9-writer.lua k9-filter.lua k9.html \
+   ~/.local/share/pandoc/
+----
+
+=== Requirements
+
+* Pandoc 3.0+ with Lua support (`+lua` feature)
+* Lua >= 5.1 (bundled with Pandoc)
 
 == Files
 
-- `k9.lua` — Comprehensive reader with YAML + Nickel support (597 lines)
-- `k9-reader.lua` — Simple reader for quick extraction (92 lines)
-- `k9-writer.lua` — Writer producing K9 Nickel output (230 lines)
+[cols="1,1,3"]
+|===
+| File | Type | Description
 
-== Filter: k9-filter.lua
+| `k9.lua`
+| Reader
+| Comprehensive reader with full YAML + Nickel parsing, pedigree extraction,
+  contract annotations, and security badge generation.
 
-`k9-filter.lua` is a Pandoc Lua filter that provides post-processing
-passes over the AST produced by the K9 reader. Run it with `--lua-filter`:
+| `k9-reader.lua`
+| Reader
+| Lightweight reader for quick metadata extraction. Produces a simpler AST
+  suitable for summary views.
+
+| `k9-writer.lua`
+| Writer
+| Converts Pandoc AST to K9 Nickel format (`.k9.ncl`). Produces valid Nickel
+  with pedigree, security, recipes, and config blocks.
+
+| `k9-filter.lua`
+| Filter
+| Post-processing filter with four passes: security badge colouring, contract
+  highlighting, recipe validation, and pedigree completeness checks.
+
+| `k9.html`
+| Template
+| HTML5 template with security-level colour scheme, pedigree summary card,
+  copy-to-clipboard, and responsive layout.
+|===
+
+== Usage Examples
+
+=== Reading K9 files
 
 [source,sh]
 ----
-# Full pipeline: read + filter + template
+# K9 (YAML variant) to HTML
+pandoc -f k9.lua hello.k9 -o output.html
+
+# K9 (Nickel variant) to HTML
+pandoc -f k9.lua config.k9.ncl -o output.html
+
+# K9 to Markdown
+pandoc -f k9.lua deploy.k9.ncl -t markdown
+
+# K9 to PDF (via LaTeX)
+pandoc -f k9.lua config.k9.ncl -o output.pdf
+
+# K9 to JSON AST (for programmatic use)
+pandoc -f k9.lua hello.k9 -t json
+----
+
+=== Writing K9 files
+
+[source,sh]
+----
+# Markdown to K9 Nickel
+pandoc input.md -t k9-writer.lua -o component.k9.ncl
+
+# HTML to K9 Nickel
+pandoc input.html -t k9-writer.lua -o config.k9.ncl
+
+# Round-trip: K9 -> AST -> K9
+pandoc -f k9.lua input.k9.ncl -t k9-writer.lua -o roundtrip.k9.ncl
+----
+
+=== Full pipeline with filter and template
+
+[source,sh]
+----
 pandoc -f k9.lua input.k9.ncl \
   --lua-filter=k9-filter.lua \
   --template=k9.html \
   -o output.html
 ----
 
-=== Capabilities
+=== Quick extraction with the lightweight reader
+
+[source,sh]
+----
+pandoc -f k9-reader.lua component.k9.ncl -o docs.html
+pandoc -f k9-reader.lua component.k9.ncl -t markdown
+----
+
+== Reader Capabilities
+
+=== Auto-Detection
+
+The reader automatically detects:
+
+* *Syntax* -- YAML (`.k9`) vs Nickel (`.k9.ncl`) based on content patterns
+* *Security level* -- Kennel / Yard / Hunt from `trust_level` or content analysis
+* *Magic number* -- `K9!` presence at file start
+* *SPDX license* -- Extracted from comment headers
+
+=== Pedigree Extraction
+
+Every K9 document produces a structured pedigree summary containing title
+(with security badge), version, description, security level, syntax format,
+and license identifier.
+
+=== YAML Content (Kennel Level)
+
+* Top-level keys become section headers
+* Key-value pairs become definition list entries
+* Block scalars (`|`) are preserved
+* Comments are skipped
+
+=== Nickel Content (Yard/Hunt Level)
+
+* `let ... = { ... } in` bindings become sections with definition lists
+* Contract annotations (`| Type`) display alongside field names
+* `import` statements render as import declarations
+* Comment blocks become `Div` elements with `.k9-comment` class
+* Multiline strings (`m%"..."%`) become code blocks
+* Record nesting is handled recursively
+
+== Pandoc Metadata
+
+The reader sets these metadata fields (accessible via `$meta.field$` in templates):
+
+* `k9-format` -- `"yaml"` or `"nickel"`
+* `k9-security-level` -- `"Kennel"`, `"Yard"`, or `"Hunt"`
+* `k9-magic` -- `true` / `false`
+* `spdx-license` -- License identifier string
+* `title` -- Component name
+* `version` -- Component version
+
+== Filter Capabilities
+
+The filter (`k9-filter.lua`) provides four post-processing passes:
 
 [cols="1,3"]
 |===
-| Feature | Description
+| Capability | Description
 
 | Security badge colouring
-| Span elements with class `k9-security-badge` are rendered as inline HTML
-  badges with colour-coded backgrounds: Kennel = green, Yard = amber,
-  Hunt = red. Colours match the K9 trust model.
+| Renders `k9-security-badge` spans as inline HTML badges.
+  Kennel = green, Yard = amber, Hunt = red.
 
 | Contract highlighting
-| Nickel contract annotations (Span elements with class `k9-contract`) are
-  rendered in monospace with type-specific colours: green for String, blue for
-  Number, orange for Bool, purple for Array, dark blue for Record.
+| Renders `k9-contract` spans in monospace with type-specific colours:
+  green for String, blue for Number, orange for Bool, purple for Array,
+  dark blue for Record.
 
 | Recipe validation
-| Code blocks in recipe sections are scanned for command references. The
-  first word of each non-comment, non-control-flow line is checked against
-  a list of 80+ known tools. Unknown commands produce a warning.
+| Scans recipe code blocks for command references. Checks the first word of
+  each line against 80+ known tools. Warns on unrecognised commands.
 
 | Pedigree completeness
-| Checks that the K9 pedigree includes name, version, and description.
-  Warns for any missing fields. Can be disabled via `k9-validate: false`.
+| Checks that name, version, and description are present. Warns for
+  missing fields.
 |===
 
-=== Disabling Capabilities
+=== Disabling Filter Features
 
-Set metadata flags to disable individual features:
+Set metadata flags in your document front matter:
 
 [source,yaml]
 ----
@@ -201,43 +203,33 @@ k9-diagrams: false
 ---
 ----
 
-== HTML Template: k9.html
+== CSS Classes
 
-`k9.html` is a Pandoc HTML5 template purpose-built for K9 components:
+For HTML output, the reader emits semantic CSS classes:
 
-[source,sh]
-----
-pandoc -f k9.lua input.k9.ncl \
-  --lua-filter=k9-filter.lua \
-  --template=k9.html \
-  -o output.html
-----
+* `.k9-pedigree` -- pedigree summary block
+* `.k9-security-badge` -- security level badge
+* `.k9-kennel` / `.k9-yard` / `.k9-hunt` -- security level variants
+* `.k9-section` -- YAML section header
+* `.k9-binding` -- Nickel `let` binding header
+* `.k9-contract` -- Nickel type contract annotation
+* `.k9-comment` -- comment block
+* `.k9-source` -- raw source section
+* `.k9-export` -- top-level export record
 
-=== Template Features
+== HTML Template
 
-- **Security-level header bar**: gradient background adapts to trust level
-  (green for Kennel, amber for Yard, red for Hunt)
-- **Pedigree summary card**: structured table at the top showing name, version,
-  security level, syntax format, license, and magic number
-- **Contract annotations**: monospace styling with type-specific colours
-- **Recipe blocks**: distinct left-border styling with "Recipe" label badge
-- **Copy-to-clipboard**: JavaScript-powered copy button on all code blocks
-  (appears on hover)
-- **Responsive layout**: fluid container, mobile-friendly grid pedigree
-- **Print-friendly**: clean monochrome, badges outlined instead of filled
+The `k9.html` template provides:
 
-=== Template Variables
+* *Security-level header bar* -- gradient background adapts to trust level
+* *Pedigree summary card* -- structured table showing name, version, security, license
+* *Contract annotations* -- monospace styling with type-specific colours
+* *Recipe blocks* -- distinct left-border styling with "Recipe" label badge
+* *Copy-to-clipboard* -- JavaScript-powered copy button on code blocks
+* *Responsive layout* -- fluid container, mobile-friendly grid
+* *Print-friendly* -- clean monochrome, badges outlined instead of filled
 
-The template consumes these Pandoc metadata fields:
-
-- `$title$` — component name
-- `$version$` — component version
-- `$k9-security-level$` — trust level (Kennel, Yard, Hunt)
-- `$k9-format$` — syntax variant (yaml, nickel)
-- `$spdx-license$` — SPDX license identifier
-- `$k9-magic$` — whether K9! magic number is present
-
-== Extensions Table
+== Extensions
 
 Both the reader and filter advertise an extensions table:
 
@@ -258,16 +250,14 @@ Both the reader and filter advertise an extensions table:
 | Structural validation (pedigree, recipes, SPDX)
 |===
 
-== Files
+== Part of the K9 Ecosystem
 
-- `k9.lua` — Comprehensive reader with YAML + Nickel support (597 lines)
-- `k9-reader.lua` — Simple reader for quick extraction (92 lines)
-- `k9-writer.lua` — Writer producing K9 Nickel output (230 lines)
-- `k9-filter.lua` — Lua filter with 4 post-processing passes
-- `k9.html` — HTML5 template with security-level colour scheme
+This Pandoc integration is part of the
+https://github.com/hyperpolymath/standards/tree/main/k9-svc[K9 Self-Validating Components]
+suite within the `standards` monorepo. Related tools:
 
-== Spec Compliance
-
-This reader implements K9 pedigree extraction as specified in `SPEC.adoc`
-and the `pedigree.ncl` contract schema. Tested against all example files
-in `examples/` and PanLL layout presets.
+* link:../bindings/[`bindings/`] -- Language bindings (Deno, Rust, Gleam, Elixir, Haskell)
+* link:../actions/validate/[`actions/validate/`] -- GitHub Action for CI validation
+* link:../editors/vscode/[`editors/vscode/`] -- VS Code extension
+* link:../SPEC.adoc[`SPEC.adoc`] -- K9 format specification
+* link:../pedigree.ncl[`pedigree.ncl`] -- Nickel contract schema

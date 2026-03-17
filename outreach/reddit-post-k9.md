@@ -161,7 +161,7 @@ K9 proved it works by dogfooding itself. Not just using it—*releasing itself* 
 
 **Links:**
 
-- Spec: https://github.com/hyperpolymath/k9-svc
+- Spec: https://github.com/hyperpolymath/standards/tree/main/k9-svc
 - Tools: https://github.com/hyperpolymath/k9-tools
 - Examples: 10+ real components
 
@@ -297,7 +297,7 @@ make build
 
 **Links:**
 
-- Spec: https://github.com/hyperpolymath/k9-svc
+- Spec: https://github.com/hyperpolymath/standards/tree/main/k9-svc
 - Tools: https://github.com/hyperpolymath/k9-tools
 - Real examples: 10+ production components
 

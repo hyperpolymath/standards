@@ -1,5 +1,6 @@
 # Clone the repository
-git clone https://github.com/hyperpolymath/k9-svc.git
+git clone https://github.com/hyperpolymath/standards.git
+# Note: K9-SVC is located in standards/k9-svc
 cd k9-svc
 
 # Using Nix (recommended for reproducibility)
@@ -86,10 +87,10 @@ Use the [feature request template](.github/ISSUE_TEMPLATE/feature_request.md) an
 
 Look for issues labelled:
 
-- [`good first issue`](https://github.com/hyperpolymath/k9-svc/labels/good%20first%20issue) — Simple Perimeter 3 tasks
-- [`help wanted`](https://github.com/hyperpolymath/k9-svc/labels/help%20wanted) — Community help needed
-- [`documentation`](https://github.com/hyperpolymath/k9-svc/labels/documentation) — Docs improvements
-- [`perimeter-3`](https://github.com/hyperpolymath/k9-svc/labels/perimeter-3) — Community sandbox scope
+- [`good first issue`](https://github.com/hyperpolymath/standards/tree/main/k9-svc/labels/good%20first%20issue) — Simple Perimeter 3 tasks
+- [`help wanted`](https://github.com/hyperpolymath/standards/tree/main/k9-svc/labels/help%20wanted) — Community help needed
+- [`documentation`](https://github.com/hyperpolymath/standards/tree/main/k9-svc/labels/documentation) — Docs improvements
+- [`perimeter-3`](https://github.com/hyperpolymath/standards/tree/main/k9-svc/labels/perimeter-3) — Community sandbox scope
 
 ---
 

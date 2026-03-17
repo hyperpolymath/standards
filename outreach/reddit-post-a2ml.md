@@ -106,9 +106,9 @@ You write `@ref(methods)` instead of "Section 5". Explicit IDs required (`{#meth
 
 **Links:**
 
-- Repo: https://github.com/hyperpolymath/a2ml
-- Release: https://github.com/hyperpolymath/a2ml/releases/tag/v1.0.0
-- Spec (in A2ML): https://github.com/hyperpolymath/a2ml/blob/main/SPEC.a2ml
+- Repo: https://github.com/hyperpolymath/standards/tree/main/a2ml
+- Release: https://github.com/hyperpolymath/standards/tree/main/a2ml/releases/tag/v1.0.0
+- Spec (in A2ML): https://github.com/hyperpolymath/standards/blob/main/a2ml/SPEC.a2ml
 
 **Questions I expect:**
 
@@ -224,9 +224,9 @@ Also demonstrates that **auto-implicit proofs** can make dependent types ergonom
 
 **Links:**
 
-- Repo: https://github.com/hyperpolymath/a2ml
-- Spec (written in A2ML): https://github.com/hyperpolymath/a2ml/blob/main/SPEC.a2ml
-- Core types: https://github.com/hyperpolymath/a2ml/blob/main/src/A2ML/Core.idr
+- Repo: https://github.com/hyperpolymath/standards/tree/main/a2ml
+- Spec (written in A2ML): https://github.com/hyperpolymath/standards/blob/main/a2ml/SPEC.a2ml
+- Core types: https://github.com/hyperpolymath/standards/blob/main/a2ml/src/A2ML/Core.idr
 
 Feedback welcome, especially on the type-level encoding of markup semantics!
 
