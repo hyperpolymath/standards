@@ -424,7 +424,7 @@ A: Yes. It has:
 
 ## Support
 
-- **Issues:** https://github.com/hyperpolymath/k9-svc/issues
+- **Issues:** https://github.com/hyperpolymath/standards/tree/main/k9-svc/issues
 - **Docs:** `../docs/SECURITY-BEST-PRACTICES.adoc`
 - **Email:** j.d.a.jewell@open.ac.uk
 

@@ -22,7 +22,7 @@ K9 is a format that **"eats its own dog food."** It's designed to validate and d
 - **Tech Stack:** Nickel (validation), Just (orchestration), POSIX shell (detection)
 - **What Works:** Full triad, MIME registration, security model, signing, Podman integration, packaging
 
-**Repository:** https://github.com/hyperpolymath/k9-svc
+**Repository:** https://github.com/hyperpolymath/standards/tree/main/k9-svc
 
 ---
 
@@ -135,7 +135,7 @@ config | {
 
 **Repository Links:**
 - Bunsenite: https://github.com/hyperpolymath/bunsenite
-- K9-SVC: https://github.com/hyperpolymath/k9-svc
+- K9-SVC: https://github.com/hyperpolymath/standards/tree/main/k9-svc
 
 ---
 
@@ -264,7 +264,7 @@ must_have = {
 
 **Repository Links:**
 - RSR Template: https://github.com/hyperpolymath/rsr-template-repo
-- K9-SVC: https://github.com/hyperpolymath/k9-svc
+- K9-SVC: https://github.com/hyperpolymath/standards/tree/main/k9-svc
 
 ---
 
@@ -353,7 +353,7 @@ server_config = {
 
 **Repository Links:**
 - MCP Servers: https://github.com/hyperpolymath?q=poly-*-mcp
-- K9-SVC: https://github.com/hyperpolymath/k9-svc
+- K9-SVC: https://github.com/hyperpolymath/standards/tree/main/k9-svc
 
 ---
 
@@ -520,7 +520,7 @@ validate_workflow = fun workflow =>
 
 **Repository Links:**
 - Robot-Repo-Bot: https://github.com/hyperpolymath/robot-repo-bot
-- K9-SVC: https://github.com/hyperpolymath/k9-svc
+- K9-SVC: https://github.com/hyperpolymath/standards/tree/main/k9-svc
 
 ---
 
@@ -746,7 +746,7 @@ K9 dogfooding is successful when:
 ## Repository Links
 
 ### Core Repositories
-- **K9-SVC:** https://github.com/hyperpolymath/k9-svc
+- **K9-SVC:** https://github.com/hyperpolymath/standards/tree/main/k9-svc
 - **RSR Template:** https://github.com/hyperpolymath/rsr-template-repo
 - **Bunsenite:** https://github.com/hyperpolymath/bunsenite
 - **Robot-Repo-Bot:** https://github.com/hyperpolymath/robot-repo-bot

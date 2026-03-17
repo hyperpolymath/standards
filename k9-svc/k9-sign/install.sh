@@ -284,7 +284,7 @@ main() {
     echo "  3. Verify signature:    k9-sign verify file.k9.ncl"
     echo ""
     echo "Documentation: $(dirname "$SCRIPT_DIR")/docs/SECURITY-BEST-PRACTICES.adoc"
-    echo "Report issues: https://github.com/hyperpolymath/k9-svc/issues"
+    echo "Report issues: https://github.com/hyperpolymath/standards/tree/main/k9-svc/issues"
 }
 
 main "$@"

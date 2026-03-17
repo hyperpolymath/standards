@@ -281,7 +281,7 @@ recipes = {
         "release/k9-svc-%{new_version.version}.tar.gz.sig",
 
       "echo 'GitHub release created!'",
-      "echo 'Release URL: https://github.com/hyperpolymath/k9-svc/releases/tag/v%{new_version.version}'",
+      "echo 'Release URL: https://github.com/hyperpolymath/standards/tree/main/k9-svc/releases/tag/v%{new_version.version}'",
     ],
   },
 
@@ -306,7 +306,7 @@ recipes = {
       "echo 'Version: %{new_version.version}'",
       "echo 'Release type: %{std.string.from config.release_type}'",
       "echo 'Tarball: release/k9-svc-%{new_version.version}.tar.gz'",
-      "echo 'GitHub: https://github.com/hyperpolymath/k9-svc/releases/tag/v%{new_version.version}'",
+      "echo 'GitHub: https://github.com/hyperpolymath/standards/tree/main/k9-svc/releases/tag/v%{new_version.version}'",
       "echo ''",
       "echo 'Next steps:'",
       "echo '  1. Review GitHub release draft'",
