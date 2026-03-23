@@ -384,7 +384,139 @@ In strict mode:
 This is RECOMMENDED for new deployments. Legacy compatibility mode
 (dual-stack or strip-and-upgrade) is available for transition.
 
-=== 7.5. Client Behaviour
+=== 7.5. Frame-Level Proxy (RECOMMENDED for Native Services)
+
+For native Groove services (Zig, Elixir, Rust), the RECOMMENDED
+strip-and-upgrade strategy operates at the TCP stream frame level
+(Layer 4), not the HTTP level (Layer 7). This provides transparent,
+zero-copy IPv4→IPv6 translation with no client reconnection.
+
+**Architecture:**
+
+[source]
+----
+Client (IPv4)              Frame Proxy (Zig)           Groove Service
+     │                          │                           │
+     │── TCP connect ─────────→ │                           │
+     │                          │── TCP connect [::1] ────→ │
+     │                          │                           │
+     │── bytes ───────────────→ │── splice(2) ────────────→ │  ← zero-copy
+     │                          │                           │
+     │←── bytes ──────────────── │←── splice(2) ────────────│  ← zero-copy
+     │                          │                           │
+     │   (client never knows    │   (service only sees     │
+     │    it's being proxied)   │    IPv6 connections)     │
+----
+
+The proxy accepts IPv4 TCP connections and opens a corresponding IPv6
+TCP connection to the real Groove service on `[::1]:PORT`. Bytes are
+spliced bidirectionally using the kernel's `splice(2)` syscall on Linux,
+which transfers data between file descriptors without copying to
+userspace.
+
+**Properties:**
+
+. **Zero-copy:** On Linux, `splice(2)` moves data between sockets via
+  kernel pipe buffers. No bytes are copied to userspace. On macOS and
+  Windows, the proxy falls back to a small userspace buffer (4KB).
+. **Transparent:** The client does not know it is being proxied. No
+  HTTP upgrade headers, no reconnection, no protocol awareness needed.
+. **Protocol-agnostic:** Works for any protocol inside the TCP stream:
+  HTTP, WebSocket, gRPC, binary Groove frames, or raw bytes. The proxy
+  does not parse the content.
+. **No elevated privileges:** Runs in userspace. No kernel modules,
+  nftables rules, or eBPF programs required.
+. **Controllable:** The proxy can log connections, apply rate limiting,
+  reject based on source address, and collect metrics — all before
+  splicing begins.
+
+**Zig reference implementation:**
+
+[source,zig]
+----
+const std = @import("std");
+
+/// Groove IPv4→IPv6 frame-level proxy.
+/// Accepts IPv4 connections, splices them to the IPv6 groove service.
+pub fn startProxy(
+    ipv4_port: u16,
+    ipv6_port: u16,
+    allocator: std.mem.Allocator,
+) !void {
+    // Bind IPv4 doorbell socket
+    const ipv4_addr = std.net.Address.parseIp4("127.0.0.1", ipv4_port);
+    var ipv4_server = try std.net.StreamServer.init(.{
+        .reuse_address = true,
+    });
+    defer ipv4_server.deinit();
+    try ipv4_server.listen(ipv4_addr);
+
+    while (true) {
+        const ipv4_conn = try ipv4_server.accept();
+
+        // Spawn a thread to handle the proxied connection
+        _ = try std.Thread.spawn(.{}, handleProxy, .{
+            ipv4_conn.stream,
+            ipv6_port,
+        });
+    }
+}
+
+fn handleProxy(ipv4_stream: std.net.Stream, ipv6_port: u16) void {
+    defer ipv4_stream.close();
+
+    // Connect to the real groove service on IPv6
+    const ipv6_addr = std.net.Address.parseIp6("::1", ipv6_port) catch return;
+    const ipv6_stream = std.net.tcpConnectToAddress(ipv6_addr) catch return;
+    defer ipv6_stream.close();
+
+    // Bidirectional splice
+    const t = std.Thread.spawn(.{}, splicePair, .{
+        ipv6_stream, ipv4_stream,
+    }) catch return;
+
+    splicePair(ipv4_stream, ipv6_stream);
+    t.join();
+}
+
+fn splicePair(from: std.net.Stream, to: std.net.Stream) void {
+    var buf: [4096]u8 = undefined;
+    while (true) {
+        const n = from.read(&buf) catch break;
+        if (n == 0) break;
+        to.writeAll(buf[0..n]) catch break;
+    }
+}
+----
+
+NOTE: The reference implementation above uses a userspace buffer for
+portability. On Linux, replace `read`/`writeAll` with `splice(2)` via
+`std.os.linux.splice()` for true zero-copy operation.
+
+**When to use frame-level vs HTTP-level:**
+
+[cols="2,2,2"]
+|===
+| Context | Strategy | Why
+
+| Native Zig/Elixir/Rust service
+| Frame-level proxy
+| Zero-copy, transparent, no reconnection
+
+| Browser extension
+| HTTP-level upgrade headers
+| Extensions use `fetch()`, cannot do raw TCP
+
+| Legacy bridge
+| Frame-level proxy
+| Legacy system doesn't understand upgrade headers
+
+| LAN discovery
+| Frame-level proxy
+| Avoids exposing IPv4 upgrade semantics across the network
+|===
+
+=== 7.6. Client Behaviour
 
 Groove clients (including browser extension harnesses) MUST:
 

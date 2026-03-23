@@ -110,6 +110,9 @@ property --- it is a compile-time proof.
 \item A modular architecture following an ABI/FFI/API triple that enables
   polyglot participation without compromising type safety
   (Section~\ref{sec:polyglot}).
+\item A zero-copy, frame-level IPv4$\rightarrow$IPv6 proxy implemented in Zig
+  that transparently translates legacy connections using \texttt{splice(2)},
+  requiring no elevated privileges (Section~\ref{sec:transport}).
 \item A reference implementation across four independent systems demonstrating
   the protocol's practical applicability (Section~\ref{sec:implementation}).
 \end{enumerate}
@@ -376,21 +379,79 @@ on the standard port range, respecting dual-stack requirements and CORS
 constraints. This provides a type-safe bridge between the browser security
 sandbox and native desktop services.
 
-\section{Transport Considerations}
+\section{Transport: IPv6-First with Frame-Level Translation}
+\label{sec:transport}
 
-Groove mandates dual-stack binding (\texttt{[::]:PORT}) to ensure
-discovery works on IPv4-only, IPv6-only, and dual-stack systems. Discovery
-probes IPv6 first (following RFC~8305 Happy Eyeballs), with IPv4 fallback.
+\subsection{IPv6 as Default Transport}
+
+Groove specifies IPv6-only binding (\texttt{[::1]:PORT}) as the recommended
+configuration for localhost discovery. Every operating system capable of
+running the Groove toolchain (Idris2, Zig) has a functional IPv6 loopback
+interface. IPv4 is treated as a legacy transport with an explicit sunset
+path.
 
 For LAN discovery beyond localhost, Groove uses mDNS/DNS-SD over IPv6
-multicast (\texttt{ff02::fb}), leveraging link-local addresses that require
-no DHCP configuration. LAN discovery is explicitly opt-in; the default
-scope is localhost-only.
+multicast (\texttt{ff02::fb}), leveraging link-local addresses (\texttt{fe80::})
+that require no DHCP configuration. LAN discovery is explicitly opt-in; the
+default scope is localhost-only.
+
+\subsection{Frame-Level IPv4$\rightarrow$IPv6 Proxy}
+
+For systems that must accept IPv4 connections during a transition period,
+we introduce a frame-level proxy that operates at the TCP stream layer
+(Layer~4) rather than the HTTP application layer (Layer~7). This provides
+transparent, zero-copy IPv4$\rightarrow$IPv6 translation.
+
+The proxy accepts IPv4 TCP connections and opens a corresponding IPv6 TCP
+connection to the Groove service on \texttt{[::1]:PORT}. Bytes are spliced
+bidirectionally using the kernel's \texttt{splice(2)} syscall, which
+transfers data between socket file descriptors without copying to userspace.
+
+\begin{lstlisting}[caption={Frame-level proxy data path}]
+Client (IPv4) --> [accept] --> Frame Proxy --> [splice] --> Service (IPv6)
+Client (IPv4) <-- [splice] <-- Frame Proxy <-- [splice] <-- Service (IPv6)
+\end{lstlisting}
+
+This approach has several advantages over HTTP-level upgrade directives:
+
+\begin{enumerate}
+\item \textbf{Zero-copy}: On Linux, \texttt{splice(2)} moves data between
+  sockets via kernel pipe buffers. No bytes are copied to userspace.
+\item \textbf{Transparent}: The client is unaware of the translation. No
+  reconnection, no upgrade headers, no protocol awareness needed.
+\item \textbf{Protocol-agnostic}: Works for any protocol inside the TCP
+  stream --- HTTP, WebSocket, gRPC, binary frames, or raw bytes. The proxy
+  does not parse content.
+\item \textbf{No elevated privileges}: Runs in userspace without kernel
+  modules, \texttt{nftables} rules, or eBPF programs.
+\end{enumerate}
+
+The proxy is implemented in approximately 60 lines of Zig, with
+\texttt{splice(2)} on Linux and a 4KB userspace buffer fallback on
+macOS and Windows.
+
+\begin{property}[Transport Transparency]
+The frame-level proxy preserves all Groove protocol properties. From the
+perspective of the Groove service, all connections arrive on IPv6. From
+the perspective of the client, the connection succeeds on IPv4 with no
+visible translation.
+\end{property}
+
+For browser extensions, which cannot perform raw TCP operations, the
+protocol falls back to HTTP-level upgrade headers:
+\texttt{Groove-IPv6-Preferred} and \texttt{Groove-Upgrade-To} directives
+instruct the extension to reconnect on \texttt{[::1]} for subsequent
+requests. This is analogous to HSTS (HTTP Strict Transport Security)
+applied to the network layer rather than the encryption layer.
+
+\subsection{CORS and the Browser Boundary}
 
 All Groove HTTP endpoints include CORS headers to enable browser extension
 access. Control-plane traffic uses HTTP/1.1; data-plane traffic may use
 any transport (WebSocket, gRPC, WebRTC, Unix sockets) as declared in the
-capability interface definition.
+capability interface definition. The Idris2 ABI layer provides type-safe
+proofs that cross the browser--native boundary, ensuring structural
+compatibility between the browser security sandbox and local services.
 
 \section{Evaluation}
 
