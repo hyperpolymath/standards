@@ -1,0 +1,293 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+= IPv6T: Typed Payload Framing for IPv6
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v0.1.0, 2026-03-23
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Abstract
+
+IPv6T defines a typed payload frame format that embeds type metadata,
+capability hashes, and provenance chain links inside standard TCP/IPv6
+payload data. It enables graduated type safety across the internet
+without modifying IPv6 headers, using extension headers, or requiring
+custom protocol support from network infrastructure.
+
+== 1. Frame Format
+
+=== 1.1. GRV6 Frame Header
+
+The GRV6 frame header is prepended to the application payload inside a
+standard TCP stream. It is invisible to all network infrastructure
+(routers, NATs, firewalls, CDNs, proxies) because it lives inside the
+TCP payload, not in protocol headers.
+
+[source]
+----
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|      'G'      |      'R'      |      'V'      |      '6'      |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|    version    |     flags     |          reserved             |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+|                    type_hash (32 bytes)                        |
+|              SHA-256 of A2ML type signature                    |
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+|                    cap_hash (32 bytes)                         |
+|           SHA-256 of capability manifest                       |
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+|                    prov_hash (32 bytes)                        |
+|          SHA-256 of previous provenance entry                  |
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                       payload_length                          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+|                     payload (variable)                         |
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+----
+
+**Total header size: 105 bytes.**
+
+=== 1.2. Field Definitions
+
+[cols="2,1,1,4"]
+|===
+| Field | Offset | Size | Description
+
+| magic | 0 | 4 | ASCII "GRV6" (0x47525636). Used for frame detection.
+| version | 4 | 1 | Protocol version. Currently 1.
+| flags | 5 | 1 | Bitfield (see Section 1.3).
+| reserved | 6 | 2 | Reserved for future use. MUST be zero.
+| type_hash | 8 | 32 | SHA-256 of the A2ML type signature for the payload.
+| cap_hash | 40 | 32 | SHA-256 of the sender's Groove capability manifest.
+| prov_hash | 72 | 32 | SHA-256 of the previous provenance record in the chain. Zero-filled if this is the first record.
+| payload_length | 104 | 4 | Length of the payload in bytes (big-endian uint32). Maximum 2^32 - 1 bytes.
+|===
+
+=== 1.3. Flags
+
+[cols="1,1,4"]
+|===
+| Bit | Name | Description
+
+| 0 | TYPED | Payload conforms to the declared type_hash. Sender asserts this.
+| 1 | PROVEN | Sender's code was compiled with Idris2 type proofs. Type hash was generated at compile time.
+| 2 | ATTESTED | Provenance hash links to a verifiable attestation chain (VeriSimDB or equivalent).
+| 3 | COMPRESSED | Payload is compressed (algorithm in first byte of payload).
+| 4-7 | reserved | Reserved. MUST be zero.
+|===
+
+=== 1.4. Trust Level Encoding
+
+The flags encode the graduated trust level:
+
+[cols="3,1,1,1,3"]
+|===
+| Trust Level | TYPED | PROVEN | ATTESTED | Meaning
+
+| **Declared** | 1 | 0 | 0 | Sender declares the type. Receiver validates at runtime.
+| **Attested** | 1 | 0 | 1 | Declared + provenance chain exists. Auditable.
+| **Proven** | 1 | 1 | 0 | Sender compiled with Idris2. Type hash is comptime.
+| **Proven + Attested** | 1 | 1 | 1 | Full guarantee: compiled, proven, auditable.
+|===
+
+A receiver SHOULD accept any trust level. A receiver MAY require a
+minimum trust level (e.g., reject frames without ATTESTED flag).
+
+== 2. Frame Detection
+
+=== 2.1. Magic Number
+
+The GRV6 magic number (`0x47525636`) is the first four bytes of the
+frame. Receivers scan the TCP stream for this magic to identify GRV6
+frames.
+
+If the first four bytes of a TCP payload are not `GRV6`, the payload
+is untyped — standard behaviour, no GRV6 processing.
+
+=== 2.2. Streaming Detection
+
+For TCP streams that mix GRV6 and non-GRV6 traffic (e.g., HTTP
+upgrade), the receiver MUST NOT scan the entire stream for the magic.
+Detection MUST occur only at the start of a new message boundary
+(e.g., after a TLS record, after an HTTP chunk, or at connection
+establishment).
+
+== 3. Type Hash Generation
+
+=== 3.1. Compile-Time (PROVEN flag)
+
+When the sender is compiled with Idris2, the type hash is generated at
+compile time from the A2ML type signature:
+
+[source,idris]
+----
+-- Compile-time type hash (Idris2)
+%runElab typeHash : Bits8 -> String -> String
+typeHash = sha256 (toA2ML (reflect MyPayloadType))
+----
+
+The hash is embedded in the binary as a constant. Zero runtime cost.
+
+=== 3.2. Runtime (DECLARED flag)
+
+When the sender is not compiled with Idris2 (polyglot participant),
+the type hash is computed at runtime from the A2ML type definition:
+
+[source,zig]
+----
+// Runtime type hash (Zig)
+const type_sig = "@payload(type=\"MyPayload\"): @field(...) @end";
+const type_hash = std.crypto.hash.sha2.Sha256.hash(type_sig);
+----
+
+=== 3.3. Hash Stability
+
+The type hash MUST be computed from a canonical form of the A2ML type
+signature. Whitespace, field ordering, and comments MUST be normalised
+before hashing. Two semantically equivalent type definitions MUST
+produce the same hash.
+
+== 4. Receiver Behaviour
+
+=== 4.1. Frame Validation
+
+On receiving a GRV6 frame, the receiver:
+
+. Verifies magic == `0x47525636`
+. Verifies version is supported (currently: 1)
+. Compares type_hash against expected type(s)
+. If match → deserialise payload
+. If mismatch → reject (see Section 4.2)
+. If ATTESTED flag set → verify prov_hash against known provenance chain
+. If PROVEN flag set → higher confidence, but still validate payload
+
+=== 4.2. Rejection Behaviour
+
+On type hash mismatch:
+
+. The frame MUST be rejected before payload parsing begins
+. The receiver SHOULD send an error response with its own type_hash
+  so the sender can diagnose the mismatch
+. The connection SHOULD NOT be closed — subsequent frames may match
+  (schema negotiation)
+
+=== 4.3. Why Runtime Validation Is Still Required
+
+The PROVEN flag means the sender's code was compiled with Idris2 type
+proofs. It does NOT mean the receiver can trust the sender:
+
+. The sender may be a modified binary
+. The sender may be impersonating a proven system
+. The network may have corrupted the frame (though TCP checksums
+  make this unlikely)
+
+Therefore, receivers MUST validate payload structure at runtime
+regardless of the PROVEN flag. The PROVEN flag increases *confidence*
+but not *proof* at the receiver side.
+
+The only context where runtime validation can be skipped is when both
+sides are compiled together from the same Idris2 source (localhost
+Groove). On the internet, always validate.
+
+== 5. Provenance Chain
+
+=== 5.1. Chain Structure
+
+Each GRV6 frame's prov_hash links to the previous frame's provenance
+record, forming a hash chain:
+
+[source]
+----
+Frame 1: prov_hash = 0x0000...0000 (genesis)
+Frame 2: prov_hash = SHA256(Frame 1 metadata)
+Frame 3: prov_hash = SHA256(Frame 2 metadata)
+----
+
+The metadata hashed includes: type_hash, cap_hash, timestamp, and
+payload_hash. This enables after-the-fact verification that a sequence
+of frames was sent in order, with the declared types, by the declared
+capability holder.
+
+=== 5.2. VeriSimDB Integration
+
+When VeriSimDB is available, provenance records are stored as octads.
+This enables cross-referencing: "show me all GRV6 frames of type X
+received between time T1 and T2, with full provenance chain."
+
+== 6. Security Considerations
+
+=== 6.1. GRV6 Over TLS
+
+GRV6 frames SHOULD be sent over TLS (standard HTTPS or TLS-wrapped
+TCP). TLS encrypts the entire GRV6 header and payload, preventing:
+
+. Type hash inspection by middleboxes (DPI cannot determine the type)
+. Provenance chain manipulation
+. Frame forgery
+
+=== 6.2. Type Hash as Fingerprint
+
+A type hash can act as a traffic fingerprint. An observer who knows the
+A2ML type definition can compute the hash and correlate traffic. TLS
+mitigates this (the hash is encrypted). Without TLS, this is a privacy
+concern.
+
+=== 6.3. Replay Prevention
+
+The provenance chain provides ordering but not replay prevention. A
+replayed frame has a valid prov_hash. To prevent replay, receivers
+SHOULD track seen prov_hash values and reject duplicates. Alternatively,
+include a timestamp or sequence number in the hashed metadata.
+
+== 7. Comparison
+
+[cols="2,1,1,1,1,1"]
+|===
+| Feature | GRV6 | Protobuf | JSON Schema | gRPC | REST+OpenAPI
+
+| Type info in payload | Yes | Yes (field nums) | No (external) | Yes (proto) | No (external)
+| Early rejection | Yes | Partial | No | Partial | No
+| Schema negotiation | Yes (hash compare) | No | No | Reflection | No
+| Provenance chain | Yes | No | No | No | No
+| Compile-time hash | Yes (Idris2) | No | No | No | No
+| Zero runtime overhead for hash | Yes | N/A | N/A | N/A | N/A
+| Works through all middleboxes | Yes | Yes | Yes | Partial (HTTP/2) | Yes
+| Trust graduation | Yes (4 levels) | No | No | No | No
+|===
+
+== 8. Implementation Notes
+
+=== 8.1. Zig Reference
+
+A complete GRV6 frame writer/reader in Zig is approximately 80 lines.
+The frame header is a packed struct that can be read with a single
+`@ptrCast` — no parsing, no allocation.
+
+=== 8.2. Testing
+
+Testing is trivial:
+
+. **Positive test:** Send a GRV6 frame with correct type_hash.
+  Receiver accepts and deserialises. Assert payload matches.
+. **Negative test:** Send a GRV6 frame with wrong type_hash.
+  Receiver rejects before parsing payload. Assert no payload access.
+. **Provenance test:** Send 3 frames with chained prov_hash values.
+  Assert chain is verifiable.
+. **Fallback test:** Send raw bytes without GRV6 magic. Receiver
+  treats as untyped. Assert standard behaviour.
+. **Flag test:** Send with PROVEN flag but invalid payload. Receiver
+  still validates. Assert rejection despite PROVEN claim.
+
+All five tests can be written in under 50 lines of Zig. Total test
+runtime: under 1 second.
