@@ -1,0 +1,565 @@
+% SPDX-License-Identifier: PMPL-1.0-or-later
+% SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+%
+% The Exceptional Protocols: What We Thought Was Impossible,
+% What Actually Was, and an Open Challenge
+%
+% Intended venue: arXiv preprint (cs.NI / cs.PL / cs.CR)
+% Subsequently: HotNets, SIGCOMM Workshop, or USENIX ;login:
+%
+% Fifth paper in the series:
+%   1. Groove Protocol (the mechanism)
+%   2. Typing the Boundaries (the boundary taxonomy)
+%   3. Graduated Trust (the trust spectrum + IPv6T)
+%   4. The Protocol Factory (the bigger vision)
+%   5. The Exceptional Protocols (this paper — what can't be done?)
+
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[margin=2.5cm]{geometry}
+
+\definecolor{codegreen}{rgb}{0.25,0.49,0.31}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codeblue}{rgb}{0.22,0.40,0.72}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{codeblue}\bfseries,
+  commentstyle=\color{codegray}\itshape,
+  stringstyle=\color{codegreen},
+  breaklines=true,
+  frame=single,
+  captionpos=b
+}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{property}{Property}
+\newtheorem{observation}{Observation}
+
+\title{The Exceptional Protocols:\\
+What We Thought Was Impossible,\\
+What Actually Was, and an Open Challenge}
+
+\author{Jonathan D.A. Jewell\\
+\texttt{j.d.a.jewell@open.ac.uk}\\
+The Open University}
+
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+During the development of the Groove Protocol and its associated
+systems (Typed Frame Router, IPv6T, FLI), we identified six boundary
+conditions that appeared to make typed communication impossible. We
+present these six ``exceptional protocols'' --- cases where type safety
+seemed fundamentally incompatible with the underlying communication
+model. We then show how five of the six fell to solutions discovered
+during iterative design and testing, leaving a residual set far narrower
+than initially expected. We document the two genuinely hard cases that
+remain, challenge the community to solve them, and commit to updating
+this paper with any progress.
+\end{abstract}
+
+\section{Introduction}
+
+Every system has edge cases. When we set out to type every system
+boundary --- language, service, protocol, component, runtime, storage
+\cite{boundaries2026} --- we expected the edges to be sharp. We expected
+large categories of communication to be fundamentally untypeable.
+
+We were wrong about almost all of them.
+
+This paper documents six cases we believed were impossible, the
+reasoning that made them seem so, the moment each one broke, and the
+solution that emerged. It then documents the two cases that genuinely
+remain open, explains why they are harder than the others, and issues
+an open challenge to the community.
+
+The purpose is not to claim completeness. It is to be honest about what
+we thought, what we learned, and what we still don't know.
+
+\section{Exception 1: The Open Internet}
+\label{sec:wan}
+
+\subsection{Why We Thought It Was Impossible}
+
+The Groove Protocol provides compile-time type proofs on localhost: both
+endpoints are compiled from the same Idris2 ABI. The proofs hold because
+you control both sides.
+
+On the open internet, you don't control the remote endpoint. You didn't
+compile their code. The proof chain terminates at your network edge.
+Beyond it: strangers, forged headers, untyped bytes. Level 4 (Proven)
+seemed restricted to localhost forever.
+
+\subsection{The Moment It Broke}
+
+The assumption was that the internet connects \emph{strangers}. But not
+all internet communication is between strangers.
+
+Two users of Burble (a voice platform) are running the same binary,
+compiled from the same Idris2 ABI, by the same build pipeline. They are
+not strangers to each other's types. They are \emph{proven peers} who
+happen to be separated by an ocean.
+
+The internet between them is a dumb pipe. TCP guarantees ordered,
+reliable delivery. GRV6 frames carry the type hashes inside the payload,
+invisible to all infrastructure. The proofs exist in the binaries at
+both ends. The pipe doesn't need to know.
+
+\subsection{The Solution}
+
+The Typed Overlay Network \cite{trust2026}: every panel instance is a
+node, every GRV6 connection is an edge. Endpoints compiled from the same
+ABI are Level 4 (Proven) to each other regardless of network path.
+Different panels sharing the same ABI package for a common capability
+are Level 4 for that capability.
+
+\subsection{What Remains}
+
+Communication with true strangers --- endpoints with no shared ABI ---
+is capped at Level 3 (Verified) at best, Level 1 (Declared) at minimum.
+This is not a limitation of Groove; it is a limitation of reality. You
+cannot prove properties of code you haven't seen.
+
+\textbf{Status: Solved for peer-to-peer. Open for stranger-to-stranger.}
+
+\section{Exception 2: Encrypted Tunnels}
+\label{sec:encryption}
+
+\subsection{Why We Thought It Was Impossible}
+
+TLS encrypts everything between the handshake and the close. A Typed
+Frame Router sitting mid-tunnel cannot inspect the bytes. It cannot
+validate type hashes. It cannot filter. The encryption is doing exactly
+what it should --- preventing inspection --- and that prevents typing.
+
+We initially listed this as a fundamental limitation: ``types cannot
+exist inside encrypted tunnels.''
+
+\subsection{The Moment It Broke}
+
+Types don't need to be \emph{inside} the tunnel. They need to be
+\emph{at the endpoints}.
+
+TLS already has a mechanism for this: Application-Layer Protocol
+Negotiation (ALPN, RFC~7301). During the TLS handshake --- before any
+encrypted application data flows --- both sides declare which protocols
+they support. HTTP/2 adoption was built on ALPN.
+
+\subsection{The Solution}
+
+A \texttt{grv6} ALPN token. During the TLS handshake:
+
+\begin{lstlisting}
+ClientHello:  ALPN: ["grv6", "h2", "http/1.1"]
+ServerHello:  ALPN: "grv6"
+\end{lstlisting}
+
+Both sides now know the tunnel carries GRV6 typed frames. After the
+handshake, all application data inside the tunnel uses GRV6 framing.
+The types were negotiated \emph{before} encryption. No mid-tunnel
+inspection needed.
+
+Additionally, TLS encrypts the GRV6 type hashes, preventing traffic
+analysis by observers. The encryption that seemed like an obstacle
+actually provides a bonus: type privacy.
+
+\subsection{What Remains}
+
+If you are a \emph{middlebox} that needs to inspect typed traffic
+passing through an encrypted tunnel you don't terminate, you cannot.
+This is by design --- TLS exists to prevent middlebox inspection.
+Legitimate cases (corporate DPI, regulatory monitoring) require TLS
+termination, at which point the decrypted traffic has GRV6 headers
+and typing resumes normally.
+
+\textbf{Status: Solved via ALPN. Mid-tunnel inspection remains
+impossible by design.}
+
+\section{Exception 3: Broadcast Protocols}
+\label{sec:broadcast}
+
+\subsection{Why We Thought It Was Impossible}
+
+The Typed Frame Router splices TCP connections. Broadcast is
+connectionless. There is no stream to splice, no connection to manage,
+no point-to-point channel to type. Broadcast seemed to be a
+fundamentally different communication model that types couldn't reach.
+
+\subsection{The Moment It Broke}
+
+Groove discovery \emph{is} typed broadcast. It has been from the start.
+
+A system announces its capability manifest via multicast or port
+probing. That announcement is a broadcast. The manifest is typed. The
+receiver filters by structural type match. If a match is found, the
+broadcast upgrades to a connection, and the connection is typed.
+
+We were already doing typed broadcast. We just didn't recognise it as
+solving the ``broadcast is impossible'' problem.
+
+\subsection{The Solution}
+
+Two primitives instead of one:
+
+\begin{enumerate}
+\item \textbf{Typed Broadcast Filter}: embeds type hashes in broadcast
+  payloads. Works on mDNS (TXT records, 255 bytes), BLE advertising
+  (manufacturer data, 31 bytes --- almost exactly one SHA-256 hash),
+  WiFi beacons (vendor-specific IEs, 255 bytes), and Zigbee
+  (manufacturer-specific clusters).
+
+\item \textbf{Typed Frame Router}: once the broadcast discovers a match,
+  the connection is established and the TFR handles the typed stream.
+\end{enumerate}
+
+The lifecycle: broadcast $\rightarrow$ discover $\rightarrow$
+connect $\rightarrow$ communicate. Broadcast is the typed discovery
+layer. Connection is the typed data layer.
+
+\subsection{What Remains}
+
+Pure broadcast with no connection upgrade --- systems that broadcast
+data continuously without any listener establishing a connection (e.g.,
+a lighthouse broadcasting a GPS-timestamped beacon). These can carry
+type hashes in the broadcast payload, but the receiver has no way to
+confirm type conformance. The hash is an assertion in the wind.
+
+\textbf{Status: Solved for discovery-then-connect. Open for
+fire-and-forget broadcast.}
+
+\section{Exception 4: IPv4-to-IPv6 Translation}
+\label{sec:ipv4v6}
+
+\subsection{Why We Thought It Was Limited}
+
+Our initial IPv4$\rightarrow$IPv6 transition design used HTTP-level
+upgrade headers: accept an IPv4 connection, respond with
+\texttt{Groove-Upgrade-To: ipv6}, let the client reconnect on IPv6.
+Two round trips, state loss, client awareness required.
+
+This seemed like the only option: the application layer is where Groove
+operates, so the upgrade has to happen at the application layer.
+
+\subsection{The Moment It Broke}
+
+``Why not strip it at the frame level instead of the packet level?''
+
+TCP streams have frames (segments). The Zig FFI can accept a TCP
+connection on IPv4 and open a corresponding connection on IPv6, then
+\texttt{splice(2)} the bytes bidirectionally. Zero-copy. Transparent.
+The client never knows. The server only sees IPv6.
+
+\subsection{The Solution}
+
+The Typed Frame Router operating as an IPv4$\rightarrow$IPv6 proxy at
+TCP Layer 4. On Linux, \texttt{splice(2)} transfers bytes between socket
+file descriptors without copying to userspace. The proxy is approximately
+60 lines of Zig. It is formally verified in Idris2 (transport
+transparency, bounded memory, direction safety, liveness).
+
+It is now the 9th core primitive in the proven-servers repository.
+
+\subsection{What Remains}
+
+Nothing. This is completely solved.
+
+\textbf{Status: Solved. Formally verified. Tests passing.}
+
+\section{Exception 5: Browser-to-Native Boundary}
+\label{sec:browser}
+
+\subsection{Why We Thought It Was Fragile}
+
+Browser extensions talk to local services via \texttt{fetch()} to
+localhost. The request is untyped HTTP. The response is parsed JSON.
+Neither side has compile-time proof of the other's types. The browser
+security sandbox actively prevents the kind of low-level socket access
+that the Typed Frame Router uses.
+
+\subsection{The Moment It Broke}
+
+The Groove harness pattern: a browser extension that probes localhost
+for Groove manifests using standard \texttt{fetch()} and establishes
+type-safe connections. The types cross the boundary via the chain:
+Idris2 ABI $\rightarrow$ C headers $\rightarrow$ Zig FFI $\rightarrow$
+HTTP $\rightarrow$ \texttt{fetch()} $\rightarrow$ JavaScript.
+
+The browser sandbox doesn't prevent \texttt{fetch()} to localhost.
+1Password, VS Code, Figma, and Obsidian all use this pattern. The
+precedent is established.
+
+\subsection{The Solution}
+
+The Groove Browser Harness: a browser extension running the same
+\texttt{GrooveHarness} constructor as a Gossamer panel, but inside a
+service worker. CORS headers on groove endpoints enable the
+\texttt{fetch()}. Dual-stack probing (\texttt{[::1]} first,
+\texttt{127.0.0.1} fallback) handles all configurations.
+
+Firefox embraces it (persistent background, open web philosophy).
+Chrome accepts it with Manifest V3 friction (service worker lifecycle).
+Safari tries to restrict it (App Transport Security, App Store
+gatekeeping).
+
+\subsection{What Remains}
+
+Safari. Apple's incentive is to prevent exactly this kind of
+disintermediation. Whether this is a technical limitation or a business
+decision is a question for Apple.
+
+\textbf{Status: Solved for Firefox and Chrome. Obstructed (not
+impossible) on Safari.}
+
+\section{Exception 6: Hardware-Accelerated Bypass}
+\label{sec:hwbypass}
+
+\subsection{Why We Thought It Was Impossible}
+
+RDMA (Remote Direct Memory Access), DPDK (Data Plane Development Kit),
+and SR-IOV (Single Root I/O Virtualisation) bypass the kernel entirely.
+Network packets go directly from the NIC to userspace memory (or to a
+virtual machine's memory) without the kernel ever seeing them.
+
+The Typed Frame Router uses \texttt{splice(2)}, which is a kernel
+operation. If the kernel never sees the packets, \texttt{splice(2)}
+cannot intercept them. The TFR is blind.
+
+\subsection{Why It's Still Hard}
+
+This is genuinely difficult because the bypass is the \emph{point}.
+RDMA exists because kernel processing is too slow for high-frequency
+trading, HPC, and storage networks. Any interception --- even a single
+branch to check a type hash --- adds latency that defeats the purpose.
+
+\subsection{Possible Approaches (Speculative)}
+
+\begin{enumerate}
+\item \textbf{Userspace typed filter}: DPDK provides a userspace network
+  stack. A typed frame filter could run inside the DPDK pipeline,
+  checking type hashes as part of the existing packet processing loop.
+  This adds computation but no kernel round-trip. The overhead would be
+  a single SHA-256 comparison (one cache line) per packet.
+
+\item \textbf{SmartNIC offload}: modern SmartNICs (NVIDIA BlueField,
+  AMD Pensando) can run custom programs on the NIC itself. A typed frame
+  filter running on the SmartNIC would intercept packets \emph{before}
+  they reach the host, with zero host CPU overhead. The NIC becomes a
+  typed boundary.
+
+\item \textbf{eBPF at the XDP layer}: Linux Express Data Path (XDP)
+  runs eBPF programs on the NIC driver, before the kernel network stack.
+  A GRV6 magic check in XDP ($< 10$ ns) could route typed frames to a
+  validation path while passing untyped frames through at full speed.
+\end{enumerate}
+
+None of these are implemented. Each requires specialised hardware or
+kernel access. We list them as directions, not solutions.
+
+\textbf{Status: Open. Genuinely hard. Challenge issued.}
+
+\section{Exception 7: Unknown Strangers}
+\label{sec:strangers}
+
+\subsection{Why It's Impossible}
+
+A packet arrives from an IP address you've never seen. It has no GRV6
+header. No Groove manifest. No type hash. No ALPN token. It is raw
+bytes from an unknown source.
+
+You cannot type this. You cannot validate what was never declared. You
+cannot prove properties of code you've never seen. This is not a
+limitation of Groove or GRV6 or any typed system. It is a limitation of
+information: you cannot reason about what you don't have.
+
+\subsection{Why It Will Always Be Impossible}
+
+Typing requires at minimum a \emph{declaration} from the sender: ``I
+claim this data is of type X.'' Without that declaration, there is
+nothing to check, nothing to match, nothing to prove. The sender must
+participate.
+
+This is analogous to encryption: you cannot encrypt a conversation
+if the other party refuses to exchange keys. You cannot type a
+conversation if the other party refuses to declare types.
+
+\subsection{What You CAN Do}
+
+\begin{enumerate}
+\item \textbf{Reject}: refuse untyped traffic entirely. This is
+  appropriate for systems that only communicate with known peers (the
+  typed overlay).
+\item \textbf{Quarantine}: accept untyped traffic but process it in a
+  restricted sandbox. Treat it as Level 0 (Untyped) and apply maximum
+  runtime validation.
+\item \textbf{Upgrade}: if the untyped traffic follows a known protocol
+  (HTTP, gRPC), wrap it in a GRV6 frame at the boundary. A Groove
+  Bridge does exactly this. The bridge is the translation layer between
+  the untyped internet and the typed overlay.
+\end{enumerate}
+
+\textbf{Status: Impossible. Fundamentally. Not a challenge --- a
+physical law of information.}
+
+\section{The Scorecard}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{clcl}
+\toprule
+\# & Exception & Status & Solution \\
+\midrule
+1 & Open Internet (WAN) & \textbf{Solved} & Typed overlay (shared ABI = Level 4) \\
+2 & Encrypted Tunnels & \textbf{Solved} & TLS ALPN negotiation \\
+3 & Broadcast Protocols & \textbf{Solved} & Typed Broadcast Filter + upgrade \\
+4 & IPv4$\rightarrow$IPv6 & \textbf{Solved} & Frame-level splice (verified) \\
+5 & Browser$\leftrightarrow$Native & \textbf{Solved} & Groove Browser Harness \\
+6 & Hardware Bypass & \textbf{Open} & DPDK/SmartNIC/XDP (speculative) \\
+7 & Unknown Strangers & \textbf{Impossible} & Information-theoretic limit \\
+\bottomrule
+\end{tabular}
+\caption{Exceptional protocol scorecard}
+\label{tab:scorecard}
+\end{table}
+
+Of seven exceptions we identified, five were solved during iterative
+design and testing. One remains open but has speculative approaches. One
+is fundamentally impossible.
+
+The genuinely untypeable surface is far narrower than we expected:
+hardware-accelerated kernel bypass (a niche use case) and packets from
+strangers who refuse to participate (an information-theoretic limit, not
+a technical one).
+
+\section{An Open Challenge}
+
+We challenge the community on Exception 6 (Hardware-Accelerated Bypass):
+
+\begin{quote}
+\emph{Can a GRV6 type hash be validated at line rate on a hardware-
+accelerated data path (RDMA, DPDK, or SR-IOV) without defeating the
+purpose of the acceleration? Specifically: can the overhead be bounded
+to $< 100$ ns per packet, which is within the jitter budget of most
+HPC and HFT applications?}
+\end{quote}
+
+We believe the answer is yes, via SmartNIC offload or XDP/eBPF, but we
+have not demonstrated it. We commit to updating this paper --- with a
+new section, not a revision --- when we or anyone else produces a
+working implementation.
+
+Exception 7 (Unknown Strangers) is not a challenge. It is a boundary.
+You cannot type what was never declared. This is as fundamental as ``you
+cannot decrypt what was never encrypted.'' We state it not as a
+limitation to be overcome but as a condition of reality to be understood.
+
+\section{What We Learned}
+
+The most important lesson from this exercise is that the boundary between
+``possible'' and ``impossible'' was in a different place than we thought.
+
+We began by listing six things that seemed impossible. We ended with two
+--- and one of those is not ``impossible'' but ``hard.'' The apparently
+impossible cases fell not because we found clever workarounds but because
+we had framed the problems wrong:
+
+\begin{itemize}
+\item We said ``you can't type the internet'' when we meant ``you can't
+  type strangers.'' The internet between peers is just a wire.
+\item We said ``you can't type encrypted tunnels'' when we meant ``you
+  can't type mid-tunnel.'' The endpoints are unencrypted.
+\item We said ``you can't type broadcast'' when we meant ``you can't
+  splice broadcast.'' You can filter it.
+\item We said ``you can't type the browser boundary'' when we meant ``the
+  browser sandbox prevents socket access.'' It doesn't prevent
+  \texttt{fetch()}.
+\end{itemize}
+
+In each case, the impossibility was an artefact of how we defined the
+problem, not a property of the problem itself. When we reframed the
+question --- from ``can we type this boundary?'' to ``where exactly in
+this boundary do the types die, and can we move that point?'' --- the
+answers appeared.
+
+We do not claim to have typed the world. We claim to have found that
+the world is more typeable than it looks, and that the untypeable
+residue is smaller, and more precisely bounded, than we expected.
+
+\section{Conclusion}
+
+Five out of seven. That is the score.
+
+Five communication patterns that we believed were fundamentally
+incompatible with type safety turned out to be solvable --- not through
+heroic engineering but through precise reframing of where the types
+need to exist.
+
+One remains open: hardware-accelerated kernel bypass. We challenge the
+community to solve it. We believe it can be done at $< 100$ ns per
+packet, and we will report any progress.
+
+One is impossible: typing traffic from strangers who refuse to
+participate. We do not challenge anyone to solve this. We document it
+as a boundary condition of typed communication, as fundamental as the
+impossibility of encrypting a conversation with an unwilling
+participant.
+
+The world is more typeable than it looks. The exceptions are
+exceptional. And the challenge is open.
+
+\bigskip
+\noindent
+\textbf{Update commitment:} This paper will be updated --- not revised,
+but extended with new sections --- when progress is made on Exception 6.
+Updates will be clearly dated and attributed. The original text will not
+be modified.
+
+\bibliographystyle{plain}
+\begin{thebibliography}{10}
+
+\bibitem{groove2026}
+J.~D.~A.~Jewell.
+\newblock Groove: Formally Verified System Composition via Dependent Types and
+  Linear Resources.
+\newblock arXiv preprint, 2026.
+
+\bibitem{boundaries2026}
+J.~D.~A.~Jewell.
+\newblock Typing the Boundaries: Preserving Type Safety Across Every System
+  Crossing Point.
+\newblock arXiv preprint, 2026.
+
+\bibitem{trust2026}
+J.~D.~A.~Jewell.
+\newblock Graduated Trust: A Spectrum of Type Safety from Localhost to the Open
+  Internet.
+\newblock arXiv preprint, 2026.
+
+\bibitem{factory2026}
+J.~D.~A.~Jewell.
+\newblock The Protocol Factory: Malleable, Ductile Protocol Creation via
+  Formally Verified Typed Overlays.
+\newblock arXiv preprint, 2026.
+
+\bibitem{rfc7301}
+S.~Friedl, A.~Popov, A.~Langley, and E.~Stephan.
+\newblock Transport Layer Security (TLS) Application-Layer Protocol Negotiation
+  Extension.
+\newblock RFC 7301, 2014.
+
+\end{thebibliography}
+
+\end{document}
