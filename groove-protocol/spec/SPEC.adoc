@@ -1,0 +1,496 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+= Groove Protocol Specification
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v0.1.0, 2026-03-23
+:toc: left
+:toclevels: 4
+:icons: font
+:source-highlighter: rouge
+:sectnums:
+
+== Abstract
+
+The Groove Protocol defines a mechanism by which independent software systems
+discover each other at runtime, negotiate type-safe capability interfaces, and
+compose into integrated wholes — without prior configuration, without mutual
+awareness at build time, and without either system requiring the other to
+function.
+
+This specification covers discovery, capability declaration, type-safe
+negotiation, connection lifecycle, versioning, attestation, mesh composition,
+and bridge adaptation for legacy systems.
+
+== Status of This Document
+
+Working Draft. Not yet submitted for standardisation.
+
+== Conventions
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD",
+"SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be
+interpreted as described in RFC 2119.
+
+== 1. Introduction
+
+=== 1.1. Problem Statement
+
+Modern software systems are built from independent components that must
+interoperate. Current integration approaches fall into three categories:
+
+. **Hard-coded integration** — systems import each other's libraries. Tight
+  coupling. Changes in one break the other.
+. **Plugin architectures** — systems define extension points. Better, but
+  plugins must be written for the host. The host is primary; plugins are
+  subordinate.
+. **Service meshes** — systems communicate over the network. Loose coupling,
+  but no compile-time safety. Runtime failures when services are incompatible.
+
+Groove is a fourth approach: **structural composition**. Systems declare what
+they offer and what they consume. If the shapes fit, they compose. If not, both
+keep working independently. Compatibility is a compile-time property enforced
+by dependent types.
+
+=== 1.2. Design Principles
+
+. **Bare-first** — every groove-aware system MUST function without any groove
+  partners. Groove capabilities are additive, never required.
+. **Structural typing** — capability compatibility is determined by the
+  structure of the types, not by names, versions, or configuration.
+. **Linear resources** — connection handles are linear types. The compiler
+  enforces that every connection is properly closed. Resource leaks are compile
+  errors.
+. **Zero configuration** — groove discovery uses well-known ports and local
+  probing. No central registry is required (though one MAY be used for scale).
+. **Graceful degradation** — losing a groove partner triggers fallback
+  behaviour, not errors.
+. **Attestation** — every groove connection generates a provenance record.
+
+== 2. Discovery
+
+=== 2.1. Capability Endpoint
+
+Every groove-aware system MUST expose an HTTP endpoint at its primary port
+that responds to `GET /.well-known/groove` with a Groove Manifest.
+
+[source,http]
+----
+GET /.well-known/groove HTTP/1.1
+Host: localhost:6473
+Accept: application/groove+a2ml
+
+HTTP/1.1 200 OK
+Content-Type: application/groove+a2ml
+
+@groove-manifest(version="0.1.0"):
+  @system(id="burble", name="Burble Voice Platform", version="1.2.0")
+  @offers:
+    @capability(id="voice",    version="2.1.0", interface="VoiceTransport")
+    @capability(id="text",     version="1.0.0", interface="TextChannel")
+    @capability(id="presence", version="1.0.0", interface="PresenceTracker")
+    @capability(id="tts",      version="1.0.0", interface="TextToSpeech")
+    @capability(id="stt",      version="1.0.0", interface="SpeechToText")
+  @end
+  @consumes:
+    @capability(id="integrity", version="1.0+", interface="IntegrityVerifier")
+    @capability(id="storage",   version="1.0+", interface="OctadStore")
+  @end
+  @requires:
+    @security(encryption="required", min-tls="1.3")
+  @end
+  @heartbeat(interval-ms=5000, timeout-ms=15000)
+@end
+----
+
+=== 2.2. Local Discovery (Port Probing)
+
+A groove-aware system SHOULD probe a configurable range of local ports on
+startup to discover nearby groove partners.
+
+**Default probe range:** ports 6460–6500, 8080–8100
+
+**Probe procedure:**
+
+. For each port in the probe range:
+  .. Send `GET /.well-known/groove` with a 500ms timeout
+  .. If the response is a valid Groove Manifest, add to discovered systems
+  .. If the response is not a Groove Manifest, or times out, skip
+. Discovery SHOULD complete within 5 seconds total
+. Discovery SHOULD be repeated on a configurable interval (default: 60s)
+. A system MUST NOT probe its own port
+
+=== 2.3. Distributed Discovery (Optional)
+
+For systems spanning multiple hosts, a distributed registry MAY be used:
+
+. **mDNS/DNS-SD** — systems register `_groove._tcp` services
+. **BEAM clustering** — Elixir/Erlang systems use native node discovery
+. **Gossip protocol** — systems share discovered manifests with peers
+
+A distributed registry is OPTIONAL. Local probing MUST always be supported
+as the baseline discovery mechanism.
+
+=== 2.4. Discovery Events
+
+When a system is discovered or lost, the following events MUST be emitted
+internally:
+
+. `groove:discovered` — a new groove partner was found
+. `groove:connected` — a groove connection was established
+. `groove:disconnected` — a groove connection was lost (partner stopped)
+. `groove:degraded` — a groove partner is unhealthy but still reachable
+
+== 3. Capability Negotiation
+
+=== 3.1. Structural Matching
+
+Capability matching is determined by the **structure** of the interface types,
+not by string comparison of capability IDs.
+
+Two capabilities match if and only if:
+
+. The provider's interface type is a **supertype** of the consumer's
+  required interface type (the provider offers at least what the consumer
+  needs)
+. The provider's version satisfies the consumer's version constraint
+. The provider's security requirements are met by the consumer
+
+=== 3.2. Version Constraints
+
+Capability versions follow Semantic Versioning (SemVer).
+
+Consumers declare version constraints using the following syntax:
+
+[cols="1,3"]
+|===
+| Constraint | Meaning
+| `1.0.0` | Exactly version 1.0.0
+| `1.0+` | Version 1.0.0 or later (any minor/patch)
+| `>=1.0,<2.0` | Version 1.x.x (compatible range)
+| `*` | Any version
+|===
+
+=== 3.3. Idris2 Type-Level Guarantees
+
+The canonical representation of groove interfaces is in Idris2 with dependent
+types. This provides four compile-time guarantees:
+
+. **Match safety** — if the types don't structurally match, the code that
+  connects them cannot be written. This is not a runtime check.
+. **Resource linearity** — connection handles are linear. The compiler
+  forces exactly-once consumption. No leaks, no double-close.
+. **Capability authenticity** — a system claiming to offer `voice` MUST
+  implement the `VoiceTransport` interface. The type checker enforces this.
+. **Composition soundness** — if A ↔ B and B ↔ C, the type checker proves
+  the composed system A ↔ B ↔ C is well-typed before any code runs.
+
+[source,idris]
+----
+-- A groove connection is a linear resource
+linear type GrooveConn : (provider : System) -> (consumer : System) -> Type where
+  MkGroove : (handle : I64) -> GrooveConn provider consumer
+
+-- Connecting requires proof that capabilities match
+connect : (prov : System)
+       -> (cons : System)
+       -> {auto proof : CapabilitiesMatch (offers prov) (requires cons)}
+       -> IO (GrooveConn prov cons)
+
+-- Disconnecting consumes the handle (exactly once)
+disconnect : (1 conn : GrooveConn prov cons) -> IO ()
+----
+
+=== 3.4. Polyglot Bindings
+
+Systems not written in Idris2 participate in Groove through the ABI/FFI
+layer:
+
+. **Idris2** defines the interface (ABI)
+. **Zig** implements the C-compatible FFI
+. **C headers** are auto-generated from the ABI
+. Any language that can call C functions can participate
+
+Language-specific binding generators SHOULD be provided for:
+Rust, Elixir, Zig, ReScript, Gleam, V, Julia.
+
+The binding generator MUST preserve the capability type-safety at the
+boundary, even if the host language cannot express dependent types. This is
+achieved through runtime validation that mirrors the compile-time proofs.
+
+== 4. Connection Lifecycle
+
+=== 4.1. States
+
+A groove connection progresses through these states:
+
+[source]
+----
+DISCOVERED → NEGOTIATING → CONNECTED → ACTIVE → DISCONNECTING → DISCONNECTED
+                 ↓                        ↓
+              REJECTED                 DEGRADED → RECONNECTING → ACTIVE
+----
+
+=== 4.2. Connection Establishment
+
+. Consumer discovers provider via probing or registry
+. Consumer sends `POST /.well-known/groove/connect` with its manifest
+. Provider checks structural compatibility
+. If compatible, provider returns a connection handle
+. Both sides emit `groove:connected`
+. Capabilities become available
+
+=== 4.3. Heartbeat
+
+Connected systems MUST exchange heartbeat messages:
+
+. Default interval: 5000ms
+. Default timeout: 15000ms (3 missed heartbeats)
+. Heartbeat: `GET /.well-known/groove/heartbeat` → `204 No Content`
+. On timeout: transition to `DEGRADED` state, attempt reconnection
+. On reconnection failure after 3 attempts: transition to `DISCONNECTED`
+
+=== 4.4. Graceful Degradation
+
+When a groove partner is lost:
+
+. All capabilities provided by that partner become unavailable
+. The system MUST continue functioning with its base capabilities
+. UI elements related to the lost capabilities SHOULD disappear or grey out
+. No errors SHOULD be surfaced to the user — this is normal operation
+
+=== 4.5. Disconnection
+
+. Either side sends `POST /.well-known/groove/disconnect`
+. The linear connection handle is consumed (destroyed)
+. Both sides emit `groove:disconnected`
+. Capabilities revert to base
+
+== 5. Attestation
+
+=== 5.1. Provenance Records
+
+Every groove connection event MUST generate a provenance record suitable
+for storage in VeriSimDB or any hash-chain provenance system.
+
+[source,json]
+----
+{
+  "event": "groove:connected",
+  "provider": {"id": "burble", "version": "1.2.0"},
+  "consumer": {"id": "gossamer", "version": "0.8.0"},
+  "capabilities": ["voice@2.1.0", "text@1.0.0"],
+  "timestamp": "2026-03-23T14:30:00Z",
+  "hash": "sha256:a1b2c3d4...",
+  "prev_hash": "sha256:e5f6g7h8..."
+}
+----
+
+=== 5.2. Audit Trail
+
+The sequence of provenance records forms a verifiable audit trail:
+
+. When did system A first groove with system B?
+. What capabilities were active at time T?
+. How long was the connection maintained?
+. Was the disconnection graceful or due to failure?
+
+=== 5.3. VeriSimDB Integration
+
+When VeriSimDB is available (via its own groove), provenance records
+are stored as octads with full 8-modality representation:
+
+. **Document** — the raw provenance JSON
+. **Temporal** — version counter per connection
+. **Provenance** — hash-chain linkage
+. **Graph** — provider→consumer edge
+. **Semantic** — typed capability annotations
+. **Vector** — embedding for similarity search
+. **Spatial** — geographic location (if applicable)
+. **Binary** — connection metadata
+
+== 6. Groove Mesh
+
+=== 6.1. Transitive Composition
+
+When three or more systems form a groove mesh, capabilities MAY compose
+transitively:
+
+[source]
+----
+A offers: voice, text
+B offers: integrity, consumes: voice
+C offers: storage, consumes: integrity
+
+Mesh: A ←→ B ←→ C
+Result: C gains voice (through B), with integrity verification
+----
+
+=== 6.2. Mesh Safety
+
+Transitive composition MUST preserve the type-safety chain:
+
+. Each hop in the mesh MUST be independently type-checked
+. The composed mesh type is the product of all individual connection types
+. Cyclic meshes (A → B → A) are permitted if the Idris2 type checker
+  proves the cycle is well-founded
+
+=== 6.3. Mesh Topology
+
+The mesh topology is discoverable via:
+
+[source,http]
+----
+GET /.well-known/groove/mesh HTTP/1.1
+
+{
+  "systems": ["burble", "vext", "verisimdb", "gossamer"],
+  "connections": [
+    {"from": "gossamer", "to": "burble", "capabilities": ["voice", "text"]},
+    {"from": "burble", "to": "vext", "capabilities": ["integrity"]},
+    {"from": "gossamer", "to": "verisimdb", "capabilities": ["storage"]}
+  ]
+}
+----
+
+== 7. Groove Bridge (Legacy Adaptation)
+
+=== 7.1. Purpose
+
+A Groove Bridge is a lightweight service that translates between groove-aware
+systems and legacy systems that do not implement the Groove Protocol.
+
+=== 7.2. Bridge Architecture
+
+[source]
+----
+┌──────────────┐     Groove      ┌──────────────┐     REST/gRPC     ┌──────────────┐
+│ Groove System │ ←────────────→ │ Groove Bridge │ ←──────────────→ │ Legacy System │
+└──────────────┘                 └──────────────┘                   └──────────────┘
+----
+
+The bridge:
+
+. Exposes a Groove Manifest on its `/.well-known/groove` endpoint
+. Declares the capabilities of the legacy system it wraps
+. Translates groove IPC calls to the legacy system's protocol
+. Maintains the linear connection handle on the groove side
+
+=== 7.3. BoJ as Reference Bridge
+
+The BoJ MCP server is the canonical Groove Bridge implementation. It wraps
+GitHub, GitLab, Cloudflare, Vercel, Gmail, and calendar APIs behind groove-
+compatible capability manifests.
+
+== 8. Groove Toolkit
+
+=== 8.1. Discovery UI (PanLL Panel)
+
+A PanLL panel SHOULD be provided that visualises:
+
+. Currently discovered groove systems
+. Active connections and their capabilities
+. Mesh topology as an interactive graph
+. Connection health and heartbeat status
+
+=== 8.2. Type Checker (CLI)
+
+A CLI tool SHOULD be provided that:
+
+. Validates a Groove Manifest for correctness
+. Checks structural compatibility between two manifests
+. Reports which capabilities will match and which will not
+
+=== 8.3. Compliance Scanner (Hypatia Rule)
+
+A Hypatia rule SHOULD scan repositories for:
+
+. Presence of `/.well-known/groove` endpoint
+. Correct A2ML manifest format
+. Idris2 interface definitions for declared capabilities
+. Linear handle consumption in connection lifecycle code
+
+== 9. Security Considerations
+
+=== 9.1. Mutual Authentication
+
+Groove systems SHOULD authenticate each other before establishing connections.
+The RECOMMENDED mechanism is mutual TLS (mTLS) with minimum TLS 1.3.
+
+=== 9.2. Capability Restrictions
+
+A system MAY declare security requirements in its manifest:
+
+[source]
+----
+@requires:
+  @security(encryption="required", min-tls="1.3")
+  @security(auth="mtls", cert-pinning="optional")
+@end
+----
+
+=== 9.3. Rejecting Connections
+
+A system MUST reject connections from systems that:
+
+. Do not meet its declared security requirements
+. Claim capabilities they cannot prove (type check failure)
+. Have been explicitly blocklisted
+
+=== 9.4. Rate Limiting
+
+Discovery probes SHOULD be rate-limited to prevent port-scanning abuse:
+
+. Maximum 10 probes per second from any single source
+. Exponential backoff on repeated failures
+
+== 10. IANA Considerations
+
+=== 10.1. Media Type Registration
+
+[cols="1,3"]
+|===
+| Type | application/groove+a2ml
+| Subtype | groove+a2ml
+| Encoding | UTF-8
+| Fragment | a2ml fragments
+|===
+
+=== 10.2. Well-Known URI Registration
+
+[cols="1,3"]
+|===
+| URI | /.well-known/groove
+| Description | Groove Protocol capability manifest endpoint
+| Specification | This document
+|===
+
+== 11. References
+
+. RFC 2119 — Key words for use in RFCs
+. RFC 8615 — Well-Known URIs
+. Semantic Versioning 2.0.0 — https://semver.org/
+. A2ML Specification — link:../a2ml/spec/SPEC.adoc[]
+. Idris2 — https://www.idris-lang.org/
+
+== Appendix A: Combination Matrix
+
+[cols="3,4"]
+|===
+| Running | What You Get
+| Gossamer alone | Desktop app shell
+| Burble alone | Voice/text comms
+| Vext alone | Feed integrity verification
+| VeriSimDB alone | Data storage with drift detection
+| Gossamer + Burble | Desktop app with embedded voice
+| Burble + Vext | Voice with cryptographic message integrity
+| Gossamer + VeriSimDB | Desktop app with persistent state
+| Gossamer + Burble + Vext | Desktop app with verified voice — the full triad
+| All four | The complete groove mesh
+|===
+
+== Appendix B: Why "Groove"
+
+A groove is the shape cut into a surface that lets something else slot in and
+ride along. It is carved into each system (always present), passive until
+engaged, guides without constraining, and fit is physical — structural, not
+negotiated. Like a vinyl groove guiding the needle: the shape is the interface.

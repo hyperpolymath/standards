@@ -1,0 +1,204 @@
+<!--
+  SPDX-License-Identifier: PMPL-1.0-or-later
+
+  Groove Panel Template — Copy this, twiddle the edges, ship it.
+
+  OPSM lifecycle:
+    MINT:       Copy this template (you just did)
+    PROVISION:  Declare your capabilities below (offers + consumes)
+    CONFIGURE:  Write your UI and handlers (the fun part)
+    HARNESS:    groove-harness.js handles everything else (discovery,
+                lifecycle, heartbeat, attestation, FLI)
+
+  What you change:  Lines marked with ★
+  What you don't:   Everything else
+-->
+
+<!-- ★ YOUR UI GOES HERE — replace this with your panel content -->
+<div class="panel-header">
+  <h2 id="gpt-title">My Groove Panel</h2>
+  <span class="badge badge-gray" id="gpt-status">Standalone</span>
+  <div style="flex:1;"></div>
+  <button class="btn btn-sm" onclick="myRefresh()">&#x21BB; Refresh</button>
+</div>
+
+<!-- Groove partner status (shows what's grooved in) -->
+<div id="gpt-groove-status" style="display:none; margin-bottom:16px;">
+  <div style="display:flex; flex-wrap:wrap; gap:8px;" id="gpt-capability-badges">
+    <!-- Auto-populated by the harness when capabilities connect -->
+  </div>
+</div>
+
+<!-- ★ YOUR MAIN CONTENT -->
+<div id="gpt-content">
+  <div class="empty-state">
+    <div class="empty-icon">&#x1F3B8;</div>
+    <p style="font-size:15px; margin-bottom:8px;">Your Panel Works Here</p>
+    <p style="font-size:13px;">
+      This panel works standalone. Start a groove partner nearby and
+      extra features will appear automatically.
+    </p>
+  </div>
+</div>
+
+<!-- ★ YOUR ENHANCED CONTENT (shown when capabilities groove in) -->
+<div id="gpt-enhanced" style="display:none;">
+  <!-- This section appears when consumed capabilities become available -->
+</div>
+
+<script>
+  // =========================================================================
+  // ★ STEP 1: Declare your capabilities
+  // =========================================================================
+  //
+  // offers:   what YOUR panel provides to others
+  // consumes: what YOUR panel wants from groove partners
+  // fliTraits: which FLI modules to load (from the clade system)
+  //
+  // That's it. The harness handles discovery, connection, heartbeat,
+  // attestation, and degradation. You just write your handlers.
+
+  var myHarness = new GrooveHarness({
+
+    // ★ Change these to your panel's identity
+    systemId:   'my-groove-panel',
+    systemName: 'My Groove Panel',
+    version:    '0.1.0',
+
+    // ★ What capabilities does YOUR panel offer to others?
+    offers: [
+      { id: 'health', version: '1.0.0', interface: 'HealthCheck' }
+      // Add more: { id: 'metrics', version: '1.0.0', interface: 'MetricsProvider' }
+    ],
+
+    // ★ What capabilities does YOUR panel want from groove partners?
+    consumes: [
+      // { id: 'voice',     version: '1.0+' },
+      // { id: 'storage',   version: '1.0+' },
+      // { id: 'integrity', version: '1.0+' }
+    ],
+
+    // ★ Which FLI modules should be provisioned for this panel?
+    fliTraits: [
+      'fli-tooltip'
+      // 'fli-gauge', 'fli-editable', 'fli-terminal', 'fli-undo'
+    ],
+
+    // =========================================================================
+    // ★ STEP 2: Write your handlers
+    // =========================================================================
+
+    /**
+     * ★ Called when a capability you consume becomes available.
+     *
+     * This is where the magic happens. A groove partner showed up and
+     * it offers something you wanted. Show the enhanced UI.
+     *
+     * @param {string} capId - The capability that arrived (e.g. 'voice')
+     * @param {object} provider - The partner's manifest
+     */
+    onCapabilityArrived: function(capId, provider) {
+      console.log('[MyPanel] Capability arrived: ' + capId + ' from ' + provider.id);
+
+      // Show the enhanced section
+      document.getElementById('gpt-enhanced').style.display = 'block';
+
+      // Add a badge for this capability
+      addCapabilityBadge(capId, provider.name || provider.id);
+
+      // ★ YOUR LOGIC HERE — what do you do with this capability?
+      // Example: if voice arrived, show a voice UI
+      // if (capId === 'voice') showVoiceUI();
+      // if (capId === 'storage') loadPersistedData();
+    },
+
+    /**
+     * ★ Called when a capability you consume is lost.
+     *
+     * The groove partner stopped or disconnected. Hide the enhanced UI
+     * and fall back to standalone mode. No errors — this is normal.
+     *
+     * @param {string} capId - The capability that was lost
+     * @param {object} provider - The partner's manifest
+     */
+    onCapabilityLost: function(capId, provider) {
+      console.log('[MyPanel] Capability lost: ' + capId);
+
+      // Remove the badge
+      removeCapabilityBadge(capId);
+
+      // If no capabilities remain, hide enhanced section
+      if (Object.keys(myHarness.activeCapabilities()).length === 0) {
+        document.getElementById('gpt-enhanced').style.display = 'none';
+      }
+
+      // ★ YOUR LOGIC HERE — graceful degradation
+      // if (capId === 'voice') hideVoiceUI();
+      // if (capId === 'storage') switchToLocalOnly();
+    },
+
+    /**
+     * Called when the harness is fully ready (FLI provisioned, initial
+     * discovery complete).
+     */
+    onReady: function() {
+      console.log('[MyPanel] Harness ready. Partners: ' + myHarness.partners().length);
+      document.getElementById('gpt-status').textContent =
+        myHarness.partners().length > 0 ? 'Grooved' : 'Standalone';
+      document.getElementById('gpt-status').className =
+        'badge ' + (myHarness.partners().length > 0 ? 'badge-green' : 'badge-gray');
+    }
+  });
+
+  // =========================================================================
+  // ★ STEP 3: Write your UI logic
+  // =========================================================================
+
+  /**
+   * ★ Your panel's refresh function. Called when the user clicks Refresh.
+   */
+  function myRefresh() {
+    // ★ YOUR LOGIC HERE
+    console.log('[MyPanel] Refreshing...');
+  }
+
+  // =========================================================================
+  // Groove status UI helpers (you probably don't need to change these)
+  // =========================================================================
+
+  /** Add a capability badge to the status bar. */
+  function addCapabilityBadge(capId, providerName) {
+    var container = document.getElementById('gpt-capability-badges');
+    var statusBar = document.getElementById('gpt-groove-status');
+    statusBar.style.display = 'block';
+
+    var badge = document.createElement('span');
+    badge.id = 'gpt-cap-' + capId;
+    badge.className = 'badge badge-green';
+    badge.textContent = capId + ' (' + providerName + ')';
+    badge.setAttribute('data-tip', 'Capability "' + capId + '" provided by ' + providerName + ' via Groove');
+    container.appendChild(badge);
+
+    // Update status
+    document.getElementById('gpt-status').textContent = 'Grooved';
+    document.getElementById('gpt-status').className = 'badge badge-green';
+  }
+
+  /** Remove a capability badge from the status bar. */
+  function removeCapabilityBadge(capId) {
+    var badge = document.getElementById('gpt-cap-' + capId);
+    if (badge) badge.remove();
+
+    var container = document.getElementById('gpt-capability-badges');
+    if (container && container.children.length === 0) {
+      document.getElementById('gpt-groove-status').style.display = 'none';
+      document.getElementById('gpt-status').textContent = 'Standalone';
+      document.getElementById('gpt-status').className = 'badge badge-gray';
+    }
+  }
+
+  // =========================================================================
+  // Start the harness (this is automatic — you don't change this)
+  // =========================================================================
+  myHarness.start();
+</script>

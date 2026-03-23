@@ -1,0 +1,365 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+= Groove Protocol Modularity Specification
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v0.1.0, 2026-03-23
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Overview
+
+Groove is modular by design. Systems start bare and add capabilities through
+well-defined layers. Each layer is self-contained, has explicit dependencies,
+and can be adopted independently. A system at any layer functions correctly
+without the layers above it.
+
+This follows the Groove principle: **bare by default, enhanced by composition**.
+
+The modularity maps directly to the four conformance levels defined in
+link:CONFORMANCE.adoc[CONFORMANCE.adoc].
+
+== Module Architecture
+
+=== The ABI/FFI/API Triple
+
+Every Groove module follows the standardised triple-layer architecture:
+
+[cols="1,1,3"]
+|===
+| Layer | Language | Purpose
+
+| **ABI** | Idris2 | Interface definition with dependent type proofs
+| **FFI** | Zig | C-compatible implementation (zero runtime, zero overhead)
+| **API** | V | Ergonomic language-specific bindings and generators
+|===
+
+**Idris2** defines _what_ the interface is, with mathematical proofs of
+correctness. **Zig** implements _how_ to call it from any language via C ABI.
+**V** wraps the Zig FFI into _pleasant_ APIs for each target language.
+
+A system written in any language that can call C functions can participate
+in Groove at Level 1. Systems that want compile-time proofs use the Idris2
+layer directly (Level 3+).
+
+== Module Dependency Graph
+
+[source]
+----
+                    ┌──────────────────┐
+                    │  groove-manifest  │  ← Level 1: A2ML manifest + HTTP endpoint
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │ groove-lifecycle  │  ← Level 2: connect/disconnect/heartbeat
+                    └────────┬─────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+     ┌────────▼───────┐ ┌───▼──────┐ ┌─────▼──────┐
+     │ groove-proven   │ │ groove-  │ │ groove-    │
+     │ (Idris2 ABI +  │ │ bridge   │ │ events     │  ← Level 3 modules
+     │  Zig FFI +     │ │          │ │ (BEAM      │     (independent)
+     │  attestation)  │ │          │ │  PubSub)   │
+     └────────┬───────┘ └──────────┘ └────────────┘
+              │
+     ┌────────▼───────┐
+     │ groove-mesh    │  ← Level 4: transitive composition
+     │ (versioning +  │
+     │  distributed   │
+     │  discovery)    │
+     └────────────────┘
+
+     Orthogonal (any level):
+     ┌──────────────┐  ┌──────────────┐
+     │ groove-tools │  │ groove-      │
+     │ (CLI, PanLL  │  │ security     │
+     │  panel,      │  │ (capability  │
+     │  Hypatia)    │  │  auth)       │
+     └──────────────┘  └──────────────┘
+----
+
+== Module Specifications
+
+=== groove-manifest (Level 1: Groove-Aware)
+
+**Purpose:** The smallest useful Groove unit. A system exposes what it offers
+via an A2ML manifest at a well-known HTTP endpoint.
+
+**What it provides:**
+
+. `GET /.well-known/groove` → returns A2ML Groove Manifest
+. Capability declaration (offers + consumes)
+. System identification (id, name, version)
+
+**What it does NOT provide:**
+
+. No connection lifecycle
+. No type proofs
+. No heartbeat
+. No events
+
+**Dependencies:** None.
+
+**Implementation:**
+
+[cols="1,2"]
+|===
+| ABI (Idris2) | `Groove.Manifest.Types` — manifest schema types
+| FFI (Zig) | `groove_manifest.zig` — A2ML parser + HTTP handler
+| API (V) | `groove.manifest` — `fn announce(port, capabilities)`
+|===
+
+**Size:** ~200 lines of Zig. Any system can add this in under an hour.
+
+**Example (V):**
+[source,v]
+----
+import groove.manifest
+
+fn main() {
+    mut m := manifest.new('my-service', '0.1.0')
+    m.offers('voice', version: '1.0.0', interface_name: 'VoiceTransport')
+    m.offers('text', version: '1.0.0', interface_name: 'TextChannel')
+    m.serve(port: 6473)
+}
+----
+
+**Example (Zig):**
+[source,zig]
+----
+const groove = @import("groove_manifest");
+
+pub fn main() !void {
+    var manifest = groove.Manifest.init("my-service", "0.1.0");
+    manifest.offers("voice", .{ .version = "1.0.0", .interface_name = "VoiceTransport" });
+    manifest.offers("text", .{ .version = "1.0.0", .interface_name = "TextChannel" });
+    try manifest.serve(6473);
+}
+----
+
+=== groove-lifecycle (Level 2: Groove-Connected)
+
+**Purpose:** Adds connection lifecycle management. Systems can connect to
+each other, maintain health via heartbeats, and disconnect gracefully.
+
+**What it adds:**
+
+. `POST /.well-known/groove/connect` — establish connection
+. `POST /.well-known/groove/disconnect` — tear down connection
+. `GET /.well-known/groove/heartbeat` — health check
+. Local port-probe discovery
+. Connection state machine (DISCOVERED → CONNECTED → ACTIVE → DISCONNECTED)
+. Graceful degradation on partner loss
+
+**Dependencies:** `groove-manifest`
+
+**Implementation:**
+
+[cols="1,2"]
+|===
+| ABI (Idris2) | `Groove.Lifecycle.States` — state machine type
+| FFI (Zig) | `groove_lifecycle.zig` — connection management + probing
+| API (V) | `groove.lifecycle` — `fn connect()`, `fn on_partner_found(cb)`
+|===
+
+**Size:** ~500 lines of Zig.
+
+=== groove-proven (Level 3: Groove-Proven)
+
+**Purpose:** Adds formal proofs. Capability interfaces are defined in Idris2
+with dependent types. Connection handles are linear resources. Every
+connection generates a provenance attestation record.
+
+**What it adds:**
+
+. Idris2 ABI definitions for all capability interfaces
+. Linear connection handles (compile-time leak prevention)
+. Structural type matching (compile-time compatibility proofs)
+. SHA-256 hash-chain provenance records
+. C header generation from Idris2 ABI
+
+**Dependencies:** `groove-lifecycle`
+
+**Implementation:**
+
+[cols="1,2"]
+|===
+| ABI (Idris2) | `Groove.Proven.Types`, `Groove.Proven.Linear`, `Groove.Proven.Attestation`
+| FFI (Zig) | `groove_proven.zig` — attestation + hash chains
+| API (V) | `groove.proven` — `fn connect_proven()` (returns linear handle)
+|===
+
+**Size:** ~300 lines of Idris2, ~400 lines of Zig.
+
+=== groove-mesh (Level 4: Groove-Native)
+
+**Purpose:** Full groove mesh with transitive composition, version negotiation,
+and distributed discovery.
+
+**What it adds:**
+
+. `GET /.well-known/groove/mesh` — mesh topology endpoint
+. Transitive capability composition (A → B → C)
+. SemVer version constraint negotiation
+. Distributed discovery via mDNS/DNS-SD or BEAM clustering
+. Mesh safety proofs (Idris2)
+
+**Dependencies:** `groove-proven`
+
+=== groove-bridge (Level 3, orthogonal)
+
+**Purpose:** Translates between Groove and legacy protocols (REST, gRPC, SOAP).
+Wraps a non-Groove system with a Groove-compatible manifest and forwards
+capability calls.
+
+**What it provides:**
+
+. A2ML-based bridge configuration
+. Protocol translation (Groove IPC → REST/gRPC/SOAP)
+. Linear handle management on the Groove side
+. Reference: BoJ MCP server
+
+**Dependencies:** `groove-lifecycle`
+
+**Size:** ~600 lines of Zig (protocol adapters).
+
+=== groove-events (Level 3, orthogonal)
+
+**Purpose:** Adds asynchronous event publishing and subscription alongside
+synchronous Groove connections.
+
+**What it provides:**
+
+. Event publishing with type-safe schemas
+. Subscription with capability-based filtering
+. BEAM PubSub integration (for Elixir systems)
+. Phoenix Channels for WebSocket streaming
+
+**Dependencies:** `groove-lifecycle`
+
+**IMPORTANT:** This module uses BEAM's built-in PubSub. It does NOT depend on
+Kafka, RabbitMQ, or any external message broker. Zero external dependencies.
+
+=== groove-security (orthogonal, requires groove-proven)
+
+**Purpose:** Adds capability-based security: required capabilities,
+mutual authentication, connection rejection.
+
+**What it adds:**
+
+. `@requires` declarations in manifests
+. Mutual TLS (mTLS) enforcement
+. Capability requirement matching at connection time
+. Blocklist management
+
+**Dependencies:** `groove-proven` (needs type proofs for security claims)
+
+=== groove-tools (orthogonal, any level)
+
+**Purpose:** Developer tooling for Groove systems.
+
+**What it provides:**
+
+. **CLI** — `groove validate`, `groove probe`, `groove mesh-status`
+. **PanLL Panel** — visual discovery dashboard in Gossamer
+. **Hypatia Rule** — CI/CD compliance scanning
+. **IDE Integration** — capability visualization
+
+**Dependencies:** Any Groove module.
+
+== User Journeys
+
+=== Journey 1: "I just want systems to find each other"
+
+[source]
+----
+Install: groove-manifest
+Time:    30 minutes
+Result:  Systems announce capabilities, can be discovered
+----
+
+=== Journey 2: "I want plug-and-play integration"
+
+[source]
+----
+Install: groove-manifest + groove-lifecycle
+Time:    2 hours
+Result:  Systems discover, connect, maintain health, degrade gracefully
+----
+
+=== Journey 3: "I want formal safety guarantees"
+
+[source]
+----
+Install: groove-manifest + groove-lifecycle + groove-proven
+Time:    1 day
+Result:  Type-safe connections, linear handles, provenance attestation
+----
+
+=== Journey 4: "I want the full mesh"
+
+[source]
+----
+Install: all modules
+Time:    1 week
+Result:  Complete groove ecosystem with mesh, versioning, bridge, events,
+         security, and tooling
+----
+
+=== Journey 5: "I have a legacy monolith"
+
+[source]
+----
+Install: groove-manifest + groove-lifecycle + groove-bridge
+Time:    3 hours
+Result:  Legacy system participates in Groove via a bridge service
+----
+
+== What Groove Is NOT
+
+. **Groove is not a service mesh.** Service meshes (Istio, Linkerd) manage
+  traffic between services. Groove manages _capability composition_ between
+  systems. Different problem.
+
+. **Groove is not a plugin system.** Plugins are subordinate to a host.
+  Groove systems are peers. Neither is primary.
+
+. **Groove without types is not Groove.** A "discovery-only" mode that
+  strips out type safety is just mDNS/DNS-SD with extra steps. The types
+  ARE the groove — the structural shape that makes fit physical, not
+  negotiated. Level 1 uses A2ML schemas (not dependent types) for
+  lightweight structural matching. The proofs come at Level 3.
+
+== Packaging
+
+Groove modules are NOT distributed as pip/npm packages. They follow the
+standardised ABI/FFI/API triple:
+
+[cols="1,3"]
+|===
+| Idris2 packages | Published to the Idris2 package index
+| Zig modules | Built from source via `zig build` (zero dependencies)
+| V modules | Published to the V package manager (`v install groove.manifest`)
+| C headers | Auto-generated from Idris2 ABI (for any language)
+|===
+
+== Stripping Back: What Can Be Removed?
+
+If a system needs to be minimal, here is what can be safely removed at each
+level without breaking anything:
+
+[cols="1,3"]
+|===
+| Remove | Consequence
+| groove-tools | No CLI/IDE support, but everything still works
+| groove-events | No async events, but sync connections still work
+| groove-bridge | No legacy integration, but Groove systems still work
+| groove-security | No mTLS/capability requirements, but connections still work
+| groove-mesh | No transitive composition, but direct connections still work
+| groove-proven | No type proofs or attestation, but discovery and connections still work
+| groove-lifecycle | No connections at all — systems only announce themselves
+|===
+
+Each row removes one layer. The system keeps working at the layer below.
+This is the Groove principle: **bare by default, enhanced by composition**.
