@@ -269,18 +269,161 @@ MUST NOT fail if IPv6 probes return network-unreachable errors.
 On dual-stack systems (the common case), the binding and probing rules
 in Sections 1 and 2 apply. IPv6 is preferred, IPv4 is the fallback.
 
-== 7. Summary
+== 7. IPv6 Transition and IPv4 Sunset
+
+=== 7.1. IPv6-Only Mode (RECOMMENDED for Localhost)
+
+For localhost Groove (the default scope), IPv6-only binding is RECOMMENDED.
+Every operating system capable of running Groove has a functional IPv6
+loopback (`::1`). There is no legitimate reason to use IPv4 loopback for
+local Groove discovery.
+
+**Startup procedure:**
+
+. Probe `::1` — attempt to bind a test socket to `[::1]:0`
+. If successful → bind to `[::1]:PORT` only. Do not create an IPv4 socket.
+. If unsuccessful (no IPv6 stack) → fall back to `127.0.0.1:PORT` and emit
+  a deprecation warning to the system log.
+. Report the binding mode in the Groove Manifest:
+
+[source,a2ml]
+----
+@groove-manifest(version="0.1.0"):
+  @system(id="my-service", version="0.1.0")
+  @transport:
+    @binding(protocol="ipv6", address="::1", port=6473)
+    @ipv4-sunset(date="2027-01-01", status="deprecated")
+  @end
+@end
+----
+
+=== 7.2. IPv4 Sunset Headers
+
+During a transition period, a Groove service that still accepts IPv4
+connections MUST include sunset headers signalling that IPv4 support will
+be removed:
+
+[source,http]
+----
+HTTP/1.1 200 OK
+Content-Type: application/groove+a2ml
+Groove-IPv6-Preferred: [::1]:6473
+Groove-IPv4-Sunset: 2027-01-01
+Groove-Upgrade-To: ipv6
+Sunset: Sat, 01 Jan 2027 00:00:00 GMT
+----
+
+[cols="2,3"]
+|===
+| Header | Purpose
+
+| `Groove-IPv6-Preferred`
+| The IPv6 endpoint the client SHOULD use for all subsequent traffic
+
+| `Groove-IPv4-Sunset`
+| The date after which IPv4 will no longer be accepted (ISO 8601)
+
+| `Groove-Upgrade-To`
+| Directive to the client to upgrade its connection to IPv6
+
+| `Sunset` (RFC 8594)
+| Standard HTTP sunset header for the IPv4 endpoint
+|===
+
+This follows the same pattern as HTTP Strict Transport Security (HSTS):
+the client is told to upgrade, and all subsequent connections use the
+preferred transport.
+
+=== 7.3. Strip-and-Upgrade on Arrival
+
+When a Groove service receives an IPv4 connection and IPv6 is available,
+the service SHOULD perform a strip-and-upgrade:
+
+. Accept the IPv4 connection (refusing causes a confusing connection error)
+. Read the Groove request
+. Respond with the manifest including `Groove-Upgrade-To: ipv6` header
+. For connection handshake (`POST /.well-known/groove/connect`):
+  accept the connection but return the IPv6 endpoint for all data-plane
+  traffic
+. All subsequent data-plane traffic uses IPv6 exclusively
+. The IPv4 socket serves only as a discovery doorbell — the real
+  conversation happens on IPv6
+
+[source]
+----
+Client (IPv4)                          Groove Service
+     │                                       │
+     │──── GET /.well-known/groove ────────→ │  ← IPv4 accepted (doorbell)
+     │                                       │
+     │←── 200 OK + Groove-Upgrade-To: ipv6 ──│  ← "Come to the IPv6 entrance"
+     │                                       │
+     │──── POST /connect (on [::1]:6473) ──→ │  ← IPv6 connection (real door)
+     │                                       │
+     │←──────── Connected (IPv6) ────────────│  ← All subsequent traffic is IPv6
+----
+
+=== 7.4. IPv6 Strict Mode
+
+Groove services MAY support an IPv6 strict mode where IPv4 connections are
+refused entirely:
+
+[source,a2ml]
+----
+@transport:
+  @binding(protocol="ipv6-strict", address="::1", port=6473)
+  @ipv4(status="disabled")
+@end
+----
+
+In strict mode:
+
+. No IPv4 socket is created
+. IPv4 probes receive no response (connection refused)
+. The manifest declares `ipv4.status = "disabled"`
+
+This is RECOMMENDED for new deployments. Legacy compatibility mode
+(dual-stack or strip-and-upgrade) is available for transition.
+
+=== 7.5. Client Behaviour
+
+Groove clients (including browser extension harnesses) MUST:
+
+. Probe `[::1]` first for all local discovery
+. Respect `Groove-Upgrade-To: ipv6` headers by reconnecting on IPv6
+. Cache the IPv6 preference for the duration of the session
+. NOT fall back to IPv4 after a successful IPv6 connection
+. Fall back to IPv4 ONLY if IPv6 probing produces no results AND the
+  `Groove-IPv4-Sunset` header is absent or the sunset date has not passed
+
+=== 7.6. LAN IPv6 Forward Strategy
+
+For LAN discovery, IPv6 provides inherent advantages:
+
+. **Link-local addresses** (`fe80::...`) exist on every interface without
+  DHCP — zero-configuration addressing
+. **mDNS multicast** over `ff02::fb` is cleaner than IPv4 `224.0.0.251`
+. **No NAT** — IPv6 link-local addresses are directly reachable on the
+  segment without NAT traversal
+
+Groove services offering LAN discovery SHOULD use IPv6 link-local multicast
+exclusively. IPv4 LAN discovery (mDNS over `224.0.0.251`) is OPTIONAL and
+SHOULD be sunset on the same timeline as IPv4 loopback.
+
+== 8. Summary
 
 [cols="2,3"]
 |===
 | Requirement | Specification
 
-| Binding | Dual-stack `[::]:PORT` or both `127.0.0.1` and `[::1]`
-| Probe order | `[::1]` first, `127.0.0.1` fallback, 500ms timeout each
+| Localhost binding | IPv6-only `[::1]:PORT` RECOMMENDED. Dual-stack as transition.
+| Probe order | `[::1]` first, `127.0.0.1` fallback only if IPv6 absent
+| IPv4 sunset | `Groove-IPv4-Sunset` header with date, `Groove-Upgrade-To: ipv6`
+| Strip-and-upgrade | Accept IPv4 as doorbell, redirect data plane to IPv6
+| Strict mode | IPv6-strict available: no IPv4 socket created at all
 | CORS | `Access-Control-Allow-Origin: *` on all groove endpoints
 | Preflight | `OPTIONS` → `204 No Content` with CORS headers
-| LAN discovery | mDNS/DNS-SD over `ff02::fb`, explicit opt-in only
+| LAN discovery | mDNS/DNS-SD over IPv6 multicast `ff02::fb`, opt-in only
 | Default scope | Localhost only (loopback interface)
-| Data plane | Any transport, declared in Idris2 ABI
-| IPv6 preference | IPv6-preferred, IPv4-fallback, never single-stack
+| Data plane | Any transport (HTTP/WS/gRPC/WebRTC/Unix/BEAM), declared in ABI
+| Client behaviour | Cache IPv6 preference, never fall back after successful IPv6
 |===
