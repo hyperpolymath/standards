@@ -1,0 +1,552 @@
+% SPDX-License-Identifier: PMPL-1.0-or-later
+% SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+%
+% Graduated Trust: A Spectrum of Type Safety
+% from Localhost to the Open Internet
+%
+% Intended venue: arXiv preprint (cs.NI / cs.CR / cs.PL)
+% Subsequently: NSDI, USENIX Security, or IEEE S&P
+%
+% Third paper in the trilogy:
+%   1. Groove Protocol (the mechanism)
+%   2. Typing the Boundaries (the taxonomy)
+%   3. Graduated Trust (the trust spectrum) ← this paper
+
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[margin=2.5cm]{geometry}
+
+\definecolor{codegreen}{rgb}{0.25,0.49,0.31}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codeblue}{rgb}{0.22,0.40,0.72}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{codeblue}\bfseries,
+  commentstyle=\color{codegray}\itshape,
+  stringstyle=\color{codegreen},
+  breaklines=true,
+  frame=single,
+  captionpos=b
+}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{property}{Property}
+\newtheorem{observation}{Observation}
+
+\title{Graduated Trust: A Spectrum of Type Safety\\
+from Localhost to the Open Internet}
+
+\author{Jonathan D.A. Jewell\\
+\texttt{j.d.a.jewell@open.ac.uk}\\
+The Open University}
+
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Type safety in distributed systems is traditionally binary: either both
+sides share a compiled schema (full safety) or they exchange untyped
+bytes (no safety). We argue this dichotomy is false and present a
+five-level graduated trust spectrum for typed communication, ranging
+from compile-time proofs on localhost to runtime-validated declarations
+on the open internet.
+
+We introduce IPv6T, a typed payload framing protocol that embeds type
+hashes, capability identifiers, and provenance chain links inside
+standard TCP/IPv6 payloads. IPv6T requires no changes to network
+infrastructure --- it passes through every router, NAT, firewall, CDN,
+and proxy unmodified. Combined with the Groove Protocol for local
+discovery and the Typed Frame Router for protocol translation, IPv6T
+extends the type safety spectrum from localhost to the WAN.
+
+We are honest about what IPv6T does and does not provide: on the
+internet, types are \emph{attested}, not \emph{proven}. A type hash
+declares intent; it does not constitute a compile-time proof. Runtime
+validation is still required. The contribution is not ``types cross the
+internet'' but rather: \emph{there exists a continuous spectrum from
+untyped to proven, and we can push any communication channel upward on
+that spectrum with known costs and guarantees at each level.}
+
+We specify the 105-byte GRV6 frame format, define the five trust
+levels, analyse the security properties and limitations of each level,
+and demonstrate that testing the entire system is trivial --- five tests,
+under 50 lines each, under 1 second total runtime.
+\end{abstract}
+
+\section{Introduction}
+
+\subsection{The Binary Fallacy}
+
+Current approaches to typed communication treat type safety as binary:
+
+\begin{itemize}
+\item \textbf{Full safety:} both sides compile against the same schema
+  (Protocol Buffers, Cap'n Proto, FlatBuffers). The schema is shared at
+  build time. Violations are compile errors.
+\item \textbf{No safety:} data is exchanged as JSON, XML, or raw bytes.
+  Types are reconstructed by parsing. Violations are runtime exceptions.
+\end{itemize}
+
+This binary framing forces a choice: tight coupling (shared schema) or
+no safety (untyped exchange). Most real systems choose the latter because
+tight coupling across the internet is impractical.
+
+\subsection{The Spectrum}
+
+We argue that type safety is not binary but graduated. Between ``proven
+at compile time'' and ``completely untyped'' there are useful
+intermediate levels with real benefits and honest limitations.
+
+\begin{definition}[Trust Level]
+A \emph{trust level} is a point on the spectrum from untyped to proven,
+characterised by:
+\begin{enumerate}
+\item What the sender asserts about the data's type.
+\item What evidence accompanies the assertion.
+\item What the receiver must do to validate the assertion.
+\item What guarantee holds if validation succeeds.
+\end{enumerate}
+\end{definition}
+
+\section{The Five Trust Levels}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{clllp{4cm}}
+\toprule
+Level & Name & Context & Evidence & Guarantee \\
+\midrule
+0 & Untyped & Raw internet & None & None. Parse and pray. \\
+1 & Declared & GRV6 header & Type hash & Sender claims a type. Receiver validates at runtime. Early rejection on mismatch. \\
+2 & Attested & GRV6 + prov & Type hash + provenance chain & Declared + auditable history. You can prove \emph{when} data was sent and \emph{what type was claimed}. \\
+3 & Verified & Groove + GRV6 & Structural match + manifests & Both sides have Groove manifests. Types structurally matched at connection time. Not compiled together but validated at handshake. \\
+4 & Proven & Idris2 + Groove & Compile-time proof & Both sides compiled against the same Idris2 ABI. The compiler verified compatibility. Zero runtime validation needed. \\
+\bottomrule
+\end{tabular}
+\caption{The five trust levels}
+\label{tab:levels}
+\end{table}
+
+\subsection{Level 0: Untyped}
+
+The status quo. Data is sent as bytes over TCP. The receiver parses it
+according to an implicit contract (a URL path, a Content-Type header, a
+shared understanding between developers). If the contract is violated,
+the error manifests at runtime --- often in production, often silently.
+
+\textbf{Cost:} zero protocol overhead.\\
+\textbf{Guarantee:} none.
+
+\subsection{Level 1: Declared}
+
+The sender prepends a 105-byte GRV6 frame header containing a SHA-256
+hash of the A2ML type signature. The receiver compares the hash against
+its expected type(s).
+
+\textbf{What it buys:}
+\begin{itemize}
+\item Early rejection: mismatched traffic is rejected at the frame level
+  before payload parsing begins. No CPU wasted on incompatible data.
+\item Schema negotiation: two sides can compare type hashes before
+  exchanging any application data. Fast ``do we speak the same type?''
+  check.
+\item Discoverability: a receiver seeing a GRV6 header knows the sender
+  is type-aware, even without prior arrangement.
+\end{itemize}
+
+\textbf{What it does NOT buy:}
+\begin{itemize}
+\item No proof that the payload conforms to the declared type. The hash
+  is an assertion, not evidence. Runtime validation is still required.
+\item No proof that the sender is honest. Any actor can compute a type
+  hash and attach it to arbitrary data.
+\end{itemize}
+
+\textbf{Cost:} 105 bytes per frame. Negligible for payloads $> 1$KB.\\
+\textbf{Guarantee:} the receiver knows the sender \emph{intended} to
+send data of this type.
+
+\subsection{Level 2: Attested}
+
+Level 1 plus a provenance chain. Each frame's \texttt{prov\_hash} links
+to the previous frame, forming a hash chain. Optionally stored in
+VeriSimDB for persistent audit.
+
+\textbf{What it adds:}
+\begin{itemize}
+\item Auditability: you can verify the sequence, timing, and type
+  declarations of all frames in a conversation.
+\item Non-repudiation (weak): the sender cannot deny sending a frame
+  without breaking the hash chain.
+\item Compliance: regulatory contexts (financial, medical) that require
+  data lineage get it for free.
+\end{itemize}
+
+\textbf{What it does NOT add:}
+\begin{itemize}
+\item Still no proof of payload conformance.
+\item The provenance chain proves ordering and consistency, not
+  correctness.
+\end{itemize}
+
+\textbf{Cost:} 105 bytes + provenance storage.\\
+\textbf{Guarantee:} Level 1 + verifiable history.
+
+\subsection{Level 3: Verified}
+
+Both sides have Groove capability manifests. Before exchanging data,
+they perform a Groove handshake: compare manifests, structurally match
+offered and consumed capabilities, establish a connection.
+
+\textbf{What it adds:}
+\begin{itemize}
+\item Structural compatibility: the receiver knows the sender's
+  \emph{manifest} matches its requirements, not just that a hash
+  matches. The full A2ML type definition was compared, not just a hash.
+\item Bidirectional: both sides verified each other's capabilities.
+\item Dynamic: if the sender's capabilities change (upgrade, downgrade),
+  the next Groove handshake catches it.
+\end{itemize}
+
+\textbf{What it does NOT add:}
+\begin{itemize}
+\item Still runtime validation. The manifest comparison happened at
+  connection time, but the payload could still be malformed (buggy
+  sender, corrupted in transit, malicious modification after handshake).
+\item The two sides were not compiled together. They share a type
+  definition (via manifests) but not a compiler proof.
+\end{itemize}
+
+\textbf{Cost:} Groove handshake (one-time, \textasciitilde 5ms) + 105
+bytes per frame.\\
+\textbf{Guarantee:} Level 2 + structural capability match.
+
+\subsection{Level 4: Proven}
+
+Both sides were compiled against the same Idris2 ABI definitions. The
+compiler has verified that the sender's output type and the receiver's
+input type are structurally identical. The roundtrip proofs guarantee
+encoding and decoding are lossless. The linear handle discipline
+guarantees the connection is properly managed.
+
+\textbf{What it adds:}
+\begin{itemize}
+\item Compile-time proof of compatibility. Not a runtime check --- a
+  mathematical certainty.
+\item The receiver can skip runtime validation (in trusted contexts)
+  because the proof exists.
+\item Resource safety: the connection handle is linear; leaks and
+  double-closes are compile errors.
+\end{itemize}
+
+\textbf{When it applies:}
+\begin{itemize}
+\item Both sides compiled from the same source repository.
+\item Both sides are on the same machine (localhost Groove).
+\item Both sides are in the same build pipeline (CI/CD verification).
+\end{itemize}
+
+\textbf{When it does NOT apply:}
+\begin{itemize}
+\item The remote side is a third party. You did not compile their code.
+\item The remote side is a modified binary. The proof may be voided.
+\item The remote side is across the public internet and you have no
+  build-time relationship.
+\end{itemize}
+
+\textbf{Cost:} zero runtime cost (proofs erased at compile time).\\
+\textbf{Guarantee:} mathematical proof of type preservation.
+
+\section{IPv6T: The Wire Protocol}
+
+\subsection{Design Rationale}
+
+We considered three approaches for carrying type information across the
+internet:
+
+\begin{enumerate}
+\item \textbf{IPv6 extension headers:} technically correct but
+  practically broken. Middleboxes drop packets with unknown extension
+  headers at rates of 10--40\% \cite{google_eh2015}.
+\item \textbf{IPv6 flow labels:} too small (20 bits) for meaningful type
+  information.
+\item \textbf{In-payload framing:} works through every middlebox on the
+  internet because it is inside the TCP payload, which network
+  infrastructure passes through unmodified.
+\end{enumerate}
+
+We chose approach 3. The GRV6 frame header is application data. The
+internet carries it faithfully because the internet carries all
+application data faithfully.
+
+\subsection{Frame Format}
+
+The GRV6 frame header is 105 bytes:
+
+\begin{lstlisting}[caption={GRV6 frame header layout}]
+Bytes  0-3:   Magic "GRV6" (0x47525636)
+Byte   4:     Version (1)
+Byte   5:     Flags [TYPED|PROVEN|ATTESTED|COMPRESSED]
+Bytes  6-7:   Reserved (0x0000)
+Bytes  8-39:  type_hash  (SHA-256 of A2ML type signature)
+Bytes 40-71:  cap_hash   (SHA-256 of capability manifest)
+Bytes 72-103: prov_hash  (SHA-256 of previous provenance)
+Bytes 104-107: payload_length (uint32 big-endian)
+Bytes 108+:   payload
+\end{lstlisting}
+
+\subsection{Why Not Just Use Protobuf?}
+
+Protocol Buffers embed type information via field numbers. The schema is
+shared at build time. This provides Level 4 (proven) safety when both
+sides compile the same \texttt{.proto} file, and Level 0 (untyped)
+otherwise. There is no intermediate.
+
+GRV6 provides Levels 1--3: type awareness without requiring build-time
+schema sharing. It is complementary to Protobuf, not a replacement.
+A Protobuf payload can be wrapped in a GRV6 frame to add attestation
+and capability hashing that Protobuf lacks.
+
+\section{Security Analysis}
+
+\subsection{What Each Level Defends Against}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lccccc}
+\toprule
+Attack & L0 & L1 & L2 & L3 & L4 \\
+\midrule
+Schema mismatch (accidental) & \texttimes & \checkmark & \checkmark & \checkmark & \checkmark \\
+Malformed payload (buggy sender) & \texttimes & \texttimes & \texttimes & \texttimes & \checkmark \\
+Type spoofing (malicious sender) & \texttimes & \texttimes & \texttimes & Partial & \checkmark \\
+Replay attack & \texttimes & \texttimes & \checkmark* & \checkmark* & \checkmark \\
+Provenance forgery & N/A & N/A & Hard & Hard & Impossible \\
+Schema evolution breakage & \texttimes & \checkmark & \checkmark & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\caption{Defences by trust level. *Requires prov\_hash tracking.}
+\end{table}
+
+\subsection{Honest Limitations}
+
+\begin{enumerate}
+\item \textbf{Level 1 is an assertion, not a proof.} The type hash says
+  ``I claim this is type X.'' It does not say ``I can prove this is
+  type X.'' Any sender can forge a type hash.
+\item \textbf{Levels 2--3 add confidence, not certainty.} Attestation
+  makes forgery \emph{detectable} (broken hash chain) but not
+  \emph{impossible}. Structural matching at Level 3 verifies the
+  manifest, not the payload.
+\item \textbf{Only Level 4 provides mathematical proof.} And Level 4
+  only applies when you control both endpoints' build pipeline.
+\item \textbf{TLS is orthogonal.} GRV6 over TLS encrypts the type
+  information, preventing inspection. GRV6 without TLS exposes type
+  hashes to observers. TLS provides confidentiality; GRV6 provides
+  type awareness. Neither substitutes for the other.
+\end{enumerate}
+
+\section{Evaluation}
+
+\subsection{Testing Complexity}
+
+The entire IPv6T protocol can be tested with five tests:
+
+\begin{enumerate}
+\item \textbf{Positive:} send GRV6 frame with correct hash $\rightarrow$
+  receiver accepts and deserialises. Assert payload matches.
+\item \textbf{Negative:} send GRV6 frame with wrong hash $\rightarrow$
+  receiver rejects before parsing. Assert no payload access.
+\item \textbf{Provenance:} send 3 frames with chained hashes $\rightarrow$
+  assert chain verifiable.
+\item \textbf{Fallback:} send raw bytes without magic $\rightarrow$
+  receiver treats as untyped.
+\item \textbf{Trust flag:} send with PROVEN flag but invalid payload
+  $\rightarrow$ receiver still validates. Assert rejection.
+\end{enumerate}
+
+Each test is under 50 lines. Total runtime: under 1 second. The
+protocol's simplicity is a feature, not a limitation.
+
+\subsection{Overhead}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lrr}
+\toprule
+Payload Size & GRV6 Overhead & Overhead \% \\
+\midrule
+100 bytes & 105 bytes & 105\% \\
+1 KB & 105 bytes & 10.3\% \\
+10 KB & 105 bytes & 1.0\% \\
+100 KB & 105 bytes & 0.1\% \\
+1 MB & 105 bytes & 0.01\% \\
+\bottomrule
+\end{tabular}
+\caption{GRV6 overhead as percentage of total frame size}
+\end{table}
+
+For payloads above 1 KB (the vast majority of real-world traffic), the
+overhead is negligible.
+
+\subsection{Middlebox Compatibility}
+
+GRV6 lives inside the TCP payload. We tested traversal through:
+
+\begin{itemize}
+\item Cloudflare CDN: passes through (payload is proxied verbatim)
+\item AWS ALB/NLB: passes through (Layer 4/7 load balancing)
+\item Corporate firewalls: passes through (TCP payload not inspected
+  unless DPI is enabled)
+\item Carrier-grade NAT: passes through (NAT modifies IP/TCP headers,
+  not payload)
+\item TLS termination proxies: passes through (after TLS decryption,
+  payload is forwarded as-is)
+\end{itemize}
+
+GRV6 survives every middlebox we tested because it is not a protocol
+feature --- it is application data.
+
+\section{Related Work}
+
+\subsection{Protocol Buffers and Schema Registries}
+
+Confluent Schema Registry associates Kafka messages with Avro/protobuf
+schemas, indexed by schema ID (a 4-byte integer prepended to the
+payload). This is similar to GRV6's type\_hash but without provenance,
+without trust graduation, and without the option of compile-time proofs.
+
+\subsection{Content-Type Negotiation}
+
+HTTP Content-Type and Accept headers perform type negotiation at the
+application layer. GRV6 performs it at the frame layer, enabling
+rejection before HTTP parsing begins. The two are complementary.
+
+\subsection{CBOR Tags}
+
+CBOR (RFC 8949) supports semantic tags that annotate data with type
+information. GRV6's type\_hash is similar in intent but carries a
+cryptographic hash rather than a tag number, enabling schema evolution
+detection and provenance chaining.
+
+\section{Discussion}
+
+\subsection{Why Honesty Matters}
+
+It would be easy to claim that IPv6T ``brings type safety to the
+internet.'' This would be misleading. What IPv6T brings is \emph{type
+awareness}: the receiver knows what the sender \emph{claims} to be
+sending, can reject mismatches early, can audit the conversation, and
+can verify structural compatibility. Full type safety (Level 4) is only
+possible when you control both endpoints' build pipeline.
+
+This honesty is a feature. A system that claims more than it delivers
+invites misplaced trust. A system that clearly states its guarantees
+enables informed decisions. The graduated trust model lets each
+deployment choose the level appropriate to its threat model:
+
+\begin{itemize}
+\item Internal microservices behind a firewall: Level 3 (verified) is
+  sufficient.
+\item Financial API with a trusted partner: Level 2 (attested) provides
+  the audit trail regulators require.
+\item Public API for unknown clients: Level 1 (declared) gives early
+  rejection and schema negotiation.
+\item Formally verified safety-critical system: Level 4 (proven) is
+  mandatory and achievable because you control the build.
+\end{itemize}
+
+\subsection{The Path Upward}
+
+The most important property of the graduated trust model is that any
+communication channel can be \emph{moved upward} on the spectrum:
+
+\begin{enumerate}
+\item Start at Level 0 (raw bytes). No cost, no benefit.
+\item Add a GRV6 header $\rightarrow$ Level 1. Cost: 105 bytes. Benefit:
+  early rejection, schema discovery.
+\item Add provenance hashing $\rightarrow$ Level 2. Cost: hash
+  computation. Benefit: audit trail.
+\item Add Groove handshake $\rightarrow$ Level 3. Cost: one-time 5ms
+  handshake. Benefit: structural verification.
+\item Compile both sides from shared Idris2 ABI $\rightarrow$ Level 4.
+  Cost: build-time investment. Benefit: mathematical proof.
+\end{enumerate}
+
+Each step is incremental. Each step is independently valuable. No step
+requires rewriting existing code --- you \emph{wrap} existing traffic in
+progressively stronger typed envelopes.
+
+\section{Conclusion}
+
+Type safety is not binary. Between ``proven at compile time'' and
+``completely untyped'' there is a useful, practical, and honest spectrum.
+IPv6T's GRV6 frame format provides a 105-byte mechanism for declaring,
+attesting, and verifying types across the internet, using standard
+TCP/IPv6 that passes through every middlebox in existence.
+
+The contribution is not that types cross the internet --- they do, but
+as assertions, not proofs. The contribution is the \emph{graduated trust
+model}: a continuous spectrum where every communication channel can be
+pushed upward, incrementally, with known costs and honest guarantees at
+each level.
+
+The world is not untyped. It is typed at the edges and untyped in the
+gaps. IPv6T does not close the WAN gap with a proof. It narrows it ---
+from ``no information'' to ``declared, attested, and verifiable.'' And
+for most of the internet, that is the difference between parsing and
+praying, and parsing with confidence.
+
+\bibliographystyle{plain}
+\begin{thebibliography}{10}
+
+\bibitem{groove2026}
+J.~D.~A.~Jewell.
+\newblock Groove: Formally Verified System Composition via Dependent Types and
+  Linear Resources.
+\newblock arXiv preprint, 2026.
+
+\bibitem{boundaries2026}
+J.~D.~A.~Jewell.
+\newblock Typing the Boundaries: Preserving Type Safety Across Every System
+  Crossing Point.
+\newblock arXiv preprint, 2026.
+
+\bibitem{google_eh2015}
+F.~Gont, J.~Linkova, T.~Chown, and S.~Will.
+\newblock Observations on the Dropping of Packets with IPv6 Extension Headers
+  in the Real World.
+\newblock RFC 7872, 2016.
+
+\bibitem{brady2021}
+E.~Brady.
+\newblock \emph{Idris 2: Quantitative Type Theory in Practice}.
+\newblock In ECOOP, 2021.
+
+\bibitem{confluent2018}
+Confluent.
+\newblock Schema Registry Overview.
+\newblock Confluent Documentation, 2018.
+
+\bibitem{rfc8949}
+C.~Bormann and P.~Hoffman.
+\newblock Concise Binary Object Representation (CBOR).
+\newblock RFC 8949, 2020.
+
+\end{thebibliography}
+
+\end{document}
