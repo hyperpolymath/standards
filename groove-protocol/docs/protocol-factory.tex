@@ -1,0 +1,484 @@
+% SPDX-License-Identifier: PMPL-1.0-or-later
+% SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+%
+% The Protocol Factory: Malleable, Ductile Protocol Creation
+% via Formally Verified Typed Overlays
+%
+% Intended venue: arXiv preprint (cs.NI / cs.SE / cs.DC)
+% Subsequently: HotNets, NSDI, or ACM Computing Surveys
+%
+% Fourth paper in the series:
+%   1. Groove Protocol (the mechanism)
+%   2. Typing the Boundaries (the boundary taxonomy)
+%   3. Graduated Trust (the trust spectrum + IPv6T)
+%   4. The Protocol Factory (this paper — the bigger vision)
+
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[margin=2.5cm]{geometry}
+
+\definecolor{codegreen}{rgb}{0.25,0.49,0.31}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codeblue}{rgb}{0.22,0.40,0.72}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{codeblue}\bfseries,
+  commentstyle=\color{codegray}\itshape,
+  stringstyle=\color{codegreen},
+  breaklines=true,
+  frame=single,
+  captionpos=b
+}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{property}{Property}
+\newtheorem{observation}{Observation}
+
+\title{The Protocol Factory:\\
+Malleable, Ductile Protocol Creation\\
+via Formally Verified Typed Overlays}
+
+\author{Jonathan D.A. Jewell\\
+\texttt{j.d.a.jewell@open.ac.uk}\\
+The Open University}
+
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Creating a new communication protocol today requires years of
+standardisation, vendor adoption, and infrastructure deployment.
+We observe that the convergence of three recent technologies ---
+dependent types (Idris2, 2021), zero-overhead FFI (Zig, 2023), and
+ubiquitous IPv6 (2024) --- enables a fundamentally different approach:
+\emph{protocol creation as compilation}. A user defines capability types
+in a formally verified language, compiles them into a panel (a
+distributable application component), and every instance of that panel
+immediately speaks a new, proven protocol over standard TCP/IPv6. No
+RFC process, no vendor adoption, no infrastructure change. The protocol
+is malleable (reshapable without breaking) and ductile (stretchable from
+localhost to WAN without breaking). We analyse why no incumbent has built
+this despite having the resources, identify the unsolved governance
+problems, and speculate on the implications of democratised protocol
+creation for the structure of networked systems.
+\end{abstract}
+
+\section{The Cost of a Protocol}
+
+Creating a communication protocol is among the most expensive acts in
+computing. HTTP/1.1 took 6 years from proposal to RFC (1993--1999).
+HTTP/2 took 7 years (2007--2014). QUIC took 9 years (2012--2021). IPv6
+has been ``deploying'' for 25 years and is not yet universal.
+
+The cost is not primarily technical. The cost is \emph{coordination}:
+drafting specifications, achieving consensus among competing vendors,
+implementing in multiple languages, deploying across infrastructure
+controlled by independent operators, and waiting for adoption to reach
+critical mass.
+
+This cost is justified for foundational protocols. HTTP needed to be
+universal. TCP needed to be reliable everywhere. DNS needed to be
+consistent globally. The coordination cost is the price of universality.
+
+But not every protocol needs to be universal. A voice protocol between
+two instances of the same application does not need IETF approval. A
+typed data exchange between panels in a desktop environment does not need
+W3C consensus. A sensor protocol between IoT devices in a factory does
+not need IEEE standardisation.
+
+For these cases --- and they are the majority --- the coordination cost
+is pure waste. The protocol is used by a closed community of endpoints.
+The only requirement is that the endpoints agree on the types. And if the
+endpoints are compiled from the same type definitions, agreement is not a
+social process. It is a compile step.
+
+\section{The Protocol Factory}
+
+\begin{definition}[Protocol Factory]
+A \emph{protocol factory} is a system in which defining a capability
+type, compiling it into a distributable component, and distributing
+that component constitutes the complete act of protocol creation.
+No external standardisation, infrastructure change, or vendor
+coordination is required.
+\end{definition}
+
+The factory has four stages, corresponding to the OPSM lifecycle
+(Mint, Provision, Configure, Harness):
+
+\begin{enumerate}
+\item \textbf{Mint}: define capability types in Idris2. The type checker
+  proves the interface is consistent.
+\item \textbf{Provision}: compile to Zig FFI, generating C headers. The
+  ABI is now callable from any language.
+\item \textbf{Configure}: embed in a panel with a Groove manifest
+  declaring the capability. The panel is distributable.
+\item \textbf{Harness}: distribute the panel. Every instance speaks the
+  new protocol. Discovery is automatic (Groove). Wire format is GRV6
+  over standard TCP/IPv6.
+\end{enumerate}
+
+The entire process --- from type definition to running protocol --- takes
+hours, not years. The resulting protocol has stronger correctness
+guarantees (dependent type proofs) than most IETF RFCs (which rely on
+prose specifications and interoperability testing).
+
+\subsection{Malleable Protocols}
+
+\begin{definition}[Malleability]
+A protocol is \emph{malleable} if its types can be reshaped --- fields
+added, constraints tightened, interfaces extended --- without breaking
+existing connections. Groove's structural subtyping enables this: a
+provider offering more than a consumer requires is a valid match.
+\end{definition}
+
+Traditional protocols are brittle. Adding a field to HTTP requires a
+new RFC. Removing a field breaks clients. Groove protocols are malleable
+because matching is structural: if the provider's type is a supertype of
+the consumer's requirement, they compose. Adding capabilities to a
+manifest never breaks existing consumers.
+
+\subsection{Ductile Protocols}
+
+\begin{definition}[Ductility]
+A protocol is \emph{ductile} if it can be stretched from localhost to
+WAN without changing its type definitions. The same types, the same
+proofs, the same GRV6 frames work on loopback, LAN, and the open
+internet.
+\end{definition}
+
+GRV6 frames are TCP payload. TCP works identically on localhost and
+across the internet. The types in the frame header don't know or care
+about the network path. A protocol designed and tested on loopback
+stretches to global scale without modification.
+
+\section{Why Incumbents Haven't Built This}
+
+Every company with the engineering resources to build a protocol factory
+has a structural incentive not to.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lp{3cm}p{5cm}}
+\toprule
+Company & Resources & Why They Won't \\
+\midrule
+Google & Chrome (3B users), Protobuf, gRPC, QUIC
+  & Removes Google as intermediary. Their revenue depends on
+    intermediation (ads, cloud, data). \\
+Apple & Safari, Swift, App Store
+  & Undermines App Store control. Peer-to-peer protocols bypass
+    Apple's 30\% commission. \\
+Meta & React Native, Thrift, WhatsApp
+  & Undermines platform lock-in. Users communicating via typed
+    panels don't need Instagram. \\
+Microsoft & Edge, TypeScript, Azure
+  & Undermines Azure. Direct peer connections reduce cloud compute
+    demand. \\
+Amazon & AWS SDK, Ion
+  & Undermines AWS entirely. The protocol factory makes cloud
+    intermediaries optional. \\
+\bottomrule
+\end{tabular}
+\caption{Incumbent incentive misalignment}
+\label{tab:incumbents}
+\end{table}
+
+The protocol factory is \emph{disintermediating by design}. Every
+company whose revenue depends on being an intermediary has a structural
+reason to not build it. This is not conspiracy; it is economics.
+
+\subsection{Why Now}
+
+Three technologies converged in 2021--2024:
+
+\begin{enumerate}
+\item \textbf{Idris2} (2021): dependent types with quantitative type
+  theory. The first language that provides both formal proofs AND
+  practical compilation to efficient code. Previous dependent type
+  systems (Coq, Agda) were proof assistants, not systems languages.
+
+\item \textbf{Zig} (2023--2024): zero-overhead FFI with no runtime, no
+  GC, comptime evaluation, and C ABI compatibility. The first systems
+  language that can match C's performance while being safe enough to
+  trust at network boundaries.
+
+\item \textbf{IPv6 ubiquity} (2024): link-local addresses on every
+  interface, enabling zero-configuration discovery. Before widespread
+  IPv6, local discovery required Bonjour, mDNS infrastructure, or
+  manual configuration.
+\end{enumerate}
+
+The Venn diagram of ``knows Idris2'' $\cap$ ``knows Zig'' $\cap$
+``cares about protocol design'' is vanishingly small. The tools
+converged, but the communities haven't overlapped until now.
+
+\section{The Typed Overlay Network}
+
+When two instances of the same panel exchange GRV6 frames, they form a
+single edge in a typed overlay network. When a third instance connects,
+another edge forms. The overlay grows with every installation.
+
+\begin{property}[Infrastructure-Free Growth]
+The typed overlay requires zero infrastructure to grow. No relays, no
+trackers, no DHT, no registry. Each panel instance is a node. Each
+GRV6 connection is an edge. The internet is the wire.
+\end{property}
+
+This is unique among overlay networks:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+Overlay & Preserves & Infrastructure & Growth Mechanism \\
+\midrule
+Tor & Anonymity & Relays & Volunteers run relays \\
+BitTorrent & Availability & Trackers/DHT & Users share files \\
+IPFS & Content addressing & DHT & Nodes pin content \\
+Signal & Confidentiality & Servers & Users install app \\
+\textbf{Typed Overlay} & \textbf{Type safety} & \textbf{None}
+  & \textbf{Users install panels} \\
+\bottomrule
+\end{tabular}
+\caption{Overlay networks compared}
+\end{table}
+
+\subsection{Cross-Panel Interoperability}
+
+The overlay is not limited to instances of the same panel. Any two
+panels that import the same Idris2 ABI package for a shared capability
+are Level 4 (Proven) to each other for that capability.
+
+This means:
+\begin{itemize}
+\item A chat panel and a file-sharing panel that both import the
+  \texttt{TextChannel} ABI can exchange text messages with proven
+  type safety.
+\item A game server panel and a voice panel that both import the
+  \texttt{VoiceTransport} ABI can carry voice with proven type safety.
+\item Neither panel needs to know the other exists in advance. Groove
+  discovery finds the match. The ABI package is the shared proof root.
+\end{itemize}
+
+The typed overlay is open. Publishing an ABI package to a registry
+is an invitation for any application to join the overlay for that
+capability. Proliferation is adoption.
+
+\section{Broadcast: The Typed Discovery Layer}
+
+Previous work \cite{boundaries2026} identified broadcast protocols as a
+boundary where types cannot survive. We revise this assessment.
+
+Broadcast is not connectionless chaos. It is the \emph{discovery layer}
+of a typed system. The Groove Protocol already performs typed broadcast:
+a system announces its capability manifest via multicast or port probing.
+Receivers filter by structural type match. Matches upgrade to connections.
+
+The architecture is two primitives:
+
+\begin{enumerate}
+\item \textbf{Typed Broadcast Filter}: embeds type hashes in broadcast
+  payloads (mDNS TXT records, BLE advertising data, WiFi vendor IEs).
+  Receivers filter by type hash before upgrading to a connection.
+
+\item \textbf{Typed Frame Router}: once a connection is established,
+  provides proven frame-level translation with zero-copy splice.
+\end{enumerate}
+
+The first primitive handles one-to-many discovery. The second handles
+one-to-one communication. Together, they cover the full lifecycle:
+broadcast $\rightarrow$ discover $\rightarrow$ connect $\rightarrow$
+communicate.
+
+\section{Encryption: Types at the Tunnel Endpoints}
+
+TLS Application-Layer Protocol Negotiation (ALPN, RFC~7301) provides a
+standard mechanism for type negotiation during the TLS handshake:
+
+\begin{lstlisting}[caption={GRV6 ALPN negotiation}]
+ClientHello:
+  ALPN: ["grv6", "h2", "http/1.1"]
+
+ServerHello:
+  ALPN: "grv6"
+
+-> Tunnel carries GRV6 typed frames
+-> Types negotiated BEFORE encryption starts
+-> No inspection of encrypted traffic needed
+\end{lstlisting}
+
+This means types exist at both tunnel endpoints without existing inside
+the tunnel. The tunnel is a trusted channel between proven endpoints.
+The ALPN token is the groove: a standard shape that both sides recognise.
+
+\section{Unsolved Problems}
+
+We are honest about what remains unsolved:
+
+\subsection{Schema Evolution}
+
+When an ABI package is updated, existing panels have the old type hash.
+New panels have the new hash. They cannot communicate.
+
+This is the most critical unsolved problem. Possible approaches:
+\begin{itemize}
+\item \textbf{Backward-compatible evolution}: like Protobuf's field
+  numbering. New fields are optional. Old fields are never removed.
+  The type hash covers the \emph{core} fields only.
+\item \textbf{Version ranges}: GRV6 carries a capability version.
+  Receivers accept a range of versions, not a single hash.
+\item \textbf{Dual-hash}: the frame carries both a \texttt{type\_hash}
+  (exact) and a \texttt{compat\_hash} (backward-compatible subset).
+  Matching on either is valid.
+\end{itemize}
+
+None of these are implemented. This is future work.
+
+\subsection{Governance of the ABI Registry}
+
+Who curates the canonical ABI packages? If centralised, the registry
+is a single point of control (the ``npm problem''). If decentralised,
+how do you prevent fragmentation (a thousand incompatible ``voice''
+definitions)?
+
+We do not propose a solution. We observe that this is a governance
+problem, not a technical one, and that governance is harder than code.
+
+\subsection{Malicious Capabilities}
+
+The type system proves that data is well-formed. It does not prove that
+data should have been sent. A panel with a proven ``file-read''
+capability can exfiltrate documents with mathematical correctness. Formal
+verification proves the mechanism works; it says nothing about whether
+the mechanism should be used.
+
+Capability signing, publisher reputation, and user consent are necessary
+but are social mechanisms, not type-level guarantees.
+
+\subsection{Traffic Analysis}
+
+GRV6 type hashes are consistent per-type. An observer who knows the ABI
+can correlate traffic by hash without decrypting. TLS ALPN mitigates
+this for the negotiation phase. Per-session hash salting mitigates it
+for the data phase. Neither is currently implemented.
+
+\section{Speculative Implications}
+
+\subsection{The End of Protocol Scarcity}
+
+If creating a protocol costs years and millions of dollars, protocols
+are scarce. Scarce protocols are controlled by those who can afford the
+cost. This concentrates power in standards bodies and large companies.
+
+If creating a protocol costs hours and is free, protocols are abundant.
+Abundant protocols are created by anyone with a problem to solve. This
+distributes power to individuals and small teams.
+
+We do not claim this is unambiguously good. Abundance creates
+fragmentation. Fragmentation creates confusion. But the alternative ---
+scarcity controlled by incumbents --- creates stagnation. The history of
+the internet suggests that abundance, despite its chaos, produces more
+innovation than scarcity.
+
+\subsection{Protocols as Libraries}
+
+In the protocol factory model, a protocol is not a specification
+document. It is a \emph{library}: an importable package of type
+definitions that, when compiled into an application, gives that
+application the ability to speak a new language.
+
+This inverts the traditional relationship between protocols and
+applications. Traditionally, protocols are fixed and applications
+conform to them. In the factory model, applications define their
+protocols by choosing which ABI packages to import. The protocol
+emerges from the application, not the other way around.
+
+\subsection{The Parallel Protocol Layer}
+
+The typed overlay does not replace TCP/IP. It runs inside TCP/IP. It is
+a parallel layer:
+
+\begin{lstlisting}[caption={The parallel protocol layer}]
+Traditional:    Application -> HTTP -> TLS -> TCP -> IPv6 -> Wire
+With GRV6:      Application -> GRV6 -> HTTP -> TLS -> TCP -> IPv6 -> Wire
+                               ^^^^
+                               Typed payload frame (105 bytes)
+                               Type hash, cap hash, provenance
+                               Invisible to all layers below
+\end{lstlisting}
+
+The GRV6 layer is invisible to HTTP, TLS, TCP, and IPv6. It is
+processed only by the application endpoints. The internet infrastructure
+carries it without knowing it exists --- and this is by design. The
+internet's job is to carry bytes faithfully. GRV6's job is to make those
+bytes meaningful.
+
+\section{Conclusion}
+
+The protocol factory is not a product to be launched. It is an
+observation about what becomes possible when dependent types, zero-
+overhead FFI, and ubiquitous IPv6 converge. The result is that protocol
+creation --- historically one of the most expensive acts in computing
+--- becomes as cheap as writing and distributing a library.
+
+The implications are speculative. We do not know whether abundant
+protocols lead to interoperability or fragmentation. We do not know
+whether the typed overlay will grow or remain niche. We do not know
+whether incumbents will adopt, compete with, or undermine the factory
+model.
+
+What we do know is this: the tools exist, the architecture works, the
+proofs hold, the tests pass on localhost, and localhost TCP is WAN TCP.
+The typed overlay is not a proposal. It is running code.
+
+Whether the world wants it is a question we cannot answer with a proof.
+
+\bibliographystyle{plain}
+\begin{thebibliography}{10}
+
+\bibitem{groove2026}
+J.~D.~A.~Jewell.
+\newblock Groove: Formally Verified System Composition via Dependent Types and
+  Linear Resources.
+\newblock arXiv preprint, 2026.
+
+\bibitem{boundaries2026}
+J.~D.~A.~Jewell.
+\newblock Typing the Boundaries: Preserving Type Safety Across Every System
+  Crossing Point.
+\newblock arXiv preprint, 2026.
+
+\bibitem{trust2026}
+J.~D.~A.~Jewell.
+\newblock Graduated Trust: A Spectrum of Type Safety from Localhost to the Open
+  Internet.
+\newblock arXiv preprint, 2026.
+
+\bibitem{brady2021}
+E.~Brady.
+\newblock \emph{Idris 2: Quantitative Type Theory in Practice}.
+\newblock In ECOOP, 2021.
+
+\bibitem{rfc7301}
+S.~Friedl, A.~Popov, A.~Langley, and E.~Stephan.
+\newblock Transport Layer Security (TLS) Application-Layer Protocol Negotiation
+  Extension.
+\newblock RFC 7301, 2014.
+
+\end{thebibliography}
+
+\end{document}
