@@ -1,0 +1,286 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+= Groove Protocol Transport Specification
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v0.1.0, 2026-03-23
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Overview
+
+This document specifies the transport-layer requirements for Groove Protocol
+discovery, connection, and heartbeat traffic. Groove operates over HTTP on
+the loopback interface for local discovery, and optionally over mDNS/DNS-SD
+for LAN discovery. Correct handling of IPv4 and IPv6 dual-stack is critical
+for reliable discovery across all operating systems and browser environments.
+
+== 1. Binding Requirements
+
+=== 1.1. Dual-Stack Binding (REQUIRED)
+
+Groove-aware services MUST bind to dual-stack sockets that accept both
+IPv4 and IPv6 connections.
+
+**Preferred:** Bind to `[::]:PORT` with dual-stack enabled (the operating
+system default on Linux, macOS, and modern Windows). This creates a single
+socket that accepts connections from both `127.0.0.1` (IPv4) and `::1`
+(IPv6).
+
+**Alternative:** If the operating system does not support dual-stack sockets,
+the service MUST bind to BOTH `127.0.0.1:PORT` and `[::1]:PORT` explicitly.
+
+**Prohibited:** A Groove service MUST NOT bind exclusively to one protocol
+family. A service that binds only to `127.0.0.1` is invisible to IPv6
+probes. A service that binds only to `[::1]` is invisible to IPv4 probes.
+
+[source,zig]
+----
+// Correct: dual-stack binding in Zig
+const addr = std.net.Address.parseIp6("::", port) catch unreachable;
+var server = std.net.StreamServer.init(.{ .reuse_address = true });
+server.listen(addr) catch |err| { /* handle */ };
+----
+
+[source,elixir]
+----
+# Correct: dual-stack binding in Elixir/Phoenix
+config :my_app, MyAppWeb.Endpoint,
+  http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}, port: 6473]  # [::] in tuple form
+----
+
+=== 1.2. Port Allocation
+
+Groove services SHOULD use ports in the range 6460–6500 for local discovery.
+This range is currently unassigned by IANA.
+
+Well-known port assignments within the Groove ecosystem:
+
+[cols="1,2,3"]
+|===
+| Port | Service | Protocol
+
+| 6470 | Gossamer | Groove + WebView IPC
+| 6473 | Burble | Groove + WebRTC + BEAM
+| 6475 | VeriSimDB | Groove + REST + gRPC
+| 6480 | Vext | Groove + Attestation
+|===
+
+Services outside the Groove ecosystem SHOULD use the range 8080–8100 as a
+secondary probe range.
+
+== 2. Discovery Probing
+
+=== 2.1. Probe Order (IPv6-Preferred)
+
+When probing for Groove partners, the discovery engine MUST follow this order:
+
+. Probe `[::1]:PORT` (IPv6 loopback) with a 500ms timeout
+. If no response, probe `127.0.0.1:PORT` (IPv4 loopback) with a 500ms timeout
+. If either responds with a valid Groove Manifest, the partner is discovered
+
+**Rationale:** Modern operating systems (Fedora 43, macOS Sonoma, Ubuntu 24.04,
+Windows 11) resolve `localhost` to `::1` first via Happy Eyeballs (RFC 8305).
+Probing IPv6 first aligns with OS behaviour and avoids unnecessary fallback
+latency on the majority of systems.
+
+=== 2.2. Browser Extension Probing
+
+Browser extensions present unique constraints:
+
+. The `fetch()` API resolves `localhost` according to the browser's own
+  resolver, which may differ from the OS resolver
+. **Firefox:** Tries `::1` first, falls back to `127.0.0.1` (Happy Eyeballs)
+. **Chrome:** Behaviour varies by OS network stack; may prefer IPv4 on some
+  configurations
+. **Safari:** Restricted by App Transport Security; may block non-HTTPS
+  localhost on some configurations
+
+To ensure reliable discovery from browser extensions:
+
+. Extensions SHOULD probe `http://[::1]:PORT` and `http://127.0.0.1:PORT`
+  explicitly, rather than relying on `http://localhost:PORT` resolution
+. Extensions MUST handle `fetch()` failures gracefully (the port is not
+  groove-aware, not an error condition)
+. Extensions SHOULD use `AbortController` with a 500ms timeout per probe
+
+[source,javascript]
+----
+// Correct: explicit dual-stack probing from a browser extension
+async function probePort(port) {
+  // Try IPv6 first
+  var manifest = await probeSingle('[::1]', port);
+  if (manifest) return manifest;
+  // Fallback to IPv4
+  return await probeSingle('127.0.0.1', port);
+}
+
+async function probeSingle(host, port) {
+  try {
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, 500);
+    var resp = await fetch('http://' + (host.includes(':') ? '[' + host + ']' : host)
+      + ':' + port + '/.well-known/groove', {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/groove+a2ml' }
+    });
+    clearTimeout(timer);
+    if (resp.ok) return await resp.text();
+  } catch (e) { /* not groove-aware, skip */ }
+  return null;
+}
+----
+
+== 3. CORS Requirements
+
+=== 3.1. Mandatory CORS Headers
+
+All Groove HTTP endpoints (`/.well-known/groove/*`) MUST include CORS
+headers to allow browser extensions and web applications to probe them.
+
+[source,http]
+----
+HTTP/1.1 200 OK
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type, Accept
+Access-Control-Max-Age: 86400
+Content-Type: application/groove+a2ml
+----
+
+**Rationale:** Without CORS headers, browser extensions cannot `fetch()`
+from the extension context to localhost services. The `*` origin is safe
+here because these endpoints are on the loopback interface — only software
+on the same machine can reach them.
+
+=== 3.2. Preflight Handling
+
+Groove services MUST respond to `OPTIONS` preflight requests on all
+`/.well-known/groove/*` paths with the CORS headers above and a
+`204 No Content` status.
+
+=== 3.3. LAN CORS
+
+For LAN discovery (services on other machines), the CORS `Origin` header
+SHOULD be restricted to known groove origins rather than `*`. This prevents
+arbitrary websites from probing LAN groove services.
+
+[source,http]
+----
+# LAN groove endpoint — restricted origin
+Access-Control-Allow-Origin: moz-extension://{extension-id}
+----
+
+== 4. LAN Discovery (Optional)
+
+=== 4.1. mDNS/DNS-SD
+
+For discovery beyond localhost, Groove services MAY register a DNS-SD
+service record:
+
+[source]
+----
+_groove._tcp.local. IN SRV 0 0 6473 my-service.local.
+_groove._tcp.local. IN TXT "id=burble" "version=1.2.0" "caps=voice,text,presence"
+----
+
+**IPv6 multicast:** mDNS queries are sent to `ff02::fb` (IPv6) or
+`224.0.0.251` (IPv4). IPv6 multicast is RECOMMENDED as the primary
+transport for LAN discovery.
+
+**Rationale:** Every device on a LAN has an IPv6 link-local address
+(`fe80::...`) automatically — no DHCP required. This makes IPv6
+mDNS the most reliable zero-configuration LAN discovery mechanism.
+
+=== 4.2. BEAM Clustering
+
+Elixir/Erlang systems MAY use native BEAM node discovery for distributed
+Groove. BEAM clustering provides:
+
+. Automatic node discovery via `epmd` (Erlang Port Mapper Daemon)
+. Built-in message passing between nodes
+. No additional discovery protocol needed
+
+When BEAM clustering is used, Groove manifests are exchanged via
+`GenServer.call/2` rather than HTTP.
+
+=== 4.3. Security Boundary
+
+LAN discovery MUST be explicitly opted into. The default configuration
+MUST be localhost-only. This prevents unintended exposure of groove
+capabilities to other machines on the network.
+
+[source,a2ml]
+----
+@groove-manifest(version="0.1.0"):
+  @system(id="my-service", name="My Service", version="0.1.0")
+  @discovery:
+    @scope("localhost")           # Default: loopback only
+    # @scope("lan")              # Opt-in: LAN discovery via mDNS
+    # @scope("wan")              # Future: WAN discovery (not specified)
+  @end
+@end
+----
+
+== 5. Connection Transport
+
+=== 5.1. HTTP for Control Plane
+
+All Groove control-plane traffic (discovery, connect, disconnect, heartbeat)
+uses HTTP/1.1 over TCP.
+
+HTTPS is NOT required for localhost connections (the loopback interface is
+inherently trusted). HTTPS SHOULD be used for LAN connections and MUST be
+used for WAN connections (if specified in future).
+
+=== 5.2. Custom Transport for Data Plane
+
+Once a Groove connection is established, the data plane (actual capability
+traffic) MAY use any transport:
+
+. HTTP/REST — for simple request/response
+. WebSocket — for bidirectional streaming
+. gRPC — for high-performance RPC
+. WebRTC — for voice/video (Burble)
+. Unix domain sockets — for same-machine high-throughput
+. BEAM message passing — for Elixir systems
+
+The transport for the data plane is declared in the capability interface
+definition (Idris2 ABI). The Groove control plane only handles discovery
+and lifecycle — it does not mandate or proxy data-plane traffic.
+
+== 6. IPv6 Transition Considerations
+
+=== 6.1. IPv6-Only Systems
+
+On systems with no IPv4 stack (increasingly common in cloud and container
+environments), Groove services MUST function correctly using only IPv6
+loopback (`::1`). The discovery engine MUST NOT fail if IPv4 probes return
+network-unreachable errors.
+
+=== 6.2. IPv4-Only Systems
+
+On legacy systems with no IPv6 stack, Groove services MUST function
+correctly using only IPv4 loopback (`127.0.0.1`). The discovery engine
+MUST NOT fail if IPv6 probes return network-unreachable errors.
+
+=== 6.3. Dual-Stack Systems (Default)
+
+On dual-stack systems (the common case), the binding and probing rules
+in Sections 1 and 2 apply. IPv6 is preferred, IPv4 is the fallback.
+
+== 7. Summary
+
+[cols="2,3"]
+|===
+| Requirement | Specification
+
+| Binding | Dual-stack `[::]:PORT` or both `127.0.0.1` and `[::1]`
+| Probe order | `[::1]` first, `127.0.0.1` fallback, 500ms timeout each
+| CORS | `Access-Control-Allow-Origin: *` on all groove endpoints
+| Preflight | `OPTIONS` → `204 No Content` with CORS headers
+| LAN discovery | mDNS/DNS-SD over `ff02::fb`, explicit opt-in only
+| Default scope | Localhost only (loopback interface)
+| Data plane | Any transport, declared in Idris2 ABI
+| IPv6 preference | IPv6-preferred, IPv4-fallback, never single-stack
+|===
