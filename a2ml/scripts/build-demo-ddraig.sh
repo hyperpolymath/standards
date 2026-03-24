@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DDRAIG_REPO="/var/mnt/eclipse/repos/ddraig-ssg"
+DDRAIG_REPO="${DDRAIG_REPO:-$(cd "$(dirname "$0")/../.." && pwd)/ddraig-ssg}"
 
 if [ ! -d "$DDRAIG_REPO" ]; then
   echo "ddraig-ssg repo not found at $DDRAIG_REPO" >&2

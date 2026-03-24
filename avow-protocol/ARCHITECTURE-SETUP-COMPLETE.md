@@ -218,11 +218,11 @@ Created proper dependency structure:
 - `package.json` - npm dependencies (ReScript toolchain)
 - `rescript.json` - ReScript configuration
 - Repos available:
-  - `/var/mnt/eclipse/repos/casket-ssg`
-  - `/var/mnt/eclipse/repos/cadre-tea-router`
-  - `/var/mnt/eclipse/repos/rescript-tea`
-  - `/var/mnt/eclipse/repos/rescript-dom-mounter`
-  - `/var/mnt/eclipse/repos/proven`
+  - `$REPOS_DIR/casket-ssg`
+  - `$REPOS_DIR/cadre-tea-router`
+  - `$REPOS_DIR/rescript-tea`
+  - `$REPOS_DIR/rescript-dom-mounter`
+  - `$REPOS_DIR/proven`
 
 ## Files Created/Modified
 
@@ -281,7 +281,7 @@ AVOW Protocol implements **belt-and-suspenders** security:
 
 ## Repository Status
 
-**Location:** `/var/mnt/eclipse/repos/avow-protocol`
+**Location:** `$REPOS_DIR/avow-protocol`
 **Symlink:** `~/Documents/hyperpolymath-repos/avow-protocol`
 **Git Status:** Modified, ready for commit
 **Build Status:** Dependencies installed, ready for compilation

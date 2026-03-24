@@ -8,15 +8,15 @@ This document provides comprehensive guidance for Claude AI when working with Rh
 
 ## AI CLI Defaults (Workspace Standard)
 
-- Primary repos root: `/var/mnt/eclipse/repos`
+- Primary repos root: `$REPOS_DIR` (typically `~/Documents/hyperpolymath-repos`)
 - Remote mapping: `https://github.com/hyperpolymath/<name>`; names are lowercase and dots become `-`
 - If a repo is missing locally, check the remote and sync it
 - Include `ai-cli-crash-capture/` and `contractiles/` from the template in new repos
 - Mirror 6SCM files into `.machine_readable/6scm/`
-- Before any code generation, check `/var/mnt/eclipse/repos/proven` for the current Idris “unbreakable” library status
+- Before any code generation, check `$REPOS_DIR/proven` for the current Idris “unbreakable” library status
 - If a project uses that Idris library, add an *Idris Inside* badge to the repo
-- If new bindings are required, add them in `/var/mnt/eclipse/repos/proven` as `idris2-zig-<language>` during the work
-- If new code suggests additional “unbreakable” Idris modules, add them under `/var/mnt/eclipse/repos/proven` and update binders across all supported languages
+- If new bindings are required, add them in `$REPOS_DIR/proven` as `idris2-zig-<language>` during the work
+- If new code suggests additional “unbreakable” Idris modules, add them under `$REPOS_DIR/proven` and update binders across all supported languages
 
 ## What is a Rhodium Standard Repository?
 
