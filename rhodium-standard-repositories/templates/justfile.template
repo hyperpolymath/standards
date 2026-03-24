@@ -331,22 +331,223 @@ deep-clean:
     # For Elixir: rm -rf _build/ deps/ mix.lock
     @echo "✓ Deep clean complete!"
 
+# === User Experience ===
+
+# Self-diagnostic — checks deps, permissions, paths, connectivity
+doctor:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== {{project}} Self-Diagnostic ==="
+    PASS=0; FAIL=0; WARN=0
+    check() {
+        local name="$1"; shift
+        if "$@" >/dev/null 2>&1; then
+            echo "  [OK]   $name"; ((PASS++))
+        else
+            echo "  [FAIL] $name"; ((FAIL++))
+        fi
+    }
+    warn_check() {
+        local name="$1"; shift
+        if "$@" >/dev/null 2>&1; then
+            echo "  [OK]   $name"; ((PASS++))
+        else
+            echo "  [WARN] $name"; ((WARN++))
+        fi
+    }
+    # Core tools
+    check "just installed" command -v just
+    check "git installed" command -v git
+    # *REMINDER: Add language-specific checks*
+    # check "rust toolchain" command -v rustc
+    # check "elixir installed" command -v elixir
+    # check "deno installed" command -v deno
+    # check "idris2 installed" command -v idris2
+    # check "zig installed" command -v zig
+    # Ecosystem tools
+    warn_check "panic-attack installed" command -v panic-attack
+    warn_check "lychee installed" command -v lychee
+    # Repo health
+    check "README.adoc exists" test -f README.adoc
+    check "EXPLAINME.adoc exists" test -f EXPLAINME.adoc
+    check "0-AI-MANIFEST.a2ml exists" test -f 0-AI-MANIFEST.a2ml
+    check ".machine_readable/ exists" test -d .machine_readable
+    check "LICENSE exists" test -f LICENSE
+    check "No hardcoded /home/ paths" bash -c '! grep -r "/home/" src/ lib/ scripts/ 2>/dev/null | grep -v ".git" | head -1'
+    # *REMINDER: Add project-specific checks (ports, services, etc.)*
+    # Permissions
+    warn_check "Justfile not world-writable" bash -c '! stat -c %a Justfile 2>/dev/null | grep -q "..7"'
+    echo ""
+    echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
+    if [ "$FAIL" -gt 0 ]; then
+        echo "Run 'just heal' to attempt automatic fixes."
+        exit 1
+    fi
+
+# Attempt automatic repair of common issues
+heal:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== {{project}} Self-Heal ==="
+    # Create missing directories
+    mkdir -p .machine_readable
+    # Fix permissions on sensitive files
+    [ -f .env ] && chmod 600 .env 2>/dev/null || true
+    # *REMINDER: Add project-specific healing*
+    # Remove stale caches, fix broken symlinks, etc.
+    echo "Heal complete. Run 'just doctor' to verify."
+
+# Guided tour of the project
+tour:
+    #!/usr/bin/env bash
+    echo "=== Welcome to {{project}} ==="
+    echo ""
+    echo "This project is: {{language}}-based"
+    echo ""
+    echo "Key files:"
+    echo "  README.adoc          - What this project does"
+    echo "  EXPLAINME.adoc       - Why decisions were made"
+    echo "  Justfile             - All available commands (you are here)"
+    echo "  0-AI-MANIFEST.a2ml   - AI agent entry point"
+    echo "  .machine_readable/   - Checkpoint files for state tracking"
+    echo ""
+    echo "Quick commands:"
+    echo "  just setup     - First-time setup"
+    echo "  just build     - Build the project"
+    echo "  just test      - Run tests"
+    echo "  just doctor    - Check everything is working"
+    echo "  just help-me   - Get help / report a problem"
+    echo ""
+    # *REMINDER: Add project-specific tour steps*
+    echo "For full command list: just --list"
+
+# Open dev shell (Guix preferred, Nix fallback)
+dev-shell:
+    #!/usr/bin/env bash
+    if command -v guix >/dev/null 2>&1 && [ -f guix.scm ]; then
+        echo "Entering Guix shell..."
+        exec guix shell
+    elif command -v nix >/dev/null 2>&1 && [ -f flake.nix ]; then
+        echo "Entering Nix shell..."
+        exec nix develop
+    else
+        echo "Neither guix.scm nor flake.nix found."
+        echo "Install dependencies manually — see QUICKSTART-DEV.adoc"
+        exit 1
+    fi
+
+# Output LLM-friendly context for the current role
+llm-context role="user":
+    #!/usr/bin/env bash
+    case "{{role}}" in
+        user)       [ -f llm-warmup-user.md ] && cat llm-warmup-user.md || echo "No user warmup found." ;;
+        dev)        [ -f llm-warmup-dev.md ] && cat llm-warmup-dev.md || echo "No dev warmup found." ;;
+        maintainer) [ -f llm-warmup-maintainer.md ] && cat llm-warmup-maintainer.md || echo "No maintainer warmup found." ;;
+        *)          echo "Usage: just llm-context [user|dev|maintainer]" ;;
+    esac
+
+# Pre-fill diagnostic context and open feedback channel
+help-me:
+    #!/usr/bin/env bash
+    echo "=== Generating diagnostic report ==="
+    REPORT="/tmp/{{project}}-help-$(date +%Y%m%d-%H%M%S).txt"
+    {
+        echo "Project: {{project}}"
+        echo "Version: {{version}}"
+        echo "Date: $(date -Iseconds)"
+        echo "Platform: $(uname -srm)"
+        echo "Shell: $SHELL"
+        echo ""
+        echo "--- Doctor Output ---"
+        just doctor 2>&1 || true
+        echo ""
+        echo "--- Recent Git Log ---"
+        git log --oneline -5 2>/dev/null || echo "(not a git repo)"
+    } > "$REPORT"
+    echo "Report saved: $REPORT"
+    echo ""
+    echo "To get help:"
+    echo "  1. Open an issue: https://github.com/hyperpolymath/{{project}}/issues"
+    echo "  2. Attach the report above"
+    echo "  3. Or paste it to your LLM assistant"
+
+# Uninstall with tier selection
+uninstall tier="parameter":
+    #!/usr/bin/env bash
+    echo "=== Uninstalling {{project}} ==="
+    echo "Uninstall tier: {{tier}}"
+    echo ""
+    case "{{tier}}" in
+        bennett)
+            echo "Bennett reversible uninstall — replaying install log in reverse"
+            # *REMINDER: Integrate with reversibility-stack*
+            echo "Not yet implemented — falling back to parameter-based"
+            ;&
+        parameter)
+            echo "Parameter-based uninstall — using saved install parameters"
+            # *REMINDER: Read install manifest and reverse each action*
+            echo "Removing installed files, shortcuts, and registry entries..."
+            ;;
+        standard)
+            echo "Standard OS uninstall"
+            # *REMINDER: Platform-specific removal*
+            ;;
+        secure)
+            echo "Secure uninstall — overwriting before deletion"
+            # *REMINDER: Secure wipe + standard removal*
+            ;;
+        *)
+            echo "Usage: just uninstall [bennett|parameter|standard|secure]"
+            exit 1
+            ;;
+    esac
+    echo ""
+    read -p "Include user data in removal? [y/N] " include_data
+    echo "Note: Data moved outside program-managed directories will NOT be removed."
+    echo ""
+    echo "Uninstall complete."
+
+# Run via Stapeln container
+stapeln-run:
+    #!/usr/bin/env bash
+    if command -v stapeln >/dev/null 2>&1; then
+        stapeln up
+    elif [ -f stapeln.toml ] || [ -f stapeln.ncl ]; then
+        echo "Stapeln config found but stapeln CLI not installed."
+        echo "Install: https://github.com/hyperpolymath/stapeln"
+        exit 1
+    else
+        echo "No Stapeln configuration found for this project."
+        echo "Use 'just run' for direct execution or 'just container-run' for Podman."
+        exit 1
+    fi
+
 # === Help ===
 
 # Show detailed help
 help:
     @echo "{{project}} - {{language}} Task Runner"
     @echo ""
-    @echo "Common recipes:"
+    @echo "Getting started:"
     @echo "  just setup         - Set up development environment"
+    @echo "  just doctor        - Check everything is working"
+    @echo "  just tour          - Guided tour of the project"
+    @echo ""
+    @echo "Common recipes:"
     @echo "  just build         - Build the project"
     @echo "  just test          - Run all tests"
-    @echo "  just validate      - Full RSR compliance check"
     @echo "  just run           - Run the project"
+    @echo "  just validate      - Full RSR compliance check"
+    @echo ""
+    @echo "Troubleshooting:"
+    @echo "  just heal          - Attempt automatic repair"
+    @echo "  just help-me       - Generate diagnostic + get help"
+    @echo "  just llm-context   - Output LLM-friendly context"
     @echo ""
     @echo "For full list: just --list"
     @echo ""
     @echo "Documentation: README.adoc"
-    @echo "Contributing: CONTRIBUTING.adoc"
+    @echo "Quick start:   QUICKSTART-USER.adoc"
+    @echo "Contributing:  CONTRIBUTING.adoc"
 
 # vim: set ft=just :
