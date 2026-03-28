@@ -26,6 +26,7 @@
 | 8093 | verisimdb | Stapeln instance | HTTP |
 | 8094 | verisimdb | Kategoria instance | HTTP |
 | 8095 | verisimdb | Project-M instance | HTTP |
+| 8096 | verisimdb | Work instance (RAM disk) | HTTP |
 | 9090 | hypatia | Web + Groove endpoints | HTTP |
 | 50051 | verisimdb | gRPC | gRPC |
 
