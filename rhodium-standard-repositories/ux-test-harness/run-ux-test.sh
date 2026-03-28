@@ -66,7 +66,7 @@ echo "Phase 2: Hardcoded paths" >&2
 
 HARDCODED=$(grep -r --include='*.sh' --include='*.rs' --include='*.ex' --include='*.exs' \
     --include='*.zig' --include='*.res' --include='*.ncl' --include='*.v' \
-    -l '/home/hyper\|/mnt/eclipse\|/var/mnt/eclipse' "$REPO_DIR/src" "$REPO_DIR/lib" \
+    -l '$HOME\|$ECLIPSE_DIR\|/var$ECLIPSE_DIR' "$REPO_DIR/src" "$REPO_DIR/lib" \
     "$REPO_DIR/scripts" "$REPO_DIR/ffi" 2>/dev/null | head -20)
 
 if [ -z "$HARDCODED" ]; then
