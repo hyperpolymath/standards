@@ -1,0 +1,1 @@
+../../abi/I18nStore.idr

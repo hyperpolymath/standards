@@ -117,8 +117,10 @@ data Handle : Type where
 ||| Returns Nothing if the pointer is null.
 public export
 createHandle : Bits64 -> Maybe Handle
-createHandle 0 = Nothing
-createHandle ptr = Just (MkHandle ptr)
+createHandle ptr =
+  case choose (ptr /= 0) of
+    Left prf  => Just (MkHandle ptr)
+    Right _   => Nothing
 
 ||| Extract raw pointer value from handle (for FFI transport)
 public export
