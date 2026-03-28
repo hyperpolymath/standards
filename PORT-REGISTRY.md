@@ -1,5 +1,5 @@
 # Port Registry — hyperpolymath ecosystem
-# Last audited: 2026-03-24
+# Last audited: 2026-03-28
 #
 # RULE: Every project MUST use a unique port. No two projects share a port.
 # Check this file BEFORE assigning ports in new projects.
@@ -14,6 +14,9 @@
 | 4040 | gossamer | Dev server | HTTP |
 | 4050 | ambientops | Composer | HTTP |
 | 4060 | reposystem | GUI backend | HTTP |
+| 6480 | vext | Verifiable comms protocol | HTTP |
+| 7500 | gitbot-fleet | Bot orchestration | HTTP |
+| 7600 | panic-attacker | Static analysis server | HTTP |
 | 7700 | boj-server | Main MCP API | HTTP |
 | 7701 | boj-server | Browser bridge | HTTP |
 | 7800 | boj-server | Cartridge runner | HTTP |
