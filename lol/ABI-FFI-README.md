@@ -18,12 +18,13 @@ LOL is always called as a service, never embedded. Consumers initialise with
 ┌─────────────────────────────────────────────────┐
 │  ABI Definitions (Idris2)                       │
 │  src/abi/                                       │
-│  - Types.idr    (Result, Locale, PluralCategory,│
-│                  LanguageInfo, TranslationResult)│
-│  - Layout.idr   (Memory layout proofs for each  │
-│                  C struct that crosses the FFI)  │
-│  - Foreign.idr  (FFI function declarations with │
-│                  safe wrappers)                  │
+│  - Types.idr           (Result, Handle, enums)  │
+│  - Layout.idr          (Memory layout proofs)   │
+│  - Locale.idr          (BCP-47 validated locale) │
+│  - TranslationKey.idr  (Type-safe key proofs)   │
+│  - PluralForm.idr      (CLDR rules + coverage)  │
+│  - I18nStore.idr       (Store interface + proofs)│
+│  - Foreign.idr         (FFI declarations)       │
 └─────────────────┬───────────────────────────────┘
                   │
                   │ generates
@@ -41,12 +42,12 @@ LOL is always called as a service, never embedded. Consumers initialise with
                   ▼
 ┌─────────────────────────────────────────────────┐
 │  FFI Implementation (Zig)                       │
-│  ffi/zig/src/main.zig                           │
-│  - BCP 47 locale parsing                        │
-│  - CLDR plural rule engine                      │
-│  - Corpus data directory access                 │
-│  - Translation lookup with fallback chains      │
-│  - Thread-safe error handling                   │
+│  ffi/zig/src/                                   │
+│  - main.zig    (C ABI exports, service state)   │
+│  - locale.zig  (BCP 47 parse, validate, norm)   │
+│  - store.zig   (HashMap store, fallback chains) │
+│  - plural.zig  (CLDR plural rule engine)        │
+│  - ffi.zig     (Module re-exports, FFI index)   │
 └─────────────────┬───────────────────────────────┘
                   │
                   │ linked by (-llol)
@@ -69,11 +70,20 @@ lol/
 │   └── abi/                         # ABI definitions (Idris2)
 │       ├── Types.idr                # Core types with formal proofs
 │       ├── Layout.idr               # Memory layout verification
+│       ├── Locale.idr               # BCP-47 locale with validation proofs
+│       ├── TranslationKey.idr       # Type-safe translation key proofs
+│       ├── PluralForm.idr           # CLDR plural rules + coverage proofs
+│       ├── I18nStore.idr            # Store interface with lookup proofs
 │       └── Foreign.idr              # FFI function declarations
 ├── ffi/
 │   └── zig/                         # FFI implementation (Zig)
 │       ├── build.zig                # Build configuration
-│       ├── src/main.zig             # Implementation
+│       ├── src/
+│       │   ├── main.zig             # C ABI exports + service state
+│       │   ├── locale.zig           # Locale parse/validate/normalise
+│       │   ├── store.zig            # Translation store with fallback
+│       │   ├── plural.zig           # CLDR plural rule engine
+│       │   └── ffi.zig              # Module re-exports + FFI index
 │       └── test/integration_test.zig# Integration tests
 ├── generated/
 │   └── abi/
@@ -111,10 +121,23 @@ The Idris2 ABI layer provides the following compile-time guarantees:
 4. **Handle non-null**: the `Handle` type cannot wrap a null pointer (enforced by `So`)
 5. **Struct alignment**: all C struct layouts are proven to have correctly aligned fields
 6. **Plural form count bounds**: `PluralRule.formCount` is proven to be in range 1-6
+7. **BCP-47 validation**: `ValidLocale` proves tag structure at construction (Locale.idr)
+8. **Translation key validity**: `ValidKey` proves non-empty dot-separated segments (TranslationKey.idr)
+9. **Plural coverage**: `eastAsianPluralConstant` proves East Asian always returns Other (PluralForm.idr)
+10. **Plural FFI bounds**: `pluralToIntBounded` proves category integers stay in 0-5 range
+11. **Store lookup guarantee**: `CorrectStore` interface proves key-exists implies non-empty result (I18nStore.idr)
+12. **Fallback chain contract**: `lookupWithFallback` walks chain with locale/key pair, resolves or returns Nothing
 
 No `believe_me`, `assert_total`, or other escape hatches are used.
 
 ## Building
+
+### Idris2 ABI
+
+```bash
+idris2 --check lol-abi.ipkg   # Type-check all ABI definitions and proofs
+idris2 --build lol-abi.ipkg   # Build (optional, ABI is specification-only)
+```
 
 ### Zig FFI
 
