@@ -14,7 +14,7 @@ echo "=== lol VeriSimDB Ingest Pipeline ==="
 
 # Step 1: Run corpus verification
 echo "[1/3] Running corpus quality analysis..."
-deno run -A src/Lang1000.res.mjs verify --output "$SCAN_OUTPUT"
+deno run --allow-read --allow-write --allow-env --allow-net src/Lang1000.res.mjs verify --output "$SCAN_OUTPUT"
 echo "  Scan written to: $SCAN_OUTPUT"
 
 # Step 2: Show summary
