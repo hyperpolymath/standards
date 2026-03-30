@@ -39,7 +39,7 @@ for project in "${!PROJECTS[@]}"; do
 
   cd "$repo_path" || continue
 
-  deno run -A npm:wrangler pages deploy . --project-name="$project" --branch=main 2>&1 | grep -E "✨|Deployment complete|View your site"
+  deno run --allow-read --allow-write --allow-env --allow-net --allow-run npm:wrangler pages deploy . --project-name="$project" --branch=main 2>&1 | grep -E "✨|Deployment complete|View your site"
 
   if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo "   ✅ Deployed successfully"
