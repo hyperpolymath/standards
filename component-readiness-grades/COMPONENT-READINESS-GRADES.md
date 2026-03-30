@@ -3,9 +3,9 @@
 
 # Component Readiness Grades (CRG)
 
-**Standard:** Component Readiness Grades v1.0  
+**Standard:** Component Readiness Grades v2.0  
 **Author:** Jonathan D.A. Jewell  
-**Date:** 2026-02-28  
+**Date:** 2026-03-30  
 **Status:** Active  
 **License:** PMPL-1.0-or-later  
 **Part of:** Rhodium Standard Repositories (RSR)
@@ -17,8 +17,13 @@
 Component Readiness Grades (CRG) is a general-purpose quality assessment scheme
 for software components, features, subcommands, modules, APIs, and libraries.
 It provides a uniform vocabulary for communicating the readiness of individual
-components within a project, mapping each grade to a release stage and requiring
-specific evidence thresholds for each level.
+components within a project, mapping each grade to a release threshold and
+requiring specific evidence thresholds for each level.
+
+This v2 revision intentionally raises the bar. It narrows what can honestly be
+called alpha, beta, stable, or published work; it requires stronger repository
+discipline earlier; and it treats long periods in alpha or beta as evidence of
+honesty rather than failure.
 
 This standard is designed to be adopted by any software project regardless of
 language, framework, or domain. It is part of the Rhodium Standard Repositories
@@ -72,6 +77,17 @@ This standard does NOT apply to:
 - **Diverse targets:** Targets that differ in ways that matter for the
   component under test. Six variations of the same thing do not constitute
   diversity.
+- **RSR-compliant:** The repository satisfies the Rhodium Standard Repository
+  baseline or has a documented equivalent that covers repository structure,
+  governance, machine-readable state, and audit surfaces.
+- **Deep code and folder annotation:** Documentation and structural annotation
+  that let an external reviewer navigate the component without source
+  archaeology. At minimum this means purpose, boundaries, invariants,
+  execution/test/proof surfaces, and per-directory orientation where the code
+  would otherwise be opaque.
+- **Abstract publication:** A paper, note, or position piece that makes no
+  implementation-readiness claim and clearly separates proved results, working
+  artefacts, conjectures, and future work.
 
 ---
 
@@ -152,12 +168,15 @@ fundamental gaps.
 
 ### 4.4. Grade D — Partial / Inconsistent
 
-**Release stage:** Alpha
+**Release stage:** Alpha  
+**Stability posture:** Unstable  
+**Honest shorthand:** `alpha-unstable`
 
 Works on some inputs, some cases, or some configurations, but not
 systematically. The component either needs to be narrowed in scope (so that
 its documented capabilities match its actual capabilities) or needs the
-inconsistencies fixed. This is the minimum grade for an Alpha release.
+inconsistencies fixed. It has crossed out of pure pre-alpha experimentation,
+but it is not yet safe enough to be called stable even in the home context.
 
 **Examples:**
 
@@ -172,19 +191,24 @@ inconsistencies fixed. This is the minimum grade for an Alpha release.
 - Documented scope: what it claims to do vs. what it actually does.
 - At least one test per claimed capability (some will be failing — that is
   expected at grade D).
+- RSR compliance, or a documented equivalent repository discipline, so that
+  the component is at least inspectable and auditable while still unstable.
 
 ### 4.5. Grade C — Self-Validated
 
-**Release stage:** Beta
+**Release stage:** Alpha  
+**Stability posture:** Stable in home context  
+**Honest shorthand:** `alpha-stable`
 
 Tested on the tool or project itself (dogfooding). The component works
 reliably in the home context. "Home context" means the project's own
 codebase, configuration, workflow, and use cases. This is the minimum grade
-for a Beta release.
+for an Alpha release.
 
 The key distinction from grade D is reliability: at grade C, the component
 does not just work on some things — it works consistently on everything
-within its home context.
+within its home context. It has borne the first serious wave of breakage
+inside the originating environment.
 
 **Examples:**
 
@@ -198,18 +222,33 @@ within its home context.
 - CI integration or equivalent automated validation in the home context.
 - No known failures within the home context (failures outside it are
   acceptable and expected at this stage).
+- Deep code and folder annotation sufficient for an external reviewer to trace
+  what the component is, where the critical paths live, and how it is checked.
 
 ### 4.6. Grade B — Broadly Validated
 
-**Release stage:** Release Candidate
+**Release stage:** Beta  
+**Stability posture:** Stable for broad trial  
+**Honest shorthand:** `beta-stable`
 
 Tested on at least six disparate, unrelated targets. The component
 demonstrates breadth and generality. The six targets MUST be genuinely
-diverse — not six variations of the same thing. This is the minimum grade
-for a Release Candidate.
+diverse — not six variations of the same thing. The component has escaped
+the home repo boundary and been seen behaving as a release elsewhere. This is
+the minimum grade for a Beta release.
 
 The number six is deliberate: it is enough to reveal assumptions baked into
-the home context without being so high that it becomes a barrier to progress.
+the home context without being so high that it becomes impossible to make
+progress. A long beta at this grade is not embarrassment; it is evidence that
+the project refuses to overclaim.
+
+This is also the minimum grade for non-abstract publication of implementation
+work. If the component is below B, publication should be limited to abstract
+or explicitly provisional writing that does not imply community-safe software.
+
+CRG intentionally does not treat "beta" as a soft synonym for "still shaky."
+If a component is externally visible but not yet stable enough for broad
+trial, describe it as `public alpha` or `alpha-stable`, not `beta`.
 
 **Examples:**
 
@@ -273,15 +312,35 @@ development team. This is the minimum grade for a Stable release.
 
 ## 5. Release Stage Mapping
 
-| Grade | Release Stage      | Meaning                                           |
-|-------|--------------------|---------------------------------------------------|
-| X     | —                  | Not assessed                                      |
-| F     | —                  | Reject / deprecate / delegate                     |
-| E     | —                  | Pre-alpha (needs redesign or major work)           |
-| D     | Alpha              | Functional but incomplete or inconsistent          |
-| C     | Beta               | Self-validated, reliable in home context           |
-| B     | Release Candidate  | Broadly validated across diverse targets           |
-| A     | Stable             | Field-proven with real-world feedback              |
+| Grade | Release Stage | Stability Posture        | Meaning                                  |
+|-------|---------------|--------------------------|------------------------------------------|
+| X     | —             | —                        | Not assessed                             |
+| F     | —             | —                        | Reject / deprecate / delegate            |
+| E     | Pre-alpha     | Unstable                 | Needs redesign or major work             |
+| D     | Alpha         | Unstable                 | Functional but incomplete or inconsistent |
+| C     | Alpha         | Stable in home context   | Self-validated in the home context       |
+| B     | Beta          | Stable for broad trial   | Broadly validated across diverse targets |
+| A     | Stable        | Stable                   | Field-proven with real-world feedback    |
+
+**Release candidate (RC) is project-level, not component-level.** RC is the
+integration phase between B and A, when release-path components already meet
+their minimum thresholds and the project-wide audit is nearly closed. CRG does
+not assign a distinct component grade for RC because RC is about coordinated
+release readiness, not a new kind of component evidence.
+
+This also means there is no endorsed `beta-unstable` badge in CRG. If the
+component is not yet stable enough for broad external trial, keep it in alpha.
+
+### 5.1. Publication Mapping
+
+- **Below B:** Do not publish implementation-facing work as if it were ready
+  for community reliance.
+- **B and above:** Suitable for public release notes, whitepapers, talks, and
+  submissions that describe working software, provided the claims match the
+  evidence and any remaining assumptions are explicit.
+- **Exception for abstract work:** Earlier publication is acceptable for
+  theory, design, position, or exploratory work if it is explicit that the
+  implementation is incomplete, unvalidated, or still conjectural.
 
 ---
 
@@ -308,6 +367,20 @@ component as it is today, not as you hope it will be next week. A component
 honestly graded D is more valuable than one dishonestly graded B, because the
 honest grade tells you where to focus effort.
 
+**Principle 5: Long alpha and beta phases are acceptable.** If alpha means
+hard internal dogfooding and beta means genuine external validation, both
+stages may last a long time. That is a sign of discipline, not drift.
+
+**Principle 6: Earlier structure, earlier scrutiny.** CRG v2 deliberately
+pulls repository discipline and navigability forward: D requires RSR
+compliance or equivalent, and C requires deep annotation instead of treating
+those as optional polish.
+
+**Principle 7: Challenge is welcome.** If practitioners from software
+engineering, QA, formal methods, or mathematics think this standard is still
+too weak, they should say why. A release gate earns trust by surviving
+critique, not by avoiding it.
+
 ### 6.2. Assessment Checklist
 
 When grading a component, answer these questions in order:
@@ -316,9 +389,10 @@ When grading a component, answer these questions in order:
 2. **Does it cause harm, waste resources, or duplicate something better?** (Yes → F)
 3. **Does it do something, however slight?** (Barely → E)
 4. **Does it work on some things but not others?** (Partial → D)
-5. **Does it work reliably on our own project?** (Dogfooded → C)
-6. **Has it been tested on 6+ diverse external targets?** (Broad → B)
-7. **Do external users confirm it works and is useful?** (Field-proven → A)
+5. **Is the repository auditable enough to deserve D at all?** (RSR-compliant or equivalent)
+6. **Does it work reliably on our own project, and is it deeply annotated?** (Dogfooded → C)
+7. **Has it been tested on 6+ diverse external targets?** (Broad → B)
+8. **Do external users confirm it works and is useful?** (Field-proven → A)
 
 ### 6.3. When to Assess
 
@@ -343,11 +417,18 @@ Recommended locations (in order of preference):
 When communicating grades to users:
 
 - **A and B:** Safe to advertise. These grades have external evidence.
-- **C:** Appropriate for beta documentation. Be clear about the scope of
-  validation.
-- **D:** Appropriate for alpha documentation. Be explicit about known gaps.
+- **C:** Appropriate for `alpha-stable` documentation. Be clear that
+  validation is strong in the home context but not yet external.
+- **B:** Appropriate for `beta-stable` documentation. Be clear that external
+  breadth exists, but field-proof is still being earned.
+- **D:** Appropriate for pre-alpha or experimental documentation. Be explicit
+  about known gaps.
 - **E, F, X:** Internal only. Do not ship components at these grades unless
   clearly marked as experimental or deprecated.
+
+For papers, whitepapers, and submission-facing prose, the same honesty rule
+applies. If the implementation evidence is below B, either do not publish it
+as implementation work or present it as abstract/provisional work only.
 
 ---
 
@@ -360,8 +441,8 @@ When communicating grades to users:
 | X    | E  | Run at least one test. Document what happened.                  |
 | X    | F  | Evaluate and determine the component is harmful or wasteful.    |
 | E    | D  | Fix the most critical failures. Document the scope.             |
-| D    | C  | Dogfood it. Use it on your own project. Fix what breaks.        |
-| C    | B  | Test on 6+ diverse external targets. Fix what breaks.           |
+| D    | C  | Dogfood it hard in the home context. Fix what breaks. Add deep code and folder annotation. |
+| C    | B  | Release beyond the home repo. Test on 6+ diverse external targets. Fix what breaks. |
 | B    | A  | Ship it. Collect external feedback. Demonstrate no harm.        |
 
 **Skipping grades:** A component MAY skip grades if the evidence supports it.
@@ -403,8 +484,8 @@ templates may be copied and adapted.
 
 | Component           | Grade | Release Stage | Evidence Summary                     | Last Assessed |
 |---------------------|-------|---------------|--------------------------------------|---------------|
-| `example-command`   | C     | Beta          | Dogfooded in CI since 2026-01.       | 2026-02-28    |
-| `parse-module`      | D     | Alpha         | Works on JSON/YAML, fails on TOML.   | 2026-02-28    |
+| `example-command`   | C     | Alpha-stable  | Dogfooded in CI since 2026-01.       | 2026-02-28    |
+| `parse-module`      | D     | Alpha-unstable| Works on JSON/YAML, fails on TOML.   | 2026-02-28    |
 | `export-feature`    | X     | —             | Not yet tested.                      | 2026-02-28    |
 | `legacy-formatter`  | F     | —             | prettier does this better; removing. | 2026-02-28    |
 ```
@@ -416,12 +497,14 @@ templates may be copied and adapted.
 
 ### `example-command`
 
-- **Grade:** C (Beta)
-- **Last assessed:** 2026-02-28
+- **Grade:** C (`alpha-stable`)
+- **Last assessed:** 2026-03-30
 - **Evidence:** Used in our own CI pipeline since 2026-01-15. No failures in
   home context. 47 successful runs logged.
+- **Annotation status:** `src/`, `tests/`, and integration boundaries all have
+  orientation notes and declared critical paths.
 - **Known limitations:** Only tested on Linux x86_64. No macOS or ARM testing.
-- **Promotion path to B:** Test on 6 diverse external projects. Candidates:
+- **Promotion path to B:** Release and test on 6 diverse external projects. Candidates:
   project-alpha (Rust, large), project-beta (Python, small), project-gamma
   (mixed monorepo), project-delta (embedded C), project-epsilon (Gleam/BEAM),
   project-zeta (legacy Java).
@@ -432,19 +515,22 @@ templates may be copied and adapted.
 
 ```scheme
 (component-readiness
-  (version "1.0")
-  (assessed "2026-02-28")
+  (version "2.0")
+  (assessed "2026-03-30")
   (components
     (component
       (name "example-command")
       (grade C)
-      (release-stage "beta")
+      (release-stage "alpha")
+      (stability-posture "stable-in-home-context")
       (evidence "Dogfooded in CI since 2026-01. 47 successful runs.")
-      (promotion-path "Test on 6+ diverse external projects"))
+      (annotation-status "Deep code and folder annotation present.")
+      (promotion-path "Release and test on 6+ diverse external projects"))
     (component
       (name "parse-module")
       (grade D)
       (release-stage "alpha")
+      (stability-posture "unstable")
       (evidence "Works on JSON/YAML, fails on TOML.")
       (promotion-path "Fix TOML parsing, then dogfood"))))
 ```
@@ -498,6 +584,51 @@ A project conforms to CRG if:
 3. Assessments are recorded in a version-controlled location (section 6.4).
 4. Assessments are reviewed at least once per release cycle (section 6.3).
 5. Release stages respect the minimum grade thresholds in section 5.
+6. Components graded D or above satisfy RSR compliance or a documented
+   equivalent repository discipline.
+7. Components graded C or above have deep code and folder annotation.
+8. Non-abstract publication claims about implementation-facing work are not
+   made below grade B.
+
+---
+
+## 11. V2 Editorial Sign-Off and Evidential Basis
+
+This v2 revision is intentionally stricter than v1 and is signed off here as a
+process-rigor upgrade, not as a claim that any particular repository already
+meets it.
+
+Editorial sign-off:
+
+- **Reviewer:** Codex
+- **Date:** 2026-03-30
+- **Scope:** The strictness and structure of the standard itself
+
+Evidential basis:
+
+- **Software engineering and secure development:** NIST SP 800-218 (SSDF)
+  supports explicit verification practices, defined review/release artefacts,
+  and repeatable gates rather than impressionistic readiness calls.
+- **Research artefacts and reproducibility:** ACM Artifact Review and Badging
+  treats availability, functionality, and reproducibility as distinct evidence
+  classes, which supports our refusal to let public claims outrun artefacts.
+- **Formal-methods practice:** CompCert shows the community value of
+  machine-checked implementation claims when correctness matters.
+- **Mathematical and theorem-proving practice:** seL4's public verification
+  material emphasises explicit assumptions and continuous proof maintenance,
+  which supports assumption ledgers and the refusal to treat proof debt as
+  invisible.
+
+Reference URLs:
+
+- `https://csrc.nist.gov/pubs/sp/800/218/final`
+- `https://www.acm.org/publications/policies/artifact-review-and-badging-current`
+- `https://compcert.org/doc/`
+- `https://sel4.systems/Verification/assumptions.html`
+
+This standard is open to challenge. If you think the bar is too low, specify
+what evidence class, release discipline, proof requirement, or traceability
+requirement is missing.
 
 ---
 
@@ -505,4 +636,5 @@ A project conforms to CRG if:
 
 | Version | Date       | Author                  | Changes          |
 |---------|------------|-------------------------|------------------|
+| 2.0     | 2026-03-30 | Jonathan D.A. Jewell    | Raised bar for alpha/beta/publication, added RSR and deep-annotation requirements, added v2 sign-off and challenge posture |
 | 1.0     | 2026-02-28 | Jonathan D.A. Jewell    | Initial release  |
