@@ -30,6 +30,10 @@ clean:
 assail:
     @command -v panic-attack >/dev/null 2>&1 && panic-attack assail . || echo "panic-attack not found — install from https://github.com/hyperpolymath/panic-attacker"
 
+# Stable release gate audit
+v1-audit path=".":
+    @./release-pre-flight/v1-audit.sh "{{path}}"
+
 # Self-diagnostic — checks dependencies, permissions, paths
 doctor:
     @echo "Running diagnostics for standards..."
