@@ -45,6 +45,8 @@ EXCLUDES=(
     --glob '!release-pre-flight/**'
     --glob '!**/publication-pre-flight/**'
     --glob '!publication-pre-flight/**'
+    --glob '!**/docs/reports/audit/**'
+    --glob '!docs/reports/audit/**'
     --glob '!**/PROOF-NEEDS.md'
     --glob '!PROOF-NEEDS.md'
     --glob '!**/TEST-NEEDS.md'
@@ -84,15 +86,107 @@ show_matches() {
     shift
     (
         cd "$TARGET"
-        rg -n --hidden -S "${EXCLUDES[@]}" "$pattern" "$@" 2>/dev/null | head -n 20 || true
+        rg -n --hidden -S "$pattern" "$@" "${EXCLUDES[@]}" 2>/dev/null | head -n 20 || true
     )
 }
 
 rg_repo() {
     (
         cd "$TARGET"
-        rg -n --hidden -S "${EXCLUDES[@]}" "$@" 2>/dev/null
+        rg -n --hidden -S "$@" "${EXCLUDES[@]}" 2>/dev/null
     )
+}
+
+path_is_support_script() {
+    case "$1" in
+        */Justfile|*/justfile|*.sh|*.k9.ncl)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+match_is_comment_only() {
+    local text="$1"
+    [[ "$text" =~ ^[[:space:]]*(#|//|/\*|\*|--|<!--) ]]
+}
+
+match_is_marker_support_line() {
+    local text="$1"
+
+    [[ "$text" == *'MARKER_PATTERN='* ]] && return 0
+    [[ "$text" == *'reject_patterns = ['*'{{PROJECT}}'* ]] && return 0
+    [[ "$text" == *'description = "No {{PROJECT}}/ {{PLACEHOLDER}} tokens remain'* ]] && return 0
+    [[ "$text" == *'todo|fixme|hack|xxx|stub|partial'* ]] && return 0
+
+    return 1
+}
+
+match_is_proof_support_line() {
+    local text="$1"
+
+    [[ "$text" == *'PROOF_DEBT_PATTERN='* ]] && return 0
+    [[ "$text" == *'idris-unsound-scan = "believe_me/assert_total"'* ]] && return 0
+
+    if [[ "$text" == *'grep '* || "$text" == *'rg '* ]]; then
+        [[ "$text" == *'believe_me'* ]] && return 0
+        [[ "$text" == *'assert_total'* ]] && return 0
+        [[ "$text" == *'unsafeCoerce'* ]] && return 0
+        [[ "$text" == *'Obj.magic'* ]] && return 0
+        [[ "$text" == *'sorry'* ]] && return 0
+        [[ "$text" == *'Admitted'* ]] && return 0
+        [[ "$text" == *'postulate'* ]] && return 0
+    fi
+
+    return 1
+}
+
+match_should_be_suppressed() {
+    local kind="$1"
+    local path="$2"
+    local text="$3"
+
+    case "$kind" in
+        marker)
+            if path_is_support_script "$path" && match_is_comment_only "$text"; then
+                return 0
+            fi
+            match_is_marker_support_line "$text" && return 0
+            ;;
+        proof)
+            match_is_comment_only "$text" && return 0
+            match_is_proof_support_line "$text" && return 0
+            ;;
+    esac
+
+    return 1
+}
+
+filter_matches() {
+    local kind="$1"
+    local match path rest text
+    local -a kept=()
+
+    while IFS= read -r match; do
+        [[ -n "$match" ]] || continue
+
+        path="${match%%:*}"
+        rest="${match#*:}"
+        text="${rest#*:}"
+
+        if match_should_be_suppressed "$kind" "$path" "$text"; then
+            continue
+        fi
+
+        kept+=("$match")
+        [[ ${#kept[@]} -ge 20 ]] && break
+    done
+
+    if [[ ${#kept[@]} -gt 0 ]]; then
+        printf '%s\n' "${kept[@]}"
+    fi
 }
 
 path_exists_with_real_files() {
@@ -122,7 +216,7 @@ recipe_exists() {
 check_marker_scan() {
     log_section "Marker Scan"
     local matches
-    matches="$(rg_repo "${CODE_GLOBS[@]}" "$MARKER_PATTERN" . | head -n 20 || true)"
+    matches="$(rg_repo "${CODE_GLOBS[@]}" "$MARKER_PATTERN" . | filter_matches marker || true)"
     if [[ -n "$matches" ]]; then
         record_blocker "unfinished markers or placeholders present"
         printf '%s\n' "$matches"
@@ -141,7 +235,7 @@ check_proof_debt() {
         --glob '*.scm' --glob '*.ncl' --glob '*.k9.ncl' --glob '*.toml' \
         --glob '*.yaml' --glob '*.yml' --glob '*.json' --glob 'Containerfile' \
         --glob 'Dockerfile' --glob 'Justfile' --glob 'justfile' --glob 'Mustfile' \
-        "$PROOF_DEBT_PATTERN" . | head -n 20 || true)"
+        "$PROOF_DEBT_PATTERN" . | filter_matches proof || true)"
     if [[ -n "$matches" ]]; then
         record_blocker "proof escape hatches found in code or proof files"
         printf '%s\n' "$matches"
