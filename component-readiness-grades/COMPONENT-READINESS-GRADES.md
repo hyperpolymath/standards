@@ -193,6 +193,13 @@ but it is not yet safe enough to be called stable even in the home context.
   expected at grade D).
 - RSR compliance, or a documented equivalent repository discipline, so that
   the component is at least inspectable and auditable while still unstable.
+- **Immaculate Guide compliance** (hyperpolymath projects): The repository MUST
+  satisfy the nine principles of the Hyperpolymath Immaculate Guide
+  (`immaculate-guide/IMMACULATE-GUIDE.adoc`). Evidence recorded in
+  `.machine_readable/STATE.a2ml` under `(immaculate-guide-compliance ...)`.
+  Specifically at minimum: `0-AI-MANIFEST.a2ml` present, `.tool-versions`
+  pins all tools, `just build` works from a clean `asdf install`, and
+  `panic-attack assail` passes (no Critical/High findings).
 
 ### 4.5. Grade C — Self-Validated
 
@@ -389,7 +396,7 @@ When grading a component, answer these questions in order:
 2. **Does it cause harm, waste resources, or duplicate something better?** (Yes → F)
 3. **Does it do something, however slight?** (Barely → E)
 4. **Does it work on some things but not others?** (Partial → D)
-5. **Is the repository auditable enough to deserve D at all?** (RSR-compliant or equivalent)
+5. **Is the repository auditable enough to deserve D at all?** (RSR-compliant or equivalent; Immaculate Guide compliant for hyperpolymath projects)
 6. **Does it work reliably on our own project, and is it deeply annotated?** (Dogfooded → C)
 7. **Has it been tested on 6+ diverse external targets?** (Broad → B)
 8. **Do external users confirm it works and is useful?** (Field-proven → A)
@@ -586,6 +593,9 @@ A project conforms to CRG if:
 5. Release stages respect the minimum grade thresholds in section 5.
 6. Components graded D or above satisfy RSR compliance or a documented
    equivalent repository discipline.
+6a. Components graded D or above in hyperpolymath projects satisfy the
+   Immaculate Guide (`immaculate-guide/IMMACULATE-GUIDE.adoc`) with
+   compliance evidence in `.machine_readable/STATE.a2ml`.
 7. Components graded C or above have deep code and folder annotation.
 8. Non-abstract publication claims about implementation-facing work are not
    made below grade B.
@@ -636,5 +646,6 @@ requirement is missing.
 
 | Version | Date       | Author                  | Changes          |
 |---------|------------|-------------------------|------------------|
+| 2.1     | 2026-04-03 | Jonathan D.A. Jewell    | Added Immaculate Guide compliance as Grade D gate requirement for hyperpolymath projects |
 | 2.0     | 2026-03-30 | Jonathan D.A. Jewell    | Raised bar for alpha/beta/publication, added RSR and deep-annotation requirements, added v2 sign-off and challenge posture |
 | 1.0     | 2026-02-28 | Jonathan D.A. Jewell    | Initial release  |
