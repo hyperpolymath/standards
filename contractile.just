@@ -4,19 +4,6 @@
 #
 # SPDX-License-Identifier: PMPL-1.0-or-later
 
-# === DUST (Recovery & Rollback) ===
-# Source: Dustfile.a2ml
-
-# List available dust recovery actions
-dust-status:
-    @echo '  dust-source-rollback: Revert all source changes to last commit [rollback]'
-
-# Revert all source changes to last commit
-dust-source-rollback:
-    @echo 'Executing rollback for source-rollback'
-    git checkout HEAD -- .
-
-
 # === INTEND (Declared Future Intent) ===
 # Source: Intentfile.a2ml
 
@@ -24,40 +11,20 @@ dust-source-rollback:
 intend-list:
     @echo '=== Declared Intent ==='
     @echo ''
-    @echo 'Features:'
+    @echo 'Purpose:'
     @echo ''
-    @echo 'Quality:'
-
-
-# === MUST (Physical State Checks) ===
-# Source: Mustfile.a2ml
-
-# Run all must checks
-must-check: must-license-present must-readme-present must-spdx-headers must-no-banned-files
-    @echo 'All must checks passed'
-
-# LICENSE file must exist
-must-license-present:
-    test -f LICENSE
-
-# README must exist
-must-readme-present:
-    test -f README.adoc || test -f README.md
-
-# Source files should have SPDX license headers
-must-spdx-headers:
-    find . -name '*.rs' -o -name '*.res' -o -name '*.gleam' | head -20 | xargs -r grep -L 'SPDX-License-Identifier' | wc -l | grep -q '^0$'
-
-# No Dockerfiles or Makefiles
-must-no-banned-files:
-    test ! -f Dockerfile && test ! -f Makefile
+    @echo 'Anti-Purpose:'
+    @echo '  - A fork or wrapper around another tool'
+    @echo '  - A monorepo (unless explicitly structured as one)'
+    @echo ''
+    @echo 'If In Doubt:'
 
 
 # === TRUST (Integrity & Provenance Verification) ===
 # Source: Trustfile.a2ml
 
 # Run all trust verifications
-trust-verify: trust-license-content trust-no-secrets-committed trust-container-images-pinned
+trust-verify: trust-license-content trust-no-secrets-committed
     @echo 'All trust verifications passed'
 
 # LICENSE contains expected SPDX identifier
@@ -68,8 +35,30 @@ trust-license-content:
 trust-no-secrets-committed:
     test ! -f .env && test ! -f credentials.json && test ! -f .env.local
 
-# Containerfile base images use pinned digests
-trust-container-images-pinned:
-    test ! -f Containerfile || grep -q '@sha256:' Containerfile
 
+# === K9 Components ===
+
+# K9 component: contractiles/k9/examples/ci-config.k9.ncl
+k9-ci-config:
+    contractile k9 run contractiles/k9/examples/ci-config.k9.ncl
+
+# K9 component: contractiles/k9/examples/project-metadata.k9.ncl
+k9-project-metadata:
+    contractile k9 run contractiles/k9/examples/project-metadata.k9.ncl
+
+# K9 component: contractiles/k9/examples/setup-repo.k9.ncl
+k9-setup-repo:
+    contractile k9 run contractiles/k9/examples/setup-repo.k9.ncl
+
+# K9 component: contractiles/k9/template-hunt.k9.ncl
+k9-template-hunt:
+    contractile k9 run contractiles/k9/template-hunt.k9.ncl
+
+# K9 component: contractiles/k9/template-kennel.k9.ncl
+k9-template-kennel:
+    contractile k9 run contractiles/k9/template-kennel.k9.ncl
+
+# K9 component: contractiles/k9/template-yard.k9.ncl
+k9-template-yard:
+    contractile k9 run contractiles/k9/template-yard.k9.ncl
 

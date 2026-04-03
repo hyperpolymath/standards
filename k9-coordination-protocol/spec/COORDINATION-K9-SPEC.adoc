@@ -1,0 +1,230 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= K9 Coordination File Specification
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:revdate: 2026-04-03
+:revnumber: 1.0.0
+:description: Schema specification for coordination.k9 files
+:toc:
+
+== Status
+
+Draft — Version 1.0.0
+
+== File Identity
+
+[cols="1,3"]
+|===
+| Filename | `coordination.k9`
+| Location | Repository root
+| K9 Level | Kennel (pure data, no execution)
+| Magic Number | `K9!` (mandatory first line)
+| SPDX | `PMPL-1.0-or-later` (or project license)
+|===
+
+== Schema
+
+=== Required Sections
+
+==== `metadata`
+
+Identity and versioning for the coordination file itself.
+
+[source,yaml]
+----
+metadata:
+  schema: k9-coordination
+  schema_version: 1.0.0
+  generated_by: k9-coordination-generator
+  last_updated: 2026-04-03
+----
+
+==== `project`
+
+Core project identity. Tells any arriving agent what this project IS.
+
+[source,yaml]
+----
+project:
+  name: "project-name"
+  description: "One-line description"
+  license: PMPL-1.0-or-later
+  repo: "hyperpolymath/project-name"
+  languages:
+    - ReScript
+    - Rust
+  build_system: just
+  runtime: deno
+----
+
+==== `invariants`
+
+Rules that MUST NOT be violated. Each invariant has an id, rule, and reason.
+
+[source,yaml]
+----
+invariants:
+  - id: no-typescript
+    rule: "Do not introduce TypeScript files anywhere in this project"
+    reason: "ReScript is the chosen frontend language — this is deliberate"
+    severity: critical
+
+  - id: custom-tea-runtime
+    rule: "Do not replace the custom TEA runtime in src/tea/"
+    reason: "18-module custom build — rescript-tea was deliberately rejected"
+    severity: critical
+----
+
+Severity levels: `critical` (never violate), `high` (ask user first),
+`moderate` (prefer compliance).
+
+==== `protected`
+
+Files and directories that are architecturally significant and must not be
+deleted, reorganised, or replaced without explicit user approval.
+
+[source,yaml]
+----
+protected:
+  - path: src/tea/
+    reason: "Custom TEA runtime — 18 modules"
+  - path: .machine_readable/
+    reason: "Canonical location for all A2ML state files"
+  - path: coordination.k9
+    reason: "This file — source of truth for AI coordination"
+----
+
+=== Optional Sections
+
+==== `architecture`
+
+Deliberate architectural decisions that may look wrong to an unfamiliar agent.
+
+[source,yaml]
+----
+architecture:
+  - id: gossamer-not-tauri
+    decision: "Gossamer (Zig + WebKitGTK) is the desktop backend"
+    reason: "Migrated from Tauri 2.0 — this is the intended direction"
+    alternatives_rejected:
+      - Tauri
+      - Electron
+      - native GTK
+
+  - id: deno-npm-hybrid
+    decision: "Deno orchestrates builds but npm used for ReScript compiler"
+    reason: "ReScript compiler requires npm — this is the only exception"
+----
+
+==== `do_not_create`
+
+Things that must NOT be introduced. Prevents well-meaning agents from
+creating parallel systems.
+
+[source,yaml]
+----
+do_not_create:
+  - pattern: "**/*.ts"
+    reason: "TypeScript is banned — use ReScript"
+  - pattern: "Dockerfile"
+    reason: "Use Containerfile (Podman, not Docker)"
+  - pattern: "package-lock.json"
+    reason: "npm lock files banned — use deno.lock"
+  - description: "REST API parallel to Groove endpoints"
+    reason: "Groove is the inter-service protocol"
+----
+
+==== `terminology`
+
+Correct terminology for this project. Prevents agents from using wrong names.
+
+[source,yaml]
+----
+terminology:
+  - correct: panels
+    incorrect:
+      - panes
+      - tabs
+      - windows
+    context: "PanLL UI elements are always called panels"
+----
+
+==== `ecosystem`
+
+How this project relates to others. Helps agents understand what NOT to
+duplicate and where to look for related functionality.
+
+[source,yaml]
+----
+ecosystem:
+  depends_on:
+    - name: gossamer
+      role: "Desktop backend (WebKitGTK + Zig)"
+    - name: verisimdb
+      role: "Persistent storage layer"
+  consumed_by:
+    - name: idaptik
+      role: "Uses PanLL as level editor"
+  related:
+    - name: typell
+      role: "Type intelligence engine — cross-panel type checking"
+----
+
+==== `coordination` (Phase 2)
+
+Active agent work tracking. Updated by agents or tooling.
+
+[source,yaml]
+----
+coordination:
+  active:
+    - agent: claude
+      area: "ABI layer + Groove endpoints"
+      started: 2026-04-03
+      status: in-progress
+    - agent: gemini
+      area: "Test coverage for auth module"
+      started: 2026-04-02
+      status: blocked
+      blocker: "Waiting for upstream API key"
+  completed:
+    - agent: cursor
+      area: "CSS layout refactor"
+      completed: 2026-04-02
+  available:
+    - "Documentation for new API surface"
+    - "Integration tests for Groove handlers"
+----
+
+== Validation Rules
+
+1. File MUST start with `K9!` on line 1
+2. `metadata` section MUST be present with `schema: k9-coordination`
+3. `project` section MUST be present
+4. `invariants` section MUST be present (even if empty list)
+5. Each invariant MUST have `id`, `rule`, and `reason`
+6. Each protected entry MUST have `path` and `reason`
+7. Severity defaults to `critical` if omitted
+
+== Generator Behaviour
+
+The generator reads `coordination.k9` and emits one file per supported AI tool.
+All generated files:
+
+1. Start with a comment indicating they were generated from `coordination.k9`
+2. Include a "do not edit directly" warning
+3. Render all sections as markdown appropriate for the target tool
+4. Are idempotent — re-running overwrites with current state
+
+Generated files SHOULD be committed to the repository so that AI tools
+which read them on startup get the coordination context immediately.
+
+== Relationship to Existing Files
+
+`coordination.k9` does NOT replace:
+
+* `0-AI-MANIFEST.a2ml` — the gateway file still serves as universal entry point
+* `.machine_readable/*.a2ml` — state/meta files remain authoritative
+* `.claude/CLAUDE.md` — can coexist; generated CLAUDE.md merges with existing
+
+The A2ML gateway SHOULD reference `coordination.k9` in its inventory so
+agents following the gatekeeper protocol discover it.
