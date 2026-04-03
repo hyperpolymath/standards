@@ -1,0 +1,544 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+= The Immaculate Guide to Forging & Distribution (Hyperpolymath Edition)
+Jonathan D.A. Jewell
+:doctype: article
+:toc: left
+:toclevels: 3
+:sectnums:
+:version: 1.0.0
+:date: 2026-04-03
+:status: Active
+:standard: Part of Rhodium Standard Repositories (RSR)
+:crg-gate: Required for CRG Grade D
+
+____
+_From Idea to Execution — Eliminating Friction Between Creation and Adoption._
+
+_Derived from the Immaculate Guide to Forging & Distribution, adapted
+for the hyperpolymath ecosystem. Where the original used generic examples
+(Docker, generic asdf, arbitrary gcc flags), this edition uses the actual
+tooling of the hyperpolymath stack. Compliance with this guide is a gate
+requirement for CRG Grade D._
+____
+
+== Preamble: The Real Failure Mode
+
+Most software does not fail because it is wrong.
+It fails because it is difficult to adopt.
+The gap between "works on my machine" and "works everywhere" is a failure of
+empathy — and a failure of discipline.
+
+In the hyperpolymath ecosystem this failure takes a specific form: a repo
+works inside the Eclipse drive, inside your asdf-managed toolchain, against
+your VeriSimDB instance, in your active Wayland session — and nowhere else.
+Every principle below exists to close that gap.
+
+[NOTE]
+====
+*CRG gate:* A component cannot reach Grade D without demonstrating compliance
+with Principles I through IX below. Record evidence in `READINESS.md` or
+`.machine_readable/STATE.a2ml` under `(immaculate-guide-compliance ...)`.
+====
+
+== I. Destroy Your Advantage
+
+_You are not your user. Your environment is contaminated. Test as a stranger._
+
+Your Eclipse drive, your asdf shims, your `.tool-versions`, your running
+VeriSimDB instance, your Wayland session, your existing `~/.config` — none of
+these exist for a first-time user.
+
+=== What to Do
+
+Test from a Chainguard base image via Podman (never Docker):
+
+[source,bash]
+----
+# Minimal Chainguard shell — deliberately has nothing
+podman run --rm -it cgr.dev/chainguard/bash:latest bash
+
+# Or use Stapeln to spin up an ephemeral project container
+just container-test
+# (Stapeln recipe in justfile — see Principle III)
+----
+
+The `cgr.dev/chainguard/bash` image has no package manager, no asdf, no Rust,
+no Deno, no Zig. If your install instructions work there, they work everywhere.
+
+=== Stapeln Integration
+
+Every repo that ships a Stapeln container MUST have a `Containerfile`
+(never `Dockerfile`) with a Chainguard base. The `just container-test` recipe
+in the justfile MUST:
+
+1. Build the Stapeln container from scratch.
+2. Run the full `just readiness` suite inside it.
+3. Exit non-zero if anything fails.
+
+*Failing evidence:* "It works on my machine" is not evidence. A passing
+`just container-test` in CI is.
+
+== II. Dependency Alchemy
+
+_Never require a dependency you can create. Systems must bootstrap themselves._
+
+=== The Hyperpolymath Bootstrap Chain
+
+The ecosystem runs on asdf. Every repo carries a `.tool-versions` that pins
+exact versions. The bootstrap sequence for any hyperpolymath repo is:
+
+[source,bash]
+----
+# 1. asdf itself (if not present)
+if ! command -v asdf >/dev/null 2>&1; then
+    git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch v0.14.1
+    . "$HOME/.asdf/asdf.sh"
+fi
+
+# 2. Install all tools declared in .tool-versions
+asdf install
+
+# 3. Idris2, Zig, Deno, Rust — all managed via asdf plugins
+# (hyperpolymath maintains asdf-tool-plugins monorepo with 74 plugins)
+
+# 4. Verify
+asdf current
+----
+
+*Rule:* Every tool your project depends on MUST be declared in `.tool-versions`
+with a pinned version. No undeclared toolchain dependencies.
+
+=== Deno as Primary JS/TS Runtime
+
+All JavaScript dependencies use Deno and `deno.json` imports.
+No `package.json` for runtime deps. No `node_modules` in production.
+
+[source,bash]
+----
+# Bootstrap Deno (if asdf not yet available)
+if ! command -v deno >/dev/null 2>&1; then
+    asdf plugin add deno
+    asdf install deno latest
+fi
+----
+
+=== rsr-template-repo as Canonical Start
+
+Every new repository MUST start from `rsr-template-repo`, not from scratch.
+This ensures the 17 required workflows, the `.machine_readable/` directory,
+and the `justfile` scaffold are present from day one.
+
+[source,bash]
+----
+cd ~/Documents/hyperpolymath-repos   # symlink to /mnt/eclipse/repos/
+git clone https://github.com/hyperpolymath/rsr-template-repo new-repo-name
+cd new-repo-name
+rm -rf .git && git init
+# Customise placeholders: {{REPO}}, {{OWNER}}, {{FORGE}}
+----
+
+== III. The Build Covenant
+
+_Nothing exists unless it is built. Prefer discovery over enumeration._
+
+=== Idris2 ABI + Zig FFI Discovery
+
+Every FFI boundary in the hyperpolymath stack is governed by the
+Idris2 ABI / Zig FFI standard. Build scripts MUST discover these
+boundaries rather than hardcode them:
+
+[source,bash]
+----
+# Discover and build all Zig FFI implementations
+# (mirrors the standard src/abi/ → ffi/zig/ directory layout)
+for abi_dir in src/abi/*/; do
+    component="$(basename "$abi_dir")"
+    ffi_dir="ffi/zig/$component"
+    if [ -f "$ffi_dir/build.zig" ]; then
+        echo "Building FFI: $component"
+        (cd "$ffi_dir" && zig build -Doptimize=ReleaseSafe)
+    fi
+done
+
+# Generate C headers from Idris2 ABI definitions
+for idr in src/abi/*.idr; do
+    idris2 --codegen chez "$idr" --output-dir generated/abi/
+done
+----
+
+=== justfile as the Sole Build Interface
+
+No Makefiles. Every build, test, lint, container, and readiness action MUST
+be declared in the `justfile`. If it is not in the `justfile`, it does not
+exist officially:
+
+[source,bash]
+----
+# Standard justfile targets (must be present)
+just build          # Build everything (Rust, Zig, Idris2, ReScript, Deno)
+just test           # Run all tests
+just readiness      # Run CRG readiness suite
+just container-test # Build + test inside Stapeln/Chainguard container
+just panic          # Run panic-attack assail on this repo
+just hypatia        # Run Hypatia neurosymbolic scan
+just clean          # Clean build artifacts
+just install        # Install binary to ~/.asdf/installs/<lang>/<version>/bin/
+----
+
+*Rule:* `just build` on a clean `asdf install` environment MUST succeed
+without any manual intervention.
+
+== IV. FFI Contracts
+
+_Treat every boundary as a strict ABI contract, proved correct before
+shipping._
+
+=== The Idris2 → Zig → C Header Chain
+
+In the hyperpolymath ABI/FFI standard, ABI correctness is proved at
+compile time in Idris2 using dependent types. The Zig FFI layer implements
+the proved interface. The C headers are generated, not handwritten.
+
+[source,bash]
+----
+# The chain (never skip steps):
+# 1. Idris2 ABI definition with dependent type proofs
+#    src/abi/Types.idr, Layout.idr, Foreign.idr
+
+# 2. Idris2 type-checks the ABI (proves memory layout, alignment, no UB)
+idris2 --check src/abi/Foreign.idr
+
+# 3. Zig implements the proved interface (zero-cost, C-compatible ABI)
+#    ffi/zig/src/main.zig  implements the types from the Idris2 ABI
+
+# 4. Zig builds a shared library with the correct RPATH for same-dir lib
+zig build -Doptimize=ReleaseSafe \
+    -Dinstall-prefix=./zig-out
+
+# 5. Integration test against the C header
+zig test ffi/zig/test/integration_test.zig
+----
+
+=== Non-Negotiables for FFI
+
+- *No `unsafe` at FFI boundaries without a proved Idris2 ABI counterpart.*
+- *No handwritten C headers* — generate from `generated/abi/`.
+- *No `believe_me`, `assert_total`, `Admitted`, `sorry`, `unsafeCoerce`*
+  in Idris2 or Haskell ABI code. These are banned patterns.
+- The Zig FFI integration test MUST appear in the `justfile` as
+  `just test-ffi` and run in CI.
+
+== V. Build Manifest
+
+_If code exists but is not declared in the build, it is a lie._
+
+=== A2ML Manifest as the Source of Truth
+
+Every repo carries a `0-AI-MANIFEST.a2ml` (or `AI.a2ml`) at its root.
+This file is the canonical entry point for AI agents and the authoritative
+record of what the repo contains.
+
+A component that exists in source but is absent from:
+
+- The `justfile` (no recipe to build or test it)
+- The `0-AI-MANIFEST.a2ml` (not declared in the manifest)
+- The `.machine_readable/STATE.a2ml` (not tracked in state)
+
+...does not officially exist. It is a ghost. Ghost code is technical debt
+that cannot be audited, tested, or shipped.
+
+=== Checklist
+
+- [ ] Every source module has a `just build-<module>` or is covered by `just build`.
+- [ ] Every Idris2 ABI definition has a corresponding Zig FFI and is built by `just build`.
+- [ ] Every binary has a `just install` target.
+- [ ] `0-AI-MANIFEST.a2ml` lists all canonical file locations and critical invariants.
+- [ ] `.machine_readable/STATE.a2ml` tracks every component with a CRG grade.
+
+== VI. CI as Truth
+
+_CI validates reality. Fresh install jobs are mandatory. panic-attack runs
+before every merge._
+
+=== The Hyperpolymath CI Stack
+
+Every repo uses the 17 required workflows from `rsr-template-repo`.
+The three that act as truth validators are:
+
+[source,bash]
+----
+# Local equivalent of what CI runs:
+
+# 1. panic-attack: static analysis must pass before commit
+just panic
+# Runs: panic-attack assail . --output-format json
+# Fails on: Critical or High findings with no documented waiver
+
+# 2. Hypatia: neurosymbolic scan
+just hypatia
+# Runs: hypatia-scan against repo rules
+# Validates: RSR compliance, ABI/FFI standards, language policy
+
+# 3. Readiness: CRG evidence collection
+just readiness
+# Runs: cargo test --test readiness (or equivalent)
+# Produces: READINESS.md evidence table
+----
+
+=== Fresh Install CI Job
+
+The `quality.yml` workflow MUST include a job that:
+
+1. Starts from a Chainguard container with only asdf.
+2. Runs `asdf install`.
+3. Runs `just build`.
+4. Runs `just test`.
+5. Runs `just panic` (panic-attack assail).
+
+If this job does not exist, the repo fails Immaculate Guide compliance.
+
+=== Pre-Commit Gate
+
+`panic-attack assail .` MUST run before every commit. Add to `.git/hooks/pre-commit`:
+
+[source,bash]
+----
+#!/usr/bin/env bash
+panic-attack assail . --exit-code || {
+    echo "panic-attack: Critical/High findings — commit blocked" >&2
+    exit 1
+}
+----
+
+Or configure via `panic-attacker.toml`:
+
+[source,toml]
+----
+[assail]
+fail_on = ["Critical", "High"]
+skip_dirs = ["external_corpora", "third_party", "corpus", "runtime"]
+----
+
+== VII. Distribution
+
+_The best distribution is the one users never have to build themselves._
+
+=== Stapeln Containers (Primary Distribution)
+
+Every repo that ships a binary SHOULD ship a Stapeln container.
+Stapeln containers use Chainguard base images and are built with Podman:
+
+[source,bash]
+----
+# Build Stapeln container
+podman build -f Containerfile -t ghcr.io/hyperpolymath/<repo>:latest .
+
+# Run (replaces "docker run -p 7700:7700 ghcr.io/...")
+podman run --rm -p 7700:7700 ghcr.io/hyperpolymath/<repo>:latest
+
+# Never use Docker — always Podman
+# Never use "Dockerfile" — always "Containerfile"
+----
+
+=== BoJ-Server Cartridges (Service Distribution)
+
+Services that integrate with the hyperpolymath ecosystem are distributed
+as BoJ-server cartridges. A cartridge is a self-describing deployment unit:
+
+[source,bash]
+----
+# Cartridge structure
+cartridges/<service>/
+├── cartridge.toml    # Declared capabilities, Groove endpoints
+├── ffi/              # Zig FFI shared libs
+├── build.zig         # Zig build (if FFI present)
+└── src/              # Service source
+
+# The BoJ-server discovers cartridges via discovery (not enumeration):
+for d in cartridges/*/; do
+    [ -f "$d/cartridge.toml" ] && boj-server load "$d"
+done
+----
+
+=== Binary Distribution via GitHub Releases
+
+For CLI tools (like `panic-attack`):
+
+- GitHub Actions builds release binaries for x86_64-linux and aarch64-linux.
+- Binaries are SHA256-checksummed and attached to GitHub Releases.
+- Users install via asdf plugin (maintained in `asdf-tool-plugins` monorepo):
+
+[source,bash]
+----
+asdf plugin add panic-attack
+asdf install panic-attack latest
+asdf global panic-attack latest
+----
+
+== VIII. README Contract
+
+_Every command must work on a clean machine. EXPLAINME.adoc is the real entry
+point._
+
+=== The Dual-Document Contract
+
+Every hyperpolymath repo carries two mandatory entry documents:
+
+[cols="1,2"]
+|===
+| File | Purpose
+
+| `README.adoc`
+| Human-facing overview. Every command listed MUST work after `asdf install`
+  on a clean machine. No assumed context.
+
+| `EXPLAINME.adoc`
+| Deep orientation for external reviewers and AI agents. Must contain:
+  purpose, critical invariants, directory map, execution surfaces,
+  proof/test surfaces, and known limitations.
+|===
+
+=== The AI Manifest Contract
+
+`0-AI-MANIFEST.a2ml` (or `AI.a2ml`) is the first file any AI agent reads.
+It MUST contain:
+
+- Canonical file locations (e.g. "SCM/A2ML files ONLY in `.machine_readable/`")
+- Critical invariants (rules that must never be violated)
+- Repository structure overview
+- Lifecycle hooks (on-enter: read manifest; on-exit: update STATE.a2ml)
+
+If this file is absent, the repo fails Immaculate Guide compliance regardless
+of all other criteria.
+
+=== README Self-Test
+
+Every code block in `README.adoc` that contains a shell command MUST be
+testable via `just readme-test` (or equivalent). CI MUST run this test.
+
+== IX. Operational Edicts
+
+_Test from zero. Ship proved code. Pin everything. Automate everything._
+
+=== Edict 1: Test from Zero
+
+Before any release, run `just container-test`. If it fails on a clean
+Chainguard container, the release is blocked.
+
+=== Edict 2: Pin Everything
+
+`.tool-versions`, Cargo.lock, `deno.json` import maps, Idris2 package sets,
+GitHub Actions SHA pins — nothing is floating. Every dependency is pinned to
+an exact version or commit SHA.
+
+SHA pin table for common Actions is maintained in the global `CLAUDE.md`.
+
+=== Edict 3: Formal Verification First
+
+Where correctness matters, use Idris2 (not ATS2, not Lean for new code, not
+informal argument). Every ABI boundary MUST have a proved Idris2 counterpart.
+
+Banned shortcuts: `believe_me`, `assert_total`, `Admitted`, `sorry`,
+`unsafeCoerce`, `Obj.magic`. If you need one of these, open a proof debt
+issue and plan to close it.
+
+=== Edict 4: Groove-First Communications
+
+Inter-service communication MUST use the Groove protocol. No ad-hoc REST,
+no raw WebSocket, no undocumented IPC. If two components talk to each other
+and they are not using Groove, that boundary is not officially a boundary — it
+is an undocumented dependency.
+
+[source,bash]
+----
+# Groove endpoint declaration in cartridge.toml
+[groove]
+endpoints = ["assail.scan", "assail.report", "bridge.triage"]
+transport = "unix-socket"
+----
+
+=== Edict 5: VeriSimDB Everywhere
+
+Every repo that produces durable data MUST persist it to a per-project
+VeriSimDB instance. File I/O for scan results, state, build artifacts,
+and attestation records is a temporary measure — the canonical store is
+VeriSimDB.
+
+[source,bash]
+----
+# Verify VeriSimDB is running for this project
+verisimdb status --project "$(basename "$PWD")"
+# Expected: running, port declared in PORT-REGISTRY.md
+----
+
+=== Edict 6: Single Main Branch
+
+Every hyperpolymath repo has exactly one branch: `main`. All others are
+temporary and are deleted after merge. If you visit a repo and see stale
+branches, delete them as part of normal housekeeping.
+
+=== Edict 7: panic-attack is Not Optional
+
+`panic-attack assail` runs:
+
+- As a pre-commit hook (blocks commit on Critical/High).
+- In CI (`hypatia-scan.yml`).
+- Before every release (`just readiness` includes it).
+- On schedule (weekly, via `assemblyline` for org-wide scans).
+
+A release that has not been scanned by `panic-attack` is not a release.
+It is a guess.
+
+=== Edict 8: Mirror on Push
+
+Every push to `main` MUST trigger mirroring to GitLab and Bitbucket via
+`mirror.yml`. This is automated in the rsr-template-repo workflows. If
+mirroring fails, investigate — do not push again and hope for the best.
+
+== Epilogue
+
+The first 10 minutes define whether your software lives or dies.
+Make them immaculate.
+
+In the hyperpolymath ecosystem that means: a stranger with only Podman and
+a git clone can reach `just build && just test` without reading anything
+except `README.adoc`. If they cannot, the repo has failed this guide,
+and it cannot be CRG Grade D until it passes.
+
+---
+
+== Compliance Evidence Record
+
+To satisfy Immaculate Guide compliance (required for CRG Grade D), record
+evidence in `.machine_readable/STATE.a2ml`:
+
+[source,scheme]
+----
+(immaculate-guide-compliance
+  (version "1.0.0")
+  (assessed "YYYY-MM-DD")
+  (principles
+    (I   (status pass) (evidence "just container-test passes on cgr.dev/chainguard/bash"))
+    (II  (status pass) (evidence ".tool-versions pins all tools; asdf install works from scratch"))
+    (III (status pass) (evidence "just build discovers all Idris2 ABI + Zig FFI; no manual steps"))
+    (IV  (status pass) (evidence "Idris2 ABI proved; Zig FFI integration test in CI"))
+    (V   (status pass) (evidence "All modules in justfile + 0-AI-MANIFEST.a2ml + STATE.a2ml"))
+    (VI  (status pass) (evidence "panic-attack pre-commit hook; fresh install CI job in quality.yml"))
+    (VII (status pass) (evidence "Stapeln container in ghcr.io/hyperpolymath/<repo>"))
+    (VIII (status pass) (evidence "README.adoc + EXPLAINME.adoc + 0-AI-MANIFEST.a2ml present"))
+    (IX  (status pass) (evidence "All 8 edicts satisfied; see READINESS.md"))))
+----
+
+== Revision History
+
+[cols="1,1,2,3"]
+|===
+| Version | Date | Author | Changes
+
+| 1.0.0
+| 2026-04-03
+| Jonathan D.A. Jewell
+| Initial hyperpolymath edition, derived from Immaculate Guide to Forging & Distribution. Replaces Docker with Podman/Chainguard/Stapeln, replaces generic asdf with hyperpolymath asdf chain, replaces gcc rpath with Idris2/Zig ABI standard, adds Groove, VeriSimDB, panic-attack, PanLL, BoJ cartridge, and CRG-D gate.
+|===
