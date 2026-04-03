@@ -1,0 +1,549 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Hyperpolymath Testing & Benchmarking Taxonomy
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v1.0.0, 2026-04-03
+:toc: macro
+:toclevels: 4
+:icons: font
+:source-highlighter: rouge
+:experimental:
+
+[abstract]
+--
+Canonical specification for all test categories, aspect dimensions, proof systems,
+and benchmark classifications across the hyperpolymath estate. This document is
+the single source of truth — all per-repo TEST-NEEDS.md files, CRG assessments,
+gitbot enforcement, Hypatia rules, and PanLL dashboards reference this taxonomy.
+--
+
+toc::[]
+
+== Status
+
+[cols="1,3"]
+|===
+| Version | 1.0.0
+| Date | 2026-04-03
+| CRG Grade | D (alpha — this document itself)
+| Enforcement | Manual until gitbot-fleet integration (v1.1)
+|===
+
+== Scope
+
+This taxonomy applies to every assessable component in the hyperpolymath estate.
+A component must declare which categories apply and demonstrate evidence for each.
+Categories that do not apply must be explicitly marked N/A with justification.
+
+== Part I: Test Categories
+
+=== 1. Unit Tests
+
+**Definition:** Single-function or single-module tests with dependencies mocked or stubbed.
+
+**Purpose:** Verify that individual units of logic are correct in isolation.
+
+**Tools:** Framework-native (`cargo test`, `mix test`, `deno test`, `gleam test`, etc.)
+
+**Coverage expectation:** All public APIs, all error branches.
+
+**Applies to:** Every repo with source code.
+
+=== 2. Point-to-Point (P2P) Tests
+
+**Definition:** Multi-component tests verifying correct interaction across a single seam
+(e.g., caller→callee, client→server, FFI boundary, IPC channel).
+
+**Purpose:** Verify that two components communicate correctly when connected.
+
+**Tools:** Integration test suites, mock servers, test doubles at the far end only.
+
+**Coverage expectation:** All significant data flow paths across seams.
+
+**Applies to:** Any repo with inter-component communication.
+
+=== 3. End-to-End (E2E) Tests
+
+**Definition:** Full-pipeline tests from user-facing entry point to final observable output,
+exercising the real stack (no mocks except external services).
+
+**Purpose:** Verify that the system works as a user would experience it.
+
+**Tools:** Playwright, Cypress, custom CLI test harnesses, `tests/e2e.sh`.
+
+**Coverage expectation:** All release-candidate workflows.
+
+**Applies to:** Any repo that ships a user-facing artifact.
+
+=== 4. Build Tests
+
+**Definition:** Verify that the project builds cleanly from a fresh checkout.
+
+**Purpose:** Catch dependency rot, missing files, stale lockfiles, platform assumptions.
+
+**Tools:** `just build`, `cargo build`, `deno task build`, CI matrix builds.
+
+**Coverage expectation:** All supported platforms × all supported toolchain versions.
+
+**Applies to:** Every repo.
+
+=== 5. Execution & Runtime Tests
+
+**Definition:** Verify that compiled/interpreted code executes correctly under runtime conditions
+(VM behaviour, JIT correctness, bytecode verification, hot-reload stability).
+
+**Purpose:** Catch issues that only manifest at runtime, not compile time.
+
+**Tools:** Runtime test harnesses, `oo7 run`, interpreter self-tests.
+
+**Applies to:** Interpreters, VMs, JIT compilers, transpilers, REPLs.
+
+=== 6. Reflexive Tests
+
+**Definition:** Tests where the system tests itself — self-diagnostics, health checks,
+`just doctor`, internal consistency validation.
+
+**Purpose:** Verify that the system can detect its own failures.
+
+**Tools:** `just doctor`, `just heal`, self-test commands, health endpoints.
+
+**Applies to:** Any repo with a runtime component.
+
+=== 7. Lifecycle Tests
+
+**Definition:** State machine and resource lifecycle correctness — creation, use, cleanup,
+error recovery, graceful shutdown.
+
+**Purpose:** Verify no resource leaks, no use-after-free, no orphaned state.
+
+**Tools:** Custom lifecycle harnesses, property tests with state machines.
+
+**Applies to:** Connection pools, file handles, database transactions, service lifetimes.
+
+=== 8. Smoke Tests
+
+**Definition:** Fast sanity checks that verify basic functionality ("does it start? does it respond?").
+
+**Purpose:** Gate before running expensive test suites. Fail fast.
+
+**Tools:** `just smoke`, `curl /health`, process start/stop scripts.
+
+**Coverage expectation:** <30 seconds total. Tests the critical path only.
+
+**Applies to:** Every repo with an executable.
+
+=== 9. Property-Based / Generative Tests
+
+**Definition:** Tests that generate random inputs according to type constraints and verify
+that properties hold across all generated cases.
+
+**Purpose:** Find edge cases that example-based tests miss. Shrinking finds minimal reproductions.
+
+**Tools:** `proptest` (Rust), `StreamData` (Elixir), `fast-check` (JS/ReScript), QuickCheck (Haskell/Idris2).
+
+**Coverage expectation:** 1000+ generated cases per property. Regression files committed.
+
+**Applies to:** Parsers, serializers, type checkers, any function with a clear invariant.
+
+=== 10. Mutation Tests
+
+**Definition:** Systematically mutate source code (flip operators, delete lines, change constants)
+and verify that tests catch each mutation.
+
+**Purpose:** Measure test suite quality, not code quality. A surviving mutant = a testing gap.
+
+**Tools:** `cargo-mutants` (Rust), `mutation_testing` (Elixir), `stryker` (JS).
+
+**Metric:** Mutation score (killed / total mutants). Target: >80%.
+
+**Applies to:** Repos at CRG C+ where test suite quality matters for confidence.
+
+=== 11. Fuzz Tests
+
+**Definition:** Feed malformed, random, or adversarial input to find crashes, hangs, and
+undefined behaviour.
+
+**Purpose:** Security and robustness. Finds issues that structured tests and property tests miss.
+
+**Tools:** `cargo-fuzz` / `libFuzzer` (Rust), `AFL++`, `jazzer` (JVM), custom harnesses.
+
+**CRITICAL:** No fake fuzz placeholders. If fuzz isn't implemented, say so honestly.
+A placeholder fuzz file is worse than no fuzz at all (misleads reviewers).
+
+**Applies to:** Parsers, network protocols, file format readers, any untrusted input boundary.
+
+=== 12. Contract / Invariant Tests
+
+**Definition:** Verify that declared contractiles (Mustfile, Trustfile, Dustfile, Intentfile,
+K9, ADJUST) actually hold at runtime.
+
+**Purpose:** The contract system is only as strong as its enforcement. Test the contracts.
+
+**Tools:** `must check`, `trust verify`, `k9 eval`, `adjust` CLI, custom contract harnesses.
+
+**Applies to:** Every repo with contractile files.
+
+=== 13. Regression Tests
+
+**Definition:** Tests for specific bugs that were found and fixed, ensuring they never recur.
+
+**Purpose:** Prevent regressions. Each fixed bug becomes a permanent test.
+
+**Tools:** Named test cases with issue/commit references. `tests/regressions/` directory.
+
+**Applies to:** Every repo. If you fixed a bug, add a regression test.
+
+=== 14. Chaos / Resilience Tests
+
+**Definition:** Deliberately inject failures — kill services, corrupt data, drop network,
+exhaust memory, slow clocks — and verify graceful degradation.
+
+**Purpose:** Verify the system doesn't catastrophically fail under adverse conditions.
+
+**Tools:** Custom chaos harnesses, network fault injection, service kill scripts.
+
+**Applies to:** Distributed systems (Burble, PanLL service switching, identity replication),
+any system with graceful degradation claims.
+
+=== 15. Compatibility Tests
+
+**Definition:** Verify backward and forward compatibility — can v0.2 read v0.1 data?
+Can the new API serve old clients?
+
+**Purpose:** Prevent breaking changes from silently corrupting user data or workflows.
+
+**Tools:** Version matrix tests, schema migration tests, API compatibility suites.
+
+**Applies to:** Any repo with persistent data (VeriSimDB), versioned APIs, or wire protocols.
+
+=== 16. Proof Regression Tests
+
+**Definition:** Verify that all formal proofs still compile and verify after code changes.
+
+**Purpose:** Proofs can silently break when definitions change. Catch this in CI.
+
+**Tools:** `coqc`, `idris2 --check`, `lean --run`, `agda --safe`, integrated into CI.
+
+**Applies to:** Every repo with formal proofs.
+
+== Part II: Aspect Test Dimensions
+
+Aspect tests are cross-cutting non-functional concerns. Each aspect can be tested
+at any level (unit, P2P, E2E, etc.). The aspect is the *what*, the test category
+is the *how*.
+
+=== The 14 Aspects
+
+[cols="1,3,3"]
+|===
+| Aspect | Definition | Example Test
+
+| **Dependability**
+| System performs its function under stated conditions for a stated period.
+Includes reliability, availability, fault tolerance, recoverability.
+| Restart after crash preserves state. 99.9% uptime under load.
+
+| **Security**
+| Protection against unauthorised access, data breach, privilege escalation,
+injection, and other OWASP Top 10 + supply chain threats.
+| SQL injection attempt returns error, not data. Dependency audit passes.
+
+| **Usability**
+| Effectiveness, efficiency, and satisfaction with which users achieve goals.
+| New user completes task in <5 minutes. Error messages suggest fixes.
+
+| **Interoperability**
+| Ability to exchange information with other systems and use it correctly.
+Includes protocol compliance, format adherence, API contract honour.
+| JSON output validates against published schema. gRPC client from different language connects.
+
+| **Safety**
+| Freedom from unacceptable risk of harm to people, property, or environment.
+Includes fail-safe defaults, dangerous-pattern bans, formal verification.
+| No `believe_me`/`sorry`/`Admitted` in safety-critical paths. Panic-attack assail passes.
+
+| **Performance**
+| Time behaviour, resource utilisation, capacity under expected and peak load.
+| Startup <2s. Query response <500ms at p99. Memory <128MB steady state.
+
+| **Functionality**
+| Correctness and completeness of the system's stated features.
+| Every documented API endpoint returns the documented response. Feature matrix matches README.
+
+| **Versability**
+| Versioning correctness, API stability, backward compatibility, migration paths,
+semantic versioning adherence, changelog accuracy.
+| v0.2 reads v0.1 persisted data. Breaking changes bump major version. CHANGELOG matches commits.
+
+| **Accessibility**
+| Conformance to WCAG 2.3 AA+ and ADJUST contractile invariants (54 checks).
+Keyboard, screen reader, colour contrast, touch targets, motion, CLI, i18n.
+| axe-core returns 0 violations. Tab order is logical. Screen reader reads all controls.
+
+| **Maintainability**
+| Modularity, analyzability, modifiability, testability of the code itself.
+Can someone else fix a bug? Is the architecture documented?
+| New contributor can build + test in <10 minutes. Deep annotation present per CRG C.
+
+| **Privacy**
+| Data minimisation, consent, no-tracking, no-logging, ephemeral data handling.
+Distinct from security (which protects data; privacy questions whether to collect it).
+| Burble relay stores zero data after connection. No analytics payloads. GDPR compliance.
+
+| **Observability**
+| Ability to understand internal state from external outputs — logging, tracing,
+metrics, diagnostics, error reporting.
+| `just doctor` identifies the problem. Structured logs include correlation IDs. Metrics endpoint works.
+
+| **Reproducibility**
+| Builds, tests, and proofs produce the same result every time, on any machine,
+from the same inputs. Includes deterministic builds and proof replay.
+| `nix build` produces identical hash. `coqc` replays all proofs. CI matches local.
+
+| **Portability**
+| Adaptability to new platforms, installability, replaceability of components.
+Cross-platform builds, container compatibility, architecture independence.
+| Builds on Linux/macOS/Windows. Runs in Podman. No hardcoded paths.
+|===
+
+== Part III: Formal Proof Systems
+
+=== Proof Assistants
+
+[cols="1,2,2,2"]
+|===
+| System | Language | Use Case | Banned Patterns
+
+| **Rocq (Coq)**
+| Gallina + Ltac/Ltac2
+| Semantics proofs, type soundness, preservation
+| `Admitted` (track in proof debt ledger)
+
+| **Idris2**
+| Idris2 (QTT)
+| ABI proofs, dependent types, linear resources, L1-L10 Kategoria levels
+| `believe_me`, `assert_total`
+
+| **Lean4**
+| Lean4
+| Mathematical proofs, algebraic structures
+| `sorry`
+
+| **Agda**
+| Agda
+| CNO proofs, tropical semirings, category theory. Must use `--safe` flag.
+| `postulate` (in --safe mode)
+|===
+
+=== Type Safety Levels (Kategoria Framework)
+
+[cols="1,2,3"]
+|===
+| Level | Name | What It Proves
+
+| L1 | Basic Types | Type errors caught at compile time
+| L2 | Algebraic Data Types | Exhaustive pattern matching, Option/Result handling
+| L3 | Parametric Polymorphism | Parametricity, cannot inspect type parameters
+| L4 | Higher-Kinded Types | Functor/Monad abstraction correctness
+| L5 | GADTs | Type-indexed DSL safety
+| L6 | Dependent Types | Lengths in types, impossible states are impossible
+| L7 | Linear/Affine Types | Resources used exactly once, no leaks
+| L8 | Refinement Types | Value constraints in types (x > 0)
+| L9 | Session Types | Protocol state machines enforced by types
+| L10 | Homotopy/Cubical Types | Equivalence reasoning, univalence
+| L11 | Tropical Cost-Tracking | Min-plus semiring resource bounds (typed-wasm extension)
+| L12 | Epistemic Safety | Information-theoretic access control (typed-wasm extension)
+|===
+
+TypeLL specialises these for database queries. typed-wasm extends to L11-L12.
+Kategoria L10 is the current hard wall (QTT cannot express cubical univalence).
+
+== Part IV: Benchmark Taxonomy
+
+=== Benchmark Categories
+
+[cols="1,3"]
+|===
+| Category | What It Measures
+
+| **Latency** | Time to complete a single operation (p50, p95, p99, p999)
+| **Throughput** | Operations per second under sustained load
+| **Memory** | Steady-state allocation, peak allocation, leak detection
+| **Startup** | Time from process launch to ready-to-serve
+| **Build** | Time to compile from clean checkout
+| **Energy** | Power consumption per operation (platform-dependent)
+| **FFI Overhead** | Cost of crossing language boundaries (Idris2→Zig, Rust→C, etc.)
+|===
+
+=== Six Sigma Classification
+
+Benchmark results are classified using a severity scale inspired by Six Sigma
+process capability analysis. The classification determines CI behaviour.
+
+[cols="1,2,2,2"]
+|===
+| Level | Definition | Threshold | CI Action
+
+| **Unacceptable**
+| Result is outside any reasonable operating envelope.
+Indicates a fundamental regression or broken implementation.
+| >50% regression from baseline OR absolute threshold breach (e.g., startup >10s)
+| **Hard fail.** Block merge. Escalate immediately.
+
+| **Acceptable**
+| Result is within operating envelope but below expected performance.
+May indicate a real regression that needs investigation.
+| 20-50% regression from baseline
+| **Soft fail.** Warn in PR. Require explicit reviewer approval to merge.
+
+| **Ordinary**
+| Result is within normal operating range. No action needed.
+Variance is expected and within statistical control limits.
+| Within ±20% of baseline (±2σ of historical distribution)
+| **Pass.** Record and track for trend analysis.
+
+| **Extraordinary**
+| Result is significantly better than baseline.
+May indicate a genuine improvement OR a measurement error.
+| >20% improvement from baseline
+| **Pass with flag.** Investigate: real improvement or measurement artifact?
+Update baseline if confirmed genuine.
+|===
+
+=== Baseline Management
+
+- Baselines are established from the mean of the last 10 CI runs on main.
+- Baselines are versioned — a new baseline is cut at each minor version bump.
+- Baseline history is retained in VeriSimDB for trend analysis.
+- Manual baseline override requires a comment in the benchmark config explaining why.
+
+== Part V: Enforcement Map
+
+=== Who Checks What
+
+[cols="2,2,3"]
+|===
+| Tool | Checks | Integration
+
+| **panic-attacker**
+| Static analysis, dangerous patterns, security assault, weak points
+| Runs `assail` pre-commit (standing rule). Feeds findings to Hypatia.
+
+| **Hypatia**
+| Neurosymbolic triage (safety triangle: Eliminate > Substitute > Control),
+cross-repo pattern detection, confidence-gated dispatch
+| Consumes panic-attacker scans + VeriSimDB. Dispatches to gitbot-fleet.
+
+| **gitbot-fleet**
+| Automated fixes with confidence thresholds. rhodibot (RSR compliance),
+echidnabot (proof verification), sustainabot (dependency health),
+glambot (documentation), seambot (interoperability), finishbot (completion).
+| Receives dispatch from Hypatia. Creates PRs with confidence scores.
+
+| **CRG v2.0**
+| Grade assessment (X/F/E/D/C/B/A) based on accumulated evidence.
+D requires RSR. C requires annotation. B requires 6+ diverse targets.
+| Manual assessment recorded in READINESS.md. Automated evidence collection planned.
+
+| **contractile CLI**
+| `must check`, `trust verify`, `dust status`, `intend check`, `k9 eval`, `adjust`
+| Contract/invariant test category. Enforcement of Must/Trust/Dust/Intend/K9/ADJUST.
+
+| **V1-GATE**
+| Hard gates for stable release: proofs, tests, benchmarks, build, aspects,
+security, claim parity. Cross-Repo Blitz Rule (Section 4).
+| Publication pre-flight. Blocks release until all evidence present.
+
+| **PanLL**
+| Dashboard visualisation of all test/bench/proof status across estate.
+Event-chain import. Blitz panel.
+| Consumes VeriSimDB data. Displays CRG grades, test gaps, benchmark trends.
+|===
+
+=== CRG ↔ Test Category Mapping
+
+[cols="1,4"]
+|===
+| CRG Grade | Minimum Test Evidence
+
+| **X** | None
+| **F** | Documented evidence of harm/waste (may include test results showing failure)
+| **E** | At least 1 test of any category. Documented failures.
+| **D** | Unit + smoke tests. Test matrix showing successes and failures. RSR compliance.
+| **C** | Unit + P2P + E2E + smoke + reflexive + build + contract + aspect tests. All passing in home context. Benchmarks baselined. Deep annotation.
+| **B** | All of C plus: property-based, fuzz, compatibility, lifecycle tests. Benchmarks in Ordinary range across 6+ diverse targets. Mutation score >80%.
+| **A** | All of B plus: chaos/resilience, regression suite comprehensive, benchmark baselines stable across releases, external user feedback incorporated.
+|===
+
+== Part VI: Cross-Repo Blitz Rule
+
+Per V1-GATE Section 4: when a system claim spans multiple repositories, all in-scope
+repos must be audited together. The weakest repo controls the system release stage.
+
+A "test blitz" means running all applicable test categories across all repos in a
+dependency chain, in a single coordinated pass. The blitz result is a matrix:
+
+[source]
+----
+           unit  P2P  E2E  build  exec  reflex  life  smoke  prop  mut  fuzz  contract  regress  chaos  compat  proof-reg
+repo-a      ✓    ✓    ✓     ✓      -      ✓      ✓     ✓     ✓    ✓     ✓      ✓        ✓       -       ✓        ✓
+repo-b      ✓    ✓    ✗     ✓      ✓      -      -     ✓     -    -     -      ✓        ✓       -       -        ✓
+repo-c      ✓    -    -     ✓      -      -      -     ✓     -    -     -      -        -       -       -        -
+----
+
+The system CRG grade is determined by the lowest grade in the matrix, not the average.
+
+== Appendix A: Test Category Quick Reference
+
+[cols="1,1,1"]
+|===
+| Category | Abbreviation | Applies From CRG
+
+| Unit | UT | E+
+| Point-to-Point | P2P | D+
+| End-to-End | E2E | C+
+| Build | BLD | D+
+| Execution & Runtime | EXE | D+ (if applicable)
+| Reflexive | REF | C+
+| Lifecycle | LCY | C+
+| Smoke | SMK | D+
+| Property-Based | PBT | B+
+| Mutation | MUT | B+
+| Fuzz | FUZ | B+
+| Contract/Invariant | CTR | C+
+| Regression | REG | C+
+| Chaos/Resilience | CHS | B+ (if applicable)
+| Compatibility | CMP | B+ (if applicable)
+| Proof Regression | PRF | C+ (if proofs exist)
+|===
+
+== Appendix B: Aspect Quick Reference
+
+[cols="1,1"]
+|===
+| Aspect | Abbreviation
+
+| Dependability | DEP
+| Security | SEC
+| Usability | USA
+| Interoperability | IOP
+| Safety | SAF
+| Performance | PER
+| Functionality | FUN
+| Versability | VER
+| Accessibility | ACC
+| Maintainability | MNT
+| Privacy | PRI
+| Observability | OBS
+| Reproducibility | RPR
+| Portability | PRT
+|===
+
+== Revision History
+
+[cols="1,1,3"]
+|===
+| Version | Date | Changes
+
+| 1.0.0 | 2026-04-03 | Initial release. 16 test categories, 14 aspect dimensions, 4 proof systems, 12 type levels, Six Sigma benchmark classification, enforcement map, CRG mapping.
+|===
