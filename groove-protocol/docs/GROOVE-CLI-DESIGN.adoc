@@ -1,0 +1,291 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= groove CLI — Design Document
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v0.1.0, 2026-04-04
+:toc: macro
+:toclevels: 3
+
+[abstract]
+--
+Design for the `groove` CLI tool — the missing adoption vehicle for the Groove
+protocol. Addresses the tooling gap identified during the 2026-04-04 estate-wide
+dogfooding audit, where 130+ repos had `.well-known/groove/` directories but no
+validation, no generation, and silent manifest drift.
+--
+
+toc::[]
+
+== Motivation
+
+The dogfooding audit found:
+
+* **3 conflicting port tables** (Idris2 ABI, Zig FFI, browser extension)
+* **`capabilities` serialized as map in static manifests, array in VeriSimDB** — schema split
+* **`groove_version` as `"1"` vs `"1.0.0"`** — string format divergence
+* **Renamed services not reflected in manifests** (`panic-attacker` vs `panic-attack`)
+* **Static manifests drift from actual routes** — no enforcement
+* **30 HTTP servers without any Groove endpoint** — adoption friction too high
+* **Soft groove (passive/CLI) pattern emerged** but isn't in schema
+* **A2ML vs JSON split** — spec says A2ML canonical, reality is 100% JSON
+
+All of these are solvable with tooling.
+
+== Subcommands
+
+=== `groove init [--service-id NAME] [--port PORT] [--passive]`
+
+Generate a `.well-known/groove/manifest.json` for a repo.
+
+**Behaviour:**
+
+1. Detect service type from repo contents:
+   - `Cargo.toml` with `[[bin]]` → Rust binary
+   - `mix.exs` → Elixir/BEAM
+   - `deno.json` → Deno
+   - No listener code detected → passive/CLI mode
+2. Extract `service_id` from binary name or `--service-id` flag
+3. Extract `service_version` from `Cargo.toml`/`mix.exs`/`deno.json` version field
+4. Detect capabilities by scanning route definitions:
+   - axum `Router::new().route("/api/scan", ...)` → infer `static-analysis`
+   - Plug/Phoenix routes → parse router macros
+   - No routes → passive mode, prompt for capability types
+5. Detect `consumes` by scanning dependencies:
+   - `verisimdb` in deps → `octad-storage`
+   - `hypatia` client → `scanning`
+   - `feedback-o-tron` invocation → `bug-reporting`
+6. Determine `requires_auth` per capability from middleware/guard analysis
+7. Write `.well-known/groove/manifest.json`
+8. Optionally generate `src/groove.rs` (Rust) or `lib/groove_plug.ex` (Elixir)
+   with dynamic handler wired into the router
+
+**Passive mode** (`--passive` or auto-detected):
+
+Generates a manifest with `"mode": "passive"` and `"invoke_patterns"` instead
+of `"endpoints"`. Detects CLI subcommands from clap/argparse definitions.
+
+=== `groove validate [PATH]`
+
+Validate an existing manifest against the JSON schema and the actual codebase.
+
+**Checks:**
+
+1. JSON schema conformance (groove-manifest.schema.json)
+2. `groove_version` is exactly `"1"` (not `"1.0.0"`)
+3. `service_id` matches the binary/app name
+4. Every `endpoint` in capabilities is an actual route in the router
+5. Capability `type` values are in the canonical enum (warn on `custom`)
+6. `consumes` array only lists known capability type wire names
+7. No unfilled template placeholders (`{{OWNER}}`, `[YOUR-REPO-NAME]`)
+8. Port in `endpoints` URLs matches actual bind address (if detectable)
+9. `capabilities` is a JSON object (map), not an array
+10. No stale service names (checks against a rename registry)
+
+**Output:** JSON findings compatible with panic-attack format (`file`, `line`, `severity`, `description`),
+so dogfood-gate can consume them directly.
+
+=== `groove check-compat SERVICE_A SERVICE_B`
+
+Check if two services can compose.
+
+**Behaviour:**
+
+1. Load both manifests (from `.well-known/groove/manifest.json` or from running services via HTTP probe)
+2. Check bidirectional capability subset: A.consumes ⊆ B.offers AND B.consumes ⊆ A.offers
+3. Report: COMPATIBLE (with matched caps), PARTIAL (one direction only), INCOMPATIBLE
+4. If Idris2 is available, invoke the `IsSubset` proof for compile-time guarantee
+
+=== `groove probe [HOST] [--port-range START-END]`
+
+Live service discovery — probe ports for running Groove endpoints.
+
+**Behaviour:**
+
+1. Probe `[::1]` first, then `127.0.0.1` (per TRANSPORT.adoc)
+2. Default range: 6460-6500, 7500-7900, 8000-8100, 9000-9100
+3. For each responsive port: fetch `GET /.well-known/groove`, parse manifest
+4. Build a live topology map showing who offers/consumes what
+5. Detect port conflicts (two services claiming the same port)
+6. Output: table or JSON
+
+=== `groove mesh`
+
+Show the current Groove mesh topology from all discovered services.
+
+**Behaviour:**
+
+1. Probe all known ports
+2. For each connected service, fetch `GET /.well-known/groove/mesh` if available
+3. Build a directed graph: edges are capability flows (A offers X → B consumes X)
+4. Detect:
+   - Dangling consumes (B consumes X but nobody offers X)
+   - Redundant offers (both A and C offer the same capability type — potential collision)
+   - Mesh partitions (disconnected subgraphs)
+5. Output: ASCII graph or JSON, compatible with PanLL panel rendering
+
+=== `groove generate-handler [--lang rust|elixir|zig|deno]`
+
+Generate a language-specific Groove endpoint handler from an existing manifest.
+
+**Behaviour:**
+
+1. Read `.well-known/groove/manifest.json`
+2. Generate:
+   - **Rust/axum:** `src/groove.rs` with typed `GrooveManifest` struct, `Router` routes
+     for manifest/health/connect/disconnect/heartbeat/message/recv
+   - **Elixir/Plug:** `lib/groove_plug.ex` following the Burble pattern
+   - **Zig:** `src/groove.zig` with static manifest and health handler
+   - **Deno:** `src/groove.ts` (ReScript compilation target) with `Deno.serve` handler
+3. Wire the handler into the existing router (detect `Router::new()` or `plug GroovePlug`)
+
+=== `groove test [--level 1|2|3|4]`
+
+Run the conformance test suite against a running service.
+
+**Behaviour:**
+
+Maps directly to CONFORMANCE.adoc levels:
+
+- **Level 1 (Groove-Aware):** manifest endpoint responds, valid JSON, at least one capability, bare-first
+- **Level 2 (Groove-Connected):** connect/disconnect/heartbeat endpoints work, graceful degradation
+- **Level 3 (Groove-Proven):** Idris2 ABI present, linear handles, Zig FFI, C headers
+- **Level 4 (Groove-Native):** SemVer negotiation, mTLS, mesh, VeriSimDB provenance
+
+Reports DOG-03 compliance for the testing taxonomy.
+
+=== `groove registry`
+
+Show the canonical port/capability registry.
+
+**Behaviour:**
+
+1. Read the authoritative port table (from Groove.idr or a central `groove-registry.json`)
+2. Show all registered services with ports, capabilities, and status
+3. Detect conflicts with running services
+
+== Port Table Reconciliation
+
+The audit found 3 conflicting tables. The resolution:
+
+[cols="1,1,1,1,1,1"]
+|===
+| Service | Spec Port | Zig FFI | Idris2 ABI | Browser Ext | Resolution
+
+| burble | 6473 | 6473 | 4020 | 6473 | **6473** (Zig+browser+spec agree, Idris2 wrong)
+| vext | 6480 | 6480 | 6480 | 6480 | **6480** (all agree)
+| gitbot-fleet | 8080 | 7500 | 8080 | 7500 | **8080** (actual bind port, Zig+browser stale)
+| panic-attacker | 7600 | 7600 | 7600 | 7600 | **7600** (all agree)
+| conflow | 7700 | 7700 | 7700 | 7700 | **7700** (all agree)
+| rpa-elysium | 7800 | 7800 | 7800 | 7800 | **7800** (all agree)
+| PanLL | 8000 | 4040 | 4040 | 8000 | **8000** (Gossamer src + browser agree, Idris2+Zig stale)
+| VeriSimDB | 8080 | 8093 | 8093 | 8080 | **8080** (actual dev port per CLAUDE.md, Zig+Idris2 stale)
+| ECHIDNA | 9000 | 9000 | 8081 | 9000 | **9000** (Zig+browser agree, Idris2 wrong)
+| Hypatia | 9090 | 9090 | 9090 | 9090 | **9090** (all agree)
+|===
+
+The `groove` CLI should carry the canonical registry and `groove validate` should
+flag any manifest whose port doesn't match.
+
+== Schema Extensions for v1.1
+
+Based on the soft groove pattern and real-world usage:
+
+[source,json]
+----
+{
+  "$comment": "New fields for groove-manifest v1.1",
+
+  "mode": {
+    "type": "string",
+    "enum": ["active", "passive"],
+    "default": "active",
+    "description": "active = HTTP server, passive = CLI/library (no listener)"
+  },
+
+  "invoke_patterns": {
+    "type": "object",
+    "description": "For passive-mode services: how consumers invoke this tool",
+    "additionalProperties": { "type": "string" }
+  },
+
+  "capabilities.*.parameters": {
+    "type": "object",
+    "description": "Typed parameters for the capability (from A2ML field definitions)",
+    "additionalProperties": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "default": {},
+        "required": { "type": "boolean" }
+      }
+    }
+  },
+
+  "degraded_capabilities": {
+    "type": "array",
+    "description": "Capabilities available in degraded mode (e.g. flat-file fallback)",
+    "items": { "type": "string" }
+  }
+}
+----
+
+New capability types to add to the enum:
+
+- `bug-reporting` — feedback-o-tron pattern
+- `dogfood-feedback` — meta-capability for dogfooding loop
+- `cve-analysis` — panic-attacker's Patch Bridge
+- `proof-exchange` — echidna's OpenTheory/Dedukti export
+- `neural-dispatch` — hypatia's neural coordinator
+
+New protocol types:
+
+- `cli` — invocable via shell command, no HTTP listener
+- `mcp` — invocable via BoJ MCP server
+
+== Implementation Plan
+
+=== Phase 1: groove CLI MVP (Rust)
+
+1. `groove init` — manifest generator with auto-detection
+2. `groove validate` — schema + drift checker
+3. `groove probe` — live discovery
+4. `groove registry` — canonical port/capability table
+
+This phase alone eliminates the adoption barrier. Any of the 30 HTTP servers
+without Groove can run `groove init` and get a correct manifest.
+
+=== Phase 2: Conformance + Handlers
+
+5. `groove test` — conformance suite (levels 1-4)
+6. `groove generate-handler` — code generators for Rust/Elixir/Zig/Deno
+7. `groove check-compat` — capability subset checking
+
+=== Phase 3: Mesh + Integration
+
+8. `groove mesh` — topology visualisation
+9. Hypatia rule HYP-DOG-003/008 integration
+10. gitbot-fleet/seambot dispatch for Groove compliance
+11. PanLL panel for live mesh monitoring
+
+== Relationship to Existing Tools
+
+[cols="1,3"]
+|===
+| Tool | How groove CLI relates
+
+| **gossamer** | groove CLI validates manifests; Gossamer hosts the ABI/FFI/schema. The CLI imports Gossamer's schema.
+| **k9iser** | Parallel pattern — k9iser generates K9 contracts from configs, groove generates manifests from routes. Could share the generation framework.
+| **panic-attacker** | groove CLI outputs findings in panic-attack's JSON format (file/line/severity/description). Findings feed the same pipeline.
+| **hypatia** | groove CLI provides the DOG-03/DOG-08 checks that Hypatia dispatches to gitbot-fleet.
+| **feedback-o-tron** | Soft groove is the canonical pattern for feedback-o-tron adoption across the estate.
+| **BoJ** | groove CLI could be a BoJ cartridge: `boj groove validate /path/to/repo`
+|===
+
+== Revision History
+
+[cols="1,1,3"]
+|===
+| Version | Date | Changes
+
+| 0.1.0 | 2026-04-04 | Initial design based on estate-wide dogfooding audit findings.
+|===
