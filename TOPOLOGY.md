@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
 <!-- TOPOLOGY.md — Project architecture map and completion dashboard -->
-<!-- Last updated: 2026-02-19 -->
+<!-- Last updated: 2026-04-04 -->
 
 # Hyperpolymath Standards — Project Topology
 
@@ -23,7 +23,7 @@
                         │  └─────┬─────┘  └────────┬──────────┘  │
                         │        │                 │              │
                         │  ┌─────▼─────┐  ┌────────▼──────────┐  │
-                        │  │ Build     │  │  SCM Metadata     │  │
+                        │  │ Build     │  │  A2ML Metadata    │  │
                         │  │ System    │  │  Family (7)       │  │
                         │  │ (Mustfile)│  │ (STATE, META, etc)│  │
                         │  └─────┬─────┘  └────────┬──────────┘  │
@@ -31,15 +31,35 @@
                                  │                 │
                                  ▼                 ▼
                         ┌─────────────────────────────────────────┐
-                        │          SPECIFICATION MODULES          │
+                        │        A2ML SPECIFICATION MODULES       │
                         │  ┌───────────┐  ┌───────────┐  ┌───────┐│
-                        │  │ meta-scm  │  │ agentic-  │  │ neuro-││
-                        │  │           │  │ scm       │  │ sym   ││
+                        │  │ meta-a2ml │  │ agentic-  │  │neuro- ││
+                        │  │           │  │ a2ml      │  │sym    ││
                         │  └───────────┘  └───────────┘  └───────┘│
                         │  ┌───────────┐  ┌───────────┐  ┌───────┐│
-                        │  │ state-scm │  │ playbook- │  │ anchor││
-                        │  │           │  │ scm       │  │ scm   ││
+                        │  │state-a2ml │  │ playbook- │  │anchor-││
+                        │  │           │  │ a2ml      │  │a2ml   ││
                         │  └───────────┘  └───────────┘  └───────┘│
+                        │  ┌───────────────────────────────────┐  │
+                        │  │        ecosystem-a2ml             │  │
+                        │  └───────────────────────────────────┘  │
+                        └─────────────────────────────────────────┘
+
+                        ┌─────────────────────────────────────────┐
+                        │           PROTOCOL SPECIFICATIONS       │
+                        │  ┌───────┐ ┌──────┐ ┌──────┐ ┌──────┐  │
+                        │  │Groove │ │ AVOW │ │ AXEL │ │  K9  │  │
+                        │  └───────┘ └──────┘ └──────┘ └──────┘  │
+                        │  ┌──────────────┐ ┌─────────────────┐   │
+                        │  │Consent-HTTP  │ │Overlay Protocol │   │
+                        │  └──────────────┘ └─────────────────┘   │
+                        └─────────────────────────────────────────┘
+
+                        ┌─────────────────────────────────────────┐
+                        │         INTEGRATION & TOOLING           │
+                        │  VeriSimDB (:8097)   Hypatia Scan       │
+                        │  ECHIDNA Proofs      PanLL Panels       │
+                        │  Groove Registry     K9 Coordination    │
                         └─────────────────────────────────────────┘
 
                         ┌─────────────────────────────────────────┐
@@ -61,10 +81,27 @@ CORE STANDARDS
   Governance Templates              ██████████ 100%    CODE_OF_CONDUCT/etc verified
 
 SPECIFICATION MODULES
-  meta-scm / state-scm              ██████████ 100%    ABNF & IANA specs stable
-  agentic-scm (Execution)           ██████████ 100%    Entropy budgets verified
-  neurosym-scm                      ██████████ 100%    Proof obligations active
-  playbook-scm / anchor-scm         ██████████ 100%    Realign/Plan specs stable
+  meta-a2ml / state-a2ml             ██████████ 100%    ABNF & IANA specs stable
+  agentic-a2ml (Execution)          ██████████ 100%    Entropy budgets verified
+  neurosym-a2ml                     ██████████ 100%    Proof obligations active
+  playbook-a2ml / anchor-a2ml       ██████████ 100%    Realign/Plan specs stable
+  ecosystem-a2ml                    ██████████ 100%    Ecosystem positioning stable
+
+PROTOCOL SPECIFICATIONS
+  Groove Protocol                   ████████░░  80%    WIP: reference impls needed
+  AVOW Protocol                     ██████░░░░  60%    Draft spec; 0 tests
+  AXEL Protocol                     ████████░░  80%    Beta; 14 tests
+  K9 Self-Validating Components     ██████████ 100%    Stable; 45 tests
+  K9 Coordination Protocol          ████████░░  80%    Phase 1 (Defensive)
+  Consent-Aware HTTP                ██████░░░░  60%    Draft; spec-focused
+  Overlay Protocol                  ████░░░░░░  40%    Spec only; sparse impl
+
+INTEGRATION & DOGFOODING
+  VeriSimDB Instance                ░░░░░░░░░░   0%    Not yet configured
+  Hypatia Self-Scan                 ░░░░░░░░░░   0%    Workflow missing
+  ECHIDNA Proof Verification        ░░░░░░░░░░   0%    Proofs exist but unverified
+  PanLL Panels                      ░░░░░░░░░░   0%    No standards panels yet
+  CRG Self-Assessment               ░░░░░░░░░░   0%    Standards not self-graded
 
 REPO INFRASTRUCTURE
   Justfile / Mustfile               ██████████ 100%    Standard build tasks verified
@@ -72,7 +109,7 @@ REPO INFRASTRUCTURE
   Multi-Forge Enforcement           ██████████ 100%    CI/CD quality gates verified
 
 ─────────────────────────────────────────────────────────────────────────────
-OVERALL:                            ██████████ 100%    Canonical Standards Stable
+OVERALL:                            ████████░░  80%    Core stable; integration layer needed
 ```
 
 ## Key Dependencies
