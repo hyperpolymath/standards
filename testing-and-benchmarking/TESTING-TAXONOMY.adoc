@@ -574,6 +574,232 @@ This implementation demonstrates that even a small CLI tool (single generator sc
 most categories either apply directly or can be honestly marked N/A with justification.
 A blitz does not require artificial tests for inapplicable categories.
 
+== Part VII: Dogfooding Tests
+
+=== Definition
+
+**Dogfooding tests** verify that a project correctly consumes, integrates, and produces
+value from other hyperpolymath tools. This is distinct from interoperability (which
+tests that two systems can exchange data) — dogfooding tests verify that the estate's
+own tools are actually used, correctly wired, and producing real output.
+
+=== The Dogfooding Test Checklist
+
+Every repo must answer these questions. The test evidence goes into the standard
+blitz matrix as a new column: **DOG** (Dogfooding).
+
+[cols="1,3,2"]
+|===
+| Check | What It Tests | How To Test
+
+| **DOG-01: CI gate fires**
+| Do the dogfooding CI tools (Hypatia, panic-attack, dogfood-gate) actually
+execute and produce findings, or do they silently skip?
+| Verify the workflow run log shows non-empty output from each tool. A run
+that produces `[]` with `continue-on-error` is a silent no-op, not a pass.
+
+| **DOG-02: Annotation pipeline works**
+| Do panic-attack findings produce GitHub Actions inline annotations (file + line)?
+| Run `panic-attack assail . --output findings.json` locally, verify each finding
+has non-null `file` and `line` fields. Check GitHub PR annotations appear.
+
+| **DOG-03: Groove manifest conformant**
+| If this repo serves HTTP, does its Groove manifest validate against the schema?
+| `jq . .well-known/groove/manifest.json` passes. JSON Schema validation against
+`gossamer/schema/groove-manifest.schema.json` passes. Ports match actual bind address.
+
+| **DOG-04: K9 contracts enforced**
+| If this repo has config files, do K9 contracts exist and validate?
+| `k9iser build` exits 0. The number of K9 contracts >= the number of significant
+config files. No config file changes without corresponding contract update.
+
+| **DOG-05: VeriSimDB wired (if stateful)**
+| If this repo stores state, is VeriSimDB integrated?
+| Grep for `verisimdb` in source code (not just docs/comments). Verify the
+VeriSimDB client is instantiated and called, not just imported.
+
+| **DOG-06: Template placeholders resolved**
+| No `{{OWNER}}`, `{{REPO}}`, `{{AUTHOR}}`, `[YOUR-REPO-NAME]` remain in
+any workflow, manifest, or configuration file.
+| `grep -rn '{{[A-Z_]*}}' --include='*.yml' . \| grep -v '${{' \| grep -v '.git/'`
+returns zero matches.
+
+| **DOG-07: Tool version currency**
+| Are workflow copies (hypatia-scan, static-analysis-gate) current with the
+rsr-template-repo source?
+| Diff the repo's workflow against `rsr-template-repo/.github/workflows/` equivalent.
+Action SHA pins should match. Job structure should match.
+
+| **DOG-08: Consumer field contract**
+| If this repo consumes output from another tool (e.g., panic-attack JSON),
+does it use the correct field names?
+| For each `jq` expression that parses tool output, verify the field names
+match the tool's actual serialisation. Document the contract in a comment.
+
+| **DOG-09: Iser applicability assessed**
+| Has someone assessed which -iser tools apply to this repo?
+| A `.machine_readable/dogfooding.a2ml` file exists listing applicable isers
+with yes/no/deferred status and justification.
+
+| **DOG-10: Naming currency**
+| All references to renamed tools use current names. No stale binary names,
+old subcommand names, or deprecated APIs.
+| Search for known renames: `panic-attacker` → `panic-attack`, `xray` → `assail`,
+`AGPL` → `PMPL`, `Dockerfile` → `Containerfile`, `docker` → `podman`.
+|===
+
+=== Enforcement
+
+DOG-01 through DOG-10 are checked by:
+
+- **dogfood-gate.yml** (CI): DOG-01, DOG-03, DOG-04, DOG-05, DOG-06
+- **Hypatia**: DOG-06, DOG-07, DOG-10 (new rules needed — see below)
+- **gitbot-fleet/rhodibot**: DOG-07 (workflow currency check — new dispatch target)
+- **Manual blitz**: DOG-02, DOG-08, DOG-09 (until automated)
+
+=== Hypatia Rule Additions for Dogfooding
+
+The following new Hypatia rules are derived from the 2026-04-04 estate dogfooding audit.
+Each rule corresponds to a real class of silent failure found during the audit.
+
+[cols="1,3,1"]
+|===
+| Rule ID | What It Detects | Severity
+
+| **HYP-DOG-001**
+| Unfilled template placeholders in workflow files (`{{OWNER}}`, `{{REPO}}`, etc.)
+| Critical — silently disables CI tools
+
+| **HYP-DOG-002**
+| Stale workflow copies — action SHA pins differ from rsr-template-repo
+| Medium — may use outdated/broken tool invocations
+
+| **HYP-DOG-003**
+| Renamed tool references (panic-attacker binary, xray subcommand, AGPL license)
+| High — broken invocations
+
+| **HYP-DOG-004**
+| Groove port mismatches — manifest advertises port X, server binds port Y
+| High — consumers get connection refused
+
+| **HYP-DOG-005**
+| Docker/Dockerfile usage in non-third-party code (policy: Podman/Containerfile)
+| Medium — policy violation
+
+| **HYP-DOG-006**
+| Consumer field name mismatches — jq parsing `.file` when source emits `.location`
+| High — silent annotation failure
+
+| **HYP-DOG-007**
+| Silent skip pattern — `continue-on-error: true` on a tool that fails to install
+| Medium — masks broken dogfooding
+
+| **HYP-DOG-008**
+| HTTP server without Groove endpoint
+| Low — dogfooding gap, not a security issue
+
+| **HYP-DOG-009**
+| Stateful repo without VeriSimDB reference in source code
+| Low — dogfooding gap
+
+| **HYP-DOG-010**
+| Unfilled `[YOUR-REPO-NAME]` placeholders in 0-AI-MANIFEST.a2ml
+| Medium — a2ml-validate-action's allowlist masks this
+|===
+
+=== gitbot-fleet Dispatch Targets for Dogfooding
+
+[cols="1,3"]
+|===
+| Bot | Dogfooding Responsibility
+
+| **rhodibot**
+| Workflow currency — detects stale copies of RSR workflows and creates PRs
+to update them from the template.
+
+| **echidnabot**
+| Proof + contract verification — verifies K9 contracts validate, formal proofs
+compile, and VeriSimDB schema matches.
+
+| **seambot**
+| Groove + interop — verifies Groove manifests are present, conformant, and
+port numbers match actual bind addresses.
+
+| **finishbot**
+| Template completion — detects unfilled placeholders (`{{OWNER}}`, `[YOUR-REPO-NAME]`)
+and creates PRs with the correct values.
+|===
+
+=== Feedback-o-tron Integration
+
+The `feedback-o-tron` tool is the autonomous multi-platform bug reporter for AI agents.
+When a dogfooding check fails, it should:
+
+1. Create a structured finding (JSON) with the DOG-XX check ID
+2. Submit to VeriSimDB as a dogfooding-specific modality
+3. Optionally create a GitHub issue (via feedback-o-tron's platform adapters)
+4. Feed back to Hypatia for pattern detection across the estate
+
+This creates the **dogfooding feedback loop**: tool → dogfood-gate → finding → feedback-o-tron → issue → fix → tool.
+
+== Part VIII: Soft Groove Strategy
+
+=== What Is a Soft Groove?
+
+A "soft groove" is a lightweight, non-blocking Groove integration. Unlike the full
+Groove protocol (which requires a live HTTP server, capability manifest, and bidirectional
+message passing), a soft groove is:
+
+1. **Declarative**: A static `.well-known/groove/manifest.json` that describes capabilities
+   without requiring a running server
+2. **Consumable**: Other tools can read the manifest at build time or CI time
+3. **Progressive**: Can be upgraded to a full Groove endpoint later
+
+Soft grooves are appropriate for CLI tools, libraries, and batch processors that
+don't serve HTTP but still need to be discoverable by the ecosystem.
+
+=== Soft Groove Manifest Format
+
+A soft groove manifest uses the same JSON format but with `"mode": "passive"`:
+
+[source,json]
+----
+{
+  "groove_version": "1",
+  "service_id": "feedback-o-tron",
+  "service_version": "0.2.0",
+  "mode": "passive",
+  "capabilities": {
+    "bug_reporting": {
+      "type": "bug-reporting",
+      "description": "Autonomous multi-platform bug reporting for AI agents",
+      "protocol": "cli",
+      "invoke": "feedback-o-tron submit --platform github",
+      "requires_auth": true,
+      "panel_compatible": true
+    }
+  },
+  "consumes": ["static-analysis", "octad-storage"],
+  "invoke_patterns": {
+    "ci": "feedback-o-tron submit --ci --format json",
+    "local": "feedback-o-tron submit --interactive",
+    "mcp": "boj feedback-o-tron submit"
+  },
+  "health": null,
+  "applicability": ["individual", "team", "ci"]
+}
+----
+
+=== Deploying feedback-o-tron as a Soft Groove
+
+feedback-o-tron should be soft-grooved into every repo that has a CI pipeline:
+
+1. Add `.well-known/groove/manifest.json` to feedback-o-tron itself (passive mode)
+2. Add a `feedback-o-tron` step to `dogfood-gate.yml` that submits failed checks
+3. Add a `feedback-o-tron.toml` config to repos that want auto-submission
+4. Wire feedback-o-tron into Hypatia's dispatch pipeline (Hypatia finding → feedback-o-tron → GitHub issue)
+5. Wire feedback-o-tron into gitbot-fleet (failed dogfooding → rhodibot PR + feedback-o-tron issue)
+
 == Revision History
 
 [cols="1,1,3"]
@@ -582,4 +808,5 @@ A blitz does not require artificial tests for inapplicable categories.
 
 | 1.0.0 | 2026-04-03 | Initial release. 16 test categories, 14 aspect dimensions, 4 proof systems, 12 type levels, Six Sigma benchmark classification, enforcement map, CRG mapping.
 | 1.0.1 | 2026-04-03 | Added Appendix C: K9 Coordination Protocol as reference implementation for the taxonomy.
+| 1.1.0 | 2026-04-04 | Added Part VII (Dogfooding Tests — DOG-01 to DOG-10, 10 Hypatia rules, gitbot dispatch targets, feedback-o-tron integration) and Part VIII (Soft Groove Strategy) based on estate-wide dogfooding audit findings.
 |===
