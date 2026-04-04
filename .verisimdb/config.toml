@@ -1,0 +1,102 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# VeriSimDB instance configuration for the standards monorepo
+# See: https://github.com/hyperpolymath/verisimdb
+
+[instance]
+name = "standards"
+port = 8097
+volume = "standards-verisimdb-data"
+base_image = "cgr.dev/chainguard/wolfi-base:latest"
+
+[instance.health]
+endpoint = "/health"
+interval_seconds = 30
+
+# ─────────────────────────────────────────────────────────────
+# Octad Schemas — what this instance stores
+# ─────────────────────────────────────────────────────────────
+
+# CRG grade tracking — component readiness grades with evidence
+[[octad_schema]]
+entity = "crg-grade"
+description = "Component Readiness Grade assessment with evidence chain"
+
+[octad_schema.modalities]
+semantic = ["component", "grade", "evidence_summary", "reviewer", "repo"]
+temporal = ["graded_at", "promoted_from", "next_review"]
+provenance = ["graded_by", "basis_commit", "ci_run_id", "methodology"]
+vector = ["component_embedding"]
+
+# Proof status — formal verification evidence
+[[octad_schema]]
+entity = "proof-status"
+description = "Formal proof verification result from ECHIDNA"
+
+[octad_schema.modalities]
+semantic = ["file_path", "prover", "theorem_name", "axioms_used", "trust_level"]
+temporal = ["verified_at", "last_source_changed", "proof_age_days"]
+provenance = ["echidna_version", "backend", "ci_run_id"]
+document = ["proof_term_cbor", "type_signature"]
+
+# Compliance scan results — Hypatia findings
+[[octad_schema]]
+entity = "compliance-scan"
+description = "Hypatia/panic-attack scan finding"
+
+[octad_schema.modalities]
+semantic = ["repo", "finding_type", "severity", "rule_id", "message"]
+temporal = ["scanned_at", "resolved_at", "age_days"]
+provenance = ["scanner", "scanner_version", "recipe_applied"]
+graph = ["related_repos", "caused_by_commit"]
+
+# Ecosystem relationships — derived from actual imports/usage
+[[octad_schema]]
+entity = "ecosystem-link"
+description = "Relationship between repos/components derived from code"
+
+[octad_schema.modalities]
+semantic = ["source_repo", "target_repo", "link_type", "strength"]
+temporal = ["first_seen", "last_confirmed", "stale_after_days"]
+graph = ["dependency_chain", "transitive_consumers"]
+provenance = ["detection_method", "evidence_file", "evidence_line"]
+
+# Inline annotations — @trust/@contract/@grade from code
+[[octad_schema]]
+entity = "inline-annotation"
+description = "Machine-readable annotation extracted from source code"
+
+[octad_schema.modalities]
+semantic = ["file_path", "line", "annotation_type", "value", "function_name"]
+temporal = ["extracted_at", "source_last_modified"]
+provenance = ["commit_sha", "extractor_version"]
+vector = ["function_embedding"]
+
+# ─────────────────────────────────────────────────────────────
+# Groove Integration
+# ─────────────────────────────────────────────────────────────
+
+[groove]
+enabled = true
+service_name = "standards-verisimdb"
+capabilities = ["octad-store", "vql-query", "annotation-index"]
+
+[groove.signals]
+# Afferent: what this instance emits
+emit = [
+    "crg.grade.changed",
+    "proof.verified",
+    "proof.stale",
+    "compliance.finding.new",
+    "compliance.finding.resolved",
+    "ecosystem.link.discovered",
+    "ecosystem.link.stale",
+    "annotation.extracted",
+]
+
+# Efferent: what this instance responds to
+respond_to = [
+    "commit.pushed",          # re-index annotations
+    "ci.completed",           # ingest scan results
+    "echidna.proof.verified", # store proof certificate
+    "hypatia.scan.completed", # store findings
+]
