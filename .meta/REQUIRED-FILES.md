@@ -50,4 +50,4 @@ When updating these files:
 
 - [RSR (Rhodium Standard Repositories)](https://github.com/hyperpolymath/rhodium-standard-repositories)
 - [Mustfile Specification](https://github.com/hyperpolymath/mustfile)
-- [SCM Format Family](https://github.com/hyperpolymath/meta-scm)
+- [A2ML Format Family](https://github.com/hyperpolymath/standards/tree/main/meta-a2ml)
