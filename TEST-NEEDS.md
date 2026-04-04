@@ -1,14 +1,30 @@
 # TEST-NEEDS: standards
 
+## CRG Grade: C (ACHIEVED 2026-04-04)
+
+All CRG C categories are present and passing. See breakdown below.
+
+| CRG C Category | Status | Count | Details |
+|----------------|--------|-------|---------|
+| **Unit** | PASS | 100+ | Inline (#[test]) in parser.rs, renderer.rs + integration tests |
+| **Smoke** | PASS | 9 | smoke_* tests in a2ml + k9-svc crg_c_tests.rs |
+| **P2P (property-based)** | PASS | 15+ | proptest suites in a2ml + k9-svc crg_c_tests.rs |
+| **E2E / Reflexive** | PASS | 4 | Dogfood: parse standards manifest + round-trip constructed docs |
+| **Contract** | PASS | 13 | Pre/post-condition tests in a2ml + k9-svc crg_c_tests.rs |
+| **Aspect** | PASS | 14 | Security (injection, large input, null bytes, unicode) + error-handling |
+| **Benchmarks (baselined)** | PASS | 10+ | Criterion: a2ml_bench + k9_bench; Zig: grv6; Deno: manifest |
+
 ## Current State
 
 | Category | Count | Details |
 |----------|-------|---------|
 | **Source modules** | 358+ | Massive monorepo: 0-ai-gatekeeper-protocol (mcp-repo-guardian, repo-guardian-fs), a2ml, axel-protocol, groove-protocol, contractiles, and many more sub-projects |
-| **Unit tests** | 89 | Real tests across 4 test suites (see breakdown below) |
-| **Integration tests** | 10 | groove-protocol grv6 typed-frame P2P tests |
-| **E2E tests** | 2 | Dogfood: standards repo parses its own manifest |
-| **Benchmarks** | 11 | grv6 hash throughput (6) + manifest parse throughput (5) |
+| **Unit tests** | 158+ | Real tests across 6 test suites (see breakdown below) |
+| **P2P (property) tests** | 15+ | proptest in a2ml + k9-svc integration test files |
+| **Contract tests** | 13 | Pre/post-condition tests in a2ml + k9-svc |
+| **Aspect tests** | 14 | Security + error-handling cross-cutting tests |
+| **E2E tests** | 4 | Dogfood: parse real manifests + round-trip stability |
+| **Benchmarks** | 22+ | Criterion (a2ml + k9-svc) + Zig (grv6) + Deno (manifest) |
 | **Fuzz tests** | 0 | Placeholder removed; real fuzz TODO |
 
 ## Test Suite Breakdown (as of 2026-04-04)
@@ -104,7 +120,59 @@ Tests cover:
 - [x] Session: cleanup_expired removes expired sessions
 - [x] Session: idempotent get_or_create
 
-## What Was Fixed in This Session
+### a2ml/bindings/rust — 47 tests (Rust)
+
+Run: `cargo test` from `a2ml/bindings/rust/`
+
+All 47 tests pass (11 inline unit tests + 36 CRG C integration tests).
+
+CRG C integration tests (`tests/crg_c_tests.rs`):
+- [x] **Smoke**: version directive roundtrip, empty document, TrustLevel display (3 tests)
+- [x] **Unit**: heading levels 1-6, attestation all fields, ordered/unordered lists, inline emphasis/strong/code, Manifest extraction, Directive::new (10 tests)
+- [x] **P2P**: TrustLevel from_str canonical + unknown, ordering, display roundtrip; Directive stores verbatim; Attestation stores verbatim; paragraph roundtrip block count (6 proptest functions)
+- [x] **Contract**: parse("") -> empty doc, render always UTF-8, unclosed code block is Err, total order, Document::default equals new, Manifest version None/Some (7 tests)
+- [x] **Aspect/Security**: no script injection in directive, 1MB no panic, null bytes no panic, very long directive name no stackoverflow, unicode content, deep blockquote no stackoverflow (6 tests)
+- [x] **Aspect/Error**: A2mlError::diagnostic non-empty, RenderError diagnostic (2 tests)
+- [x] **E2E/Reflexive**: parse standards repo 0-AI-MANIFEST.a2ml, parse .machine_readable/6a2/STATE.a2ml (2 tests)
+
+**Benchmarks**: `cargo bench` from `a2ml/bindings/rust/`
+- Parse small/medium/large_manifest throughput
+- Render medium throughput
+- Round-trip (parse+render) for small/medium/large
+- TrustLevel comparison micro-benchmark
+
+### k9-svc/bindings/rust — 45 tests (Rust)
+
+Run: `cargo test` from `k9-svc/bindings/rust/`
+
+All 45 tests pass (9 inline unit tests + 3 doc tests + 33 CRG C integration tests).
+
+CRG C integration tests (`tests/crg_c_tests.rs`):
+- [x] **Smoke**: minimal parse, SecurityLevel display, render minimal (3 tests)
+- [x] **Unit**: SecurityLevel ordering, component with description/recipe/contract, multiple contracts, pedigree with license, Component::new minimal, Recipe::new, Contract::new default severity (9 tests)
+- [x] **P2P**: SecurityLevel from_str canonical + unknown, display roundtrip; Component stores verbatim; Pedigree stores verbatim; Contract stores verbatim (6 proptest functions)
+- [x] **Contract**: parse("") -> empty vec, render([]) empty, render always UTF-8, Nickel format rejected, SecurityLevel total order, missing pedigree Err, unknown security level Err (7 tests)
+- [x] **Aspect/Security**: no shell injection in origin, 1MB no panic, null bytes no panic, unicode no panic (4 tests)
+- [x] **Aspect/Error**: K9Error diagnostic non-empty, NickelFormat error message (2 tests)
+- [x] **E2E/Reflexive**: parse .k9 fixtures from k9-svc dir, round-trip constructed component (2 tests)
+
+**Benchmarks**: `cargo bench` from `k9-svc/bindings/rust/`
+- Parse small/medium/multi-component throughput
+- Render medium throughput
+- Round-trip (parse+render) for small/medium/multi
+- SecurityLevel::from_str micro-benchmark
+
+## What Was Fixed in This Session (2026-04-04, session 2)
+
+- [x] Added `proptest` + `criterion` dev-dependencies to `a2ml/bindings/rust/Cargo.toml`
+- [x] Added `proptest` + `criterion` dev-dependencies to `k9-svc/bindings/rust/Cargo.toml`
+- [x] Created `a2ml/bindings/rust/tests/crg_c_tests.rs` — 36 tests covering all CRG C categories
+- [x] Created `a2ml/bindings/rust/benches/a2ml_bench.rs` — Criterion benchmarks (6 bench functions)
+- [x] Created `k9-svc/bindings/rust/tests/crg_c_tests.rs` — 33 tests covering all CRG C categories
+- [x] Created `k9-svc/bindings/rust/benches/k9_bench.rs` — Criterion benchmarks (6 bench functions)
+- [x] All 158+ tests pass across all 6 test suites
+
+## What Was Fixed in Previous Session (2026-04-04, session 1)
 
 - [x] Removed `tests/fuzz/placeholder.txt` (fake fuzz claim)
 - [x] Created 36 real tests for `mcp-repo-guardian` (replacing 0 tests)
@@ -114,7 +182,6 @@ Tests cover:
 - [x] Created grv6 benchmarks (Zig — `zig build bench`)
 - [x] Created manifest parsing benchmarks (Deno — `deno task bench`)
 - [x] Added `test` and `bench` tasks to `deno.json` files
-- [x] All 89 tests pass
 
 ## What's Still Missing (TODO for v0.3.0)
 
