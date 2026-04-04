@@ -642,10 +642,39 @@ requirement is missing.
 
 ---
 
+## Machine-Readable Grade Declaration
+
+Projects using CRG SHOULD include a `READINESS.md` in their repository root with
+the following line to enable automated badge generation and grade querying:
+
+```markdown
+**Current Grade:** B
+```
+
+Replace `B` with the current overall project grade (the worst grade of any
+deployed component, or the grade of the primary component if the project is
+single-component). This line is parsed by `just crg-grade` and `just crg-badge`
+from the `rsr-template-repo` Justfile.
+
+### Badge Generation
+
+Run `just crg-badge` in any repo that has a `READINESS.md` with the above line.
+This outputs a shields.io badge in Markdown format:
+
+```markdown
+[![CRG B](https://img.shields.io/badge/CRG-B-green?style=flat-square)](https://github.com/hyperpolymath/standards/tree/main/component-readiness-grades)
+```
+
+Embed this badge in `README.adoc` using Asciidoc image syntax or in `README.md`
+directly.
+
+---
+
 ## Revision History
 
 | Version | Date       | Author                  | Changes          |
 |---------|------------|-------------------------|------------------|
+| 2.2     | 2026-04-04 | Jonathan D.A. Jewell    | Added machine-readable grade declaration standard and badge generation convention |
 | 2.1     | 2026-04-03 | Jonathan D.A. Jewell    | Added Immaculate Guide compliance as Grade D gate requirement for hyperpolymath projects |
 | 2.0     | 2026-03-30 | Jonathan D.A. Jewell    | Raised bar for alpha/beta/publication, added RSR and deep-annotation requirements, added v2 sign-off and challenge posture |
 | 1.0     | 2026-02-28 | Jonathan D.A. Jewell    | Initial release  |
