@@ -1,0 +1,165 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+= Standards PanLL Panels
+:version: 0.1.0-draft
+:status: Draft
+:updated: 2026-04-05
+
+== Overview
+
+Three new PanLL panels surface the data that the standards innervation
+architecture collects. Each panel reads from the standards VeriSimDB
+instance (port 8097) via VCL queries; no panel reads repo files directly.
+
+[cols="1,2,3",options="header"]
+|===
+| Panel | Data source | Primary consumer
+
+| CRG Dashboard            | `crg-grade` octads         | Repo owners, reviewers
+| Compliance Monitor       | `compliance-scan` octads   | Hypatia operators
+| Proof Hub                | `proof-status` octads      | Formal-methods team
+|===
+
+All three follow the standard PanLL panel conventions (see
+`developer-ecosystem/panll/` — "panels" NEVER "panes").
+
+== Panel 1 — CRG Dashboard
+
+**Purpose:** visualise grade distribution, transitions, and promotion
+readiness across all graded components.
+
+=== Views
+
+- **Grade matrix** — rows = repos, columns = {X,F,E,D,C,B,A}, cells count
+- **Timeline** — grade transitions over time (grouped by repo or grade)
+- **Promotion queue** — components whose evidence suggests a grade bump
+- **Demotion alerts** — components with stale evidence or failed criteria
+
+=== VCL Queries
+
+----
+# Grade distribution (current)
+grades = octads(entity="crg-grade")
+  |> latest_per("component")
+  |> group_by("grade")
+  |> count()
+
+# Transitions in the last 30 days
+transitions = octads(entity="crg-grade")
+  |> where("temporal.graded_at > now - 30d")
+  |> order_by("graded_at")
+  |> project("component, promoted_from, grade, graded_at")
+
+# Promotion candidates (B→A)
+candidates = octads(entity="crg-grade")
+  |> where("grade == 'B'")
+  |> join(octads(entity="compliance-scan"), on="component")
+  |> where("finding_count == 0 for last 60d")
+----
+
+== Panel 2 — Compliance Monitor
+
+**Purpose:** heatmap of rule violations across 290+ repos, with drill-down
+to individual findings and recipe-application results.
+
+=== Views
+
+- **Heatmap** — repos × rule categories, coloured by finding severity
+- **Trend** — findings opened/resolved over time
+- **Rule impact** — which rules fire most often
+- **Remediation feed** — stream of recipe applications and outcomes
+
+=== VCL Queries
+
+----
+# Open findings per repo
+open_findings = octads(entity="compliance-scan")
+  |> where("temporal.resolved_at == null")
+  |> group_by("repo, severity")
+  |> count()
+
+# Rule firing frequency (last 7d)
+hot_rules = octads(entity="compliance-scan")
+  |> where("temporal.scanned_at > now - 7d")
+  |> group_by("rule_id")
+  |> count()
+  |> order_by("count desc")
+  |> limit(20)
+----
+
+== Panel 3 — Proof Hub
+
+**Purpose:** table of all formal proofs with status, trust level, and
+axiom usage.
+
+=== Views
+
+- **Proof table** — file, prover, theorem, trust level, last verified
+- **Axiom usage** — bar chart of axioms referenced, flagged if rejected
+- **Trust-level distribution** — pie chart of the 5-level trust hierarchy
+- **Staleness** — proofs not verified in >30 days
+
+=== VCL Queries
+
+----
+# All current proofs
+proofs = octads(entity="proof-status")
+  |> latest_per("file, theorem_name")
+  |> project("file, prover, theorem_name, trust_level, verified_at")
+
+# Rejected-axiom flags
+flagged = octads(entity="proof-status")
+  |> where("any(axioms_used, is_rejected)")
+
+# Stale proofs
+stale = octads(entity="proof-status")
+  |> where("temporal.proof_age_days > 30")
+  |> order_by("proof_age_days desc")
+----
+
+== Panel Manifest
+
+All three panels are registered via `panels/manifest.json` in the PanLL
+workspace (see `standards/developer-ecosystem/panll/` — manifest schema
+is defined by the PanelHarness protocol).
+
+[source]
+----
+{
+  "panels": [
+    {
+      "id": "standards-crg-dashboard",
+      "title": "CRG Dashboard",
+      "data_source": "verisimdb://standards:8097",
+      "refresh_interval_s": 60
+    },
+    {
+      "id": "standards-compliance-monitor",
+      "title": "Standards Compliance Monitor",
+      "data_source": "verisimdb://standards:8097",
+      "refresh_interval_s": 30
+    },
+    {
+      "id": "standards-proof-hub",
+      "title": "Proof Verification Hub",
+      "data_source": "verisimdb://standards:8097",
+      "refresh_interval_s": 120
+    }
+  ]
+}
+----
+
+== Implementation Plan (not this session)
+
+1. ReScript components in `panll/src/panels/standards-*/`
+2. VCL query layer via shared PanLL data-hooks
+3. Tea message/command wiring
+4. Register in workspace manifest
+
+== Consumer Wiring
+
+These panels in turn drive:
+
+- **Dashboard embeds** — CRG heatmap on the standards README
+- **CI status line** — Compliance Monitor snapshot on every PR
+- **Release gate** — Proof Hub trust-level filter before v1.0 release

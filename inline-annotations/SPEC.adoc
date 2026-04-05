@@ -1,0 +1,193 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+= Inline Annotations Specification
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:version: 0.1.0-draft
+:status: Draft
+:updated: 2026-04-05
+
+== Abstract
+
+Inline annotations are structured metadata embedded in source-code comments.
+They travel with the code they describe, are extracted by a language-agnostic
+tool, and emit an A2ML stream ingestible by VeriSimDB as `inline-annotation`
+octads.
+
+Annotations make trust, contract, and grade claims **intrinsic** to the code
+rather than extrinsic to satellite metadata files.
+
+== Design Goals
+
+- **Co-located**: metadata lives next to the code it describes
+- **Language-agnostic**: one extractor reads any comment-bearing language
+- **A2ML-native**: emitted records map 1:1 to VeriSimDB octads
+- **Verifiable**: annotations make claims that tools (ECHIDNA, Hypatia,
+  panic-attack) can verify or refute
+- **Cheap to write**: a human can add an annotation in under 10 seconds
+
+== Annotation Types (v0.1)
+
+Three annotation kinds are defined in v0.1. Additional kinds are reserved.
+
+[cols="1,2,3",options="header"]
+|===
+| Kind | Purpose | Consumer
+
+| `@trust` | Declares the trust level of the annotated entity | ECHIDNA, Hypatia
+| `@contract` | Declares a must/trust/dust/intent obligation | K9, contractile system
+| `@grade` | Declares a CRG grade claim for the annotated entity | CRG self-assessment, Hypatia
+|===
+
+Reserved for future versions: `@axiom`, `@provenance`, `@sunset`, `@owner`.
+
+== Syntax
+
+=== General Form
+
+An annotation occupies a single-line or block comment and has the form:
+
+----
+@<kind>(<key>=<value>, <key>=<value>, ...)
+----
+
+The set of accepted keys depends on the kind (see sections below).
+Values are one of: identifier, quoted string, integer, ISO-8601 date.
+
+=== Placement
+
+An annotation attaches to the **next non-comment, non-blank line** in the file.
+If the next line is a definition (function, type, module, constant), the
+annotation attaches to that definition. Otherwise the annotation attaches to
+the file as a whole.
+
+=== Comment Syntax per Language
+
+[cols="1,2",options="header"]
+|===
+| Language | Comment prefix
+
+| Rust, Zig, Gleam, OCaml, Deno/JS, Idris2, Agda, ReScript | `//` or `/* */`
+| Bash, Nickel, Guile, Julia | `#`
+| Ada | `--`
+| Lean, Haskell | `--`
+|===
+
+=== @trust
+
+----
+@trust(level=<trust-level>, prover=<prover>, since=<date>)
+----
+
+- `level` (required): one of `axiom`, `postulate`, `admitted`, `proven`,
+  `tested`, `reviewed`, `unreviewed`
+- `prover` (optional): the prover or tool that established the trust level
+  (e.g. `echidna`, `idris2`, `agda`, `manual`)
+- `since` (optional): ISO-8601 date the trust level was established
+
+=== @contract
+
+----
+@contract(obligation=<k9-force>, clause="<text>", severity=<level>)
+----
+
+- `obligation` (required): one of `must`, `trust`, `dust`, `intent` — the
+  K9 modal force. (Named `obligation` to avoid colliding with the directive-level
+  `kind` attribute.)
+- `clause` (required): quoted-string describing the contract
+- `severity` (optional): one of `critical`, `high`, `medium`, `low`;
+  defaults to `medium`
+
+=== @grade
+
+----
+@grade(value=<crg-grade>, basis=<basis>, assessed=<date>)
+----
+
+- `value` (required): one of `X`, `F`, `E`, `D`, `C`, `B`, `A`
+- `basis` (optional): short free-text justification
+- `assessed` (optional): ISO-8601 date
+
+== Extraction
+
+The extractor walks source files in a repository, parses comments according to
+the language's comment syntax, recognises annotation kinds, and emits an A2ML
+stream to stdout (or a file specified by `--out`).
+
+The extractor does **not** evaluate or verify claims — it only transports them.
+Verification is Hypatia's and ECHIDNA's responsibility.
+
+=== CLI
+
+----
+inline-annotations extract [--out <path>] [--lang <lang>] <paths...>
+----
+
+- `--out` writes A2ML output to a file; default is stdout
+- `--lang` restricts extraction to a single language; default is auto-detect
+  by file extension
+- `<paths...>` are files or directories to scan recursively
+
+=== Output Format
+
+The extractor emits a single A2ML document with one `@annotation` directive
+block per extracted annotation. See `examples/output.a2ml` for a complete
+example.
+
+Each annotation block carries:
+
+- `file` — repository-relative path
+- `line` — line number (1-indexed) of the annotation
+- `target_line` — line number of the entity the annotation attaches to
+- `kind` — annotation kind (`trust`, `contract`, `grade`)
+- attribute keys specific to the kind
+
+== Octad Mapping
+
+Each annotation maps to one VeriSimDB `inline-annotation` octad across four
+modalities:
+
+[cols="1,2",options="header"]
+|===
+| Modality | Fields
+
+| Semantic | `file`, `target_line`, `kind`, kind-specific attrs
+| Temporal | `extracted_at`, `since` (or `assessed`)
+| Provenance | `extractor_version`, `source_commit`, `prover`
+| Graph | edges to the entity the annotation attaches to
+|===
+
+See `examples/octad-mapping.a2ml` for a worked example showing an annotation
+traversing from source to extractor output to VeriSimDB octad.
+
+== Verification Obligations
+
+A consuming tool (Hypatia rule, ECHIDNA backend, panic-attack check) may verify
+an annotation. Verification outcomes become new octads with provenance back to
+the annotation octad:
+
+- `@trust(level=proven, prover=idris2)` — ECHIDNA re-runs the Idris2 proof
+- `@contract(kind=must, ...)` — K9 checks the clause at the declared trigger
+- `@grade(value=B, ...)` — Hypatia cross-references CRG evidence
+
+An annotation whose verification fails produces a `finding` octad referencing
+the annotation octad. It does not mutate the original annotation.
+
+== Versioning
+
+- Annotation grammar version is carried in the A2ML output header
+  (`@version: 0.1.0`).
+- Unknown kinds are ignored by v0.1 consumers but passed through by the
+  extractor.
+- New kinds require a spec update and a VeriSimDB octad-schema update.
+
+== Reference Implementation
+
+A Rust reference extractor lives in `inline-annotations/extractor/` (to be
+written). It parses comments for all languages listed in the language table
+and emits conformant A2ML.
+
+== Open Questions
+
+- Multi-line annotations: v0.1 is single-line; v0.2 may allow continuation
+- Attaching to expressions rather than definitions: deferred
+- Nested annotations (an annotation inside a directive body): deferred

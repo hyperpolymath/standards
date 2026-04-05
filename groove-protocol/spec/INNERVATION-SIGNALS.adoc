@@ -1,0 +1,213 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+= Groove Innervation Signal Schema
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:version: 0.1.0-draft
+:status: Draft
+:updated: 2026-04-05
+
+== Abstract
+
+Innervation signals are the vocabulary of the hyperpolymath nervous system.
+Every repo-level event that crosses the boundary between producer and
+consumer (extractor → VeriSimDB, CI → Hypatia, ECHIDNA → proof store) travels
+as a Groove message with a name defined in this schema.
+
+This document lists the v0.1 canonical signal names, their payloads, and
+their producers and consumers.
+
+== Naming Convention
+
+Signal names use dot-separated lowercase segments:
+
+----
+<domain>.<entity>.<event>
+----
+
+- `<domain>` names the subsystem (`crg`, `proof`, `compliance`, `ecosystem`,
+  `annotation`, `commit`, `ci`, `echidna`, `hypatia`)
+- `<entity>` names the thing acted upon (`grade`, `verified`, `finding`,
+  `link`, `extracted`, `pushed`)
+- `<event>` names the transition (`new`, `changed`, `resolved`, `stale`)
+
+Two-segment names are allowed when the event is obvious from the entity
+(e.g. `commit.pushed`, `ci.completed`).
+
+== Canonical Signals (v0.1)
+
+=== Source-Lifecycle Signals
+
+Emitted by git hosts, CI systems, and pre-commit tooling.
+
+[cols="2,1,3,2",options="header"]
+|===
+| Signal | Producer | Payload | Consumers
+
+| `commit.pushed`
+| git forge webhook
+| `repo`, `sha`, `branch`, `author`, `pushed_at`
+| verisimdb, hypatia, extractor
+
+| `ci.completed`
+| GitHub Actions
+| `repo`, `workflow`, `run_id`, `result`, `sha`
+| verisimdb, hypatia
+
+| `precommit.scan.completed`
+| panic-attack
+| `repo`, `sha`, `findings[]`
+| verisimdb, hypatia
+|===
+
+=== Compliance Signals (Hypatia)
+
+[cols="2,1,3,2",options="header"]
+|===
+| Signal | Producer | Payload | Consumers
+
+| `compliance.finding.new`
+| hypatia
+| `repo`, `rule_id`, `severity`, `file`, `line`, `message`, `sha`
+| verisimdb, panll
+
+| `compliance.finding.resolved`
+| hypatia
+| `finding_id`, `repo`, `resolved_at`, `resolving_sha`
+| verisimdb, panll
+
+| `hypatia.scan.completed`
+| hypatia
+| `repo`, `sha`, `ruleset_version`, `finding_count`
+| verisimdb
+
+| `hypatia.finding`
+| hypatia
+| `repo`, `rule_id`, `severity`, `actionable`, `recipe_id` (optional)
+| affected repo's reflex loop
+|===
+
+=== Proof Signals (ECHIDNA)
+
+[cols="2,1,3,2",options="header"]
+|===
+| Signal | Producer | Payload | Consumers
+
+| `proof.verified`
+| echidna
+| `file`, `prover`, `theorem`, `axioms_used[]`, `trust_level`, `verified_at`
+| verisimdb, panll
+
+| `proof.stale`
+| verisimdb (temporal rule)
+| `file`, `last_verified`, `age_days`
+| echidna, hypatia
+
+| `proof.changed`
+| git hook / extractor
+| `file`, `old_sha`, `new_sha`, `repo`
+| echidna
+
+| `echidna.proof.verified`
+| echidna
+| `proof_id`, `result`, `certificate_blob_ref`
+| verisimdb
+|===
+
+=== CRG Grade Signals
+
+[cols="2,1,3,2",options="header"]
+|===
+| Signal | Producer | Payload | Consumers
+
+| `crg.grade.assessed`
+| self-assessment doc or hypatia rule
+| `component`, `grade`, `basis`, `assessed_at`
+| verisimdb
+
+| `crg.grade.changed`
+| verisimdb (derived)
+| `component`, `from_grade`, `to_grade`, `changed_at`
+| panll, hypatia
+|===
+
+=== Ecosystem-Link Signals
+
+[cols="2,1,3,2",options="header"]
+|===
+| Signal | Producer | Payload | Consumers
+
+| `ecosystem.link.discovered`
+| ecosystem ingest pipeline
+| `source_repo`, `target_repo`, `link_type`, `evidence_file`
+| verisimdb
+
+| `ecosystem.link.stale`
+| verisimdb (temporal rule)
+| `link_id`, `last_confirmed`, `age_days`
+| ingest pipeline, hypatia
+|===
+
+=== Annotation Signals
+
+[cols="2,1,3,2",options="header"]
+|===
+| Signal | Producer | Payload | Consumers
+
+| `annotation.extracted`
+| inline-annotations extractor
+| `repo`, `sha`, `file`, `line`, `kind`, `attrs`
+| verisimdb
+|===
+
+== Message Envelope
+
+All signals travel as Groove messages with this envelope (independent of
+the body schema above):
+
+----
+@groove_message(version="1.0"):
+signal: <canonical-signal-name>
+producer: <service-name>
+timestamp: <ISO-8601-UTC>
+correlation_id: <UUID>         # optional; joins related messages
+body: { ... signal payload ... }
+@end
+----
+
+The `correlation_id` is used to thread a chain of signals (e.g.
+`commit.pushed` → `ci.completed` → `compliance.finding.new` all share an id).
+
+== Versioning
+
+- Schema version is carried in this document (v0.1.0) and in each message
+  envelope.
+- Adding a new signal is a minor-version bump (v0.1.0 → v0.2.0).
+- Removing or renaming a signal is a major-version bump.
+- Adding an optional field to a payload is a patch bump.
+
+== Consumer Registration
+
+A service consuming a signal registers interest via its
+`coordination.k9` `innervation.efferent` section:
+
+----
+innervation:
+  efferent:
+    - signal: "echidna.proof.verified"
+      action: "ingest certificate into proof-status octad"
+      auto_fix: false
+----
+
+The Groove registry uses these declarations to route messages.
+
+== Unknown Signals
+
+Consumers MUST ignore unknown signal names. Producers SHOULD NOT emit
+signals not listed here without first updating this document.
+
+== See Also
+
+- `standards/.verisimdb/config.toml` — emit/respond_to lists that MUST
+  match this schema
+- `standards/coordination.k9` — example afferent/efferent declarations
+- `groove-protocol/spec/SPEC.adoc` — underlying Groove transport
