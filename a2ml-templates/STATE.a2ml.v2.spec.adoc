@@ -1,0 +1,118 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+= STATE.a2ml v2 — Thin Session Journal
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:version: 2.0.0-draft
+:status: Draft
+:updated: 2026-04-05
+
+== Rationale
+
+STATE.a2ml v1 tried to be a full project-state store: metadata, route-to-MVP,
+session history, progress percentages, blockers, route, milestones. It grew to
+~100 lines per repo and drifted out of sync with reality because it stored
+information that was already authoritative elsewhere (git log, VeriSimDB,
+CI status).
+
+**v2 discards everything that is derivable.** It keeps only what the next AI
+agent or human needs to resume work — the things that cannot be reconstructed
+from git history or VeriSimDB.
+
+== What v2 stores
+
+- **phase**: current development phase (free text, one line)
+- **blockers**: active external blockers (dependencies, upstream bugs)
+- **last_action**: the most recent substantive action taken
+- **next_action**: the intended next step (single, not a list)
+- **session_marker**: optional label for the current session ("pre-commit",
+  "mid-refactor", "awaiting review")
+
+== What v2 does NOT store
+
+| Removed v1 field | Where it lives now |
+| --- | --- |
+| session history | git log |
+| completion percentage | VeriSimDB CRG grade |
+| milestones | ROADMAP.adoc |
+| file inventory | repo itself |
+| task lists | VeriSimDB task octads or TODO.md |
+| metadata (name, license) | META.a2ml / README |
+| related projects | ECOSYSTEM derivation via ingest pipeline |
+
+== Grammar
+
+----
+@state(version="2.0"):
+phase: "<free-text phase name>"
+next_action: "<single intended next step>"
+last_action: "<most recent substantive action>"
+session_marker: "<optional marker>"         # optional
+updated: <ISO-8601 date or datetime>
+
+@blockers:
+- id: <short-slug>
+  description: "<what is blocked>"
+  waiting_on: "<external thing>"
+  since: <ISO-8601 date>
+@end
+
+@end
+----
+
+Absent fields are valid. A repo with no blockers omits the `@blockers` block.
+
+== Example (minimal)
+
+----
+@state(version="2.0"):
+phase: "post-Phase-1 innervation build-out"
+next_action: "implement k9 init migration tool"
+last_action: "shipped inline-annotations extractor (7/7 tests passing)"
+updated: 2026-04-05
+@end
+----
+
+== Example (with blockers)
+
+----
+@state(version="2.0"):
+phase: "ECHIDNA CI wiring"
+next_action: "add Idris2 install step to echidna-verify.yml"
+last_action: "ECHIDNA workflow created with Agda job, Idris2 stubbed"
+session_marker: "awaiting pack-install recipe"
+updated: 2026-04-05
+
+@blockers:
+- id: idris2-ci-install
+  description: "Idris2 CI jobs skip because no pack-install step"
+  waiting_on: "pack install recipe decision (apt vs nix vs source)"
+  since: 2026-04-05
+@end
+
+@end
+----
+
+== Migration from v1
+
+A one-shot converter reads v1 STATE.a2ml and extracts the four v2 fields:
+
+- `phase` ← v1 `current-phase` or last section heading
+- `next_action` ← v1 `critical-next-actions[0]`
+- `last_action` ← v1 `session-history[-1]`
+- `blockers` ← v1 `blockers-and-issues`
+
+Everything else is discarded. See `k9-init` migration tool (to be written).
+
+== Versioning
+
+- v2.0.0 is a breaking change from v1. There is no forward-compat shim;
+  a repo is either v1 or v2.
+- The `version="2.0"` attribute on the `@state` directive is mandatory.
+- Tools encountering `version="1.x"` should emit a migration suggestion.
+
+== Consumers
+
+- VeriSimDB `STATE-journal` octad ingests v2 directly (semantic: phase,
+  last_action, next_action; temporal: updated)
+- PanLL session-resume panel reads v2 from every active repo
+- `coordination.k9` reflex guards can reference `next_action` for agent handoff
