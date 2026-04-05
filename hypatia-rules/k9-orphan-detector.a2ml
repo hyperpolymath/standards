@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# HYP-S002 — K9 Orphan Detector
+# Finds K9 components (coordination.k9 nodes, contractile modules) that
+# are not referenced in any Justfile recipe.
+
+@rule(version="1.0"):
+id: HYP-S002
+name: "K9 orphan detector"
+description: "Detect K9 components declared but not wired into any Justfile"
+severity: medium
+category: Dogfooding
+auto_fixable: false
+source: standards/hypatia-rules
+
+@scanner(type="file-tree"):
+find:
+  - glob: "**/coordination.k9"
+  - glob: "**/contractile.just"
+  - glob: "**/Justfile"
+  - glob: "**/justfile"
+@end
+
+@logic(engine="built-in"):
+# For each coordination.k9, extract the repo's declared invariants/protected paths.
+# For each Justfile in the repo, check whether it references those identifiers.
+# A K9 component is an orphan if it is declared but no recipe references it.
+steps:
+  - parse_k9: "coordination.k9"
+  - collect_just_recipes: "**/[Jj]ustfile"
+  - cross_reference: "k9.invariants.*.id"
+  - emit_unmatched
+@end
+
+@action:
+emit_signal: compliance.finding.new
+message_template: "K9 orphan: {id} declared in {file} is not referenced by any Justfile recipe"
+recipe: none
+@end
+
+@end

@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# HYP-S003 — Proof Freshness
+# Alerts when a formal proof hasn't been re-verified in > 30 days.
+
+@rule(version="1.0"):
+id: HYP-S003
+name: "Proof freshness"
+description: "Detect stale proofs (not re-verified in > stale_after_days)"
+severity: medium
+category: FormalVerification
+auto_fixable: true
+source: standards/hypatia-rules
+
+@parameters:
+stale_after_days: 30
+critical_after_days: 90
+@end
+
+@query(engine="vcl"):
+octads(entity="proof-status")
+  |> where("temporal.proof_age_days > ${stale_after_days}")
+  |> order_by("proof_age_days desc")
+  |> project("file_path, prover, theorem_name, verified_at, proof_age_days")
+@end
+
+@action:
+emit_signal: proof.stale
+message_template: "Proof stale: {file_path} last verified {verified_at} ({proof_age_days}d ago)"
+recipe: echidna-reverify
+severity_escalates_at: 90   # above critical_after_days → severity becomes high
+@end
+
+@recipe(id="echidna-reverify"):
+description: "Trigger ECHIDNA re-verification for a stale proof"
+command: "gh workflow run echidna-verify.yml --field target={file_path}"
+auto_applicable: true
+@end
+
+@end
