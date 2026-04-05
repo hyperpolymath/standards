@@ -1,0 +1,146 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+= Standards Innervation Architecture
+:version: 0.1.0
+:status: Draft
+:updated: 2026-04-05
+
+== What this is
+
+The standards repo is moving from a static 6a2 file-per-repo model to an
+innervation architecture — standards that *run through* the code rather
+than sit beside it.
+
+The old model stored metadata in six A2ML files per repo
+(STATE/META/ECOSYSTEM/AGENTIC/NEUROSYM/PLAYBOOK). Scaled to 290+ repos,
+that became ~1800 files that drift out of sync, can't enforce, can't
+derive, can't visualise.
+
+The new model runs standards through five layers that already exist.
+
+== The five layers
+
+[cols="1,2,3",options="header"]
+|===
+| # | Layer | Purpose
+
+| 1 | Git                  | Code, specs, authored decisions (unchanged)
+| 2 | `coordination.k9`    | Per-repo nerve receptor — invariants, afferent/efferent signals, reflex guards
+| 3 | `STATE.a2ml v2`      | Thin session journal (phase + blockers + last action)
+| 4 | VeriSimDB            | Central knowledge graph (octads for CRG, proofs, compliance, ecosystem links, annotations)
+| 5 | Hypatia              | Enforcement layer (scans, rules, recipes)
+|===
+
+**PanLL** sits on top as the visibility lens. **Groove** is the nervous
+system signalling medium. **ECHIDNA** verifies proofs at gates.
+
+Per-repo footprint shrinks from 6–7 files to 2 (`coordination.k9` +
+`STATE.a2ml v2`).
+
+== What lives where now
+
+[cols="2,3",options="header"]
+|===
+| Information | Where it lives
+
+| Code, docs, specs                       | Git (as before)
+| Repo invariants, protected paths        | `coordination.k9`
+| Architecture decisions                  | `coordination.k9` `architecture:` section
+| Banned-language list                    | `coordination.k9` `do_not_create:`
+| Afferent / efferent / reflex signals    | `coordination.k9` `innervation:`
+| Current phase + next action + blockers  | `STATE.a2ml v2` (thin)
+| Session history                         | Git log
+| CRG grade + evidence                    | VeriSimDB `crg-grade` octads
+| Proof verification status               | VeriSimDB `proof-status` octads
+| Compliance findings                     | VeriSimDB `compliance-scan` octads
+| Ecosystem links / dependency graph      | VeriSimDB `ecosystem-link` octads (derived)
+| Inline code claims (@trust/@contract/@grade) | VeriSimDB `inline-annotation` octads
+| Runbook recipes                         | Hypatia `recipes/*.a2ml` (generated from PLAYBOOK)
+| Live views across all of the above      | PanLL panels
+|===
+
+== Artefacts in this session
+
+[cols="2,3,3",options="header"]
+|===
+| Artefact | Path | Status
+
+| Inline annotation SPEC             | `inline-annotations/SPEC.adoc`              | Draft v0.1.0
+| Inline annotation extractor        | `inline-annotations/extractor/` (Rust)      | Built, 7/7 tests
+| Annotation examples (8 languages)  | `inline-annotations/examples/`              | Complete
+| Groove signal schema               | `groove-protocol/spec/INNERVATION-SIGNALS.adoc` | Draft v0.1.0
+| STATE.a2ml v2 spec                 | `a2ml-templates/STATE.a2ml.v2.spec.adoc`    | Draft v2.0.0
+| STATE.a2ml v2 template             | `a2ml-templates/STATE.a2ml.v2.template`     | Ready
+| k9-init migration tool             | `k9-coordination-protocol/tools/k9-init/`   | Built, 5/5 tests
+| playbook→recipe converter          | `hooks/playbook-to-recipe/`                 | Built, 5/5 tests
+| Ecosystem ingest pipeline spec     | `.verisimdb/ECOSYSTEM-INGEST.adoc`          | Draft v0.1.0
+| PanLL panels spec                  | `docs/PANLL-PANELS.adoc`                    | Draft v0.1.0
+| ECHIDNA verification CI            | `.github/workflows/echidna-verify.yml`      | Ready (Idris2 skip until pack-install)
+| VeriSimDB octad schemas            | `.verisimdb/config.toml`                    | 5 entities defined
+|===
+
+== Walk-through (machine-readable)
+
+A commit lands in repo X → Groove emits `commit.pushed`. Subscribers:
+
+1. **inline-annotations extractor** runs → emits `annotation.extracted` for
+   each `@trust`/`@contract`/`@grade` found → VeriSimDB stores
+   `inline-annotation` octads.
+2. **Hypatia** runs → emits `compliance.finding.new` for each violation →
+   VeriSimDB stores `compliance-scan` octads → `hypatia.finding` fires back
+   to repo X's efferent loop.
+3. **ECHIDNA** (if proofs changed) re-verifies → emits `proof.verified` →
+   VeriSimDB stores `proof-status` octads.
+4. **CRG rule** derives a grade from the accumulated evidence → emits
+   `crg.grade.changed` if it moved.
+5. **PanLL panels** refresh from VeriSimDB and render the new state.
+
+All signals are listed in `groove-protocol/spec/INNERVATION-SIGNALS.adoc`.
+
+== For humans
+
+- Start with this document
+- Then read `coordination.k9` in this repo — it is both the spec for the
+  format and the reference instance
+- Then browse `inline-annotations/examples/sources.md` to see the
+  annotation grammar in 8 languages
+- To initialise `coordination.k9` in a new repo: run
+  `k9-init /path/to/repo`
+- To convert a PLAYBOOK runbook to Hypatia recipes: run
+  `playbook-to-recipe --playbook PATH --out DIR`
+
+== For machines
+
+- Octad schemas: `.verisimdb/config.toml`
+- Groove signal vocabulary: `groove-protocol/spec/INNERVATION-SIGNALS.adoc`
+- Annotation grammar: `inline-annotations/SPEC.adoc`
+- Extractor output format: `inline-annotations/examples/output.a2ml`
+- STATE v2 grammar: `a2ml-templates/STATE.a2ml.v2.spec.adoc`
+
+== Roll-out
+
+The standards repo is the pilot. Migration to other repos proceeds by
+natural diffusion:
+
+1. High-traffic repos that currently own 6a2 files get migrated first
+   (run `k9-init`, write invariants, deploy VeriSimDB ingest for that repo)
+2. New repos use `coordination.k9` + `STATE.a2ml v2` from scaffolding
+3. Low-traffic repos are migrated opportunistically on next visit
+
+There is no forced migration. 6a2 files continue to work until their repo
+is migrated.
+
+== Status
+
+- Pilot repo: this one (standards)
+- VeriSimDB deployment: configured (port 8097), not yet live
+- PanLL panels: spec only
+- Ecosystem ingest pipeline: spec only
+- ECHIDNA CI: workflow exists, Idris2 install step TODO
+
+== See also
+
+- `coordination.k9` — nerve receptor for this repo
+- `ROADMAP.adoc` — phases A–D of the innervation build-out
+- `TOPOLOGY.md` — architecture diagram
+- `component-readiness-grades/SELF-ASSESSMENT.adoc` — why this repo is B

@@ -1,0 +1,132 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+= VeriSimDB Ecosystem Ingest Pipeline
+:version: 0.1.0-draft
+:status: Draft
+:updated: 2026-04-05
+
+== Purpose
+
+Derive ecosystem-link octads from the code itself — not from hand-written
+ECOSYSTEM.a2ml files. The pipeline scans every repo for dependency manifests
+and import statements, normalises them to repo identities, and emits
+`ecosystem-link` octads to VeriSimDB (port 8097).
+
+This replaces the Graph-modality section of ECOSYSTEM.a2ml with a derived,
+continuously-updated graph.
+
+== Evidence Sources
+
+[cols="1,2,2",options="header"]
+|===
+| Source | File(s) | Link type
+
+| Cargo (Rust)          | `Cargo.toml` [dependencies] | `cargo-dep`
+| Deno                  | `deno.json` imports         | `deno-import`
+| Mix (Elixir/Gleam)    | `mix.exs` deps              | `mix-dep`
+| Pack (Idris2)         | `pack.toml`, `*.ipkg` depends | `idris-dep`
+| Zig                   | `build.zig.zon`             | `zig-dep`
+| Guix/Nix              | `guix.scm`, `flake.nix` inputs | `nix-input`
+| Just recipes          | `Justfile` cross-repo refs  | `build-ref`
+| GitHub Actions        | `uses:` in `.github/workflows/*.yml` | `action-ref`
+| Inline imports        | `import`, `use`, `require` statements | `code-import`
+|===
+
+== Octad Shape
+
+Each link becomes one `ecosystem-link` octad (schema already defined in
+`.verisimdb/config.toml`):
+
+- **Semantic**: `source_repo`, `target_repo`, `link_type`, `strength`
+- **Temporal**: `first_seen`, `last_confirmed`, `stale_after_days`
+- **Graph**: `dependency_chain[]`, `transitive_consumers[]`
+- **Provenance**: `detection_method`, `evidence_file`, `evidence_line`
+
+**Strength** is a float in [0, 1]:
+
+- 1.0 — declared direct dependency (manifest entry)
+- 0.7 — import statement found in code
+- 0.4 — mentioned in config or docs only
+- 0.1 — text match in comments
+
+== Pipeline Stages
+
+[source]
+----
+scan   -> parse   -> normalise -> resolve  -> emit
+(walk)   (format)    (name)       (repo URL)  (VeriSimDB)
+----
+
+=== Stage 1 — scan
+
+Walk every repo under `~/Documents/hyperpolymath-repos/`. For each file
+matching the patterns in the evidence-source table, record `(repo, path,
+format)`.
+
+=== Stage 2 — parse
+
+Per-format parsers extract dependency edges:
+
+- TOML (Cargo, pack.toml, zon) — parse and read `[dependencies]`
+- deno.json — parse as JSON (reluctantly) and read `imports`
+- mix.exs — regex `{:dep, "~> x.y"}` entries
+- Justfile — regex `just -d ../other-repo` invocations
+- Workflows — regex `uses: owner/repo@sha`
+
+=== Stage 3 — normalise
+
+Dependency names (`serde`, `deno.land/std`, `:phoenix`) are mapped to
+canonical repo identities via a registry file
+(`.verisimdb/repo-aliases.a2ml`). Unknown names are emitted with
+`target_repo="UNRESOLVED:<raw>"` so they can be resolved later.
+
+=== Stage 4 — resolve
+
+For each canonical repo name, resolve to a git URL from the hyperpolymath
+registry (if known) or leave as external. External deps are tagged
+`external=true`.
+
+=== Stage 5 — emit
+
+For each edge, create or update the `ecosystem-link` octad:
+
+- If an octad with the same `(source_repo, target_repo, link_type)` exists,
+  update `last_confirmed` and keep `first_seen`
+- Otherwise create a new octad with `first_seen = last_confirmed = now`
+- Emit a Groove signal `ecosystem.link.discovered` (for new) or
+  nothing (for updates)
+
+A temporal rule in VeriSimDB marks octads where
+`now - last_confirmed > stale_after_days` as stale and emits
+`ecosystem.link.stale`.
+
+== Scheduling
+
+- **On-demand**: `just ecosystem-ingest` in the standards repo
+- **Per-commit**: consumed via `commit.pushed` Groove signal — re-scan the
+  changed repo only
+- **Weekly full sweep**: cron in CI — scans all 290+ repos
+
+== Implementation Plan (not this session)
+
+1. `ecosystem-ingest` CLI in Rust (~500 LOC)
+2. Per-format parsers as separate modules
+3. Repo alias registry (`.verisimdb/repo-aliases.a2ml`)
+4. VeriSimDB client using the Groove protocol
+
+== Consumer Wiring
+
+Once emitted, octads drive:
+
+- **PanLL Ecosystem panel** — render the dependency graph
+- **Hypatia `ecosystem-drift` rule** — flag when a repo's declared
+  ECOSYSTEM.a2ml disagrees with the derived graph
+- **CRG evidence** — consumer count feeds into grade basis
+
+== Open Questions
+
+- Monorepo handling: each sub-project emits its own edges? Yes — the
+  `source_repo` becomes `monorepo-name/sub-project-name`.
+- Circular deps: record as-is; let consumers flag cycles.
+- Version pinning: v0.1 ignores versions (just captures the edge); v0.2 may
+  add a `version_range` field.
