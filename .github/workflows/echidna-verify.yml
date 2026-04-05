@@ -84,22 +84,39 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Idris2
+      - name: Cache pack
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        with:
+          path: |
+            ~/.pack
+            ~/.idris2
+          key: ${{ runner.os }}-idris2-pack-${{ hashFiles('**/pack.toml', '**/*.ipkg') }}
+          restore-keys: |
+            ${{ runner.os }}-idris2-pack-
+
+      - name: Install Idris2 via pack
         run: |
-          # Idris2 is not in Ubuntu repos; install from release or container.
-          # Placeholder: use pack or nix. For now, skip gracefully if not available.
-          if ! command -v idris2 >/dev/null 2>&1; then
-            echo "::warning::Idris2 not installed in this job; skipping (add pack-install step when ready)"
+          set -e
+          if command -v idris2 >/dev/null 2>&1; then
+            echo "idris2 already present: $(idris2 --version)"
             exit 0
           fi
+          # Bootstrap: install pack, which installs idris2.
+          sudo apt-get update
+          sudo apt-get install -y build-essential libgmp-dev chezscheme
+          # Clone pack bootstrap
+          git clone --depth 1 https://github.com/stefan-hoeck/idris2-pack.git "$HOME/idris2-pack"
+          cd "$HOME/idris2-pack"
+          # Use the bootstrap script in non-interactive mode
+          bash install.bash </dev/null || echo "::warning::pack install had warnings"
+          echo "$HOME/.pack/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.pack/bin:$PATH"
+          pack install-api idris2
           idris2 --version
 
       - name: Type-check A2ML.Proofs
         run: |
-          if ! command -v idris2 >/dev/null 2>&1; then
-            echo "skipping — idris2 missing"
-            exit 0
-          fi
+          export PATH="$HOME/.pack/bin:$PATH"
           cd a2ml
           idris2 --check src/A2ML/Proofs.idr 2>&1 | tee ../idris2-a2ml.log
 
@@ -121,20 +138,36 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Idris2
+      - name: Cache pack
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        with:
+          path: |
+            ~/.pack
+            ~/.idris2
+          key: ${{ runner.os }}-idris2-pack-${{ hashFiles('**/pack.toml', '**/*.ipkg') }}
+          restore-keys: |
+            ${{ runner.os }}-idris2-pack-
+
+      - name: Install Idris2 via pack
         run: |
-          if ! command -v idris2 >/dev/null 2>&1; then
-            echo "::warning::Idris2 not installed in this job; skipping"
+          set -e
+          if command -v idris2 >/dev/null 2>&1; then
+            echo "idris2 already present: $(idris2 --version)"
             exit 0
           fi
+          sudo apt-get update
+          sudo apt-get install -y build-essential libgmp-dev chezscheme
+          git clone --depth 1 https://github.com/stefan-hoeck/idris2-pack.git "$HOME/idris2-pack"
+          cd "$HOME/idris2-pack"
+          bash install.bash </dev/null || echo "::warning::pack install had warnings"
+          echo "$HOME/.pack/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.pack/bin:$PATH"
+          pack install-api idris2
           idris2 --version
 
       - name: Type-check AVOW proofs
         run: |
-          if ! command -v idris2 >/dev/null 2>&1; then
-            echo "skipping — idris2 missing"
-            exit 0
-          fi
+          export PATH="$HOME/.pack/bin:$PATH"
           cd avow-protocol/avow-lib
           for f in src/abi/Consent.idr src/abi/Unsubscribe.idr src/abi/Types.idr; do
             if [ -f "$f" ]; then

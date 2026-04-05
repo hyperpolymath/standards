@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# VeriSimDB container for the standards repo (port 8097).
+#
+# Base: Chainguard wolfi-base (per Hyperpolymath container policy).
+# Build: podman build -f .verisimdb/Containerfile -t standards-verisimdb:latest .
+# Run:   podman-compose -f .verisimdb/compose.yml up -d
+
+FROM cgr.dev/chainguard/wolfi-base:latest AS base
+
+# VeriSimDB binary is built from the verisimdb repo (nextgen-databases/verisimdb)
+# For this container we expect the binary at /usr/local/bin/verisimdb.
+# In CI this layer is replaced by an actual build stage.
+
+FROM base AS runtime
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+
+# Config + schema live inside the image; data is volume-mounted.
+COPY .verisimdb/config.toml /app/config.toml
+COPY .verisimdb/ECOSYSTEM-INGEST.adoc /app/docs/ECOSYSTEM-INGEST.adoc
+
+# Placeholder until a verisimdb binary is built and dropped in.
+# Real build stage will cargo install or copy from a verisimdb build layer.
+RUN printf '#!/bin/sh\necho "verisimdb stub — replace with real binary" >&2\nsleep infinity\n' \
+    > /usr/local/bin/verisimdb && chmod +x /usr/local/bin/verisimdb
+
+EXPOSE 8097
+VOLUME ["/app/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD wget -q --spider http://localhost:8097/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/verisimdb"]
+CMD ["--config", "/app/config.toml", "--port", "8097", "--data-dir", "/app/data"]

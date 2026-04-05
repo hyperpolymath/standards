@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# HYP-S001 — CRG Demotion Detector
+# Fires when a component's CRG grade moves backwards (e.g. B → C).
+
+@rule(version="1.0"):
+id: HYP-S001
+name: "CRG demotion detector"
+description: "Alert when a CRG grade moves backwards along the X → F → E → D → C → B → A scale"
+severity: high
+category: StandardsCompliance
+auto_fixable: false
+source: standards/hypatia-rules
+
+@query(engine="vcl"):
+octads(entity="crg-grade")
+  |> order_by("temporal.graded_at desc")
+  |> window_per("component", size=2)
+  |> where("grade_rank(previous.grade) > grade_rank(current.grade)")
+  |> project("component, previous.grade, current.grade, graded_at")
+@end
+
+@action:
+emit_signal: compliance.finding.new
+message_template: "CRG grade demoted: {component} moved from {previous.grade} to {current.grade} at {graded_at}"
+recipe: none
+@end
+
+@grade_ranks:
+X: 0
+F: 1
+E: 2
+D: 3
+C: 4
+B: 5
+A: 6
+@end
+
+@end
