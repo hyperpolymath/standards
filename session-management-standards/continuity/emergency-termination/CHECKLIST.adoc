@@ -1,0 +1,522 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+
+= Emergency Termination Protocol
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v1.1, 2026-04-07
+:toc:
+:toclevels: 3
+
+== Overview
+
+The *Emergency Termination Protocol* governs unplanned interruption of an active working session where immediate preservation of operational state is required.
+
+Use this protocol when:
+- tokens or credits are nearly exhausted
+- the session is about to be forcibly interrupted
+- tooling becomes unstable
+- the active model is degraded or unreliable
+- an urgent context switch prevents orderly closure
+
+*Design principle*: _Preserve first, analyze later. Continuity over completeness. Speed over elegance._
+
+This protocol MUST succeed with minimal dependencies and MUST produce enough state for a later model or person to resume safely.
+
+== Invocation Contract
+
+Trigger phrases MAY include:
+- `urgent close`
+- `emergency terminate`
+- `tokens running out`
+- `secure current state now`
+- `execute emergency termination for <repo>`
+
+Expected behavior:
+- stop non-essential analysis immediately
+- preserve the current working state
+- generate mandatory continuity artifacts
+- prefer minimal successful capture over ambitious incomplete capture
+- escalate to fuller capture only if time and system stability allow
+
+The operator MAY specify a target repository, task, or session identifier.
+
+== Emergency Constraints
+
+During emergency termination:
+
+- Do NOT refactor
+- Do NOT re-analyze architecture
+- Do NOT attempt cleanup beyond preservation steps
+- Do NOT optimize artifacts
+- Do NOT delay preservation to improve formatting
+- Do NOT depend on optional systems unless Tier A preservation is already complete
+
+== Dependency Tiers
+
+This protocol is dependency-tiered.
+
+=== Tier A: Required
+
+The protocol MUST work with:
+
+- shell
+- git
+- basic filesystem operations
+- tar
+
+=== Tier B: Optional
+
+Use if available, but never block on them:
+
+- groove
+- verisimdb
+- custom emergency scripts
+
+=== Tier C: Enhancement / observability
+
+Use only after preservation is secure:
+
+- Hypatia
+- PanLL
+- coordination.k9
+- dashboards / monitors / remote stores
+
+== Mandatory Output Artifacts
+
+The protocol MUST produce these artifacts whenever possible:
+
+[cols="1,3"]
+|===
+| Artifact | Purpose
+
+| `SESSION_STATE.md`
+| Minimal resumable state for model or human continuation
+
+| `EMERGENCY-CHECKPOINT.md`
+| Structured emergency snapshot with resume pointer
+
+| `RECOVERY-TOKEN.txt`
+| Unique recovery reference
+
+| `EMERGENCY.diff`
+| Current uncommitted git diff, if any
+
+| `EMERGENCY-NOTICE.md`
+| Timestamped emergency notice and reason
+|===
+
+Preferred additional artifacts:
+- `EMERGENCY-CAPTURE.tar.gz`
+- `RECOVERY-PLAN.md`
+- `EMERGENCY-LOG.json`
+
+== Tier 0: Last-Message Survival Mode (<=15 seconds)
+
+Use Tier 0 when interruption is imminent and there may be only one or two actions left.
+
+Execute ONLY the following:
+
+1. Create `SESSION_STATE.md`
+2. Create `EMERGENCY-CHECKPOINT.md`
+3. Save git diff to `EMERGENCY.diff`
+4. Generate `RECOVERY-TOKEN.txt`
+5. Create `EMERGENCY-NOTICE.md`
+
+Do NOT attempt external integration.
+Do NOT attempt verification beyond file existence.
+
+=== Tier 0 Required Content
+
+`SESSION_STATE.md` MUST contain:
+
+- goal
+- current task
+- last completed action
+- next intended action
+- active file(s)
+- active branch
+- known blockers
+- whether working tree is dirty
+
+`EMERGENCY-CHECKPOINT.md` MUST contain:
+
+- emergency reason
+- timestamp
+- resume pointer
+- commands most recently run
+- files most recently edited
+- immediate next recovery steps
+
+== Tier 1: Minimal Secure Termination (<=60 seconds)
+
+Use Tier 1 when there is enough time for a quick but meaningful preservation pass.
+
+[cols="1,3,1"]
+|===
+| Priority | Action | Command Pattern
+
+| 1
+| Generate recovery token
+| `echo "EMERGENCY-$(date +%Y%m%d-%H%M%S)" > RECOVERY-TOKEN.txt`
+
+| 2
+| Write emergency notice
+| create `EMERGENCY-NOTICE.md`
+
+| 3
+| Write session state
+| create `SESSION_STATE.md`
+
+| 4
+| Write emergency checkpoint
+| create `EMERGENCY-CHECKPOINT.md`
+
+| 5
+| Save git diff
+| `git diff > EMERGENCY.diff`
+
+| 6
+| Preserve untracked/modified state
+| `git stash push -u -m "emergency-save-$(date +%Y%m%d-%H%M%S)"`
+
+| 7
+| Create capture archive
+| `tar czf EMERGENCY-CAPTURE.tar.gz SESSION_STATE.md EMERGENCY-CHECKPOINT.md EMERGENCY-NOTICE.md RECOVERY-TOKEN.txt EMERGENCY.diff`
+
+| 8
+| Emit optional signal
+| `groove emit session.emergency --priority critical`
+|===
+
+If stash fails, fallback to:
+- leave working tree intact
+- record failure in `EMERGENCY-CHECKPOINT.md`
+- record `git status` output in checkpoint
+
+== Tier 2: Extended Secure Termination (2-5 minutes)
+
+Use Tier 2 only if Tier 1 is complete and the environment remains stable.
+
+=== Extended Actions
+
+1. Verify archive contents
+2. Verify stash presence
+3. Update session file metadata
+4. Generate `RECOVERY-PLAN.md`
+5. Update optional external systems
+6. Create structured emergency log
+
+=== Tier 2 Verification
+
+[cols="1,3,1,1"]
+|===
+| Step | Action | Success Criteria | Fallback
+
+| 2.1
+| Verify capture archive
+| `tar tzf EMERGENCY-CAPTURE.tar.gz` lists expected files
+| Recreate archive manually
+
+| 2.2
+| Verify stash
+| `git stash list` shows emergency stash
+| Note preservation gap in checkpoint
+
+| 2.3
+| Verify token
+| `RECOVERY-TOKEN.txt` matches `EMERGENCY-YYYYMMDD-HHMMSS`
+| Regenerate token
+
+| 2.4
+| Verify checkpoint completeness
+| Resume pointer and next step present
+| Amend checkpoint manually
+|===
+
+== Resume Pointer Specification
+
+Every emergency checkpoint MUST include a resume pointer with this exact structure:
+
+[source,md]
+----
+## Resume Pointer
+
+- Active branch:
+- Active file:
+- Active function/class/section:
+- Last completed action:
+- Next intended action:
+- Command in progress or last command run:
+- Known blocker or uncertainty:
+----
+
+This is mandatory. Recovery without a resume pointer is incomplete.
+
+== Required Artifact Templates
+
+=== `SESSION_STATE.md`
+
+[source,md]
+----
+# Session State
+
+- Timestamp:
+- Recovery token:
+- Repository:
+- Branch:
+- HEAD commit:
+- Goal:
+- Current task:
+- Last completed action:
+- Next intended action:
+- Active files:
+- Working tree status:
+- Known blockers:
+- Notes for next operator:
+----
+
+=== `EMERGENCY-CHECKPOINT.md`
+
+[source,md]
+----
+# Emergency Checkpoint
+
+- Timestamp:
+- Reason:
+- Severity:
+- Recovery token:
+
+## Resume Pointer
+
+- Active branch:
+- Active file:
+- Active function/class/section:
+- Last completed action:
+- Next intended action:
+- Command in progress or last command run:
+- Known blocker or uncertainty:
+
+## Recent Changes
+
+- Files edited:
+- Files created:
+- Files partially changed:
+- Diff saved to: `EMERGENCY.diff`
+
+## Preservation Actions Taken
+
+- [ ] Session state written
+- [ ] Emergency notice written
+- [ ] Recovery token generated
+- [ ] Git diff saved
+- [ ] Git stash created
+- [ ] Archive created
+
+## Immediate Recovery Steps
+
+1.
+2.
+3.
+----
+
+=== `EMERGENCY-NOTICE.md`
+
+[source,md]
+----
+# Emergency Notice
+
+Emergency termination executed.
+
+- Timestamp:
+- Reason:
+- Session interrupted before orderly closure.
+- Recovery token:
+- Resume from: `EMERGENCY-CHECKPOINT.md`
+----
+
+=== `RECOVERY-PLAN.md`
+
+[source,md]
+----
+# Recovery Plan
+
+1. Confirm repository and branch
+2. Review `EMERGENCY-NOTICE.md`
+3. Review `SESSION_STATE.md`
+4. Review `EMERGENCY-CHECKPOINT.md`
+5. Inspect `EMERGENCY.diff`
+6. Restore stash if required
+7. Resume from stated next intended action
+----
+
+== Detailed Procedure
+
+=== Phase 1: Immediate Preservation
+
+Goal: create minimum viable continuity.
+
+1. Generate recovery token
+2. Record emergency notice
+3. Record session state
+4. Record emergency checkpoint
+5. Save current diff
+6. Attempt stash
+7. Create archive
+
+Success means:
+- mandatory artifacts exist
+- a resume pointer exists
+- the next operator can tell what to do next
+
+=== Phase 2: Minimal Verification
+
+Goal: ensure the preservation artifacts are usable.
+
+1. Confirm files exist
+2. Confirm token format
+3. Confirm checkpoint includes resume pointer
+4. Confirm diff is non-empty if repo was dirty
+5. Confirm stash exists if stash was claimed
+
+=== Phase 3: Optional Notification and External Sync
+
+Goal: update secondary systems without risking primary preservation.
+
+Optional actions:
+- emit Groove signal
+- update VeriSimDB
+- notify Hypatia / PanLL
+- append structured event log
+
+These MUST NOT block successful completion.
+
+== Emergency Recovery Protocol
+
+=== Recovery Order
+
+Recovery MUST proceed in this order:
+
+1. identify repo and branch
+2. read `EMERGENCY-NOTICE.md`
+3. read `SESSION_STATE.md`
+4. read `EMERGENCY-CHECKPOINT.md`
+5. inspect `EMERGENCY.diff`
+6. inspect stash list
+7. restore working state as needed
+8. resume from resume pointer
+9. record recovery result
+
+=== Recovery Script (Reference)
+
+[source,bash]
+----
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "== Emergency Recovery =="
+
+if [ -f RECOVERY-TOKEN.txt ]; then
+  echo "Recovery token: $(cat RECOVERY-TOKEN.txt)"
+fi
+
+if [ -f EMERGENCY-NOTICE.md ]; then
+  echo "Found EMERGENCY-NOTICE.md"
+fi
+
+if [ -f SESSION_STATE.md ]; then
+  echo "Found SESSION_STATE.md"
+fi
+
+if [ -f EMERGENCY-CHECKPOINT.md ]; then
+  echo "Found EMERGENCY-CHECKPOINT.md"
+fi
+
+if [ -f EMERGENCY.diff ]; then
+  echo "Found EMERGENCY.diff"
+fi
+
+if git stash list | grep -q 'emergency-save'; then
+  echo "Emergency stash found"
+else
+  echo "No emergency stash found"
+fi
+
+echo "Next action: review checkpoint before applying changes"
+----
+
+This script is advisory. Recovery must remain operator-reviewed.
+
+== Partial Recovery
+
+If preservation was incomplete:
+
+1. recover checkpoint and session files first
+2. inspect git reflog
+3. inspect stash list
+4. reconstruct intent from `SESSION_STATE.md`
+5. rebuild missing context manually
+6. record gaps in `RECOVERY-GAPS.md`
+
+Priority order:
+1. resume pointer
+2. active changes
+3. task intent
+4. secondary metadata
+
+== Failed Recovery Escalation
+
+If emergency recovery fails:
+
+1. escalate to the Recovery Operation Protocol
+2. create `EMERGENCY-INCIDENT-YYYYMMDD.md`
+3. archive emergency artifacts into `.emergency_archive/`
+4. document what could not be restored
+5. restart from last known safe state
+
+== Compliance Checklist
+
+[ ] Tier 0 or Tier 1 completed
+[ ] Recovery token generated
+[ ] Session state written
+[ ] Emergency checkpoint written
+[ ] Resume pointer included
+[ ] Emergency notice written
+[ ] Git diff captured
+[ ] Git stash attempted or explicitly waived
+[ ] Archive created if feasible
+[ ] Preservation verified at minimal level
+[ ] Optional external notifications treated as non-blocking
+
+== Scenarios
+
+[cols="1,2,2"]
+|===
+| Scenario | Immediate Response | Protocol Mode
+
+| Token exhaustion imminent
+| Execute Tier 0 or Tier 1 immediately
+| Emergency termination
+
+| Tooling instability
+| Preserve local state only
+| Emergency termination
+
+| LLM corruption suspected
+| Preserve, do not trust ongoing reasoning
+| Emergency termination -> recovery operation
+
+| Forced context switch
+| Preserve next-step continuity
+| Emergency termination
+
+| Session crash risk
+| Create artifacts before further work
+| Emergency termination
+|===
+
+== See Also
+
+- link:../planned-session-close/CHECKLIST.adoc[Planned Session Close Protocol]
+- link:../recovery-operation/CHECKLIST.adoc[Recovery Operation Protocol]
+- link:../../handover/full-transfer/CHECKLIST.adoc[Handover Protocol]
+- link:../repo-intake/CHECKLIST.adoc[Repo Intake Protocol]

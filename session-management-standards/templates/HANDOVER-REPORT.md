@@ -1,0 +1,19 @@
+# HANDOVER_REPORT
+
+## Transfer Type
+
+- full | split | model | human
+
+## Context Transfer
+
+- Goal:
+- Current task:
+- Last completed action:
+- Next intended action:
+- Repository:
+- Branch:
+- HEAD commit:
+- Files of interest:
+- Known blockers:
+- Residual risks:
+- Recommended next protocol:

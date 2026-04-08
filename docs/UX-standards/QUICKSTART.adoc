@@ -1,0 +1,220 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= UX Standards Quickstart Guide
+:toc:
+:toclevels: 3
+
+== 🚀 Getting Started in 5 Minutes
+
+This guide helps you quickly implement UX standards in your application.
+
+== 📋 Step 1: Choose Your Launcher Type
+
+[cols="1,2,2,1"]
+|=== 
+| Type | Use Case | Template | Complexity
+
+| **E-Grade** 
+| Simple CLI tools, minimal needs 
+| link:e-grade-launcher-template.sh[] 
+| ⭐
+
+| **Comprehensive** 
+| Web apps, servers, complex tools 
+| link:comprehensive-launcher-template.sh[] 
+| ⭐⭐⭐
+
+| **Dustfile** 
+| Automated repair companion 
+| link:dustfile-template.sh[] 
+| ⭐⭐
+|===
+
+Copy the appropriate template:
+
+[source,bash]
+----
+cp /var/mnt/eclipse/repos/standards/docs/UX-standards/comprehensive-launcher-template.sh \
+  /path/to/your/repo/scripts/<app-name>-launcher.sh
+----
+
+== 🔧 Step 2: Customize Configuration
+
+Edit the **CONFIGURATION** section at the top of the template:
+
+[source,bash]
+----
+APP_NAME="MyApp"              # Your application name
+REPO_DIR="/path/to/repo"       # Repository directory
+COMMAND="cargo run"            # Command to start your app
+URL="http://localhost:3000"     # Web URL (if applicable)
+PID_FILE="/tmp/myapp-server.pid" # Process ID file
+LOG_FILE="/tmp/myapp-server.log" # Log file
+MODE="${1:---auto}"             # Default mode
+----
+
+== 📦 Step 3: Create Desktop File
+
+Create `~/.local/share/applications/<app-name>.desktop`:
+
+[source,ini]
+----
+[Desktop Entry]
+Type=Application
+Name=MyApp
+Exec=/path/to/your/repo/scripts/<app-name>-launcher.sh
+Icon=/path/to/icon.svg
+Terminal=false
+Categories=Development;
+StartupWMClass=myapp
+----
+
+Set permissions:
+
+[source,bash]
+----
+chmod +x /path/to/your/repo/scripts/<app-name>-launcher.sh
+chmod 444 ~/.local/share/applications/<app-name>.desktop
+----
+
+== 🛡️ Step 4: Add Integrity Verification
+
+Generate integrity hashes:
+
+[source,bash]
+----
+/var/mnt/eclipse/repos/.desktop-tools/verify-desktop-integrity.sh --generate
+----
+
+Verify:
+
+[source,bash]
+----
+/var/mnt/eclipse/repos/.desktop-tools/verify-desktop-integrity.sh --check
+----
+
+== 🧹 Step 5: Create Dustfile (Optional but Recommended)
+
+[source,bash]
+----
+cp /var/mnt/eclipse/repos/standards/docs/UX-standards/dustfile-template.sh \
+  /path/to/your/repo/scripts/<app-name>-dustfile.sh
+
+# Customize and make executable
+chmod +x /path/to/your/repo/scripts/<app-name>-dustfile.sh
+----
+
+== 📚 Step 6: Add Warmup Scripts (Optional)
+
+Create warmup scripts for different user types:
+
+[source,bash]
+----
+# User warmup
+cp /var/mnt/eclipse/repos/standards/docs/UX-standards/LM-LA-LIFECYCLE-STANDARD.adoc \
+  /path/to/your/repo/scripts/warmup-user.sh
+
+# Make executable
+chmod +x /path/to/your/repo/scripts/warmup-*.sh
+----
+
+== ✅ Compliance Checklist
+
+[ ] Launcher script created and executable
+[ ] Desktop file created with proper permissions (444)
+[ ] No konsole wrapping for GUI apps
+[ ] Terminal=false for GUI apps
+[ ] Integrity hashes generated
+[ ] Dustfile created (recommended)
+[ ] Warmup scripts created (recommended)
+[ ] All scripts follow D-SIP-FV-MA principles
+
+== 🎯 Common Patterns
+
+=== Web Application
+
+[source,bash]
+----
+# Launcher starts server and opens browser
+start_server() {
+  nohup npm run dev > /tmp/app.log 2>&1 &
+  wait_for_server 10
+  open_browser
+}
+
+wait_for_server() {
+  # Wait for server to be ready
+  for i in $(seq 1 10); do
+    if curl -s http://localhost:3000 >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  err "Server failed to start"
+  return 1
+}
+
+open_browser() {
+  xdg-open http://localhost:3000
+}
+----
+
+=== CLI Tool
+
+[source,bash]
+----
+# Simple direct execution
+Exec=/path/to/binary --flag
+Terminal=true  # CLI tools need terminal
+----
+
+=== Background Service
+
+[source,bash]
+----
+# Use nohup for background processes
+nohup /path/to/service > /tmp/service.log 2>&1 &
+echo $! > /tmp/service.pid
+
+# Check if running
+is_running() {
+  [ -f /tmp/service.pid ] && kill -0 $(cat /tmp/service.pid) 2>/dev/null
+}
+----
+
+== 🚨 Troubleshooting
+
+=== "Desktop file not writable"
+This is **expected behavior** - desktop files are read-only (444) for security.
+
+To update:
+[source,bash]
+----
+sudo chmod 644 ~/.local/share/applications/<app-name>.desktop
+# Make changes
+sudo chmod 444 ~/.local/share/applications/<app-name>.desktop
+----
+
+=== "Server not starting"
+1. Check logs: `tail -50 /tmp/<app-name>.log`
+2. Run diagnostics: `<app-name>-dustfile.sh --diagnose`
+3. Try repair: `<app-name>-dustfile.sh --repair`
+4. LLM assistance: `hypatia diagnose --app <app-name> --log /tmp/<app-name>.log`
+
+=== "Browser not opening"
+1. Check if server is running: `curl -v http://localhost:PORT`
+2. Try manual URL: Open browser to `http://localhost:PORT`
+3. Check xdg-open: `which xdg-open`
+
+== 📖 Reference Implementation
+
+See link:comprehensive-launcher-template.sh[] for a complete, annotated example
+with all features implemented.
+
+== 🎓 Next Steps
+
+1. Read link:LM-LA-LIFECYCLE-STANDARD.adoc[LM/LA Lifecycle Standard] for complete lifecycle management
+2. Explore link:DUSTFILE-SPECIFICATION.adoc[Dustfile Specification] for automated repair
+3. Review link:launcher-standard.adoc[Comprehensive Launcher Standard] for advanced features
+4. Integrate with link:../../consent-aware-http/[Consent-Aware HTTP] for privacy-compliant telemetry
+5. Add link:../../groove-protocol/[Groove Protocol] for soft-attach patterns
