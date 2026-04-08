@@ -1,0 +1,472 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= LM/LA Lifecycle Standard (Launcher/Application)
+:toc:
+:toclevels: 4
+
+== Overview
+
+This standard defines the complete lifecycle for **Launchers (LM)** and **Applications (LA)**
+in the hyperpolymath ecosystem, covering installation, configuration, personalization,
+and warmup procedures for different user types.
+
+== Lifecycle Phases
+
+[cols="1,3,2"]
+|=== 
+| Phase | Description | Responsible Party
+
+| **Install** 
+| Initial setup and deployment 
+| Platform Maintainers
+
+| **Configure** 
+| System-wide and user-specific configuration 
+| Platform Maintainers / Users
+
+| **Personalize** 
+| User preferences and customization 
+| Users
+
+| **Warmup** 
+| First-run setup and user onboarding 
+| Application
+
+| **Run** 
+| Normal operation 
+| Users
+
+| **Update** 
+| Version upgrades and migrations 
+| Platform Maintainers
+
+| **Diagnose** 
+| Troubleshooting and health checks 
+| Users / Support
+
+| **Repair** 
+| Automated and manual fixes 
+| Dustfiles / Users
+
+| **Uninstall** 
+| Clean removal 
+| Platform Maintainers / Users
+|===
+
+== Installation Standard (LM/LA-INSTALL)
+
+=== Requirements
+
+Launchers and applications MUST provide:
+
+1. **Standardized Installation Scripts**
+   - Named: `<app-name>-install.sh`
+   - Location: `<repo-root>/scripts/install.sh`
+   - Permissions: `755` (executable)
+
+2. **Idempotent Operations**
+   - Safe to run multiple times
+   - Detects existing installation
+   - Skips completed steps
+
+3. **Dependency Management**
+   - Automatic detection of missing dependencies
+   - Clear error messages with installation instructions
+   - Optional auto-install with user confirmation
+
+4. **Desktop Integration**
+   - Creates `.desktop` files in `~/.local/share/applications/`
+   - Sets proper permissions (444 for security)
+   - Generates integrity hashes
+
+=== Installation Script Template
+
+[source,bash]
+----
+#!/usr/bin/env bash
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# <APP-NAME> Installation Script
+
+set -euo pipefail
+
+APP_NAME="<app-name>"
+REPO_DIR="/var/mnt/eclipse/repos/$APP_NAME"
+INSTALL_DIR="$HOME/.local/share/$APP_NAME"
+DESKTOP_FILE="$HOME/.local/share/applications/$APP_NAME.desktop"
+
+log() { echo -e "\033[0;32m[$APP_NAME-Install]\033[0m $1"; }
+warn() { echo -e "\033[0;33m[$APP_NAME-Install]\033[0m $1"; }
+err() { echo -e "\033[0;31m[$APP_NAME-Install]\033[0m $1" >&2; }
+
+# Check if already installed
+if [ -f "$DESKTOP_FILE" ]; then
+  log "$APP_NAME is already installed"
+  read -rp "Reinstall? [y/N] " confirm
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    exit 0
+  fi
+fi
+
+# Check dependencies
+check_deps() {
+  local missing=()
+  for dep in curl grep sed; do
+    if ! command -v "$dep" >/dev/null 2>&1; then
+      missing+=("$dep")
+    fi
+  done
+  
+  if [ ${#missing[@]} -gt 0 ]; then
+    err "Missing dependencies: ${missing[*]}"
+    case "$(uname -s)" in
+      Linux*) 
+        if command -v dnf >/dev/null 2>&1; then
+          sudo dnf install -y "${missing[@]}"
+        elif command -v apt-get >/dev/null 2>&1; then
+          sudo apt-get update && sudo apt-get install -y "${missing[@]}"
+        else
+          err "Please install: ${missing[*]}"
+          exit 1
+        fi
+        ;;
+      *) err "Unsupported OS"; exit 1 ;;
+    esac
+  fi
+}
+
+# Install desktop file
+install_desktop() {
+  cat > "$DESKTOP_FILE" << EOF
+[Desktop Entry]
+Type=Application
+Name=$APP_NAME
+Exec=$INSTALL_DIR/bin/$APP_NAME
+Icon=$INSTALL_DIR/assets/icon.svg
+Terminal=false
+Categories=Development;
+StartupWMClass=$APP_NAME
+EOF
+  
+  chmod 444 "$DESKTOP_FILE"
+  log "Installed desktop file: $DESKTOP_FILE"
+}
+
+# Main installation
+main() {
+  check_deps
+  install_desktop
+  
+  # Generate integrity hashes
+  if command -v verify-desktop-integrity.sh >/dev/null 2>&1; then
+    verify-desktop-integrity.sh --generate
+  fi
+  
+  log "✓ $APP_NAME installed successfully!"
+  log "Launch from your application menu or: $DESKTOP_FILE"
+}
+
+main "$@"
+----
+
+== Configuration Standard (LM/LA-CONFIG)
+
+=== Configuration Files
+
+Applications MUST support these configuration locations (in priority order):
+
+1. **User Configuration**: `~/.config/<app-name>/config.toml`
+2. **System Configuration**: `/etc/<app-name>/config.toml`
+3. **Repository Defaults**: `<repo-root>/config/default.toml`
+
+=== Configuration Format
+
+**TOML** is the standard format for configuration files:
+
+[source,toml]
+----
+# <APP-NAME> Configuration
+[app]
+name = "<app-name>"
+version = "1.0.0"
+
+[server]
+port = 4000
+host = "localhost"
+
+[features]
+enabled = ["feature1", "feature2"]
+
+[logging]
+level = "info"
+file = "~/.local/share/<app-name>/<app-name>.log"
+----
+
+=== Configuration Management
+
+Launchers MUST:
+
+1. **Validate configuration** on startup
+2. **Provide sensible defaults** for all options
+3. **Merge configurations** (user overrides system, CLI overrides all)
+4. **Report configuration errors** clearly
+
+== Personalization Standard (LM/LA-PERSONALIZE)
+
+=== User Preferences
+
+Applications SHOULD support:
+
+1. **Theme Selection** (light/dark/system)
+2. **Font Size** (small/medium/large)
+3. **Language** (follow system locale by default)
+4. **Accessibility Options** (high contrast, screen reader support)
+
+=== Personalization File
+
+[source,toml]
+----
+# User Preferences for <APP-NAME>
+[ui]
+theme = "system"
+font_size = "medium"
+language = "en"
+
+[accessibility]
+high_contrast = false
+screen_reader = false
+
+[behavior]
+auto_update = true
+telemetry = "opt-in"
+----
+
+== Warmup Scripts Standard (LM/LA-WARMUP)
+
+=== Warmup Script Types
+
+[cols="1,3,2"]
+|=== 
+| User Type | Script Purpose | Location
+
+| **User** 
+| First-run setup, basic configuration 
+| `<repo-root>/scripts/warmup-user.sh`
+
+| **Platform Maintainer** 
+| System integration, dependency setup 
+| `<repo-root>/scripts/warmup-maintainer.sh`
+
+| **Developer** 
+| Development environment setup 
+| `<repo-root>/scripts/warmup-dev.sh`
+
+| **Aspect Developer** 
+| Advanced configuration, extension points 
+| `<repo-root>/scripts/warmup-aspect.sh`
+|===
+
+=== Warmup Script Template (User)
+
+[source,bash]
+----
+#!/usr/bin/env bash
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# <APP-NAME> User Warmup Script
+
+set -euo pipefail
+
+APP_NAME="<app-name>"
+
+log() { echo -e "\033[0;32m[$APP_NAME-Warmup]\033[0m $1"; }
+
+# Welcome message
+log "Welcome to $APP_NAME!"
+log "This script will guide you through basic setup.\n"
+
+# Check first-run flag
+FIRST_RUN_FLAG="$HOME/.config/$APP_NAME/.first-run-complete"
+if [ -f "$FIRST_RUN_FLAG" ]; then
+  log "You've already completed warmup. Exiting."
+  exit 0
+fi
+
+# Basic configuration
+read -rp "Choose theme (light/dark/system) [system]: " theme
+theme=${theme:-system}
+
+read -rp "Enable telemetry (yes/no) [no]: " telemetry
+telemetry=${telemetry:-no}
+
+# Create config directory
+mkdir -p "$HOME/.config/$APP_NAME"
+
+# Write configuration
+cat > "$HOME/.config/$APP_NAME/config.toml" << EOF
+[ui]
+theme = "$theme"
+
+[privacy]
+telemetry = "$telemetry"
+EOF
+
+# Mark warmup complete
+touch "$FIRST_RUN_FLAG"
+
+log "✓ Warmup complete!"
+log "Configuration saved to: $HOME/.config/$APP_NAME/config.toml"
+log "You can now launch $APP_NAME from your application menu."
+----
+
+=== Warmup Script Template (Platform Maintainer)
+
+[source,bash]
+----
+#!/usr/bin/env bash
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# <APP-NAME> Platform Maintainer Warmup Script
+
+set -euo pipefail
+
+APP_NAME="<app-name>"
+
+log() { echo -e "\033[0;32m[$APP_NAME-Maintainer]\033[0m $1"; }
+
+# System integration
+log "Setting up system integration..."
+
+# Create system config directory
+sudo mkdir -p "/etc/$APP_NAME"
+
+# Install systemd service (if applicable)
+if [ -f "$APP_NAME.service" ]; then
+  sudo cp "$APP_NAME.service" "/etc/systemd/user/"
+  systemctl --user enable "$APP_NAME.service"
+  log "Installed systemd service"
+fi
+
+# Set up log rotation
+sudo cp "logrotate.conf" "/etc/logrotate.d/$APP_NAME"
+
+log "✓ Platform setup complete!"
+----
+
+== Uninstallation Standard (LM/LA-UNINSTALL)
+
+=== Uninstall Script Requirements
+
+[source,bash]
+----
+#!/usr/bin/env bash
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# <APP-NAME> Uninstall Script
+
+set -euo pipefail
+
+APP_NAME="<app-name>"
+
+log() { echo -e "\033[0;32m[$APP_NAME-Uninstall]\033[0m $1"; }
+warn() { echo -e "\033[0;33m[$APP_NAME-Uninstall]\033[0m $1"; }
+
+# Confirm uninstall
+read -rp "Uninstall $APP_NAME? This will remove all files. [y/N] " confirm
+if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+  exit 0
+fi
+
+# Remove desktop file
+rm -f "$HOME/.local/share/applications/$APP_NAME.desktop"
+
+# Remove user data
+rm -rf "$HOME/.config/$APP_NAME"
+rm -rf "$HOME/.local/share/$APP_NAME"
+
+# Remove system integration
+sudo rm -f "/etc/systemd/user/$APP_NAME.service"
+sudo systemctl --user daemon-reload
+
+log "✓ $APP_NAME uninstalled successfully"
+----
+
+== A2ML Integration
+
+All scripts SHOULD include A2ML metadata for machine readability:
+
+[source,a2ml]
+----
+(
+  id = "launcher-lifecycle-standard"
+  type = "standard"
+  version = "1.0.0"
+  
+  components = [
+    {
+      id = "install"
+      type = "script"
+      path = "scripts/install.sh"
+      description = "Installation script"
+    }
+    {
+      id = "uninstall"
+      type = "script"
+      path = "scripts/uninstall.sh"
+      description = "Uninstallation script"
+    }
+    {
+      id = "warmup-user"
+      type = "script"
+      path = "scripts/warmup-user.sh"
+      description = "User warmup script"
+    }
+  ]
+  
+  compliance = [
+    "D-SIP-FV-MA"
+    "LM-LA-LIFECYCLE"
+    "CONSENT-AWARE-HTTP"
+  ]
+)
+----
+
+== Examples
+
+=== Complete Example: Game Server Admin
+
+[source,bash]
+----
+# Installation
+./scripts/install.sh
+
+# User Warmup
+./scripts/warmup-user.sh
+
+# Launch
+game-server-admin-launcher --gossamer
+
+# Diagnose Issues
+game-server-admin-dustfile.sh --diagnose
+
+# Repair
+game-server-admin-dustfile.sh --repair
+
+# Uninstall
+./scripts/uninstall.sh
+----
+
+== Compliance Checklist
+
+[ ] Installation script follows LM/LA-INSTALL standard
+[ ] Configuration uses TOML format in standard locations
+[ ] Personalization options documented and implemented
+[ ] Warmup scripts provided for all user types
+[ ] Uninstall script follows LM/LA-UNINSTALL standard
+[ ] A2ML metadata included for machine readability
+[ ] All scripts are executable (chmod +x)
+[ ] Desktop files are read-only (chmod 444)
+[ ] Integrity verification implemented
+
+== See Also
+
+- link:launcher-standard.adoc[Comprehensive Launcher Standard]
+- link:DUSTFILE-SPECIFICATION.adoc[Dustfile Specification]
+- link:../../consent-aware-http/[Consent-Aware HTTP]
+- link:../../groove-protocol/[Groove Protocol]

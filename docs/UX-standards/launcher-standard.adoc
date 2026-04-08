@@ -1,0 +1,371 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= UX Standards - Comprehensive Launcher Standard
+:toc:
+:toclevels: 4
+
+== Overview
+
+This document defines the **Comprehensive Launcher Standard** for the hyperpolymath ecosystem.
+It extends the E-Grade principles with specific implementation patterns, code templates, and
+troubleshooting guides for creating robust, reliable application launchers.
+
+== Standard Launcher Template
+
+The reference implementation is provided in link:comprehensive-launcher-template.sh[comprehensive-launcher-template.sh].
+
+=== Key Features
+
+[source,bash]
+----
+# Standardized structure for all launchers
+APP_NAME="MyApp"              # Application name
+REPO_DIR="/path/to/repo"       # Repository directory  
+COMMAND="command to run"      # Startup command
+URL="http://localhost:PORT"     # Web URL (if applicable)
+PID_FILE="/tmp/app-server.pid" # Process ID tracking
+LOG_FILE="/tmp/app-server.log" # Log file location
+MODE="${1:---auto}"            # Default mode
+----
+
+=== Required Functions
+
+[source,bash]
+----
+log()          # User feedback (stdout)
+err()          # Error messages (stderr)
+is_running()   # Check if process is running
+wait_for_server() # Active waiting with timeout
+start_server() # Robust server startup
+stop_server()  # Clean shutdown
+open_browser() # Browser launching (if web app)
+----
+
+== Implementation Patterns
+
+=== Process Management
+
+[source,bash]
+----
+# Start process with nohup to prevent termination
+nohup $COMMAND >"$LOG_FILE" 2>&1 &
+echo $! > "$PID_FILE"
+
+# Check if process is still running
+is_running() {
+  [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+}
+
+# Clean shutdown
+stop_server() {
+  if is_running; then
+    kill "$(cat "$PID_FILE")" 2>/dev/null || true
+    rm -f "$PID_FILE"
+  fi
+}
+----
+
+=== Server Readiness Checking
+
+[source,bash]
+----
+wait_for_server() {
+  local max_wait=$1
+  local waited=0
+  
+  while [ $waited -lt $max_wait ]; do
+    if curl -fsS "$URL" >/dev/null 2>&1; then
+      return 0  # Success
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  
+  return 1  # Timeout
+}
+
+# Usage
+if ! wait_for_server 15; then
+  err "Server did not start within 15 seconds"
+  err "Check log: $LOG_FILE"
+  return 1
+fi
+----
+
+=== Browser Launching
+
+[source,bash]
+----
+open_browser() {
+  if ! is_running; then
+    err "Server is not running"
+    return 1
+  fi
+  
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$URL" &
+  elif command -v firefox >/dev/null 2>&1; then
+    firefox "$URL" &
+  elif command -v chromium >/dev/null 2>&1; then
+    chromium "$URL" &
+  else
+    log "Open manually: $URL"
+  fi
+}
+----
+
+=== Error Handling
+
+[source,bash]
+----
+# Always provide actionable feedback
+err() {
+  echo "[$APP_NAME] ERROR: $1" >&2
+  echo "[$APP_NAME] Try: check $LOG_FILE for details" >&2
+}
+
+# Example usage
+if ! start_server; then
+  err "Failed to start server"
+  exit 1
+fi
+----
+
+== Standard Modes
+
+=== Required Modes
+
+[cols="1,3"]
+|===
+| Mode | Purpose
+
+| `--start`
+| Start the server/application without opening browser
+
+| `--stop`
+| Stop the running server/application
+
+| `--status`
+| Show current status (running/stopped, URL if applicable)
+
+| `--auto` (default)
+| Start server and open browser (for web apps)
+
+| `--browser` / `--web`
+| Alias for `--auto` (start and open browser)
+|===
+
+=== Mode Implementation
+
+[source,bash]
+----
+case "$MODE" in
+  --start)
+    start_server
+    ;;
+  
+  --stop)
+    stop_server
+    ;;
+  
+  --status)
+    if is_running; then
+      log "Server running (PID: $(cat "$PID_FILE"))"
+      [ -n "$URL" ] && log "URL: $URL"
+    else
+      log "Server not running"
+    fi
+    ;;
+  
+  --browser|--web|--auto|*)
+    start_server && open_browser
+    ;;
+esac
+----
+
+== Desktop File Standard
+
+=== Required Format
+
+[source,ini]
+----
+[Desktop Entry]
+Type=Application
+Name=Application Name
+Exec=/path/to/launcher.sh --auto
+Terminal=false  # Critical for web/GUI apps
+Icon=/path/to/icon.png
+Categories=Category;
+StartupNotify=true
+
+# Actions for additional functionality
+Actions=stop;status;
+
+[Desktop Action stop]
+Name=Stop Server
+Exec=/path/to/launcher.sh --stop
+
+[Desktop Action status]
+Name=Server Status
+Exec=/path/to/launcher.sh --status
+----
+
+=== Forbidden Patterns
+
+[source,ini]
+----
+# BAD: Terminal wrapping
+Exec=konsole -e /path/to/launcher.sh --auto
+Terminal=true
+
+# BAD: Complex wrapping
+Exec=konsole --background-mode --hold --qwindowtitle Title -e wrapper.sh launcher.sh
+
+# BAD: No error handling
+Exec=launcher.sh
+----
+
+== Troubleshooting Guide
+
+=== Common Issues and Solutions
+
+[cols="1,2,2"]
+|===
+| Symptom | Likely Cause | Solution
+
+| Black terminal window
+| Terminal wrapping in desktop file
+| Remove konsole wrapping, set Terminal=false
+
+| "Cannot connect to server"
+| Server not running or wrong URL
+| Check `is_server_running()` function and URL
+
+| Browser doesn't open
+| Server not ready when browser launches
+| Increase wait_for_server timeout
+
+| Process dies immediately
+| Missing `nohup` or process management
+| Add `nohup` and proper PID tracking
+
+| Multiple instances running
+| No PID file checking
+| Implement `is_running()` check before start
+
+| Port already in use
+| Previous instance not cleaned up
+| Add `kill` before starting new instance
+|===
+
+=== Debugging Checklist
+
+1. Check log file: `tail -f /tmp/app-server.log`
+2. Verify process: `ps aux | grep app-name`
+3. Test URL manually: `curl -v http://localhost:PORT`
+4. Check PID file: `cat /tmp/app-server.pid`
+5. Test browser opening: `xdg-open http://localhost:PORT`
+6. Verify dependencies: `command -v required-command`
+7. Check port availability: `ss -tlnp | grep PORT`
+
+== Migration Guide
+
+=== From Old Konsole-Wrapped Launchers
+
+[source,bash]
+----
+# OLD (bad)
+Exec=konsole --background-mode --hold --qwindowtitle Title -e wrapper.sh launcher.sh
+Terminal=true
+
+# NEW (good)
+Exec=/path/to/launcher.sh --auto
+Terminal=false
+----
+
+=== From Simple Pass-Through Scripts
+
+[source,bash]
+----
+# OLD (minimal)
+#!/bin/bash
+exec upstream-launcher "$@"
+
+# NEW (robust)
+#!/bin/bash
+# Standardized launcher with process management
+APP_NAME="AppName"
+# ... include standard template ...
+----
+
+== Compliance Checklist
+
+[ ] Remove all terminal wrapping from desktop files
+[ ] Set `Terminal=false` for GUI/web applications
+[ ] Implement `nohup` for background processes
+[ ] Add PID file tracking and cleanup
+[ ] Implement `wait_for_server()` with reasonable timeout
+[ ] Add proper error handling and user feedback
+[ ] Provide clear success/failure messages
+[ ] Log to predictable location (`/tmp/app-name.log`)
+[ ] Handle browser launch failures gracefully
+[ ] Provide manual fallback instructions
+[ ] Implement `--start`, `--stop`, `--status` modes
+[ ] Test desktop launching without terminal
+[ ] Verify browser opens automatically
+[ ] Test error conditions (port in use, missing deps)
+
+== Best Practices
+
+=== Logging
+- Log to `/tmp/app-name.log` for easy debugging
+- Include timestamps for long-running processes
+- Rotate logs if they grow large
+- Provide log location in error messages
+
+=== User Experience
+- Provide immediate feedback when launching
+- Show progress during server startup
+- Clear success message when ready
+- Actionable error messages with next steps
+- Never leave user wondering what happened
+
+=== Performance
+- Use reasonable timeouts (10-20 seconds typical)
+- Don't block indefinitely
+- Provide feedback during waiting
+- Optimize startup sequence
+
+=== Security
+- Use predictable but unique PID file names
+- Clean up PID files on exit
+- Don't log sensitive information
+- Validate URLs before opening
+
+== Reference Implementations
+
+=== Burble Launcher
+[source,bash]
+----
+include::../../../../.desktop-tools/burble-launcher.sh[]
+----
+
+=== IDApTIK Launcher
+[source,bash]
+----
+include::../../../../.desktop-tools/idaptik-launcher.sh[]
+----
+
+=== PanLL Launcher
+[source,bash]
+----
+include::../../../../.desktop-tools/panll-launcher.sh[]
+----
+
+== See Also
+
+- link:e-grade-launcher-template.sh[E-Grade Launcher Template] - Original specification
+- link:comprehensive-launcher-template.sh[Comprehensive Template] - Full reference implementation
+- link:../../consent-aware-http/[Consent-Aware HTTP] - Privacy-compliant feedback
+- link:../../groove-protocol/[Groove Protocol] - Soft-attach patterns
+- link:../../hypatia-rules/[Hypatia Rules] - LLM integration guidelines

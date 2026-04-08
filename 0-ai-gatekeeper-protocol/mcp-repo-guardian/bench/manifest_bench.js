@@ -14,7 +14,7 @@
 // These benchmarks establish a baseline for CI regression detection.
 // Network I/O benchmarks (MCP server calls) require a live environment.
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // Benchmark infrastructure
@@ -113,7 +113,7 @@ function benchSessionManagerOps() {
   const sessions = {};
 
   // create session
-  const sessionId = `bench-${Math.random()}`;
+  const sessionId = `bench-${randomUUID()}`;
   sessions[sessionId] = {
     sessionId,
     acknowledgedManifest: false,
