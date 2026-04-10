@@ -153,7 +153,32 @@ fi
 
 | `--browser` / `--web`
 | Alias for `--auto` (start and open browser)
+
+| `--integ`
+| **System integration**. Install the launcher as a first-class application:
+  Start Menu / Applications folder entry, Desktop shortcut, icon, and the
+  launcher itself copied to a stable location on `PATH`. Cross-platform
+  (see §System Integration Modes below). Idempotent; `--integ --force`
+  reinstalls without prompting.
+
+| `--disinteg`
+| **System dis-integration**. Undo everything `--integ` installed:
+  Start Menu entry, Desktop shortcut, icon, and the installed launcher.
+  Also stops the running server. Leaves user config in `~/.config/<app>/`
+  and logs in place so reinstall is seamless. Idempotent.
+
+| `--help` / `-h`
+| Print usage text, including a description of every mode, the files the
+  launcher reads/writes, and the detected platform.
 |===
+
+NOTE: `--integ` and `--disinteg` replace the earlier pattern of separate
+`install.sh` / `uninstall.sh` scripts from LM-LA-LIFECYCLE-STANDARD.
+Having install, uninstall, and runtime in a single script means users have
+one thing to run and one thing to remember, which is the whole point of the
+E-Grade principle. The LM-LA-LIFECYCLE-STANDARD remains authoritative for
+*what* must happen during install and uninstall; this standard specifies
+*where* those operations are triggered from (the launcher itself).
 
 === Mode Implementation
 
@@ -182,6 +207,99 @@ case "$MODE" in
     ;;
 esac
 ----
+
+== System Integration Modes (`--integ` / `--disinteg`)
+
+The `--integ` mode installs the launcher as a first-class desktop application
+on the host OS. It is the single entry point for "make this a real app on my
+system". The `--disinteg` mode is its exact inverse.
+
+=== Design principles
+
+1. **Idempotent.** `--integ` run twice is fine. `--disinteg` on an unintegrated
+   system is a friendly no-op, not an error.
+2. **Cross-platform.** The same launcher script works on Linux, macOS, and
+   Windows (via Git Bash or WSL). Platform detection is via `uname -s`.
+3. **Detectable.** `--integ` detects existing installations and prompts
+   before overwriting, unless `--force` is passed as a second argument.
+4. **Reversible.** `--disinteg` removes everything `--integ` installed and
+   leaves user config and logs alone so reinstall is seamless.
+5. **No elevated privileges.** All paths are user-level. No `sudo`, no
+   system-wide directories. Reinstall per user, not per machine.
+6. **Launcher copy, not symlink.** `--integ` copies the launcher script to a
+   stable location on `PATH` rather than symlinking, so moving or renaming
+   the source repo does not break the Start Menu entry.
+
+=== What `--integ` creates
+
+[cols="1,2,3"]
+|===
+| Platform | Path | Purpose
+
+| Linux
+| `~/.local/share/applications/<app>.desktop`
+| Start Menu / app launcher entry
+
+| Linux
+| `~/Desktop/<app>.desktop`
+| Desktop shortcut (marked trusted via `gio` if available, so KDE doesn't prompt)
+
+| Linux
+| `~/.local/share/icons/hicolor/256x256/apps/<app>.png`
+| Icon used by the Start Menu entry
+
+| Linux
+| `~/.local/bin/<app>-launcher`
+| Copy of the launcher script on `PATH`
+
+| macOS
+| `~/Applications/<App>.app/` (minimal bundle: `Info.plist`, `Contents/MacOS/<app>`)
+| Launchpad + Spotlight entry. Not codesigned.
+
+| macOS
+| `~/Desktop/<App>.command`
+| Double-clickable shortcut
+
+| macOS
+| `~/.local/bin/<app>-launcher`
+| Copy of the launcher script on `PATH`
+
+| Windows (Git Bash / WSL)
+| `%APPDATA%\Microsoft\Windows\Start Menu\Programs\<App>.lnk`
+| Start Menu entry. Created via PowerShell `WScript.Shell`. Falls back to `.bat` if PowerShell is not reachable.
+
+| Windows (Git Bash / WSL)
+| `~/Desktop/<App>.lnk`
+| Desktop shortcut
+
+| Windows (Git Bash / WSL)
+| `~/.local/bin/<app>-launcher.sh`
+| Copy of the launcher script
+|===
+
+=== What `--disinteg` removes
+
+Everything `--integ` created, plus:
+
+* The PID file (`/tmp/<app>-server.pid`)
+* Any `.bat` fallback shortcuts written when PowerShell wasn't available
+
+It deliberately **does not** remove:
+
+* `~/.config/<app>/` — user preferences survive reinstall
+* `/tmp/<app>-server.log` — logs stay for post-mortem
+* The source repository at `REPO_DIR`
+
+The removal instructions for those are printed after `--disinteg` so the user
+can run them manually if they really want a clean wipe.
+
+=== Reference implementation
+
+See link:comprehensive-launcher-template.sh[comprehensive-launcher-template.sh]
+for the `do_integ()` / `do_disinteg()` functions and the platform-dispatch
+pattern. Existing launchers should be updated to include these modes; the
+pattern is drop-in because the integration paths are all globals set by
+platform detection at the top of the script.
 
 == Desktop File Standard
 

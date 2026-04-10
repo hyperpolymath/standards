@@ -17,42 +17,61 @@ See: https://github.com/hyperpolymath/standards
 
 ## Language Policy (Hyperpolymath Standard)
 
+### Terminology note — "Rust" always means "Rust/SPARK"
+
+As of 2026-04-10, the word **Rust** in all hyperpolymath documentation is
+shorthand for **Rust with SPARK integration as the default stance**. SPARK
+integration is the transition direction — Rust-primary now, with SPARK/Ada
+modules called via the standard Idris2-ABI / Zig-FFI pattern for the
+correctness-critical parts. New Rust projects should be *designed* to admit
+SPARK modules even if they do not yet contain any. See
+`spec/LANGUAGE-POLICY.adoc §Terminology` in `rhodium-standard-repositories`
+for the canonical statement.
+
 ### ALLOWED Languages & Tools
 
 | Language/Tool | Use Case | Notes |
 |---------------|----------|-------|
 | **ReScript** | Primary application code | Compiles to JS, type-safe |
 | **Deno** | Runtime & package management | Replaces Node/npm/bun |
-| **Rust** | Performance-critical, systems, WASM | Preferred for CLI tools |
+| **Rust/SPARK** | Performance-critical, systems, WASM, CLI tools, safety-critical | "Rust" always means "Rust/SPARK" per terminology note above. Preferred over Ada where reachable. |
+| **Zig** | FFI layer (hyperpolymath ABI/FFI standard), memory-safe systems where Rust/SPARK is overkill | Also the migration target for V-lang |
+| **Idris2** | Formal verification (sole option) | ATS2 rejected. Proven-library status in `proven` repo. |
 | **Tauri 2.0+** | Mobile apps (iOS/Android) | Rust backend + web UI |
 | **Dioxus** | Mobile apps (native UI) | Pure Rust, React-like |
 | **Gleam** | Backend services | Runs on BEAM or compiles to JS |
+| **Elixir** | Backend services, distributed systems | BEAM, Phoenix, OTP |
+| **Haskell** | Type-heavy tools, registry validation | Scaffoldia CLI |
 | **Bash/POSIX Shell** | Scripts, automation | Keep minimal |
 | **JavaScript** | Only where ReScript cannot | MCP protocol glue, Deno APIs |
 | **Nickel** | Configuration language | For complex configs |
 | **A2ML** | State/meta files | STATE.a2ml, META.a2ml, etc. (TOML-like format) |
 | **Julia** | Batch scripts, data processing | Per RSR |
 | **OCaml** | AffineScript compiler | Language-specific |
-| **Ada** | Safety-critical systems | Where required |
+| **Ada** (legacy) | Safety-critical systems where Rust/SPARK is not yet reachable | Rust/SPARK is absorbing most Ada work over time. Do not start new pure-Ada projects unless Rust/SPARK cannot reach. |
 
 ### BANNED - Do Not Use
 
-| Banned | Replacement |
-|--------|-------------|
-| TypeScript | ReScript |
-| Node.js | Deno |
-| npm | Deno |
-| Bun | Deno |
-| pnpm/yarn | Deno |
-| Go | Rust |
-| **Python** | ReScript/Rust |
-| Java/Kotlin | Rust/Tauri/Dioxus |
-| Swift | Tauri/Dioxus |
-| React Native | Tauri/Dioxus |
-| Flutter/Dart | Tauri/Dioxus |
-| **Makefiles** | Mustfile/justfile |
+| Banned | Replacement | Notes |
+|--------|-------------|-------|
+| TypeScript | ReScript | |
+| Node.js | Deno | |
+| npm | Deno | |
+| Bun | Deno | |
+| pnpm/yarn | Deno | |
+| Go | Rust/SPARK | |
+| **Python** | ReScript/Rust/SPARK/Julia | Fully banned, no exceptions (SaltStack exception removed 2026-01-03) |
+| Java/Kotlin | Rust/SPARK, Tauri, Dioxus | |
+| Swift | Tauri/Dioxus | |
+| React Native | Tauri/Dioxus | |
+| Flutter/Dart | Tauri/Dioxus | Google lock-in |
+| **V-lang** | Zig | Banned 2026-04-10. "Too many things, and V does not live up to it." Detected via `v.mod` / `vpkg.json` (not `.v` files, because that collides with Verilog). Migration is a direction, not a rip-out. |
+| **ATS2** | Idris2 (formal), Rust/SPARK (safety-critical operational) | Rejected in favour of Idris2 and Rust/SPARK. |
+| **Makefiles** | Mustfile/justfile | |
 
-**NOTE:** Python is fully banned. There are no exceptions (SaltStack exception removed 2026-01-03).
+**NOTE:** Python is fully banned. V-lang is fully banned (2026-04-10). ATS2 is
+fully banned in favour of Idris2 + Rust/SPARK. All three bans are enforced by
+`.github/workflows/language-policy.yml`.
 
 ### Build System
 
