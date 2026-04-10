@@ -1,18 +1,32 @@
-// SPDX-License-Identifier: MPL-2.0-or-later
-// SPDX-FileCopyrightText: 2024-2025 hyperpolymath
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 
 = RSR Language Policy
-:author: hyperpolymath
-:revnumber: 1.0.0
-:revdate: 2025-12-27
+:author: Jonathan D.A. Jewell (hyperpolymath)
+:revnumber: 1.1.0
+:revdate: 2026-04-10
 :toc: left
 :icons: font
 :source-repo: https://github.com/hyperpolymath/cccp
 
 [NOTE]
 ====
-*Version Status*: v1.0.0 *FROZEN* — Language allowed/banned lists are immutable.
+*Version Status*: v1.1.0 — allowed/banned lists amended 2026-04-10. See §Amendments
+at the bottom of this document for the rationale and the full change list. The
+prior v1.0.0 freeze was lifted on the same date.
 ====
+
+== Terminology: "Rust" means "Rust/SPARK"
+
+Throughout this document and all derived documentation, the word **Rust** is
+shorthand for **Rust with SPARK integration as the default stance**. SPARK
+integration is the transition direction — Rust-primary now, with SPARK/Ada
+modules called via the standard Idris2-ABI / Zig-FFI pattern for the
+correctness-critical parts of any given subsystem. New Rust projects should
+be *designed* to admit SPARK modules even if they do not yet contain any.
+
+This terminology note supersedes any earlier document that uses "Rust" in
+isolation; such uses should be read as "Rust/SPARK".
 
 == Overview
 
@@ -30,9 +44,21 @@ NOTE: For full rationale and migration guides, see the link:{source-repo}[CCCP r
 | Primary application code
 | Compiles to JS, OCaml type safety
 
-| *Rust*
-| Systems, performance, WASM
-| Preferred for CLI tools
+| *Rust/SPARK*
+| Systems, performance, WASM, CLI tools, safety-critical (preferred over Ada where reachable)
+| "Rust" in this document always means "Rust with SPARK integration as the
+  default stance". See §Terminology. New Rust projects should be designed
+  to admit SPARK/Ada modules via the standard Idris2-ABI / Zig-FFI pattern.
+
+| *Zig*
+| FFI layer for the hyperpolymath ABI/FFI standard, memory-safe systems code where Rust/SPARK is overkill, and any work where Zig's C-ABI compatibility is load-bearing.
+| Replaces V-lang (see §Banned Languages). Zig is the target for migrating
+  existing V-lang code over time.
+
+| *Idris2*
+| Formal verification (sole option)
+| Idris2 is the only formal-verification language. ATS2 is rejected.
+  See the `proven` repo for the canonical library status.
 
 | *Deno*
 | Runtime & package management
@@ -42,13 +68,24 @@ NOTE: For full rationale and migration guides, see the link:{source-repo}[CCCP r
 | Backend services
 | BEAM or JS target
 
+| *Elixir*
+| Backend services, distributed systems
+| BEAM, Phoenix framework, OTP patterns
+
 | *OCaml*
-| Compilers, formal methods
+| Compilers, formal methods, AffineScript
 | Strong type system
 
-| *Ada*
-| Safety-critical systems
-| SPARK verification
+| *Ada* (legacy)
+| Safety-critical systems where Rust/SPARK is not yet viable
+| SPARK verification. The migration direction is **Rust/SPARK absorbing
+  most Ada work over time**. Do not start new pure-Ada projects unless
+  Rust/SPARK genuinely cannot reach. Existing Ada code is not being
+  rewritten wholesale — this is a direction, not a rip-out.
+
+| *Haskell*
+| Type-heavy tools, Scaffoldia CLI, registry validation
+| Strong type system
 
 | *Julia*
 | Data processing, batch scripts
@@ -56,7 +93,8 @@ NOTE: For full rationale and migration guides, see the link:{source-repo}[CCCP r
 
 | *Guile Scheme*
 | State/meta files
-| STATE.scm, META.scm, ECOSYSTEM.scm
+| STATE.scm, META.scm, ECOSYSTEM.scm (being migrated to A2ML — see
+  `feedback_scm_to_a2ml_migration` in project memory)
 
 | *Nickel*
 | Configuration language
@@ -86,25 +124,58 @@ NOTE: For full rationale and migration guides, see the link:{source-repo}[CCCP r
 | Supply chain risks
 
 | *Go*
-| Rust
+| Rust/SPARK
 | Error handling, generics
 
-| *Python* (general)
-| ReScript/Rust
-| No static types
+| *Python*
+| ReScript/Rust/SPARK/Julia
+| No static types. **All Python banned** (SaltStack exception removed
+  2026-01-03 per `feedback_python_fully_banned`).
 
 | *Java/Kotlin*
-| Rust
+| Rust/SPARK, Tauri, Dioxus
 | JVM overhead
 
 | *Swift*
 | Tauri/Dioxus
 | Platform lock-in
+
+| *Flutter/Dart*
+| Tauri/Dioxus
+| Google lock-in
+
+| *React Native*
+| Tauri/Dioxus
+| Facebook/Meta lock-in
+
+| *Bun*
+| Deno, then pnpm (as Node fallback only)
+| Added 2026-04-10. Previously tentatively allowed as a Deno fallback; ditched
+  on 2026-04-10 in favour of pnpm for forced-Node cases. User's framing:
+  "okay, let's dirch bun for pnpm if needed, so deno thebn fall back to pnpm".
+  Bun is too young and moves too fast for policy-level adoption.
+
+| *V-lang*
+| Zig
+| Added 2026-04-10. "Too many things, and V does not live up to it." V-lang
+  has not delivered on reliability, ecosystem depth, or performance relative
+  to Zig. Migration target: Zig. The migration is a direction; existing V
+  code is not being ripped out, but no new V code should be written. The
+  prior `feedback_vlang_location.md` guidance ("stop remaking V-lang API
+  triples") now reads as "stop remaking them, and migrate to Zig when
+  touched." See §Amendments.
+
+| *ATS2*
+| Idris2 (for formal verification), Rust/SPARK (for safety-critical non-proof work)
+| Formal verification is Idris2-only. ATS2 was previously considered for
+  correctness-critical work but is rejected in favour of Idris2 (proven
+  ecosystem) and Rust/SPARK (operational safety with formal verification
+  of key invariants).
+
+| *Makefiles*
+| Mustfile / justfile
+| Per standards/.claude/CLAUDE.md
 |===
-
-=== Exception: SaltStack
-
-Python is permitted *only* for SaltStack configuration management. This is a temporary exception pending migration to Nickel-based infrastructure.
 
 == Mobile Development
 
@@ -136,10 +207,85 @@ Both are FOSS with independent governance.
 When encountering banned languages:
 
 1. *Immediate*: Block new code in banned languages
-2. *Short-term*: Convert TypeScript to ReScript
-3. *Medium-term*: Replace Node/npm with Deno
-4. *Long-term*: Rewrite Go/Python in Rust
+2. *Short-term*: Convert TypeScript to ReScript; block new V-lang
+3. *Medium-term*: Replace Node/npm with Deno; begin V-lang → Zig migration on-touch
+4. *Long-term*: Rewrite Go/Python in Rust/SPARK; complete V-lang → Zig migration;
+   absorb most Ada work into Rust/SPARK where Rust/SPARK is reachable
+
+== JavaScript / Node Ecosystem Policy
+
+Ratified 2026-04-10. When the work involves the JavaScript or Node ecosystem,
+the reach order is:
+
+1. **Deno first, always.** Deno with `npm:` specifiers covers most forced-Node
+   package needs without actually having a Node project.
+
+2. **pnpm as the Node-runtime fallback.** When a project *must* be
+   Node-runtime (legacy integration, deployment target demands it), use
+   **pnpm**. Rationale: pnpm's strict `node_modules` (no phantom deps) is a
+   real security improvement over npm, its content-addressable store saves
+   disk, its workspaces are sane, and it's compatible with the npm registry.
+
+3. **No other JavaScript runtimes or package managers.** Explicitly banned:
+   * `npm` — unsafe defaults, phantom dependencies, slow
+   * `yarn` (classic + berry) — classic is abandoned, berry/PnP has
+     compatibility pain
+   * `Bun` — too young, moves too fast (ditched 2026-04-10 after brief
+     consideration)
+   * `Node.js` as a standalone runtime — replaced by Deno
 
 == Machine-Readable Policy
 
 See link:../spec.scm/language-policy.scm[spec.scm/language-policy.scm] for tooling integration.
+
+== Amendments
+
+=== v1.1.0 — 2026-04-10 (Jonathan D.A. Jewell)
+
+The v1.0.0 freeze was lifted to reflect architectural decisions made in the
+2026-04-10 reconciliation session. The amendments are:
+
+. **V-lang banned, target is Zig.** V-lang has been removed from the allowed
+  list and added to the banned list. Migration target: Zig. Rationale: "too
+  many things, and V does not live up to it." Existing V-lang code (notably
+  `developer-ecosystem/v-ecosystem/` and `standards/lol/api/v-lol/`) is not
+  being ripped out; the migration is a direction. No new V-lang code should
+  be written.
+
+. **Rust always means Rust/SPARK.** Throughout this document and derived
+  documentation, the word "Rust" is shorthand for "Rust with SPARK integration
+  as the default stance." New Rust projects should be designed to admit
+  SPARK/Ada modules via the standard Idris2-ABI / Zig-FFI pattern, even if
+  they do not yet contain any. See §Terminology.
+
+. **Rust/SPARK absorbs most Ada work over time.** Ada remains in the allowed
+  list but is marked (legacy). The direction is for Rust/SPARK to take over
+  most of what Ada/SPARK has historically done, with Ada retained only for
+  cases where Rust/SPARK genuinely cannot reach. Existing Ada code is not
+  being rewritten wholesale.
+
+. **Formal verification is Idris2-only.** ATS2 is explicitly rejected (it was
+  already rejected in project memory; this amendment codifies it in the
+  standard). Idris2 is the sole formal-verification language.
+
+. **Python SaltStack exception removed.** The SaltStack exception noted in
+  v1.0.0 was removed on 2026-01-03 (prior to this amendment). All Python is
+  now banned without exception.
+
+. **Elixir, Haskell, Zig added to the allowed list.** These were already in
+  use per project memory but were not explicitly listed in v1.0.0. This
+  amendment codifies them.
+
+. **Flutter/Dart and React Native explicitly added to the banned list.**
+  Already banned in practice per project memory.
+
+. **License header corrected.** Updated from `MPL-2.0-or-later` to
+  `PMPL-1.0-or-later`, and copyright updated to "Jonathan D.A. Jewell
+  (hyperpolymath)" per the `Author Attribution (CRITICAL)` rule in
+  `~/.claude/CLAUDE.md`. The v1.0.0 header attributed the document to
+  "hyperpolymath" alone, which violates the attribution standard.
+
+This is a significant amendment. The RSR compliance-grading tools and
+downstream language-policy workflows (`standards/.github/workflows/language-policy.yml`
+and its mirrors) should be updated to match. Tooling updates are tracked
+separately and are **not** part of this spec amendment.

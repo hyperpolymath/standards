@@ -86,6 +86,46 @@ jobs:
           fi
           echo "✓ No Swift files found"
 
+      - name: Check for V-lang code
+        run: |
+          # V-lang is banned as of 2026-04-10. Migration target: Zig.
+          # We detect by v.mod (V-lang's module manifest) rather than *.v
+          # extension because .v collides with Verilog hardware sources.
+          V_MOD_FILES=$(find . -name "v.mod" -not -path "*/node_modules/*" -not -path "*/.git/*" || true)
+          if [ -n "$V_MOD_FILES" ]; then
+            echo "::error::V-lang code found (detected via v.mod). V-lang is banned since 2026-04-10. Migrate to Zig."
+            echo "$V_MOD_FILES"
+            exit 1
+          fi
+          # Also check for vpkg.json (alternative V package manifest)
+          VPKG_FILES=$(find . -name "vpkg.json" -not -path "*/node_modules/*" -not -path "*/.git/*" || true)
+          if [ -n "$VPKG_FILES" ]; then
+            echo "::error::V-lang code found (detected via vpkg.json). V-lang is banned since 2026-04-10. Migrate to Zig."
+            echo "$VPKG_FILES"
+            exit 1
+          fi
+          echo "✓ No V-lang code found"
+
+      - name: Check for Flutter/Dart files
+        run: |
+          if find . -name "*.dart" -o -name "pubspec.yaml" | head -1 | grep -q .; then
+            echo "::error::Flutter/Dart code found. Use Tauri/Dioxus instead (Google lock-in policy)."
+            find . -name "*.dart" -o -name "pubspec.yaml"
+            exit 1
+          fi
+          echo "✓ No Flutter/Dart code found"
+
+      - name: Check for ATS2 files
+        run: |
+          # ATS2 is rejected in favour of Idris2 (formal verification) and
+          # Rust/SPARK (safety-critical operational code). See LANGUAGE-POLICY.adoc §Amendments v1.1.0.
+          if find . -name "*.dats" -o -name "*.sats" -o -name "*.hats" | head -1 | grep -q .; then
+            echo "::error::ATS2 files found. Use Idris2 (formal verification) or Rust/SPARK (safety-critical code) instead."
+            find . -name "*.dats" -o -name "*.sats" -o -name "*.hats"
+            exit 1
+          fi
+          echo "✓ No ATS2 files found"
+
   check-required-files:
     name: Check Required Files
     runs-on: ubuntu-latest
