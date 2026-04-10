@@ -1,0 +1,15 @@
+# STATISTEASE-PLAN — 2026-03-30
+
+## Mission
+Ensure StatistEase (the data analysis / diagnostics stack) meets the new PPPPP gate before any downstream release/paper, with full proofs/tests/contractiles/ability coverage plus the necessary HOL/HAL evidence.
+
+## Key lines of work
+1. **Proofs**: Identify the mathematical claims within StatistEase papers or docs that require Idris2/Lean4/Agda mechanisation; add them to the `PROOF-NEEDS` ledger and schedule totality checks.  
+2. **Tests & Benches**: Run point-to-point tests (parsing, pipeline, statistics engine), e2e flows, panic-attack/Hypatia scans, and authenticity benches (heavy datasets). Replace any placeholder fuzz entries with real harnesses.  
+3. **Contractiles & Ability**: Document the invariants (must, trust, dust, intent) inside `contractiles/` and ensure the ability/access doc is live for dataset pipelines; tie the logs into `k9`.  
+4. **Publication Readiness**: Connect StatistEase outputs to `PAPER-STATUS.md` + `LLM-PROOF-TRUST.md` + `AUDIT-V2.adoc`. Do not call anything “beta stable” until the entire PPPPP pipeline (proofs, tests, benches, contractiles, ability/access review) is satisfied.
+
+## Coordination
+- Report progress in the desktop `chatgpt work` ledger and update `CLAUDE-WORK.md` for proof-heavy edits.  
+- Keep the ability/access doc and the `stapeln/ACCESSIBILITY.md` reference alive as the Statement for high-visibility releases.  
+- Invite peers (HOL, Zenodo, security community) to review this plan and propose additional audit steps when they challenge a claim.

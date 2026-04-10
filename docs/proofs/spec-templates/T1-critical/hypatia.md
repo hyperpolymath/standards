@@ -1,0 +1,518 @@
+# Proof Spec: hypatia
+<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+
+**Repo Path**: `/var/mnt/eclipse/repos/hypatia`
+**Tier**: T1 — Critical
+**Total Theorems**: 12
+**Primary Prover(s)**: Idris2 (7), Lean4 (2), Agda (1), TLA+ (2)
+**Existing Proof Coverage**: ~30% (Idris2 ABI 1027 LOC, pipeline state machine with ValidTransition GADT)
+**Dependencies**: `proven` library, `rsr-template-repo` ABI proofs
+
+## Status Tracker
+
+| # | Theorem | Prover | Status | Verified |
+|---|---------|--------|--------|----------|
+| 1 | H1 Confidence bounds [0.0, 1.0] | I2 | [ ] Pending | — |
+| 2 | H2 Dispatch strategy monotonicity | I2 | [ ] Pending | — |
+| 3 | H3 Safety triangle ordering | I2 | [ ] Pending | — |
+| 4 | H4 Rate limit enforcement | L4 | [ ] Pending | — |
+| 5 | H5 Quarantine trigger exclusivity | I2 | [ ] Pending | — |
+| 6 | H6 Outcome log monotonicity | Ag | [ ] Pending | — |
+| 7 | H7 Bayesian update soundness | L4 | [ ] Pending | — |
+| 8 | H8 Kin gate atomicity | TLA | [ ] Pending | — |
+| 9 | H9 Neural consensus aggregation | I2 | [ ] Pending | — |
+| 10 | H10 VQL query injection freedom | I2 | [ ] Pending | — |
+| 11 | H11 Batch rollback completeness | I2 | [ ] Pending | — |
+| 12 | H12 Cross-repo learning isolation | TLA | [ ] Pending | — |
+
+## Context
+
+### What this repo does
+
+Hypatia is a neurosymbolic CI/CD intelligence platform. It scans 302 repos using panic-attack, detects patterns via 8 neural networks, routes through a safety triangle (Eliminate > Substitute > Control), dispatches to gitbot-fleet with confidence-gated strategies, and learns from outcomes via Bayesian updates. It has rate limiting (50/bot/min, 200/global/min), auto-quarantine, and batch rollback.
+
+**Critical invariants**: 
+- Confidence never exits [0,1]
+- Safety triangle strict ordering
+- Dispatch strategy monotone in confidence
+- Rate limits never exceeded
+- No confidence leakage between repos
+
+### Source file tree (relevant subset)
+
+```
+hypatia/
+├── lib/ (Elixir - 67 modules)
+│   ├── pattern_analyzer.ex             Pipeline orchestrator
+│   ├── triangle_router.ex              Safety triangle routing
+│   ├── fleet_dispatcher.ex             Confidence-gated dispatch
+│   ├── outcome_tracker.ex              Bayesian confidence updates
+│   ├── safety/
+│   │   ├── rate_limiter.ex             Sliding window
+│   │   ├── quarantine.ex               Soft/hard/permanent
+│   │   └── batch_rollback.ex
+│   ├── kin/gate.ex                     Second-opinion gate
+│   ├── neural/coordinator.ex           8-network blackboard
+│   └── cross_repo_learning.ex
+├── src/abi/ (Idris2 - 1027 LOC)
+│   ├── Types.idr                       Confidence, Strategy types
+│   ├── FFI.idr                         FFI return proofs
+│   └── REST.idr
+├── verify/ (Idris2 verification)
+│   └── src/
+│       ├── PipelineState.idr           ValidTransition GADT (EXISTS)
+│       └── Verify/Fuel.idr
+└── ffi/zig/                            7 exported C functions
+```
+
+### Languages & LOC
+
+| Language | LOC | Purpose |
+|----------|-----|---------|
+| Elixir | ~8,000+ | Core pipeline, neural |
+| Rust | ~3,000+ | Forge adapters |
+| Idris2 | 1,027 | ABI + verification |
+| Zig | ~500 | FFI bridge |
+
+## Existing Proofs (DO NOT REDO)
+
+| File | LOC | Covers |
+|------|-----|--------|
+| `src/abi/Types.idr` | ~300 | Confidence refined type with So constraint |
+| `src/abi/FFI.idr` | ~200 | FFI return type proofs |
+| `verify/src/PipelineState.idr` | 175 | ValidTransition GADT for pipeline states |
+| `src/abi/RuleEngine.idr` | ~300 | Logtalk rule type definitions |
+
+## Theorems to Prove
+
+### H1: Confidence bounds
+
+**Target file**: `verification/proofs/idris2/ConfidenceBounds.idr`
+**Source being verified**: `src/abi/Types.idr` (existing) + `lib/outcome_tracker.ex`
+**Prover**: Idris2
+**Priority**: P0
+
+**Statement**:
+> Confidence values are constrained to [0.0, 1.0] (modelled as fractions num/den with num ≤ den). All operations (Bayesian update, annealing clamp, weighted average) preserve this invariant.
+
+**Formal signature**:
+```idris
+module ConfidenceBounds
+
+%default total
+
+||| Confidence as a refined fraction num/den, 0 ≤ num ≤ den.
+public export
+record Confidence where
+  constructor MkConfidence
+  num : Nat
+  den : Nat
+  {auto 0 denPos : NonZero den}
+  {auto 0 inBound : LTE num den}
+
+||| Bayesian success update: (num+1)/(den+1).
+public export
+updateSuccess : Confidence -> Confidence
+
+||| Bayesian failure update: num/(den+1).
+public export
+updateFailure : Confidence -> Confidence
+
+||| THEOREM: updateSuccess preserves the invariant.
+export
+updateSuccessPreserves : (c : Confidence) -> LTE c.num c.den ->
+                         LTE (updateSuccess c).num (updateSuccess c).den
+
+||| THEOREM: updateFailure preserves the invariant (num unchanged, den grows).
+export
+updateFailurePreserves : (c : Confidence) -> LTE c.num c.den ->
+                         LTE (updateFailure c).num (updateFailure c).den
+
+||| THEOREM: updateSuccess is monotone non-decreasing.
+export
+updateSuccessMonotone : (c : Confidence) -> LTE c.num (updateSuccess c).num
+
+||| THEOREM: updateFailure is monotone non-increasing (in value).
+export
+updateFailureMonotone : (c : Confidence) -> LTE (updateFailure c).num c.num
+```
+
+**Hints**:
+- Model confidence as exact fraction (num/den), not floating point
+- LTE reasoning with Nat.LteSucc lemmas
+- Reference hypatia's existing `So` constraint approach in Types.idr
+
+**Obligations**:
+- [ ] Define refined Confidence record
+- [ ] Define updateSuccess, updateFailure, clamp
+- [ ] Prove all preserve invariant
+- [ ] Prove monotonicity of each
+
+---
+
+### H2: Dispatch strategy monotonicity
+
+**Target file**: `verification/proofs/idris2/DispatchStrategy.idr`
+**Source being verified**: `lib/fleet_dispatcher.ex:45-90` + `lib/triangle_router.ex`
+**Prover**: Idris2
+**Priority**: P0
+
+**Statement**:
+> The dispatch strategy function is monotonic in confidence: higher confidence never yields less autonomy. Thresholds: confidence ≥ 0.95 → AutoExecute, 0.85-0.94 → Review, < 0.85 → ReportOnly.
+
+**Formal signature**:
+```idris
+module DispatchStrategy
+
+%default total
+
+public export
+data Strategy = ReportOnly | Review | AutoExecute
+
+||| Total order on strategies: ReportOnly < Review < AutoExecute.
+public export
+data StratLE : Strategy -> Strategy -> Type where
+  ReportLEAny : {s : Strategy} -> StratLE ReportOnly s
+  ReviewLEReview : StratLE Review Review
+  ReviewLEAuto : StratLE Review AutoExecute
+  AutoLEAuto : StratLE AutoExecute AutoExecute
+
+||| Dispatch function using confidence as Nat percentage (0..100).
+public export
+dispatch : (conf : Nat) -> {auto 0 ok : LTE conf 100} -> Strategy
+dispatch conf = if conf >= 95 then AutoExecute
+                else if conf >= 85 then Review
+                else ReportOnly
+
+||| KEY THEOREM: dispatch is monotone.
+export
+dispatchMonotone : (c1, c2 : Nat) -> LTE c1 c2 ->
+                   {auto ok1 : LTE c1 100} -> {auto ok2 : LTE c2 100} ->
+                   StratLE (dispatch c1) (dispatch c2)
+
+||| Boundary: dispatch 95 = AutoExecute.
+export
+dispatch95 : dispatch 95 = AutoExecute
+
+||| Boundary: dispatch 85 = Review.
+export
+dispatch85 : dispatch 85 = Review
+
+||| Boundary: dispatch 84 = ReportOnly.
+export
+dispatch84 : dispatch 84 = ReportOnly
+```
+
+**Hints**:
+- Prove by exhaustive case split on confidence zones
+- Use `decEq` for Nat comparisons
+- Note: existing work may already have this — check `src/abi/Types.idr`
+
+**Obligations**:
+- [ ] Define Strategy + StratLE
+- [ ] Define dispatch function
+- [ ] Prove dispatchMonotone
+- [ ] Prove boundary cases
+
+---
+
+### H3: Safety triangle ordering
+
+**Target file**: `verification/proofs/idris2/SafetyTriangle.idr`
+**Source being verified**: `lib/triangle_router.ex:35-84`
+**Prover**: Idris2
+**Priority**: P0
+
+**Statement**:
+> The safety triangle is a strict total order: Eliminate > Substitute > Control. Routing always prefers the highest tier. No downgrading: once Eliminate is applicable, Substitute is not chosen.
+
+**Formal signature**:
+```idris
+module SafetyTriangle
+
+%default total
+
+public export
+data Tier = Eliminate | Substitute | Control
+
+||| Strict total order.
+public export
+data TierGT : Tier -> Tier -> Type where
+  ElimGTSub : TierGT Eliminate Substitute
+  ElimGTCtl : TierGT Eliminate Control
+  SubGTCtl : TierGT Substitute Control
+
+||| THEOREM: Irreflexivity.
+export
+tierNotGTSelf : (t : Tier) -> Not (TierGT t t)
+
+||| THEOREM: Asymmetry.
+export
+tierAsymmetric : {a, b : Tier} -> TierGT a b -> Not (TierGT b a)
+
+||| THEOREM: Transitivity.
+export
+tierTransitive : {a, b, c : Tier} -> TierGT a b -> TierGT b c -> TierGT a c
+
+||| THEOREM: Trichotomy — for any two tiers, one is greater or they're equal.
+export
+tierTrichotomy : (a, b : Tier) ->
+                 Either (TierGT a b) (Either (a = b) (TierGT b a))
+
+||| Routing: given applicability bitmap, pick the highest tier.
+public export
+route : (elimOK : Bool) -> (subOK : Bool) -> (ctlOK : Bool) -> Maybe Tier
+
+||| THEOREM: If Eliminate applicable, route returns Eliminate.
+export
+elimWins : (s, c : Bool) -> route True s c = Just Eliminate
+
+||| THEOREM: If Eliminate inapplicable but Substitute applicable, returns Substitute.
+export
+subSecond : (c : Bool) -> route False True c = Just Substitute
+```
+
+**Hints**:
+- GADT-style TierGT with only valid constructors
+- Uninhabited for irreflexivity
+- Reference existing hypatia work (there may be starter code from prior session)
+
+**Obligations**:
+- [ ] Define Tier + TierGT
+- [ ] Prove irreflexivity, asymmetry, transitivity, trichotomy
+- [ ] Define route function
+- [ ] Prove elimWins, subSecond
+
+---
+
+### H4: Rate limit enforcement
+
+**Target file**: `verification/proofs/lean4/RateLimiting.lean`
+**Source being verified**: `lib/safety/rate_limiter.ex:74-120`
+**Prover**: Lean4
+**Priority**: P0
+
+**Statement**:
+> Sliding-window rate limiter counter never exceeds configured bound. Per-bot: 50/60s. Global: 200/60s. Burst: 10/5s.
+
+**Formal signature**:
+```lean
+structure RateLimit where
+  maxCount : Nat
+  windowSec : Nat
+
+structure Window where
+  events : List Nat  -- timestamps
+  config : RateLimit
+
+def prune (w : Window) (now : Nat) : Window :=
+  { w with events := w.events.filter (fun t => now - t ≤ w.config.windowSec) }
+
+def tryAccept (w : Window) (now : Nat) : Option Window :=
+  let pruned := prune w now
+  if pruned.events.length < pruned.config.maxCount then
+    some { pruned with events := now :: pruned.events }
+  else none
+
+-- INVARIANT: After tryAccept, count never exceeds maxCount
+theorem try_accept_bounded (w : Window) (now : Nat) :
+  (tryAccept w now).isSome →
+  ∀ w', tryAccept w now = some w' → w'.events.length ≤ w.config.maxCount
+```
+
+**Hints**:
+- Model window as list of timestamps
+- `prune` removes expired events
+- Simple case analysis on the `if`
+
+**Obligations**:
+- [ ] Define Window + RateLimit
+- [ ] Define prune + tryAccept
+- [ ] Prove bounded invariant
+- [ ] Instantiate for per-bot (50/60), global (200/60), burst (10/5)
+
+---
+
+### H5: Quarantine trigger exclusivity + release times
+
+**Target file**: `verification/proofs/idris2/Quarantine.idr`
+**Source being verified**: `lib/safety/quarantine.ex:62-100`
+**Prover**: Idris2
+**Priority**: P1
+
+**Statement**:
+> Quarantine levels (Soft, Hard, Permanent) are triggered by exclusive conditions. Release times: Soft after 24h, Hard after 72h, Permanent never.
+
+**Obligations**:
+- [ ] Define QuarantineLevel + Trigger
+- [ ] Prove trigger conditions are mutually exclusive
+- [ ] Prove release time monotonicity (Soft < Hard, Permanent = ∞)
+
+---
+
+### H6: Outcome log monotonicity
+
+**Target file**: `verification/proofs/agda/OutcomeLog.agda`
+**Source being verified**: `lib/outcome_tracker.ex:42-70`
+**Prover**: Agda
+**Priority**: P1
+
+**Statement**:
+> Outcome records form an append-only log. Timestamps are strictly monotonic: for any two records r1, r2 where r1 appears before r2, r1.timestamp < r2.timestamp.
+
+**Obligations**:
+- [ ] Define OutcomeRecord with timestamp
+- [ ] Define ValidLog (monotonic inductive type)
+- [ ] Prove append preserves monotonicity
+
+---
+
+### H7: Bayesian confidence update soundness
+
+**Target file**: `verification/proofs/lean4/BayesianUpdate.lean`
+**Source being verified**: `lib/outcome_tracker.ex` (Bayesian Beta distribution update)
+**Prover**: Lean4
+**Priority**: P1
+
+**Statement**:
+> Bayesian posterior update is sound: after observing success, posterior ≥ prior; after failure, posterior ≤ prior. Result always clamped to [0.10, 0.99].
+
+**Obligations**:
+- [ ] Model Beta distribution as (alpha, beta) pair
+- [ ] Define update functions
+- [ ] Prove monotonicity
+- [ ] Prove clamp bounds
+
+---
+
+### H8: Kin gate atomicity
+
+**Target file**: `verification/proofs/tlaplus/KinGate.tla`
+**Source being verified**: `lib/kin/gate.ex`
+**Prover**: TLA+
+**Priority**: P1
+
+**Statement**:
+> Repo locks prevent concurrent bot actions on the same repo. No two bots can hold the same repo lock simultaneously.
+
+**Obligations**:
+- [ ] Model bots + repos + locks
+- [ ] Define lock acquisition as atomic action
+- [ ] Model-check mutual exclusion
+
+---
+
+### H9: Neural consensus aggregation soundness
+
+**Target file**: `verification/proofs/idris2/NeuralConsensus.idr`
+**Source being verified**: `lib/neural/coordinator.ex`
+**Prover**: Idris2
+**Priority**: P2
+
+**Statement**:
+> Aggregating 8 neural network predictions into a single confidence is sound: result is in [0,1] and bounded by min/max of inputs.
+
+**Obligations**:
+- [ ] Model 8-network prediction as Vect 8 Confidence
+- [ ] Define aggregation (weighted average)
+- [ ] Prove result bounds
+
+---
+
+### H10: VQL query injection freedom
+
+**Target file**: `verification/proofs/idris2/VqlInjection.idr`
+**Source being verified**: `lib/vql/client.ex`
+**Prover**: Idris2
+**Priority**: P2
+
+**Statement**:
+> VQL queries cannot contain raw user strings without escaping. Injection attacks are impossible by type construction.
+
+**Obligations**:
+- [ ] Define escaped string type
+- [ ] Prove query construction requires escaping
+- [ ] Prove no raw concatenation path exists
+
+---
+
+### H11: Batch rollback completeness
+
+**Target file**: `verification/proofs/idris2/BatchRollback.idr`
+**Source being verified**: `lib/safety/batch_rollback.ex`
+**Prover**: Idris2
+**Priority**: P2
+
+**Statement**:
+> All dispatches in a batch can be reverted atomically. Rollback is complete: every applied change is reverted.
+
+**Obligations**:
+- [ ] Define Dispatch + Batch types
+- [ ] Define rollback function
+- [ ] Prove rollback(apply(b)) = initial_state
+
+---
+
+### H12: Cross-repo learning isolation
+
+**Target file**: `verification/proofs/tlaplus/CrossRepoIsolation.tla`
+**Source being verified**: `lib/cross_repo_learning.ex`
+**Prover**: TLA+
+**Priority**: P2
+
+**Statement**:
+> Confidence updates in repo A do not affect confidence for the same recipe in repo B. Isolation per repo context.
+
+**Obligations**:
+- [ ] Model per-repo confidence maps
+- [ ] Define update operation with repo scope
+- [ ] Model-check isolation
+
+---
+
+## Verification Commands
+
+```bash
+cd /var/mnt/eclipse/repos/hypatia
+mkdir -p verification/proofs/{idris2,lean4,agda,tlaplus}
+
+just proof-check-all
+
+idris2 --check verification/proofs/idris2/*.idr
+lean verification/proofs/lean4/*.lean
+agda --safe verification/proofs/agda/*.agda
+tlc verification/proofs/tlaplus/*.tla
+
+just proof-scan-dangerous
+```
+
+## Banned Patterns (NEVER use)
+
+- `believe_me`, `assert_total`, `postulate` (Idris2)
+- `sorry` (Lean4)
+- `Admitted` (Coq)
+- `postulate` (Agda)
+
+## Handoff Checklist
+
+- [ ] All 12 theorems proven
+- [ ] No banned patterns in new proof files
+- [ ] SPDX headers on all files
+- [ ] `just proof-check-all` returns PASS
+- [ ] `PROOF-STATUS.md` updated
+- [ ] Commit: `proof: complete hypatia critical proofs (12/12 theorems)`
+
+## Notes
+
+A prior session (agent a0f03b547207651fe) started work on H1, H2, H3, H4 and created:
+- `verification/proofs/idris2/ConfidenceBounds.idr` (~220 LOC)
+- `verification/proofs/idris2/SafetyTriangle.idr` (~195 LOC)
+- `verification/proofs/idris2/DispatchStrategy.idr` (~230 LOC)
+- `verification/proofs/lean4/RateLimiting.lean` (~175 LOC)
+- `verification/PROOF-STATUS.md`
+
+Verify these exist and work before restarting H1-H4.
+
+## Blockers
+
+None currently.
