@@ -1,0 +1,157 @@
+# Proof Spec: proven-servers
+<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+
+**Repo Path**: `/var/mnt/eclipse/repos/proven-servers`
+**Tier**: T1 — Critical
+**Total Theorems**: 6
+**Primary Prover(s)**: Idris2 (all)
+**Existing Proof Coverage**: 752 .idr files across core/* and connectors/*
+**Dependencies**: `proven` library
+
+## Status Tracker
+
+| # | Theorem | Prover | Status | Verified |
+|---|---------|--------|--------|----------|
+| 1 | PS1 FrameStrategy produces valid boundaries | I2 | [ ] Pending | — |
+| 2 | PS2 FSM totality (all states have handlers) | I2 | [ ] Pending | — |
+| 3 | PS3 Protocol composition soundness | I2 | [ ] Pending | — |
+| 4 | PS4 Connector lifecycle invariants | I2 | [ ] Pending | — |
+| 5 | PS5 ABI/FFI purity (Zig is translation-only) | I2 | [ ] Pending | — |
+| 6 | PS6 Audit trail completeness | I2 | [ ] Pending | — |
+
+## Context
+
+108 protocol skeletons (DNS, SMTP, HTTP, MQTT...), 8 core primitives (socket, frame, FSM, wire, compose, TLS, config, audit), 6 connector interfaces (db, auth, cache, queue, resolver, storage).
+
+### Key files
+- `core/proven-frame/src/Frame/Types.idr` — FrameStrategy, Delimiter types
+- `core/proven-fsm/src/FSM.idr` — finite state machines
+- `core/proven-compose/src/Compose.idr` — protocol composition
+- `connectors/proven-dbconn/src/DBConn.idr` — DB connection ABI
+
+### Critical invariants
+1. Frame boundaries always valid (no data loss)
+2. FSM transitions total (all states handled)
+3. Connectors maintain invariants across FFI
+4. Each protocol encodes ≥ 1 security property
+5. ABI/FFI is pure translation (no safety logic)
+
+## Theorems to Prove
+
+### PS1: FrameStrategy produces valid message boundaries
+
+**Target file**: `verification/proofs/idris2/FrameBoundaries.idr`
+**Source**: `core/proven-frame/src/Frame/Types.idr`
+**Priority**: P0
+
+**Statement**:
+> For any FrameStrategy f and valid byte stream s, `parseFrames f s` reconstructs the original messages without loss. Round-trip: `encodeFrames f (parseFrames f s) = s`.
+
+**Formal signature**:
+```idris
+data FrameStrategy = LineDelimited | LengthPrefixed | HTTPFrame
+                   | FixedSize Nat | ChunkEncoded | TLVFrame
+
+parseFrames : FrameStrategy -> List Bits8 -> List (List Bits8)
+encodeFrames : FrameStrategy -> List (List Bits8) -> List Bits8
+
+export
+frameRoundtrip : (f : FrameStrategy) -> (msgs : List (List Bits8)) ->
+  parseFrames f (encodeFrames f msgs) = msgs
+```
+
+**Obligations**:
+- [ ] Define parseFrames/encodeFrames for each strategy
+- [ ] Prove roundtrip for each strategy
+
+---
+
+### PS2: FSM totality
+
+**Target file**: `verification/proofs/idris2/FSMTotality.idr`
+**Source**: `core/proven-fsm/src/FSM.idr`
+**Priority**: P0
+
+**Statement**:
+> Every FSM state has a handler for every possible input. The transition function is total.
+
+**Obligations**:
+- [ ] Model FSM with indexed transition type
+- [ ] Prove transition function totality
+
+---
+
+### PS3: Protocol composition soundness
+
+**Target file**: `verification/proofs/idris2/ProtoCompose.idr`
+**Source**: `core/proven-compose/src/Compose.idr`
+**Priority**: P1
+
+**Statement**:
+> Composing two protocols preserves their individual safety properties: if P1 is safe and P2 is safe, then `compose P1 P2` is safe.
+
+**Obligations**:
+- [ ] Define Protocol with safety predicate
+- [ ] Define compose operation
+- [ ] Prove safety preservation
+
+---
+
+### PS4: Connector lifecycle invariants
+
+**Target file**: `verification/proofs/idris2/ConnectorLifecycle.idr`
+**Source**: `connectors/proven-*/src/`
+**Priority**: P1
+
+**Statement**:
+> Connectors follow strict lifecycle: Disconnected → Connecting → Connected → Disconnecting → Disconnected. No skip transitions.
+
+**Obligations**:
+- [ ] Define connection state machine
+- [ ] Prove transitions respect order
+- [ ] Prove resources freed on disconnect
+
+---
+
+### PS5: ABI/FFI purity
+
+**Target file**: `verification/proofs/idris2/ABIPurity.idr`
+**Priority**: P2
+
+**Statement**:
+> Zig FFI layer contains NO safety logic — only type translation. All safety decisions are made in Idris2.
+
+**Obligations**:
+- [ ] Define Pure translation property
+- [ ] Audit Zig code for absence of safety logic
+
+---
+
+### PS6: Audit trail completeness
+
+**Target file**: `verification/proofs/idris2/AuditComplete.idr`
+**Source**: `core/proven-audit/`
+**Priority**: P2
+
+**Statement**:
+> Every security-relevant operation produces an audit log entry. Audit log is append-only and tamper-evident.
+
+**Obligations**:
+- [ ] Enumerate security operations
+- [ ] Prove each produces an audit entry
+- [ ] Prove append-only via hash chain
+
+---
+
+## Verification Commands
+
+```bash
+cd /var/mnt/eclipse/repos/proven-servers
+just proof-check-idris2
+just proof-scan-dangerous
+```
+
+## Handoff Checklist
+
+- [ ] All 6 theorems proven
+- [ ] Commit: `proof: complete proven-servers proofs (6/6 theorems)`

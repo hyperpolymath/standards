@@ -1,0 +1,79 @@
+# Proof Spec: groove-browser-harness
+<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+
+**Repo Path**: `/var/mnt/eclipse/repos/groove-browser-harness`
+**Tier**: T2 — High
+**Total Theorems**: 3
+**Primary Prover(s)**: Idris2 (2), TLA+ (1)
+**Existing Proof Coverage**: 0 (relies on Gossamer's Groove.idr)
+
+## Status Tracker
+
+| # | Theorem | Prover | Status | Verified |
+|---|---------|--------|--------|----------|
+| 1 | GB1 Localhost-only probing | I2 | [ ] Pending | — |
+| 2 | GB2 Manifest signature validation | I2 | [ ] Pending | — |
+| 3 | GB3 Stateless-resumable discovery | TLA | [ ] Pending | — |
+
+## Context
+
+Firefox MV2 extension for type-safe localhost service discovery. Probes 10 known ports, bridges groove-aware services.
+
+### Key files
+- `background/groove-discovery.js`
+- `content/groove-bridge.js`
+- `manifest.json`
+- `popup/popup.js`
+
+## Theorems to Prove
+
+### GB1: Localhost-only probing
+
+**Target**: `verification/proofs/idris2/LocalhostOnly.idr`
+**Priority**: P0
+
+**Statement**: Probes only 127.0.0.1/::1. No remote discovery possible.
+
+**Obligations**:
+- [ ] Model URL constructor
+- [ ] Prove host constraint
+
+---
+
+### GB2: Manifest signature validation
+
+**Target**: `verification/proofs/idris2/ManifestSig.idr`
+**Priority**: P0
+
+**Statement**: `/.well-known/groove` manifests verified before trust.
+
+**Obligations**:
+- [ ] Model signature verification
+- [ ] Prove pre-trust check
+
+---
+
+### GB3: Stateless-resumable discovery
+
+**Target**: `verification/proofs/tlaplus/ResumableDisco.tla`
+**Priority**: P1
+
+**Statement**: Discovery state recoverable after background termination.
+
+**Obligations**:
+- [ ] Model persistent state
+- [ ] Model-check resumability
+
+---
+
+## Verification Commands
+
+```bash
+cd /var/mnt/eclipse/repos/groove-browser-harness
+just proof-check-all
+```
+
+## Handoff Checklist
+
+- [ ] All 3 theorems proven
+- [ ] Commit: `proof: complete groove-browser-harness proofs (3/3)`
