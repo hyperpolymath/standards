@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# launcher-standard.a2ml — canonical declarative description of a
+# hyperpolymath-compliant desktop launcher.
+#
+# This file is the source of truth for what a compliant launcher looks like.
+# It is baked into the launch-scaffolder binary at build time via
+# include_str!(), and can be overridden at runtime via --standard <file> or
+# $LAUNCH_SCAFFOLDER_STANDARD.
+#
+# See also:
+#   - standards/rhodium-standard-repositories/spec/LANGUAGE-POLICY.adoc
+#   - standards/docs/UX-standards/launcher-standard.adoc (prose version)
+#   - standards/docs/UX-standards/LM-LA-LIFECYCLE-STANDARD.adoc (install/uninstall)
+
+[spec]
+version = "0.1.0"
+date = "2026-04-10"
+compliance = [
+    "launcher-standard.adoc",
+    "LM-LA-LIFECYCLE-STANDARD.adoc",
+    "cross-platform-system-integration-modes",
+]
+
+[required-modes]
+# These are the modes every compliant launcher MUST implement.
+runtime = ["--start", "--stop", "--status", "--auto", "--browser"]
+integration = ["--integ", "--disinteg"]
+meta = ["--help"]
+
+[optional-modes]
+# Modes launchers MAY implement for extra functionality.
+developer = ["--debug", "--logs", "--tail"]
+
+[default-mode]
+# Mode selected when the launcher is invoked with no arguments.
+mode = "--auto"
+
+[runtime]
+# Required runtime behaviour.
+background = "nohup"
+pid-file-pattern = "/tmp/{app-name}-server.pid"
+log-file-pattern = "/tmp/{app-name}-server.log"
+wait-for-url-timeout-seconds = 15
+startup-command-search = [
+    "{repo-dir}/scripts/run.sh",
+    "{repo-dir}/dev.sh",
+]
+
+[error-visibility]
+# When the launcher runs in a GUI context (no tty + DISPLAY/WAYLAND_DISPLAY set),
+# errors must be visible to the user via a GUI dialog, not only to stderr.
+gui-dialog-chain = ["kdialog", "zenity", "notify-send", "xmessage"]
+always-also-to-stderr = true
+
+[integration.linux]
+apps-dir = "$HOME/.local/share/applications"
+icon-dir = "$HOME/.local/share/icons/hicolor/256x256/apps"
+desktop-shortcut-dir = "$HOME/Desktop"
+bin-dir = "$HOME/.local/bin"
+desktop-file-permissions = 444
+# If no custom icon is available, fall back to this freedesktop named icon.
+icon-fallback = "package-x-generic"
+refresh-command = "update-desktop-database"
+trust-command = "gio set {file} metadata::trusted true"
+
+[integration.macos]
+apps-dir = "$HOME/Applications"
+desktop-shortcut-dir = "$HOME/Desktop"
+bin-dir = "$HOME/.local/bin"
+bundle-pattern = "{app-display}.app"
+shortcut-pattern = "{app-display}.command"
+
+[integration.windows]
+start-menu-dir = "$APPDATA/Microsoft/Windows/Start Menu/Programs"
+desktop-shortcut-dir = "$HOME/Desktop"
+bin-dir = "$HOME/.local/bin"
+shortcut-pattern = "{app-display}.lnk"
+# Fallback when PowerShell is not reachable under Git Bash / WSL.
+bat-fallback = true
+
+[integrity]
+# Per LM-LA-LIFECYCLE §LM/LA-INSTALL: after --integ completes, generate
+# integrity hashes via an external tool.
+verification-tool = "verify-desktop-integrity.sh"
+fallback-paths = [
+    "/var/mnt/eclipse/repos/.desktop-tools/verify-desktop-integrity.sh",
+]
+fatal-on-failure = false  # missing verifier is a log line, not an error
+
+[disinteg]
+# What --disinteg removes and what it deliberately leaves alone.
+remove = [
+    "desktop-file",
+    "desktop-shortcut",
+    "icon",
+    "launcher-binary",
+    "start-menu-entry",
+    "bat-fallback-shortcuts",
+    "pid-file",
+]
+preserve = [
+    "$HOME/.config/{app-name}/",
+    "/tmp/{app-name}-server.log",
+    "{repo-dir}",
+]
+
+[soft-attach]
+# Optional integrations — called if present, silently skipped if absent.
+tools = [
+    { name = "feedback-o-tron", event-on-failure = "launcher:start_failed" },
+    { name = "hypatia", command = "hypatia diagnose --app {app-name} --log {log-file}" },
+    { name = "panic-attack", command = "panic-attack assail {repo-dir}" },
+]
+
+[a2ml-metadata-block]
+# Every generated launcher must carry this metadata block in its header so it
+# can be re-parsed by `launch-scaffolder config` and `realign`.
+required-fields = [
+    "id",
+    "type",
+    "version",
+    "app-name",
+    "app-display",
+    "app-url",
+    "standards-compliance",
+    "modes",
+    "platforms",
+    "lifecycle-phases-covered",
+    "lifecycle-phases-deferred",
+]
