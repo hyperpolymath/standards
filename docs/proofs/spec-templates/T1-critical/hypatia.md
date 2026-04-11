@@ -12,15 +12,15 @@
 
 | # | Theorem | Prover | Status | Verified |
 |---|---------|--------|--------|----------|
-| 1 | H1 Confidence bounds [0.0, 1.0] | I2 | [ ] Pending | — |
-| 2 | H2 Dispatch strategy monotonicity | I2 | [ ] Pending | — |
-| 3 | H3 Safety triangle ordering | I2 | [ ] Pending | — |
-| 4 | H4 Rate limit enforcement | L4 | [ ] Pending | — |
-| 5 | H5 Quarantine trigger exclusivity | I2 | [ ] Pending | — |
-| 6 | H6 Outcome log monotonicity | Ag | [ ] Pending | — |
-| 7 | H7 Bayesian update soundness | L4 | [ ] Pending | — |
-| 8 | H8 Kin gate atomicity | TLA | [ ] Pending | — |
-| 9 | H9 Neural consensus aggregation | I2 | [ ] Pending | — |
+| 1 | H1 Confidence bounds [0.0, 1.0] | I2 | [x] Done 2026-04-11 | `verification/proofs/idris2/ConfidenceBounds.idr` |
+| 2 | H2 Dispatch strategy monotonicity | I2 | [x] Done 2026-04-11 | `verification/proofs/idris2/DispatchStrategy.idr` |
+| 3 | H3 Safety triangle ordering | I2 | [x] Done 2026-04-11 | `verification/proofs/idris2/SafetyTriangle.idr` |
+| 4 | H4 Rate limit enforcement | L4 | [x] Done 2026-04-11 | `verification/proofs/lean4/RateLimiting.lean` |
+| 5 | H5 Quarantine trigger exclusivity | I2 | [x] Done 2026-04-11 | `verification/proofs/idris2/Quarantine.idr` |
+| 6 | H6 Outcome log monotonicity | Ag | [x] Done 2026-04-11 | `verification/proofs/agda/OutcomeLog.agda` |
+| 7 | H7 Bayesian update soundness | L4 | [x] Done 2026-04-11 | `verification/proofs/lean4/BayesianUpdate.lean` |
+| 8 | H8 Kin gate atomicity | TLA | [ ] Pending | — (TLA+ tooling needed) |
+| 9 | H9 Neural consensus aggregation | Ag | [ ] Pending | — |
 | 10 | H10 VQL query injection freedom | I2 | [ ] Pending | — |
 | 11 | H11 Batch rollback completeness | I2 | [ ] Pending | — |
 | 12 | H12 Cross-repo learning isolation | TLA | [ ] Pending | — |

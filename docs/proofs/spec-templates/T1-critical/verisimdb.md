@@ -18,7 +18,7 @@
 | 4 | V4 Raft consensus safety | L4 | [ ] Pending | — |
 | 5 | V5 Transaction atomicity | TLA | [ ] Pending | — |
 | 6 | V6 WAL integrity + replay idempotence | L4 | [ ] Pending | — |
-| 7 | V7 Provenance chain immutability | Ag | [ ] Pending | — |
+| 7 | V7 Provenance chain immutability | Ag | [x] Done 2026-04-11 | `verisimdb/verification/proofs/agda/ProvenanceChain.agda` |
 | 8 | V8 Drift metric correctness | I2 | [ ] Pending | — |
 | 9 | V9 Normalizer determinism | TLA | [ ] Pending | — |
 | 10 | V10 Transaction serializability | TLA | [ ] Pending | — |
