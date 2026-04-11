@@ -12,15 +12,15 @@
 
 | # | Theorem | Prover | Status | Verified |
 |---|---------|--------|--------|----------|
-| 1 | E1 TrustLevel lattice properties | L4 | [ ] Pending | — |
-| 2 | E2 Axiom tracker completeness | I2 | [ ] Pending | — |
-| 3 | E3 Dispatch pipeline ordering | I2 | [ ] Pending | — |
-| 4 | E4 Trust level soundness (Reject→L1) | I2 | [ ] Pending | — |
-| 5 | E5 Prover dispatch compatibility | I2 | [ ] Pending | — |
-| 6 | E6 ProverKind injectivity | I2 | [ ] Pending | — |
-| 7 | E7 GNN embedding faithfulness | Ag | [ ] Pending | — |
-| 8 | E8 VQL-UT query safety | I2 | [ ] Pending | — |
-| 9 | E9 Proof composition soundness | Ag | [ ] Pending | — |
+| 1 | E1 TrustLevel lattice properties | L4 | [x] Done | 2026-04-04 |
+| 2 | E2 Axiom tracker completeness | I2 | [x] Done | 2026-04-04 |
+| 3 | E3 Dispatch pipeline ordering | I2 | [x] Done | 2026-04-04 |
+| 4 | E4 Trust level soundness (Reject→L1) | L4+I2 | [x] Done | L4 2026-04-04; I2 2026-04-11 |
+| 5 | E5 Prover dispatch compatibility | I2 | [x] Done | 2026-04-04 |
+| 6 | E6 ProverKind injectivity (49 variants) | I2 | [x] Done | 2026-04-04 |
+| 7 | E7 GNN embedding faithfulness | I2 | [x] Done | 2026-04-04 (EchidnaABI/Gnn.idr) |
+| 8 | E8 VQL-UT query safety | I2 | [x] Done | 2026-04-04 (EchidnaABI/VqlUt.idr) |
+| 9 | E9 Proof composition soundness | Ag | [x] Done | 2026-04-04 (ProofComposition.agda) |
 | 10 | E10 Pareto frontier maximality | L4 | [ ] Pending | — |
 | 11 | E11 SHAKE3/BLAKE3 integrity | L4 | [ ] Pending | — |
 | 12 | E12 ProofState serialization | I2 | [ ] Pending | — |
