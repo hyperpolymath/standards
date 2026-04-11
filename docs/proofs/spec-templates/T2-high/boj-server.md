@@ -11,11 +11,9 @@
 
 | # | Theorem | Prover | Status | Verified |
 |---|---------|--------|--------|----------|
-| 1 | BJ1 Manifest schema validation | I2 | [ ] Pending | — |
-| 2 | BJ2 No duplicate tool names across 95 cartridges | I2 | [ ] Pending | — |
-| 3 | BJ3 Credential isolation per cartridge | I2 | [ ] Pending | — |
-| 4 | BJ4 Panel autowire determinism | I2 | [ ] Pending | — |
-| 5 | BJ5 MCP stdio channel integrity | Cq | [ ] Pending | — |
+| BJ1 | Cartridge dispatch type safety | I2 | [x] Done 2026-04-11 | `src/abi/Boj/CartridgeDispatch.idr` |
+| BJ2 | Auth/credential handling (full isolation model) | I2 | [ ] Partial | `Safe{APIKey,HTTP}.idr` partial |
+| BJ3 | API contract compliance (95 cartridges) | I2 | [ ] Pending | — |
 
 ## Context
 
