@@ -12,14 +12,14 @@
 
 | # | Theorem | Prover | Status | Verified |
 |---|---------|--------|--------|----------|
-| 1 | PQ1 CarriesInvariant for all 13 analyzers | Ag | [ ] Partial | — |
+| 1 | PQ1 CarriesInvariant for all 13 analyzers | Ag | [x] Done | 2026-04-11 |
 | 2 | PQ2 Transport class soundness | Ag | [x] Done | 2026-XX |
 | 3 | PQ3 Optimizer preserves CarriesInvariant | Ag | [x] Done | 2026-XX |
-| 4 | PQ4 Adapter synthesis correctness | Ag | [ ] Pending | — |
+| 4 | PQ4 Adapter synthesis correctness | Ag | [x] Done | 2026-04-11 |
 | 5 | PQ5 Concorde bidirectional losslessness | Ag | [x] Done | 2026-XX |
-| 6 | PQ6 Business class loss documentation | Ag | [ ] Pending | — |
-| 7 | PQ7 21 remaining crates unwrap-free | I2 | [ ] Pending | — |
-| 8 | PQ8 Buffer overflow freedom | I2 | [ ] Pending | — |
+| 6 | PQ6 Business class loss documentation | Ag | [x] Done | 2026-04-11 |
+| 7 | PQ7 All 29 crates unwrap-free | I2 | [x] Done | 2026-04-11 |
+| 8 | PQ8 Buffer overflow freedom | I2 | [x] Done | 2026-04-11 |
 
 ## Context
 
@@ -121,6 +121,6 @@ just proof-check-idris2
 
 ## Handoff Checklist
 
-- [ ] All 8 theorems (5 existing + 3 new) verified
-- [ ] 21 crates unwrap-free
+- [x] All 8 theorems (5 existing + 3 new) verified — 2026-04-11
+- [x] All 29 crates unwrap-free (commit 4231afb, 2026-02-04)
 - [ ] Commit: `proof: complete protocol-squisher proofs (8/8 theorems)`
