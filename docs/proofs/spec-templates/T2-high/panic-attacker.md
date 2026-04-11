@@ -11,10 +11,14 @@
 
 | # | Theorem | Prover | Status | Verified |
 |---|---------|--------|--------|----------|
-| 1 | PA1 Pattern detection completeness (20 categories) | I2 | [ ] Pending | — |
-| 2 | PA2 miniKanren rule enumeration | I2 | [ ] Pending | — |
+| 1 | PA1 Pattern detection completeness (47 langs, 20 categories, cross-lang) | I2 | [x] Done | 2026-04-11 |
+| 2 | PA2 Classification soundness (severity total order, monotone aggregation) | I2 | [x] Done | 2026-04-11 |
 | 3 | PA3 CVE phantom-dep classification | I2 | [ ] Pending | — |
 | 4 | PA4 Attestation chain unforgeability | Cq | [ ] Pending | — |
+
+**Notes:**
+- PA1 proved in `src/abi/PatternCompleteness.idr` — `analyzerFor` covers all 47 Lang constructors, `detectorsFor` covers all 20 WPCategory constructors, `completeScanForAll` combines both.
+- PA2 proved in `src/abi/ClassificationSoundness.idr` — Severity is a total order, `maxSeverity` is monotone, numeric encoding preserves ordering.
 
 ## Context
 
