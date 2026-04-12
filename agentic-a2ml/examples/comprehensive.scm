@@ -1,5 +1,8 @@
 ;; SPDX-License-Identifier: MPL-2.0-or-later
 ;; SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+;;
+;; DEPRECATED: This file uses the legacy Guile Scheme (.scm) format.
+;; See comprehensive.a2ml for the current A2ML format.
 
 ;;; AGENTIC.scm — Comprehensive Example
 ;;; enterprise-platform
