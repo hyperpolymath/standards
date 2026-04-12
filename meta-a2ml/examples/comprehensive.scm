@@ -1,5 +1,8 @@
 ;; SPDX-License-Identifier: PMPL-1.0-or-later
 ;; SPDX-FileCopyrightText: 2025 Example Corp
+;;
+;; DEPRECATED: This file uses the legacy Guile Scheme (.scm) format.
+;; See comprehensive.a2ml for the current A2ML format.
 
 ;;; META.scm — Comprehensive Example with All Sections
 ;;; enterprise-platform
