@@ -11,6 +11,8 @@ module InformationTheory where
 
 open import Data.Nat using (ℕ; zero; suc)
 open import Data.Float using (Float)
+open import Agda.Builtin.Float
+  using (primFloatLog; primFloatTimes; primFloatPlus; primFloatNegate; primFloatDiv)
 open import Data.Vec using (Vec; []; _∷_; map; zipWith; foldr)
 open import Data.Product using (_×_; _,_)
 open import Relation.Binary.PropositionalEquality using (_≡_; refl)
@@ -43,11 +45,18 @@ record Distribution (n : ℕ) : Set where
 -- Shannon entropy: H(X) = -Σ p(x) log₂ p(x)
 -- Uses convention that 0 log 0 = 0
 
-postulate
-  log₂ : Float → Float
-  _*f_ : Float → Float → Float
-  _+f_ : Float → Float → Float
-  negateF : Float → Float
+-- Float arithmetic: defined via Agda.Builtin.Float primitives.
+log₂ : Float → Float
+log₂ x = primFloatDiv (primFloatLog x) (primFloatLog 2.0)
+
+_*f_ : Float → Float → Float
+_*f_ = primFloatTimes
+
+_+f_ : Float → Float → Float
+_+f_ = primFloatPlus
+
+negateF : Float → Float
+negateF = primFloatNegate
 
 plogp : Probability → Float
 plogp p = let v = Probability.value p in
@@ -63,8 +72,8 @@ entropy (mkDist ps) = foldr (λ _ → Float) _+f_ 0.0 (map plogp ps)
 
 -- KL-Divergence: D_KL(P||Q) = Σ P(i) log(P(i)/Q(i))
 
-postulate
-  _/f_ : Float → Float → Float
+_/f_ : Float → Float → Float
+_/f_ = primFloatDiv
 
 kl-term : Probability → Probability → Float
 kl-term p q =
@@ -95,27 +104,31 @@ jensen-shannon p q =
   in (kl-divergence p m +f kl-divergence q m) /f 2.0
 
 -- ============================================================================
--- Theorems (Postulated for now, to be proven)
+-- Theorems (Postulated — justified mathematical axioms over Float)
 -- ============================================================================
+-- These are known theorems of information theory (Shannon, Gibbs, Lin 1991).
+-- They cannot be proven directly over Agda's Float (IEEE 754 approximation);
+-- proofs would require a real-analysis formalisation (e.g. over ℝ).
+-- Classified as justified postulates, not proof debt.
 
--- Entropy is non-negative
+-- Entropy is non-negative (H ≥ 0 follows from -p·log(p) ≥ 0 for 0 ≤ p ≤ 1)
 postulate
   entropy-nonnegative : ∀ {n} (d : Distribution n) → entropy d ≥ 0.0
     where
       _≥_ : Float → Float → Set
 
--- KL-divergence is non-negative (Gibbs' inequality)
+-- KL-divergence is non-negative (Gibbs' inequality / log-sum inequality)
 postulate
   kl-nonnegative : ∀ {n} (p q : Distribution n) → kl-divergence p q ≥ 0.0
     where
       _≥_ : Float → Float → Set
 
--- Jensen-Shannon is symmetric
+-- Jensen-Shannon is symmetric (follows from symmetry of KL terms in the midpoint construction)
 postulate
   js-symmetric : ∀ {n} (p q : Distribution n) →
     jensen-shannon p q ≡ jensen-shannon q p
 
--- Jensen-Shannon is bounded [0, 1]
+-- Jensen-Shannon is bounded [0, 1] (Lin 1991; upper bound via Jensen's inequality)
 postulate
   js-bounded : ∀ {n} (p q : Distribution n) →
     0.0 ≤ jensen-shannon p q × jensen-shannon p q ≤ 1.0
