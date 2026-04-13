@@ -1,0 +1,275 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= Concurrent-Write Collision Protocol (Companion-File Pattern)
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v1.0, 2026-04-13
+:toc:
+:toclevels: 3
+
+== Purpose
+
+This document defines the canonical pattern for handling *concurrent-write
+collisions* on shared handover documents — files that multiple parallel Claude
+(or human) sessions write to simultaneously during session-close, handover, or
+checkpoint protocols.
+
+The pattern applies whenever a session needs to write to a document that is
+being edited by other sessions faster than the writing session can finish its
+edits. The canonical example is `~/Desktop/AI-WORK.md` and its project-scoped
+siblings (e.g. `~/Desktop/AI-WORK-007.md`), which are written by every active
+Claude session working on the estate and routinely collide during wrap-up.
+
+This protocol is *cross-cutting*: it applies to every family in this
+directory (`verify`, `continuity`, `handover`), not just `planned-session-close`.
+
+== Origin incident
+
+First codified on 2026-04-13 by the F7 Diagnostics / Hexadeca-Connector
+session (Opus 4.6, 1M context) after five consecutive
+`Edit`-tool attempts on `~/Desktop/AI-WORK-007.md` failed with
+`File has been modified since read`. The parent doc grew from
+635 → 840 → 981 → 1801 → 1834 lines during the wrap-up window as at least
+three other sessions (T6 step-semantics, Metadatastician cross-estate,
+TRG sweep) were landing their own addenda in parallel. Two duplicate
+`## 11.` section headers already existed in the parent file before the F7
+session began its wrap-up — the protocol documented here was born out of
+that failure mode.
+
+== When this pattern applies
+
+Use the companion-file pattern when **any** of these triggers is hit:
+
+. Two or more `Edit`-tool calls on the same handover file in the same
+  session have failed with `File has been modified since read`, even
+  with freshly-read anchors.
+. The parent document has grown by more than 100 lines between the
+  session's first read and its current edit attempt.
+. `grep -n '^## ' <file>` shows duplicate section-number headers
+  (e.g. two `## 11.` entries) indicating that other sessions have
+  already raced to claim the same slot.
+. The session is *aware* that one or more parallel sessions are also
+  in wrap-up on the same file (e.g. via `git log --since=1h`, known
+  lane ownership, or coordination chatter in §Coordination of the
+  parent doc).
+. Network or filesystem latency is making the read→edit window wider
+  than normal (sync delays on mounted drives, slow kernel writeback).
+
+If **none** of those triggers are hit, inline addendum is still the
+preferred default — it keeps the handover file self-contained and
+avoids scattering context across multiple files.
+
+== The pattern
+
+=== Step 1 — land the full addendum as a companion file
+
+Write the complete session-close addendum — scope delivered, test counts,
+commits pushed, continuity core, handover prompt for the next session,
+git state at close — to a *new* file adjacent to the parent document.
+
+*Naming convention:*
+
+[source,text]
+----
+~/Desktop/<PARENT-STEM>-<SESSION-TAG>-<YYYY-MM-DD>.md
+----
+
+Examples:
+
+* `~/Desktop/AI-WORK-007-F7-SESSION-2026-04-13.md`
+* `~/Desktop/AI-WORK-007-T6-STEP-SEMANTICS-2026-04-13.md`
+* `~/Desktop/AI-WORK-STANDARDS-PROTOCOL-LANDING-2026-04-13.md`
+
+Where:
+
+* `<PARENT-STEM>` matches the parent filename without extension
+  (`AI-WORK-007` for `AI-WORK-007.md`).
+* `<SESSION-TAG>` is a short, human-readable identifier for *what* the
+  session did. Prefer the slot designator (`F7`, `T6`, `M3`) when one
+  exists; otherwise a short topic tag (`SECURITY-AUDIT`,
+  `STANDARDS-LANDING`).
+* `<YYYY-MM-DD>` is the session-close date in ISO-8601 calendar form.
+
+The companion file is a normal Markdown or AsciiDoc document with its
+own full continuity core. It MUST contain every field the parent's
+inline addendum would have contained — do not split content between
+the companion file and the parent.
+
+=== Step 2 — write a *small* pointer section into the parent document
+
+After the companion file lands, do ONE small `Edit` on the parent
+document that adds a pointer section. Keep it under ~40 lines so the
+edit window is narrow enough to slip between concurrent writes.
+
+*Required content of the pointer section:*
+
+. Section heading with a unique, non-colliding number. See §Section
+  numbering under collision below.
+. A single paragraph stating *why* the addendum is a companion file
+  (reference to this protocol, plus a one-line indication of the
+  collision trigger that fired).
+. The exact path of the companion file in bold or code.
+. A one-line scope summary (what the session delivered) for readers
+  who only skim the parent.
+. Git state at close (HEAD commits of affected repos).
+. Test counts at close.
+
+*Suggested minimum template:*
+
+[source,markdown]
+----
+---
+
+## {{N}}. {{Session title}} — companion file
+
+Full addendum landed as a separate file because this parent doc was under
+concurrent write during wrap-up (see
+`standards/session-management-standards/CONCURRENT-WRITE-COLLISION-PROTOCOL.adoc`).
+Read:
+
+**`~/Desktop/{{PARENT-STEM}}-{{SESSION-TAG}}-{{YYYY-MM-DD}}.md`**
+
+### One-line scope
+
+{{One sentence.}}
+
+### Git state at close
+
+- **{{repo-a}}** HEAD `{{sha-a}}`, pushed to origin/main.
+- **{{repo-b}}** HEAD `{{sha-b}}`, pushed to origin/main.
+
+### Tests at close
+
+- {{command}}: **{{n/n}}**
+----
+
+=== Step 3 — write the collision trigger into the companion file's footer
+
+At the bottom of the companion file, include a short "Note on why this
+is a separate file" section that explains the concrete collision trigger
+that fired. This exists so the *next* session picking up the work
+understands why the content is here and not in the parent — it is NOT
+an apology, it is a signal that this protocol fired as designed.
+
+*Template:*
+
+[source,markdown]
+----
+## Note on why this is a separate file
+
+During this session's wrap-up, `{{parent path}}` was under heavy
+concurrent write by at least one other session. `Edit` tool calls
+repeatedly failed with "File has been modified since read" between
+read and write. Per
+`standards/session-management-standards/CONCURRENT-WRITE-COLLISION-PROTOCOL.adoc`,
+this session landed the full addendum as a companion file and a
+small pointer edit to the parent doc instead.
+
+If a future session consolidates the parent doc, the contents of this
+file can be pasted inline at the pointer section's location once
+concurrent writes have settled. The companion file should be retained
+either way as an immutable record of the session-close state.
+----
+
+== Section numbering under collision
+
+When the parent document has collided section numbers (e.g. two `## 11.`
+entries landed by different sessions), the companion-file pointer
+section MUST take a *new, unused* number rather than disputing an
+existing one. Run:
+
+[source,bash]
+----
+grep -n '^## [0-9]' ~/Desktop/<parent>.md | tail -10
+----
+
+Pick the next integer *above* the highest currently-in-use number. If
+two collided sections both claim `## 11`, skip to `## 13` (not `## 12`),
+because `## 12` may also be claimed by a parallel session that has not
+yet written its pointer. Leaving a one-number gap between the collided
+cluster and the new pointer reduces the chance of another collision at
+the new number.
+
+**Do NOT renumber existing collided sections in-place** from a
+companion-file wrap-up — that is a separate consolidation task (see
+§Consolidation below) and should not be performed while other sessions
+are still actively writing.
+
+== Consolidation (after concurrent writes settle)
+
+Once the collision window has closed — typically when all parallel
+sessions have reported end-of-session — a later session may consolidate
+the parent document. Consolidation is OPTIONAL and should only be
+attempted when:
+
+* All parallel sessions have committed their final state.
+* No duplicate section headers are being added by any active writer.
+* The consolidating session has *explicit user authorisation*.
+
+When consolidating:
+
+. Read the full current parent document.
+. Read every companion file referenced from it.
+. Renumber collided sections in-place to eliminate duplicates.
+. Optionally inline the companion-file contents at each pointer
+  section (the user may prefer to keep the companion files as
+  immutable session-close records — ask first).
+. Commit the consolidated parent in a single atomic edit.
+. **Do not delete the companion files** without explicit user
+  authorisation. They are the immutable record of what each session
+  actually produced; the parent document is a consolidated view.
+
+== Reading the handover stack
+
+When a future session picks up from a parent document that uses the
+companion-file pattern, the read order is:
+
+. Parent document, full read.
+. Every companion file referenced from the pointer sections the
+  session cares about, in order of relevance.
+. Any upstream design documents referenced from inside the companion
+  files.
+
+The companion files are *authoritative* for the continuity core of
+their own sessions. If the pointer section in the parent disagrees
+with the companion file, trust the companion file.
+
+== Relationship to other protocols
+
+This protocol is orthogonal to the canonical-command protocols in
+`verify/`, `continuity/`, and `handover/`. It describes *how* to
+write the output of those protocols when the target file is under
+concurrent write; it does not replace any of them.
+
+Specifically:
+
+* `continuity/planned-session-close/CHECKLIST.adoc` — the continuity
+  core captured in the companion file must still follow this
+  checklist. Only the *location* of that content changes.
+* `handover/full-transfer/CHECKLIST.adoc` — same.
+* `verify/substantial-completion/CHECKLIST.adoc` — same.
+
+See link:adoption-and-integration-guide/GUIDE.adoc[adoption-and-integration-guide/GUIDE.adoc]
+for repository-local integration patterns once this protocol is
+wired into downstream repos.
+
+== Detection helpers (suggested)
+
+Future tooling may implement these as automated checks:
+
+* `session-close-helper collision-check <parent-file>` — greps for
+  duplicate section headers and reports the next safe number.
+* `session-close-helper companion-name <parent-file> <session-tag>`
+  — generates the canonical companion filename from the parent stem
+  and today's date.
+* `session-close-helper write-pointer <parent-file> <companion-file>`
+  — attempts the pointer edit with exponential backoff across
+  `File has been modified since read` failures, with a hard cap after
+  which it falls through to a "manual consolidation needed" signal.
+
+None of these are implemented yet. They are suggested follow-ups.
+
+== Status
+
+STANDING. Adopted 2026-04-13 after the F7 session collision incident.
+Downstream repositories using `AI-WORK*.md` patterns should reference
+this doc from their local CLAUDE.md and adoption guides.
