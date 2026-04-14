@@ -1,0 +1,183 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= CappauScripto Migration Spec (`cappa migrate`)
+:toc:
+:toclevels: 2
+:icons: font
+
+== Purpose
+
+Define stable behavior for migrating CoffeeScript-style code into
+CappauScripto with auditable, low-risk transforms.
+
+Related documents:
+
+* link:CAPPAUSCRIPTO-FACE-IDENTITY-CARD.adoc[Face Identity Card]
+* link:CAPPAUSCRIPTO-RELEASE-GATE-TRACKER.adoc[Release Gate Tracker]
+* link:CAPPAUSCRIPTO-COMPATIBILITY-MATRIX.adoc[Compatibility Matrix]
+
+== Command Surface
+
+[cols="1,3", options="header"]
+|===
+| Command | Contract
+
+| `cappa migrate <path>`
+| Applies safe transforms, writes updated files, and emits migration report.
+
+| `cappa migrate <path> --dry-run`
+| Computes transforms and warnings without file writes.
+
+| `cappa migrate <path> --check`
+| Fails non-zero if required transforms or unresolved blockers remain.
+
+| `cappa migrate <path> --format`
+| Applies canonical formatter after transforms.
+
+| `cappa migrate <path> --report <file>`
+| Writes machine-readable migration report (`json`).
+|===
+
+== Pipeline
+
+`cappa migrate` runs in fixed phases:
+
+1. Parse and classify syntax features per file.
+2. Apply deterministic, semantics-preserving rewrites.
+3. Emit warnings for non-automatable or risky constructs.
+4. Run post-transform validation (`cappa check` equivalent).
+5. Emit report with per-file summary and confidence score.
+
+== Deterministic Rewrite Rules
+
+[cols="1,2,2,2", options="header"]
+|===
+| ID | Source idiom | Transform | Notes
+
+| MR-01
+| `name = (x) -> expr`
+| `let name = (x) -> expr`
+| Introduce explicit binding keyword.
+
+| MR-02
+| `name = => expr`
+| `let name = => expr`
+| Preserve lexical `this`.
+
+| MR-03
+| `{a, b = 1} = cfg`
+| `let {a, b = 1} = cfg`
+| Normalize destructuring declaration form.
+
+| MR-04
+| `doThing() if cond`
+| `doThing() if cond`
+| Keep surface syntax; annotate canonical lowering in report.
+
+| MR-05
+| `unless cond then doThing()`
+| `if not cond then doThing()`
+| Optional normalization for readability consistency.
+
+| MR-06
+| `value ? fallback`
+| `value ?? fallback`
+| Normalize existential fallback to null-coalescing form.
+
+| MR-07
+| `obj?.a?.b`
+| `obj?.a?.b`
+| Preserve soak chain syntax directly.
+
+| MR-08
+| `[x for x in xs when p(x)]`
+| `[x for x in xs when p(x)]`
+| Preserve face syntax; verify lowering equivalence.
+
+| MR-09
+| `class A extends B`
+| `class A extends B`
+| Preserve class declaration; verify constructor/super behavior.
+
+| MR-10
+| `log "hi"`
+| `log "hi"` or `log("hi")`
+| Keep optional-call form unless ambiguity detected.
+|===
+
+== Non-Automatable Cases (Must Warn)
+
+[cols="1,3,2", options="header"]
+|===
+| ID | Case | Required action
+
+| NA-01
+| Ambiguous optional-call chains where parse may differ after normalization
+| Emit warning and suggested parenthesized rewrite.
+
+| NA-02
+| Dynamic property/meta-programming patterns with runtime-generated keys
+| Emit warning and mark confidence `low`.
+
+| NA-03
+| Implicit global writes or scope leakage patterns
+| Emit warning and require manual binding declaration.
+
+| NA-04
+| `this` capture semantics in deeply nested callback trees with mixed arrow forms
+| Emit warning and show equivalent explicit closure rewrite candidate.
+
+| NA-05
+| Macros or transpiler-dependent syntax outside supported grammar
+| Emit warning and classify file as `manual-port-required`.
+|===
+
+== Migration Report Schema (Minimum)
+
+Each run MUST emit:
+
+[cols="1,3", options="header"]
+|===
+| Field | Meaning
+
+| `files_total`
+| Number of files analyzed
+
+| `files_changed`
+| Number of files modified
+
+| `warnings_total`
+| Total warnings emitted
+
+| `warnings_by_code`
+| Warning counts by code (`NA-*`)
+
+| `confidence`
+| Overall migration confidence (`high`, `medium`, `low`)
+
+| `blocked_files`
+| Files requiring manual intervention
+|===
+
+== Exit Codes
+
+* `0`: migration completed and validation passed.
+* `1`: migration completed with blocking warnings (manual action required).
+* `2`: parser/validation failure or internal tool error.
+
+== Safety Requirements
+
+* Never silently drop code.
+* Preserve comments where parser supports stable attachment.
+* Preserve file encoding and line endings where feasible.
+* Write backup snapshots when not in `--dry-run`.
+
+== Validation Sequence (Recommended)
+
+Run after migration:
+
+1. `cappa check --all`
+2. `cappa test --all --report junit`
+3. `cappa bench --all --baseline latest`
+
+Attach all three results in the release-gate tracker.

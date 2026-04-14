@@ -1,0 +1,151 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// System Update GUI — AffineScript TEA Interface
+// Underpinned by Cadre Router (Affine Stack Implementation)
+//
+// Purpose: Provide a formally verified, resource-safe interface for
+// managing and tracking the multi-stage system update process.
+
+// ── Types ─────────────────────────────────────────────────────────────────
+
+enum UpdateStage {
+  RpmOstree,
+  Flatpak,
+  Snap,
+  Firmware,
+  Asdf,
+  LanguageManagers,
+  Pipx,
+  Finished
+}
+
+enum StageStatus {
+  Pending,
+  InProgress,
+  Success,
+  Failed(String),
+  Skipped
+}
+
+struct UpdateStep {
+  stage: UpdateStage,
+  name: String,
+  status: StageStatus,
+  elapsed_seconds: Int
+}
+
+// ── Model ───────────────────────────────────────────────────────────────────
+
+struct Model {
+  current_stage: UpdateStage,
+  steps: List(UpdateStep),
+  is_running: Bool,
+  log_output: String,
+  history_depth: Int
+}
+
+// ── Msg ──────────────────────────────────────────────────────────────────────
+
+enum Msg {
+  StartUpdate,
+  StageStarted(UpdateStage),
+  StageFinished(UpdateStage, StageStatus, Int),
+  UpdateLog(String),
+  PopState
+}
+
+// ── TEA Logic ────────────────────────────────────────────────────────────────
+
+fn system_update_init() -> Model {
+  {
+    current_stage: UpdateStage::RpmOstree,
+    steps: [],
+    is_running: false,
+    log_output: "",
+    history_depth: 0
+  }
+}
+
+fn system_update_update(@linear msg: Msg, @linear model: Model) -> Model {
+  match model {
+    { current_stage: cs, steps: s, is_running: ir, log_output: lo, history_depth: h } => {
+      match msg {
+        StartUpdate => {
+          {
+            current_stage: UpdateStage::RpmOstree,
+            steps: s,
+            is_running: true,
+            log_output: lo,
+            history_depth: h + 1
+          }
+        }
+
+        StageStarted(stage) => {
+          {
+            current_stage: stage,
+            steps: s,
+            is_running: true,
+            log_output: lo,
+            history_depth: h
+          }
+        }
+
+        StageFinished(stage, status, elapsed) => {
+          {
+            current_stage: stage, // Next stage logic would be here
+            steps: s,
+            is_running: true,
+            log_output: lo,
+            history_depth: h
+          }
+        }
+
+        UpdateLog(new_line) => {
+          {
+            current_stage: cs,
+            steps: s,
+            is_running: ir,
+            log_output: lo + "\n" + new_line,
+            history_depth: h
+          }
+        }
+
+        PopState => {
+          if h > 0 {
+            {
+              current_stage: UpdateStage::RpmOstree,
+              steps: s,
+              is_running: false,
+              log_output: "",
+              history_depth: h - 1
+            }
+          } else {
+            {
+              current_stage: cs,
+              steps: s,
+              is_running: ir,
+              log_output: lo,
+              history_depth: 0
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn system_update_view(model: Model) -> String {
+  match model.current_stage {
+    RpmOstree        => "UPDATING: rpm-ostree (Base OS)",
+    Flatpak          => "UPDATING: Flatpak packages",
+    Snap             => "UPDATING: Snap packages",
+    Firmware         => "UPDATING: Device Firmware",
+    Asdf             => "UPDATING: asdf Tool Plugins",
+    LanguageManagers => "UPDATING: Language Managers (Cargo, Deno, etc.)",
+    Pipx             => "UPDATING: Python Pipx tools",
+    Finished         => "SYSTEM UPDATE COMPLETE"
+  }
+}
+
+fn system_update_subs(model: Model) -> String {
+  "None"
+}

@@ -3,6 +3,8 @@
 # See: https://github.com/hyperpolymath/mustfile
 
 # Default recipe
+import? "contractile.just"
+
 default:
     @just --list
 
