@@ -1,0 +1,327 @@
+# Quick Reference Guide
+
+## Rust Commands Cheat Sheet
+
+### Daily Development
+```bash
+# Format code
+cargo fmt
+
+# Lint code
+cargo clippy -- -D warnings
+
+# Run tests
+cargo test
+
+# Build project
+cargo build
+
+# Check for warnings
+cargo check --all-targets
+```
+
+### Security Checks
+```bash
+# Security audit
+cargo audit
+
+# Unsafe code analysis
+cargo geiger
+
+# Outdated dependencies
+cargo outdated
+
+# Comprehensive security scan
+cargo clippy --all-features -- -D warnings && cargo audit
+```
+
+### CI/CD Commands
+```bash
+# Format check (CI)
+cargo fmt --all -- --check
+
+# Full clippy (CI)
+cargo clippy --all-targets --all-features -- -D warnings
+
+# Security audit (CI)
+cargo audit
+
+# Build release (CI)
+cargo build --release
+```
+
+## Julia Commands Cheat Sheet
+
+### Daily Development
+```julia
+# Format code (REPL)
+using JuliaFormatter
+format("src/myfile.jl")
+
+# Format entire project (REPL)
+format(".")
+
+# Run tests (REPL)
+using Pkg
+Pkg.test()
+
+# Static analysis (REPL)
+using JET
+JET.test_package(".")
+
+# Package audit (REPL)
+using Aqua
+Aqua.test_all()
+```
+
+### Command Line
+```bash
+# Format check (CLI)
+julia -e 'using JuliaFormatter; format("."; overwrite=false)'
+
+# Static analysis (CLI)
+julia -e 'using JET; JET.test_package(".")'
+
+# Package audit (CLI)
+julia -e 'using Aqua; Aqua.test_all()'
+
+# Run tests (CLI)
+julia --project=. -e 'using Pkg; Pkg.test()'
+```
+
+### CI/CD Commands
+```yaml
+# Julia CI template
+- uses: julia-actions/setup-julia@v2
+  with:
+    version: '1.10'
+
+- name: Install tools
+  run: julia -e 'using Pkg; Pkg.add(["JuliaFormatter", "JET", "Aqua"])'
+
+- name: Format
+  run: julia -e 'using JuliaFormatter; format("."; overwrite=false)'
+
+- name: Lint
+  run: julia -e 'using JET; JET.test_package(".")'
+
+- name: Audit
+  run: julia -e 'using Aqua; Aqua.test_all()'
+
+- name: Test
+  run: julia --project=. -e 'using Pkg; Pkg.test()'
+```
+
+## Tool Equivalence Table
+
+| Purpose | Rust | Julia |
+|---------|------|-------|
+| Formatting | `cargo fmt` | `JuliaFormatter.format(".")` |
+| Linting | `cargo clippy` | `JET.test_package(".")` |
+| Security Audit | `cargo audit` | `Aqua.test_all()` |
+| Testing | `cargo test` | `Pkg.test()` |
+| Benchmarking | `cargo bench` | `BenchmarkTools.@benchmark` |
+| Dependency Mgmt | `Cargo.toml` | `Project.toml` |
+| Documentation | `cargo doc` | `Documenter.jl` |
+| Coverage | `tarpaulin` | `Coverage.jl` |
+
+## CI/CD Pipeline Reference
+
+### Rust Pipeline Structure
+```yaml
+jobs:
+  check:
+    - fmt: cargo fmt --check
+    - clippy: cargo clippy -- -D warnings
+  
+  security:
+    - audit: cargo audit
+    - geiger: cargo geiger
+  
+  test:
+    - unit: cargo test
+    - integration: cargo test --test '*'
+  
+  build:
+    - debug: cargo build
+    - release: cargo build --release
+```
+
+### Julia Pipeline Structure
+```yaml
+jobs:
+  check:
+    - fmt: julia -e 'using JuliaFormatter; format("."; overwrite=false)'
+    - lint: julia -e 'using JET; JET.test_package(".")'
+  
+  security:
+    - audit: julia -e 'using Aqua; Aqua.test_all()'
+  
+  test:
+    - unit: julia -e 'using Pkg; Pkg.test()'
+  
+  docs:
+    - build: julia -e 'using Documenter; makedocs()'
+```
+
+## Common Issues & Fixes
+
+### Rust Issues
+
+**Issue:** `unwrap()` called on `Option`/`Result`
+**Fix:** Use `?` operator or proper error handling
+```rust
+// Bad
+let x = some_option.unwrap();
+
+// Good
+let x = some_option?;
+```
+
+**Issue:** Integer overflow
+**Fix:** Use checked arithmetic
+```rust
+// Bad
+let x = a + b; // Can overflow
+
+// Good
+let x = a.checked_add(b)?;
+```
+
+**Issue:** Unsafe code without documentation
+**Fix:** Document safety invariants
+```rust
+/// # Safety
+/// Caller must ensure pointer is valid and properly aligned
+unsafe fn my_unsafe_func(ptr: *const u8) {}
+```
+
+### Julia Issues
+
+**Issue:** Type instability
+**Fix:** Add type annotations
+```julia
+# Bad - type unstable
+function process_data(x)
+    result = 0
+    for item in x
+        result += item
+    end
+    result
+end
+
+# Good - type stable
+function process_data(x::Vector{T}) where T<:Number
+    result = zero(T)
+    for item in x
+        result += item
+    end
+    result
+end
+```
+
+**Issue:** Method ambiguity
+**Fix:** Make methods more specific
+```julia
+# Bad - ambiguous
+f(x::Number) = x + 1
+f(x::Integer) = x + 2
+
+# Good - specific order
+f(x::Integer) = x + 2
+f(x::Number) = x + 1
+```
+
+**Issue:** Unbounded input
+**Fix:** Validate inputs
+```julia
+# Bad - no validation
+function process_input(x)
+    # ...
+end
+
+# Good - with validation
+function process_input(x)
+    @assert x > 0 "Input must be positive"
+    # ...
+end
+```
+
+## Security Checklist
+
+### Pre-Commit Checklist
+```markdown
+- [ ] Run formatter (cargo fmt / JuliaFormatter)
+- [ ] Run linter (cargo clippy / JET)
+- [ ] Run tests locally
+- [ ] Check for warnings
+- [ ] Review changes for security issues
+```
+
+### Pre-PR Checklist
+```markdown
+- [ ] All tests passing
+- [ ] No clippy/JET warnings
+- [ ] Formatting correct
+- [ ] Dependencies updated
+- [ ] Documentation updated
+- [ ] Security audit passed
+```
+
+### Weekly Maintenance
+```markdown
+- [ ] Run cargo audit / Aqua.test_all()
+- [ ] Check for dependency updates
+- [ ] Review security advisories
+- [ ] Update advisory databases
+- [ ] Review CI/CD pipeline logs
+```
+
+## Emergency Response
+
+### Security Incident Response
+
+**Rust:**
+```bash
+# Check for known vulnerabilities
+cargo audit
+
+# Update vulnerable dependencies
+cargo update -p vulnerable_package
+
+# Check for unsafe code
+cargo geiger --all
+```
+
+**Julia:**
+```julia
+# Check package health
+using Aqua
+Aqua.test_all()
+
+# Update vulnerable packages
+using Pkg
+Pkg.update()
+```
+
+### CI/CD Failure Response
+
+**Steps:**
+1. Check CI/CD logs for specific errors
+2. Reproduce locally
+3. Fix issue or update configuration
+4. Push fix and monitor
+5. Document incident and resolution
+
+**Common Fixes:**
+- Update tool versions
+- Adjust lint configurations
+- Fix formatting issues
+- Resolve test failures
+- Update dependency versions
+
+## Version Info
+
+**Last Updated:** 2024-04-14
+**Version:** 1.0.0
+**Maintainers:** @hyperpolymath/core-team
