@@ -305,18 +305,25 @@ platform detection at the top of the script.
 
 === Required Format
 
+Every `.desktop` file's primary `Exec=` line MUST go through `keepopen.sh`
+(see §Fallback Ladder below). This ensures that a user who double-clicks
+a desktop icon always lands somewhere useful — even when every upstream
+hook is broken — instead of seeing a terminal flash on-and-off with no
+feedback.
+
 [source,ini]
 ----
 [Desktop Entry]
 Type=Application
 Name=Application Name
-Exec=/path/to/launcher.sh --auto
-Terminal=false  # Critical for web/GUI apps
+Exec=/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh "AppName" "/path/to/repo" "GUI_CMD" "TUI_CMD" "/tmp/app.log"
+Terminal=true   # keepopen needs a terminal for its loud banners and shell fallback
 Icon=/path/to/icon.png
 Categories=Category;
 StartupNotify=true
 
-# Actions for additional functionality
+# Actions for additional functionality — these can bypass keepopen because
+# they are invoked from an already-open context menu; no fallback needed.
 Actions=stop;status;
 
 [Desktop Action stop]
@@ -328,19 +335,112 @@ Name=Server Status
 Exec=/path/to/launcher.sh --status
 ----
 
-=== Forbidden Patterns
+NOTE: The old "pure-GUI apps use `Terminal=false`" advice is superseded by
+`keepopen.sh`. A pure-GUI `Exec=` still flashes a terminal for ~1 second
+when the GUI launch succeeds, but in exchange every failure mode becomes
+*visible* instead of silent. The tradeoff favours debuggability.
+
+== Fallback Ladder (`keepopen.sh`)
+
+=== Why this exists
+
+Desktop launchers fail in three predictable ways, and users must be able
+to see which one happened:
+
+1. The GUI binary is missing, broken, or the URL is unreachable.
+2. The TUI/CLI fallback is also broken.
+3. The repo itself is missing or unbuildable.
+
+Without a visible fallback ladder, all three failures look identical to
+the user: a terminal flashes for half a second, then the desktop is quiet.
+`keepopen.sh` turns each failure into a LOUD, labelled banner and, when
+all else fails, drops the user into an interactive shell at the repo
+root so they can fix whatever is broken.
+
+=== Canonical location
+
+The single source of truth is:
+
+    developer-ecosystem/standards/launcher/keepopen.sh
+
+For desktop files to reference a stable absolute path, a symlink is
+deployed at:
+
+    /var/mnt/eclipse/repos/.desktop-tools/keepopen.sh → ↑
+
+`launch-scaffolder` copies the same script into its baked-in standards
+so regenerated launchers stay in sync.
+
+=== Calling convention
+
+[source,bash]
+----
+keepopen.sh APP_NAME REPO_DIR "GUI_CMD" "TUI_CMD" [LOG_FILE]
+----
+
+* `APP_NAME`: short label; used in banners and the `[keepopen:${APP_NAME}]` prefix.
+* `REPO_DIR`: absolute path to the app's repository root — where the final shell fallback lands.
+* `GUI_CMD`: shell command for the primary GUI path. Pass `""` to skip this stage.
+* `TUI_CMD`: shell command for the TUI fallback. Pass `""` to skip this stage.
+* `LOG_FILE` (optional): log file path, shown in banners so the user knows where to look.
+
+Each `*_CMD` is executed via `bash -c`, so pipelines and shell quoting work.
+For launchers that daemonise their payload and exit 0 immediately, chain
+a `tail -f LOG` after the launcher so the terminal stays open:
+
+[source,bash]
+----
+"aerie-launcher.sh --auto && tail -f /tmp/aerie.log"
+----
+
+=== The three stages
+
+[cols="1,3,3"]
+|===
+| Stage | On success | On failure
+
+| **1. GUI**
+| `keepopen` exits 0 silently.
+| Yellow banner titled `FALLBACK 1/2 — GUI FAILED (exit N)` listing the
+  GUI cmd, log file, and a human-readable hint. Proceeds to stage 2.
+
+| **2. TUI**
+| `keepopen` exits 0 silently.
+| Red banner titled `FALLBACK 2/2 — TUI ALSO FAILED (exit N)` listing
+  both commands and the repo path. Proceeds to stage 3.
+
+| **3. Shell at repo root**
+| `exec bash -l` inside `REPO_DIR` — user can investigate, run `just --list`, etc.
+| If `REPO_DIR` does not exist, a red warning prints and the shell starts in `$PWD`.
+|===
+
+The banners are intentionally loud and ugly. Visibility beats aesthetics —
+the point is that a broken launcher should *look* broken, not silently fail.
+
+=== Forbidden patterns
+
+* Do **not** use `read -rp 'Press Enter to close...'` as a terminal-keepalive.
+  It loses the user's context. Use `keepopen.sh`'s shell fallback instead,
+  which drops them into the repo root where they can actually debug.
+* Do **not** wrap `Exec=` in `konsole --hold` — the `--hold` terminal has
+  no working directory and no login-shell environment, so the user can't
+  easily switch to investigating.
+* Do **not** skip `keepopen.sh` for "simple" apps. Simple apps break too,
+  and the symptom is identical to the flashy ones without the wrapper.
+
+=== Forbidden (legacy) patterns
 
 [source,ini]
 ----
-# BAD: Terminal wrapping
+# BAD: konsole wrapping (pre-keepopen era)
 Exec=konsole -e /path/to/launcher.sh --auto
 Terminal=true
 
-# BAD: Complex wrapping
+# BAD: konsole --hold with no cwd / no login shell
 Exec=konsole --background-mode --hold --qwindowtitle Title -e wrapper.sh launcher.sh
 
-# BAD: No error handling
-Exec=launcher.sh
+# BAD: launcher without keepopen — flashes a terminal on failure with no feedback
+Exec=launcher.sh --auto
 ----
 
 == Troubleshooting Guide
@@ -418,8 +518,12 @@ APP_NAME="AppName"
 
 == Compliance Checklist
 
-[ ] Remove all terminal wrapping from desktop files
-[ ] Set `Terminal=false` for GUI/web applications
+[ ] Primary `Exec=` goes through `keepopen.sh` with non-empty GUI and/or TUI commands
+[ ] `GUI_CMD` for daemon-style launchers chains `&& tail -f LOG` so the terminal stays open on success
+[ ] `REPO_DIR` argument points to a real, existing repository root
+[ ] `LOG_FILE` argument is passed when the launcher writes one, so banners can cite it
+[ ] Remove all pre-keepopen konsole wrapping from desktop files
+[ ] `Terminal=true` on the primary Exec (keepopen needs a terminal for banners + shell fallback)
 [ ] Implement `nohup` for background processes
 [ ] Add PID file tracking and cleanup
 [ ] Implement `wait_for_server()` with reasonable timeout
