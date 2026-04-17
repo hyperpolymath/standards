@@ -1,0 +1,462 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+= GitHub Repository Transfer Playbook — Personal Org -> Enterprise Account
+:toc: left
+:toclevels: 3
+:source-highlighter: rouge
+
+Canonical playbook for transferring a private repository from a personal /
+shared GitHub organisation to a GitHub Enterprise Cloud (GHEC) account, whether
+for cost-pooling reasons, isolating internal work, or restructuring access
+boundaries.
+
+This is the template. Repo-specific execution plans should instantiate it as
+an audit doc in the target repo's `audits/` directory or a pre-flight entry in
+`YOUR-ACTIONS.md`.
+
+== When to use this playbook
+
+Use when ALL of the following are true:
+
+1. A repository is currently hosted in a GitHub organisation outside your
+   enterprise account.
+2. You want the destination to be a GitHub Enterprise Cloud organisation
+   under your enterprise account (not a different personal/shared org).
+3. Actions minutes, storage, or security-feature access under the enterprise
+   plan is materially better than your current org's plan.
+4. The repo is either private or can be switched to "internal" visibility in
+   the destination enterprise org (preferred — internal visibility is the
+   enterprise-native equivalent of cross-org sharing without full private).
+5. You have owner rights on both source org and destination enterprise.
+
+Do NOT use this playbook for:
+
+* Public open-source repos — those generally stay in the public-facing org
+  for discoverability.
+* Transfers between two personal orgs — the same procedure works but the
+  billing-motivation rationale doesn't apply; only the URL-update discipline
+  matters.
+* Same-org rename operations — use `gh repo rename` instead.
+* Splitting a repo — that's a different operation (subtree split or export).
+
+== Pre-transfer audit (do BEFORE clicking Transfer)
+
+=== 1. Estate-wide reference scan
+
+Every hard-coded URL reference to `github.com/<source-org>/<repo>` breaks on
+transfer. GitHub sets up a redirect for up to **30 days** (unless you create a
+new repo at the old path, in which case it snaps off immediately), but the
+redirect is best-effort — don't rely on it.
+
+**Scan:**
+
+[source,bash]
+----
+grep -rln --include="*.md" --include="*.adoc" --include="*.toml" \
+         --include="*.yml" --include="*.yaml" --include="*.a2ml" \
+         --include="*.ncl" --include="*.json" --include="*.sh" \
+         --include="*.py" --include="*.rs" --include="*.ex" \
+  "<source-org>/<repo>" <estate-root>
+----
+
+For a hyperpolymath estate scan, exclude `hyperpolymath-archive/`,
+`node_modules/`, `target/`, `_build/`, `.lake/`, `.git/`.
+
+Classify the hits:
+
+[cols="2,3",options="header"]
+|===
+| Category | How to handle
+
+| References INSIDE the transferring repo (its own docs, issue templates, manifests)
+| Travel with the repo — no action.
+
+| References in OTHER repos (submodules, dependencies, documentation pointers)
+| Must be updated *after* the transfer. Track in a post-transfer punch list.
+
+| References in YOUR-ACTIONS.md / personal notes on Desktop
+| Update manually.
+
+| References in CI workflows that clone or `gh api` the old path
+| Update workflow + re-push before the redirect window expires.
+|===
+
+Acceptable result: document every hit, who owns it, and estimated fix effort.
+If the count is >~50 hits, consider a scripted post-transfer sweep.
+
+=== 2. Submodule / dependency dependents
+
+**Check for submodule references:**
+
+[source,bash]
+----
+grep -rln "url = .*<source-org>/<repo>" <estate-root>/**/.gitmodules
+----
+
+Each match is a repo whose `.gitmodules` will need updating after transfer.
+`git submodule sync --recursive` picks up `.gitmodules` changes but does NOT
+rewrite URL history — each dependent repo needs its `.gitmodules` edited and
+committed.
+
+**Check for package-manager references** if this repo is published:
+
+* Cargo: `Cargo.toml` git dependencies with `git = "https://github.com/<source-org>/<repo>"`.
+* npm: `package.json` git dependencies.
+* Deno: imports with `https://raw.githubusercontent.com/<source-org>/<repo>/...`.
+* Pack (Idris2): `pack.toml` references.
+
+Update all dependent `Cargo.toml` / `package.json` / `deno.json` / `pack.toml`
+after transfer.
+
+=== 3. Mirror configurations
+
+If the repo has downstream forge mirrors (GitLab, Bitbucket, Codeberg,
+Sourcehut, Radicle, Disroot, Gitea), enumerate them from the source repo's
+`git remote -v` BEFORE transfer:
+
+[source,bash]
+----
+cd <local-repo> && git remote -v
+----
+
+Mirror SSH deploy keys stored as secrets (`SSH_PRIVATE_KEY`,
+`MIRROR_DEPLOY_KEY`, etc.) do NOT transfer. Record them:
+
+[source,bash]
+----
+gh secret list --repo <source-org>/<repo>
+----
+
+You will re-add each secret in the destination after transfer. Plan the
+rotation: each mirror target needs a fresh SSH key pair (don't reuse the old
+key; consider the transfer an opportunity to rotate).
+
+=== 4. Secrets inventory
+
+All repository secrets (Actions, Dependabot, Codespaces) must be re-added in
+the destination. Inventory:
+
+[source,bash]
+----
+gh secret list --repo <source-org>/<repo>                      # Actions
+gh api repos/<source-org>/<repo>/dependabot/secrets --jq '.secrets[].name'  # Dependabot
+----
+
+Save the secret *names* only (you cannot read values). You must have the
+original values stored elsewhere (a secrets manager, SOPS+age encrypted file,
+or a password manager) to re-populate them. If you don't, the transfer is a
+forced rotation for those secrets — plan accordingly.
+
+Environment secrets (under `github.com/.../settings/environments`) and
+Codespace secrets have separate endpoints; enumerate those too if used.
+
+=== 5. Branch protection + rulesets
+
+Branch protection rules ARE preserved across transfer for owner-level rules.
+Organisation-level rulesets (GHEC Business+) are NOT — they apply at the org
+boundary. If the source org has an org-level ruleset that pins behaviour on
+this repo, the destination enterprise org's ruleset must be re-authored.
+
+Inventory:
+
+[source,bash]
+----
+gh api repos/<source-org>/<repo>/branches/main/protection
+gh api repos/<source-org>/<repo>/rulesets
+----
+
+=== 6. Webhooks
+
+Webhooks are preserved but their payload URLs will still fire — check with
+the receiver (CI systems, Discord, Slack, status pages) whether the
+payload-source repo identity matters. For most integrations it does not
+(the repo's *numeric* ID stays the same). For URL-sensitive webhooks, update
+after transfer.
+
+=== 7. GitHub Pages
+
+If the repo publishes a Pages site, the URL changes from
+`<source-org>.github.io/<repo>` to `<dest-org>.github.io/<repo>`. Any
+external link to the Pages site will 404. Plan the redirect (custom domain
+is the clean fix).
+
+=== 8. Backup
+
+Immediately before transfer, create a full-fidelity backup:
+
+[source,bash]
+----
+# Mirror clone (all branches, tags, notes, refs)
+git clone --mirror https://github.com/<source-org>/<repo>.git \
+  /path/to/backups/<repo>-pre-transfer-$(date -I).git
+
+# Archive as tarball for longer-term offline retention
+tar -czf <repo>-pre-transfer-$(date -I).tar.gz \
+  /path/to/backups/<repo>-pre-transfer-$(date -I).git
+----
+
+Keep this for at least 90 days after the transfer — it's your only
+unconditional rollback.
+
+== Transfer execution
+
+=== 1. Notify collaborators
+
+If anyone else works on the repo, notify them 24h ahead. The transfer
+typically completes within seconds, but active CI runs, open PRs from
+external contributors, and any half-pushed refs can be disrupted.
+
+Tell them:
+
+* The new URL.
+* When to update their local remotes (`git remote set-url origin <new-url>`).
+* Whether to `git pull` at a specific timestamp (if you want a clean cutoff).
+
+=== 2. Settle the working tree
+
+All collaborators push their in-flight work. Close out transient branches.
+Open PRs continue to work after transfer (they migrate automatically) but
+the hygiene rule is: don't transfer mid-rebase or with unpushed merges
+pending.
+
+=== 3. Execute transfer
+
+Via UI: repo Settings -> scroll to "Danger Zone" -> "Transfer ownership" ->
+type the destination enterprise org's name -> confirm.
+
+Via CLI:
+
+[source,bash]
+----
+gh api repos/<source-org>/<repo>/transfer \
+  -f new_owner=<destination-enterprise-org> \
+  -f new_name=<repo>
+----
+
+The repo's numeric ID stays the same; clone URL changes; issues, PRs,
+releases, wikis, gists, webhooks, branch protection all migrate.
+
+=== 4. Update local working copy
+
+On every machine with a clone:
+
+[source,bash]
+----
+cd <local-repo>
+git remote set-url origin git@github.com:<dest-org>/<repo>.git
+git fetch origin
+----
+
+=== 5. Verify the transfer
+
+Check within 5 minutes:
+
+* `gh repo view <dest-org>/<repo>` returns the repo.
+* `gh repo view <source-org>/<repo>` either 404s or shows a redirect notice.
+* Issues, PRs, tags, releases all present.
+* Latest commit SHA matches the pre-transfer working copy.
+
+== Post-transfer checklist
+
+=== 1. Set visibility (internal vs private)
+
+If destination is GHEC Business or higher, consider switching to "internal"
+visibility — readable by any enterprise member but not public. This is
+often the right default for estate-internal tooling:
+
+[source,bash]
+----
+gh repo edit <dest-org>/<repo> --visibility internal
+----
+
+=== 2. Re-add secrets
+
+For every secret enumerated in pre-transfer step 4:
+
+[source,bash]
+----
+gh secret set <SECRET_NAME> --repo <dest-org>/<repo> < <value-file>
+# or
+echo -n "$VALUE" | gh secret set <SECRET_NAME> --repo <dest-org>/<repo> --body -
+----
+
+Do Dependabot secrets separately:
+
+[source,bash]
+----
+gh api repos/<dest-org>/<repo>/dependabot/secrets/<NAME> \
+  -X PUT -f encrypted_value=... -f key_id=...
+----
+
+=== 3. Re-register mirror deploy keys
+
+For each downstream forge:
+
+. Generate a fresh SSH key pair (do NOT reuse the old one).
+. Register the public key on the downstream forge as a deploy key.
+. Add the private key as a GitHub secret in the destination repo.
+. Re-test the mirror workflow.
+
+=== 4. Update the estate-wide references
+
+Using the scan from pre-transfer step 1, sweep every external file that
+referenced the old URL:
+
+[source,bash]
+----
+find <estate-root> -type f \( \
+  -name "*.md" -o -name "*.adoc" -o -name "*.toml" \
+  -o -name "*.yml" -o -name "*.yaml" -o -name "*.a2ml" \
+  -o -name "*.ncl" -o -name "*.json" -o -name "*.sh" \) \
+  -not -path "*/hyperpolymath-archive/*" \
+  -not -path "*/.git/*" \
+  -not -path "*/node_modules/*" \
+  -exec sed -i 's|<source-org>/<repo>|<dest-org>/<repo>|g' {} +
+----
+
+Commit + push each affected repo.
+
+=== 5. Update submodule references
+
+For every `.gitmodules` that referenced the old URL:
+
+[source,bash]
+----
+cd <dependent-repo>
+sed -i 's|<source-org>/<repo>|<dest-org>/<repo>|g' .gitmodules
+git submodule sync --recursive
+git add .gitmodules
+git commit -m "submodules: retarget <repo> to <dest-org> after transfer"
+git push
+----
+
+Every dependent that pins this repo in its `.gitmodules` needs this update.
+
+=== 6. Update package-manager references
+
+Cargo:
+
+[source,toml]
+----
+# Before
+my-dep = { git = "https://github.com/<source-org>/<repo>" }
+# After
+my-dep = { git = "https://github.com/<dest-org>/<repo>" }
+----
+
+After update: `cargo update -p my-dep` then commit Cargo.toml + Cargo.lock.
+
+Equivalent sweep for npm, Deno import maps, Pack packages.
+
+=== 7. CI / integration sanity check
+
+Trigger a test workflow run. Verify:
+
+* Actions minutes billed against the destination enterprise account (not
+  the source org).
+* External integrations (status pages, PR-review bots, deploy targets) still
+  receive payloads.
+* Dependabot continues to operate (version + security updates).
+
+=== 8. Sunset the old URL
+
+After 7 days of quiet, you can retire the old URL with confidence. Record
+the transfer in:
+
+* Source-repo's retired-links index (if you have one).
+* Estate-wide `README` or landing page.
+* `MEMORY.md` / agent-facing state files so future sessions use the new URL.
+
+If you created a redirect repo at the old path, delete it now.
+
+== Rollback plan
+
+If the transfer turns out to be a mistake within the first 24h:
+
+. Immediately re-transfer the repo *back* to the original org.
+. Re-pin any collaborators' local remotes to the original URL.
+. Restore the old webhooks / integrations if they were modified.
+
+After 24h, rollback gets harder — integrations, CI history, and habitual
+muscle-memory accrete in the new location. Beyond 7 days, rollback is
+impractical; the repo is effectively in its new home.
+
+If the transfer is demonstrably harmful (data loss, permission corruption,
+missing issues), the mirror backup from pre-transfer step 8 is the
+unconditional escape hatch: create a fresh empty repo in either org, push
+from the mirror clone, then redirect.
+
+== Common gotchas (learned from past transfers)
+
+=== Secret values not recoverable
+
+If you didn't record secret *values* before transfer (only names), they're
+lost. GitHub never returns secret values to the UI or API. Any CI depending
+on them must be re-populated — ideally from a persistent secrets manager
+rather than the old repo.
+
+=== PR commit signing breaks
+
+Commits with GPG signatures tied to the old repo's deploy key verification
+show as "unverified" after transfer until the destination repo's verified
+signers are configured. Not harmful; just noisy.
+
+=== Org-level Actions policies override
+
+The destination enterprise org may have a stricter Actions allowlist than the
+source. After transfer, workflows referencing actions not on the destination
+allowlist fail silently. Check the destination org's
+`Settings -> Actions -> Policies` before transferring repos that use
+uncommon third-party actions.
+
+=== Enterprise contract scopes Actions minutes
+
+GHEC Business and higher include *pooled* Actions minutes — the repo just
+consumes from the enterprise budget. But if the enterprise has a seat-count
+cap or a strict policy around public-vs-private minutes, transferring a
+heavy-CI private repo can breach limits. Verify the enterprise plan's
+Actions limits before transferring any repo whose monthly minute consumption
+is material.
+
+=== Redirect window is 30 days OR until conflict
+
+If anyone creates a new repo at the old path during the redirect window
+(`<source-org>/<repo>` again), the redirect breaks IMMEDIATELY. Lock down
+that path: either archive-squat with a dummy repo noting the new location,
+or monitor for re-creation.
+
+== Checklist (abridged)
+
+.Pre-transfer
+* [ ] Estate-wide reference scan captured; external hits enumerated
+* [ ] Submodule / package-manager dependents listed
+* [ ] Mirror configurations documented
+* [ ] All secret NAMES inventoried; VALUES captured in a secrets manager
+* [ ] Branch protection + rulesets snapshotted
+* [ ] Webhooks enumerated
+* [ ] Pages URL impact assessed
+* [ ] Full mirror backup created and stored
+
+.Transfer
+* [ ] Collaborators notified
+* [ ] Working tree clean across all clones
+* [ ] Transfer executed via UI or `gh api`
+* [ ] Local remotes re-pointed
+* [ ] Verification: repo visible, issues/PRs/releases present, latest SHA matches
+
+.Post-transfer
+* [ ] Visibility set (internal / private per plan)
+* [ ] Secrets re-added
+* [ ] Mirror deploy keys rotated and re-registered
+* [ ] Estate-wide URL sweep completed
+* [ ] Dependent submodules retargeted
+* [ ] Cargo / npm / Deno / Pack references updated
+* [ ] CI sanity-test run green
+* [ ] Old URL sunset after 7 days quiet; MEMORY.md / agent state updated
+
+== Cross-references
+
+* Related: `docs/compliance/` for other compliance playbooks.
+* For repos in the hyperpolymath estate, the *always-private* list in the
+  workspace memory rule `always-private-repos.md` is the starting point for
+  transfer candidates.
