@@ -493,6 +493,254 @@ repo-c      ✓    -    -     ✓      -      -      -     ✓     -    -     - 
 
 The system CRG grade is determined by the lowest grade in the matrix, not the average.
 
+=== Cross-Repo Test Ideas (added 2026-04-17)
+
+These tests span two or more repos and catch failure modes that single-repo blitzes
+cannot. Added after the echidna TypeDiscipline transition (commit `8f573f1`) exposed
+several drift classes that had been latent for weeks. Each idea lists: **what it tests**,
+**where it lives**, **why single-repo tests miss it**, and **estate applicability**.
+
+==== CR-1. Mirror-enum drift test
+
+**What:** Property test asserting that any enum mirrored across repos stays in sync
+with its upstream source of truth. Consumer generates its mirror at test-time from
+a shared manifest (JSON / A2ML) that the upstream emits, then diffs against its own
+hand-maintained copy. Fails fast when they diverge.
+
+**Where:** In each consumer repo's integration-test directory, plus a companion
+manifest at `src/<mirror-enum>.manifest.a2ml` in the upstream.
+
+**Why single-repo misses it:** Upstream adds a variant, downstream mirror stays
+stale, consumer keeps compiling because downstream has `_ =>` fallback — drift goes
+undetected until a user hits the fallback path with unexpected results.
+
+**Applicability:** `ProverKind` (echidna -> echidnabot + protocol-squisher-bridge);
+`Severity` / `Tier` / `BotId` (gitbot-fleet/shared-context -> each bot); future
+`TypeDiscipline` (echidna -> hypatia, panic-attack); `NodeKind` / `EdgeKind` in
+GNN schemas (echidna -> any ML consumer).
+
+**Concrete gap today:** `echidnabot` and `protocol-squisher-echidna-bridge` both
+carry local mirror enums that already lag behind echidna main; silent today because
+matches use `_ =>`, loud tomorrow when someone relies on a specific variant.
+
+==== CR-2. Foreign-enum exhaustive-match lint
+
+**What:** Custom clippy lint (or `cargo miri`-style analysis, or a grep-based CI
+job as MVP) that flags every `match` expression over an enum imported from an
+external crate that lacks an `_ =>` fallback. The grep MVP is one regex plus a list
+of extern-enum names.
+
+**Where:** `developer-ecosystem/standards/hypatia-rules/lint-foreign-exhaustive.a2ml`
+as the declarative policy; enforced by hypatia in every downstream repo's CI.
+
+**Why single-repo misses it:** An exhaustive match compiles fine today, but a
+one-variant addition in the upstream turns the downstream into a compile failure
+on the next `cargo build`. The issue surfaces as upstream's CI problem even though
+the fault is in the downstream's coupling decision.
+
+**Applicability:** Every Rust repo with a path-dep on another hyperpolymath repo.
+Especially `echidna` consumers; any repo importing `katagoria::Discipline` once
+that exists; `gitbot-shared-context` consumers.
+
+**Concrete gap today:** Echidna's `src/rust/main.rs` had three exhaustive matches
+over `ProverKind` that were silently wrong before the TypeDiscipline transition
+(they never covered the 12 original HP ecosystem variants) and broke loudly the
+moment 28 more were added. Nobody noticed for weeks.
+
+==== CR-3. FFI roundtrip bijection property
+
+**What:** For every FFI boundary that serialises a Rust enum to a numeric or
+string representation, a property test asserting `decode(encode(x)) == x` for
+every variant — not just a hand-picked subset. Run in both directions where
+both are exposed.
+
+**Where:** The originating crate's `tests/ffi_roundtrip.rs`, generated from the
+enum's `ALL` const (see reference implementation in echidna
+`src/rust/disciplines/mod.rs`).
+
+**Why single-repo misses it:** When a table only tests the variants the author
+remembers, it silently tolerates missing entries. echidna's `kind_from_u8` was
+missing codes 49–60 for weeks before the TypeDiscipline transition; the
+existing roundtrip test only covered codes 0–48 and explicitly *asserted*
+`kind_from_u8(49).is_none()`, locking in the bug.
+
+**Applicability:** Every `*_to_u8` / `*_from_u8` or `*_to_str` / `*_from_str`
+pair. Every CBOR-encoded proof-state field. Every GraphQL / gRPC / REST enum
+bridge. Every Zig ABI that names variants.
+
+==== CR-4. Shared-fixture corpus contract
+
+**What:** Canonical golden fixtures live in ONE upstream repo (`katagoria/`,
+`standards/a2ml/examples/`, `echidna/training_data/`) and every downstream that
+consumes that format runs its parser / validator / type-checker over the
+*shared* corpus. When katagoria graduates a new discipline, the fixture is
+added once and every downstream's next CI run exercises it.
+
+**Where:** Upstream hosts `fixtures/` with an index.a2ml. Downstream
+`tests/shared_corpus.rs` dereferences via path dep or git submodule.
+
+**Why single-repo misses it:** Each consumer writes its own fixtures, they
+drift from the upstream format, and a format extension in the upstream doesn't
+fail any test until a real user trips over it.
+
+**Applicability:** katagoria → echidna + typell + typed-wasm (type disciplines);
+a2ml → every repo that emits a2ml; avow-protocol → every repo that uses proven
+results; VeriSimDB → every repo that writes octads.
+
+**Concrete gap today:** `katagoria/research/tropical/TropicalKleene.idr` is
+standalone; no downstream currently uses it as a fixture, so when tropical
+semantics shift, nothing breaks.
+
+==== CR-5. Claim-grounder adversarial cross-test
+
+**What:** Each claim-grounder (invariant-path, PLASMA, Hypatia, ECHIDNA,
+panic-attacker) is run against proofs produced by the others, specifically
+constructed to hide violations or to appear cleaner than they are. This makes
+the dual-use posture (per the Akerlof memory note) operational: a grounder
+that cannot detect another grounder's escape hatches is not actually grounded.
+
+**Where:** `verification-ecosystem/<grounder>/tests/adversarial_cross/`
+plus a meta-repo `verification-ecosystem/meta-adversarial-suite/` that
+coordinates the round-robin and publishes a weekly summary.
+
+**Why single-repo misses it:** Every grounder tests itself against
+hand-picked fixtures by default. The adversarial signal — "tool X can hide
+from tool Y" — is only visible when you explicitly set them against each
+other.
+
+**Applicability:** All five listed grounders; any future grounder (invariant-path,
+PLASMA, Hypatia, ECHIDNA, panic-attacker) immediately on admission.
+
+==== CR-6. Upstream-HEAD sentinel in downstream CI
+
+**What:** Every downstream-of-a-path-dep repo runs a nightly CI job that
+pulls the upstream's `main` branch (overriding its Cargo.toml path dep or
+submodule) and runs the full test suite. Result emitted as a status check
+on the upstream's recent PRs via Hypatia / gitbot-fleet webhook.
+
+**Where:** `.github/workflows/upstream-head-sentinel.yml` in downstream
+repos; Hypatia rule in `standards/hypatia-rules/upstream-sentinel.a2ml`.
+
+**Why single-repo misses it:** The upstream's CI is green, the downstream's
+CI against the pinned version is green, but a merge that would break the
+downstream is invisible until the pin bumps — often weeks later.
+
+**Applicability:** `echidna` consumers (echidnabot, panic-attack, hypatia,
+protocol-squisher-echidna-bridge); `shared-context` -> every gitbot;
+`a2ml-rs` -> every repo consuming A2ML; `proven` -> every repo consuming a
+formally-verified alternative.
+
+**Concrete gap today:** Today's echidna commit `8f573f1` added 28 new
+ProverKind variants. Downstream echidnabot silently continues to compile
+(for now) but its dispatcher is mis-calibrated. An upstream-HEAD sentinel
+would have pinged immediately.
+
+==== CR-7. Workspace-aware blitz matrix
+
+**What:** The blitz matrix (§ Part VI) distinguishes four cells per (repo,
+category): `in-isolation` (cargo test with this member only), `in-workspace`
+(cargo test at workspace root), `workspace-root-with-bins` (cargo test
+`--all-targets`), and `cross-workspace` (downstream workspace importing this
+as a path dep). Many bugs only appear in one of the four.
+
+**Where:** An enriched matrix format in `.machine_readable/testing/blitz.a2ml`
+per repo, rolled up at the ecosystem level in `standards/dashboards/blitz.a2ml`.
+
+**Why single-repo misses it:** `cargo test --lib` can pass while `cargo test
+--all-targets` fails on the same enum, because bin / test-target exhaustive
+matches are outside the lib's compilation unit. echidna hit exactly this today.
+
+**Applicability:** All workspace-member repos (echidna, gitbot-fleet,
+developer-ecosystem monorepo, nextgen-languages monorepo, nextgen-databases).
+
+==== CR-8. Cross-prover proof-exchange roundtrip
+
+**What:** For every proof-interchange format (OpenTheory, Dedukti, TSTP,
+Alethe, DRAT/LRAT, custom CBOR), a roundtrip test: prove theorem T in prover
+A, export to format F, re-import to prover B, re-check T. Must hold across
+{Coq, Lean, HOL4, HOL Light, Isabelle} × {OpenTheory, Dedukti} pairs at
+minimum.
+
+**Where:** `echidna/tests/proof_exchange_roundtrip.rs` with the heavy lifting
+delegated to the `src/rust/exchange/` module. Parallel suite in any future
+proof-exchange host.
+
+**Why single-repo misses it:** The exchange module has unit tests for each
+direction independently; nothing today asserts semantic preservation across
+the roundtrip.
+
+**Applicability:** `echidna/src/rust/exchange/`; any repo that ships an
+exchange format bridge.
+
+==== CR-9. Schema-surface drift detector
+
+**What:** Every public surface (Rust enum, JSON schema, A2ML schema, GraphQL
+type, Zig ABI) emits a machine-readable schema snapshot at build time to
+`.schemas/<surface>.a2ml`. Every PR's CI computes the new snapshot and diffs
+against the merged-main version; any change is flagged with a SEMVER
+classification (patch / minor / major).
+
+**Where:** `just emit-schemas` recipe per repo; shared implementation in
+`developer-ecosystem/schema-snapshot-rs` (TBD).
+
+**Why single-repo misses it:** Today a `pub enum` variant addition in the
+upstream is invisible to the downstream until someone imports the crate
+again. A schema snapshot makes the surface change a visible PR artifact.
+
+**Applicability:** Every public-facing crate / library / protocol.
+
+==== CR-10. Stale-fixture-and-baseline decay alarm
+
+**What:** Any test fixture, proof corpus sample, benchmark baseline, or
+regression gold file that has not been regenerated in N days (default 90)
+raises a decay alarm in the daily CI pulse. Bench baselines specifically
+decay faster (30 days) because upstream prover performance shifts.
+
+**Where:** `standards/hypatia-rules/fixture-decay.a2ml` + per-repo
+`.machine_readable/fixtures.a2ml` manifest listing every fixture with its
+last-regenerated timestamp.
+
+**Why single-repo misses it:** Tests keep passing against stale fixtures
+that no longer reflect real inputs. Benchmarks pass against baselines that
+no longer reflect current performance. Drift is slow and undetected.
+
+**Applicability:** echidna (`training_data/*.jsonl`, `premises_merged.jsonl`,
+etc.); proven (Idris2 proof libraries); a2ml (grammar examples); any repo
+with a `fixtures/` or `corpora/` directory.
+
+=== Weak Points Spotted in the Current Taxonomy (2026-04-17)
+
+Recorded at the same time as the cross-repo ideas above, things that feel
+under-specified in this document itself:
+
+- **No "coupling test" category.** Tests that assert drift-freedom between
+  two independent artefacts (mirror enums, redundant parsers, serde + custom
+  Display, etc.) don't fit cleanly into the 16 categories. Proposal: add
+  Category 17 "Coupling / Drift-freedom" in v1.1.
+- **Proof-regression is single-prover.** Category 16 catches "Coq no longer
+  accepts proof P" but not "Coq and Lean give different counterexamples for
+  the same formula". Cross-prover regression deserves its own sub-category.
+- **Benchmark taxonomy is single-process.** Six Sigma classification
+  (§ Part IV) applies to one binary's hot path. There is no equivalent for
+  end-to-end pipelines (panic-attack → hypatia → echidna → verisim) where
+  the interesting latency is the tail across all four.
+- **CRG mapping doesn't include cross-repo rows.** § "CRG ↔ Test Category
+  Mapping" maps repo-local categories to grades. A repo with mirror-enum
+  drift or FFI roundtrip gaps has a visible-externally failure mode that
+  its in-repo blitz will not catch. Proposal: a new "Ecosystem CRG" rollup
+  grade that can only be A if all CR-* cross-repo checks pass.
+- **Dogfooding is listed (§ Part VII) but not adversarial.** Dogfooding
+  asks "does the author use their own tool?"; CR-5 (claim-grounder
+  adversarial cross-test) asks the much harder "can the tool fool its
+  peers?". The latter is closer to real robustness.
+- **"Shared fixtures" are implied but never required.** Several repos
+  (katagoria, a2ml, avow-protocol) should host canonical fixtures that
+  every downstream consumes, but the taxonomy doesn't elevate this to a
+  first-class obligation. CR-4 above proposes a fix.
+- **"Run time" categories don't include warm-boot vs cold-boot separation.**
+  Many bugs (FFI init, plugin registry, GNN client handshake) only appear
+  once per process lifetime. A cold-start test category is missing.
+
 == Appendix A: Test Category Quick Reference
 
 [cols="1,1,1"]
