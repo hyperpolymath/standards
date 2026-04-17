@@ -85,8 +85,10 @@
   #   adjust:  + 'partial
   #   bust:    + 'drilled
   #   dust:    'declared, 'proposed, 'approved, 'removed  (non-standard)
-  #   intend:  'declared, 'in_progress, 'done, 'deferred, 'retired
-  #   lust:    'declared, 'in_progress, 'achieved, 'abandoned
+  #   intend:  intents: 'declared, 'in_progress, 'done, 'deferred, 'retired
+  #            wishes:  'declared, 'in_progress, 'achieved, 'abandoned
+  #            (the wishes schema was absorbed from the deprecated `lust`
+  #             verb 2026-04-18; lust/ dir removed estate-wide)
   #
   # See: docs/CONTRACTILE-SPEC.adoc §Per-Verb Extension
   # -------------------------------------------------------------------------
@@ -128,7 +130,7 @@
   # Most verbs override on_any_fail:
   #   "exit-nonzero"          : hard gate  (must, trust, bust, adjust-gating)
   #   "continue-with-warnings": advisory   (dust, adjust)
-  #   "continue"              : never gate (intend, lust)
+  #   "continue"              : never gate (intend — covers both intents and wishes)
   # -------------------------------------------------------------------------
   run_defaults = {
     on_pass = "continue",
