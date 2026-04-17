@@ -1,0 +1,205 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Metadatastician Transfer Plan
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+#
+# Purpose: move private hyperpolymath repos that can tolerate
+#          enterprise-internal visibility into The-Metadatastician org,
+#          where GitHub Advanced Security (GHAS) coverage is available
+#          on the Enterprise plan. Repos remain non-public; they gain
+#          code scanning, secret scanning, and dependency review.
+#
+# Current posture:
+#   - The-Metadatastician (login: `The-Metadatastician`) is on Enterprise
+#     plan (999999 private repos, 50 seats, 1 filled). Owns 1 private + 2 public.
+#   - hyperpolymath org holds 10 private repos (1 archived, 9 active).
+#   - User is owner of both orgs (transfer authorisation available).
+#
+# Irreversibility profile (per `git remote` redirect): GitHub keeps
+# old URLs redirecting indefinitely, so SSH/HTTPS refs keep working. BUT:
+# CI webhooks that point at the org-name path (rare), hard-coded owner
+# references in workflow `uses:` (none for hyperpolymath-authored code),
+# and mirror-sync targets may need URL updates.
+
+@abstract:
+Transfer plan for the 4 low-sensitivity private hyperpolymath repos that
+are good candidates for Metadatastician-internal status (unlocks GHAS).
+Four repos explicitly excluded as always-private (007, .git-private-farm,
+hyperpolymath-sovereign-registry, blog-drafts). One archived (polystack),
+one workspace-root (repos-monorepo) also excluded.
+@end
+
+## Inventory — 10 private hyperpolymath repos
+
+[[inventory]]
+name = "007"
+exclude = true
+reason = "always-private per memory: Claude-only language repo, agent meta-language"
+last_push = "2026-04-17"
+
+[[inventory]]
+name = ".git-private-farm"
+exclude = true
+reason = "always-private per memory: hookset-sync hub with sensitive manifest data"
+last_push = "2026-04-16"
+
+[[inventory]]
+name = "hyperpolymath-sovereign-registry"
+exclude = true
+reason = "always-private per memory: sovereign registry; decisional/governance content"
+last_push = "2026-04-17"
+
+[[inventory]]
+name = "blog-drafts"
+exclude = true
+reason = "always-private per memory: unpublished blog drafts; premature disclosure risk"
+last_push = "2026-04-17"
+
+[[inventory]]
+name = "polystack"
+exclude = true
+reason = "archived; superseded by boj-server. No ongoing security-signal value from transfer."
+last_push = "2026-04-04"
+
+[[inventory]]
+name = "repos-monorepo"
+exclude = true
+reason = "Eclipse-drive workspace-root wrapper; submodule pointer tracker. Transferring changes origin for every submodule consumer. Too high-blast for this pass."
+last_push = "2026-04-17"
+review_next_pass = true
+
+[[inventory]]
+name = "ipv6-only"
+exclude = false
+candidate = true
+size_kb = 45138
+description = "IPv6-only network profile tool (aerie/network). Dual-use with ambientops subset."
+last_push = "2026-04-17"
+rationale = "Already positioned as dual-use with a public subset downstream. Low-sensitivity code. Size ~45MB suggests real content worth scanning."
+
+[[inventory]]
+name = "katagoria"
+exclude = false
+candidate = true
+size_kb = 373
+description = "(empty)"
+last_push = "2026-04-17"
+rationale = "Very small (373KB). Low disclosure risk. Empty description — recommend user confirm content before transfer."
+pre_transfer_check = "skim README + file listing to confirm no sensitive content hides under the size."
+
+[[inventory]]
+name = "network-ambulance"
+exclude = false
+candidate = true
+size_kb = 413
+description = "Platform-independent complete internet repair tool — cross-platform successor to Windows Complete Internet Repair. Canonical in aerie; subset in ambientops."
+last_push = "2026-04-17"
+rationale = "Described as cross-platform successor to an existing public tool. Subset already extracted downstream. Low-sensitivity operational tool."
+
+[[inventory]]
+name = "nextgen-typing"
+exclude = false
+candidate = true
+size_kb = 373
+description = "(empty)"
+last_push = "2026-04-17"
+rationale = "Very small (373KB). Low disclosure risk. Empty description — recommend user confirm content before transfer."
+pre_transfer_check = "skim README + file listing to confirm no sensitive content hides under the size."
+
+## Proposed sequencing (dry-run first, then batched)
+
+[[batch]]
+id = "batch-0-dry-run"
+description = "Dry-run inspection — no transfers executed. For each candidate, cat README + list top-level files + verify no secrets."
+commands = [
+  "for r in ipv6-only katagoria network-ambulance nextgen-typing; do echo === $r ===; gh api repos/hyperpolymath/$r/contents/ -q '.[].name'; done",
+  "for r in katagoria nextgen-typing; do gh api repos/hyperpolymath/$r/readme --jq '.content' | base64 -d || echo NO-README; done",
+]
+executes_transfer = false
+
+[[batch]]
+id = "batch-1-tiny-repos"
+description = "Transfer the two tiny empty-description repos first, as the lowest-blast-radius test of the transfer mechanics."
+repos = ["katagoria", "nextgen-typing"]
+rationale = "If the mechanics break, failure is contained to 2×373KB repos with no stars/forks and no CI dependency."
+executes_transfer = true
+commands = [
+  "gh api -X POST repos/hyperpolymath/katagoria/transfer -f new_owner=The-Metadatastician",
+  "gh api -X POST repos/hyperpolymath/nextgen-typing/transfer -f new_owner=The-Metadatastician",
+]
+post_action = "verify redirect works: `git ls-remote git@github.com:hyperpolymath/katagoria.git` should resolve."
+
+[[batch]]
+id = "batch-2-operational-tools"
+description = "Transfer the operational tool repos after batch-1 succeeds."
+repos = ["network-ambulance", "ipv6-only"]
+rationale = "Real content with public downstream subsets. Transfer unblocks GHAS code-scanning on the full internal version while the aerie/ambientops public subsets continue to ship normally."
+executes_transfer = true
+commands = [
+  "gh api -X POST repos/hyperpolymath/network-ambulance/transfer -f new_owner=The-Metadatastician",
+  "gh api -X POST repos/hyperpolymath/ipv6-only/transfer -f new_owner=The-Metadatastician",
+]
+post_action = "verify mirror-sync references still resolve; check CI webhook targets (if any) still fire."
+
+[[batch]]
+id = "batch-3-deferred"
+description = "Repos-monorepo transfer deferred pending review."
+repos = ["repos-monorepo"]
+rationale = "Submodule-pointer workspace root. Moving it changes origin URL for every downstream submodule reference. Worth doing only if GHAS on the wrapper repo provides meaningful signal — probably not."
+executes_transfer = false
+decision_pending = "JONATHAN — is there value in scanning the wrapper monorepo, or is the signal entirely on the member repos?"
+
+## Post-transfer checks (each transferred repo)
+
+[[post_check]]
+id = "redirect-works"
+command = "git ls-remote git@github.com:hyperpolymath/<repo>.git 2>&1 | head -1"
+expect = "non-error output (GitHub redirects old-owner URLs)"
+
+[[post_check]]
+id = "ghas-features-enabled"
+command = "gh api repos/The-Metadatastician/<repo> -q '.security_and_analysis'"
+expect = "secret_scanning + code_scanning = enabled (may need explicit enablement POST-transfer)"
+next_action_if_missing = "gh api -X PATCH repos/The-Metadatastician/<repo> -f 'security_and_analysis[secret_scanning][status]=enabled' -f 'security_and_analysis[code_scanning][status]=enabled'"
+
+[[post_check]]
+id = "internal-visibility"
+command = "gh api repos/The-Metadatastician/<repo> -q '.visibility'"
+expect = "private (default on transfer) — must be changed to 'internal' via gh api -X PATCH -f visibility=internal if Enterprise tier supports it for this repo"
+
+[[post_check]]
+id = "mirror-chain-updated"
+description = "Verify hub-and-spoke mirror system still points at the new upstream. Per memory: GitHub is single source of truth; mirror-sync is automated. Transfers change the canonical URL from github.com/hyperpolymath/X to github.com/The-Metadatastician/X — confirm the mirror system follows."
+owner = "JONATHAN or mirror-sync tooling"
+
+## Open questions for Jonathan
+
+[[question]]
+id = "q1-katagoria-content"
+text = "What is katagoria? Empty description, 373KB, 1 star. Confirm content is not sensitive before batch-1 executes."
+
+[[question]]
+id = "q2-nextgen-typing-content"
+text = "What is nextgen-typing? Empty description, 373KB, 1 star. Same check as katagoria."
+
+[[question]]
+id = "q3-repos-monorepo"
+text = "Transfer repos-monorepo to Metadatastician, or keep it at hyperpolymath as the workspace root?"
+
+[[question]]
+id = "q4-ghas-features-post-transfer"
+text = "Post-transfer, should code_scanning + secret_scanning be auto-enabled via PATCH, or left to the default enterprise policy?"
+
+[[question]]
+id = "q5-greenlight-batch-1"
+text = "GREENLIGHT batch-1 (katagoria + nextgen-typing)? This is the first destructive-ish action — everything prior is reversible via `gh api -X POST repos/The-Metadatastician/X/transfer -f new_owner=hyperpolymath`."
+
+## Status
+
+[[status]]
+as_of = "2026-04-17"
+plan_prepared = true
+dry_run_executed = false
+batch_1_executed = false
+batch_2_executed = false
+batch_3_executed = false
+awaiting = "Jonathan greenlight on open questions q1-q5"
