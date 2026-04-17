@@ -11,10 +11,14 @@
 #             `contractile trust probe`  → run declared safe-hacking probes
 #
 # Anything else in this directory is human-only notes/archive; machines ignore.
+#
+# Base: ../_base.ncl provides pedigree_schema, run_defaults, probe_schema.
+# See: docs/CONTRACTILE-SPEC.adoc
+
+let base = import "../_base.ncl" in
 
 {
-  pedigree = {
-    schema_version = "1.0.0",
+  pedigree = base.pedigree_schema & {
     contractile_verb = "trust",
     semantics = "security + provenance + safe-hacking",
     security = {
@@ -39,8 +43,11 @@
       | Array {
           id | String,
           description | String,
+          # TODO: migrate to base.probe_schema (structured probe) when CLI supports it
           probe | String,                 # read-only; exit 0 = pass
+          # status_core values: 'declared, 'verified, 'failing
           status | [| 'declared, 'verified, 'failing |] | default = 'declared,
+          # trust uses all four severity levels (from base.severity_core)
           severity | [| 'critical, 'high, 'medium, 'low |] | default = 'high,
           notes | String | optional,
         },
@@ -59,6 +66,7 @@
                 id | String,
                 class | [| 'fuzz, 'property_test, 'chaos, 'auth_bypass, 'injection, 'timing |],
                 description | String,
+                # TODO: migrate to base.probe_schema (structured probe) when CLI supports it
                 probe | String,             # command to run the probe
                 expected_outcome | [| 'probe_blocks_attempt, 'probe_finds_no_issue |],
                 timeout_seconds | Number | default = 300,
@@ -69,8 +77,9 @@
       | default = { scope = "this-repo-only", allowed_probe_classes = [], probes = [] },
   },
 
-  run = {
-    on_pass = "continue",
+  # Runner behaviour — inherits from base.run_defaults.
+  # trust has an extra field for unexpected safe-hacking outcomes.
+  run = base.run_defaults & {
     on_any_fail = "exit-nonzero",       # hard gate on verifications
     safe_hacking_on_unexpected_outcome = "exit-nonzero",  # probe found what it shouldn't = block
     report_format = "a2ml",
