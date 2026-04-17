@@ -5,7 +5,7 @@
 **Tier**: T1 — Critical
 **Total Theorems**: 12
 **Primary Prover(s)**: Idris2 (4), Lean4 (4), Agda (2), TLA+ (2)
-**Existing Proof Coverage**: ~15% (Idris2 ABI 1748 LOC, ReScript VQL 11 proof types)
+**Existing Proof Coverage**: ~15% (Idris2 ABI 1748 LOC, ReScript VCL 11 proof types)
 **Dependencies**: `proven` library, `rsr-template-repo` ABI proofs
 
 ## Status Tracker
@@ -13,8 +13,8 @@
 | # | Theorem | Prover | Status | Verified |
 |---|---------|--------|--------|----------|
 | 1 | V1 Octad coherence invariant | I2 | [ ] Pending | — |
-| 2 | V2 VQL type inference soundness | L4 | [ ] Pending | — |
-| 3 | V3 VQL subtyping transitivity | L4 | [ ] Pending | — |
+| 2 | V2 VCL type inference soundness | L4 | [ ] Pending | — |
+| 3 | V3 VCL subtyping transitivity | L4 | [ ] Pending | — |
 | 4 | V4 Raft consensus safety | L4 | [ ] Pending | — |
 | 5 | V5 Transaction atomicity | TLA | [ ] Pending | — |
 | 6 | V6 WAL integrity + replay idempotence | L4 | [ ] Pending | — |
@@ -56,18 +56,18 @@ verisimdb/
 │   └── verisim-storage/                redb B-tree
 ├── elixir-orchestration/               185,797 LOC (OTP/Raft)
 ├── src/
-│   ├── vql/                            7,283 LOC ReScript (VQL type system)
-│   │   ├── VQLTypeChecker.res
-│   │   ├── VQLBidir.res                Bidirectional type inference
-│   │   ├── VQLSubtyping.res
-│   │   └── VQLProofObligation.res
+│   ├── vcl/                            7,283 LOC ReScript (VCL type system)
+│   │   ├── VCLTypeChecker.res
+│   │   ├── VCLBidir.res                Bidirectional type inference
+│   │   ├── VCLSubtyping.res
+│   │   └── VCLProofObligation.res
 │   ├── registry/                       Raft cluster (ReScript)
 │   │   └── KRaftCluster.res
 │   └── abi/                            1,748 LOC Idris2
 └── docs/
-    ├── vql-formal-semantics.adoc
-    ├── vql-grammar.ebnf
-    └── vql-type-system.adoc
+    ├── vcl-formal-semantics.adoc
+    ├── vcl-grammar.ebnf
+    └── vcl-type-system.adoc
 ```
 
 ### Languages & LOC
@@ -76,7 +76,7 @@ verisimdb/
 |----------|-----|---------|
 | Rust | 48,789 | Core engine, 8 modality stores |
 | Elixir | 185,797 | OTP orchestration, Raft |
-| ReScript | 7,283 | VQL type system |
+| ReScript | 7,283 | VCL type system |
 | Idris2 | 1,748 | ABI proofs |
 
 ## Existing Proofs (DO NOT REDO)
@@ -86,8 +86,8 @@ verisimdb/
 | `src/abi/Types.idr` | ~500 | Entity size proofs, platform sizing |
 | `src/abi/Foreign.idr` | ~400 | FFI IO monad correctness |
 | `src/abi/Layout.idr` | ~300 | Memory layout invariants |
-| `src/vql/VQLBidir.res` | 1500 | Bidirectional inference impl |
-| `src/vql/VQLSubtyping.res` | 247 | Subtyping rules impl |
+| `src/vcl/VCLBidir.res` | 1500 | Bidirectional inference impl |
+| `src/vcl/VCLSubtyping.res` | 247 | Subtyping rules impl |
 
 ## Theorems to Prove
 
@@ -155,10 +155,10 @@ opPreservesCoherence : (o : Octad) -> Coherent o -> (op : Op) ->
 
 ---
 
-### V2: VQL type inference soundness
+### V2: VCL type inference soundness
 
-**Target file**: `verification/proofs/lean4/VQLTypeSoundness.lean`
-**Source being verified**: `src/vql/VQLBidir.res` + `src/vql/VQLTypes.res`
+**Target file**: `verification/proofs/lean4/VCLTypeSoundness.lean`
+**Source being verified**: `src/vcl/VCLBidir.res` + `src/vcl/VCLTypes.res`
 **Prover**: Lean4
 **Priority**: P0
 
@@ -167,25 +167,25 @@ opPreservesCoherence : (o : Octad) -> Coherent o -> (op : Op) ->
 
 **Formal signature**:
 ```lean
-inductive VqlTy where
+inductive VclTy where
   | TString | TNat | TBool | TEntity
-  | TList : VqlTy → VqlTy
-  | TArrow : VqlTy → VqlTy → VqlTy
-  | TPi : VqlTy → (VqlTy → VqlTy) → VqlTy   -- dependent function
-  | TSigma : VqlTy → (VqlTy → VqlTy) → VqlTy -- dependent pair
+  | TList : VclTy → VclTy
+  | TArrow : VclTy → VclTy → VclTy
+  | TPi : VclTy → (VclTy → VclTy) → VclTy   -- dependent function
+  | TSigma : VclTy → (VclTy → VclTy) → VclTy -- dependent pair
 
-inductive VqlExpr where
-  | EVar : Nat → VqlExpr
-  | ELit : VqlVal → VqlExpr
-  | ELam : VqlTy → VqlExpr → VqlExpr
-  | EApp : VqlExpr → VqlExpr → VqlExpr
+inductive VclExpr where
+  | EVar : Nat → VclExpr
+  | ELit : VclVal → VclExpr
+  | ELam : VclTy → VclExpr → VclExpr
+  | EApp : VclExpr → VclExpr → VclExpr
 
 -- Typing judgement
-inductive HasType : Ctx → VqlExpr → VqlTy → Prop
+inductive HasType : Ctx → VclExpr → VclTy → Prop
 
 -- Evaluation
-inductive Step : VqlExpr → VqlExpr → Prop
-inductive IsValue : VqlExpr → Prop
+inductive Step : VclExpr → VclExpr → Prop
+inductive IsValue : VclExpr → Prop
 
 -- Progress
 theorem progress : ∀ e t, HasType [] e t → IsValue e ∨ ∃ e', Step e e'
@@ -205,7 +205,7 @@ theorem type_soundness : ∀ e t v,
 - Skip alpha-equivalence complications; use de Bruijn indices
 
 **Obligations**:
-- [ ] Define VqlTy (including dependent types)
+- [ ] Define VclTy (including dependent types)
 - [ ] Define HasType (bidirectional judgements)
 - [ ] Define Step + IsValue
 - [ ] Prove progress
@@ -214,19 +214,19 @@ theorem type_soundness : ∀ e t v,
 
 ---
 
-### V3: VQL subtyping transitivity
+### V3: VCL subtyping transitivity
 
-**Target file**: `verification/proofs/lean4/VQLSubtyping.lean`
-**Source being verified**: `src/vql/VQLSubtyping.res`
+**Target file**: `verification/proofs/lean4/VCLSubtyping.lean`
+**Source being verified**: `src/vcl/VCLSubtyping.res`
 **Prover**: Lean4
 **Priority**: P0
 
 **Statement**:
-> The subtyping relation `<:` is reflexive, transitive, and antisymmetric (modulo type equality). Subtyping is decidable for the VQL type system.
+> The subtyping relation `<:` is reflexive, transitive, and antisymmetric (modulo type equality). Subtyping is decidable for the VCL type system.
 
 **Formal signature**:
 ```lean
-inductive Subtype : VqlTy → VqlTy → Prop
+inductive Subtype : VclTy → VclTy → Prop
   | refl : ∀ t, Subtype t t
   | nat_any : Subtype TNat TEntity  -- example
   | arrow : ∀ s1 s2 t1 t2, Subtype t1 s1 → Subtype s2 t2 →
