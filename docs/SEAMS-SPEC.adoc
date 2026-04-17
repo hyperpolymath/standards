@@ -1,0 +1,454 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+//
+// SEAMS-SPEC.adoc — Normative Seam Declaration Standard
+// Copyright (C) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// Part of the Hyperpolymath Standards Repository.
+// https://github.com/hyperpolymath/standards
+//
+// Status: ACTIVE
+// Declared: 2026-04-17
+// Authors: Jonathan D.A. Jewell
+
+= SEAMS-SPEC: Seam Declaration Standard
+:doctype: article
+:toc: left
+:toclevels: 3
+:sectnums:
+:source-highlighter: highlight.js
+:icons: font
+:revdate: 2026-04-17
+:revnumber: 1.0.0
+:revremark: Initial normative publication
+
+== Preamble and Scope
+
+This document defines the normative specification for *seam declarations*
+in Hyperpolymath repositories. A seam is a precisely bounded integration
+boundary between two components. Every seam in the estate MUST be declared,
+tested, and classified according to this specification.
+
+The scope of this spec is:
+
+* What constitutes a seam (<<definitions>>).
+* How seams are classified (<<classification>>).
+* Where seam declarations live (<<seam-register>>).
+* Who owns each side and how versioning is governed (<<contract-authoritativeness>>).
+* What the seam check runtime rule is (<<seam-check>>).
+* What failure modes are permitted (<<failure-modes>>).
+* How seams map to the verification ladder (<<verification-tier-mapping>>).
+* Worked examples from the estate (<<examples>>).
+* Relationship to contractiles (<<contractile-relationship>>).
+
+This specification is normative. Repositories that do not conform are in
+violation of the estate-wide RSR (Rhodium Standard Repository) requirements
+and cannot achieve CRG grade B or above.
+
+== Definitions [[definitions]]
+
+seam::
+  An integration boundary between two components that can be independently
+  versioned, built, or deployed. A seam has exactly two sides (a _from_
+  component and a _to_ component), a governing _contract_, a _test reference_
+  that exercises the boundary end-to-end, and a declared _failure mode_.
+
+contract::
+  The authoritative artefact that describes what both sides of a seam agree to.
+  A contract may be an Idris2 ABI module, a Zig FFI signature, an HTTP schema,
+  a session type declaration, or a normative prose document. A contract MUST
+  be version-controlled and MUST be referenced by path from the seam declaration.
+
+seam-register::
+  The `[SEAMS]` section of a repository's Trustfile. Every repository with
+  more than one independently deployable component MUST have a seam-register
+  listing all declared seams.
+
+seam-check::
+  The runtime rule: any PR that touches either side of a declared seam MUST
+  run the P2P test for that seam and pass it before merge. See
+  <<seam-check, §6>> for the normative statement.
+
+P2P test::
+  A test that exercises a single seam end-to-end: caller → callee, FFI
+  boundary, IPC channel, or HTTP API surface. P2P tests are distinct from
+  unit tests (which test one component in isolation) and integration tests
+  (which test multiple seams at once). See
+  `testing-and-benchmarking/TESTING-TAXONOMY.adoc §2` for the full
+  taxonomy definition.
+
+seam-register entry::
+  A single `seams:` list item in the `[SEAMS]` section of the Trustfile,
+  containing all required fields for one seam. See <<seam-register, §4>>.
+
+== Classification [[classification]]
+
+Seams are classified by the technology on either side of the boundary.
+Every seam declaration MUST include a `tier:` field set to one of the four
+values from the `[VERIFICATION_LADDER]` (see Trustfile template). The tier
+is determined by the _weaker_ side of the seam — a seam where one side is
+Idris2-proven and the other is Zig is classified `zig-assured`, not
+`idris2-proven`.
+
+=== FFI seam
+
+A Foreign Function Interface boundary between two languages. The canonical
+Hyperpolymath FFI seam is Idris2 ABI → Zig implementation → C header
+(generated). The contract is the Idris2 `.idr` ABI module. Typical tier:
+`zig-assured` (even when the Idris2 side has formal proofs, the Zig side is
+assurance-level, not proof-level).
+
+=== IPC seam
+
+An inter-process communication channel: UNIX socket, named pipe, D-Bus
+message, or BEAM message-passing boundary. The contract is a session-type
+declaration or a documented message schema. Typical tier: `elixir-disciplined`
+for BEAM-to-BEAM; `zig-assured` for Zig-to-BEAM.
+
+=== HTTP API seam
+
+A synchronous or streaming HTTP boundary between two independently deployable
+services. The contract is an OpenAPI or A2ML schema, or a session-typed
+protocol document. Typical tier: `elixir-disciplined` unless both sides have
+Idris2 proofs over the API schema.
+
+=== Filesystem seam
+
+A shared file or directory used as an interface between two components (e.g.
+config file written by A, read by B; log directory written by A, tailed by B).
+The contract is a documented format spec. Typical tier: `elixir-disciplined`
+or `external-trust` depending on whether either side is verified.
+
+=== Database seam
+
+A shared database schema used by two or more components. The contract is the
+schema migration history and any declared invariants. Typical tier:
+`elixir-disciplined`. VeriSimDB integration upgrades a database seam when
+invariants are formally declared.
+
+=== Module boundary seam
+
+A public API surface between two modules within the same codebase that are
+independently versioned (e.g. a library crate in a Rust workspace, an Elixir
+umbrella app). The contract is the public module signature. Typical tier:
+matches the language: `idris2-proven` if the Idris2 ABI is in use;
+`elixir-disciplined` for Elixir umbrella apps; `zig-assured` for Zig
+library `.zig` headers.
+
+== Seam Register [[seam-register]]
+
+Every repository with more than one independently deployable component MUST
+contain a `[SEAMS]` section in its Trustfile
+(`.machine_readable/contractiles/trust/Trustfile.a2ml`).
+
+=== Required fields per entry
+
+Each entry under `seams:` MUST contain all of the following fields:
+
+`id`::
+  A short unique identifier for this seam within the repository. Lowercase,
+  hyphen-separated. Example: `proven-zig-api`.
+
+`description`::
+  One sentence describing what this boundary is and what crosses it.
+
+`from`::
+  The path or component name of the upstream (caller / writer) side.
+
+`to`::
+  The path or component name of the downstream (callee / reader) side.
+
+`contract`::
+  Path to the authoritative contract artefact relative to repository root.
+  For Idris2 ABI, this is the `.idr` file. For HTTP APIs, the schema file.
+  For prose specs, the `.adoc` file.
+
+`test_ref`::
+  Path (relative to repository root) of the P2P test that exercises this
+  seam end-to-end.
+
+`failure_mode`::
+  One of: `fail-closed`, `fail-open`, `fail-degrade`. See <<failure-modes, §7>>.
+
+`tier`::
+  One of the four verification-ladder values: `idris2-proven`, `zig-assured`,
+  `elixir-disciplined`, `external-trust`.
+
+`notes`::
+  Optional free-text notes. May be empty string `""`.
+
+=== Example seam-register entry (A2ML)
+
+[source,yaml]
+----
+seams:
+  - id: "proven-zig-api"
+    description: "Idris2 proven library ↔ Zig FFI boundary"
+    from: "verification-ecosystem/proven"
+    to: "src/abi/Boj/Catalogue.idr + ffi/zig/"
+    contract: "src/abi/Boj/Catalogue.idr"
+    test_ref: "tests/seam/proven-zig-api.test"
+    failure_mode: "fail-closed"
+    tier: "zig-assured"
+    notes: ""
+----
+
+== Contract Authoritativeness [[contract-authoritativeness]]
+
+=== Ownership
+
+Each seam has two sides. The side that defines the _interface_ is the contract
+owner. For FFI seams, the Idris2 ABI module is always the contract owner.
+For HTTP API seams, the provider (server) side owns the contract. For database
+seams, the component that writes migrations owns the contract.
+
+Contract ownership MUST be documented in the `notes` field of the seam
+declaration when ambiguous.
+
+=== Versioning
+
+Contracts MUST be versioned. Version changes to a contract that break
+compatibility are breaking changes and MUST trigger:
+
+1. A major version bump in the contract artefact.
+2. Updates to all seam declarations that reference that contract.
+3. Re-run of all P2P tests for affected seams before merge.
+
+Consumers of a contract (the `to` side) MUST pin the contract version they
+depend on. Drift between the contract version and the pinned version is a
+seam-check failure.
+
+=== Incompatibility detection
+
+Incompatibility between contract and implementation MUST be caught at the
+seam-check stage (PR gate). For Idris2 ABI seams, the Idris2 type-checker
+catches incompatibility at compile time. For HTTP API seams, the schema
+validator catches it. For prose-contract seams, human review is required
+and MUST be recorded in the PR description.
+
+== Seam Check (The Runtime Rule) [[seam-check]]
+
+[IMPORTANT]
+====
+*Every PR that touches either side of a declared seam MUST run the P2P test
+for that seam and pass it before merge.*
+
+This rule is not optional. Exceptions MUST be documented in the PR with an
+explicit deferral record in the seam declaration's `notes` field.
+====
+
+This rule is grounded in the estate-wide feedback rule: "When two items
+complete together, verify their integration boundary works end-to-end before
+moving on." (See `memory/feedback_seam_check.md`.) The seam check makes this
+normative and automatable: the CI system MUST run the P2P test when it
+detects that a commit touches either the `from` or `to` path listed in any
+seam declaration.
+
+=== CI enforcement
+
+The Trustfile `[SEAMS]` section is consumed by `contractile trust verify`
+(planned — see <<contractile-relationship, §10>>). Until that is implemented,
+seam checks are enforced by the MUST contractile (`Mustfile`) for each
+repository. Repositories MUST include a `seam-check` target in their
+Mustfile that runs all P2P tests for affected seams.
+
+=== What counts as "touching" a seam
+
+A PR touches a seam if any changed file's path is:
+
+* An ancestor directory of the `from` path, or
+* An ancestor directory of the `to` path, or
+* The `contract` artefact itself.
+
+Changes to the `test_ref` alone (test-only changes) do not count as touching
+the seam for the purposes of triggering the seam check — but a test-only PR
+that also improves seam coverage is encouraged.
+
+== Failure Modes [[failure-modes]]
+
+Every seam declaration MUST specify its `failure_mode`. The three legal values
+and their semantics:
+
+`fail-closed`::
+  On seam mismatch or boundary failure, the component refuses to process the
+  request and returns an error. This is the *default* and *preferred* failure
+  mode. It prevents silent data corruption and limits blast radius. All seams
+  involving security-critical paths MUST be `fail-closed`.
+
+`fail-open`::
+  On seam mismatch or boundary failure, the component continues with a
+  degraded default. This is ONLY permitted for read-only, non-security
+  observability seams (e.g. a telemetry sink that can be absent without
+  breaking the main path). `fail-open` seams MUST be justified in `notes`.
+
+`fail-degrade`::
+  On seam mismatch, the component continues with reduced capability declared
+  in `notes` (e.g. falls back to a slower path, caches stale data). The
+  degraded behaviour MUST be explicitly documented. `fail-degrade` seams
+  require `elixir-disciplined` tier or higher.
+
+=== Interaction with circuit breakers
+
+Seams at `external-trust` tier (HAT seams, external service seams) MUST be
+isolated by a circuit breaker. When the circuit breaker trips, the seam's
+`failure_mode` determines what happens to callers. For HAT seams, the
+correct combination is `fail-closed` + circuit breaker with exponential
+backoff.
+
+== Verification Tier Mapping [[verification-tier-mapping]]
+
+Seam tier is determined by the verification strength of the *weaker* side.
+The mapping from seam type to likely tier:
+
+[cols="2,2,3",options="header"]
+|===
+| Seam type | Typical tier | Rationale
+
+| Idris2 ABI → Idris2 ABI
+| `idris2-proven`
+| Both sides are formally typed; proof-checked at compile time.
+
+| Idris2 ABI → Zig FFI
+| `zig-assured`
+| Zig side provides assurance via safety primitives, not formal proof.
+
+| Zig → Elixir (NIF or port)
+| `zig-assured`
+| Zig boundary is the weakest proven side; Elixir runtime is disciplined.
+
+| Elixir → Elixir (OTP message)
+| `elixir-disciplined`
+| Session-typed protocols + dialyzer. Not proven.
+
+| Elixir → external service / HAT
+| `external-trust`
+| External component is unverified by construction.
+
+| HTTP API (schema-validated)
+| `elixir-disciplined`
+| Schema validation is not formal proof.
+
+| HTTP API (Idris2-typed schema)
+| `zig-assured`
+| If the schema is generated from Idris2 types; still not full proof.
+
+| Filesystem / database (no invariants)
+| `elixir-disciplined`
+| No formal invariants declared.
+
+| Filesystem / database (VeriSimDB invariants)
+| `zig-assured`
+| VeriSimDB invariants provide grounded assurance, not full proof.
+|===
+
+Seams may be *promoted* to a stronger tier when the weaker side is upgraded:
+for example, a `elixir-disciplined` HTTP API seam becomes `zig-assured` when
+a VeriSimDB schema with proven invariants is introduced.
+
+== Examples [[examples]]
+
+The following examples reference seams declared today (2026-04-17) in
+`boj-server/.machine_readable/contractiles/trust/Trustfile.a2ml`.
+
+=== proven ↔ zig-api (zig-assured)
+
+The `verification-ecosystem/proven` library exposes formally-proven safety
+primitives. The seam between `proven` and the Zig FFI layer in BoJ is
+`zig-assured`: the Idris2 proofs hold on the `proven` side, but crossing
+into Zig is an assurance boundary rather than a proof-carrying one. The
+contract is `src/abi/Boj/Catalogue.idr`.
+
+[source,yaml]
+----
+- id: "proven-zig-api"
+  from: "verification-ecosystem/proven"
+  to: "src/abi/Boj/Catalogue.idr + ffi/zig/"
+  contract: "src/abi/Boj/Catalogue.idr"
+  failure_mode: "fail-closed"
+  tier: "zig-assured"
+----
+
+=== zig-api ↔ BoJ Elixir core (zig-assured)
+
+The Zig FFI layer hands off to the Elixir/BEAM core. This seam is
+`zig-assured` because the Zig side grounds it in proven primitives, but the
+Elixir side is `elixir-disciplined`. The weaker side wins: `zig-assured`.
+
+[source,yaml]
+----
+- id: "zig-api-boj"
+  from: "ffi/zig/"
+  to: "lib/boj/"
+  contract: "src/abi/Boj/Catalogue.idr"
+  failure_mode: "fail-closed"
+  tier: "zig-assured"
+----
+
+=== cartridge ↔ HAT (external-trust)
+
+HATs (Hardware Attached on Top) are unverified-by-construction. Any seam
+between a cartridge and its HAT is `external-trust`. The circuit breaker
+is mandatory. Failure mode is `fail-closed` so that HAT absence or misbehaviour
+does not propagate into the verified cartridge core.
+
+[source,yaml]
+----
+- id: "cartridge-hat"
+  from: "lib/boj/cartridge/"
+  to: "external HAT"
+  contract: "docs/specification/cartridges/README.md §5"
+  failure_mode: "fail-closed (circuit breaker)"
+  tier: "external-trust"
+  notes: "HAT failure trips circuit breaker; core unaffected"
+----
+
+=== cartridge ↔ BEAM supervisor (elixir-disciplined)
+
+The BEAM OTP supervisor manages cartridge process lifecycle. This is an
+intra-BEAM boundary, classified `elixir-disciplined`: session-typed where
+feasible, dialyzer-clean, but not formally proven.
+
+[source,yaml]
+----
+- id: "cartridge-beam-supervisor"
+  from: "lib/boj/cartridge/"
+  to: "lib/boj/supervisor/"
+  contract: "OTP supervisor protocol"
+  failure_mode: "fail-closed (supervisor restart)"
+  tier: "elixir-disciplined"
+----
+
+== Relationship to Contractiles [[contractile-relationship]]
+
+[NOTE]
+====
+*TRACKED IN CONTRACTILE FUTURE WORK*
+
+This section describes planned automation that does not yet exist as
+implemented contractile behaviour. It is forward-referenced here so that
+tooling authors have a clear target.
+====
+
+The `contractile trust verify` subcommand (planned) will:
+
+1. Read the `[SEAMS]` section from the repository's Trustfile.
+2. For each declared seam, verify that:
+   a. The `contract` path exists in the repository.
+   b. The `test_ref` path exists and is runnable.
+   c. The `from` and `to` paths exist.
+3. Run all P2P tests listed in `test_ref` fields.
+4. Report tier mismatches (e.g. a seam declared `idris2-proven` where the
+   contract path does not contain an Idris2 module).
+5. Output an AssailReport-compatible JSON result.
+
+Until `contractile trust verify` is implemented, seam-check enforcement
+is the responsibility of the per-repository Mustfile `seam-check` target
+and manual PR review discipline.
+
+Additionally, `6a2/META.a2ml` audit-focus entries may reference
+"seams/compromises/exception register" as an audit target — this
+specification is the normative definition of what that means.
+
+---
+
+_End of SEAMS-SPEC v1.0.0_
