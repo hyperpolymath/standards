@@ -1,27 +1,35 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 //
-// main.zig — LOL (1000Langs) triple API gateway.
+// main.zig — LOL (1000Langs) single-port path-routed API gateway.
 //
 // Replaces: standards/lol/api/v-gateway/ (main.v, rest.v, grpc.v, graphql.v,
 //           domain.v, helpers.v) and standards/lol/api/v-lol/ (lol.v, ffi.v)
 //
-// Launches REST, gRPC-compat, and GraphQL servers on consecutive ports.
-// Default base port: 7800 (configurable via LOL_PORT).
+// All three protocols are served on ONE port via path routing (default: 7800).
+// The HTTP listener is owned by uapi_gnosis_start via uapi_gnosis_set_handler,
+// which calls lolHandler for every incoming request.
 //
-//   REST:    :7800  — /api/v1/languages, /api/v1/corpus/stats, /api/v1/crawl/status
-//   gRPC:    :7801  — lol.CorpusService/* (JSON-over-HTTP)
-//   GraphQL: :7802  — /graphql (queries + minimal GraphiQL playground)
+//   /api/v1/*                       — REST handlers
+//   /lol.CorpusService/*            — gRPC-compat JSON-over-HTTP handlers
+//   /graphql                        — GraphQL handler (+ minimal playground on GET)
+//   everything else                 — 404
 //
-// HTTP listener/transport/threading: delegated to uapi_gnosis_* from
+// Previously the gateway used three separate ports (7800/7801/7802) with its
+// own per-port accept loops.  The new shape collapses all of these into a single
+// uapi_gnosis_create(base_port) + uapi_gnosis_set_handler(lolHandler) +
+// uapi_gnosis_start call.  No current consumer fires more than one protocol path
+// simultaneously, so consolidating to one port loses nothing.
+//
+// HTTP listener/transport/threading: fully delegated to uapi_gnosis_* from
 // developer-ecosystem/zig-api (per UNIFIED-ZIG-API-STACK.adoc).
 // lol-specific request-handler logic (handleRest*, handleGrpc*,
 // handleGraphql, resolveGql*) is preserved unchanged.
 //
-// File-open paths at lines 70/120/290/406/565 (original numbering) are now
-// gated through uapi_safe_path_default (zig-api/ffi/zig/src/process.zig),
-// which applies the DEFAULT_ALLOWLIST prefix check followed by the
-// proven_path_has_traversal formally-verified traversal gate.
+// File-open paths are gated through uapi_safe_path_default
+// (zig-api/ffi/zig/src/process.zig), which applies the DEFAULT_ALLOWLIST
+// prefix check followed by the proven_path_has_traversal formally-verified
+// traversal gate.
 //
 // Corpus data read from LOL_DATA_DIR (default: "corpus").
 // The Julia analysis bridge and Elixir orchestrator write JSON files there.
@@ -51,6 +59,13 @@ extern fn uapi_teardown() callconv(.c) void;
 /// Returns a non-zero opaque handle on success, 0 on failure.
 extern fn uapi_gnosis_create(port: u16) callconv(.c) u64;
 
+/// Register an edge handler hook.  Must be called before uapi_gnosis_start.
+/// Returns 0 (ok) on success.
+extern fn uapi_gnosis_set_handler(
+    handle:     u64,
+    handler_fn: ?*const fn (req: *const GnosisRequest, resp: *GnosisResponse) callconv(.c) void,
+) callconv(.c) u8;
+
 /// Start serving (spawns background thread).  Returns 0 (ok) on success.
 extern fn uapi_gnosis_start(handle: u64) callconv(.c) u8;
 
@@ -66,6 +81,28 @@ extern fn uapi_gnosis_state(handle: u64) callconv(.c) u8;
 // Result code constants (must match zig_api.h UAPI_* defines).
 const UAPI_OK:               u8 = 0;
 const UAPI_SERVER_LISTENING: u8 = 1;
+
+// =============================================================================
+// C-ABI structs for the gnosis handler hook (mirrors zig_api.h)
+// =============================================================================
+
+/// Request context passed to the lolHandler by gnosis's accept loop.
+/// All pointer fields are valid only for the duration of the handler call.
+const GnosisRequest = extern struct {
+    method:   [*:0]const u8,
+    path:     [*:0]const u8,
+    body_ptr: ?[*]const u8,
+    body_len: u32,
+};
+
+/// Response the lolHandler must fill before returning.
+const GnosisResponse = extern struct {
+    status:       u16,
+    _pad:         u16,
+    content_type: [*:0]const u8,
+    body_ptr:     ?[*]const u8,
+    body_len:     u32,
+};
 
 /// Two-gate path safety check from zig-api/ffi/zig/src/process.zig.
 ///
@@ -774,279 +811,643 @@ fn resolveGqlSchema(conn: *std.net.Server.Connection) void {
 }
 
 // =============================================================================
-// Per-connection handler  (REST, gRPC-compat, and GraphQL all share this)
+// Single-port path-routing handler (replaces multi-port + GnosisPortThread)
 //
-// Called by the uapi_gnosis per-connection dispatch loop.
-// Each gnosis server instance has already accepted the TCP connection and
-// handed us a std.net.Server.Connection; we parse the HTTP/1.1 request and
-// route to the appropriate handler based on the ServerKind of this port.
+// lolHandler is the C-ABI edge hook registered via uapi_gnosis_set_handler.
+// It is called by gnosis's accept loop for every incoming request on port 7800.
+// All three protocols are path-routed here:
+//
+//   /api/v1/*              → REST handlers
+//   /lol.CorpusService/*   → gRPC-compat JSON-over-HTTP handlers
+//   /graphql               → GraphQL handler
+//   /                      → discovery JSON
+//   else                   → 404
+//
+// Module-level context (data_dir, allocator) is set by main() before
+// uapi_gnosis_start is called; it is read-only after that point.
 // =============================================================================
 
-const ServerKind = enum { rest, grpc, graphql };
+/// Corpus data directory path.  Set once in main() before uapi_gnosis_start.
+var g_data_dir: []const u8 = "corpus";
 
-fn serveRequest(
-    conn: *std.net.Server.Connection,
-    kind: ServerKind,
-    data_dir: []const u8,
+/// General-purpose allocator for handler-level allocations.
+/// Set once in main() before uapi_gnosis_start; stable for process lifetime.
+var g_allocator: std.mem.Allocator = undefined;
+
+/// Flag: true once main() has initialised g_data_dir and g_allocator.
+var g_context_ready: bool = false;
+
+/// Response body buffer used by lolHandler.
+///
+/// gnosis calls lolHandler once per connection on the gnosis serve thread.
+/// Each invocation overwrites this buffer — thread-safe because gnosis.zig
+/// spawns one thread per server slot and the slot's serve loop is single-
+/// threaded per connection (connections are handled sequentially by one
+/// background thread per slot).
+///
+/// Size: 256 KiB — matches MAX_BODY_BYTES in gnosis.zig.
+var g_resp_buf: [256 * 1024]u8 = undefined;
+
+/// Content-type sentinel constants (null-terminated).
+const CT_JSON:    [*:0]const u8 = "application/json";
+const CT_GRPC:    [*:0]const u8 = "application/grpc-web+json";
+const CT_HTML:    [*:0]const u8 = "text/html";
+const CT_TEXT:    [*:0]const u8 = "text/plain";
+
+/// GraphiQL playground HTML (served on GET /graphql).
+const GRAPHQL_PLAYGROUND =
+    \\<!DOCTYPE html>
+    \\<html><head><title>LOL (1000Langs) GraphQL</title></head>
+    \\<body style="font-family:monospace;padding:2em;background:#1a1a2e;color:#e0e0e0">
+    \\<h2>LOL (1000Langs) GraphQL API</h2>
+    \\<p>POST queries to /graphql with JSON body:</p>
+    \\<pre style="background:#16213e;padding:1em;border-radius:4px">
+    \\{ "query": "{ health { status version languages } }" }
+    \\
+    \\{ "query": "{ languages { iso639_3 name family quality } }" }
+    \\
+    \\{ "query": "{ language(code: \"eng\") { iso639_3 name nativeName sources verses quality } }" }
+    \\
+    \\{ "query": "{ corpusStats { totalLanguages totalVerses avgQuality families } }" }
+    \\
+    \\{ "query": "{ crawlStatus { crawled inProgress failed sources { name status } } }" }
+    \\</pre></body></html>
+;
+
+/// Fill `resp` with a JSON error.  `msg` must not contain double-quotes.
+fn respError(resp: *GnosisResponse, status: u16, msg: []const u8) void {
+    var fbs = std.io.fixedBufferStream(&g_resp_buf);
+    fbs.writer().print("{{\"error\":\"{s}\"}}", .{msg}) catch {};
+    const written = fbs.getWritten();
+    resp.status       = status;
+    resp._pad         = 0;
+    resp.content_type = CT_JSON;
+    resp.body_ptr     = written.ptr;
+    resp.body_len     = @intCast(written.len);
+}
+
+/// Fill `resp` with a static JSON string.
+fn respJsonStatic(resp: *GnosisResponse, status: u16, body: []const u8) void {
+    resp.status       = status;
+    resp._pad         = 0;
+    resp.content_type = CT_JSON;
+    resp.body_ptr     = body.ptr;
+    resp.body_len     = @intCast(body.len);
+}
+
+/// Adapter: route a lolHandler request/response pair through the legacy
+/// `handleRestListLanguages` / similar functions that expect a
+/// `*std.net.Server.Connection`.
+///
+/// Because the legacy handlers write directly to a `std.net.Server.Connection`
+/// stream, we can't call them from a GnosisRequest/Response context without
+/// a real connection.  Instead we replicate their logic inline, writing into
+/// `g_resp_buf` and filling `resp` directly.  The business logic (corpus
+/// reading, JSON encoding) is unchanged; only the I/O path changes.
+///
+/// This is the cleanest option that avoids circular dependencies or forking
+/// the legacy handler functions.
+///
+/// `allocator` must be an arena reset between calls.
+
+/// Temporary connection shim — wraps g_resp_buf in a minimal fake connection
+/// so the legacy handlers (which call writeJson/writeHttpResponse) can write
+/// into our buffer instead of a TCP stream.
+///
+/// Implementation: we can't construct a real std.net.Server.Connection without
+/// a live socket.  The legacy handlers call writeJson → writeHttpResponse →
+/// conn.stream.writeAll.  We redirect these by keeping a separate
+/// FixedBufferStream and patching the legacy write helpers to work with it.
+///
+/// The cleaner approach (matching the design intent): inline all routing in
+/// lolHandler.  The existing handler functions accept `*std.net.Server.Connection`
+/// as their first argument only to write their response.  We reuse the bodies
+/// of these functions by calling them with a `*FakeConn`.
+///
+/// Since Zig doesn't support vtables on arbitrary types for std.net.Stream,
+/// the simplest correct approach is: define a lightweight `FakeConn` that
+/// satisfies the functions' actual usage (stream.writeAll).  But
+/// std.net.Server.Connection.stream is a std.net.Stream (a plain integer fd),
+/// not an interface — we cannot substitute it cleanly.
+///
+/// Resolution: provide thin wrapper functions `lolRestDispatch` /
+/// `lolGrpcDispatch` / `lolGraphqlDispatch` that replicate the handler logic
+/// using a `fixedBufferStream` writer, then fill `resp`.
+
+fn lolRestDispatch(
+    path:      []const u8,
+    method:    []const u8,
+    body:      []const u8,
+    resp:      *GnosisResponse,
     allocator: std.mem.Allocator,
 ) void {
-    var req_line_buf: [1024]u8 = undefined;
-    const req_line = readLine(conn.stream, &req_line_buf) catch return;
+    const is_get  = std.mem.eql(u8, method, "GET");
 
-    var parts = std.mem.splitScalar(u8, req_line, ' ');
-    const method = parts.next() orelse return;
-    const raw_path = parts.next() orelse return;
+    if (is_get and std.mem.eql(u8, path, "/")) {
+        respJsonStatic(resp, 200,
+            "{\"service\":\"lol-rest\",\"version\":\"0.1.0\"," ++
+            "\"project\":\"1000Langs Parallel Corpus\"," ++
+            "\"endpoints\":[\"/api/v1/languages\",\"/api/v1/corpus/stats\"," ++
+            "\"/api/v1/crawl/status\",\"/api/v1/health\"]}");
+        return;
+    }
 
-    // Strip query string.
-    const path = if (std.mem.indexOfScalar(u8, raw_path, '?')) |qi|
-        raw_path[0..qi] else raw_path;
+    if (is_get and std.mem.eql(u8, path, "/api/v1/languages")) {
+        // Build language list into g_resp_buf.
+        const langs = listLanguages(allocator, g_data_dir) catch {
+            respError(resp, 500, "failed to read corpus");
+            return;
+        };
+        defer {
+            for (langs) |p| { var m = p; m.deinit(); }
+            allocator.free(langs);
+        }
+        var fbs = std.io.fixedBufferStream(&g_resp_buf);
+        const w = fbs.writer();
+        w.print("{{\"count\":{d},\"languages\":[", .{langs.len}) catch {
+            respError(resp, 500, "buffer overflow");
+            return;
+        };
+        for (langs, 0..) |p, i| {
+            if (i > 0) w.writeByte(',') catch return;
+            writeLangJson(w, p.value) catch { respError(resp, 500, "json encode failed"); return; };
+        }
+        w.writeAll("]}") catch { respError(resp, 500, "buffer overflow"); return; };
+        const written = fbs.getWritten();
+        resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+        resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+        return;
+    }
 
+    if (is_get and std.mem.startsWith(u8, path, "/api/v1/languages/")) {
+        const code = path["/api/v1/languages/".len..];
+        for (code) |ch| {
+            if (!std.ascii.isAlphanumeric(ch) and ch != '-') {
+                respError(resp, 400, "invalid language code");
+                return;
+            }
+        }
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const fpath = std.fmt.bufPrint(&path_buf, "{s}/languages/{s}.json",
+            .{ g_data_dir, code }) catch { respError(resp, 500, "path too long"); return; };
+        guardPath(fpath) catch { respError(resp, 403, "path denied"); return; };
+        const file = std.fs.cwd().openFile(fpath, .{}) catch {
+            respError(resp, 404, "language not found");
+            return;
+        };
+        defer file.close();
+        const contents = file.readToEndAlloc(allocator, 64 * 1024) catch {
+            respError(resp, 500, "read failed");
+            return;
+        };
+        defer allocator.free(contents);
+        const parsed = std.json.parseFromSlice(LanguageInfo, allocator, contents, .{
+            .ignore_unknown_fields = true,
+        }) catch { respError(resp, 500, "parse failed"); return; };
+        var mp = parsed; defer mp.deinit();
+        var fbs = std.io.fixedBufferStream(&g_resp_buf);
+        writeLangJson(fbs.writer(), parsed.value) catch {
+            respError(resp, 500, "json encode failed");
+            return;
+        };
+        const written = fbs.getWritten();
+        resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+        resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+        return;
+    }
+
+    if (is_get and std.mem.eql(u8, path, "/api/v1/corpus/stats")) {
+        lolCorpusStatsInto(resp, allocator);
+        return;
+    }
+
+    if (is_get and std.mem.eql(u8, path, "/api/v1/crawl/status")) {
+        lolCrawlStatusInto(resp, allocator);
+        return;
+    }
+
+    if (is_get and std.mem.eql(u8, path, "/api/v1/health")) {
+        lolHealthInto(resp, allocator);
+        return;
+    }
+
+    // Unmatched REST path.
+    _ = body; // suppress unused warning
+    respError(resp, 404, "not found");
+}
+
+fn lolGrpcDispatch(
+    path:      []const u8,
+    method:    []const u8,
+    body:      []const u8,
+    resp:      *GnosisResponse,
+    allocator: std.mem.Allocator,
+) void {
+    const is_post = std.mem.eql(u8, method, "POST");
+    if (!is_post) {
+        resp.status = 405; resp._pad = 0; resp.content_type = CT_GRPC;
+        const e = "{\"error\":\"POST required for RPC calls\"}";
+        resp.body_ptr = e; resp.body_len = e.len;
+        return;
+    }
+
+    if (std.mem.eql(u8, path, "/lol.CorpusService/ListLanguages")) {
+        // Reuse REST list handler (same response shape).
+        lolRestDispatch("/api/v1/languages", "GET", "", resp, allocator);
+        resp.content_type = CT_GRPC;
+        return;
+    }
+    if (std.mem.eql(u8, path, "/lol.CorpusService/GetLanguage")) {
+        const code = jsonFieldStrInto(body, "code", allocator) orelse {
+            resp.status = 400; resp._pad = 0; resp.content_type = CT_GRPC;
+            const e = "{\"error\":\"code field required\"}";
+            resp.body_ptr = e; resp.body_len = e.len;
+            return;
+        };
+        defer allocator.free(code);
+        for (code) |ch| {
+            if (!std.ascii.isAlphanumeric(ch) and ch != '-') {
+                resp.status = 400; resp._pad = 0; resp.content_type = CT_GRPC;
+                const e = "{\"error\":\"invalid language code\"}";
+                resp.body_ptr = e; resp.body_len = e.len;
+                return;
+            }
+        }
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const fpath = std.fmt.bufPrint(&path_buf, "{s}/languages/{s}.json",
+            .{ g_data_dir, code }) catch {
+                resp.status = 500; resp._pad = 0; resp.content_type = CT_GRPC;
+                const e = "{\"error\":\"path too long\"}"; resp.body_ptr = e; resp.body_len = e.len;
+                return;
+            };
+        guardPath(fpath) catch {
+            resp.status = 403; resp._pad = 0; resp.content_type = CT_GRPC;
+            const e = "{\"error\":\"path denied\"}"; resp.body_ptr = e; resp.body_len = e.len;
+            return;
+        };
+        const file = std.fs.cwd().openFile(fpath, .{}) catch {
+            resp.status = 404; resp._pad = 0; resp.content_type = CT_GRPC;
+            const e = "{\"error\":\"language not found\"}"; resp.body_ptr = e; resp.body_len = e.len;
+            return;
+        };
+        defer file.close();
+        const contents = file.readToEndAlloc(allocator, 64 * 1024) catch {
+            resp.status = 500; resp._pad = 0; resp.content_type = CT_GRPC;
+            const e = "{\"error\":\"read failed\"}"; resp.body_ptr = e; resp.body_len = e.len;
+            return;
+        };
+        defer allocator.free(contents);
+        const parsed = std.json.parseFromSlice(LanguageInfo, allocator, contents, .{
+            .ignore_unknown_fields = true,
+        }) catch {
+            resp.status = 500; resp._pad = 0; resp.content_type = CT_GRPC;
+            const e = "{\"error\":\"parse failed\"}"; resp.body_ptr = e; resp.body_len = e.len;
+            return;
+        };
+        var mp = parsed; defer mp.deinit();
+        var fbs = std.io.fixedBufferStream(&g_resp_buf);
+        writeLangJson(fbs.writer(), parsed.value) catch {
+            resp.status = 500; resp._pad = 0; resp.content_type = CT_GRPC;
+            const e = "{\"error\":\"json encode failed\"}"; resp.body_ptr = e; resp.body_len = e.len;
+            return;
+        };
+        const written = fbs.getWritten();
+        resp.status = 200; resp._pad = 0; resp.content_type = CT_GRPC;
+        resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+        return;
+    }
+    if (std.mem.eql(u8, path, "/lol.CorpusService/CorpusStats")) {
+        lolCorpusStatsInto(resp, allocator);
+        resp.content_type = CT_GRPC;
+        return;
+    }
+    if (std.mem.eql(u8, path, "/lol.CorpusService/CrawlStatus")) {
+        lolCrawlStatusInto(resp, allocator);
+        resp.content_type = CT_GRPC;
+        return;
+    }
+    if (std.mem.eql(u8, path, "/lol.CorpusService/Health")) {
+        lolHealthInto(resp, allocator);
+        resp.content_type = CT_GRPC;
+        return;
+    }
+    resp.status = 404; resp._pad = 0; resp.content_type = CT_GRPC;
+    const e = "{\"error\":\"gRPC method not found\"}";
+    resp.body_ptr = e; resp.body_len = e.len;
+}
+
+fn lolGraphqlDispatch(
+    method: []const u8,
+    body:   []const u8,
+    resp:   *GnosisResponse,
+    allocator: std.mem.Allocator,
+) void {
     const is_get  = std.mem.eql(u8, method, "GET");
     const is_post = std.mem.eql(u8, method, "POST");
-    const is_opts = std.mem.eql(u8, method, "OPTIONS");
-
-    // Drain headers; track Content-Length for POST body reads.
-    var content_length: usize = 0;
-    var h_buf: [512]u8 = undefined;
-    while (true) {
-        const line = readLine(conn.stream, &h_buf) catch break;
-        if (line.len == 0) break;
-        // Parse Content-Length so we can read POST bodies accurately.
-        if (std.ascii.startsWithIgnoreCase(line, "content-length:")) {
-            const val = std.mem.trimLeft(u8, line["content-length:".len..], " \t");
-            content_length = std.fmt.parseInt(usize, val, 10) catch 0;
-        }
+    if (is_get) {
+        resp.status = 200; resp._pad = 0; resp.content_type = CT_HTML;
+        resp.body_ptr = GRAPHQL_PLAYGROUND; resp.body_len = GRAPHQL_PLAYGROUND.len;
+        return;
     }
-
-    // Read POST body up to content_length bytes (capped at 64 KB).
-    var post_body_buf: [65536]u8 = undefined;
-    var post_body: []const u8 = "";
-    if (is_post and content_length > 0) {
-        const to_read = @min(content_length, post_body_buf.len);
-        var read_total: usize = 0;
-        while (read_total < to_read) {
-            const n = conn.stream.read(post_body_buf[read_total..to_read]) catch break;
-            if (n == 0) break;
-            read_total += n;
-        }
-        post_body = post_body_buf[0..read_total];
+    if (is_post) {
+        // Extract "query" field from {"query":"..."}.
+        const query = jsonFieldStrInto(body, "query", allocator) orelse {
+            const e = "{\"errors\":[{\"message\":\"Missing query field\"}]}";
+            resp.status = 400; resp._pad = 0; resp.content_type = CT_JSON;
+            resp.body_ptr = e; resp.body_len = e.len;
+            return;
+        };
+        defer allocator.free(query);
+        lolGqlResolve(query, resp, allocator);
+        return;
     }
-
-    if (is_opts) return writeHttpResponse(conn, 204, "text/plain", "");
-
-    switch (kind) {
-        .rest => {
-            if (is_get and std.mem.eql(u8, path, "/")) {
-                writeJson(conn, 200,
-                    \\{"service":"lol-rest","version":"0.1.0","project":"1000Langs Parallel Corpus","endpoints":["/api/v1/languages","/api/v1/corpus/stats","/api/v1/crawl/status","/api/v1/health"]}
-                );
-            } else if (is_get and std.mem.eql(u8, path, "/api/v1/languages")) {
-                handleRestListLanguages(conn, data_dir, allocator);
-            } else if (is_get and std.mem.startsWith(u8, path, "/api/v1/languages/")) {
-                handleRestGetLanguage(conn, data_dir, path["/api/v1/languages/".len..], allocator);
-            } else if (is_get and std.mem.eql(u8, path, "/api/v1/corpus/stats")) {
-                handleRestCorpusStats(conn, data_dir, allocator);
-            } else if (is_get and std.mem.eql(u8, path, "/api/v1/crawl/status")) {
-                handleRestCrawlStatus(conn, data_dir, allocator);
-            } else if (is_get and std.mem.eql(u8, path, "/api/v1/health")) {
-                handleRestHealth(conn, data_dir, allocator);
-            } else {
-                writeError(conn, 404, "not found");
-            }
-        },
-        .grpc => {
-            // gRPC-Web compatible JSON-over-HTTP.
-            // All RPC methods require POST (mirrors the POST guard in grpc.v).
-            if (!is_post) {
-                return writeHttpResponse(conn, 405, "application/grpc-web+json",
-                    "{\"error\":\"POST required for RPC calls\"}");
-            }
-            if (std.mem.eql(u8, path, "/lol.CorpusService/ListLanguages")) {
-                handleRestListLanguages(conn, data_dir, allocator);
-            } else if (std.mem.eql(u8, path, "/lol.CorpusService/GetLanguage")) {
-                handleGrpcGetLanguage(conn, data_dir, post_body, allocator);
-            } else if (std.mem.eql(u8, path, "/lol.CorpusService/CorpusStats")) {
-                handleRestCorpusStats(conn, data_dir, allocator);
-            } else if (std.mem.eql(u8, path, "/lol.CorpusService/CrawlStatus")) {
-                handleRestCrawlStatus(conn, data_dir, allocator);
-            } else if (std.mem.eql(u8, path, "/lol.CorpusService/Health")) {
-                handleRestHealth(conn, data_dir, allocator);
-            } else {
-                writeHttpResponse(conn, 404, "application/grpc-web+json",
-                    "{\"error\":\"gRPC method not found\"}");
-            }
-        },
-        .graphql => {
-            if (!std.mem.eql(u8, path, "/graphql")) {
-                return writeError(conn, 404, "use /graphql");
-            }
-            if (is_get) {
-                // Minimal GraphiQL playground — mirrors graphiql_page() in graphql.v.
-                const PLAYGROUND =
-                    \\<!DOCTYPE html>
-                    \\<html><head><title>LOL (1000Langs) GraphQL</title></head>
-                    \\<body style="font-family:monospace;padding:2em;background:#1a1a2e;color:#e0e0e0">
-                    \\<h2>LOL (1000Langs) GraphQL API</h2>
-                    \\<p>POST queries to /graphql with JSON body:</p>
-                    \\<pre style="background:#16213e;padding:1em;border-radius:4px">
-                    \\{ "query": "{ health { status version languages } }" }
-                    \\
-                    \\{ "query": "{ languages { iso639_3 name family quality } }" }
-                    \\
-                    \\{ "query": "{ language(code: \"eng\") { iso639_3 name nativeName sources verses quality } }" }
-                    \\
-                    \\{ "query": "{ corpusStats { totalLanguages totalVerses avgQuality families } }" }
-                    \\
-                    \\{ "query": "{ crawlStatus { crawled inProgress failed sources { name status } } }" }
-                    \\</pre></body></html>
-                ;
-                writeHttpResponse(conn, 200, "text/html", PLAYGROUND);
-            } else if (is_post) {
-                handleGraphql(conn, data_dir, post_body, allocator);
-            } else {
-                writeError(conn, 405, "POST or GET required");
-            }
-        },
-    }
+    const e = "{\"error\":\"POST or GET required\"}";
+    resp.status = 405; resp._pad = 0; resp.content_type = CT_JSON;
+    resp.body_ptr = e; resp.body_len = e.len;
 }
 
-// =============================================================================
-// uapi_gnosis pool — three server handles (REST / gRPC / GraphQL)
-//
-// Replaces the hand-rolled runServer / serverThread / handleConn trio.
-//
-// uapi_gnosis_* manages:
-//   - socket creation and bind
-//   - listener accept loop (background thread per server)
-//   - graceful stop / drain
-//
-// We retain full control of the request-handler layer by using a custom
-// dispatch model: after uapi_init / uapi_gnosis_create / uapi_gnosis_start,
-// the gnosis background threads call gnosis.zig's serveRequest — that is the
-// gnosis-internal HTTP layer.  Our lol-specific handler (serveRequest in this
-// file) is invoked by the lol_gateway binary's own per-connection wiring below
-// using the gnosis server as a transport/listener provider only.
-//
-// NOTE: uapi_gnosis_start spawns a background thread that owns the accept loop
-// and calls gnosis.zig:serveRequest (the /render, /context, /health gnosis
-// routes).  For lol-gateway we instead delegate the lol-specific routes to
-// our own serveRequest — so we do NOT use gnosis.zig as the per-request
-// handler.  Instead we:
-//   1. uapi_gnosis_create(port) — allocate the server slot.
-//   2. uapi_gnosis_start(handle) — start the gnosis listener (background thread).
-//   3. In each lol serve thread: open our own std.net.Server on the same port
-//      via the gnosis handle's state to confirm it is listening, then run our
-//      own accept loop that routes to lol's serveRequest.
-//
-// Wait — that would bind two sockets to the same port, which is wrong.
-//
-// Correct interpretation: we use uapi_gnosis as the *complete* transport layer.
-// gnosis.zig's serveRequest handles /render /context /health routes internally.
-// For lol-specific routes (all of /api/v1/*, /lol.CorpusService/*, /graphql),
-// we do not re-use gnosis's internal handlers.  Instead, we run our own
-// per-port listener threads that call lol's serveRequest directly.
-//
-// The uapi_gnosis_* pool is still used per the UNIFIED-ZIG-API-STACK.adoc
-// mandate.  Concretely:
-//   - uapi_init() initialises the pool.
-//   - uapi_gnosis_create(port) / uapi_gnosis_start(handle) binds and listens
-//     on each port inside the pool.
-//   - We do NOT spawn a second std.net.Server on the same port.  Instead, our
-//     lol-specific accept loop replaces gnosis's internal one by interposing at
-//     the correct level: we call serveRequest (our handler) from within the
-//     same background thread that gnosis would normally use.
-//
-// Architectural resolution: gnosis.zig's serveThread calls gnosis.serveRequest
-// in a loop.  For lol-gateway we need to call lol.serveRequest instead.
-// Since gnosis is a compiled library (libzig_api.a), we cannot swap its per-
-// request handler at runtime via the C ABI.
-//
-// Therefore the correct pattern is:
-//   - Use uapi_gnosis_* for lifecycle management (init, teardown, health).
-//   - Run our own listener threads for the lol ports, independently of gnosis's
-//     internal threads.  These are the replacement for the old runServer/
-//     serverThread/handleConn trio.
-//   - Call uapi_init() (mandatory per UNIFIED-ZIG-API-STACK.adoc).
-//   - Call uapi_gnosis_create / uapi_gnosis_start for each port so the pool
-//     slot is registered and health probes work via uapi_gnosis_health.
-//   - Immediately call uapi_gnosis_stop on each handle so gnosis's background
-//     thread exits — preventing a double-bind — while keeping the pool slot
-//     alive for health-check queries.
-//   - Run our own accept loops (GnosisPortThread) that own the port sockets.
-//
-// This is consistent with UNIFIED-ZIG-API-STACK.adoc §Edge-consumption pattern:
-// "edges consume the pool for lifecycle management; request routing is the
-// edge's responsibility."
-// =============================================================================
-
-// =============================================================================
-// GnosisPortThread — per-port accept loop that uses uapi_gnosis lifecycle
-// =============================================================================
-
-/// Per-port server context.  One instance per lol port (REST/gRPC/GraphQL).
-const GnosisPortArgs = struct {
-    /// uapi_gnosis handle for this port (for health and state queries).
-    handle:   u64,
-    port:     u16,
-    kind:     ServerKind,
-    data_dir: []const u8,
-    alloc:    std.mem.Allocator,
-};
-
-/// Connection-level args passed to the per-connection thread.
-const ConnArgs = struct {
-    conn:     std.net.Server.Connection,
-    kind:     ServerKind,
-    data_dir: []const u8,
-    alloc:    std.mem.Allocator,
-};
-
-/// Handle a single accepted connection.  Each connection runs in its own
-/// detached thread, mirroring the old handleConn pattern.
-fn handleConn(args: ConnArgs) void {
-    var conn = args.conn;
-    defer conn.stream.close();
-    var arena = std.heap.ArenaAllocator.init(args.alloc);
-    defer arena.deinit();
-    serveRequest(&conn, args.kind, args.data_dir, arena.allocator());
+/// Write corpus stats into g_resp_buf and fill resp.
+fn lolCorpusStatsInto(resp: *GnosisResponse, allocator: std.mem.Allocator) void {
+    const langs = listLanguages(allocator, g_data_dir) catch &[_]std.json.Parsed(LanguageInfo){};
+    defer { for (langs) |p| { var m = p; m.deinit(); } allocator.free(langs); }
+    var total_verses: i64 = 0;
+    var total_bytes: i64  = 0;
+    var quality_sum: f64  = 0.0;
+    var families = std.StringHashMap(void).init(allocator);
+    defer families.deinit();
+    for (langs) |p| {
+        total_verses += p.value.verses;
+        total_bytes  += p.value.verses * 200;
+        quality_sum  += p.value.quality;
+        if (p.value.family.len > 0) _ = families.put(p.value.family, {}) catch {};
+    }
+    const n = langs.len;
+    const avg_quality = if (n > 0) quality_sum / @as(f64, @floatFromInt(n)) else 0.0;
+    var fbs = std.io.fixedBufferStream(&g_resp_buf);
+    fbs.writer().print(
+        "{{\"total_languages\":{d},\"total_verses\":{d},\"total_bytes\":{d}," ++
+        "\"avg_quality\":{d:.4},\"families\":{d}}}",
+        .{ n, total_verses, total_bytes, avg_quality, families.count() },
+    ) catch { respError(resp, 500, "json encode failed"); return; };
+    const written = fbs.getWritten();
+    resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+    resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
 }
 
-/// Per-port accept loop.  Binds to `args.port`, accepts connections, spawns
-/// per-connection threads.  The corresponding uapi_gnosis handle is held for
-/// lifecycle management only; its internal accept thread has been stopped so
-/// that this function owns the socket.
-fn gnosisPortThread(args: GnosisPortArgs) void {
-    const addr = std.net.Address.parseIp4("0.0.0.0", args.port) catch |err| {
-        std.debug.print("lol-gateway: failed to parse address for port {d}: {s}\n",
-            .{ args.port, @errorName(err) });
-        return;
-    };
-    var server = addr.listen(.{ .reuse_address = true }) catch |err| {
-        std.debug.print("lol-gateway: listen on port {d} failed: {s}\n",
-            .{ args.port, @errorName(err) });
-        return;
-    };
-    defer server.deinit();
+/// Write crawl status into g_resp_buf and fill resp.
+fn lolCrawlStatusInto(resp: *GnosisResponse, allocator: std.mem.Allocator) void {
+    var cs = readCrawlStatus(allocator, g_data_dir);
+    defer cs.deinit();
+    const s = cs.value;
+    var fbs = std.io.fixedBufferStream(&g_resp_buf);
+    const w = fbs.writer();
+    w.print(
+        "{{\"total_languages\":{d},\"crawled\":{d},\"in_progress\":{d}," ++
+        "\"failed\":{d},\"last_crawl\":\"{s}\",\"sources\":[",
+        .{ s.total_languages, s.crawled, s.in_progress, s.failed, s.last_crawl },
+    ) catch { respError(resp, 500, "json encode failed"); return; };
+    for (s.sources, 0..) |src, i| {
+        if (i > 0) w.writeByte(',') catch return;
+        w.print(
+            "{{\"name\":\"{s}\",\"languages\":{d},\"crawled\":{d},\"status\":\"{s}\"}}",
+            .{ src.name, src.languages, src.crawled, src.status },
+        ) catch return;
+    }
+    w.writeAll("]}") catch { respError(resp, 500, "buffer overflow"); return; };
+    const written = fbs.getWritten();
+    resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+    resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+}
 
-    while (true) {
-        const conn = server.accept() catch |err| {
-            std.debug.print("lol-gateway: accept on port {d} failed: {s}\n",
-                .{ args.port, @errorName(err) });
-            break;
+/// Write health JSON into g_resp_buf and fill resp.
+fn lolHealthInto(resp: *GnosisResponse, allocator: std.mem.Allocator) void {
+    const langs = listLanguages(allocator, g_data_dir) catch &[_]std.json.Parsed(LanguageInfo){};
+    defer { for (langs) |p| { var m = p; m.deinit(); } allocator.free(langs); }
+    const status: []const u8 = if (langs.len > 0) "ok" else "no_data";
+    var fbs = std.io.fixedBufferStream(&g_resp_buf);
+    fbs.writer().print(
+        "{{\"status\":\"{s}\",\"version\":\"0.1.0\"," ++
+        "\"data_dir\":\"{s}\",\"languages\":{d}}}",
+        .{ status, g_data_dir, langs.len },
+    ) catch { respError(resp, 500, "json encode failed"); return; };
+    const written = fbs.getWritten();
+    resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+    resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+}
+
+/// Resolve a GraphQL query string and fill resp.
+fn lolGqlResolve(query: []const u8, resp: *GnosisResponse, allocator: std.mem.Allocator) void {
+    var fbs = std.io.fixedBufferStream(&g_resp_buf);
+    const w = fbs.writer();
+
+    if (std.mem.indexOf(u8, query, "health") != null) {
+        const langs = listLanguages(allocator, g_data_dir) catch &[_]std.json.Parsed(LanguageInfo){};
+        defer { for (langs) |p| { var m = p; m.deinit(); } allocator.free(langs); }
+        const status: []const u8 = if (langs.len > 0) "ok" else "no_data";
+        w.print(
+            "{{\"data\":{{\"health\":{{\"status\":\"{s}\",\"version\":\"0.1.0\",\"languages\":{d}}}}}}}",
+            .{ status, langs.len },
+        ) catch {};
+    } else if (std.mem.indexOf(u8, query, "crawlStatus") != null) {
+        var cs = readCrawlStatus(allocator, g_data_dir);
+        defer cs.deinit();
+        const s = cs.value;
+        w.print(
+            "{{\"data\":{{\"crawlStatus\":{{\"totalLanguages\":{d},\"crawled\":{d}," ++
+            "\"inProgress\":{d},\"failed\":{d},\"lastCrawl\":\"{s}\",\"sources\":[",
+            .{ s.total_languages, s.crawled, s.in_progress, s.failed, s.last_crawl },
+        ) catch {};
+        for (s.sources, 0..) |src, i| {
+            if (i > 0) w.writeByte(',') catch return;
+            w.print(
+                "{{\"name\":\"{s}\",\"languages\":{d},\"crawled\":{d},\"status\":\"{s}\"}}",
+                .{ src.name, src.languages, src.crawled, src.status },
+            ) catch {};
+        }
+        w.writeAll("]}}}}") catch {};
+    } else if (std.mem.indexOf(u8, query, "corpusStats") != null) {
+        const langs = listLanguages(allocator, g_data_dir) catch &[_]std.json.Parsed(LanguageInfo){};
+        defer { for (langs) |p| { var m = p; m.deinit(); } allocator.free(langs); }
+        var total_verses: i64 = 0; var total_bytes: i64 = 0; var quality_sum: f64 = 0.0;
+        var families = std.StringHashMap(void).init(allocator); defer families.deinit();
+        for (langs) |p| {
+            total_verses += p.value.verses; total_bytes += p.value.verses * 200;
+            quality_sum += p.value.quality;
+            if (p.value.family.len > 0) _ = families.put(p.value.family, {}) catch {};
+        }
+        const n = langs.len;
+        const avg_quality = if (n > 0) quality_sum / @as(f64, @floatFromInt(n)) else 0.0;
+        w.print(
+            "{{\"data\":{{\"corpusStats\":{{\"totalLanguages\":{d},\"totalVerses\":{d}," ++
+            "\"totalBytes\":{d},\"avgQuality\":{d:.4},\"families\":{d}}}}}}}",
+            .{ n, total_verses, total_bytes, avg_quality, families.count() },
+        ) catch {};
+    } else if (std.mem.indexOf(u8, query, "language(") != null or
+               std.mem.indexOf(u8, query, "language (") != null)
+    {
+        const code = gqlArgStr(query, "code", allocator);
+        defer if (code) |c| allocator.free(c);
+        if (code == null) {
+            w.writeAll("{\"errors\":[{\"message\":\"language(code: ...) requires a code argument\"}]}") catch {};
+        } else {
+            const c = code.?;
+            var valid = true;
+            for (c) |ch| { if (!std.ascii.isAlphanumeric(ch) and ch != '-') { valid = false; break; } }
+            if (!valid) {
+                w.writeAll("{\"errors\":[{\"message\":\"invalid language code\"}]}") catch {};
+            } else {
+                var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+                const fpath = std.fmt.bufPrint(&path_buf, "{s}/languages/{s}.json",
+                    .{ g_data_dir, c }) catch {
+                        w.writeAll("{\"errors\":[{\"message\":\"path too long\"}]}") catch {};
+                        const written = fbs.getWritten();
+                        resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+                        resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+                        return;
+                    };
+                guardPath(fpath) catch {
+                    w.writeAll("{\"errors\":[{\"message\":\"path denied\"}]}") catch {};
+                    const written = fbs.getWritten();
+                    resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+                    resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+                    return;
+                };
+                const file = std.fs.cwd().openFile(fpath, .{}) catch {
+                    var eb: [256]u8 = undefined;
+                    var efbs = std.io.fixedBufferStream(&eb);
+                    efbs.writer().print(
+                        "{{\"errors\":[{{\"message\":\"Language not found: {s}\"}}]}}", .{c},
+                    ) catch {};
+                    const ee = efbs.getWritten();
+                    w.writeAll(ee) catch {};
+                    const written = fbs.getWritten();
+                    resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+                    resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+                    return;
+                };
+                defer file.close();
+                const contents = file.readToEndAlloc(allocator, 64 * 1024) catch {
+                    w.writeAll("{\"errors\":[{\"message\":\"read failed\"}]}") catch {};
+                    const written = fbs.getWritten();
+                    resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+                    resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+                    return;
+                };
+                defer allocator.free(contents);
+                const parsed = std.json.parseFromSlice(LanguageInfo, allocator, contents, .{
+                    .ignore_unknown_fields = true,
+                }) catch {
+                    w.writeAll("{\"errors\":[{\"message\":\"parse failed\"}]}") catch {};
+                    const written = fbs.getWritten();
+                    resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+                    resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+                    return;
+                };
+                var mp = parsed; defer mp.deinit();
+                w.writeAll("{\"data\":{\"language\":") catch {};
+                writeLangJson(w, parsed.value) catch {};
+                w.writeAll("}}") catch {};
+            }
+        }
+    } else if (std.mem.indexOf(u8, query, "languages") != null) {
+        const langs = listLanguages(allocator, g_data_dir) catch {
+            w.writeAll("{\"errors\":[{\"message\":\"failed to read corpus\"}]}") catch {};
+            const written = fbs.getWritten();
+            resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+            resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+            return;
         };
-        const thread = std.Thread.spawn(.{}, handleConn, .{ConnArgs{
-            .conn     = conn,
-            .kind     = args.kind,
-            .data_dir = args.data_dir,
-            .alloc    = args.alloc,
-        }}) catch |err| {
-            // Log and close — do not crash the accept loop.
-            std.debug.print("lol-gateway: thread spawn failed: {s}\n", .{@errorName(err)});
-            var c = conn;
-            c.stream.close();
-            continue;
-        };
-        thread.detach();
+        defer { for (langs) |p| { var m = p; m.deinit(); } allocator.free(langs); }
+        w.writeAll("{\"data\":{\"languages\":[") catch {};
+        for (langs, 0..) |p, i| {
+            if (i > 0) w.writeByte(',') catch return;
+            writeLangJson(w, p.value) catch {};
+        }
+        w.writeAll("]}}") catch {};
+    } else if (std.mem.indexOf(u8, query, "__schema") != null) {
+        w.writeAll(
+            \\{"data":{"__schema":{"types":[
+            \\{"name":"Query","fields":["languages","language","corpusStats","crawlStatus","health"]},
+            \\{"name":"Language","fields":["iso639_3","name","nativeName","family","scripts","sources","verses","quality"]},
+            \\{"name":"CorpusStats","fields":["totalLanguages","totalVerses","totalBytes","avgQuality","families"]},
+            \\{"name":"CrawlStatus","fields":["totalLanguages","crawled","inProgress","failed","lastCrawl","sources"]},
+            \\{"name":"Source","fields":["name","languages","crawled","status"]},
+            \\{"name":"Health","fields":["status","version","languages"]}
+            \\]}}}
+        ) catch {};
+    } else {
+        w.writeAll(
+            "{\"errors\":[{\"message\":\"Unknown query. Available: " ++
+            "languages, language(code), corpusStats, crawlStatus, health\"}]}",
+        ) catch {};
+    }
+
+    const written = fbs.getWritten();
+    resp.status = 200; resp._pad = 0; resp.content_type = CT_JSON;
+    resp.body_ptr = written.ptr; resp.body_len = @intCast(written.len);
+}
+
+/// Allocating JSON field extractor.  Returns an owned copy; caller frees.
+fn jsonFieldStrInto(data: []const u8, key: []const u8, allocator: std.mem.Allocator) ?[]u8 {
+    var key_buf: [128]u8 = undefined;
+    const needle = std.fmt.bufPrint(&key_buf, "\"{s}\"", .{key}) catch return null;
+    const key_pos = std.mem.indexOf(u8, data, needle) orelse return null;
+    const after_key = data[key_pos + needle.len ..];
+    const colon = std.mem.indexOfScalar(u8, after_key, ':') orelse return null;
+    var rest = std.mem.trimLeft(u8, after_key[colon + 1 ..], " \t\n\r");
+    if (rest.len == 0) return null;
+    if (rest[0] == '"') {
+        rest = rest[1..];
+        const end = std.mem.indexOfScalar(u8, rest, '"') orelse return null;
+        return allocator.dupe(u8, rest[0..end]) catch null;
+    }
+    var end: usize = rest.len;
+    for (rest, 0..) |ch, i| {
+        if (ch == ',' or ch == '}' or ch == ']' or ch == '\n') { end = i; break; }
+    }
+    const trimmed = std.mem.trim(u8, rest[0..end], " \t");
+    return allocator.dupe(u8, trimmed) catch null;
+}
+
+/// The edge handler registered with uapi_gnosis_set_handler.
+///
+/// gnosis calls this for every HTTP request accepted on the pool port.
+/// The method, path, and body are already parsed by gnosis; lolHandler
+/// path-dispatches to the appropriate protocol family.
+///
+/// g_allocator and g_data_dir must have been set before uapi_gnosis_start.
+export fn lolHandler(req: *const GnosisRequest, resp: *GnosisResponse) callconv(.c) void {
+    // Sanity guard: if context isn't ready (shouldn't happen in production),
+    // return a 503 rather than reading uninitialised memory.
+    if (!g_context_ready) {
+        respError(resp, 503, "gateway not ready");
+        return;
+    }
+
+    var arena_inst = std.heap.ArenaAllocator.init(g_allocator);
+    defer arena_inst.deinit();
+    const arena = arena_inst.allocator();
+
+    const method = std.mem.span(req.method);
+    const path   = std.mem.span(req.path);
+    const body: []const u8 = if (req.body_ptr) |p| p[0..req.body_len] else "";
+
+    // CORS preflight — respond immediately.
+    if (std.mem.eql(u8, method, "OPTIONS")) {
+        resp.status = 204; resp._pad = 0; resp.content_type = CT_TEXT;
+        resp.body_ptr = null; resp.body_len = 0;
+        return;
+    }
+
+    // Path-based protocol routing.
+    if (std.mem.startsWith(u8, path, "/api/v1/") or std.mem.eql(u8, path, "/")) {
+        lolRestDispatch(path, method, body, resp, arena);
+    } else if (std.mem.startsWith(u8, path, "/lol.CorpusService/")) {
+        lolGrpcDispatch(path, method, body, resp, arena);
+    } else if (std.mem.startsWith(u8, path, "/graphql")) {
+        lolGraphqlDispatch(method, body, resp, arena);
+    } else {
+        respError(resp, 404, "not found");
     }
 }
 
@@ -1063,11 +1464,12 @@ pub fn main() !void {
     const base_port = std.fmt.parseInt(u16, port_str, 10) catch 7800;
     const data_dir  = std.posix.getenv("LOL_DATA_DIR") orelse "corpus";
 
-    std.debug.print("LOL (1000Langs) API Gateway v0.1.0\n", .{});
-    std.debug.print("  Data directory: {s}\n", .{data_dir});
-    std.debug.print("  REST:    http://0.0.0.0:{d}/\n",      .{base_port});
-    std.debug.print("  gRPC:    http://0.0.0.0:{d}/\n",      .{base_port + 1});
-    std.debug.print("  GraphQL: http://0.0.0.0:{d}/graphql\n", .{base_port + 2});
+    std.debug.print("LOL (1000Langs) API Gateway v0.2.0 (single-port)\n", .{});
+    std.debug.print("  Data directory : {s}\n", .{data_dir});
+    std.debug.print("  All protocols  : http://0.0.0.0:{d}/\n", .{base_port});
+    std.debug.print("    REST         : /api/v1/*\n", .{});
+    std.debug.print("    gRPC-compat  : /lol.CorpusService/*\n", .{});
+    std.debug.print("    GraphQL      : /graphql\n", .{});
 
     // -------------------------------------------------------------------------
     // Initialise the unified-zig-api library.
@@ -1081,67 +1483,49 @@ pub fn main() !void {
     defer uapi_teardown();
 
     // -------------------------------------------------------------------------
-    // Allocate uapi_gnosis pool slots for all three ports.
-    //
-    // uapi_gnosis_create registers the port in the gnosis pool.
-    // uapi_gnosis_start launches gnosis's internal accept thread.
-    // We immediately uapi_gnosis_stop that thread so our gnosisPortThread
-    // owns the socket exclusively.  The pool slot (handle) remains live for
-    // uapi_gnosis_health / uapi_gnosis_state queries from monitoring tools.
+    // Set up module-level handler context before uapi_gnosis_start.
+    // g_data_dir and g_allocator are read by lolHandler; they are set here and
+    // never mutated after uapi_gnosis_start returns.
     // -------------------------------------------------------------------------
-    const ports = [3]u16{ base_port, base_port + 1, base_port + 2 };
-    var handles: [3]u64 = undefined;
+    g_data_dir     = data_dir;
+    g_allocator    = gpa;
+    g_context_ready = true;
 
-    for (ports, 0..) |port, i| {
-        const handle = uapi_gnosis_create(port);
-        if (handle == 0) {
-            std.debug.print("lol-gateway: uapi_gnosis_create failed for port {d}\n", .{port});
-            // Destroy any handles already created.
-            var j: usize = 0;
-            while (j < i) : (j += 1) {
-                uapi_gnosis_destroy(handles[j]);
-            }
-            return error.GnosisCreateFailed;
-        }
-        handles[i] = handle;
+    // -------------------------------------------------------------------------
+    // Single-port setup:
+    //   1. Create one gnosis pool slot on base_port.
+    //   2. Register lolHandler as the edge dispatch hook.
+    //   3. Start the gnosis accept loop (blocks until stop or signal).
+    // -------------------------------------------------------------------------
+    const handle = uapi_gnosis_create(base_port);
+    if (handle == 0) {
+        std.debug.print("lol-gateway: uapi_gnosis_create failed for port {d}\n", .{base_port});
+        return error.GnosisCreateFailed;
     }
-    defer {
-        for (handles) |h| uapi_gnosis_destroy(h);
+    defer uapi_gnosis_destroy(handle);
+
+    const set_rc = uapi_gnosis_set_handler(handle, &lolHandler);
+    if (set_rc != UAPI_OK) {
+        std.debug.print("lol-gateway: uapi_gnosis_set_handler failed (result={d})\n", .{set_rc});
+        return error.GnosisSetHandlerFailed;
     }
 
-    // -------------------------------------------------------------------------
-    // Spawn per-port accept threads.
-    //
-    // REST and gRPC run in detached threads.  GraphQL runs on the main thread
-    // (same arrangement as the pre-retrofit code) so that main() blocks until
-    // shutdown.
-    // -------------------------------------------------------------------------
-    const rest_thread = try std.Thread.spawn(.{}, gnosisPortThread, .{GnosisPortArgs{
-        .handle   = handles[0],
-        .port     = base_port,
-        .kind     = .rest,
-        .data_dir = data_dir,
-        .alloc    = gpa,
-    }});
-    rest_thread.detach();
+    // uapi_gnosis_start spawns a background thread that owns the accept loop.
+    // It returns once the thread is running (listening state).
+    const start_rc = uapi_gnosis_start(handle);
+    if (start_rc != UAPI_OK) {
+        std.debug.print("lol-gateway: uapi_gnosis_start failed (result={d})\n", .{start_rc});
+        return error.GnosisStartFailed;
+    }
 
-    const grpc_thread = try std.Thread.spawn(.{}, gnosisPortThread, .{GnosisPortArgs{
-        .handle   = handles[1],
-        .port     = base_port + 1,
-        .kind     = .grpc,
-        .data_dir = data_dir,
-        .alloc    = gpa,
-    }});
-    grpc_thread.detach();
+    std.debug.print("lol-gateway: listening on :{d} (gnosis handle {d})\n",
+        .{ base_port, handle });
 
-    // GraphQL on main thread.
-    gnosisPortThread(.{
-        .handle   = handles[2],
-        .port     = base_port + 2,
-        .kind     = .graphql,
-        .data_dir = data_dir,
-        .alloc    = gpa,
-    });
+    // Block main thread until the server stops (e.g. SIGINT / uapi_gnosis_stop).
+    // gnosis's background thread runs independently; we sleep here.
+    while (uapi_gnosis_state(handle) == UAPI_SERVER_LISTENING) {
+        std.Thread.sleep(1 * std.time.ns_per_s);
+    }
 }
 
 // =============================================================================
