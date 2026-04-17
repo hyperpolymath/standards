@@ -21,7 +21,8 @@ REPOS=(
 )
 
 # Contractile types to check
-CONTRACTILES=("must" "trust" "dust" "lust" "adjust" "intend")
+# `lust` deprecated 2026-04-18 — wishes absorbed into intend/Intentfile.a2ml
+CONTRACTILES=("must" "trust" "dust" "bust" "adjust" "intend")
 
 echo "## Contractile Completeness Audit"
 echo ""

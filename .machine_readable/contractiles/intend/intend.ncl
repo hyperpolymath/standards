@@ -1,13 +1,20 @@
 # SPDX-License-Identifier: PMPL-1.0-or-later
-# Intend — north-star runner (verb is `intend`, not `intent`)
+# Intend — north-star runner (verb is `intend`, file is `Intentfile.a2ml`)
 #
-# Pairs with: Intendfile.a2ml (same directory)
+# Pairs with: Intentfile.a2ml (same directory)
 # Verb:       intend
-# Semantics:  declarative aspirations. Not a gate — reports progress toward
-#             target state. Items can be declared / in-progress / done /
-#             deferred / retired.
-# CLI:        `contractile intend run`      → print status table
-#             `contractile intend progress` → diff declared-vs-observed
+# Semantics:  Declares BOTH concrete committed next-actions ([[intents]]) and
+#             horizon aspirations ([[wishes]]). Not a gate — reports progress
+#             toward declared intents and lists wishes by horizon.
+#             Status progressions:
+#               intents: 'declared → 'in_progress → 'done | 'deferred | 'retired
+#               wishes:  'declared → 'in_progress → 'achieved | 'abandoned
+# CLI:        `contractile intend run`       → print status table (both sections)
+#             `contractile intend progress`  → diff declared-vs-observed (intents)
+#             `contractile intend horizon`   → group wishes by near/mid/far
+#
+# History:    Absorbed the deprecated `lust` contractile's [[wishes]] schema
+#             2026-04-18. `lust/` dir removed estate-wide.
 #
 # Anything else in this directory is human-only notes/archive; machines ignore.
 #
@@ -19,19 +26,19 @@ let base = import "../_base.ncl" in
 {
   pedigree = base.pedigree_schema & {
     contractile_verb = "intend",
-    semantics = "north-star / aspirational",
+    semantics = "north-star (commitments + aspirations)",
     security = {
       leash = 'Kennel,
       trust_level = "read-only reporting",
       allow_network = false,
       allow_filesystem_write = false,
-      allow_subprocess = true,      # probe commands may shell out
+      allow_subprocess = true,      # probe commands may shell out (intents only; wishes never probe)
     },
     metadata = {
       name = "intend-runner",
-      version = "1.0.0",
-      description = "Reports progress toward declared future-state intents. Non-gating.",
-      paired_xfile = "Intendfile.a2ml",
+      version = "2.0.0",
+      description = "Reports progress toward committed next-actions and lists horizon aspirations. Non-gating. Absorbed `lust` semantics 2026-04-18.",
+      paired_xfile = "Intentfile.a2ml",
       author = "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>",
     },
   },
@@ -43,22 +50,32 @@ let base = import "../_base.ncl" in
           description | String,
           # TODO: migrate to base.probe_schema (structured probe) when CLI supports it
           probe | String | optional,     # shell command that indicates done-ness
-          # intend has its own non-standard status progression (non-gating):
-          #   'declared → 'in_progress → 'done | 'deferred | 'retired
           status | [| 'declared, 'in_progress, 'done, 'deferred, 'retired |] | default = 'declared,
           notes | String | optional,
           target_date | String | optional,
         },
+    wishes
+      | Array {
+          id | String,
+          description | String,
+          horizon | [| 'near, 'mid, 'far |] | default = 'mid,
+          why | String | optional,
+          status | [| 'declared, 'in_progress, 'achieved, 'abandoned |] | default = 'declared,
+          notes | String | optional,
+        }
+      | optional,
   },
 
   # Runner behaviour — inherits from base.run_defaults.
   # intend never blocks; it is a report only.
-  # emit_diff is intend-specific (declared vs observed).
+  # emit_diff is intent-specific (declared vs observed probes).
+  # emit_grouped_by_horizon renders wishes grouped by near/mid/far.
   run = base.run_defaults & {
     on_pass = "continue",
     on_any_fail = "continue",         # never blocks; it's a report
     report_format = "a2ml",
     emit_summary = true,
-    emit_diff = true,                 # declared vs observed
+    emit_diff = true,                 # declared vs observed (intents)
+    emit_grouped_by_horizon = true,   # wishes grouped by horizon (absorbed from lust)
   },
 }

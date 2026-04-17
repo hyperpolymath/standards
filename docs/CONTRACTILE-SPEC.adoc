@@ -110,16 +110,13 @@ exception documented in <<k9-exception>>.
   `--apply` flag and explicit approval per item.
 
 | `intend`
-| North-star / aspirational commitments
-| Declarative next-actions the project has committed to. Not a hard
-  gate — reports progress (declared → in_progress → done / deferred /
-  retired). Distinct from `lust` which holds wishes on the horizon axis.
-
-| `lust`
-| Aspirational / wishlist / horizon
-| Wishes and aspirations grouped by near/mid/far horizon. Never gates.
-  An item graduates from `lust` to `intend` when a concrete plan
-  materialises.
+| North-star (commitments + aspirations)
+| Declarative next-actions the project has committed to, alongside
+  horizon aspirations it points toward. Two sections in one file:
+  `[[intents]]` (probed, declared → in_progress → done/deferred/retired)
+  and `[[wishes]]` (horizon-grouped near/mid/far, declared →
+  in_progress → achieved/abandoned). Not a hard gate — reports progress.
+  Absorbed the deprecated `lust` verb 2026-04-18.
 
 | `must`
 | Invariant assertion
@@ -143,7 +140,7 @@ exception documented in <<k9-exception>>.
 ----
 .machine_readable/contractiles/
 ├── _base.ncl                      ← shared base (pedigree + status-core + probe-schema + run-defaults)
-├── INDEX.a2ml                     ← registry of all 8 verbs
+├── INDEX.a2ml                     ← registry of all active verbs (6 + k9 exception)
 ├── README.adoc                    ← human overview + k9 exception note
 │
 ├── adjust/
@@ -159,12 +156,8 @@ exception documented in <<k9-exception>>.
 │   └── dust.ncl
 │
 ├── intend/
-│   ├── Intendfile.a2ml            ← note: Intendfile, NOT Intentfile
+│   ├── Intentfile.a2ml            ← noun form (absorbed the deprecated `lust` verb 2026-04-18)
 │   └── intend.ncl
-│
-├── lust/
-│   ├── Lustfile.a2ml
-│   └── lust.ncl
 │
 ├── must/
 │   ├── Mustfile.a2ml
@@ -193,21 +186,23 @@ Anything else in a verb directory is human notes or archive; machines ignore it.
 1. **Verb is always lowercase.** The directory name, the `.ncl` file name, and
    the verb field inside `pedigree` all use the lowercase verb: `must`, not `Must`.
 
-2. **Declaration file uses capitalised verb.** `Mustfile.a2ml`, `Bustfile.a2ml`,
-   `Intendfile.a2ml` — capitalised Verb, `file`, `.a2ml`. No underscores, no
-   spaces, no hyphens in the file name.
+2. **Declaration file uses noun-form capitalised verb.** `Mustfile.a2ml`,
+   `Bustfile.a2ml`, `Trustfile.a2ml`, `Intentfile.a2ml` — capitalised noun
+   form, `file`, `.a2ml`. No underscores, no spaces, no hyphens.
 
-3. **The verb is the verb, not a related noun.** The `intend` verb's file is
-   `Intendfile.a2ml`, NOT `Intentfile.a2ml`. The file tracks the naming rule
-   (`intend` + `file`), not English grammar. This was a drift issue fixed in
-   this spec version (see <<migration-notes>>).
+3. **The file name uses the noun form of the verb.** Most verbs have
+   identical verb and noun forms (must/Mustfile, trust/Trustfile, bust/Bustfile,
+   dust/Dustfile, adjust/Adjustfile). The one irregular case is `intend` →
+   `Intentfile.a2ml` (verb `intend`, noun `intent`). The `.ncl` runner keeps
+   the verb form: `intend.ncl`. This is the canonical state as of 2026-04-18
+   (see <<migration-notes>>).
 
 4. **k9 follows none of the above.** k9 is the explicit exception
    (see <<k9-exception>>).
 
 == Shared Base (`_base.ncl`)
 
-All seven verb runner files import
+All six active verb runner files import
 `.machine_readable/contractiles/_base.ncl`. The base provides four
 named fragments that verb runners overlay with verb-specific fields.
 
@@ -358,10 +353,10 @@ different shape; factoring it would obscure more than it shared.
 | `dust`
 | `'declared`, `'proposed`, `'approved`, `'removed`
 
-| `intend`
+| `intend` ([[intents]])
 | `'declared`, `'in_progress`, `'done`, `'deferred`, `'retired`
 
-| `lust`
+| `intend` ([[wishes]])
 | `'declared`, `'in_progress`, `'achieved`, `'abandoned`
 
 | `must`
@@ -579,16 +574,13 @@ subcommand with verb-specific subsubcommands:
 | Dry-run or actual removal (gated behind `--apply` + approval).
 
 | `contractile intend run`
-| Print status table.
+| Print status table (both sections).
 
 | `contractile intend progress`
-| Diff declared-vs-observed.
+| Diff declared-vs-observed (intents).
 
-| `contractile lust run`
-| Print wishlist.
-
-| `contractile lust horizon`
-| Group by target-horizon.
+| `contractile intend horizon`
+| Group wishes by target-horizon.
 
 | `contractile trust verify`
 | Run all verifications (read-only).
@@ -604,20 +596,51 @@ NOTE: The CLI was confirmed present at `reposystem/contractiles/cli/` on
 [[migration-notes]]
 == Migration Notes
 
-=== Intentfile → Intendfile rename (2026-04-17)
+=== `lust` verb deprecated, absorbed into `intend` (2026-04-18)
 
-The file `intend/Intentfile.a2ml` was incorrectly named. The naming rule is
-`<verb>file.a2ml` where verb is `intend`, so the correct name is
-`Intendfile.a2ml`. Renamed to comply with the rule documented in this spec.
+The `lust` verb was retired: the name carried unwanted associations and
+its `[[wishes]]` horizon/aspiration semantics had always been a second
+expression of the north-star axis already owned by `intend`. The two are
+now unified inside `intend/Intentfile.a2ml` as sibling sections:
 
-If any repo copies contain `Intentfile.a2ml`, rename it:
+* `[[intents]]` — committed next-actions with probes (previous intend).
+* `[[wishes]]` — horizon-grouped aspirations (former `lust` schema).
+
+If any repo copies retain `lust/`, remove it and migrate its wishes:
 
 [source,bash]
 ----
-git mv intend/Intentfile.a2ml intend/Intendfile.a2ml
+cat lust/Lustfile.a2ml            # extract any real wishes
+# paste them into intend/Intentfile.a2ml under the [[wishes]] section
+rm -r lust/
 ----
 
-Update `intend.ncl`'s `paired_xfile` field to `"Intendfile.a2ml"`.
+The verb count drops 7 → 6 (plus the k9 exception, unchanged). All tooling
+dispatch on `lust` must be removed; consumers should read wishes from
+`Intentfile.a2ml` instead.
+
+=== Intentfile ← Intendfile revert (2026-04-18)
+
+The 2026-04-17 rename `Intentfile.a2ml` → `Intendfile.a2ml` was reverted
+2026-04-18. The canonical name is the noun form, `Intentfile.a2ml`. This
+is the only irregular case across the verb set (all other verbs have
+identical verb and noun forms — Must/Mustfile, Trust/Trustfile, etc.).
+The `.ncl` runner keeps the verb form (`intend.ncl`), and
+`intend.ncl`'s `paired_xfile` field references `"Intentfile.a2ml"`.
+
+If any repo copy still contains `Intendfile.a2ml`, rename it:
+
+[source,bash]
+----
+git mv intend/Intendfile.a2ml intend/Intentfile.a2ml
+----
+
+Then update the paired runner:
+
+[source,bash]
+----
+sed -i 's/Intendfile.a2ml/Intentfile.a2ml/g' intend/intend.ncl
+----
 
 === Bustfile.a2ml was empty (2026-04-17)
 
