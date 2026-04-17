@@ -1,16 +1,20 @@
-# LOL i18n Service — ABI/FFI/API V-Triple Documentation
+# LOL i18n Service — ABI/FFI/API Triple Documentation
 
 ## Overview
 
-The LOL (Language of Languages) i18n service follows the **Hyperpolymath V-Triple Standard**:
+The LOL (Language of Languages) i18n service follows the **Hyperpolymath ABI/FFI/API Triple Standard**:
 
 - **ABI (Application Binary Interface)** defined in **Idris2** with formal proofs
 - **FFI (Foreign Function Interface)** implemented in **Zig** for C compatibility
-- **API** exposed in **V-lang** for idiomatic high-level access
+- **API** exposed via a **Zig** gateway (REST/gRPC/GraphQL) for idiomatic high-level access
 
 LOL is always called as a service, never embedded. Consumers initialise with
 `lol_init()`, perform translation lookups and plural form selection across
 1500+ languages, then clean up with `lol_free()`.
+
+> **Note:** V-lang was the previous API layer and was banned estate-wide on 2026-04-10.
+> The sidelined V-lang wrappers under `api/v-lol/` and `api/v-gateway/` remain only
+> for historical reference. See their respective `MIGRATION.adoc` files for details.
 
 ## Architecture
 
@@ -53,12 +57,17 @@ LOL is always called as a service, never embedded. Consumers initialise with
                   │ linked by (-llol)
                   ▼
 ┌─────────────────────────────────────────────────┐
-│  V-lang API (idiomatic wrapper)                 │
-│  api/v-lol/src/                                 │
-│  - lol.v     (Service struct, public methods)   │
-│  - ffi.v     (Raw C bindings)                   │
-│  - types.v   (V types: Locale, PluralCategory,  │
-│               TranslationResult, LanguageInfo)  │
+│  Zig API Gateway (REST/gRPC/GraphQL)            │
+│  api/zig-gateway/src/                           │
+│  - main.zig      (HTTP gateway, triple endpoints,│
+│                   REST 7800 / gRPC 7801 / GQL    │
+│                   7802; REST+gRPC+GraphQL         │
+│                   handlers; domain I/O)          │
+│  - types.zig     (public domain types; replaces  │
+│                   v-lol/src/types.v)             │
+│  - lol_ffi.zig   (Zig wrapper around liblol;    │
+│                   replaces v-lol/src/lol.v +     │
+│                   ffi.v)                         │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -89,27 +98,30 @@ lol/
 │   └── abi/
 │       └── lol.h                    # Auto-generated C header
 ├── api/
-│   ├── v-lol/                       # V-lang API wrapper
-│   │   ├── v.mod                    # V module definition
+│   ├── zig-gateway/                 # Canonical API gateway (REST/gRPC/GraphQL)
+│   │   ├── build.zig                # Build configuration (links liblol)
 │   │   └── src/
-│   │       ├── lol.v                # Public API (Service struct)
-│   │       ├── ffi.v                # Raw C bindings
-│   │       └── types.v              # V types and enums
-│   └── v-gateway/                   # Existing triple API gateway
-│       └── src/                     # REST + gRPC + GraphQL
+│   │       ├── main.zig             # HTTP gateway: REST/gRPC/GraphQL handlers + domain I/O
+│   │       ├── types.zig            # Public domain types (replaces v-lol/src/types.v)
+│   │       └── lol_ffi.zig          # Zig liblol wrapper (replaces v-lol/src/lol.v + ffi.v)
+│   ├── v-lol/                       # DEPRECATED — see MIGRATION.adoc
+│   │   ├── v.mod
+│   │   └── src/
+│   └── v-gateway/                   # DEPRECATED — see MIGRATION.adoc
+│       └── src/
 └── ABI-FFI-README.md                # This file
 ```
 
 ## Key Types
 
-| Type | Idris2 | C | V |
-|------|--------|---|---|
-| Result codes | `Result` | `lol_result_t` | `LolError` |
-| Plural category | `PluralCategory` | `lol_plural_category_t` | `PluralCategory` |
-| Locale | `Locale` | `lol_locale_t` | `Locale` |
-| Translation | `TranslationResult` | `lol_translation_result_t` | `TranslationResult` |
-| Language info | `LanguageInfo` | `lol_language_info_t` | `LanguageInfo` |
-| Plural rule | `PluralRule` | `lol_plural_rule_t` | `PluralRule` |
+| Type | Idris2 | C |
+|------|--------|---|
+| Result codes | `Result` | `lol_result_t` |
+| Plural category | `PluralCategory` | `lol_plural_category_t` |
+| Locale | `Locale` | `lol_locale_t` |
+| Translation | `TranslationResult` | `lol_translation_result_t` |
+| Language info | `LanguageInfo` | `lol_language_info_t` |
+| Plural rule | `PluralRule` | `lol_plural_rule_t` |
 
 ## Formal Proofs (Idris2 ABI)
 
@@ -148,42 +160,39 @@ zig build test         # Runs unit tests
 zig build test-integration  # Runs integration tests
 ```
 
-### V-lang API
+### Zig API Gateway
 
 ```bash
-cd api/v-lol
-v -cflags "-L../../ffi/zig/zig-out/lib" src/   # Build with liblol
+cd api/zig-gateway
+zig build
+./zig-out/bin/lol-gateway
 ```
 
-## Usage (V-lang)
+Default base port is 7800. Configure via `LOL_PORT` environment variable.
+Corpus data directory defaults to `corpus`; set via `LOL_DATA_DIR`.
 
-```v
-import lol
+## Usage (Zig gateway, HTTP)
 
-fn main() {
-    // Open the service with a corpus data directory
-    mut svc := lol.open('/path/to/corpus') or { panic(err) }
-    defer svc.close()
+The Zig API gateway exposes three endpoint families:
 
-    // Translate a key
-    result := svc.translate('en-US', 'app.greeting') or {
-        println('Translation not found, using default')
-        lol.TranslationResult{ text: 'Hello!', resolved_locale: 'en' }
-    }
-    println(result.text)
+**REST API** (HTTP on port 7800):
+```bash
+curl http://localhost:7800/api/v1/languages
+curl http://localhost:7800/api/v1/corpus/stats
+```
 
-    // Select plural form
-    cat := svc.select_plural('ar', 5)
-    println('Arabic plural for 5: ${cat}')  // "few"
+**gRPC JSON-compatible** (on port 7801):
+```bash
+curl -X POST http://localhost:7801/lol.TranslationService/Translate \
+  -H "Content-Type: application/json" \
+  -d '{"locale":"en-US","key":"app.greeting"}'
+```
 
-    // Get language metadata
-    info := svc.get_language('eng') or { panic(err) }
-    println('${info.name} (${info.native_name}): ${info.verse_count} verses')
-
-    // Get plural rule
-    rule := svc.get_plural_rule('ru') or { panic(err) }
-    println('Russian has ${rule.form_count} plural forms')
-}
+**GraphQL** (on port 7802, endpoint `/graphql`):
+```bash
+curl -X POST http://localhost:7802/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ languages { code name } }"}'
 ```
 
 ## License
