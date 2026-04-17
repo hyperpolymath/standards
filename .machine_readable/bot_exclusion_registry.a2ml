@@ -1,0 +1,414 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Bot Exclusion Registry — authoritative estate-wide denylist for hyperpolymath bots.
+#
+# Canonical location:  standards/.machine_readable/bot_exclusion_registry.a2ml
+# Schema:              bot-exclusion-registry.v1
+# Consumed by:         hypatia, robot-repo-automaton, every bot in gitbot-fleet/bots/*
+# Enforcement point:   robot-repo-automaton (the only bot that pushes/PRs); belt-and-
+#                      braces checks in each Tier-1/Tier-2 bot so comments are gated too.
+#
+# Three axes — a match on ANY axis blocks the action:
+#   [external-repos]             — specific full_name matches (org/repo)
+#   [vendored-directory-patterns] — globs that should never be edited regardless of repo
+#   [remote-origin-patterns]     — bail-if-origin-matches patterns (catches local clones
+#                                  of upstream toolchains that slipped through the net)
+#
+# Action classes — fine-grained: a repo/pattern can be `scan-only` but still allow
+# comments, or `full-denial` which blocks everything.
+#
+# Default stance for unknown repos: DEFAULT-ALLOW (scan + act), because the estate
+# has ~330 owned repos. Use the `candidates` section to propose additions without
+# enforcing until reviewed.
+
+[registry]
+version = "1.0.0"
+schema = "bot-exclusion-registry.v1"
+created = "2026-04-17"
+owner = "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"
+enforcement = "single-point-plus-belt-and-braces"
+kill-switch-env = "HYPATIA_AUTOMATION"  # set to "off" to halt ALL bot writes estate-wide
+
+[default-stance]
+# Applied when no axis matches.
+scan = "allow"
+comment = "allow"
+label = "allow"
+pr = "allow"
+push = "allow"
+merge = "gate-on-confidence"   # still honours robot-repo-automaton's tiered thresholds
+
+# ============================================================================
+# AXIS 1 — external-repos
+# Repos where the user has affiliation (collaborator / org-member) but is NOT
+# the owning org. These are the "do not embarrass me" repos. All scan-only.
+# ============================================================================
+
+[[external-repos]]
+full_name = "Campus-Advisors/github-education-teacher-training-Hyperpolymath"
+owner = "Campus-Advisors"
+affiliation = "collaborator"
+stance = "scan-only"
+reason = "External org (Campus-Advisors). User has collaborator rights; bots must not write."
+
+[[external-repos]]
+full_name = "JoshuaJewell/IDApixiTIK"
+owner = "JoshuaJewell"
+affiliation = "collaborator"
+stance = "scan-only"
+reason = "Son's personal namespace (co-developer on IDApTIK). Respect personal ownership."
+
+[[external-repos]]
+full_name = "JoshuaJewell/IDApTIK"
+owner = "JoshuaJewell"
+affiliation = "collaborator"
+archived = true
+stance = "scan-only"
+reason = "Archived. Son's namespace. Never write."
+
+[[external-repos]]
+full_name = "The-Metadatastician/.github"
+owner = "The-Metadatastician"
+affiliation = "organization_member"
+stance = "scan-only"
+reason = "Metadatastician org .github profile. User is member, not owner."
+
+[[external-repos]]
+full_name = "The-Metadatastician/paint-type"
+owner = "The-Metadatastician"
+affiliation = "organization_member"
+stance = "scan-only"
+reason = "Metadatastician project. Not hyperpolymath-owned."
+
+[[external-repos]]
+full_name = "The-Metadatastician/the-metadatastician"
+owner = "The-Metadatastician"
+affiliation = "organization_member"
+stance = "scan-only"
+reason = "Metadatastician main project. User is org member."
+
+# ============================================================================
+# AXIS 2 — vendored-directory-patterns
+# Glob patterns inside any repo that bots must never edit. Catches vendored
+# upstream code that could have slipped through the existing `third-party-
+# excludes.sh` (which was per-fix-script, not per-bot).
+# ============================================================================
+
+[[vendored-directory-patterns]]
+pattern = "**/deps/**"
+reason = "Elixir/mix deps. Rustler FFI bindings are vendored here."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/vendor/**"
+reason = "Generic vendor directory convention."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/third_party/**"
+reason = "Google/bazel convention."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/third-party/**"
+reason = "Hyphenated variant (common in Rust/C++ monorepos)."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/toolchain/**"
+reason = "Toolchain snapshots (rust-toolchain, OCaml switches, Haskell sandboxes)."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/registries/**"
+reason = "Package registry caches."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/.cargo/**"
+reason = "Cargo registry + config. Bots never touch."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/node_modules/**"
+reason = "npm/pnpm/yarn install trees. Never committed, never edited."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/target/**"
+reason = "Cargo/Rust build output."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/_build/**"
+reason = "Elixir/Erlang build dir."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/.hex/**"
+reason = "Hex package cache."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/rustlib/**"
+reason = "Rust standard library installation."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/rust-src/**"
+reason = "Rust source component (rustup component)."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/.rustup/**"
+reason = "Rustup state dir."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/winget-pkgs/**"
+reason = "Windows package manifests (fork of upstream) — legacy pattern from third-party-excludes.sh."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/macports-ports/**"
+reason = "MacPorts port definitions (fork) — legacy pattern from third-party-excludes.sh."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/compiler-source/**"
+reason = "Vendored compiler sources (rustc, ghc, etc.) — legacy pattern from third-party-excludes.sh."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/HOL/**"
+reason = "HOL theorem prover source — legacy pattern from third-party-excludes.sh."
+stance = "never-edit"
+
+[[vendored-directory-patterns]]
+pattern = "**/.mypy_cache/**"
+reason = "mypy type-check cache."
+stance = "never-edit"
+
+# ============================================================================
+# AXIS 3 — remote-origin-patterns
+# If the current repo's `origin` matches any of these, every bot must bail.
+# Catches the case where a user clones an upstream repo locally under their
+# eclipse/repos tree — the local clone doesn't have hyperpolymath in the path,
+# but its origin remote does identify it. This is the belt-and-braces check
+# for the rust-toolchain scenario.
+# ============================================================================
+
+[[remote-origin-patterns]]
+pattern = "github.com/rust-lang/*"
+reason = "Official Rust toolchain / standard library."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/Homebrew/*"
+reason = "Homebrew official."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/homebrew/*"
+reason = "Homebrew lowercase-variant."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/NixOS/*"
+reason = "NixOS / nixpkgs."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/nixos/*"
+reason = "NixOS lowercase-variant."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/llvm/*"
+reason = "LLVM upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/ocaml/*"
+reason = "OCaml upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/elixir-lang/*"
+reason = "Elixir upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/erlang/*"
+reason = "Erlang/OTP upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/golang/*"
+reason = "Go upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/python/*"
+reason = "CPython upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/haskell/*"
+reason = "Haskell upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/ziglang/*"
+reason = "Zig upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/JuliaLang/*"
+reason = "Julia upstream (user has many Julia-ecosystem repos; be specific)."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/idris-lang/*"
+reason = "Idris upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/coq/*"
+reason = "Coq/Rocq upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/leanprover/*"
+reason = "Lean upstream."
+stance = "full-denial"
+
+[[remote-origin-patterns]]
+pattern = "github.com/agda/*"
+reason = "Agda upstream."
+stance = "full-denial"
+
+# ============================================================================
+# CANDIDATES — pending user review, NOT yet enforced.
+# These are hyperpolymath-owned forks of upstream repos. Forked-upstream status
+# was inferred from the fact that Dependabot is disabled on them (characteristic
+# of upstream forks that don't want the noise). Needs user confirmation before
+# moving to one of the enforced axes above.
+# ============================================================================
+
+[candidates]
+reason = "18 hyperpolymath-owned repos with Dependabot disabled — signature of upstream forks. Bots should treat as scan-only until user confirms."
+status = "awaiting-user-confirmation"
+proposed-stance = "scan-only"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-elixir"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, name matches awesome-* fork pattern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-gleam"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-haskell"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-idris2"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-lua"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-mcp-servers"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-mcp-servers-1"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern (duplicate?)"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-pandoc"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-rust"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern — particularly important given rust-toolchain concern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-selfhosted"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-v"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/awesome-zig"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, awesome-* fork pattern"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/file"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, likely fork of file(1) tool"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/info"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/linguist"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, github/linguist fork"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/lua-filters"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, pandoc-lua-filters fork"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/rescript"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, ReScript compiler fork (user is on ReScript core team)"
+
+[[candidates.forked-upstreams]]
+full_name = "hyperpolymath/servers"
+proposed-stance = "scan-only"
+signature = "dependabot-disabled, likely MCP servers fork"
+
+# ============================================================================
+# Enforcement notes
+# ============================================================================
+
+[enforcement]
+primary-enforcement-point = "verification-ecosystem/robot-repo-automaton/src/confidence.rs"
+secondary-enforcement-points = [
+  "fleet-ecosystem/git-automation-ecosystem/gitbot-fleet/bots/rhodibot/src/main.rs",
+  "fleet-ecosystem/git-automation-ecosystem/gitbot-fleet/bots/echidnabot/src/main.rs",
+  "fleet-ecosystem/git-automation-ecosystem/gitbot-fleet/bots/sustainabot/crates/sustainabot-analysis/src/directives.rs",
+  "fleet-ecosystem/git-automation-ecosystem/gitbot-fleet/bots/glambot/src/main.rs",
+  "fleet-ecosystem/git-automation-ecosystem/gitbot-fleet/bots/seambot/src/main.rs",
+  "fleet-ecosystem/git-automation-ecosystem/gitbot-fleet/bots/finishbot/src/main.rs",
+  "fleet-ecosystem/git-automation-ecosystem/gitbot-fleet/bots/panicbot/src/main.rs",
+]
+load-order = "read-at-startup, cache-in-memory, reload-on-SIGHUP"
+fail-closed = true   # if registry can't be loaded, ALL bots refuse to write
+
+[kill-switch]
+env = "HYPATIA_AUTOMATION"
+behaviour = "setting to `off`, `disabled`, or `0` halts ALL bot write actions immediately"
+check-frequency = "every-action"
