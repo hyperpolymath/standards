@@ -10,10 +10,14 @@
 #             `contractile intend progress` → diff declared-vs-observed
 #
 # Anything else in this directory is human-only notes/archive; machines ignore.
+#
+# Base: ../_base.ncl provides pedigree_schema, run_defaults, probe_schema.
+# See: docs/CONTRACTILE-SPEC.adoc
+
+let base = import "../_base.ncl" in
 
 {
-  pedigree = {
-    schema_version = "1.0.0",
+  pedigree = base.pedigree_schema & {
     contractile_verb = "intend",
     semantics = "north-star / aspirational",
     security = {
@@ -37,14 +41,20 @@
       | Array {
           id | String,
           description | String,
+          # TODO: migrate to base.probe_schema (structured probe) when CLI supports it
           probe | String | optional,     # shell command that indicates done-ness
+          # intend has its own non-standard status progression (non-gating):
+          #   'declared → 'in_progress → 'done | 'deferred | 'retired
           status | [| 'declared, 'in_progress, 'done, 'deferred, 'retired |] | default = 'declared,
           notes | String | optional,
           target_date | String | optional,
         },
   },
 
-  run = {
+  # Runner behaviour — inherits from base.run_defaults.
+  # intend never blocks; it is a report only.
+  # emit_diff is intend-specific (declared vs observed).
+  run = base.run_defaults & {
     on_pass = "continue",
     on_any_fail = "continue",         # never blocks; it's a report
     report_format = "a2ml",

@@ -11,10 +11,14 @@
 #             `contractile dust sweep --apply` → actually delete (gated)
 #
 # Anything else in this directory is human-only notes/archive; machines ignore.
+#
+# Base: ../_base.ncl provides pedigree_schema, run_defaults, probe_schema.
+# See: docs/CONTRACTILE-SPEC.adoc
+
+let base = import "../_base.ncl" in
 
 {
-  pedigree = {
-    schema_version = "1.0.0",
+  pedigree = base.pedigree_schema & {
     contractile_verb = "dust",
     semantics = "exnovation / removal",
     security = {
@@ -41,15 +45,19 @@
           description | String,
           target | String,                 # file / path / symbol / dep name
           reason | String,                 # why it's a removal candidate
+          # TODO: migrate to base.probe_schema (structured probe) when CLI supports it
           probe | String | optional,       # command that confirms it's still removable
+          # dust has a non-standard status progression (no 'verified):
+          #   'declared → 'proposed → 'approved → 'removed
           status | [| 'declared, 'proposed, 'approved, 'removed |] | default = 'declared,
           approver | String | optional,    # who signed off (for 'approved / 'removed)
           notes | String | optional,
         },
   },
 
-  run = {
-    on_pass = "continue",
+  # Runner behaviour — inherits from base.run_defaults.
+  # dust is advisory; apply_requires_approval is dust-specific.
+  run = base.run_defaults & {
     on_any_fail = "continue-with-warnings",
     report_format = "a2ml",
     emit_summary = true,

@@ -12,10 +12,14 @@
 #             `contractile lust horizon`  → group by target-horizon
 #
 # Anything else in this directory is human-only notes/archive; machines ignore.
+#
+# Base: ../_base.ncl provides pedigree_schema, run_defaults, probe_schema.
+# See: docs/CONTRACTILE-SPEC.adoc
+
+let base = import "../_base.ncl" in
 
 {
-  pedigree = {
-    schema_version = "1.0.0",
+  pedigree = base.pedigree_schema & {
     contractile_verb = "lust",
     semantics = "aspirational / wishlist / horizon",
     security = {
@@ -41,12 +45,16 @@
           description | String,
           horizon | [| 'near, 'mid, 'far |] | default = 'mid,
           why | String | optional,
+          # lust has its own non-standard status progression (non-gating):
+          #   'declared → 'in_progress → 'achieved | 'abandoned
           status | [| 'declared, 'in_progress, 'achieved, 'abandoned |] | default = 'declared,
           notes | String | optional,
         },
   },
 
-  run = {
+  # Runner behaviour — inherits from base.run_defaults.
+  # lust never blocks; emit_grouped_by_horizon is lust-specific.
+  run = base.run_defaults & {
     on_pass = "continue",
     on_any_fail = "continue",       # never blocks; it's a report
     report_format = "a2ml",

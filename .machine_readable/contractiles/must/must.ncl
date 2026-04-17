@@ -11,10 +11,14 @@
 # /var/mnt/eclipse/repos/reposystem/contractiles/cli/) loads alongside
 # Mustfile.a2ml. Anything else in this directory is human-only notes/archive
 # and MUST be ignored by machines.
+#
+# Base: ../_base.ncl provides pedigree_schema, run_defaults, probe_schema.
+# See: docs/CONTRACTILE-SPEC.adoc
+
+let base = import "../_base.ncl" in
 
 {
-  pedigree = {
-    schema_version = "1.0.0",
+  pedigree = base.pedigree_schema & {
     contractile_verb = "must",
     semantics = "invariant",
     security = {
@@ -40,7 +44,9 @@
       | Array {
           id | String,
           description | String,
+          # TODO: migrate to base.probe_schema (structured probe) when CLI supports it
           probe | String,                          # shell command; exit 0 = pass
+          # status_core values: 'declared, 'verified, 'failing
           status | [| 'declared, 'verified, 'failing |] | default = 'declared,
           severity | [| 'critical, 'high, 'medium |] | default = 'critical,
           notes | String | optional,
@@ -49,8 +55,8 @@
   },
 
   # Runner behaviour — consumed by the contractile CLI dispatcher.
-  run = {
-    on_pass = "continue",
+  # Inherits from base.run_defaults; on_any_fail is the hard-gate default.
+  run = base.run_defaults & {
     on_any_fail = "exit-nonzero",     # hard gate
     report_format = "a2ml",           # emit a2ml report, not json
     emit_summary = true,

@@ -1,0 +1,652 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+// Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Contractile System Specification
+:toc:
+:toc-placement: left
+:sectnums:
+:icons: font
+:source-highlighter: rouge
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v1.1.0, 2026-04-17
+
+== Preamble and Scope
+
+A **contractile** is a paired artefact that documents and enforces a single
+operational concern in a hyperpolymath repository. The word is borrowed from
+biology — contractile proteins do work by changing shape. A contractile here
+*does work* by declaring expectations and running probes to check they hold.
+
+Each contractile consists of exactly two files in a named verb directory:
+
+1. A *declaration file* (`<Verb>file.a2ml`) — the project-specific data.
+2. A *runner file* (`<verb>.ncl`) — the Nickel schema + runner policy.
+
+The `contractile` CLI (located at
+`reposystem/contractiles/cli/`) reads both files together, validates the
+declaration against the runner's schema contract, and executes configured
+probes.
+
+=== Scope of this document
+
+This spec covers:
+
+* The eight contractile verbs and their semantics.
+* The canonical directory layout and naming rules.
+* The shared Nickel base (`_base.ncl`) and how verb runners inherit from it.
+* The `probe` contract (current legacy String form and target structured form).
+* The k9 exception — trust-tier template infrastructure, not a verb contractile.
+* The registry (`INDEX.a2ml`) that lists all verbs.
+* Test fixture conventions.
+* CLI binding and invocation.
+* Migration notes for adopters.
+
+This spec intentionally defers:
+
+* Cross-verb composition (a `cross_refs` field — see <<composition-deferred>>).
+* Full Nickel meta-schema validation of runner files themselves (see
+  <<validator-meta-schema>>).
+* Test fixture implementation (structure is specified; fixtures are a stretch goal).
+
+== Definitions
+
+contractile-verb::
+  A single lowercase word naming a contractile concern (e.g. `must`, `trust`).
+  Determines directory name, Nickel runner file name, and (capitalised) A2ML
+  declaration file name.
+
+declaration file (xfile)::
+  The A2ML file containing project-specific data. Named `<Verb>file.a2ml`
+  where `<Verb>` is the capitalised contractile-verb. E.g. `Mustfile.a2ml`.
+  This is the file adopters edit.
+
+runner file::
+  The Nickel (`.ncl`) file containing `pedigree`, `schema`, and `run` blocks.
+  Named `<verb>.ncl` (all lowercase). This file is normally copied unchanged
+  from the standards template; adopters only edit the xfile.
+
+probe::
+  A command (currently a `String`) that the contractile CLI executes to
+  evaluate an invariant, intent, or failure-mode. Exit 0 means pass.
+  See <<probe-contract>> for the target structured form.
+
+pedigree::
+  A required top-level record in every runner file. Contains schema version,
+  verb identity, security policy, and metadata. Factored into `_base.ncl`.
+
+run-behaviour::
+  A required top-level record in every runner file. Contains pass/fail policy,
+  report format, and runner-specific flags. Defaults factored into `_base.ncl`.
+
+k9::
+  Service-automation trust-tier infrastructure. Lives alongside the verb
+  directories but is NOT itself a contractile verb. See <<k9-exception>>.
+
+== The Verb Set
+
+Eight verbs are defined. Seven follow the standard pattern; k9 is an
+exception documented in <<k9-exception>>.
+
+[cols="1,2,5", options="header"]
+|===
+| Verb | Semantics (one line) | Description
+
+| `adjust`
+| Accessibility compliance
+| Evaluates accessibility requirements (WCAG 2.1 AA baseline). Gating
+  where a deterministic fix exists; advisory otherwise. `adjust fix`
+  applies deterministic patches.
+
+| `bust`
+| Error handling + failure recovery
+| Every declared failure mode must have a working recovery path. The
+  runner injects failures via declared probes and verifies recovery.
+  Hard gate on any failure-mode with missing or broken recovery.
+
+| `dust`
+| Exnovation / removal
+| Identifies code, docs, files, and dependencies that are candidates
+  for removal. Advisory by default; active deletion gated behind
+  `--apply` flag and explicit approval per item.
+
+| `intend`
+| North-star / aspirational commitments
+| Declarative next-actions the project has committed to. Not a hard
+  gate — reports progress (declared → in_progress → done / deferred /
+  retired). Distinct from `lust` which holds wishes on the horizon axis.
+
+| `lust`
+| Aspirational / wishlist / horizon
+| Wishes and aspirations grouped by near/mid/far horizon. Never gates.
+  An item graduates from `lust` to `intend` when a concrete plan
+  materialises.
+
+| `must`
+| Invariant assertion
+| Hard-gates on every check. A single failure blocks merge. The
+  simplest and most commonly populated contractile.
+
+| `trust`
+| Security + provenance + safe-hacking
+| Integrity / provenance verifications plus an authorised safe-hacking
+  section (pen-test, chaos, fuzz probes scoped to the repo under test).
+
+| `k9` *(exception)*
+| Trust-tier automation templates
+| NOT a verb contractile. See <<k9-exception>>.
+|===
+
+== Directory Layout
+
+=== Standard verb layout
+
+----
+.machine_readable/contractiles/
+├── _base.ncl                      ← shared base (pedigree + status-core + probe-schema + run-defaults)
+├── INDEX.a2ml                     ← registry of all 8 verbs
+├── README.adoc                    ← human overview + k9 exception note
+│
+├── adjust/
+│   ├── Adjustfile.a2ml            ← declaration (data)
+│   └── adjust.ncl                 ← runner (schema + pedigree + run)
+│
+├── bust/
+│   ├── Bustfile.a2ml
+│   └── bust.ncl
+│
+├── dust/
+│   ├── Dustfile.a2ml
+│   └── dust.ncl
+│
+├── intend/
+│   ├── Intendfile.a2ml            ← note: Intendfile, NOT Intentfile
+│   └── intend.ncl
+│
+├── lust/
+│   ├── Lustfile.a2ml
+│   └── lust.ncl
+│
+├── must/
+│   ├── Mustfile.a2ml
+│   └── must.ncl
+│
+├── trust/
+│   ├── Trustfile.a2ml
+│   └── trust.ncl
+│
+└── k9/                            ← EXCEPTION: trust-tier templates, not a verb
+    ├── README.adoc
+    ├── template-kennel.k9.ncl
+    ├── template-yard.k9.ncl
+    └── template-hunt.k9.ncl
+----
+
+Each verb directory MUST contain exactly:
+
+* One `<Verb>file.a2ml` (capitalised verb, e.g. `Mustfile.a2ml`).
+* One `<verb>.ncl` runner (lowercase verb, e.g. `must.ncl`).
+
+Anything else in a verb directory is human notes or archive; machines ignore it.
+
+== Naming Rules
+
+1. **Verb is always lowercase.** The directory name, the `.ncl` file name, and
+   the verb field inside `pedigree` all use the lowercase verb: `must`, not `Must`.
+
+2. **Declaration file uses capitalised verb.** `Mustfile.a2ml`, `Bustfile.a2ml`,
+   `Intendfile.a2ml` — capitalised Verb, `file`, `.a2ml`. No underscores, no
+   spaces, no hyphens in the file name.
+
+3. **The verb is the verb, not a related noun.** The `intend` verb's file is
+   `Intendfile.a2ml`, NOT `Intentfile.a2ml`. The file tracks the naming rule
+   (`intend` + `file`), not English grammar. This was a drift issue fixed in
+   this spec version (see <<migration-notes>>).
+
+4. **k9 follows none of the above.** k9 is the explicit exception
+   (see <<k9-exception>>).
+
+== Shared Base (`_base.ncl`)
+
+All seven verb runner files import
+`.machine_readable/contractiles/_base.ncl`. The base provides four
+named fragments that verb runners overlay with verb-specific fields.
+
+=== `pedigree_schema`
+
+Defines the canonical shape of the `pedigree` block:
+
+[source,nickel]
+----
+pedigree_schema = {
+  schema_version | String,           # semver e.g. "1.0.0"
+  contractile_verb | String,         # lowercase verb name
+  semantics | String,                # one-line description
+  security = {
+    leash | [| 'Kennel, 'Yard, 'Hunt |],
+    trust_level | String,
+    allow_network | Bool,
+    allow_filesystem_write | Bool,
+    allow_subprocess | Bool,
+    # verbs may add additional fields (e.g. authorised_probes_only, injection_scope)
+  },
+  metadata = {
+    name | String,
+    version | String,
+    description | String,
+    paired_xfile | String,
+    author | String,
+  },
+}
+----
+
+=== `status_core`
+
+The minimum shared status enum present in every verb:
+
+[source,nickel]
+----
+# [| 'declared, 'verified, 'failing |]
+# Verbs extend this with their own states.
+# Nickel does not have direct enum-extension syntax; verb files reproduce
+# the full enum and note which values are from status_core.
+status_core_values = ["declared", "verified", "failing"]
+----
+
+=== `probe_schema` (target structured form)
+
+The *target* shape for probes. Existing verb files carry `probe | String`
+with a `# TODO: migrate to probe_schema` comment. See <<probe-contract>>.
+
+[source,nickel]
+----
+probe_schema = {
+  command | String,
+  timeout_seconds | Number | default = 300,
+  allowed_exit_codes | Array Number | default = [0],
+  permission_class
+    | [| 'read_only, 'filesystem_write, 'subprocess, 'network |]
+    | default = 'read_only,
+}
+----
+
+=== `severity_core`
+
+[source,nickel]
+----
+# [| 'critical, 'high, 'medium, 'low |]
+# Not all verbs use all severity levels.
+----
+
+=== `run_defaults`
+
+Default runner behaviour inherited by all verbs:
+
+[source,nickel]
+----
+run_defaults = {
+  on_pass = "continue",
+  on_any_fail = "exit-nonzero",
+  report_format = "a2ml",
+  emit_summary = true,
+}
+----
+
+Verb runners import `_base.ncl` with:
+
+[source,nickel]
+----
+let base = import "../_base.ncl" in
+----
+
+Then overlay verb-specific values:
+
+[source,nickel]
+----
+pedigree = base.pedigree_schema & {
+  contractile_verb = "must",
+  semantics = "invariant",
+  security = {
+    leash = 'Kennel,
+    trust_level = "read-only verification",
+    allow_network = false,
+    allow_filesystem_write = false,
+    allow_subprocess = true,
+  },
+  metadata = {
+    name = "must-runner",
+    version = "1.0.0",
+    description = "...",
+    paired_xfile = "Mustfile.a2ml",
+    author = "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>",
+  },
+},
+----
+
+[source,nickel]
+----
+run = base.run_defaults & {
+  on_any_fail = "exit-nonzero",    # hard gate
+  # verb-specific overrides here
+},
+----
+
+== Per-Verb Extension
+
+Each verb's `.ncl` file:
+
+1. Imports `_base.ncl` at the top of the file.
+2. Declares `pedigree` by merging `base.pedigree_schema` with verb-specific values.
+3. Declares `schema` — the business shape (invariants, failure_modes, intents,
+   etc.). This is verb-specific and NOT factored into the base.
+4. Declares `run` by merging `base.run_defaults` with verb-specific overrides.
+
+The `schema` block is intentionally NOT shared. Each verb's primary array has a
+different shape; factoring it would obscure more than it shared.
+
+=== Status enums per verb
+
+[cols="1,3", options="header"]
+|===
+| Verb | Status values (from status_core + extensions)
+
+| `adjust`
+| `'declared`, `'partial`, `'verified`, `'failing`
+
+| `bust`
+| `'declared`, `'drilled`, `'verified`, `'failing`
+
+| `dust`
+| `'declared`, `'proposed`, `'approved`, `'removed`
+
+| `intend`
+| `'declared`, `'in_progress`, `'done`, `'deferred`, `'retired`
+
+| `lust`
+| `'declared`, `'in_progress`, `'achieved`, `'abandoned`
+
+| `must`
+| `'declared`, `'verified`, `'failing`
+
+| `trust`
+| `'declared`, `'verified`, `'failing`
+|===
+
+`must` and `trust` use `status_core` exactly; the others extend it.
+
+[[composition-deferred]]
+== Composition Primitive (DEFERRED)
+
+A `cross_refs` field would allow verb A to express a dependency on verb B:
+
+[source,nickel]
+----
+# DEFERRED: not implemented in current verb files.
+# cross_refs = [
+#   { verb = "must", xfile = "../must/Mustfile.a2ml", relation = "depends_on_pass" }
+# ]
+----
+
+This is deferred because:
+
+* Implementing it requires CLI support for transitive dependency resolution.
+* No concrete cross-verb rule has been identified that would use it yet.
+* Scope would balloon the refactor beyond one session.
+
+When this is implemented, the base will gain a `cross_refs_schema` fragment and
+verbs will optionally declare it.
+
+[[probe-contract]]
+== Probe Contract
+
+=== Current form (legacy)
+
+Every verb currently uses `probe | String`. A probe is a shell command; exit 0
+means pass. Example:
+
+[source,nickel]
+----
+probe | String,   # shell command; exit 0 = pass
+----
+
+=== Target form (structured)
+
+The target structured probe replaces the plain String with:
+
+[source,nickel]
+----
+probe | {
+  command | String,
+  timeout_seconds | Number | default = 300,
+  allowed_exit_codes | Array Number | default = [0],
+  permission_class
+    | [| 'read_only, 'filesystem_write, 'subprocess, 'network |]
+    | default = 'read_only,
+},
+----
+
+This is a *breaking change* from existing xfiles (which use plain String probes).
+The migration path is:
+
+1. The structured form is declared in `_base.ncl` as `probe_schema`.
+2. Existing verb runner files retain `probe | String` with a
+   `# TODO: migrate to probe_schema` comment.
+3. CLI migration will happen in a future session when all xfiles are updated.
+
+Adopters writing new xfiles should prefer the structured form where possible.
+
+[[k9-exception]]
+== K9 Exception
+
+`k9/` is **not a contractile verb**. It is trust-tier template infrastructure
+that sits alongside the verb directories.
+
+=== Why k9 is different
+
+The eight verbs each declare *one concern per repo*. k9 is not a concern; it is
+the *graded automation surface* that enforces or validates concern declarations.
+k9 provides three trust-tier templates that repos copy and instantiate:
+
+[cols="1,1,3", options="header"]
+|===
+| File | Trust tier | What it does
+
+| `template-kennel.k9.ncl`
+| Kennel
+| Pure data, no execution. No subprocess, no filesystem write, no network.
+  Safe for metadata and declarative settings.
+
+| `template-yard.k9.ncl`
+| Yard
+| Nickel evaluation with contracts; no side effects. Used for validated config.
+
+| `template-hunt.k9.ncl`
+| Hunt
+| Full execution surface. Declares side effects, supports dry-run, requires
+  signature before estate-wide trust.
+|===
+
+=== Why the naming rule does not apply
+
+The one-verb-one-Verbfile rule exists to enforce a clean concern separation.
+k9 is meta-infrastructure, not a concern: it does not have a single
+`K9file.a2ml` declaration because it is not a declarative xfile — it is a
+template set that instantiates into specific repos. Applying the rule would
+produce a meaningless `K9file.a2ml` with nothing to declare.
+
+=== Audit rule
+
+If a repo claims `k9` enforcement, each `k9` component in that repo MUST
+declare a `paired_xfile` pointing to a specific contractile declaration (e.g.
+`Mustfile.a2ml`). Floating k9 components with no paired xfile are non-conformant.
+
+See `k9/README.adoc` for the full k9 pattern, security model, and usage
+instructions.
+
+[[validator-meta-schema]]
+== Validator Meta-Schema (DEFERRED — Spec Only)
+
+A meta-schema would validate the runner `.ncl` files themselves, ensuring
+every verb runner:
+
+* Has a `pedigree` block matching `pedigree_schema`.
+* Has a `schema` block with at least one named array field.
+* Has a `run` block with `on_pass`, `on_any_fail`, `report_format`, `emit_summary`.
+* Carries a valid `SPDX-License-Identifier` header comment.
+
+Implementation approach: a top-level `contractile-meta.ncl` that imports each
+verb's `.ncl` and applies contracts. Deferred because:
+
+* Nickel's import system would require all verb files to satisfy the same top-level
+  contract type, which conflicts with their structural diversity.
+* The practical benefit is limited until the CLI enforces it.
+
+When implemented, place as `.machine_readable/contractiles/contractile-meta.ncl`.
+
+== Registry (`INDEX.a2ml`)
+
+`.machine_readable/contractiles/INDEX.a2ml` is the machine-readable catalogue
+of all eight verbs. It lists:
+
+* Verb name and one-line semantics.
+* The file pair (declaration + runner).
+* Active vs exception status.
+* Notes for exceptions.
+* The base schema location.
+* Meta-schema status.
+
+Format: A2ML (TOML-like, not JSON). See the actual `INDEX.a2ml` file.
+
+Consumers of the contractile system (CI scripts, the `contractile` CLI, Hypatia
+rules) SHOULD read `INDEX.a2ml` to discover available verbs rather than hard-coding
+the list.
+
+== Test Fixtures (Spec — Implementation is a Stretch Goal)
+
+Each verb directory SHOULD eventually contain:
+
+----
+<verb>/
+├── <Verb>file.a2ml       ← live declaration
+├── <verb>.ncl            ← runner
+└── examples/
+    ├── valid.a2ml        ← minimal valid xfile that the runner accepts
+    └── invalid/
+        ├── missing_id.a2ml       ← xfile missing required `id` field
+        ├── wrong_status.a2ml     ← xfile with invalid status enum value
+        └── empty_array.a2ml     ← xfile with an empty primary array
+----
+
+The `contractile <verb> typecheck examples/valid.a2ml` command MUST exit 0.
+The `contractile <verb> typecheck examples/invalid/*.a2ml` commands MUST exit non-zero.
+
+Implementation of fixtures is deferred from this refactor.
+
+== CLI Binding
+
+The `contractile` CLI lives at:
+
+  /var/mnt/eclipse/repos/reposystem/contractiles/cli/
+
+It is a Rust workspace (`Cargo.toml` + `crates/`). Each verb maps to a
+subcommand with verb-specific subsubcommands:
+
+[cols="1,2", options="header"]
+|===
+| Invocation | Action
+
+| `contractile must run`
+| Read `Mustfile.a2ml`, run invariant probes, exit non-zero if any fail.
+
+| `contractile must typecheck <file>`
+| Validate xfile against `must.ncl` schema; do not run probes.
+
+| `contractile bust check`
+| List declared failure modes + recovery status.
+
+| `contractile bust drill`
+| Inject declared failures, verify recovery paths.
+
+| `contractile adjust check`
+| Run all probes, list violations.
+
+| `contractile adjust fix`
+| Apply deterministic fixes where defined.
+
+| `contractile dust find`
+| List removal candidates.
+
+| `contractile dust sweep [--apply]`
+| Dry-run or actual removal (gated behind `--apply` + approval).
+
+| `contractile intend run`
+| Print status table.
+
+| `contractile intend progress`
+| Diff declared-vs-observed.
+
+| `contractile lust run`
+| Print wishlist.
+
+| `contractile lust horizon`
+| Group by target-horizon.
+
+| `contractile trust verify`
+| Run all verifications (read-only).
+
+| `contractile trust probe`
+| Run declared safe-hacking probes.
+|===
+
+NOTE: The CLI was confirmed present at `reposystem/contractiles/cli/` on
+2026-04-17. Verify CLI version compatibility with runner schema version via
+`contractile --version`.
+
+[[migration-notes]]
+== Migration Notes
+
+=== Intentfile → Intendfile rename (2026-04-17)
+
+The file `intend/Intentfile.a2ml` was incorrectly named. The naming rule is
+`<verb>file.a2ml` where verb is `intend`, so the correct name is
+`Intendfile.a2ml`. Renamed to comply with the rule documented in this spec.
+
+If any repo copies contain `Intentfile.a2ml`, rename it:
+
+[source,bash]
+----
+git mv intend/Intentfile.a2ml intend/Intendfile.a2ml
+----
+
+Update `intend.ncl`'s `paired_xfile` field to `"Intendfile.a2ml"`.
+
+=== Bustfile.a2ml was empty (2026-04-17)
+
+`bust/Bustfile.a2ml` was 1 byte (empty). Populated with a minimal seed skeleton
+in this refactor. Repos that copied the template before 2026-04-17 may have an
+empty Bustfile; populate it with real failure modes.
+
+=== Legacy String probes
+
+All current verb runner files use `probe | String`. The target structured form
+(see <<probe-contract>>) is specified in `_base.ncl` as `probe_schema` but is
+not yet enforced. The migration will happen when the CLI is updated to accept
+both forms. Until then, all existing xfiles with String probes are valid.
+
+=== `_base.ncl` import
+
+Runner files in this template set now import `_base.ncl` for shared pedigree
+and run-defaults. Repos that copied verb runners before this refactor can
+update by adding the import line at the top and replacing duplicated pedigree
+blocks with the merged form. This is backwards-compatible — old runners remain
+valid.
+
+== SPDX and Attribution
+
+All files in this spec and the contractile system carry:
+
+  SPDX-License-Identifier: PMPL-1.0-or-later
+
+MPL-2.0 is the automatic legal fallback until PMPL achieves formal recognition.
+
+Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> +
+Copyright: Jonathan D.A. Jewell, Open University

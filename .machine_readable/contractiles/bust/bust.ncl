@@ -11,10 +11,14 @@
 #             `contractile bust drill`  → inject declared failures, verify recovery
 #
 # Anything else in this directory is human-only notes/archive; machines ignore.
+#
+# Base: ../_base.ncl provides pedigree_schema, run_defaults, probe_schema.
+# See: docs/CONTRACTILE-SPEC.adoc
+
+let base = import "../_base.ncl" in
 
 {
-  pedigree = {
-    schema_version = "1.0.0",
+  pedigree = base.pedigree_schema & {
     contractile_verb = "bust",
     semantics = "error handling + failure recovery",
     security = {
@@ -40,16 +44,20 @@
           id | String,
           description | String,
           class | [| 'network, 'disk_full, 'oom, 'timeout, 'partial_write, 'panic, 'crash, 'rollback, 'concurrency |],
+          # TODO: migrate to base.probe_schema (structured probe) when CLI supports it
           injection_probe | String,          # command that deterministically causes this failure
+          # TODO: migrate to base.probe_schema (structured probe) when CLI supports it
           recovery_probe | String,           # command that verifies recovery (exit 0 = recovered)
           expected_recovery_time_seconds | Number | default = 30,
+          # status_core values: 'declared, 'verified, 'failing; bust adds 'drilled
           status | [| 'declared, 'drilled, 'verified, 'failing |] | default = 'declared,
           notes | String | optional,
         },
   },
 
-  run = {
-    on_pass = "continue",
+  # Runner behaviour — inherits from base.run_defaults.
+  # bust adds record_recovery_times for performance tier feeding.
+  run = base.run_defaults & {
     on_any_fail = "exit-nonzero",         # missing or broken recovery blocks merge
     report_format = "a2ml",
     emit_summary = true,
