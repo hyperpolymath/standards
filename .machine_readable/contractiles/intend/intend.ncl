@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: PMPL-1.0-or-later
 # Intend — north-star runner (verb is `intend`, not `intent`)
 #
-# Pairs with: Intentfile.a2ml (same directory)
+# Pairs with: Intendfile.a2ml (same directory)
 # Verb:       intend
 # Semantics:  declarative aspirations. Not a gate — reports progress toward
 #             target state. Items can be declared / in-progress / done /
@@ -27,7 +27,7 @@
       name = "intend-runner",
       version = "1.0.0",
       description = "Reports progress toward declared future-state intents. Non-gating.",
-      paired_xfile = "Intentfile.a2ml",
+      paired_xfile = "Intendfile.a2ml",
       author = "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>",
     },
   },
