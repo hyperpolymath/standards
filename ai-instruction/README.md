@@ -1,0 +1,70 @@
+<!--
+SPDX-License-Identifier: PMPL-1.0-or-later
+(MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+-->
+
+# `ai-instruction/` — briefing templates for large language models
+
+## Scope
+
+This directory contains **prompt templates and delegation guidance** used when a
+human (or orchestrating model) gives work to a specific LLM model tier. It is
+**advice to the prompter**, not configuration consumed by a bot.
+
+Three model tiers are covered, each in its own file:
+
+- [`haiku.md`](haiku.md) — mechanical sweeps, enumerable audits, formatting passes
+- [`sonnet.md`](sonnet.md) — mid-tier implementation, non-trivial refactors, test
+  authoring, local reasoning
+- [`opus.md`](opus.md) — proof work, language/compiler design, novel architecture,
+  cross-repo synthesis, supervision of other models
+
+## What this directory is **NOT**
+
+This directory must not be confused with the estate's **bot directive** channel.
+
+| Concern | Location | Audience | Format |
+|---|---|---|---|
+| **Briefing templates for prompting LLMs** (this dir) | `standards/ai-instruction/` | Humans + orchestrating LLMs writing delegation prompts | Markdown prose |
+| **Repo-local machine-readable directives** | `<repo>/.machine_readable/` (`6a2/`, `contractiles/`, `anchors/`, etc.) | `gitbot-fleet`, `hypatia`, `coordination.k9`, MCP guardian | A2ML |
+
+The `.machine_readable/` channel tells the gitbot-fleet *how this particular
+repo behaves* — its invariants, contractiles, neurosymbolic rules, canonical
+file locations. It is consumed mechanically by bots at CI time and by the MCP
+guardian at agent session start.
+
+This directory (`ai-instruction/`) is a different channel entirely: it tells
+*a prompter* how to choose and structure a request to a given model tier so the
+output is useful. The bot fleet never reads these files; they are editorial
+guidance that lives alongside the other human-readable standards in this repo.
+
+If you find yourself mixing the two — e.g. putting "tell Haiku to audit this
+repo" advice into a repo's `.machine_readable/AGENTIC.a2ml` — stop; that advice
+belongs here.
+
+## How to use
+
+Before delegating a task to a model:
+
+1. Decide the tier (see the per-model files for task-fitness tables).
+2. Copy the relevant file's **prompt scaffold** and fill in the task-specific
+   blocks.
+3. Include the model's **hard rules** section verbatim (the model will not
+   follow rules it cannot see — memory and global CLAUDE.md do not transfer to
+   delegated subagents).
+4. Decide your trust level ahead of time (per that model's trust guidance) and
+   spot-check before acting.
+
+## Cross-references
+
+- [`llm-warmup-dev.md`](../llm-warmup-dev.md) / [`llm-warmup-user.md`](../llm-warmup-user.md)
+  — project-level context primers (what this repo *is*, not how to prompt an LLM)
+- [`0-ai-gatekeeper-protocol/`](../0-ai-gatekeeper-protocol/) — the enforcement
+  side: MCP guardian + FUSE wrapper that stop agents from violating repo
+  invariants
+- [`0-AI-MANIFEST.a2ml`](../0-AI-MANIFEST.a2ml) — the repo's own machine-readable
+  manifest that agents read at session start
+
+## License
+
+PMPL-1.0-or-later (MPL-2.0 automatic legal fallback).
