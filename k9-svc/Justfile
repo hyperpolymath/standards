@@ -32,6 +32,9 @@ check-deps:
     @command -v file >/dev/null 2>&1 && echo "  ✓ file: available" || echo "  ○ file: not installed"
     @echo "K9: Dependency check complete."
 
+# Compatibility alias from previous Makefile workflow
+check: check-deps
+
 # Sync .machine_readable metadata into 6scm mirrors
 sync-6scm:
     @mkdir -p .machine_readable/6scm
@@ -87,6 +90,46 @@ verify-mime:
 # Full MIME setup (user-level)
 setup-mime: install-mime install-magic
     @echo "K9: Full MIME setup complete."
+
+# Install K9 user tooling and schemas (Makefile parity)
+install:
+    @prefix="${PREFIX:-$HOME/.local}"; \
+    bindir="$$prefix/bin"; \
+    sharedir="$$prefix/share/k9"; \
+    mimedir="$$prefix/share/mime/packages"; \
+    echo "K9: Installing to $$prefix..."; \
+    mkdir -p "$$bindir" "$$sharedir" "$$sharedir/examples" "$$sharedir/assets" "$$mimedir"; \
+    install -m 755 must "$$bindir/k9-must"; \
+    install -m 755 sign.sh "$$bindir/k9-sign"; \
+    install -m 644 Justfile "$$sharedir/Justfile"; \
+    install -m 644 pedigree.ncl register.ncl leash.ncl "$$sharedir/"; \
+    install -m 644 examples/*.k9 "$$sharedir/examples/" 2>/dev/null || true; \
+    install -m 644 examples/*.k9.ncl "$$sharedir/examples/" 2>/dev/null || true; \
+    install -m 644 assets/*.svg "$$sharedir/assets/" 2>/dev/null || true; \
+    install -m 644 mime/k9.xml "$$mimedir/"; \
+    update-mime-database "$$prefix/share/mime" 2>/dev/null || true; \
+    install -m 644 README.adoc SPEC.adoc GUIDE.adoc LICENSE "$$sharedir/" 2>/dev/null || true; \
+    printf '#!/bin/sh\nexec just --justfile %s/share/k9/Justfile "$$@"\n' "$$prefix" > "$$bindir/k9"; \
+    chmod 755 "$$bindir/k9"; \
+    echo "K9: Installation complete."
+
+install-system:
+    @PREFIX=/usr/local just install
+
+uninstall:
+    @prefix="${PREFIX:-$HOME/.local}"; \
+    bindir="$$prefix/bin"; \
+    sharedir="$$prefix/share/k9"; \
+    mimedir="$$prefix/share/mime/packages"; \
+    echo "K9: Uninstalling from $$prefix..."; \
+    rm -f "$$bindir/k9" "$$bindir/k9-must" "$$bindir/k9-sign"; \
+    rm -rf "$$sharedir"; \
+    rm -f "$$mimedir/k9.xml"; \
+    update-mime-database "$$prefix/share/mime" 2>/dev/null || true; \
+    echo "K9: Uninstallation complete."
+
+uninstall-system:
+    @PREFIX=/usr/local just uninstall
 
 # ─────────────────────────────────────────────────────────────
 # Validation (The Brain)
