@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# HYP-S005 — CRG Overclaim Detector
+# Flags repos self-declaring a CRG grade that lacks the evidence artefacts
+# required by CRG v2.0 (STRICT). Sibling rule to HYP-S001 (demotion detector):
+# HYP-S001 catches backwards moves; HYP-S005 catches forwards-overshoots.
+#
+# Evidence thresholds are derived from the boj-server 2026-04-18 audit,
+# which became the first worked example of a v2.0 grade read. See:
+#   boj-server/docs/governance/CRG-AUDIT-2026-04-18.adoc
+#   rsr-template-repo/docs/governance/CRG-AUDIT-TEMPLATE.adoc
+
+@rule(version="1.0"):
+id: HYP-S005
+name: "CRG overclaim detector"
+description: "Alert when a self-declared CRG grade in STATE.a2ml is not backed by the v2.0 evidence artefacts required for that grade"
+severity: high
+category: StandardsCompliance
+auto_fixable: false
+source: standards/hypatia-rules
+
+@scanner(type="file-tree"):
+# Ingest the declared grade from every repo with machine-readable state.
+find:
+  - glob: "**/.machine_readable/STATE.a2ml"
+  - glob: "**/.machine_readable/6a2/STATE.a2ml"
+  - glob: "**/.machine_readable/**/STATE.scm"
+@end
+
+@logic(engine="built-in"):
+# Parse the declared grade, then check evidence thresholds per grade.
+# A repo is *overclaimed* if its declared grade exceeds what the evidence
+# supports under v2.0.
+steps:
+  - parse_state: "STATE.a2ml"
+    extract:
+      - key: "crg-grade"
+        as: declared
+      - key: "crg-grade-achieved"
+        as: declared_date
+  - classify_repo: "by declared grade"
+  - run_evidence_checks: "per grade threshold below"
+  - emit_if_gap
+@end
+
+@evidence_thresholds:
+# What each grade REQUIRES, as file-tree signals the scanner can verify.
+# If the declared grade is >= the row and any `requires` item is missing,
+# the repo is overclaimed and a finding is emitted.
+
+D:
+  requires:
+    # RSR D-floor (mandatory for D and above)
+    - file: ".machine_readable/6a2/STATE.a2ml"
+      or_file: ".machine_readable/STATE.a2ml"
+      reason: "RSR R-040 (A2ML metadata)"
+    - file: "README.adoc"
+      or_file: "README.md"
+      reason: "RSR R-001 (orientation)"
+    - file: "LICENSE"
+      reason: "RSR R-004"
+    - file: "Justfile"
+      or_file: "justfile"
+      reason: "RSR R-020 (no Makefiles)"
+    - path: "tests/"
+      or_path: "test/"
+      or_path: "spec/"
+      reason: "v2.0 D needs a test matrix"
+    - path: ".github/workflows/"
+      reason: "CI evidence of D"
+  evidence_of:
+    - "test matrix documented in STATE.a2ml ([test-matrix] or total-tests)"
+    - "scope documented in STATE.a2ml, ROADMAP.adoc or TOPOLOGY.md"
+
+C:
+  requires_all_of: "D"
+  requires:
+    # v2.0 C adds: dogfooding, CI green, deep per-file + per-directory annotation
+    - path: "docs/architecture/"
+      reason: "C requires per-directory orientation — architecture subtree"
+    - file: "docs/READINESS.md"
+      or_file: "docs/READINESS.adoc"
+      reason: "C needs a per-component readiness assessment"
+    - file: "docs/EXPLAINME.adoc"
+      reason: "RSR C annotation floor"
+    - state_key: "dogfooding-status"
+      in_file: ".machine_readable/6a2/STATE.a2ml"
+      reason: "C requires documented dogfooding evidence"
+  evidence_of:
+    - "CI green in last 7 days (workflow run log)"
+    - "per-<<unit>> README coverage >= 90% (cartridges, panels, plugins, modules)"
+    - "per-directory orientation README in every non-trivial source subtree"
+    - "non-axiomatic believe_me / Admitted / sorry / assert_total = 0"
+
+B:
+  requires_all_of: "C"
+  requires:
+    - state_key: "external-targets"
+      in_file: ".machine_readable/6a2/STATE.a2ml"
+      reason: "B requires 6+ diverse external targets tested"
+    - state_key: "issues-fed-back"
+      in_file: ".machine_readable/6a2/STATE.a2ml"
+      reason: "B requires an issues-fed-back pipeline"
+  evidence_of:
+    - "6+ diverse external-target entries, each with identity + date + outcome"
+    - "external-issue label in the repo's issue tracker with >=1 closed issue"
+    - "feedback log or changelog entry attributing a change to an external target"
+  negative_signal:
+    - "internal-capability items (QUIC, multinode, etc.) do NOT count as external targets"
+
+A:
+  requires_all_of: "B"
+  requires:
+    - state_key: "field-signal"
+      in_file: ".machine_readable/6a2/STATE.a2ml"
+      reason: "A requires real-world external feedback confirming value"
+  evidence_of:
+    - "multi-source external usage confirmation (testimonials, third-party writeups, papers citing)"
+    - "no harm signal: no unresolved safety / correctness incidents in last 90 days"
+@end
+
+@action:
+emit_signal: compliance.finding.new
+message_template: >-
+  CRG overclaim: {component} self-declares {declared} but fails {missing_requirement}
+  (reason: {reason}). Per CRG v2.0 "honest D > dishonest B" — demote or provide
+  evidence. See rsr-template-repo/docs/governance/CRG-AUDIT-TEMPLATE.adoc.
+recipe: none
+halt_on_violation: false
+dedupe_window_days: 7
+@end
+
+@sibling_rules:
+- HYP-S001 crg-demotion-detector — fires on backwards moves
+- HYP-S003 proof-freshness       — fires on stale proof artefacts (C evidence)
+- HYP-S004 rsr-self-compliance   — RSR D-floor verifier
+@end
+
+@end
