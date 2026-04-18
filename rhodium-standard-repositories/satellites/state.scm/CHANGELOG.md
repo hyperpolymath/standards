@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - CONTRIBUTING.adoc
   - GOVERNANCE.adoc
   - flake.nix for Nix reproducibility
-  - justfile for task automation
+  - Justfile for task automation
   - Containerfile for Podman/Docker
 
 ### Changed

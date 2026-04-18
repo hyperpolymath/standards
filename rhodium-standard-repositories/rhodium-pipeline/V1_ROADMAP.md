@@ -57,7 +57,7 @@ rhodium-pipeline/
 │   │   ├── schemas/
 │   │   │   └── config.cue.liquid
 │   │   ├── config.ncl.liquid
-│   │   ├── justfile.liquid
+│   │   ├── Justfile.liquid
 │   │   └── ...
 ├── docs/
 │   ├── HANDOVER.md
@@ -129,7 +129,7 @@ The generated project should:
 
 Template variable `include-julia: true/false` that:
 - Adds Julia project files when true
-- Adds Julia recipes to justfile
+- Adds Julia recipes to Justfile
 - Includes Julia↔Rust FFI skeleton
 
 #### 3.2 Proof Starter Library
@@ -160,7 +160,7 @@ Reusable validation patterns:
 | Isabelle .thy template | Medium | Domain knowledge |
 | CUE schema template | Easy | None |
 | Nickel config template | Easy | None |
-| justfile template | Medium | All above |
+| Justfile template | Medium | All above |
 | check_deps.sh | Easy | None |
 | QUICKSTART.md | Medium | Working template |
 | CI pipeline | Medium | Working template |
@@ -182,7 +182,7 @@ Reusable validation patterns:
           ↓
 5. Create minimal CUE + Nickel templates
           ↓
-6. Create justfile with all categories
+6. Create Justfile with all categories
           ↓
 7. Write check_deps.sh
           ↓

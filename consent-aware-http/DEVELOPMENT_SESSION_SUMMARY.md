@@ -46,7 +46,7 @@ This document summarizes the comprehensive autonomous development session that t
 - ✅ CHANGELOG.md (version tracking)
 - ✅ CODE_OF_CONDUCT.md (community standards)
 - ✅ .well-known/ directory (RFC 9116 + AIBDP + humans.txt + ai.txt)
-- ✅ justfile (30+ build/validation recipes)
+- ✅ Justfile (30+ build/validation recipes)
 - ✅ flake.nix (reproducible Nix builds)
 - ✅ **Bronze+ RSR compliance achieved**
 
@@ -400,7 +400,7 @@ Each scenario includes:
 ### Commits
 1. Add CLAUDE.md documentation for AI assistants
 2. Add RSR framework compliance: governance and .well-known/
-3. Add build system: justfile and flake.nix for RSR compliance
+3. Add build system: Justfile and flake.nix for RSR compliance
 4. Add AIBDP Internet-Draft specification and JSON Schema
 5. Add Node.js/Express reference implementation for AIBDP + HTTP 430
 6. Add Python/Flask reference implementation for AIBDP + HTTP 430

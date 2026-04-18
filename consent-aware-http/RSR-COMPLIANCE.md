@@ -20,7 +20,7 @@ This project achieves **RSR Gold** standard for specification repositories throu
 - Complete governance framework (TPCF)
 - Comprehensive .well-known/ directory
 - Dual-licensing with ethical encouragement
-- Reproducible builds (Nix + justfile)
+- Reproducible builds (Nix + Justfile)
 - RSR-compliant formatting (AsciiDoc)
 
 ---

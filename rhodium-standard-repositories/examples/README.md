@@ -162,7 +162,7 @@ All examples demonstrate:
 - .well-known/humans.txt (attribution)
 
 ### ✅ Build System
-- justfile (task runner)
+- Justfile (task runner)
 - flake.nix (Nix reproducible builds)
 - .gitlab-ci.yml (CI/CD)
 
@@ -251,7 +251,7 @@ Want to contribute a new example?
 **Requirements**:
 - Must achieve minimum Bronze compliance (75%)
 - Must include all required documentation files
-- Must have working build system (justfile + flake.nix)
+- Must have working build system (Justfile + flake.nix)
 - Must have .well-known/ directory
 - Must have SPDX headers on all source files
 
