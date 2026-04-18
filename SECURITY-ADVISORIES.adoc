@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+
+= Security advisories — triage log
+:toc:
+:toclevels: 2
+
+Triaged record of open / deferred / closed Dependabot advisories against
+`hyperpolymath/standards`. Updated whenever an advisory is resolved or a
+deferral is re-evaluated.
+
+== Closed
+
+=== GHSA-xgp8-3hg3-c2mh + GHSA-965h-392x-2mh5 (rustls-webpki, low, 2026-04-18)
+
+`rustls-webpki` 0.103.10 → 0.103.12 in
+`rhodium-standard-repositories/satellites/rsr-certifier/Cargo.lock`.
+Transitive dep, Cargo.lock-only bump. Both advisories closed by the
+same upstream patch level.
+
+== Deferred (with reason)
+
+=== GHSA-cq8v-f236-94qc — `rand` < 0.9.3 (3 locations, low, triaged 2026-04-18)
+
+*Advisory:* `rand::rng()` is unsound when a custom global logger
+invokes the default RNG from inside its logging hook. First patched
+version: `rand` 0.9.3. Severity: low.
+
+*Affected manifests, and exposure assessment:*
+
+[cols="1,2,1,3"]
+|===
+|Manifest |Path to `rand` |Exposure |Blocker
+
+|`k9-svc/k9-sign/Cargo.toml`
+|Direct declaration (`rand = "0.8"`) + `ed25519-dalek` 2.2 for Ed25519 keygen.
+|Production. Uses `rand::rngs::OsRng` as the CSPRNG for signing-key generation — never invokes the global `rand::rng()` path that the advisory targets.
+|`ed25519-dalek` 2.x requires `rand_core` 0.6; only `ed25519-dalek` 3.0 (currently pre-release `3.0.0-pre.6`) uses `rand_core` 0.9. Stable-track upgrade blocked until `ed25519-dalek` 3.x stabilises upstream.
+
+|`k9-svc/tools/src/k9-init/Cargo.lock`
+|Transitive via `tera` 1.20 → `rand` 0.8.5; also `phf_generator` → `chrono-tz-build` (build-dep only).
+|Build-time / template-render only. `k9-init` does not install a custom global logger.
+|`tera` 1.x still pins `rand` 0.8. Fix requires upstream `tera` 2.x migration (or a replacement template engine).
+
+|`rhodium-standard-repositories/examples/enterprise-service/Cargo.lock`
+|Dev-dependency via `axum-test` → `rust-multipart-rfc7578_2`.
+|Test-time only. `enterprise-service` does not ship any binary that embeds `axum-test`.
+|`rust-multipart-rfc7578_2` still depends on `rand` 0.8. Fix requires upstream (or replacing `axum-test` in dev-deps).
+|===
+
+*Re-evaluate trigger:* once `ed25519-dalek` 3.0 goes stable OR
+`tera` / `axum-test` upstream publish a release that uses `rand` 0.9+,
+re-run the triage and either bump or re-defer.
+
+*Decision:* Deferred. All three exposures are either non-reachable
+(none of the three codebases installs a custom global logger that
+re-enters the RNG) or non-production (dev-dep / build-dep only). Low
+severity is consistent with that residual-risk picture.
