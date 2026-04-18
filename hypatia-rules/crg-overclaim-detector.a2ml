@@ -172,7 +172,10 @@ grade_ge_c_but_early_stage:
   condition: >-
     parse_state.crg-grade IN {"C", "B", "A"}
     AND parse_state.version < "0.5.0"
-    AND parse_state.completion-percentage < 50
+    AND (
+      parse_state.completion-percentage < 50
+      OR parse_state.completion-percentage IS empty_or_absent
+    )
     AND parse_state.dogfooding-status IS empty_or_absent
   severity: high
   finding_kind: self-inconsistent-claim
@@ -180,10 +183,26 @@ grade_ge_c_but_early_stage:
     - "[dogfooding-status] is populated (explains why C is plausible despite the numbers)"
     - "crg-grade-demoted is set to a recent date (repo is already in a correction cycle)"
   message: >-
-    {component} claims {declared} with version={version}, completion={completion}%,
-    no [dogfooding-status]. Under v2.0 this is an overclaim on the face of
-    STATE.a2ml — demote to E (or D if structural-policy compliant), or populate
-    [dogfooding-status] with evidence.
+    {component} claims {declared} with early-stage metadata
+    (version={version}, completion={completion}) and no [dogfooding-status].
+    Under v2.0 this is an overclaim on the face of STATE.a2ml — demote to E
+    (or D if structural-policy compliant), or populate [dogfooding-status]
+    with evidence.
+
+grade_ge_c_but_missing_self_consistency_inputs:
+  condition: >-
+    parse_state.crg-grade IN {"C", "B", "A"}
+    AND (
+      parse_state.version IS empty_or_absent
+      OR parse_state.completion-percentage IS empty_or_absent
+    )
+  severity: high
+  finding_kind: self-inconsistent-claim
+  message: >-
+    {component} claims {declared} but STATE.a2ml is missing version and/or
+    completion-percentage. The CRG self-consistency precheck cannot run
+    without these keys — treat this as a structural overclaim until state
+    metadata is completed.
 
 grade_b_but_no_external_targets:
   condition: >-
