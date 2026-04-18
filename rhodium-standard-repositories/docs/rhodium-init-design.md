@@ -414,7 +414,7 @@ end Rhodium.Init.Types;
 │  ├── src/                                                  │
 │  ├── bin/                                                  │
 │  ├── docs/                                                 │
-│  ├── justfile                                              │
+│  ├── Justfile                                              │
 │  ├── flake.nix                                             │
 │  ├── .gitlab-ci.yml                                        │
 │  └── my_ada_project.gpr                                    │
@@ -440,7 +440,7 @@ end Rhodium.Init.Types;
 │  ✅ Created directory structure                            │
 │  ✅ Generated documentation (15 files)                     │
 │  ✅ Generated .well-known/ directory (5 files)             │
-│  ✅ Generated build files (justfile, flake.nix, CI/CD)     │
+│  ✅ Generated build files (Justfile, flake.nix, CI/CD)     │
 │  ✅ Initialized Git repository                             │
 │  ✅ Set up Git hooks (RVC pre-commit)                      │
 │  ⏳ Running `just validate`...                             │

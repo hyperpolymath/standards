@@ -42,7 +42,7 @@ This separates concerns cleanly and uses each tool where it's strongest.
 
 ### 3. Automation-First Philosophy
 
-"If a procedure exists, it's a justfile recipe" is the right approach. The layered justfile organization (META, BUILD, CORE TASK, VALIDATE, WORKFLOWS, UTILITIES) provides discoverability without sacrificing power.
+"If a procedure exists, it's a Justfile recipe" is the right approach. The layered Justfile organization (META, BUILD, CORE TASK, VALIDATE, WORKFLOWS, UTILITIES) provides discoverability without sacrificing power.
 
 ### 4. Explicit Non-Goals
 
@@ -168,7 +168,7 @@ The proposed structure is clean:
 ├── proofs/              ✓ Isolated formal content
 ├── schemas/             ✓ Runtime validation separate
 ├── config.ncl           ✓ Single entry point
-├── justfile             ✓ Primary automation
+├── Justfile             ✓ Primary automation
 ├── Makefile             ✓ Fallback (good pragmatism)
 ├── scripts/             ✓ Dependency checks
 └── docs/                ✓ Documentation co-located

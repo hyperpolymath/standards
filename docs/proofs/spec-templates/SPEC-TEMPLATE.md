@@ -89,7 +89,7 @@ agda --safe verification/proofs/agda/*.agda
 # Check all Coq proofs
 coqc verification/proofs/coq/*.v
 
-# Run full suite via justfile
+# Run full suite via Justfile
 just proof-check-all
 
 # Scan for dangerous patterns

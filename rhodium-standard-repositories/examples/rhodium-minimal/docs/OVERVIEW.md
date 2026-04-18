@@ -31,7 +31,7 @@ rhodium-minimal/
 ├── docs/                    # Documentation
 │   └── OVERVIEW.md          # This file
 ├── Cargo.toml               # Rust package manifest
-├── justfile                 # Task runner (20+ recipes)
+├── Justfile                 # Task runner (20+ recipes)
 ├── flake.nix                # Nix reproducible builds
 ├── .gitlab-ci.yml           # CI/CD pipeline
 ├── README.md                # Project documentation

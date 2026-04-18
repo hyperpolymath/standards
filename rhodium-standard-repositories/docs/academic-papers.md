@@ -101,7 +101,7 @@ RSR challenges industry assumptions: that gradual typing suffices (vs sound type
 
 **4.2 Tooling**
 - rhodium-init: Ada 2022 TUI for project scaffolding
-- justfile automation: 40+ recipes
+- Justfile automation: 40+ recipes
 - Nix flakes: reproducible builds
 - GitLab CI: automated compliance validation
 

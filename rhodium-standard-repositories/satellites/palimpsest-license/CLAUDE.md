@@ -54,7 +54,7 @@ palimpsest-license/
 ├── flake.nix                    # Nix reproducible builds
 ├── guix.scm                     # Guix package definition
 ├── Containerfile                # Wolfi container definition
-├── justfile                     # Build automation recipes
+├── Justfile                     # Build automation recipes
 ├── package.json                 # Node.js dependencies
 └── Makefile                     # Asset conversion targets
 ```
@@ -174,7 +174,7 @@ make [target]
 - **Primary Implementation:** OCaml (Melange for browser JS, OCanren for logic)
 - **Legacy Validation:** Haskell (TOOLS/validation/haskell/, migrating to OCaml)
 - **Metadata:** JSON-LD, Dublin Core, Protocol Buffers, VoID RDF
-- **Build System:** Nix flake (primary), Guix (alternative), justfile recipes
+- **Build System:** Nix flake (primary), Guix (alternative), Justfile recipes
 - **Configuration:** Nickel (.ncl) for validated config schemas
 - **Containers:** Wolfi-based (Containerfile) with nerdctl
 - **Web:** HTML/SCSS for presentation

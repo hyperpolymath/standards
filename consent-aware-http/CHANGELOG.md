@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLAUDE.md for AI assistant context and project understanding
 - CODE_OF_CONDUCT.md with consent-aware community values
 - .well-known/ directory with RFC 9116 security.txt, ai.txt, humans.txt, aibdp.json
-- justfile with 30+ validation and build recipes
+- Justfile with 30+ validation and build recipes
 - flake.nix for Nix reproducible development environments
 - Achieved RSR Bronze+ compliance for specification repositories
 

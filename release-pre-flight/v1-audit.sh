@@ -68,7 +68,7 @@ CODE_GLOBS=(
     --glob '*.scm' --glob '*.ncl' --glob '*.k9.ncl' --glob '*.toml'
     --glob '*.yaml' --glob '*.yml' --glob '*.json' --glob '*.adoc'
     --glob '*.md' --glob '*.tex' --glob 'Containerfile' --glob 'Dockerfile'
-    --glob 'Justfile' --glob 'justfile' --glob 'Mustfile' --glob 'flake.nix'
+    --glob 'Justfile' --glob 'Justfile' --glob 'Mustfile' --glob 'flake.nix'
     --glob 'guix.scm' --glob 'Cargo.toml' --glob 'mix.exs'
 )
 
@@ -234,7 +234,7 @@ check_proof_debt() {
         --glob '*.lean' --glob '*.v' --glob '*.ex' --glob '*.exs' --glob '*.jl' \
         --glob '*.scm' --glob '*.ncl' --glob '*.k9.ncl' --glob '*.toml' \
         --glob '*.yaml' --glob '*.yml' --glob '*.json' --glob 'Containerfile' \
-        --glob 'Dockerfile' --glob 'Justfile' --glob 'justfile' --glob 'Mustfile' \
+        --glob 'Dockerfile' --glob 'Justfile' --glob 'Justfile' --glob 'Mustfile' \
         "$PROOF_DEBT_PATTERN" . | filter_matches proof || true)"
     if [[ -n "$matches" ]]; then
         record_blocker "proof escape hatches found in code or proof files"
@@ -268,17 +268,17 @@ check_audit_surfaces() {
     log_section "Audit Surfaces"
 
     local jf
-    if ! jf="$(justfile_path)"; then
-        record_blocker "missing justfile/Justfile"
+    if ! jf="$(Justfile_path)"; then
+        record_blocker "missing Justfile/Justfile"
         return
     fi
-    printf 'PASS: justfile present at %s\n' "$jf"
+    printf 'PASS: Justfile present at %s\n' "$jf"
 
     if rg -n 'not configured yet|TODO: Replace|TODO: Add|placeholder values' "$jf" >/dev/null 2>&1; then
         record_blocker "justfile still contains placeholder or unconfigured recipes"
         rg -n 'not configured yet|TODO: Replace|TODO: Add|placeholder values' "$jf" | head -n 20
     else
-        printf 'PASS: justfile does not advertise unconfigured placeholder recipes\n'
+        printf 'PASS: Justfile does not advertise unconfigured placeholder recipes\n'
     fi
 
     if recipe_exists "$jf" 'build'; then
