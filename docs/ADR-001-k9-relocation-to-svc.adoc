@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+// Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= ADR-001: K9 Relocation to .machine_readable/svc/
+:toc:
+:sectnums:
+:icons: font
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v1.0.0, 2026-04-18
+
+== Status
+
+**Accepted** — 2026-04-18. Supersedes the `k9-exception` formulation in
+`CONTRACTILE-SPEC.adoc` v1.1.0 (2026-04-17).
+
+== Context
+
+`CONTRACTILE-SPEC.adoc` v1.1.0 (2026-04-17) placed k9 templates at
+`.machine_readable/contractiles/k9/` as an "exception alongside the verb
+directories". This was an uncomfortable compromise:
+
+* The `contractiles/` directory is conceptually "one concern per verb,
+  one verb per directory". k9 is not a verb and has no `K9file.a2ml`.
+* Contractile CLIs and audit tools that iterate over
+  `contractiles/*` had to carry a hard-coded exclusion for `k9/`.
+* The estate pre-commit hook iterates the six active verbs; k9 being
+  adjacent to them invited its own faulty verb-treatment drift.
+
+One day after the spec landed, the top-level repos-monorepo moved
+k9 out to `.machine_readable/svc/k9/` (2026-04-18). The hook comment
+captured the rule explicitly: "k9 is svc, not a contractile".
+
+This ADR ratifies that move and extends it estate-wide.
+
+== Decision
+
+k9 lives at `.machine_readable/svc/k9/` in every repo. The
+`contractiles/` directory contains only the six active verbs
+(`intend`, `trust`, `must`, `bust`, `adjust`, `dust`) — no exceptions.
+
+== Rationale
+
+* **Cleaner boundary.** `contractiles/` becomes a pure verb-set; `svc/`
+  becomes the graded-automation (kennel/yard/hunt) home.
+* **No more exception handling in verb iterators.** Every entry under
+  `contractiles/` is a verb directory, period.
+* **Matches actual role.** k9 is *trust-tier service automation
+  infrastructure*; `svc/` names what it is.
+* **Keeps `INDEX.a2ml` honest.** The registry lists six verbs; k9 no
+  longer needs a special "active vs exception" column.
+
+== Directory Layout (after ADR)
+
+----
+.machine_readable/
+├── contractiles/
+│   ├── _base.ncl
+│   ├── INDEX.a2ml
+│   ├── README.adoc
+│   ├── adjust/   ── Adjustfile.a2ml + adjust.ncl
+│   ├── bust/     ── Bustfile.a2ml   + bust.ncl
+│   ├── dust/     ── Dustfile.a2ml   + dust.ncl
+│   ├── intend/   ── Intentfile.a2ml + intend.ncl
+│   ├── must/     ── Mustfile.a2ml   + must.ncl
+│   └── trust/    ── Trustfile.a2ml  + trust.ncl
+│
+└── svc/
+    └── k9/
+        ├── README.adoc
+        ├── template-kennel.k9.ncl
+        ├── template-yard.k9.ncl
+        ├── template-hunt.k9.ncl
+        └── examples/
+            ├── ci-config.k9.ncl
+            ├── project-metadata.k9.ncl
+            └── setup-repo.k9.ncl
+----
+
+`svc/` is a **directory of named service-automation subsystems**. Today
+it holds only `k9/`. Future service-layer infrastructure (watchers,
+daemons, long-running automations) belongs here under its own name.
+
+== Migration Rules
+
+For each repo in the estate:
+
+. If `.machine_readable/contractiles/k9/` exists and `.machine_readable/svc/k9/`
+  does not: `git mv` the former to the latter.
+. If both exist, the `contractiles/` copy is the duplicate — remove it,
+  keep the one under `svc/`.
+. If neither exists: do nothing — the repo does not use k9.
+. Repos that still have a root-level `contractiles/k9/` need the same
+  move, paired with the root-home → canonical-home migration
+  (separate pass; see `CONTRACTILE-HOME-MIGRATION-2026-04-18.adoc`).
+
+== Consequences
+
+=== Positive
+
+* Cleanest verb/service boundary the estate has yet had.
+* Removes the need for k9 to keep claiming "I'm an exception" in the
+  spec.
+* Unblocks future graded-automation services to sit alongside k9.
+
+=== Negative — to be fixed
+
+* The top-level `.machine_readable/contractiles/README.adoc` still
+  mentions the retired `lust` verb and the old four-verb set
+  (`must/trust/dust/lust`). Requires a sweep.
+* Pre-commit hooks across ~150 repos still enforce `Lust.a2ml`
+  (retired 2026-04-18 — `intend` absorbed it). These hooks reject
+  contractile-layout changes, blocking the estate migration. Feeds
+  directly into the "stale-hook repos" cleanup work.
+
+=== Neutral
+
+* `CONTRACTILE-SPEC.adoc` §§ 82–83 and the `k9-exception` section
+  must be updated to point to this ADR and remove the "alongside verb
+  directories" language.
+
+== Related Work
+
+* `CONTRACTILE-HOME-MIGRATION-2026-04-18.adoc` — root-level
+  `contractiles/` → `.machine_readable/contractiles/` consolidation
+  (task 2 of the current migration wave).
+* `.machine_readable/migrations/contractile-layout-2026-04-18.a2ml` —
+  machine-readable migration log with per-repo outcomes.
