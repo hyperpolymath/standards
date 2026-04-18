@@ -154,6 +154,64 @@ sections:
     notes: "superseded by [external-targets]; entries need re-classification per audit"
 @end
 
+@self_consistency_heuristic:
+# Added 2026-04-18 after the Phase 3 random sample (civic-connect, bofig,
+# januskey) produced 3/3 demote with a shared shape: STATE.a2ml self-declares
+# a grade that its own adjacent fields contradict. This heuristic catches the
+# worst offenders at zero file-tree cost — it reads only STATE.a2ml.
+#
+# Contradiction rule: a repo cannot self-consistently claim C (or higher) if
+# its own metadata says it is <50% complete and pre-0.5.0. Either the grade
+# is wrong, the version is wrong, or the completion-percentage is wrong.
+# The audit convention is: trust version + completion, demote the grade.
+#
+# This fires BEFORE the file-tree evidence checks; if it fires, a full audit
+# may not be needed — the repo is self-inconsistent on the face of it.
+
+grade_ge_c_but_early_stage:
+  condition: >-
+    parse_state.crg-grade IN {"C", "B", "A"}
+    AND parse_state.version < "0.5.0"
+    AND parse_state.completion-percentage < 50
+    AND parse_state.dogfooding-status IS empty_or_absent
+  severity: high
+  finding_kind: self-inconsistent-claim
+  exempt_if:
+    - "[dogfooding-status] is populated (explains why C is plausible despite the numbers)"
+    - "crg-grade-demoted is set to a recent date (repo is already in a correction cycle)"
+  message: >-
+    {component} claims {declared} with version={version}, completion={completion}%,
+    no [dogfooding-status]. Under v2.0 this is an overclaim on the face of
+    STATE.a2ml — demote to E (or D if structural-policy compliant), or populate
+    [dogfooding-status] with evidence.
+
+grade_b_but_no_external_targets:
+  condition: >-
+    parse_state.crg-grade IN {"B", "A"}
+    AND parse_state.external-targets IS empty_or_absent
+    AND parse_state.grade-b-status IS empty_or_absent
+  severity: high
+  finding_kind: self-inconsistent-claim
+  message: >-
+    {component} claims {declared} without any [external-targets] or legacy
+    [grade-b-status] entries. B requires 6+ diverse external targets — this is
+    a structural overclaim. Demote to C until targets are documented.
+
+grade_a_but_no_field_signal:
+  condition: >-
+    parse_state.crg-grade == "A"
+    AND parse_state.field-signal IS empty_or_absent
+  severity: high
+  finding_kind: self-inconsistent-claim
+  message: >-
+    {component} claims A without any [field-signal] entries. A requires
+    real-world external feedback — demote to B.
+
+# Cheap pre-filter order: run heuristics first, THEN the file-tree evidence
+# scan only on repos that pass self-consistency. This reduces scan cost by
+# whatever fraction of the estate is overclaimed on its own state alone.
+@end
+
 @action:
 emit_signal: compliance.finding.new
 message_template: >-
