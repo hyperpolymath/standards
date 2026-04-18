@@ -46,8 +46,12 @@ let base    = import "../_base.ncl" in
 
     metadata = {
       name = "intend-k9",
-      version = "1.0.0",
-      description = "Executes Intentfile probes + emits drift log. Non-gating; reporting authority only.",
+      version = "2.0.0",             # 1.0.0 (2026-04-18 AM): initial trident.
+                                     # 2.0.0 (2026-04-18 PM): negotiation +
+                                     # accountability + plain-language-translation
+                                     # schema baked into on_open — prerequisite for
+                                     # the adversarial Gemini+Copilot drift pilot.
+      description = "Executes Intentfile probes + emits drift log. Non-gating; reporting authority only. on_open hook implements negotiation-ratification-accountability protocol.",
       paired_xfile = "Intentfile.a2ml",
       paired_runner = "intend.ncl",
       author = "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>",
@@ -132,19 +136,99 @@ let base    = import "../_base.ncl" in
       surface_expired_variances = true,
     },
 
-    # Session-open hook — ratification protocol
-    # (user_contractiles_agreed_at_session_start.md).
-    # Summary must be plain language (metaphor-capture defense —
-    # user_metaphor_capture_break_frame_at_operational_boundaries.md).
+    # -----------------------------------------------------------------
+    # Session-open hook — NEGOTIATION + RATIFICATION + ACCOUNTABILITY
+    # (user_contract_negotiation_and_accountability_pledge.md)
+    # (user_contractiles_agreed_at_session_start.md)
+    #
+    # Ratification is not passive acknowledgement; it is negotiation
+    # ending in an explicit accountability pledge from BOTH parties.
+    # Work cannot proceed before both pledges are on file.
+    # -----------------------------------------------------------------
     on_open = {
-      render_summary = 'plain_language,
-      require_user_agreement = true,
+      # --- Context presentation (pre-negotiation) ---
+      render_summary = 'plain_language,    # metaphor-capture defense
       include_drift_log_from_last_close = true,
       include_active_variances = true,
-      # Recent ANCHORs (user_anchor_a2ml_recalibration_record.md) may
-      # have shifted the contract since last session — surface them.
       include_recent_anchors = true,
       anchor_lookback_weeks = 8,
+
+      # --- Negotiation phase (five mandatory inputs) ---
+      # AI must surface all five before the user is asked to ratify.
+      # "Yes, and …" — not "yes". Missing any of the five = the
+      # negotiation is incomplete and work cannot proceed.
+      negotiation = {
+        required = true,              # blank-cheque ratification refused
+
+        # The five inputs the AI must contribute to the negotiation.
+        # Each is a structured field the agent is required to populate,
+        # not optional prose. See user_contract_negotiation_and_
+        # accountability_pledge.md for the domain-language-rendering rule.
+        ai_required_inputs = [
+          'timeline_realism,           # "this will take X; not Y"
+          'industry_standards,         # WCAG, ISO, OWASP, GDPR, licensing …
+          'audience_feasibility,       # real addressable user set
+          'resulting_invariants,       # what must/trust/adjust entries follow
+          'ecosystem_dependencies,     # libs, licences, threat-model implications
+        ],
+
+        # User must actually engage with each input — not
+        # auto-approve. If user tries to skip ("just do it, I trust you")
+        # the system re-renders the obligations and requires the pledge.
+        user_engagement_required = true,
+        user_engagement_mode = 'per_input_response,
+
+        # The AI does the specification-form work. The user reviews the
+        # rendering in domain language and accepts / amends / pushes back.
+        # User never has to author Nickel schemas or decide on type
+        # specificity — that is the AI's translation responsibility,
+        # with auditable faithfulness.
+        specification_translation = {
+          ai_produces_spec_form = true,
+          user_reviews_in_domain_language = true,
+          schema_authoring_is_ai_responsibility = true,
+          translation_faithfulness_auditable = true,
+          # Failure mode this closes: user is forced to learn spec-theory
+          # (type refinement, Nickel contract grammar) to ratify a contract
+          # — which drives users away from ratification entirely.
+        },
+      },
+
+      # --- Accountability pledge (both parties, explicit) ---
+      # Not "I read it" — "I am answerable for this obligation".
+      # Both pledges are required before work proceeds; both are recorded.
+      accountability_pledge = {
+        required = true,
+        parties = [
+          {
+            role = 'user,
+            pledge = "I have reviewed the obligations as negotiated; I accept accountability for meeting the declared invariants and for the audience/timeline/standards consequences surfaced in negotiation.",
+            signature_required = true,
+          },
+          {
+            role = 'ai_agent,
+            pledge = "I will hold the user to the obligations as negotiated, including by surfacing drift at session close and refusing off-contract actions, even when the user is enthusiastic about them. If the user wishes to depart from the contract, I will require a variance or amendment, not silent acceptance.",
+            signature_required = true,
+            # Per user_contractile_is_contract_do_not_break.md —
+            # the AI is the holder of the line against enthusiasm drift.
+          },
+        ],
+        signed_record_destination = ".machine_readable/6a2/ratification-<session-id>.a2ml",
+        must_precede_work = true,
+      },
+
+      # --- Policy: ratification output ---
+      # The ratification record IS the negotiation transcript + the
+      # accountability pledge combined. One document; future-session
+      # ground-truth for "what was agreed, who is accountable".
+      ratification_record_shape = {
+        includes_negotiation_transcript = true,
+        includes_both_pledges = true,
+        signed = true,
+        dated = true,
+        session_id = 'required,
+        contract_hash = 'required,    # pins what was actually signed
+      },
     },
   },
 
