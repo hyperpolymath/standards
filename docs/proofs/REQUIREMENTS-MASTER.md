@@ -516,7 +516,7 @@ Each repo is categorised by **proof tier**:
 | `PolyglotFormalisms.jl` | ABI | I2 |
 | `polyglot-i18n` | ABI + i18n completeness | I2 |
 | `polysafe-gitfixer` | ABI + git safety | I2 |
-| `polystack` | ABI | I2 |
+| `boj-server` | ABI | I2 |
 | `rrecord-verity` | ABI + record validation | I2 |
 | `resource-record-fluctuator` | ABI + DNS correctness | I2 |
 | `format-registrations` | ABI | I2 |
