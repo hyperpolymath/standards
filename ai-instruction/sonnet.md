@@ -83,8 +83,8 @@ You are implementing <one-line task statement> in <repo path>.
 
 - <License headers: SPDX-License-Identifier: PMPL-1.0-or-later unless otherwise
   stated (AGPL-3.0-or-later for IDApTIK / Airborne Submarine Squadron)>
-- <Language policy: AffineScript / Rust(+SPARK) / Deno / Zig / Idris2 / Gleam; no
-  TypeScript, ReScript, Node, npm/bun/yarn, Go, general Python (RS/TS/JS → AffineScript → typed-wasm)>
+- <Language policy: AffineScript / Rust(+SPARK) / Deno / Zig / Idris2 / Agda / Gleam; no
+  TypeScript, ReScript, Node, npm/bun/yarn, Go, general Python (RS/TS/JS → AffineScript → typed-wasm; Agda for foundational proofs incl. echo-types)>
 - <Testing: run tests before claiming completion; "dune build passes" is NOT
   the same as "behaviourally correct" — cite a behavioural check>
 - <No dangerous patterns: believe_me, assert_total, Admitted, sorry,

@@ -36,7 +36,9 @@ for the canonical statement.
 | **Deno** | Runtime & package management | Replaces Node/npm/bun |
 | **Rust/SPARK** | Performance-critical, systems, WASM, CLI tools, safety-critical | "Rust" always means "Rust/SPARK" per terminology note above. Preferred over Ada where reachable. |
 | **Zig** | FFI layer (hyperpolymath ABI/FFI standard), memory-safe systems where Rust/SPARK is overkill | Also the migration target for V-lang |
-| **Idris2** | Formal verification (sole option) | ATS2 rejected. Proven-library status in `proven` repo. |
+| **Idris2** | Formal verification (primary, ABI-style proofs) | ATS2 rejected. Proven-library status in `proven` repo. |
+| **Agda** | Formal verification (foundational / type-theoretic constructions) | Used by `hyperpolymath/echo-types` (loss-with-residue / proof-relevant fibers) and other foundational formalisations. Constructive only — no postulates in load-bearing tracks. |
+| **echo-types library** | Loss-with-residue formalism (Agda) | `hyperpolymath/echo-types` — canonical formalisation of `Echo f y := Σ (x : A) , (f x ≡ y)`. Cite from this lib rather than reinventing in downstream code. |
 | **Tauri 2.0+** | Mobile apps (iOS/Android) | Rust backend + web UI |
 | **Dioxus** | Mobile apps (native UI) | Pure Rust, React-like |
 | **Gleam** | Backend services | Runs on BEAM or compiles to JS |
