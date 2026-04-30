@@ -32,7 +32,7 @@ for the canonical statement.
 
 | Language/Tool | Use Case | Notes |
 |---------------|----------|-------|
-| **ReScript** | Primary application code | Compiles to JS, type-safe |
+| **AffineScript** | Primary application code | Compiles to typed-wasm; affine/linear types. Replaces ReScript across the estate (RS/TS/JS → AffineScript → typed-wasm). |
 | **Deno** | Runtime & package management | Replaces Node/npm/bun |
 | **Rust/SPARK** | Performance-critical, systems, WASM, CLI tools, safety-critical | "Rust" always means "Rust/SPARK" per terminology note above. Preferred over Ada where reachable. |
 | **Zig** | FFI layer (hyperpolymath ABI/FFI standard), memory-safe systems where Rust/SPARK is overkill | Also the migration target for V-lang |
@@ -43,7 +43,7 @@ for the canonical statement.
 | **Elixir** | Backend services, distributed systems | BEAM, Phoenix, OTP |
 | **Haskell** | Type-heavy tools, registry validation | Scaffoldia CLI |
 | **Bash/POSIX Shell** | Scripts, automation | Keep minimal |
-| **JavaScript** | Only where ReScript cannot | MCP protocol glue, Deno APIs |
+| **JavaScript** | Only where AffineScript cannot | MCP protocol glue, Deno APIs (transitional; prefer .affine where possible) |
 | **Nickel** | Configuration language | For complex configs |
 | **A2ML** | State/meta files | STATE.a2ml, META.a2ml, etc. (TOML-like format) |
 | **Julia** | Batch scripts, data processing | Per RSR |
@@ -54,13 +54,14 @@ for the canonical statement.
 
 | Banned | Replacement | Notes |
 |--------|-------------|-------|
-| TypeScript | ReScript | |
+| TypeScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
+| **ReScript** | AffineScript | Banned in new code as of 2026-04-30. Existing `.res` files migrate to `.affine` directly (do not pass through ReScript). |
 | Node.js | Deno | |
 | npm | Deno | |
 | Bun | Deno | |
 | pnpm/yarn | Deno | |
 | Go | Rust/SPARK | |
-| **Python** | ReScript/Rust/SPARK/Julia | Fully banned, no exceptions (SaltStack exception removed 2026-01-03) |
+| **Python** | AffineScript/Rust/SPARK/Julia | Fully banned, no exceptions (SaltStack exception removed 2026-01-03) |
 | Java/Kotlin | Rust/SPARK, Tauri, Dioxus | |
 | Swift | Tauri/Dioxus | |
 | React Native | Tauri/Dioxus | |
@@ -70,7 +71,8 @@ for the canonical statement.
 | **Makefiles** | Mustfile/justfile | |
 
 **NOTE:** Python is fully banned. V-lang is fully banned (2026-04-10). ATS2 is
-fully banned in favour of Idris2 + Rust/SPARK. All three bans are enforced by
+fully banned in favour of Idris2 + Rust/SPARK. ReScript is fully banned in new
+code as of 2026-04-30 (use AffineScript). All four bans are enforced by
 `.github/workflows/language-policy.yml`.
 
 ### Build System
@@ -87,14 +89,14 @@ See: https://github.com/hyperpolymath/mustfile
 
 **No exceptions for Kotlin/Swift** - use Rust-first approach:
 
-1. **Tauri 2.0+** - Web UI (ReScript) + Rust backend, MIT/Apache-2.0
+1. **Tauri 2.0+** - Web UI (AffineScript → typed-wasm) + Rust backend, MIT/Apache-2.0
 2. **Dioxus** - Pure Rust native UI, MIT/Apache-2.0
 
 Both are FOSS with independent governance (no Big Tech).
 
 ### Enforcement Rules
 
-1. **No new TypeScript files** - Convert existing TS to ReScript
+1. **No new TypeScript or ReScript files** - Convert existing TS/RS to AffineScript directly (`.affine`); ReScript is no longer the destination
 2. **No package.json for runtime deps** - Use deno.json imports
 3. **No node_modules in production** - Deno caches deps automatically
 4. **No Go code** - Use Rust instead
