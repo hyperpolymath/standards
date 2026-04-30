@@ -21,11 +21,22 @@ jobs:
       - name: Check for TypeScript files
         run: |
           if find . -name "*.ts" -o -name "*.tsx" | grep -v node_modules | grep -v ".d.ts" | head -1 | grep -q .; then
-            echo "::error::TypeScript files found. Use ReScript instead."
+            echo "::error::TypeScript files found. Use AffineScript instead."
             find . -name "*.ts" -o -name "*.tsx" | grep -v node_modules | grep -v ".d.ts"
             exit 1
           fi
           echo "✓ No TypeScript files found"
+
+      - name: Check for ReScript files
+        run: |
+          # Estate policy: RS/TS/JS -> AffineScript -> typed-wasm.
+          # ReScript (.res) is no longer the TS replacement.
+          if find . -name "*.res" | grep -v node_modules | head -1 | grep -q .; then
+            echo "::error::ReScript files found. Use AffineScript instead."
+            find . -name "*.res" | grep -v node_modules
+            exit 1
+          fi
+          echo "✓ No ReScript files found"
 
       - name: Check for Go files
         run: |
@@ -41,7 +52,7 @@ jobs:
           # Allow Python only in ansible/ directories or for Ansible-specific files
           PYTHON_FILES=$(find . -name "*.py" | grep -v __pycache__ | grep -v ".venv" | grep -v "ansible" | grep -v "molecule" || true)
           if [ -n "$PYTHON_FILES" ]; then
-            echo "::error::Python files found outside Ansible context. Rewrite in Rust/ReScript."
+            echo "::error::Python files found outside Ansible context. Rewrite in Rust/AffineScript."
             echo "$PYTHON_FILES"
             exit 1
           fi
@@ -139,11 +150,12 @@ jobs:
             echo "::warning::.machine_readable/ directory not found"
           else
             echo "✓ .machine_readable/ directory exists"
-            for scm in STATE META ECOSYSTEM AGENTIC NEUROSYM PLAYBOOK; do
-              if [ ! -f ".machine_readable/${scm}.scm" ]; then
-                echo "::warning::Missing .machine_readable/${scm}.scm"
+            # Per estate policy: .a2ml is canonical; .scm is reserved for Guix.
+            for a2ml in STATE META ECOSYSTEM AGENTIC NEUROSYM PLAYBOOK; do
+              if [ ! -f ".machine_readable/6a2/${a2ml}.a2ml" ] && [ ! -f ".machine_readable/${a2ml}.a2ml" ]; then
+                echo "::warning::Missing .machine_readable/6a2/${a2ml}.a2ml (or top-level fallback)"
               else
-                echo "✓ .machine_readable/${scm}.scm exists"
+                echo "✓ ${a2ml}.a2ml present"
               fi
             done
           fi
@@ -159,7 +171,7 @@ jobs:
       - name: Check SPDX headers
         run: |
           MISSING_SPDX=0
-          for ext in rs res js jsx mjs ts tsx py go java kt swift sh bash; do
+          for ext in rs affine js jsx mjs ts tsx py go java kt swift sh bash; do
             while IFS= read -r file; do
               if [ -n "$file" ] && ! head -5 "$file" | grep -q "SPDX-License-Identifier"; then
                 echo "::warning::Missing SPDX header: $file"
