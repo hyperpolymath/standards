@@ -125,3 +125,13 @@ Both are FOSS with independent governance (no Big Tech).
 - No hardcoded secrets
 - SHA-pinned dependencies
 - SPDX license headers on all files
+
+### TypeScript Exemptions (Approved)
+
+The hyperpolymath "no new TypeScript" policy has the following approved exemptions in this repo. These are *not* policy violations — they are documented carve-outs.
+
+| Path | Files | Rationale | Unblock condition |
+|---|---|---|---|
+| `avow-protocol/telegram-bot/avow-telegram-bot/**/*.ts` | 4 | Telegram bot — Telegraf / node-telegram-bot-api are the canonical TS-native libraries for the Bot API; no AffineScript binding planned. | AffineScript Telegram-bot bindings (no scheduled issue). |
+
+Adding to this list requires explicit user approval and an unblock condition. New TypeScript files outside this list are blocked by the RSR antipattern check.
