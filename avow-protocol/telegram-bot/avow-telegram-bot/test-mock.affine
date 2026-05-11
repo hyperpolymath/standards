@@ -1,0 +1,195 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// Tests for the mock STAMP verification library.
+// AffineScript port of test-mock.ts.
+//
+// Self-contained: declares types and logic inline since module imports
+// are not yet resolved at test-harness compile time. Logic is kept in sync
+// with stamp-mock.affine; the duplication is tracked and will be removed
+// once the module system supports cross-file imports in the deno-test harness.
+//
+// Convention: pub fn test_<name>() -> Bool (affinescript-deno-test harness)
+
+// __ Fixed "current time" for deterministic tests ___________________________
+
+fn mock_now() -> Int {
+  2000000000000
+}
+
+// __ Types (local copy) ____________________________________________________
+
+type VerificationResult =
+  | VrSuccess
+  | VrErrInvalidUrl
+  | VrErrTimeout
+  | VrErrInvalidResponse
+  | VrErrInvalidSignature
+  | VrErrRateLimitExceeded
+  | VrErrConsentInvalid
+  | VrErrNullPointer
+  | VrErrInternal
+
+type UnsubscribeParams = {
+  url: String,
+  tested_at: Int,
+  response_code: Int,
+  response_time: Int,
+  token: String,
+  signature: String,
+}
+
+type ConsentParams = {
+  initial_request: Int,
+  confirmation: Int,
+  ip_address: String,
+  token: String,
+}
+
+type Proof = {
+  proof_type: String,
+  timestamp: Int,
+  signature: String,
+}
+
+// __ Logic (local copy) ____________________________________________________
+
+fn str_starts_with(s: String, prefix: String) -> Bool {
+  let plen = len(prefix);
+  if plen > len(s) { false } else { string_sub(s, 0, plen) == prefix }
+}
+
+fn verify_unsubscribe_at(p: UnsubscribeParams, now: Int) -> VerificationResult {
+  if !str_starts_with(p.url, "https://") { return VrErrInvalidUrl(); }
+  let age = now - p.tested_at;
+  if age > 60000 || age < 0 { return VrErrTimeout(); }
+  if p.response_code != 200 { return VrErrInvalidResponse(); }
+  if p.response_time >= 200 { return VrErrTimeout(); }
+  if len(p.signature) == 0 { return VrErrInvalidSignature(); }
+  VrSuccess()
+}
+
+fn verify_consent(p: ConsentParams) -> VerificationResult {
+  if p.confirmation <= p.initial_request { return VrErrConsentInvalid(); }
+  let diff = p.confirmation - p.initial_request;
+  if diff > 86400000 { return VrErrConsentInvalid(); }
+  if len(p.token) == 0 { return VrErrInvalidSignature(); }
+  VrSuccess()
+}
+
+fn result_to_string(r: VerificationResult) -> String {
+  match r {
+    VrSuccess              => "SUCCESS",
+    VrErrInvalidUrl        => "INVALID_URL",
+    VrErrTimeout           => "TIMEOUT",
+    VrErrInvalidResponse   => "INVALID_RESPONSE",
+    VrErrInvalidSignature  => "INVALID_SIGNATURE",
+    VrErrRateLimitExceeded => "RATE_LIMIT_EXCEEDED",
+    VrErrConsentInvalid    => "CONSENT_INVALID",
+    VrErrNullPointer       => "NULL_POINTER",
+    VrErrInternal          => "INTERNAL_ERROR",
+  }
+}
+
+fn make_valid_unsub() -> UnsubscribeParams {
+  UnsubscribeParams {
+    url: "https://example.com/unsubscribe",
+    tested_at: mock_now() - 5000,
+    response_code: 200,
+    response_time: 87,
+    token: "abc123",
+    signature: "valid_sig",
+  }
+}
+
+// __ Tests _________________________________________________________________
+
+pub fn test_verify_unsubscribe_valid() -> Bool {
+  match verify_unsubscribe_at(make_valid_unsub(), mock_now()) {
+    VrSuccess => true,
+    _ => false,
+  }
+}
+
+pub fn test_verify_unsubscribe_invalid_url() -> Bool {
+  let p = UnsubscribeParams {
+    url: "not_https",
+    tested_at: mock_now() - 5000,
+    response_code: 200,
+    response_time: 87,
+    token: "abc123",
+    signature: "valid_sig",
+  };
+  match verify_unsubscribe_at(p, mock_now()) {
+    VrErrInvalidUrl => true,
+    _ => false,
+  }
+}
+
+pub fn test_verify_unsubscribe_stale_timestamp() -> Bool {
+  let p = UnsubscribeParams {
+    url: "https://example.com/unsubscribe",
+    tested_at: 0,
+    response_code: 200,
+    response_time: 87,
+    token: "abc123",
+    signature: "valid_sig",
+  };
+  match verify_unsubscribe_at(p, mock_now()) {
+    VrErrTimeout => true,
+    _ => false,
+  }
+}
+
+pub fn test_verify_unsubscribe_bad_response_code() -> Bool {
+  let p = UnsubscribeParams {
+    url: "https://example.com/unsubscribe",
+    tested_at: mock_now() - 5000,
+    response_code: 404,
+    response_time: 87,
+    token: "abc123",
+    signature: "valid_sig",
+  };
+  match verify_unsubscribe_at(p, mock_now()) {
+    VrErrInvalidResponse => true,
+    _ => false,
+  }
+}
+
+pub fn test_verify_consent_valid() -> Bool {
+  let p = ConsentParams {
+    initial_request: 1000000,
+    confirmation: 1100000,
+    ip_address: "192.168.1.1",
+    token: "token123",
+  };
+  match verify_consent(p) {
+    VrSuccess => true,
+    _ => false,
+  }
+}
+
+pub fn test_verify_consent_simultaneous() -> Bool {
+  let p = ConsentParams {
+    initial_request: 1000000,
+    confirmation: 1000000,
+    ip_address: "192.168.1.1",
+    token: "token123",
+  };
+  match verify_consent(p) {
+    VrErrConsentInvalid => true,
+    _ => false,
+  }
+}
+
+pub fn test_result_to_string_success() -> Bool {
+  result_to_string(VrSuccess()) == "SUCCESS"
+}
+
+pub fn test_result_to_string_invalid_url() -> Bool {
+  result_to_string(VrErrInvalidUrl()) == "INVALID_URL"
+}
+
+pub fn test_result_to_string_consent_invalid() -> Bool {
+  result_to_string(VrErrConsentInvalid()) == "CONSENT_INVALID"
+}

@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// AXEL Protocol - Policy JSON Schema Validator.
+// AffineScript port of validate-policy.ts.
+// Compiled via: affinescript compile --target node-cjs
+// Uses stdlib/Ajv.affine extern bindings.
+
+module ValidatePolicy;
+
+extern type AjvInstance;
+extern type Validator;
+extern fn ajv_new() -> AjvInstance;
+extern fn ajv_compile(a: AjvInstance, schema_json: String) -> Validator;
+extern fn ajv_validate(v: Validator, value_json: String) -> Bool;
+extern fn ajv_errors_json(v: Validator) -> String;
+extern fn read_file(path: String) -> String;
+extern fn log(s: String) -> Int;
+extern fn process_exit(code: Int) -> Int;
+
+pub fn main() -> Int {
+  let schema_json = read_file("schemas/axel-policy.schema.json");
+  let ajv = ajv_new();
+  let validator = ajv_compile(ajv, schema_json);
+
+  let policy_paths = [
+    "public/.well-known/axel-policy",
+    "public/.well-known/axel-policy.example-adult.json",
+  ];
+
+  let all_passed = true;
+  let i = 0;
+  while i < len(policy_paths) {
+    let path = policy_paths[i];
+    let policy_json = read_file(path);
+    let valid = ajv_validate(validator, policy_json);
+    if valid {
+      log("PASS: " ++ path);
+    } else {
+      log("FAIL: " ++ path);
+      log("  Errors: " ++ ajv_errors_json(validator));
+      all_passed = false;
+    }
+    i = i + 1;
+  }
+
+  if all_passed {
+    log("All policies valid.");
+    0
+  } else {
+    log("Validation failed.");
+    1
+  }
+}
