@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// AXEL Protocol - Policy Schema Validation Tests.
+// AffineScript port of validate-policy_test.ts.
+//
+// NOTE: These tests require ajv_new/ajv_compile/ajv_validate externs from
+// stdlib/Ajv.affine to be provided by the test shim. Until the deno-test
+// harness is extended with an Ajv Node-CJS shim, compile via --target node-cjs
+// and run via the node-cjs test runner.
+//
+// Convention: pub fn test_<name>() -> Bool
+
+extern type AjvInstance;
+extern type Validator;
+extern fn ajv_new() -> AjvInstance;
+extern fn ajv_compile(a: AjvInstance, schema_json: String) -> Validator;
+extern fn ajv_validate(v: Validator, value_json: String) -> Bool;
+extern fn read_file(path: String) -> String;
+
+fn make_validator() -> Validator {
+  let schema = read_file("schemas/axel-policy.schema.json");
+  ajv_compile(ajv_new(), schema)
+}
+
+fn base_policy(version: String, id_val: String, category: String) -> String {
+  "{\"version\":\"" ++ version ++ "\",\"id\":\"" ++ id_val ++
+  "\",\"scope\":{\"hostnames\":[\"example.com\"]},\"content\":{\"category\":\"" ++
+  category ++ "\",\"min_age\":18},\"enforcement\":{\"profiles\":[\"AXEL-O\"],\"proof_required\":true}," ++
+  "\"cache\":{\"max_age_seconds\":86400,\"stale_if_error_seconds\":604800}}"
+}
+
+pub fn test_valid_minimal_policy() -> Bool {
+  ajv_validate(make_validator(), base_policy("AXEL1", "20260212T1200Z", "adult"))
+}
+
+pub fn test_valid_proof_required_false() -> Bool {
+  let p = "{\"version\":\"AXEL1\",\"id\":\"test-1\",\"scope\":{\"hostnames\":[\"safe.example.com\"]}," ++
+    "\"content\":{\"category\":\"mature\",\"min_age\":0}," ++
+    "\"enforcement\":{\"profiles\":[\"AXEL-O\"],\"proof_required\":false}," ++
+    "\"cache\":{\"max_age_seconds\":3600,\"stale_if_error_seconds\":7200}}";
+  ajv_validate(make_validator(), p)
+}
+
+pub fn test_reject_missing_version() -> Bool {
+  let p = "{\"id\":\"test-1\",\"scope\":{\"hostnames\":[\"example.com\"]}," ++
+    "\"content\":{\"category\":\"adult\",\"min_age\":18}," ++
+    "\"enforcement\":{\"profiles\":[\"AXEL-O\"],\"proof_required\":true}," ++
+    "\"cache\":{\"max_age_seconds\":86400,\"stale_if_error_seconds\":604800}}";
+  !ajv_validate(make_validator(), p)
+}
+
+pub fn test_reject_wrong_version() -> Bool {
+  !ajv_validate(make_validator(), base_policy("AXEL2", "test-1", "adult"))
+}
+
+pub fn test_reject_empty_id() -> Bool {
+  !ajv_validate(make_validator(), base_policy("AXEL1", "", "adult"))
+}
+
+pub fn test_reject_empty_hostnames() -> Bool {
+  let p = "{\"version\":\"AXEL1\",\"id\":\"test-1\",\"scope\":{\"hostnames\":[]}," ++
+    "\"content\":{\"category\":\"adult\",\"min_age\":18}," ++
+    "\"enforcement\":{\"profiles\":[\"AXEL-O\"],\"proof_required\":true}," ++
+    "\"cache\":{\"max_age_seconds\":86400,\"stale_if_error_seconds\":604800}}";
+  !ajv_validate(make_validator(), p)
+}
+
+pub fn test_reject_invalid_category() -> Bool {
+  !ajv_validate(make_validator(), base_policy("AXEL1", "test-1", "invalid-category"))
+}
+
+pub fn test_reject_missing_cache() -> Bool {
+  let p = "{\"version\":\"AXEL1\",\"id\":\"test-1\",\"scope\":{\"hostnames\":[\"example.com\"]}," ++
+    "\"content\":{\"category\":\"adult\",\"min_age\":18}," ++
+    "\"enforcement\":{\"profiles\":[\"AXEL-O\"],\"proof_required\":true}}";
+  !ajv_validate(make_validator(), p)
+}
+
+pub fn test_reject_cache_max_age_zero() -> Bool {
+  let p = "{\"version\":\"AXEL1\",\"id\":\"test-1\",\"scope\":{\"hostnames\":[\"example.com\"]}," ++
+    "\"content\":{\"category\":\"adult\",\"min_age\":18}," ++
+    "\"enforcement\":{\"profiles\":[\"AXEL-O\"],\"proof_required\":true}," ++
+    "\"cache\":{\"max_age_seconds\":0,\"stale_if_error_seconds\":604800}}";
+  !ajv_validate(make_validator(), p)
+}
+
+pub fn test_reject_additional_top_level_props() -> Bool {
+  let p = "{\"version\":\"AXEL1\",\"id\":\"test-1\",\"scope\":{\"hostnames\":[\"example.com\"]}," ++
+    "\"content\":{\"category\":\"adult\",\"min_age\":18}," ++
+    "\"enforcement\":{\"profiles\":[\"AXEL-O\"],\"proof_required\":true}," ++
+    "\"cache\":{\"max_age_seconds\":86400,\"stale_if_error_seconds\":604800}," ++
+    "\"unknown_field\":\"should fail\"}";
+  !ajv_validate(make_validator(), p)
+}
