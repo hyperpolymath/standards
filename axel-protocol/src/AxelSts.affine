@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// AXEL Protocol - DNS TXT Record Parser (Strict).
+// AffineScript port of AxelSts.res.
+//
+// Parses AXEL DNS TXT record payloads (RDATA only, not full RR lines).
+// Fails closed on missing required fields. Does NOT default v=AXEL1.
+
+module AxelSts;
+
+// __ Types _________________________________________________________________
+
+pub type ParseError =
+  | MissingVersion
+  | InvalidVersion(String)
+  | MissingId
+  | EmptyId
+  | MalformedRecord(String)
+
+pub type AxelRecord = {
+  version: String,
+  id: String,
+}
+
+pub type ParseResult =
+  | ParseOk(AxelRecord)
+  | ParseErr(ParseError)
+
+// __ Helpers _______________________________________________________________
+
+fn str_split_on(s: String, delim: String) -> [String] {
+  let slen = len(s);
+  let dlen = len(delim);
+  let result = [];
+  let start = 0;
+  let i = 0;
+  while i <= slen - dlen {
+    if string_sub(s, i, dlen) == delim {
+      result = result ++ [string_sub(s, start, i - start)];
+      start = i + dlen;
+      i = i + dlen;
+    } else {
+      i = i + 1;
+    }
+  }
+  result ++ [string_sub(s, start, slen - start)]
+}
+
+fn str_join(parts: [String], sep: String) -> String {
+  if len(parts) == 0 { return ""; }
+  let result = parts[0];
+  let i = 1;
+  while i < len(parts) {
+    result = result ++ sep ++ parts[i];
+    i = i + 1;
+  }
+  result
+}
+
+fn parse_kv(segment: String) -> Option<(String, String)> {
+  let trimmed = trim(segment);
+  let parts = str_split_on(trimmed, "=");
+  if len(parts) < 2 {
+    None
+  } else {
+    let key = trim(parts[0]);
+    let vp = [];
+    let j = 1;
+    while j < len(parts) {
+      vp = vp ++ [parts[j]];
+      j = j + 1;
+    }
+    let value = trim(str_join(vp, "="));
+    Some((key, value))
+  }
+}
+
+// __ Parser ________________________________________________________________
+
+pub fn parse(payload: String) -> ParseResult {
+  let trimmed = trim(payload);
+  if len(trimmed) == 0 {
+    return ParseErr(MalformedRecord("empty payload"));
+  }
+
+  let segments = str_split_on(trimmed, ";");
+  let version = None;
+  let id = None;
+  let i = 0;
+  while i < len(segments) {
+    match parse_kv(segments[i]) {
+      Some(("v", v))  => { version = Some(v); }
+      Some(("id", d)) => { id = Some(d); }
+      _               => {}
+    }
+    i = i + 1;
+  }
+
+  match version {
+    None => ParseErr(MissingVersion()),
+    Some(v) => {
+      if v != "AXEL1" {
+        ParseErr(InvalidVersion(v))
+      } else {
+        match id {
+          None => ParseErr(MissingId()),
+          Some(d) => {
+            let trimmed_id = trim(d);
+            if len(trimmed_id) == 0 {
+              ParseErr(EmptyId())
+            } else {
+              ParseOk(AxelRecord { version: v, id: trimmed_id })
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+pub fn error_to_string(err: ParseError) -> String {
+  match err {
+    MissingVersion     => "Missing required field: v (version)",
+    InvalidVersion(v)  => "Invalid version: '" ++ v ++ "' (expected 'AXEL1')",
+    MissingId          => "Missing required field: id",
+    EmptyId            => "Empty id field (must be non-empty)",
+    MalformedRecord(m) => "Malformed record: " ++ m,
+  }
+}
