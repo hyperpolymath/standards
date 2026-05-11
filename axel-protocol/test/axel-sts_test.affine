@@ -1,0 +1,180 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// AXEL Protocol - DNS TXT Parser Tests.
+// AffineScript port of axel-sts_test.ts.
+//
+// Self-contained: includes the AxelSts parser inline for deno-test harness
+// compatibility. Will be refactored to import from AxelSts.affine once
+// cross-file imports land in the harness.
+//
+// Convention: pub fn test_<name>() -> Bool
+
+// __ Parser (inlined) ______________________________________________________
+
+type ParseError =
+  | MissingVersion
+  | InvalidVersion(String)
+  | MissingId
+  | EmptyId
+  | MalformedRecord(String)
+
+type AxelRecord = {
+  version: String,
+  id: String,
+}
+
+type ParseResult =
+  | ParseOk(AxelRecord)
+  | ParseErr(ParseError)
+
+fn ax_split(s: String, delim: String) -> [String] {
+  let slen = len(s);
+  let dlen = len(delim);
+  let result = [];
+  let start = 0;
+  let i = 0;
+  while i <= slen - dlen {
+    if string_sub(s, i, dlen) == delim {
+      result = result ++ [string_sub(s, start, i - start)];
+      start = i + dlen;
+      i = i + dlen;
+    } else {
+      i = i + 1;
+    }
+  }
+  result ++ [string_sub(s, start, slen - start)]
+}
+
+fn ax_join(parts: [String], sep: String) -> String {
+  if len(parts) == 0 { return ""; }
+  let result = parts[0];
+  let i = 1;
+  while i < len(parts) {
+    result = result ++ sep ++ parts[i];
+    i = i + 1;
+  }
+  result
+}
+
+fn ax_parse_kv(segment: String) -> Option<(String, String)> {
+  let t = trim(segment);
+  let parts = ax_split(t, "=");
+  if len(parts) < 2 {
+    None
+  } else {
+    let key = trim(parts[0]);
+    let vp = [];
+    let j = 1;
+    while j < len(parts) { vp = vp ++ [parts[j]]; j = j + 1; }
+    Some((key, trim(ax_join(vp, "="))))
+  }
+}
+
+fn parse(payload: String) -> ParseResult {
+  let t = trim(payload);
+  if len(t) == 0 { return ParseErr(MalformedRecord("empty payload")); }
+  let segs = ax_split(t, ";");
+  let version = None;
+  let id = None;
+  let i = 0;
+  while i < len(segs) {
+    match ax_parse_kv(segs[i]) {
+      Some(("v", v))  => { version = Some(v); }
+      Some(("id", d)) => { id = Some(d); }
+      _               => {}
+    }
+    i = i + 1;
+  }
+  match version {
+    None    => ParseErr(MissingVersion()),
+    Some(v) => {
+      if v != "AXEL1" {
+        ParseErr(InvalidVersion(v))
+      } else {
+        match id {
+          None    => ParseErr(MissingId()),
+          Some(d) => {
+            let tid = trim(d);
+            if len(tid) == 0 { ParseErr(EmptyId()) }
+            else { ParseOk(AxelRecord { version: v, id: tid }) }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn is_ok(r: ParseResult) -> Bool {
+  match r { ParseOk(_) => true, ParseErr(_) => false }
+}
+
+fn is_err(r: ParseResult) -> Bool {
+  match r { ParseOk(_) => false, ParseErr(_) => true }
+}
+
+fn get_version(r: ParseResult) -> String {
+  match r { ParseOk(rec) => rec.version, ParseErr(_) => "" }
+}
+
+fn get_id(r: ParseResult) -> String {
+  match r { ParseOk(rec) => rec.id, ParseErr(_) => "" }
+}
+
+// __ Tests _________________________________________________________________
+
+pub fn test_parse_valid_minimal() -> Bool {
+  let r = parse("v=AXEL1; id=20260212T1200Z");
+  is_ok(r) && get_version(r) == "AXEL1" && get_id(r) == "20260212T1200Z"
+}
+
+pub fn test_parse_valid_extra_whitespace() -> Bool {
+  let r = parse("  v=AXEL1 ;  id=my-policy-id  ");
+  is_ok(r) && get_id(r) == "my-policy-id"
+}
+
+pub fn test_parse_valid_unknown_keys_ignored() -> Bool {
+  let r = parse("v=AXEL1; id=test-1; foo=bar; baz=qux");
+  is_ok(r) && get_id(r) == "test-1"
+}
+
+pub fn test_parse_valid_id_with_equals() -> Bool {
+  let r = parse("v=AXEL1; id=base64=encoded=id");
+  is_ok(r) && get_id(r) == "base64=encoded=id"
+}
+
+pub fn test_reject_missing_version() -> Bool {
+  is_err(parse("id=test-1"))
+}
+
+pub fn test_reject_empty_payload() -> Bool {
+  is_err(parse(""))
+}
+
+pub fn test_reject_whitespace_only() -> Bool {
+  is_err(parse("   "))
+}
+
+pub fn test_reject_wrong_version() -> Bool {
+  is_err(parse("v=AXEL2; id=test-1"))
+}
+
+pub fn test_reject_missing_id() -> Bool {
+  is_err(parse("v=AXEL1"))
+}
+
+pub fn test_reject_empty_id() -> Bool {
+  is_err(parse("v=AXEL1; id="))
+}
+
+pub fn test_reject_whitespace_only_id() -> Bool {
+  is_err(parse("v=AXEL1; id=   "))
+}
+
+pub fn test_reject_full_rr_line() -> Bool {
+  is_err(parse("_axel.example.com. 3600 IN TXT \"v=AXEL1; id=test-1\""))
+}
+
+pub fn test_reject_no_default_version() -> Bool {
+  is_err(parse("id=test-1; mode=enforce"))
+}

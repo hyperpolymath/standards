@@ -1,0 +1,176 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// Mock STAMP verification library.
+//
+// AffineScript port of stamp-mock.ts. Temporary implementation for the MVP
+// Telegram bot without dependent-type proofs. Replace with real libstamp
+// FFI when the libstamp Zig bindings land.
+
+module StampMock;
+
+extern fn time_ms() -> Int;
+extern fn random_string(n: Int) -> String;
+
+// __ Types _________________________________________________________________
+
+pub type VerificationResult =
+  | VrSuccess
+  | VrErrInvalidUrl
+  | VrErrTimeout
+  | VrErrInvalidResponse
+  | VrErrInvalidSignature
+  | VrErrRateLimitExceeded
+  | VrErrConsentInvalid
+  | VrErrNullPointer
+  | VrErrInternal
+
+pub type UnsubscribeParams = {
+  url: String,
+  tested_at: Int,
+  response_code: Int,
+  response_time: Int,
+  token: String,
+  signature: String,
+}
+
+pub type ConsentParams = {
+  initial_request: Int,
+  confirmation: Int,
+  ip_address: String,
+  token: String,
+}
+
+pub type RateLimitParams = {
+  sender_id: String,
+  account_created: Int,
+  messages_today: Int,
+  daily_limit: Int,
+}
+
+pub type Proof = {
+  proof_type: String,
+  timestamp: Int,
+  signature: String,
+}
+
+// __ Helpers _______________________________________________________________
+
+fn str_starts_with(s: String, prefix: String) -> Bool {
+  let plen = len(prefix);
+  if plen > len(s) {
+    false
+  } else {
+    string_sub(s, 0, plen) == prefix
+  }
+}
+
+// __ Verification __________________________________________________________
+
+pub fn verify_unsubscribe_at(p: UnsubscribeParams, now: Int) -> VerificationResult {
+  if !str_starts_with(p.url, "https://") {
+    return VrErrInvalidUrl();
+  }
+  let age = now - p.tested_at;
+  if age > 60000 || age < 0 {
+    return VrErrTimeout();
+  }
+  if p.response_code != 200 {
+    return VrErrInvalidResponse();
+  }
+  if p.response_time >= 200 {
+    return VrErrTimeout();
+  }
+  if len(p.signature) == 0 {
+    return VrErrInvalidSignature();
+  }
+  VrSuccess()
+}
+
+pub fn verify_unsubscribe(p: UnsubscribeParams) -> VerificationResult {
+  verify_unsubscribe_at(p, time_ms())
+}
+
+pub fn verify_consent(p: ConsentParams) -> VerificationResult {
+  if p.confirmation <= p.initial_request {
+    return VrErrConsentInvalid();
+  }
+  let diff = p.confirmation - p.initial_request;
+  if diff > 86400000 {
+    return VrErrConsentInvalid();
+  }
+  if len(p.token) == 0 {
+    return VrErrInvalidSignature();
+  }
+  VrSuccess()
+}
+
+pub fn verify_rate_limit_at(p: RateLimitParams, now: Int) -> VerificationResult {
+  if p.messages_today >= p.daily_limit {
+    return VrErrRateLimitExceeded();
+  }
+  let age_days = (now - p.account_created) / 86400000;
+  let max_limit = if age_days < 30 {
+    1000
+  } else if age_days < 90 {
+    10000
+  } else {
+    100000
+  };
+  if p.daily_limit > max_limit {
+    return VrErrRateLimitExceeded();
+  }
+  VrSuccess()
+}
+
+pub fn verify_rate_limit(p: RateLimitParams) -> VerificationResult {
+  verify_rate_limit_at(p, time_ms())
+}
+
+// __ Proof _________________________________________________________________
+
+pub fn generate_proof(proof_type: String) -> Proof {
+  let ts = time_ms();
+  Proof {
+    proof_type: proof_type ++ "_verification",
+    timestamp: ts,
+    signature: "mock_sig_" ++ show(ts) ++ "_" ++ random_string(7),
+  }
+}
+
+pub fn format_proof(p: Proof) -> String {
+  "{\"type\":\"" ++ p.proof_type
+    ++ "\",\"timestamp\":" ++ show(p.timestamp)
+    ++ ",\"signature\":\"" ++ p.signature ++ "\"}"
+}
+
+pub fn result_to_string(r: VerificationResult) -> String {
+  match r {
+    VrSuccess              => "SUCCESS",
+    VrErrInvalidUrl        => "INVALID_URL",
+    VrErrTimeout           => "TIMEOUT",
+    VrErrInvalidResponse   => "INVALID_RESPONSE",
+    VrErrInvalidSignature  => "INVALID_SIGNATURE",
+    VrErrRateLimitExceeded => "RATE_LIMIT_EXCEEDED",
+    VrErrConsentInvalid    => "CONSENT_INVALID",
+    VrErrNullPointer       => "NULL_POINTER",
+    VrErrInternal          => "INTERNAL_ERROR",
+  }
+}
+
+pub fn generate_unsubscribe_url(user_id: Int, token: String) -> String {
+  "https://stamp-bot.example.com/unsubscribe?user=" ++ show(user_id) ++ "&token=" ++ token
+}
+
+pub fn test_unsubscribe_url(url: String) -> (Int, Int) {
+  let status = if str_starts_with(url, "https://") { 200 } else { 404 };
+  (status, 87)
+}
+
+pub fn generate_token(user_id: Int) -> String {
+  show(user_id) ++ "_" ++ show(time_ms()) ++ "_" ++ random_string(13)
+}
+
+pub fn generate_signature(data: String) -> String {
+  "sig_" ++ show(time_ms()) ++ "_" ++ show(len(data)) ++ "_" ++ random_string(7)
+}
