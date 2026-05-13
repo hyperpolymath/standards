@@ -44,9 +44,16 @@ jobs:
 
       - name: Run Hypatia scan
         id: scan
+        env:
+          # Suppress the "Dependabot alerts unavailable: GITHUB_TOKEN not set"
+          # warning so the run is silent-warning-free.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Scanning standards repo (dogfooding)"
-          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . > hypatia-findings.json
+          # --exit-zero so a findings-found exit-1 doesn't short-circuit the
+          # rest of this step under `set -e`. The "Check for critical or
+          # high-severity issues" step below is the explicit gate.
+          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero > hypatia-findings.json
 
           FINDING_COUNT=$(jq '. | length' hypatia-findings.json 2>/dev/null || echo 0)
           CRITICAL=$(jq '[.[] | select(.severity == "critical")] | length' hypatia-findings.json 2>/dev/null || echo 0)
