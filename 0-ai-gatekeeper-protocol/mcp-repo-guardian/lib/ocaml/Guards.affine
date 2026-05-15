@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// AffineScript port of Guards.res.
+
+module Guards;
+
+use Types;
+use Session;
+
+extern fn str_substring(s: String, start: Int, end: Int) -> String = "string" "substring";
+extern fn str_ends_with(s: String, suffix: String) -> Bool = "string" "endsWith";
+extern fn str_includes(s: String, needle: String) -> Bool = "string" "includes";
+extern fn throw_message(msg: String) -> a = "error" "throw";
+
+module AccessGuard {
+  pub type T = {
+    session_manager: Session.SessionManager.T,
+    manifest: Types.AiManifest,
+  }
+
+  pub fn make(session_manager: Session.SessionManager.T, manifest: Types.AiManifest) -> T {
+    T { session_manager: session_manager, manifest: manifest }
+  }
+
+  pub fn check_access(guard: T, session_id: String) -> Types.AccessResult {
+    match Session.SessionManager.get_session(guard.session_manager, session_id) {
+      None => Types.AccessResult {
+        allowed: false,
+        reason: Some("Invalid session ID. Session may have expired."),
+      },
+      Some(session) => {
+        if !session.acknowledged_manifest {
+          let hash_preview = str_substring(guard.manifest.hash, 0, 16);
+          Types.AccessResult {
+            allowed: false,
+            reason: Some(
+              "⚠️ ACCESS DENIED\n\n"
+              ++ "You must read and acknowledge the AI manifest (AI.a2ml) before "
+              ++ "accessing any files in this repository.\n\n"
+              ++ "Call the acknowledge_manifest tool with the manifest hash to proceed.\n\n"
+              ++ "Expected hash: " ++ hash_preview ++ "..."),
+          }
+        } else {
+          Types.AccessResult { allowed: true, reason: None }
+        }
+      }
+    }
+  }
+
+  pub fn validate_path(guard: T, path: String) -> Types.AccessResult {
+    if array_includes(guard.manifest.invariants, "no_scm_duplication") {
+      let scm_files = ["STATE.scm", "META.scm", "ECOSYSTEM.scm", "AGENTIC.scm",
+                       "NEUROSYM.scm", "PLAYBOOK.scm", "LANGUAGES.scm"];
+      let is_violation = false;
+      let violated_file = "unknown";
+      let i = 0;
+      while i < len(scm_files) {
+        if str_ends_with(path, scm_files[i]) {
+          violated_file = scm_files[i];
+          if !str_includes(path, ".machine_readable/") {
+            is_violation = true;
+          }
+        }
+        i = i + 1;
+      }
+      if is_violation {
+        Types.AccessResult {
+          allowed: false,
+          reason: Some(
+            "⚠️ INVARIANT VIOLATION\n\n"
+            ++ "Attempted to access " ++ violated_file ++ " outside of .machine_readable/ directory.\n\n"
+            ++ "Per AI.a2ml manifest: SCM files MUST be in .machine_readable/ only.\n"
+            ++ "This prevents duplicate file errors."),
+        }
+      } else {
+        Types.AccessResult { allowed: true, reason: None }
+      }
+    } else {
+      Types.AccessResult { allowed: true, reason: None }
+    }
+  }
+
+  pub fn require_acknowledgment(guard: T, session_id: String, operation: String) -> Unit {
+    let access = check_access(guard, session_id);
+    if !access.allowed {
+      let reason = match access.reason { Some(r) => r, None => "Unknown reason" };
+      throw_message("Cannot perform " ++ operation ++ ": " ++ reason)
+    }
+  }
+}
