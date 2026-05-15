@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// AffineScript port of VectorReport.res.
+
+module VectorReport;
+
+use Compat;
+use A2ml;
+
+extern fn readdir_sync(path: String) -> [String] = "fs" "readdirSync";
+extern fn read_file_sync(path: String, enc: String) -> String = "fs" "readFileSync";
+extern fn write_file_sync(path: String, contents: String) -> Unit = "fs" "writeFileSync";
+extern fn exists_sync(path: String) -> Bool = "fs" "existsSync";
+
+pub fn list_vectors() -> [(String, String)] {
+  let files = readdir_sync("tests/vectors");
+  let out = [];
+  let i = 0;
+  while i < len(files) {
+    if Compat.ends_with(files[i], ".a2ml") {
+      let expected = Compat.replace(files[i], ".a2ml", ".expected");
+      out = out ++ [("tests/vectors/" ++ files[i], "tests/vectors/" ++ expected)];
+    }
+    i = i + 1;
+  }
+  out
+}
+
+pub fn run() -> Effect[IO] Unit {
+  let vectors = list_vectors();
+  let report = [];
+  let i = 0;
+  while i < len(vectors) {
+    let (input_path, _expected_path) = vectors[i];
+    let input = read_file_sync(input_path, "utf8");
+    let doc = A2ml.parse(A2ml.Lax, input);
+    let errors = A2ml.validate_checked(doc);
+    let status = if len(errors) == 0 { "PASS" } else { "FAIL" };
+    report = report ++ ["{\"file\": \"" ++ input_path ++ "\", \"status\": \"" ++ status ++ "\"}"];
+    i = i + 1;
+  }
+  write_file_sync("build/vector-report.json", "[" ++ Compat.array_join(report, ",") ++ "]");
+  Compat.console_log("Report written to build/vector-report.json")
+}
