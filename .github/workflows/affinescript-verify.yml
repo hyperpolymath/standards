@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+name: AffineScript Verify
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+# Compile-verifies changed `.affine` files with the canonical AffineScript
+# compiler (hyperpolymath/affinescript). The compiler is pinned to a commit
+# SHA for reproducibility; bump COMPILER_REF deliberately.
+env:
+  COMPILER_REPO: hyperpolymath/affinescript
+  COMPILER_REF: d2875a552f1d389b4a60c4adfdc02ae53e36aca3
+
+jobs:
+  verify:
+    name: AffineScript Verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout standards
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed .affine files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null \
+             || printf '%s' "$BASE" | grep -qE '^0+$'; then
+            BASE="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
+          fi
+          FILES="$(git diff --name-only --diff-filter=ACMR "$BASE" HEAD -- '*.affine' || true)"
+          if [ -z "$FILES" ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No changed .affine files — nothing to verify."
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "Changed .affine files:"
+            echo "$FILES"
+            { echo 'files<<EOF'; echo "$FILES"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout AffineScript compiler
+        if: steps.changed.outputs.any == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ env.COMPILER_REPO }}
+          ref: ${{ env.COMPILER_REF }}
+          path: .affinescript-compiler
+
+      - name: Set up OCaml
+        if: steps.changed.outputs.any == 'true'
+        uses: ocaml/setup-ocaml@e32b06a3e831ff2fbc6f08cf35be2085e3918014 # v3
+        with:
+          ocaml-compiler: "5.1"
+
+      - name: Build compiler
+        if: steps.changed.outputs.any == 'true'
+        working-directory: .affinescript-compiler
+        run: |
+          opam install . --deps-only
+          opam exec -- dune build
+
+      - name: Verify changed .affine files
+        if: steps.changed.outputs.any == 'true'
+        working-directory: .affinescript-compiler
+        run: |
+          set -u
+          rc=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            abs="$GITHUB_WORKSPACE/$f"
+            echo "::group::check $f"
+            if opam exec -- dune exec affinescript -- check "$abs"; then
+              echo "✅ $f"
+            else
+              echo "❌ $f failed AffineScript check"
+              rc=1
+            fi
+            echo "::endgroup::"
+          done <<'EOF'
+          ${{ steps.changed.outputs.files }}
+          EOF
+          if [ "$rc" -ne 0 ]; then
+            echo "AffineScript verification failed."
+            exit 1
+          fi
+          echo "All changed .affine files passed AffineScript verification."
