@@ -288,8 +288,7 @@ See [CONTRIBUTING.md](../../../.github/CONTRIBUTING.md) in the main repository.
 ## Related Projects
 
 - [AIBDP Specification](https://github.com/Hyperpolymath/consent-aware-http)
-- [Python Implementation](../python/)
-- [Rust Implementation](../rust/)
+- [Deno Implementation](../deno/)
 
 ---
 
