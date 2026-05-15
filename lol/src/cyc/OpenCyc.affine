@@ -1,0 +1,216 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
+//
+// OpenCyc integration: semantic grounding for language concepts.
+// AffineScript port of OpenCyc.res.
+
+module OpenCyc;
+
+use Lang1000;
+
+extern fn str_lower(s: String) -> String = "string" "toLowerCase";
+extern fn promise_resolve(v: a) -> Promise<a> = "Promise" "resolve";
+
+module Config {
+  pub let default_endpoint = "http://localhost:3602";
+  pub let connection_timeout = 5000;
+
+  pub type Credentials = { endpoint: String, timeout: Int }
+
+  pub fn default() -> Credentials {
+    Credentials { endpoint: default_endpoint, timeout: connection_timeout }
+  }
+}
+
+module Concepts {
+  pub let human_language = "#$HumanLanguage";
+  pub let writing_script = "#$WritingScript";
+  pub let geographical_region = "#$GeographicalRegion";
+  pub let linguistic_property = "#$LinguisticProperty";
+  pub let language_family = "#$LanguageFamily";
+  pub let spoken_in = "#$languageSpokenInRegion";
+  pub let written_in = "#$languageWrittenInScript";
+  pub let sub_language_of = "#$subLanguageOf";
+  pub let word_order = "#$WordOrder";
+  pub let phonological_inventory = "#$PhonologicalInventory";
+  pub let morphological_type = "#$MorphologicalType";
+}
+
+module Types {
+  pub type CycConstant = String
+
+  pub type CycFormula =
+    | Atom(CycConstant)
+    | List([CycFormula])
+    | Variable(String)
+
+  pub type QueryResult =
+    | Success([Dict<CycFormula>])
+    | Failure(String)
+    | Timeout
+
+  pub type ConnectionState =
+    | Connected
+    | Disconnected
+    | Connecting
+    | ConnError(String)
+
+  pub type LanguageMapping = {
+    iso639_3: String,
+    cyc_constant: CycConstant,
+    name: String,
+    family: Option<CycConstant>,
+    region: Option<CycConstant>,
+    script: Option<CycConstant>,
+  }
+}
+
+module Client {
+  use Types;
+
+  pub type T = {
+    config: Config.Credentials,
+    mut state: Types.ConnectionState,
+  }
+
+  pub fn make(endpoint: Option<String>, timeout: Option<Int>) -> T {
+    T {
+      config: Config.Credentials {
+        endpoint: match endpoint { Some(e) => e, None => Config.default_endpoint },
+        timeout: match timeout { Some(t) => t, None => Config.connection_timeout },
+      },
+      state: Types.Disconnected,
+    }
+  }
+
+  // TODO: implement actual connection to OpenCyc server.
+  pub fn connect(_client: T) -> Promise<Result<Unit, String>> {
+    promise_resolve(Err("OpenCyc connection not implemented"))
+  }
+
+  pub fn disconnect(client: T) -> Unit {
+    client.state = Types.Disconnected
+  }
+
+  pub fn is_connected(client: T) -> Bool {
+    match client.state { Connected => true, _ => false }
+  }
+}
+
+module Query {
+  use Types;
+
+  pub fn language_query(iso639_3: String) -> String {
+    "(#$isa ?lang #$HumanLanguage)\n     (#$iso639-3Code ?lang \"" ++ iso639_3 ++ "\")"
+  }
+
+  pub fn languages_in_region(region: Types.CycConstant) -> String {
+    "(#$isa ?lang #$HumanLanguage)\n     (#$languageSpokenInRegion ?lang " ++ region ++ ")"
+  }
+
+  pub fn languages_with_script(script: Types.CycConstant) -> String {
+    "(#$isa ?lang #$HumanLanguage)\n     (#$languageWrittenInScript ?lang " ++ script ++ ")"
+  }
+
+  pub fn language_family_query(language: Types.CycConstant) -> String {
+    "(#$subLanguageOf " ++ language ++ " ?family)"
+  }
+
+  // TODO: implement actual query execution.
+  pub fn execute(_client: Client.T, _query: String) -> Promise<Types.QueryResult> {
+    promise_resolve(Types.Failure("Query execution not implemented"))
+  }
+}
+
+module LanguageOntology {
+  use Types;
+
+  pub fn iso639_to_cyc() -> Dict<Types.CycConstant> {
+    let d = dict_empty();
+    dict_set(d, "eng", "#$English-HumanLanguage");
+    dict_set(d, "deu", "#$German-HumanLanguage");
+    dict_set(d, "fra", "#$French-HumanLanguage");
+    dict_set(d, "spa", "#$Spanish-HumanLanguage");
+    dict_set(d, "por", "#$Portuguese-HumanLanguage");
+    dict_set(d, "ita", "#$Italian-HumanLanguage");
+    dict_set(d, "rus", "#$Russian-HumanLanguage");
+    dict_set(d, "zho", "#$Chinese-HumanLanguage");
+    dict_set(d, "jpn", "#$Japanese-HumanLanguage");
+    dict_set(d, "kor", "#$Korean-HumanLanguage");
+    dict_set(d, "ara", "#$Arabic-HumanLanguage");
+    dict_set(d, "heb", "#$Hebrew-HumanLanguage");
+    dict_set(d, "ell", "#$Greek-HumanLanguage");
+    dict_set(d, "lat", "#$Latin-HumanLanguage");
+    dict_set(d, "san", "#$Sanskrit-HumanLanguage");
+    d
+  }
+
+  pub fn language_families() -> Dict<Types.CycConstant> {
+    let d = dict_empty();
+    dict_set(d, "indo-european", "#$IndoEuropeanLanguageFamily");
+    dict_set(d, "sino-tibetan", "#$SinoTibetanLanguageFamily");
+    dict_set(d, "afroasiatic", "#$AfroAsiaticLanguageFamily");
+    dict_set(d, "austronesian", "#$AustronesianLanguageFamily");
+    dict_set(d, "niger-congo", "#$NigerCongoLanguageFamily");
+    dict_set(d, "dravidian", "#$DravidianLanguageFamily");
+    dict_set(d, "uralic", "#$UralicLanguageFamily");
+    dict_set(d, "altaic", "#$AltaicLanguageFamily");
+    d
+  }
+
+  pub fn writing_scripts() -> Dict<Types.CycConstant> {
+    let d = dict_empty();
+    dict_set(d, "latin", "#$LatinAlphabet");
+    dict_set(d, "cyrillic", "#$CyrillicAlphabet");
+    dict_set(d, "greek", "#$GreekAlphabet");
+    dict_set(d, "arabic", "#$ArabicScript");
+    dict_set(d, "hebrew", "#$HebrewAlphabet");
+    dict_set(d, "devanagari", "#$DevanagariScript");
+    dict_set(d, "chinese", "#$ChineseCharacters");
+    dict_set(d, "japanese", "#$JapaneseWritingSystem");
+    dict_set(d, "korean", "#$HangulAlphabet");
+    d
+  }
+
+  pub fn get_cyc_constant(iso639_3: String) -> Option<Types.CycConstant> {
+    dict_get(iso639_to_cyc(), iso639_3)
+  }
+
+  pub fn get_language_family(family_name: String) -> Option<Types.CycConstant> {
+    dict_get(language_families(), str_lower(family_name))
+  }
+
+  pub fn get_script(script_name: String) -> Option<Types.CycConstant> {
+    dict_get(writing_scripts(), str_lower(script_name))
+  }
+}
+
+module Reasoning {
+  use Types;
+
+  pub fn is_in_family(_client: Client.T, _language: Types.CycConstant, _family: Types.CycConstant) -> Promise<Bool> {
+    promise_resolve(false)
+  }
+
+  pub fn languages_in_region(_client: Client.T, _region: Types.CycConstant) -> Promise<[Types.LanguageMapping]> {
+    promise_resolve([])
+  }
+
+  pub fn related_languages(_client: Client.T, _language: Types.CycConstant) -> Promise<[Types.CycConstant]> {
+    promise_resolve([])
+  }
+
+  pub fn scripts_compatible(_script1: Types.CycConstant, _script2: Types.CycConstant) -> Bool {
+    false
+  }
+}
+
+module Sync {
+  pub fn sync_languages(_client: Client.T, _languages: [Lang1000.Language.T]) -> Promise<Int> {
+    promise_resolve(0)
+  }
+
+  pub fn update_mappings(_client: Client.T) -> Promise<Result<Int, String>> {
+    promise_resolve(Err("Not implemented"))
+  }
+}
