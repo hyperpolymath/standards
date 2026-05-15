@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
+//
+// Crawler module tests. AffineScript port of Crawler_test.res.
+
+module Crawler_test;
+
+use Vitest;
+use Crawler;
+
+Vitest.describe("Crawler.Config", fn() {
+  Vitest.test("has sensible default timeout", fn() {
+    Vitest.to_be(Vitest.expect(Crawler.Config.default_timeout), 30000)
+  });
+  Vitest.test("has sensible default retries", fn() {
+    Vitest.to_be(Vitest.expect(Crawler.Config.default_retries), 3)
+  });
+  Vitest.test("has sensible default rate limit", fn() {
+    Vitest.to_be(Vitest.expect(Crawler.Config.default_rate_limit_ms), 1000)
+  });
+  Vitest.test("makeDefaultHeaders creates valid headers", fn() {
+    let headers = Crawler.Config.make_default_headers();
+    Vitest.to_be(Vitest.expect(option_is_some(dict_get(headers, "User-Agent"))), true)
+  })
+});
+
+Vitest.describe("Crawler.Request", fn() {
+  Vitest.test("make creates request with defaults", fn() {
+    let req = Crawler.Request.make("https://example.com", Crawler.Types.GET, None, None, None);
+    Vitest.to_be(Vitest.expect(req.url), "https://example.com");
+    Vitest.to_equal(Vitest.expect(req.method), Crawler.Types.GET);
+    Vitest.to_be(Vitest.expect(req.timeout), Crawler.Config.default_timeout);
+    Vitest.to_be(Vitest.expect(req.retries), Crawler.Config.default_retries)
+  });
+  Vitest.test("make accepts custom options", fn() {
+    let req = Crawler.Request.make("https://example.com", Crawler.Types.POST, None, Some(5000), Some(5));
+    Vitest.to_equal(Vitest.expect(req.method), Crawler.Types.POST);
+    Vitest.to_be(Vitest.expect(req.timeout), 5000);
+    Vitest.to_be(Vitest.expect(req.retries), 5)
+  });
+  Vitest.test("withHeader adds header", fn() {
+    let req = Crawler.Request.make("https://example.com", Crawler.Types.GET, None, None, None);
+    let _ = Crawler.Request.with_header(req, "X-Custom", "value");
+    Vitest.to_equal(Vitest.expect(dict_get(req.headers, "X-Custom")), Some("value"))
+  });
+  Vitest.test("methodToString converts correctly", fn() {
+    Vitest.to_be(Vitest.expect(Crawler.Request.method_to_string(Crawler.Types.GET)), "GET");
+    Vitest.to_be(Vitest.expect(Crawler.Request.method_to_string(Crawler.Types.POST)), "POST");
+    Vitest.to_be(Vitest.expect(Crawler.Request.method_to_string(Crawler.Types.HEAD)), "HEAD")
+  })
+});
+
+Vitest.describe("Crawler.RateLimiter", fn() {
+  Vitest.test("make creates limiter with default delay", fn() {
+    let limiter = Crawler.RateLimiter.make(Crawler.Config.default_rate_limit_ms);
+    Vitest.to_be(Vitest.expect(limiter.delay_ms), Crawler.Config.default_rate_limit_ms)
+  });
+  Vitest.test("make accepts custom delay", fn() {
+    let limiter = Crawler.RateLimiter.make(2000);
+    Vitest.to_be(Vitest.expect(limiter.delay_ms), 2000)
+  });
+  Vitest.test("canProceed returns true for new limiter", fn() {
+    let limiter = Crawler.RateLimiter.make(Crawler.Config.default_rate_limit_ms);
+    Vitest.to_be(Vitest.expect(Crawler.RateLimiter.can_proceed(limiter)), true)
+  });
+  Vitest.test("recordRequest updates lastRequest", fn() {
+    let limiter = Crawler.RateLimiter.make(Crawler.Config.default_rate_limit_ms);
+    let before = limiter.last_request;
+    Crawler.RateLimiter.record_request(limiter);
+    Vitest.to_be(Vitest.expect(limiter.last_request > before), true)
+  })
+});
+
+Vitest.describe("Crawler.RetryPolicy", fn() {
+  Vitest.describe("calculateDelay", fn() {
+    Vitest.test("Constant returns same delay", fn() {
+      let strategy = Crawler.RetryPolicy.Constant(1000);
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.calculate_delay(strategy, 1)), 1000);
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.calculate_delay(strategy, 3)), 1000)
+    });
+    Vitest.test("Linear increases linearly", fn() {
+      let strategy = Crawler.RetryPolicy.Linear(1000);
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.calculate_delay(strategy, 1)), 1000);
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.calculate_delay(strategy, 2)), 2000);
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.calculate_delay(strategy, 3)), 3000)
+    });
+    Vitest.test("Exponential increases exponentially", fn() {
+      let strategy = Crawler.RetryPolicy.Exponential(1000, 2.0);
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.calculate_delay(strategy, 1)), 1000);
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.calculate_delay(strategy, 2)), 2000);
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.calculate_delay(strategy, 3)), 4000)
+    })
+  });
+  Vitest.describe("shouldRetry", fn() {
+    Vitest.test("returns true when under max", fn() {
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.should_retry(1, 3)), true);
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.should_retry(2, 3)), true)
+    });
+    Vitest.test("returns false when at or over max", fn() {
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.should_retry(3, 3)), false);
+      Vitest.to_be(Vitest.expect(Crawler.RetryPolicy.should_retry(4, 3)), false)
+    })
+  })
+});
+
+Vitest.describe("Crawler.Parser", fn() {
+  Vitest.test("selectorToString formats correctly", fn() {
+    Vitest.to_be(Vitest.expect(Crawler.Parser.selector_to_string(Crawler.Parser.Css(".verse"))), "css:.verse");
+    Vitest.to_be(Vitest.expect(Crawler.Parser.selector_to_string(Crawler.Parser.XPath("//div"))), "xpath://div");
+    Vitest.to_be(Vitest.expect(Crawler.Parser.selector_to_string(Crawler.Parser.Regex("\\d+"))), "regex:\\d+")
+  })
+});

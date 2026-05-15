@@ -1,0 +1,145 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
+//
+// Base crawler module. AffineScript port of Crawler.res.
+
+module Crawler;
+
+extern fn date_now() -> Float = "Date" "now";
+extern fn math_pow(base: Float, exp: Float) -> Float = "Math" "pow";
+
+module Types {
+  pub type HttpMethod = | GET | POST | HEAD
+
+  pub type RequestConfig = {
+    url: String,
+    method: HttpMethod,
+    headers: Dict<String>,
+    timeout: Int,
+    retries: Int,
+  }
+
+  pub type ResponseStatus =
+    | Ok(Int)
+    | NetworkError(String)
+    | Timeout
+    | RateLimited
+    | NotFound
+
+  pub type Response = {
+    status: ResponseStatus,
+    headers: Dict<String>,
+    body: Option<String>,
+  }
+
+  pub type CrawlResult<a> =
+    | Success(a)
+    | Failure(String)
+    | Pending
+
+  pub type CrawlerState =
+    | Idle
+    | Crawling(String)
+    | Paused
+    | Stopped
+    | StateError(String)
+}
+
+module Config {
+  pub let default_timeout = 30000;
+  pub let default_retries = 3;
+  pub let default_user_agent = "1000Langs/0.1.0 (Parallel Corpus Crawler; +https://github.com/Hyperpolymath/1000Langs)";
+  pub let default_rate_limit_ms = 1000;
+
+  pub fn make_default_headers() -> Dict<String> {
+    let headers = dict_empty();
+    dict_set(headers, "User-Agent", default_user_agent);
+    dict_set(headers, "Accept", "text/html,application/xhtml+xml,application/xml");
+    dict_set(headers, "Accept-Language", "en-US,en;q=0.9");
+    headers
+  }
+}
+
+module Request {
+  use Types;
+
+  pub fn make(url: String, method: Types.HttpMethod, headers: Option<Dict<String>>,
+              timeout: Option<Int>, retries: Option<Int>) -> Types.RequestConfig {
+    Types.RequestConfig {
+      url: url,
+      method: method,
+      headers: match headers { Some(h) => h, None => Config.make_default_headers() },
+      timeout: match timeout { Some(t) => t, None => Config.default_timeout },
+      retries: match retries { Some(r) => r, None => Config.default_retries },
+    }
+  }
+
+  pub fn with_header(config: Types.RequestConfig, key: String, value: String) -> Types.RequestConfig {
+    dict_set(config.headers, key, value);
+    config
+  }
+
+  pub fn method_to_string(m: Types.HttpMethod) -> String {
+    match m { GET => "GET", POST => "POST", HEAD => "HEAD" }
+  }
+}
+
+module RateLimiter {
+  pub type T = {
+    mut last_request: Float,
+    delay_ms: Int,
+  }
+
+  pub fn make(delay_ms: Int) -> T {
+    T { last_request: 0.0, delay_ms: delay_ms }
+  }
+
+  pub fn can_proceed(limiter: T) -> Bool {
+    let elapsed = date_now() -. limiter.last_request;
+    elapsed >= int_to_float(limiter.delay_ms)
+  }
+
+  pub fn record_request(limiter: T) -> Unit {
+    limiter.last_request = date_now()
+  }
+}
+
+module RetryPolicy {
+  pub type T =
+    | Constant(Int)
+    | Linear(Int)
+    | Exponential(Int, Float)
+
+  pub fn calculate_delay(strategy: T, attempt: Int) -> Int {
+    match strategy {
+      Constant(ms)            => ms,
+      Linear(base)            => base * attempt,
+      Exponential(base, factor) =>
+        float_to_int(int_to_float(base) *. math_pow(factor, int_to_float(attempt - 1))),
+    }
+  }
+
+  pub fn should_retry(attempt: Int, max_retries: Int) -> Bool {
+    attempt < max_retries
+  }
+}
+
+module Parser {
+  pub type Selector =
+    | Css(String)
+    | XPath(String)
+    | Regex(String)
+
+  pub type ParseResult<a> =
+    | Parsed(a)
+    | ParseError(String)
+    | NoMatch
+
+  pub fn selector_to_string(s: Selector) -> String {
+    match s {
+      Css(x)   => "css:" ++ x,
+      XPath(x) => "xpath:" ++ x,
+      Regex(x) => "regex:" ++ x,
+    }
+  }
+}

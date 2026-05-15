@@ -1,0 +1,210 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
+//
+// Bible.com (YouVersion) web-scraping crawler. AffineScript port of BibleCom.res.
+
+module BibleCom;
+
+use Crawler;
+use Http;
+use Lang1000;
+
+extern fn json_parse_exn(s: String) -> Json = "JSON" "parseExn";
+extern fn json_data_array(j: Json) -> Option<[Dict<Json>]> = "json" "dataObjArray";
+extern fn json_str_field(o: Dict<Json>, key: String) -> String = "json" "strField";
+extern fn json_int_field(o: Dict<Json>, key: String) -> Int = "json" "intField";
+extern fn json_bool_field(o: Dict<Json>, key: String) -> Bool = "json" "boolField";
+extern fn str_replace_regex(s: String, pattern: String, repl: String) -> String = "string" "replaceRegExp";
+extern fn str_trim(s: String) -> String = "string" "trim";
+extern fn str_split(s: String, sep: String) -> [String] = "string" "split";
+
+module Config {
+  pub let base_url = "https://www.bible.com";
+  pub let api_url = "https://www.bible.com/api/bible";
+  pub let rate_limit_ms = 2000;
+
+  pub type VersionInfo = {
+    id: Int,
+    abbreviation: String,
+    title: String,
+    language_tag: String,
+  }
+}
+
+module Endpoints {
+  pub fn versions() -> String { Config.base_url ++ "/versions" }
+  pub fn version(id: Int) -> String { Config.base_url ++ "/versions/" ++ show(id) }
+  pub fn bible(id: Int, book_code: String, chapter: Int) -> String {
+    Config.base_url ++ "/bible/" ++ show(id) ++ "/" ++ book_code ++ "." ++ show(chapter)
+  }
+  pub fn search(id: Int, query: String) -> String {
+    Config.base_url ++ "/search/bible?version_id=" ++ show(id) ++ "&q=" ++ query
+  }
+  pub fn api_chapter(id: Int, book_code: String, chapter: Int) -> String {
+    Config.api_url ++ "/chapter/" ++ show(id) ++ "/" ++ book_code ++ "." ++ show(chapter) ++ ".json"
+  }
+}
+
+module Selectors {
+  pub let verse_container = ".ChapterContent_verse__uvbXo";
+  pub let verse_number = ".ChapterContent_label__R2PLt";
+  pub let verse_text = ".ChapterContent_content__RlRwn";
+  pub let chapter_nav = ".ChapterContent_nav__vVPwy";
+  pub let version_selector = ".VersionSelector_container__3uKjR";
+}
+
+module Types {
+  pub type VersionMeta = {
+    id: Int,
+    abbreviation: String,
+    title: String,
+    language: Lang1000.Language.T,
+    has_audio: Bool,
+    has_offline: Bool,
+  }
+
+  pub type ChapterContent = {
+    version_id: Int,
+    book: String,
+    chapter: Int,
+    verses: [Lang1000.Verse.T],
+    next_chapter: Option<(String, Int)>,
+    prev_chapter: Option<(String, Int)>,
+  }
+}
+
+module Parser {
+  use Types;
+
+  pub fn parse_version_list(json: Json) -> Crawler.Parser.ParseResult<[Types.VersionMeta]> {
+    match json_data_array(json) {
+      None => Crawler.Parser.NoMatch,
+      Some(arr) => {
+        let versions = [];
+        let i = 0;
+        while i < len(arr) {
+          let v = arr[i];
+          let lang_tag = json_str_field(v, "language_tag");
+          versions = versions ++ [Types.VersionMeta {
+            id: json_int_field(v, "id"),
+            abbreviation: json_str_field(v, "abbreviation"),
+            title: json_str_field(v, "title"),
+            language: Lang1000.Language.make(lang_tag, lang_tag, None, None, None),
+            has_audio: json_bool_field(v, "has_audio"),
+            has_offline: json_bool_field(v, "has_offline"),
+          }];
+          i = i + 1;
+        }
+        Crawler.Parser.Parsed(versions)
+      }
+    }
+  }
+
+  pub fn strip_html_tags(html: String) -> String {
+    str_trim(str_replace_regex(str_replace_regex(html, "<[^>]+>", ""), "\\s+", " "))
+  }
+
+  pub fn parse_chapter_html(html: String, version_id: Int, book: String, chapter: Int,
+                            language_code: String) -> Crawler.Parser.ParseResult<Types.ChapterContent> {
+    let verses = [];
+    let blocks = str_split(html, "data-usfm=\"");
+    let i = 1;
+    while i < len(blocks) {
+      let cleaned = strip_html_tags(blocks[i]);
+      if len(cleaned) > 0 {
+        verses = verses ++ [Lang1000.Verse.make(
+          Lang1000.Verse.make_reference(book, chapter, len(verses) + 1),
+          cleaned, language_code)];
+      }
+      i = i + 1;
+    }
+    if len(verses) > 0 {
+      Crawler.Parser.Parsed(Types.ChapterContent {
+        version_id: version_id, book: book, chapter: chapter,
+        verses: verses, next_chapter: None, prev_chapter: None,
+      })
+    } else {
+      Crawler.Parser.NoMatch
+    }
+  }
+
+  pub fn normalize_text(text: String) -> String {
+    str_replace_regex(str_trim(text), "\\s+", " ")
+  }
+}
+
+module Crawler_ {
+  use Crawler.Types;
+
+  pub type T = {
+    rate_limiter: Crawler.RateLimiter.T,
+    mut state: Crawler.Types.CrawlerState,
+    mut cached_versions: Option<[Types.VersionMeta]>,
+  }
+
+  pub fn make() -> T {
+    T {
+      rate_limiter: Crawler.RateLimiter.make(Config.rate_limit_ms),
+      state: Crawler.Types.Idle,
+      cached_versions: None,
+    }
+  }
+
+  pub fn fetch_versions(crawler: T) -> Effect[Async] Crawler.Types.CrawlResult<[Types.VersionMeta]> {
+    match crawler.cached_versions {
+      Some(versions) => Crawler.Types.Success(versions),
+      None => {
+        crawler.state = Crawler.Types.Crawling("versions");
+        let resp = await Http.get_with_rate_limit(Endpoints.versions(), None, crawler.rate_limiter);
+        crawler.state = Crawler.Types.Idle;
+        match resp {
+          Ok(r) => {
+            match Parser.parse_version_list(json_parse_exn(r.body)) {
+              Crawler.Parser.Parsed(versions) => {
+                crawler.cached_versions = Some(versions);
+                Crawler.Types.Success(versions)
+              }
+              _ => Crawler.Types.Failure("Failed to parse versions"),
+            }
+          }
+          Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
+          Err(_) => Crawler.Types.Failure("Request failed"),
+        }
+      }
+    }
+  }
+
+  pub fn fetch_chapter(crawler: T, version_id: Int, book: String, chapter: Int,
+                       language_code: String) -> Effect[Async] Crawler.Types.CrawlResult<Types.ChapterContent> {
+    let resp = await Http.get_with_rate_limit(Endpoints.bible(version_id, book, chapter), None, crawler.rate_limiter);
+    match resp {
+      Ok(r) => {
+        match Parser.parse_chapter_html(r.body, version_id, book, chapter, language_code) {
+          Crawler.Parser.Parsed(content) => Crawler.Types.Success(content),
+          _ => Crawler.Types.Failure("Failed to parse chapter HTML"),
+        }
+      }
+      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
+      Err(_) => Crawler.Types.Failure("Request failed"),
+    }
+  }
+
+  pub fn fetch_book(crawler: T, version_id: Int, book: String, total_chapters: Int,
+                    language_code: String) -> Effect[Async] Crawler.Types.CrawlResult<[Types.ChapterContent]> {
+    let chapters = [];
+    let failed = false;
+    let fail_msg = "";
+    let ch = 1;
+    while ch <= total_chapters {
+      if !failed {
+        match await fetch_chapter(crawler, version_id, book, ch, language_code) {
+          Crawler.Types.Success(content) => { chapters = chapters ++ [content]; }
+          Crawler.Types.Failure(msg)     => { failed = true; fail_msg = msg; }
+          Crawler.Types.Pending          => {}
+        }
+      }
+      ch = ch + 1;
+    }
+    if failed { Crawler.Types.Failure(fail_msg) } else { Crawler.Types.Success(chapters) }
+  }
+}
