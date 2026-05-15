@@ -1,0 +1,164 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// AffineScript port of Index.res.
+
+module Index;
+
+use Types;
+use Session;
+use Manifest;
+use Guards;
+
+module MCP {
+  extern type Server;
+  extern type Transport;
+
+  pub type ToolRequest = { name: String, arguments: Dict<Json> }
+  pub type ToolResponse = { content: [Json] }
+
+  extern fn create_server(info: Json) -> Server = "@modelcontextprotocol/sdk/server/index.js" "Server";
+  extern fn create_stdio_transport() -> Transport = "@modelcontextprotocol/sdk/server/stdio.js" "StdioServerTransport";
+  extern fn connect(s: Server, t: Transport) -> Promise<Unit> = "mcp" "connect";
+  extern fn set_request_handler(s: Server, name: String, handler: fn(ToolRequest) -> Promise<ToolResponse>) -> Unit = "mcp" "setRequestHandler";
+}
+
+extern fn read_file(path: String, enc: String) -> Promise<String> = "node:fs/promises" "readFile";
+extern fn path_resolve(a: String, b: String) -> String = "node:path" "resolve";
+extern fn path_join(a: String, b: String) -> String = "node:path" "join";
+extern fn env_get(name: String) -> Option<String> = "process" "env";
+extern fn process_cwd() -> String = "process" "cwd";
+extern fn console_log(msg: String) -> Unit = "console" "log";
+extern fn str_to_int(s: String) -> Option<Int> = "string" "toInt";
+extern fn json_text_content(text: String) -> Json = "json" "textContent";
+extern fn json_decode_string(j: Json) -> Option<String> = "json" "decodeString";
+
+pub fn get_env(name: String, default: String) -> String {
+  match env_get(name) { Some(v) => v, None => default }
+}
+
+module GuardianServer {
+  pub type T = {
+    server: MCP.Server,
+    config: Types.GuardianConfig,
+    session_manager: Session.SessionManager.T,
+    mut manifests: Dict<Types.AiManifest>,
+  }
+
+  pub fn make() -> T {
+    let config = Types.GuardianConfig {
+      base_path: get_env("REPOS_PATH", process_cwd()),
+      strict_mode: get_env("STRICT_MODE", "false") == "true",
+      session_timeout: match str_to_int(get_env("SESSION_TIMEOUT", "3600000")) {
+        Some(n) => n, None => 3600000,
+      },
+    };
+    let server = MCP.create_server(json_object([
+      ("name", json_string("repo-guardian")),
+      ("version", json_string("0.1.0")),
+    ]));
+    T {
+      server: server,
+      config: config,
+      session_manager: Session.SessionManager.make(config),
+      manifests: dict_empty(),
+    }
+  }
+
+  pub fn handle_get_manifest(guardian: T, repo_path: String) -> Effect[Async] MCP.ToolResponse {
+    let full_path = path_resolve(guardian.config.base_path, repo_path);
+    let manifest = await Manifest.parse_manifest(full_path);
+    dict_set(guardian.manifests, repo_path, manifest);
+    MCP.ToolResponse {
+      content: [json_text_content(
+        "Manifest hash: " ++ manifest.hash
+        ++ "\n\nYou must acknowledge this manifest with the hash to proceed.")],
+    }
+  }
+
+  pub fn handle_acknowledge_manifest(guardian: T, repo_path: String,
+                                     attestation_hash: String) -> Effect[Async] MCP.ToolResponse {
+    match dict_get(guardian.manifests, repo_path) {
+      None => MCP.ToolResponse { content: [json_text_content("ERROR: You must call get_manifest first")] },
+      Some(manifest) => {
+        if !Manifest.validate_attestation(manifest, attestation_hash) {
+          MCP.ToolResponse { content: [json_text_content("ERROR: Invalid attestation hash")] }
+        } else {
+          let session = Session.SessionManager.create_session(guardian.session_manager, repo_path);
+          let _ = Session.SessionManager.acknowledge_manifest(
+            guardian.session_manager, session.session_id, manifest, attestation_hash);
+          MCP.ToolResponse {
+            content: [json_text_content("✅ Manifest acknowledged! Session ID: " ++ session.session_id)],
+          }
+        }
+      }
+    }
+  }
+
+  pub fn handle_read_file(guardian: T, session_id: String, path: String) -> Effect[Async] MCP.ToolResponse {
+    match Session.SessionManager.get_session(guardian.session_manager, session_id) {
+      None => MCP.ToolResponse { content: [json_text_content("ERROR: Invalid session ID")] },
+      Some(session) => {
+        match dict_get(guardian.manifests, session.repo_path) {
+          None => MCP.ToolResponse { content: [json_text_content("ERROR: Manifest not found")] },
+          Some(manifest) => {
+            let access_guard = Guards.AccessGuard.make(guardian.session_manager, manifest);
+            let access_result = Guards.AccessGuard.check_access(access_guard, session_id);
+            if !access_result.allowed {
+              let reason = match access_result.reason { Some(r) => r, None => "Unknown" };
+              MCP.ToolResponse { content: [json_text_content("ERROR: " ++ reason)] }
+            } else {
+              let path_result = Guards.AccessGuard.validate_path(access_guard, path);
+              if !path_result.allowed {
+                let reason = match path_result.reason { Some(r) => r, None => "Unknown" };
+                MCP.ToolResponse { content: [json_text_content("ERROR: " ++ reason)] }
+              } else {
+                let full_path = path_join(guardian.config.base_path, path_join(session.repo_path, path));
+                try {
+                  let file_content = await read_file(full_path, "utf-8");
+                  MCP.ToolResponse { content: [json_text_content(file_content)] }
+                } catch _e {
+                  MCP.ToolResponse { content: [json_text_content("ERROR: Failed to read file " ++ path)] }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  fn arg_str(args: Dict<Json>, key: String) -> String {
+    match dict_get(args, key) {
+      Some(j) => match json_decode_string(j) { Some(s) => s, None => "" },
+      None => "",
+    }
+  }
+
+  pub fn start(guardian: T) -> Effect[Async] Unit {
+    MCP.set_request_handler(guardian.server, "tools/list", fn(_request) {
+      MCP.ToolResponse { content: [] }
+    });
+
+    MCP.set_request_handler(guardian.server, "tools/call", fn(request) {
+      let args = request.arguments;
+      match request.name {
+        "get_manifest" => await handle_get_manifest(guardian, arg_str(args, "repoPath")),
+        "acknowledge_manifest" =>
+          await handle_acknowledge_manifest(guardian, arg_str(args, "repoPath"), arg_str(args, "attestationHash")),
+        "read_file" =>
+          await handle_read_file(guardian, arg_str(args, "sessionId"), arg_str(args, "path")),
+        _ => MCP.ToolResponse { content: [json_text_content("Unknown tool: " ++ request.name)] },
+      }
+    });
+
+    let transport = MCP.create_stdio_transport();
+    await MCP.connect(guardian.server, transport);
+    console_log("MCP Repository Guardian started")
+  }
+}
+
+pub fn main() -> Effect[Async] Unit {
+  let guardian = GuardianServer.make();
+  await GuardianServer.start(guardian)
+}
+
+main()
