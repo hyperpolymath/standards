@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// AffineScript port of Session.res.
+
+module Session;
+
+use Types;
+
+extern fn random_uuid() -> String = "node:crypto" "randomUUID";
+extern fn set_timeout(cb: fn() -> Unit, ms: Int) -> Unit = "global" "setTimeout";
+extern fn date_make() -> Types.Date = "Date" "make";
+
+module SessionManager {
+  pub type T = {
+    mut sessions: Dict<Types.SessionState>,
+    config: Types.GuardianConfig,
+  }
+
+  pub fn make(config: Types.GuardianConfig) -> T {
+    T { sessions: dict_empty(), config: config }
+  }
+
+  pub fn create_session(manager: T, repo_path: String) -> Types.SessionState {
+    let session = Types.SessionState {
+      session_id: random_uuid(),
+      acknowledged_manifest: false,
+      attestation_hash: None,
+      acknowledged_at: None,
+      repo_path: repo_path,
+    };
+    dict_set(manager.sessions, session.session_id, session);
+    set_timeout(fn() {
+      dict_set(manager.sessions, session.session_id, session);
+    }, manager.config.session_timeout);
+    session
+  }
+
+  pub fn get_session(manager: T, session_id: String) -> Option<Types.SessionState> {
+    dict_get(manager.sessions, session_id)
+  }
+
+  pub fn acknowledge_manifest(manager: T, session_id: String,
+                              manifest: Types.AiManifest, attestation_hash: String) -> Bool {
+    match dict_get(manager.sessions, session_id) {
+      None => false,
+      Some(session) => {
+        if manifest.hash != attestation_hash {
+          false
+        } else {
+          let updated = Types.SessionState {
+            ...session,
+            acknowledged_manifest: true,
+            attestation_hash: Some(attestation_hash),
+            acknowledged_at: Some(date_make()),
+          };
+          dict_set(manager.sessions, session_id, updated);
+          true
+        }
+      }
+    }
+  }
+
+  pub fn is_acknowledged(manager: T, session_id: String) -> Bool {
+    match dict_get(manager.sessions, session_id) {
+      None => false,
+      Some(session) => session.acknowledged_manifest,
+    }
+  }
+
+  pub fn destroy_session(manager: T, session_id: String) -> Unit {
+    match dict_get(manager.sessions, session_id) {
+      Some(s) => dict_set(manager.sessions, session_id, s),
+      None => {},
+    }
+  }
+
+  pub fn get_active_sessions(manager: T) -> [Types.SessionState] {
+    dict_values(manager.sessions)
+  }
+}

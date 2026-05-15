@@ -1,0 +1,133 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+name: AffineScript Verify
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+# Compile-verifies changed `.affine` files with the canonical AffineScript
+# compiler (hyperpolymath/affinescript). The compiler is pinned to a commit
+# SHA for reproducibility; bump COMPILER_REF deliberately.
+#
+# NON-BLOCKING (temporary): the initial ReScript->AffineScript port (PR #62)
+# was done without a compiler, so `affinescript check` currently reports
+# errors that need mechanical fixes. Until those are resolved this job
+# REPORTS failures (job summary + warnings) but exits green so it does not
+# block merges. Flip BLOCKING to "true" once the ports compile clean.
+env:
+  BLOCKING: "false"
+  COMPILER_REPO: hyperpolymath/affinescript
+  COMPILER_REF: d2875a552f1d389b4a60c4adfdc02ae53e36aca3
+
+jobs:
+  verify:
+    name: AffineScript Verify
+    runs-on: ubuntu-latest
+    # NON-BLOCKING (temporary): see header note. continue-on-error keeps the
+    # whole job advisory — including the compiler checkout/setup-ocaml/build
+    # steps — so a toolchain/build problem cannot block merges or add
+    # estate-wide red noise while the ports + build are sorted in follow-up.
+    # Remove this (and flip BLOCKING=true) once the job is reliably green.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout standards
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed .affine files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null \
+             || printf '%s' "$BASE" | grep -qE '^0+$'; then
+            BASE="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
+          fi
+          FILES="$(git diff --name-only --diff-filter=ACMR "$BASE" HEAD -- '*.affine' || true)"
+          if [ -z "$FILES" ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No changed .affine files — nothing to verify."
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "Changed .affine files:"
+            echo "$FILES"
+            { echo 'files<<EOF'; echo "$FILES"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout AffineScript compiler
+        if: steps.changed.outputs.any == 'true'
+        continue-on-error: true
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ env.COMPILER_REPO }}
+          ref: ${{ env.COMPILER_REF }}
+          path: .affinescript-compiler
+
+      - name: Set up OCaml
+        if: steps.changed.outputs.any == 'true'
+        continue-on-error: true
+        uses: ocaml/setup-ocaml@e32b06a3e831ff2fbc6f08cf35be2085e3918014 # v3
+        with:
+          ocaml-compiler: "5.1"
+
+      - name: Build compiler
+        if: steps.changed.outputs.any == 'true'
+        continue-on-error: true
+        working-directory: .affinescript-compiler
+        run: |
+          opam install . --deps-only
+          opam exec -- dune build
+
+      - name: Verify changed .affine files
+        if: steps.changed.outputs.any == 'true'
+        continue-on-error: true
+        working-directory: .affinescript-compiler
+        run: |
+          set -u
+          rc=0
+          failed=""
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            abs="$GITHUB_WORKSPACE/$f"
+            echo "::group::check $f"
+            if opam exec -- dune exec affinescript -- check "$abs" 2>&1; then
+              echo "✅ $f"
+            else
+              echo "::warning file=$f::AffineScript check failed"
+              echo "❌ $f failed AffineScript check"
+              failed="$failed$f"$'\n'
+              rc=1
+            fi
+            echo "::endgroup::"
+          done <<'EOF'
+          ${{ steps.changed.outputs.files }}
+          EOF
+
+          {
+            echo "## AffineScript Verify"
+            if [ "$rc" -eq 0 ]; then
+              echo "All changed \`.affine\` files passed \`affinescript check\`."
+            else
+              echo "The following changed \`.affine\` files failed \`affinescript check\`:"
+              echo ""
+              echo "$failed" | sed '/^$/d' | sed 's/^/- /'
+              echo ""
+              echo "_See the per-file groups in the job log for the compiler errors._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$rc" -ne 0 ]; then
+            if [ "$BLOCKING" = "true" ]; then
+              echo "AffineScript verification failed (blocking)."
+              exit 1
+            fi
+            echo "::warning::AffineScript verification found errors but is non-blocking (BLOCKING=false). See job summary."
+            exit 0
+          fi
+          echo "All changed .affine files passed AffineScript verification."

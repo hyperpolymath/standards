@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// AffineScript port of Cli.res — A2ML CLI (prototype).
+
+module Cli;
+
+use Compat;
+use A2ml;
+use Json;
+
+extern fn argv() -> [String] = "process" "argv";
+extern fn read_text(path: String) -> String = "platform" "readTextFile";
+extern fn write_text(path: String, text: String) -> Unit = "platform" "writeTextFile";
+extern fn read_stdin() -> String = "platform" "readStdin";
+extern fn exit(code: Int) -> Unit = "platform" "exit";
+
+pub let help_text = "A2ML CLI (prototype)\n\n"
+  ++ "Usage:\n  a2ml <render|validate|ast> <file...|-> [options]\n\n"
+  ++ "Commands:\n  render    Render HTML to stdout (or --out)\n"
+  ++ "  validate  Validate in checked mode, exit 2 on errors\n"
+  ++ "  ast       Output JSON surface AST\n\n"
+  ++ "Options:\n  --mode <lax|checked>   Parse mode (default: lax)\n"
+  ++ "  --out <path>           Write output to file\n"
+  ++ "  --concat               Concatenate outputs when multiple inputs\n"
+  ++ "  --stdin                Read input from stdin (equivalent to '-')\n"
+  ++ "  -h, --help             Show this help\n\n"
+  ++ "Notes:\n  * Use '-' as a filename to read from stdin.\n"
+  ++ "  * For multiple files, --concat joins outputs in order.\n";
+
+pub fn usage() -> Effect[IO] Unit {
+  Compat.console_log(help_text);
+  exit(1)
+}
+
+pub fn get_arg(args: [String], name: String) -> Option<String> {
+  let i = 0;
+  while i < len(args) {
+    if args[i] == name {
+      if i + 1 < len(args) { return Some(args[i + 1]); } else { return None; }
+    }
+    i = i + 1;
+  }
+  None
+}
+
+pub fn has_flag(args: [String], name: String) -> Bool {
+  let i = 0;
+  while i < len(args) { if args[i] == name { return true; } i = i + 1; }
+  false
+}
+
+pub fn collect_inputs(args: [String]) -> [String] {
+  let inputs = [];
+  let i = 3;
+  let done = false;
+  while i < len(args) && !done {
+    if Compat.starts_with(args[i], "-") {
+      done = true;
+    } else {
+      inputs = inputs ++ [args[i]];
+      i = i + 1;
+    }
+  }
+  inputs
+}
+
+pub fn read_input(path: String) -> String {
+  if path == "-" { read_stdin() } else { read_text(path) }
+}
+
+pub fn render_doc(input: String, mode: A2ml.ParseMode) -> String {
+  A2ml.render_html(A2ml.parse(mode, input))
+}
+
+pub fn validate_doc(input: String, mode: A2ml.ParseMode) -> [A2ml.ParseError] {
+  let doc = A2ml.parse(mode, input);
+  if mode == A2ml.Checked { A2ml.validate_checked(doc) } else { [] }
+}
+
+pub fn ast_doc(input: String, mode: A2ml.ParseMode) -> String {
+  Json.doc_to_json(A2ml.parse(mode, input))
+}
+
+pub fn main() -> Effect[IO] Unit {
+  let args = argv();
+  if has_flag(args, "-h") || has_flag(args, "--help") { Compat.console_log(help_text); exit(0); }
+  if len(args) < 3 { usage(); }
+
+  let command = args[2];
+  let inputs = collect_inputs(args);
+  let read_from_stdin = has_flag(args, "--stdin");
+  let mode = match get_arg(args, "--mode") { Some("checked") => A2ml.Checked, _ => A2ml.Lax };
+  let out_path = get_arg(args, "--out");
+  let concat = has_flag(args, "--concat");
+  let sources = if read_from_stdin { ["-"] } else { inputs };
+  if len(sources) == 0 { usage(); }
+
+  match command {
+    "render" => {
+      let outputs = [];
+      let i = 0;
+      while i < len(sources) { outputs = outputs ++ [render_doc(read_input(sources[i]), mode)]; i = i + 1; }
+      let result = if concat { Compat.array_join(outputs, "\n") } else { Compat.array_join(outputs, "\n\n") };
+      match out_path { Some(p) => write_text(p, result), None => Compat.console_log(result) }
+    }
+    "validate" => {
+      let all_errors = [];
+      let i = 0;
+      while i < len(sources) {
+        let errs = validate_doc(read_input(sources[i]), mode);
+        let j = 0;
+        while j < len(errs) { all_errors = all_errors ++ [errs[j]]; j = j + 1; }
+        i = i + 1;
+      }
+      if len(all_errors) == 0 {
+        Compat.console_log("ok")
+      } else {
+        let k = 0;
+        while k < len(all_errors) {
+          Compat.console_log(Compat.int_to_string(all_errors[k].line) ++ ": " ++ all_errors[k].msg);
+          k = k + 1;
+        }
+        exit(2)
+      }
+    }
+    "ast" => {
+      let outputs = [];
+      let i = 0;
+      while i < len(sources) { outputs = outputs ++ [ast_doc(read_input(sources[i]), mode)]; i = i + 1; }
+      let result = Compat.array_join(outputs, "\n");
+      match out_path { Some(p) => write_text(p, result), None => Compat.console_log(result) }
+    }
+    _ => usage(),
+  }
+}
+
+main()

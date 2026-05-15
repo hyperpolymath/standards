@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
+//
+// HTTP fetch module: Deno fetch() with rate limiting, retry logic and
+// error handling for crawler use. AffineScript port of Http.res.
+
+module Http;
+
+use Crawler;
+
+module Fetch {
+  extern type Response;
+  extern fn fetch(url: String, init: Json) -> Promise<Response> = "global" "fetch";
+  extern fn fetch_simple(url: String) -> Promise<Response> = "global" "fetch";
+  extern fn status(r: Response) -> Int = "fetch" "status";
+  extern fn ok(r: Response) -> Bool = "fetch" "ok";
+  extern fn status_text(r: Response) -> String = "fetch" "statusText";
+  extern fn text(r: Response) -> Promise<String> = "fetch" "text";
+  extern fn json(r: Response) -> Promise<Json> = "fetch" "json";
+  extern fn get_header(r: Response, name: String) -> Option<String> = "fetch" "headers.get";
+}
+
+extern fn json_parse_exn(s: String) -> Json = "JSON" "parseExn";
+extern fn json_encode_object(d: Dict<Json>) -> Json = "JSON" "encodeObject";
+extern fn json_encode_string(s: String) -> Json = "JSON" "encodeString";
+extern fn set_timeout(cb: fn() -> Unit, ms: Int) -> Int = "global" "setTimeout";
+extern fn sleep_ms(ms: Int) -> Promise<Unit> = "global" "sleep";
+
+pub type HttpError =
+  | NetworkError(String)
+  | HttpError(Int, String)
+  | TimeoutError
+  | ParseError(String)
+
+pub type HttpResponse = {
+  status: Int,
+  body: String,
+  headers: Dict<String>,
+}
+
+// Perform a GET request with optional headers.
+pub fn get(url: String, headers: Option<Dict<String>>) -> Effect[Async] Result<HttpResponse, HttpError> {
+  try {
+    let resp = match headers {
+      Some(h) => {
+        let header_dict = dict_empty();
+        let pairs = dict_entries(h);
+        let i = 0;
+        while i < len(pairs) {
+          let (k, v) = pairs[i];
+          dict_set(header_dict, k, json_encode_string(v));
+          i = i + 1;
+        }
+        await Fetch.fetch(url, json_object([
+          ("method", json_string("GET")),
+          ("headers", json_encode_object(header_dict)),
+        ]))
+      }
+      None => await Fetch.fetch_simple(url),
+    };
+
+    let body = await Fetch.text(resp);
+    let status = Fetch.status(resp);
+
+    if Fetch.ok(resp) {
+      Ok(HttpResponse { status: status, body: body, headers: dict_empty() })
+    } else if status == 429 {
+      Err(HttpError(429, "Rate limited"))
+    } else if status == 404 {
+      Err(HttpError(404, "Not found"))
+    } else {
+      Err(HttpError(status, Fetch.status_text(resp)))
+    }
+  } catch e {
+    Err(NetworkError(exn_message_or(e, "Unknown error")))
+  }
+}
+
+// Perform a GET request and parse the response as JSON.
+pub fn get_json(url: String, headers: Option<Dict<String>>) -> Effect[Async] Result<Json, HttpError> {
+  match await get(url, headers) {
+    Ok(r) => {
+      try {
+        Ok(json_parse_exn(r.body))
+      } catch _e {
+        Err(ParseError("Invalid JSON response"))
+      }
+    }
+    Err(e) => Err(e),
+  }
+}
+
+// Perform a GET request with rate limiter integration.
+pub fn get_with_rate_limit(url: String, headers: Option<Dict<String>>,
+                           rate_limiter: Crawler.RateLimiter.T) -> Effect[Async] Result<HttpResponse, HttpError> {
+  fn wait_for_limit() -> Effect[Async] Unit {
+    if Crawler.RateLimiter.can_proceed(rate_limiter) {
+      Crawler.RateLimiter.record_request(rate_limiter)
+    } else {
+      await sleep_ms(rate_limiter.delay_ms);
+      await wait_for_limit()
+    }
+  }
+  await wait_for_limit();
+  await get(url, headers)
+}
+
+// Perform a GET request with retry logic.
+pub fn get_with_retry(url: String, headers: Option<Dict<String>>,
+                       max_retries: Int, backoff: Crawler.RetryPolicy.T) -> Effect[Async] Result<HttpResponse, HttpError> {
+  fn attempt(n: Int) -> Effect[Async] Result<HttpResponse, HttpError> {
+    let resp = await get(url, headers);
+    match resp {
+      Ok(_) => resp,
+      Err(HttpError(429, _)) => {
+        if n < max_retries {
+          await sleep_ms(Crawler.RetryPolicy.calculate_delay(backoff, n + 1));
+          await attempt(n + 1)
+        } else { resp }
+      }
+      Err(NetworkError(_)) => {
+        if n < max_retries {
+          await sleep_ms(Crawler.RetryPolicy.calculate_delay(backoff, n + 1));
+          await attempt(n + 1)
+        } else { resp }
+      }
+      Err(_) => resp,
+    }
+  }
+  await attempt(0)
+}

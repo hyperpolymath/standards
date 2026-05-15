@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
+//
+// eBible.org crawler. AffineScript port of EBible.res.
+
+module EBible;
+
+use Crawler;
+use Http;
+use Lang1000;
+
+extern fn str_split(s: String, sep: String) -> [String] = "string" "split";
+extern fn str_trim(s: String) -> String = "string" "trim";
+extern fn str_starts_with(s: String, p: String) -> Bool = "string" "startsWith";
+extern fn str_slice_to_end(s: String, start: Int) -> String = "string" "sliceToEnd";
+extern fn str_slice(s: String, start: Int, end: Int) -> String = "string" "slice";
+extern fn str_index_of(s: String, needle: String) -> Int = "string" "indexOf";
+extern fn str_replace_regex(s: String, pattern: String, repl: String) -> String = "string" "replaceRegExp";
+extern fn str_to_int(s: String) -> Option<Int> = "string" "toInt";
+
+module Config {
+  pub let base_url = "https://ebible.org";
+  pub let download_url = "https://ebible.org/Scriptures";
+  pub let rate_limit_ms = 1000;
+}
+
+module Endpoints {
+  pub fn translation_list() -> String { Config.base_url ++ "/Scriptures/" }
+  pub fn translation(id: String) -> String { Config.download_url ++ "/" ++ id ++ "/" }
+  pub fn usfm_zip(id: String) -> String { Config.download_url ++ "/" ++ id ++ "_usfm.zip" }
+  pub fn metadata(id: String) -> String { Config.download_url ++ "/" ++ id ++ "/copr.htm" }
+}
+
+module Types {
+  pub type TranslationInfo = {
+    id: String,
+    language: String,
+    title: String,
+    copyright: Option<String>,
+    completeness: Option<String>,
+  }
+}
+
+module Parser {
+  use Types;
+
+  // Parse translation listing from the Scriptures index page.
+  pub fn parse_translation_list(html: String) -> Crawler.Parser.ParseResult<[Types.TranslationInfo]> {
+    let translations = [];
+    let entries = str_split(html, "href=\"");
+    let i = 1;
+    while i < len(entries) {
+      let seg = entries[i];
+      let q = str_index_of(seg, "\"");
+      if q > 0 {
+        let raw = str_slice(seg, 0, q);
+        let id = str_replace_regex(raw, "/", "");
+        if len(id) > 2 && !str_starts_with(id, ".") {
+          translations = translations ++ [Types.TranslationInfo {
+            id: id, language: id, title: id, copyright: None, completeness: None,
+          }];
+        }
+      }
+      i = i + 1;
+    }
+    if len(translations) > 0 {
+      Crawler.Parser.Parsed(translations)
+    } else {
+      Crawler.Parser.NoMatch
+    }
+  }
+
+  // Parse USFM content to extract verses.
+  pub fn parse_usfm(usfm: String, language_code: String) -> [Lang1000.Verse.T] {
+    let verses = [];
+    let current_book = "";
+    let current_chapter = 0;
+
+    let lines = str_split(usfm, "\n");
+    let i = 0;
+    while i < len(lines) {
+      let trimmed = str_trim(lines[i]);
+      if str_starts_with(trimmed, "\\id ") {
+        current_book = str_split(str_slice_to_end(trimmed, 4), " ")[0];
+      }
+      if str_starts_with(trimmed, "\\c ") {
+        current_chapter = match str_to_int(str_trim(str_slice_to_end(trimmed, 3))) {
+          Some(n) => n, None => 0,
+        };
+      }
+      if str_starts_with(trimmed, "\\v ") {
+        let rest = str_slice_to_end(trimmed, 3);
+        let space_idx = str_index_of(rest, " ");
+        if space_idx > 0 {
+          let verse_num = match str_to_int(str_slice(rest, 0, space_idx)) { Some(n) => n, None => 0 };
+          let text = str_trim(str_replace_regex(str_slice_to_end(rest, space_idx + 1), "\\\\[a-z]+\\s?", ""));
+          if verse_num > 0 && len(text) > 0 {
+            verses = verses ++ [Lang1000.Verse.make(
+              Lang1000.Verse.make_reference(current_book, current_chapter, verse_num),
+              text, language_code)];
+          }
+        }
+      }
+      i = i + 1;
+    }
+    verses
+  }
+}
+
+module Crawler_ {
+  use Crawler.Types;
+
+  pub type T = {
+    rate_limiter: Crawler.RateLimiter.T,
+    mut state: Crawler.Types.CrawlerState,
+  }
+
+  pub fn make() -> T {
+    T {
+      rate_limiter: Crawler.RateLimiter.make(Config.rate_limit_ms),
+      state: Crawler.Types.Idle,
+    }
+  }
+
+  pub fn fetch_translations(crawler: T) -> Effect[Async] Crawler.Types.CrawlResult<[Types.TranslationInfo]> {
+    crawler.state = Crawler.Types.Crawling("translations");
+    let resp = await Http.get_with_rate_limit(Endpoints.translation_list(), None, crawler.rate_limiter);
+    crawler.state = Crawler.Types.Idle;
+    match resp {
+      Ok(r) => {
+        match Parser.parse_translation_list(r.body) {
+          Crawler.Parser.Parsed(translations) => Crawler.Types.Success(translations),
+          _ => Crawler.Types.Failure("Failed to parse translation list"),
+        }
+      }
+      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
+      Err(_) => Crawler.Types.Failure("Request failed"),
+    }
+  }
+
+  pub fn fetch_translation(crawler: T, translation_id: String,
+                           language_code: String) -> Effect[Async] Crawler.Types.CrawlResult<[Lang1000.Verse.T]> {
+    crawler.state = Crawler.Types.Crawling(translation_id);
+    let resp = await Http.get_with_rate_limit(Endpoints.translation(translation_id), None, crawler.rate_limiter);
+    crawler.state = Crawler.Types.Idle;
+    match resp {
+      Ok(r) => {
+        let verses = Parser.parse_usfm(r.body, language_code);
+        if len(verses) > 0 {
+          Crawler.Types.Success(verses)
+        } else {
+          Crawler.Types.Failure("No verses extracted from USFM content")
+        }
+      }
+      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
+      Err(_) => Crawler.Types.Failure("Request failed"),
+    }
+  }
+}

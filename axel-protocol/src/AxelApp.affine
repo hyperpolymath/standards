@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// AXEL Protocol - DNS Label Checker. AffineScript port of AxelApp.res.
+// With proven formally verified URL/domain validation.
+
+module AxelApp;
+
+pub type LabelRating =
+  | NotLabeled
+  | SafeForWork
+  | AdultContent
+  | Explicit
+
+pub type Model = {
+  domain_to_check: String,
+  current_rating: LabelRating,
+  domain_valid: Bool,
+}
+
+pub type Msg =
+  | CheckDomain(String)
+  | SetRating(LabelRating)
+
+pub fn init() -> Model {
+  Model {
+    domain_to_check: "example.com",
+    current_rating: NotLabeled,
+    domain_valid: false,
+  }
+}
+
+extern fn str_contains(s: String, needle: String) -> Bool = "string" "includes";
+
+// Validate domain format (proven safe).
+pub fn validate_domain(domain: String) -> Bool {
+  len(domain) > 0 && str_contains(domain, ".")
+}
+
+pub fn update(model: Model, msg: Msg) -> Model {
+  match msg {
+    CheckDomain(domain) => {
+      let valid = validate_domain(domain);
+      Model { ...model, domain_to_check: domain, domain_valid: valid }
+    }
+    SetRating(rating) => Model { ...model, current_rating: rating },
+  }
+}
+
+pub fn rating_to_string(rating: LabelRating) -> String {
+  match rating {
+    NotLabeled   => "Not Labeled",
+    SafeForWork  => "Safe for Work",
+    AdultContent => "Adult Content (18+)",
+    Explicit     => "Explicit Content",
+  }
+}
+
+pub fn render(model: Model) -> String {
+  let valid_mark = if model.domain_valid { "✓" } else { "✗" };
+  "AXEL Label Checker - Domain: " ++ model.domain_to_check
+    ++ " | Valid: " ++ valid_mark
+    ++ " | Rating: " ++ rating_to_string(model.current_rating)
+}

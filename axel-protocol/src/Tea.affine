@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Minimal TEA implementation for STAMP. AffineScript port of Tea.res.
+// Compatible with the full rescript-tea architecture.
+
+module Tea;
+
+module Cmd {
+  pub type T<msg> = Unit
+  pub fn none() -> T<msg> { Unit }
+  pub fn msg(_m: msg) -> T<msg> { Unit }
+}
+
+module Sub {
+  pub type T<msg> = Unit
+  pub fn none() -> T<msg> { Unit }
+}
+
+module Html {
+  // A node is represented as its serialised HTML string; an attribute as
+  // its serialised `name="value"` fragment (faithful to the .res Obj.magic
+  // string representation).
+  pub type Node = String
+  pub type Attribute = String
+
+  extern fn dom_get_by_id(id: String) -> Option<DomElement> = "dom" "getElementById";
+  extern fn dom_set_inner_html(el: DomElement, html: String) -> Unit = "dom" "setInnerHTML";
+  extern type DomElement;
+
+  pub fn no_node() -> Node { "" }
+
+  pub fn text(s: String) -> Node { s }
+
+  fn join_nodes(children: [Node]) -> String {
+    let out = "";
+    let i = 0;
+    while i < len(children) {
+      out = out ++ children[i];
+      i = i + 1;
+    }
+    out
+  }
+
+  pub fn tag(tag_name: String, _attrs: [Attribute], children: [Node]) -> Node {
+    "<" ++ tag_name ++ ">" ++ join_nodes(children) ++ "</" ++ tag_name ++ ">"
+  }
+
+  pub fn div(attrs: [Attribute], children: [Node]) -> Node { tag("div", attrs, children) }
+  pub fn p(attrs: [Attribute], children: [Node]) -> Node { tag("p", attrs, children) }
+  pub fn h2(attrs: [Attribute], children: [Node]) -> Node { tag("h2", attrs, children) }
+  pub fn h3(attrs: [Attribute], children: [Node]) -> Node { tag("h3", attrs, children) }
+  pub fn h4(attrs: [Attribute], children: [Node]) -> Node { tag("h4", attrs, children) }
+  pub fn pre(attrs: [Attribute], children: [Node]) -> Node { tag("pre", attrs, children) }
+  pub fn code(attrs: [Attribute], children: [Node]) -> Node { tag("code", attrs, children) }
+  pub fn button(attrs: [Attribute], children: [Node]) -> Node { tag("button", attrs, children) }
+  pub fn section(attrs: [Attribute], children: [Node]) -> Node { tag("section", attrs, children) }
+
+  pub fn class(name: String) -> Attribute { "class=\"" ++ name ++ "\"" }
+  pub fn id(name: String) -> Attribute { "id=\"" ++ name ++ "\"" }
+  pub fn on_click(_handler: msg) -> Attribute { "" }
+}
+
+module App {
+  pub type Program<model, msg> = {
+    init: fn() -> (model, Cmd.T<msg>),
+    update: fn(model, msg) -> (model, Cmd.T<msg>),
+    view: fn(model) -> Html.Node,
+    subscriptions: fn(model) -> Sub.T<msg>,
+  }
+
+  pub fn standard_program(program: Program<model, msg>) -> Effect[IO] Unit {
+    let (model, _cmd) = (program.init)();
+    let html = (program.view)(model);
+
+    match Html.dom_get_by_id("tea-app") {
+      Some(el) => Html.dom_set_inner_html(el, html),
+      None     => Console.log("TEA mount point #tea-app not found"),
+    }
+  }
+}
