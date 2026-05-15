@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// AffineScript port of ProvenResult_test.res.
+
+module ProvenResult_test;
+
+use ProvenResult;
+
+extern fn assert_equals(a: a, b: a) -> Unit = "@std/assert" "assertEquals";
+extern fn assert_not_equals(a: a, b: a) -> Unit = "@std/assert" "assertNotEquals";
+extern fn deno_test(name: String, body: fn() -> Unit) -> Unit = "Deno" "test";
+
+// __ from_js tests _______________________________________________________
+
+deno_test("fromJs: ok result with value converts to Ok", fn() {
+  let js = ProvenResult.JsResult { ok: true, value: Some("hello"), error: None };
+  assert_equals(ProvenResult.from_js(js), Ok("hello"))
+})
+
+deno_test("fromJs: ok result missing value converts to Error", fn() {
+  let js = ProvenResult.JsResult { ok: true, value: None, error: None };
+  assert_equals(ProvenResult.from_js(js), Err("Ok result missing value"))
+})
+
+deno_test("fromJs: error result with message converts to Error", fn() {
+  let js = ProvenResult.JsResult { ok: false, value: None, error: Some("parse failed") };
+  assert_equals(ProvenResult.from_js(js), Err("parse failed"))
+})
+
+deno_test("fromJs: error result without message converts to Unknown error", fn() {
+  let js = ProvenResult.JsResult { ok: false, value: None, error: None };
+  assert_equals(ProvenResult.from_js(js), Err("Unknown error"))
+})
+
+// __ to_js tests _________________________________________________________
+
+deno_test("toJs: Ok value converts to jsResult with ok=true", fn() {
+  let js = ProvenResult.to_js(Ok("world"));
+  assert_equals(js.ok, true);
+  assert_equals(js.value, Some("world"));
+  assert_equals(js.error, None)
+})
+
+deno_test("toJs: Error value converts to jsResult with ok=false", fn() {
+  let js = ProvenResult.to_js(Err("bad input"));
+  assert_equals(js.ok, false);
+  assert_equals(js.value, None);
+  assert_equals(js.error, Some("bad input"))
+})
+
+// __ round-trip tests ____________________________________________________
+
+deno_test("round-trip: Ok -> toJs -> fromJs preserves value", fn() {
+  let original = Ok(42);
+  assert_equals(ProvenResult.from_js(ProvenResult.to_js(original)), original)
+})
+
+deno_test("round-trip: Error -> toJs -> fromJs preserves error", fn() {
+  let original = Err("not found");
+  assert_equals(ProvenResult.from_js(ProvenResult.to_js(original)), original)
+})
