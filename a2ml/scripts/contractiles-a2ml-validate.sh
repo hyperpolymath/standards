@@ -3,7 +3,8 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-tool="$root/scripts/contractiles-a2ml-tool.py"
+tool="$root/scripts/contractiles-a2ml-tool.js"
+runtool() { deno run --quiet --allow-read --allow-write "$tool" "$@"; }
 
 if ! command -v a2ml >/dev/null 2>&1; then
   echo "a2ml CLI not found. Install it or add bin/a2ml to PATH." >&2
@@ -21,4 +22,4 @@ for file in "${files[@]}"; do
   a2ml validate "$file"
 done
 
-python3 "$tool" validate "${files[@]}"
+runtool validate "${files[@]}"
