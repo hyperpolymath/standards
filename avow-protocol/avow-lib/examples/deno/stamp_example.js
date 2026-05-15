@@ -202,8 +202,8 @@ function main() {
     testedAt: now - 5000,
     responseCode: 200,
     responseTime: 87,
-    token: "abc123def456",
-    signature: "valid_signature",
+    token: "EXAMPLE-UNSUBSCRIBE-TOKEN",
+    signature: "EXAMPLE-SIGNATURE",
   });
   console.log(`Result: ${StampResult.toString(result)}`);
   assert(result === StampResult.SUCCESS, "example 1");
@@ -214,8 +214,8 @@ function main() {
     testedAt: now - 5000,
     responseCode: 200,
     responseTime: 87,
-    token: "abc123def456",
-    signature: "valid_signature",
+    token: "EXAMPLE-UNSUBSCRIBE-TOKEN",
+    signature: "EXAMPLE-SIGNATURE",
   });
   if (proof) {
     console.log("Proof generated:");
@@ -230,8 +230,8 @@ function main() {
     testedAt: now,
     responseCode: 200,
     responseTime: 87,
-    token: "token",
-    signature: "sig",
+    token: "EXAMPLE-TOKEN",
+    signature: "EXAMPLE-SIG",
   });
   console.log(`Result: ${StampResult.toString(result)}`);
   assert(result === StampResult.ERROR_INVALID_URL, "example 2");
@@ -245,7 +245,7 @@ function main() {
     initialRequest: initial,
     confirmation,
     ipAddress: "192.168.1.100",
-    token: "consent_token",
+    token: "EXAMPLE-CONSENT-TOKEN",
   });
   console.log(`Initial: ${initial}`);
   console.log(`Confirmation: ${confirmation} (+${Math.floor((confirmation - initial) / 1000)} seconds)`);
@@ -259,7 +259,7 @@ function main() {
     initialRequest: confirmation,
     confirmation: initial,
     ipAddress: "192.168.1.100",
-    token: "consent_token",
+    token: "EXAMPLE-CONSENT-TOKEN",
   });
   console.log(`Result: ${StampResult.toString(result)}`);
   assert(result === StampResult.ERROR_CONSENT_INVALID, "example 4");
