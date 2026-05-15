@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// CRG Dashboard panel. AffineScript port of CrgDashboard.res.
+
+module CrgDashboard;
+
+use VcldbClient;
+
+extern type ReactNode;
+extern fn react_use_reducer(reduce: fn(State, Action) -> State, initial: State) -> (State, fn(Action) -> Unit) = "react" "useReducer";
+extern fn react_use_effect0(body: fn() -> Option<fn() -> Unit>) -> Unit = "react" "useEffect0";
+extern fn react_string(s: String) -> ReactNode = "react" "string";
+extern fn react_int(n: Int) -> ReactNode = "react" "int";
+extern fn react_array(xs: [ReactNode]) -> ReactNode = "react" "array";
+extern fn react_null() -> ReactNode = "react" "null";
+extern fn h(tag: String, props: Json, children: [ReactNode]) -> ReactNode = "react" "h";
+extern fn set_interval(cb: fn() -> Unit, ms: Int) -> Int = "global" "setInterval";
+extern fn clear_interval(id: Int) -> Unit = "global" "clearInterval";
+extern fn json_decode_string(j: Json) -> Option<String> = "json" "decodeString";
+extern fn json_decode_number(j: Json) -> Option<Float> = "json" "decodeNumber";
+
+pub type State = {
+  loading: Bool,
+  distribution: [(String, Int)],
+  error: Option<String>,
+}
+
+pub type Action =
+  | LoadStarted
+  | DistributionLoaded([(String, Int)])
+  | LoadFailed(String)
+
+pub let initial = State { loading: false, distribution: [], error: None };
+
+pub fn reduce(state: State, action: Action) -> State {
+  match action {
+    LoadStarted              => State { ...state, loading: true, error: None },
+    DistributionLoaded(rows) => State { ...state, loading: false, distribution: rows },
+    LoadFailed(msg)          => State { ...state, loading: false, error: Some(msg) },
+  }
+}
+
+pub fn refresh(dispatch: fn(Action) -> Unit) -> Effect[Async] Unit {
+  dispatch(LoadStarted);
+  match await VcldbClient.grade_distribution() {
+    Ok(result) => {
+      let rows = [];
+      let i = 0;
+      while i < len(result.rows) {
+        let sem = result.rows[i].semantic;
+        let g = match dict_get(sem, "grade") {
+          Some(j) => match json_decode_string(j) { Some(s) => s, None => "?" },
+          None => "?",
+        };
+        let c = match dict_get(sem, "count") {
+          Some(j) => match json_decode_number(j) { Some(f) => float_to_int(f), None => 0 },
+          None => 0,
+        };
+        rows = rows ++ [(g, c)];
+        i = i + 1;
+      }
+      dispatch(DistributionLoaded(rows))
+    }
+    Err(msg) => dispatch(LoadFailed(msg)),
+  }
+}
+
+pub fn make() -> ReactNode {
+  let (state, dispatch) = react_use_reducer(reduce, initial);
+
+  react_use_effect0(fn() {
+    refresh(dispatch);
+    let id = set_interval(fn() { refresh(dispatch); }, 60000);
+    Some(fn() { clear_interval(id); })
+  });
+
+  let error_node = match state.error {
+    Some(msg) => h("div", json_object([("className", json_string("error"))]), [react_string(msg)]),
+    None => react_null(),
+  };
+
+  let body = if state.loading {
+    h("div", json_object([("className", json_string("spinner"))]), [react_string("Loading...")])
+  } else {
+    let rows = [];
+    let i = 0;
+    while i < len(state.distribution) {
+      let (grade, count) = state.distribution[i];
+      rows = rows ++ [h("tr", json_object([("key", json_string(grade))]), [
+        h("td", json_object([]), [react_string(grade)]),
+        h("td", json_object([]), [react_int(count)]),
+      ])];
+      i = i + 1;
+    }
+    h("table", json_object([("className", json_string("grade-matrix"))]), [
+      h("thead", json_object([]), [
+        h("tr", json_object([]), [
+          h("th", json_object([]), [react_string("Grade")]),
+          h("th", json_object([]), [react_string("Count")]),
+        ]),
+      ]),
+      h("tbody", json_object([]), [react_array(rows)]),
+    ])
+  };
+
+  h("div", json_object([("className", json_string("panel panel-crg-dashboard"))]), [
+    h("h2", json_object([]), [react_string("CRG Dashboard")]),
+    error_node,
+    body,
+  ])
+}

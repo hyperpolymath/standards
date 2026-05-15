@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// VeriSimDB query client. AffineScript port of VcldbClient.res.
+
+module VcldbClient;
+
+extern fn fetch_post(url: String, init: Json) -> Promise<Json> = "global" "fetch";
+extern fn json_stringify_any(v: a) -> Option<String> = "JSON" "stringifyAny";
+extern fn json_to_query_result(j: Json) -> QueryResult = "json" "asQueryResult";
+
+pub type OctadRow = {
+  id: String,
+  entity: String,
+  semantic: Dict<Json>,
+  temporal: Dict<Json>,
+}
+
+pub type QueryResult = {
+  rows: [OctadRow],
+  query_ms: Int,
+}
+
+pub let base_url = "http://localhost:8097";
+
+pub fn run_vcl(vcl: String) -> Effect[Async] Result<QueryResult, String> {
+  let body = match json_stringify_any(json_object([("vcl", json_string(vcl))])) {
+    Some(s) => s, None => "{}",
+  };
+  let init = json_object([
+    ("method", json_string("POST")),
+    ("headers", json_object([("Content-Type", json_string("application/json"))])),
+    ("body", json_string(body)),
+  ]);
+  try {
+    let resp = await fetch_post(base_url ++ "/vcl/query", init);
+    Ok(json_to_query_result(resp))
+  } catch _e {
+    Err("VeriSimDB query failed — is it running on port 8097?")
+  }
+}
+
+pub fn grade_distribution() -> Effect[Async] Result<QueryResult, String> {
+  run_vcl("octads(entity=\"crg-grade\") |> latest_per(\"component\") |> group_by(\"grade\") |> count()")
+}
+
+pub fn open_findings() -> Effect[Async] Result<QueryResult, String> {
+  run_vcl("octads(entity=\"compliance-scan\") |> where(\"temporal.resolved_at == null\") |> group_by(\"repo, severity\") |> count()")
+}
+
+pub fn current_proofs() -> Effect[Async] Result<QueryResult, String> {
+  run_vcl("octads(entity=\"proof-status\") |> latest_per(\"file, theorem_name\") |> project(\"file, prover, theorem_name, trust_level, verified_at\")")
+}
+
+pub fn stale_proofs(days: Int) -> Effect[Async] Result<QueryResult, String> {
+  run_vcl("octads(entity=\"proof-status\") |> where(\"temporal.proof_age_days > " ++ show(days) ++ "\") |> order_by(\"proof_age_days desc\")")
+}
