@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Create Cloudflare Pages projects via API.
+// AffineScript port of CreatePagesProjects.res.
+
+module CreatePagesProjects;
+
+use Deno_Api;
+use Fetch_Api;
+
+extern fn console_log(msg: String) -> Unit = "console" "log";
+extern fn console_error(msg: String) -> Unit = "console" "error";
+extern fn str_repeat(s: String, count: Int) -> String = "string" "repeat";
+extern fn json_stringify(value: a) -> Option<String> = "JSON" "stringifyAny";
+extern fn json_get_bool(j: Json, key: String) -> Bool = "json" "getBool";
+
+let cloudflare_api_token = Deno_Api.Env.get("CLOUDFLARE_API_TOKEN");
+let cloudflare_account_id = Deno_Api.Env.get("CLOUDFLARE_ACCOUNT_ID");
+
+pub type Project = { name: String, domain: String }
+
+let projects = [
+  Project { name: "affinescript", domain: "affinescript.dev" },
+  Project { name: "anvomidav", domain: "anvomidav.org" },
+  Project { name: "betlang", domain: "betlang.org" },
+  Project { name: "eclexia", domain: "eclexia.org" },
+  Project { name: "ephapax", domain: "ephapax.org" },
+  Project { name: "error-lang", domain: "error-lang.org" },
+  Project { name: "my-lang", domain: "my-lang.net" },
+  Project { name: "oblibeny", domain: "oblibeny.net" },
+  Project { name: "reposystem", domain: "reposystem.dev" },
+  Project { name: "verisimdb", domain: "verisimdb.org" },
+];
+
+fn auth_headers() -> Fetch_Api.Headers {
+  let token = match cloudflare_api_token { Some(t) => t, None => "" };
+  Fetch_Api.Headers { authorization: "Bearer " ++ token, content_type: "application/json" }
+}
+
+pub fn main() -> Effect[Async] Unit {
+  match (cloudflare_api_token, cloudflare_account_id) {
+    (None, _) => { console_error("Missing credentials"); Deno_Api.exit(1); }
+    (_, None) => { console_error("Missing credentials"); Deno_Api.exit(1); }
+    _ => {}
+  }
+
+  let account_id = match cloudflare_account_id { Some(a) => a, None => "" };
+  let bar = str_repeat("=", 70);
+
+  console_log("Creating Cloudflare Pages projects");
+  console_log(bar);
+
+  let i = 0;
+  while i < len(projects) {
+    let project = projects[i];
+    console_log("\n" ++ project.name);
+
+    let create_body = match json_stringify(json_object([
+      ("name", json_string(project.name)),
+      ("production_branch", json_string("main")),
+    ])) { Some(s) => s, None => "" };
+
+    let create_response = await Fetch_Api.fetch(
+      "https://api.cloudflare.com/client/v4/accounts/" ++ account_id ++ "/pages/projects",
+      Fetch_Api.RequestInit { method: Some("POST"), headers: auth_headers(), body: Some(create_body) },
+    );
+    let create_result = await Fetch_Api.json(create_response);
+    if json_get_bool(create_result, "success") {
+      console_log("   Project created");
+      console_log("   URL: https://" ++ project.name ++ ".pages.dev");
+    } else {
+      console_log("   Project already exists or failed");
+    }
+
+    console_log("   Adding domain: " ++ project.domain);
+    let domain_body = match json_stringify(json_object([("name", json_string(project.domain))])) {
+      Some(s) => s, None => "",
+    };
+    let domain_response = await Fetch_Api.fetch(
+      "https://api.cloudflare.com/client/v4/accounts/" ++ account_id
+        ++ "/pages/projects/" ++ project.name ++ "/domains",
+      Fetch_Api.RequestInit { method: Some("POST"), headers: auth_headers(), body: Some(domain_body) },
+    );
+    let domain_result = await Fetch_Api.json(domain_response);
+    if json_get_bool(domain_result, "success") {
+      console_log("   Domain added");
+    } else {
+      console_log("   Domain already added or failed");
+    }
+    i = i + 1;
+  }
+
+  console_log("\n" ++ bar);
+  console_log("Projects created!");
+  console_log("\nNow run:");
+  console_log("   ./deploy-repos.sh");
+  console_log(bar)
+}
+
+main()

@@ -1,0 +1,238 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// AXEL-STS DNS Record Validator (demo). AffineScript port of axelSts.res.
+// Self-contained demo script (not the library; see src/AxelSts.affine).
+
+module AxelStsDemo;
+
+extern fn str_split(s: String, sep: String) -> [String] = "string" "split";
+extern fn str_trim(s: String) -> String = "string" "trim";
+extern fn str_lower(s: String) -> String = "string" "toLowerCase";
+extern fn str_starts_with(s: String, prefix: String) -> Bool = "string" "startsWith";
+extern fn str_to_int(s: String) -> Option<Int> = "string" "toInt";
+extern fn dict_from_pairs(pairs: [(String, String)]) -> Dict<String> = "dict" "fromArray";
+extern fn dict_get(d: Dict<String>, key: String) -> Option<String> = "dict" "get";
+extern fn date_now_ms() -> Float = "date" "now";
+
+module AxelSts {
+  pub type Mode = | Testing | Enforce
+
+  pub type T = {
+    version: String,
+    mode: Mode,
+    ipv6_only: Bool,
+    attestation_url: String,
+  }
+
+  pub fn mode_to_string(m: Mode) -> String {
+    match m { Testing => "testing", Enforce => "enforce" }
+  }
+
+  pub fn mode_from_string(s: String) -> Option<Mode> {
+    match str_lower(s) {
+      "testing" => Some(Testing),
+      "enforce" => Some(Enforce),
+      _         => None,
+    }
+  }
+
+  pub fn parse(txt: String) -> Option<T> {
+    let raw = str_split(txt, ";");
+    let pairs = [];
+    let i = 0;
+    while i < len(raw) {
+      let part = str_trim(raw[i]);
+      if len(part) > 0 {
+        let kv = str_split(part, "=");
+        if len(kv) == 2 {
+          pairs = pairs ++ [(str_trim(kv[0]), str_trim(kv[1]))];
+        }
+      }
+      i = i + 1;
+    }
+    let dict = dict_from_pairs(pairs);
+
+    let version = match dict_get(dict, "v") { Some(v) => v, None => "AXEL1" };
+    let mode = match dict_get(dict, "mode") {
+      Some(m) => match mode_from_string(m) { Some(md) => md, None => Testing },
+      None => Testing,
+    };
+    let ipv6_only = match dict_get(dict, "ipv6-only") {
+      Some(v) => match str_to_int(v) { Some(n) => n == 1, None => true },
+      None => true,
+    };
+    let attestation_url = match dict_get(dict, "attestation") { Some(a) => a, None => "" };
+
+    if version != "AXEL1" || attestation_url == "" {
+      None
+    } else {
+      Some(T { version: version, mode: mode, ipv6_only: ipv6_only, attestation_url: attestation_url })
+    }
+  }
+
+  pub fn validate(record: T) -> Result<Unit, String> {
+    if record.version != "AXEL1" {
+      Err("Invalid version: " ++ record.version)
+    } else if record.attestation_url == "" {
+      Err("Missing attestation URL")
+    } else if !str_starts_with(record.attestation_url, "https://") {
+      Err("Attestation URL must use HTTPS")
+    } else {
+      Ok(Unit)
+    }
+  }
+
+  pub fn to_string(record: T) -> String {
+    let ipv6 = if record.ipv6_only { "1" } else { "0" };
+    "v=" ++ record.version
+      ++ "; mode=" ++ mode_to_string(record.mode)
+      ++ "; ipv6-only=" ++ ipv6
+      ++ "; attestation=" ++ record.attestation_url
+  }
+}
+
+module Apl {
+  pub type Family = | IPv6 | IPv4
+
+  pub type Prefix = {
+    family: Family,
+    address: String,
+    length: Int,
+  }
+
+  pub type T = [Prefix]
+
+  pub fn family_to_int(f: Family) -> Int {
+    match f { IPv6 => 1, IPv4 => 2 }
+  }
+
+  pub fn family_from_int(n: Int) -> Option<Family> {
+    match n { 1 => Some(IPv6), 2 => Some(IPv4), _ => None }
+  }
+
+  pub fn parse_prefix(s: String) -> Option<Prefix> {
+    let parts = str_split(s, ":");
+    if len(parts) != 2 {
+      None
+    } else {
+      let fam = match str_to_int(parts[0]) {
+        Some(n) => family_from_int(n),
+        None => None,
+      };
+      let cidr_parts = str_split(parts[1], "/");
+      match (fam, len(cidr_parts) == 2) {
+        (Some(f), true) => {
+          let length = match str_to_int(cidr_parts[1]) { Some(n) => n, None => 0 };
+          Some(Prefix { family: f, address: cidr_parts[0], length: length })
+        }
+        _ => None,
+      }
+    }
+  }
+
+  pub fn parse(txt: String) -> Option<T> {
+    let raw = str_split(txt, " ");
+    let out = [];
+    let i = 0;
+    while i < len(raw) {
+      let tok = str_trim(raw[i]);
+      if len(tok) > 0 {
+        match parse_prefix(tok) {
+          Some(p) => { out = out ++ [p]; }
+          None    => {}
+        }
+      }
+      i = i + 1;
+    }
+    Some(out)
+  }
+
+  pub fn to_string(prefixes: T) -> String {
+    let out = "";
+    let i = 0;
+    while i < len(prefixes) {
+      let p = prefixes[i];
+      let seg = show(family_to_int(p.family)) ++ ":" ++ p.address ++ "/" ++ show(p.length);
+      out = if i == 0 { seg } else { out ++ " " ++ seg };
+      i = i + 1;
+    }
+    out
+  }
+
+  // Simplified check - in production, use proper CIDR matching.
+  pub fn is_ip_in_prefixes(ip: String, prefixes: T) -> Bool {
+    let i = 0;
+    let found = false;
+    while i < len(prefixes) {
+      if str_starts_with(ip, prefixes[i].address) { found = true; }
+      i = i + 1;
+    }
+    found
+  }
+}
+
+module Attestation {
+  pub type Method = | ZKP | GovId | CreditCard
+
+  pub type Claims = {
+    iss: String,
+    sub: String,
+    aud: String,
+    exp: Float,
+    iat: Float,
+    age_verified: Bool,
+    method: Method,
+    min_age: Option<Int>,
+  }
+
+  pub fn method_to_string(m: Method) -> String {
+    match m { ZKP => "zkp", GovId => "gov_id", CreditCard => "credit_card" }
+  }
+
+  pub fn method_from_string(s: String) -> Option<Method> {
+    match s {
+      "zkp"         => Some(ZKP),
+      "gov_id"      => Some(GovId),
+      "credit_card" => Some(CreditCard),
+      _             => None,
+    }
+  }
+
+  // In production, implement proper JWT validation.
+  pub fn validate_token(_token: String) -> Result<Claims, String> {
+    Err("JWT validation not implemented")
+  }
+
+  pub fn is_expired(claims: Claims) -> Bool {
+    let now = date_now_ms() /. 1000.0;
+    claims.exp < now
+  }
+
+  pub fn is_valid_lifetime(claims: Claims) -> Bool {
+    let lifetime = claims.exp -. claims.iat;
+    lifetime <= 900.0  // 15 minutes max
+  }
+}
+
+// __ Example usage _______________________________________________________
+
+pub fn main() -> Effect[IO] Unit {
+  let example_sts = "_axel._sts.example.com. IN TXT \"v=AXEL1; mode=enforce; ipv6-only=1; attestation=https://example.com/.well-known/axel/attestation\"";
+  match AxelSts.parse(example_sts) {
+    Some(record) => {
+      Console.log("Parsed AXEL-STS record:");
+      Console.log("  Version: " ++ record.version);
+      Console.log("  Mode: " ++ AxelSts.mode_to_string(record.mode));
+      Console.log("  IPv6 Only: " ++ (if record.ipv6_only { "true" } else { "false" }));
+      Console.log("  Attestation URL: " ++ record.attestation_url);
+      match AxelSts.validate(record) {
+        Ok(_)    => Console.log("✓ Record is valid"),
+        Err(msg) => Console.log("✗ Validation error: " ++ msg),
+      }
+    }
+    None => Console.log("✗ Failed to parse AXEL-STS record"),
+  }
+}
+
+main()

@@ -1,0 +1,241 @@
+// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+//
+// AIBDP + HTTP 430 middleware for Express. AffineScript port of Aibdp.res.
+// Implements AI Boundary Declaration Protocol enforcement.
+
+module Aibdp;
+
+use Node;
+use Express;
+
+extern fn console_warn(msg: String) -> Unit = "console" "warn";
+extern fn console_error(msg: String) -> Unit = "console" "error";
+extern fn json_parse(s: String) -> a = "JSON" "parse";
+
+// Regex helpers (case-insensitive). `re_test(pattern, s)` tests /pattern/i.
+extern fn re_test(pattern: String, s: String) -> Bool = "regex" "testI";
+extern fn re_replace_all(s: String, pattern: String, repl: String) -> String = "regex" "replaceAll";
+extern fn re_test_dynamic(anchored_pattern: String, s: String) -> Bool = "regex" "test";
+extern fn str_lower(s: String) -> String = "string" "toLowerCase";
+
+// AI User-Agent patterns.
+let ai_user_agent_patterns = [
+  "GPTBot", "ChatGPT-User", "Claude-Web", "anthropic-ai", "Google-Extended",
+  "CCBot", "Googlebot", "Bingbot", "Slurp", "DuckDuckBot", "Baiduspider",
+  "YandexBot", "Sogou", "Exabot", "facebookexternalhit", "ia_archiver",
+  "PerplexityBot", "Omgilibot", "Diffbot",
+];
+
+pub type PolicyStatus = | Allowed | Refused | Conditional
+
+pub type Exception = { path: String, status: PolicyStatus }
+
+pub type Policy = {
+  status: PolicyStatus,
+  scope: Option<[String]>,
+  conditions: Option<[String]>,
+  rationale: Option<String>,
+  exceptions: Option<[Exception]>,
+}
+
+pub type Manifest = {
+  canonical_uri: Option<String>,
+  policies: Dict<Policy>,
+  contact: Option<String>,
+}
+
+pub type Response430 = {
+  status_code: Int,
+  headers: Dict<String>,
+  body: Json,
+}
+
+// Load and parse the AIBDP manifest.
+pub fn load_manifest(manifest_path: String) -> Effect[Async] Option<Manifest> {
+  try {
+    let content = await Node.Fs.read_file(manifest_path, "utf-8");
+    Some(json_parse(content))
+  } catch e {
+    console_warn("Failed to load AIBDP manifest: " ++ exn_message(e));
+    None
+  }
+}
+
+pub fn is_ai_user_agent(user_agent: Option<String>) -> Bool {
+  match user_agent {
+    None => false,
+    Some(ua) => {
+      let i = 0;
+      let found = false;
+      while i < len(ai_user_agent_patterns) {
+        if re_test(ai_user_agent_patterns[i], ua) { found = true; }
+        i = i + 1;
+      }
+      found
+    }
+  }
+}
+
+pub fn extract_ai_purpose(headers: Dict<String>) -> String {
+  match dict_get(headers, "ai-purpose") {
+    Some(purpose) => str_lower(purpose),
+    None => {
+      let ua = match dict_get(headers, "user-agent") { Some(u) => u, None => "" };
+      if re_test("GPTBot", ua) {
+        "training"
+      } else if re_test("Claude-Web", ua) {
+        "indexing"
+      } else if re_test("Google-Extended", ua) {
+        "training"
+      } else if re_test("Googlebot", ua) {
+        "indexing"
+      } else {
+        "unknown"
+      }
+    }
+  }
+}
+
+// Check if path matches a glob-style pattern.
+pub fn path_matches(request_path: String, pattern: String) -> Bool {
+  if pattern == "all" {
+    true
+  } else {
+    let rx = re_replace_all(pattern, "\\.", "\\\\.");
+    rx = re_replace_all(rx, "\\*\\*", ".*");
+    rx = re_replace_all(rx, "\\*", "[^/]*");
+    rx = re_replace_all(rx, "\\?", ".");
+    re_test_dynamic("^" ++ rx ++ "$", request_path)
+  }
+}
+
+fn status_to_string(s: PolicyStatus) -> String {
+  match s { Allowed => "allowed", Refused => "refused", Conditional => "conditional" }
+}
+
+pub fn create_430_response(manifest: Manifest, policy: Policy, purpose: String) -> Response430 {
+  let manifest_uri = match manifest.canonical_uri {
+    Some(u) => u, None => "/.well-known/aibdp.json",
+  };
+
+  let headers = dict_empty();
+  dict_set(headers, "Content-Type", "application/json");
+  dict_set(headers, "Link", "<" ++ manifest_uri ++ ">; rel=\"blocked-by-consent\"");
+  dict_set(headers, "Retry-After", "86400");
+
+  let conditions = match policy.conditions { Some(c) => c, None => [] };
+  let rationale = match policy.rationale {
+    Some(r) => r, None => "No additional information provided",
+  };
+
+  Response430 {
+    status_code: 430,
+    headers: headers,
+    body: json_object([
+      ("error", json_string("AI usage boundaries declared in AIBDP manifest not satisfied")),
+      ("manifest", json_string(manifest_uri)),
+      ("violated_policy", json_string(purpose)),
+      ("policy_status", json_string(status_to_string(policy.status))),
+      ("required_conditions", json_string_array(conditions)),
+      ("rationale", json_string(rationale)),
+      ("contact", json_opt_string(manifest.contact)),
+    ]),
+  }
+}
+
+pub type MiddlewareOptions = {
+  manifest_path: Option<String>,
+  enforce_for_all: Option<Bool>,
+  on_violation: Option<fn(Express.Req, Policy, String) -> Unit>,
+}
+
+// Express middleware factory.
+pub fn aibdp_middleware(options: MiddlewareOptions) -> Express.Middleware {
+  let manifest_path = match options.manifest_path {
+    Some(p) => p, None => ".well-known/aibdp.json",
+  };
+  let enforce_for_all = match options.enforce_for_all { Some(b) => b, None => false };
+
+  let manifest_ref = None;
+  let manifest_load_time = 0.0;
+  let cache_duration = 3600000.0;  // 1 hour
+
+  fn(req: Express.Req, res: Express.Res, next: Express.Next) -> Effect[Async] Unit {
+    try {
+      let now = Node.date_now();
+      let stale = match manifest_ref { None => true, Some(_) => now -. manifest_load_time > cache_duration };
+      if stale {
+        manifest_ref = await load_manifest(manifest_path);
+        manifest_load_time = now;
+      }
+
+      match manifest_ref {
+        None => next(),
+        Some(manifest) => {
+          let user_agent = dict_get(req.headers, "user-agent");
+          let is_ai = enforce_for_all || is_ai_user_agent(user_agent);
+
+          if !is_ai {
+            next()
+          } else {
+            let purpose = extract_ai_purpose(req.headers);
+            match dict_get(manifest.policies, purpose) {
+              None => next(),
+              Some(policy) => {
+                match policy.status {
+                  Refused => {
+                    let response = create_430_response(manifest, policy, purpose);
+                    match options.on_violation {
+                      Some(f) => f(req, policy, purpose),
+                      None => {},
+                    }
+                    let r = Express.status(res, response.status_code);
+                    let entries = dict_entries(response.headers);
+                    let i = 0;
+                    while i < len(entries) {
+                      let (k, v) = entries[i];
+                      Express.header(r, k, v);
+                      i = i + 1;
+                    }
+                    Express.json(r, response.body)
+                  }
+                  Allowed => next(),
+                  // Simplified - full impl would check conditions.
+                  Conditional => next(),
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch e {
+      console_error("AIBDP middleware error: " ++ exn_message(e));
+      next()
+    }
+  }
+}
+
+// Serve manifest endpoint.
+pub fn serve_manifest(manifest_path: Option<String>) -> Express.Middleware {
+  let path = match manifest_path { Some(p) => p, None => ".well-known/aibdp.json" };
+
+  fn(req: Express.Req, res: Express.Res, next: Express.Next) -> Effect[Async] Unit {
+    if req.path != "/.well-known/aibdp.json" {
+      next()
+    } else {
+      match await load_manifest(path) {
+        None => {
+          let r = Express.status(res, 404);
+          Express.json(r, json_object([("error", json_string("Manifest not found"))]))
+        }
+        Some(manifest) => {
+          let r1 = Express.header(res, "Content-Type", "application/aibdp+json");
+          let r2 = Express.header(r1, "Cache-Control", "public, max-age=3600");
+          let r3 = Express.header(r2, "Access-Control-Allow-Origin", "*");
+          Express.json(r3, manifest)
+        }
+      }
+    }
+  }
+}

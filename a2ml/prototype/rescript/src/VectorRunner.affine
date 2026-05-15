@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Minimal test vector runner for Module 0. AffineScript port of VectorRunner.res.
+
+module VectorRunner;
+
+use Compat;
+use A2ml;
+
+extern fn readdir_sync(path: String) -> [String] = "fs" "readdirSync";
+extern fn read_file_sync(path: String, enc: String) -> String = "fs" "readFileSync";
+extern fn exists_sync(path: String) -> Bool = "fs" "existsSync";
+extern fn includes(s: String, needle: String) -> Bool = "string" "includes";
+extern fn regex_replace_global(s: String, pattern: String, repl: String) -> String = "regex" "replaceGlobal";
+
+pub fn list_vectors() -> [(String, String)] {
+  let files = readdir_sync("tests/vectors");
+  let out = [];
+  let i = 0;
+  while i < len(files) {
+    if Compat.ends_with(files[i], ".a2ml") {
+      let expected = Compat.replace(files[i], ".a2ml", ".expected");
+      out = out ++ [("tests/vectors/" ++ files[i], "tests/vectors/" ++ expected)];
+    }
+    i = i + 1;
+  }
+  out
+}
+
+pub fn parse_expected(text: String) -> Option<String> {
+  let lines = Compat.split(text, "\n");
+  let i = 0;
+  while i < len(lines) {
+    if Compat.starts_with(lines[i], "ERROR:") {
+      return Some(Compat.trim(Compat.slice_to_end(lines[i], 6)));
+    }
+    i = i + 1;
+  }
+  None
+}
+
+pub fn normalize_html(html: String) -> String {
+  Compat.trim(regex_replace_global(html, "\\s+", " "))
+}
+
+pub fn run() -> Effect[IO] Int {
+  let vectors = list_vectors();
+  let failures = [];
+  let v = 0;
+  while v < len(vectors) {
+    let (input_path, expected_path) = vectors[v];
+    let input = read_file_sync(input_path, "utf8");
+    let expected = read_file_sync(expected_path, "utf8");
+
+    let doc = A2ml.parse(A2ml.Lax, input);
+    let errors = A2ml.validate_checked(doc);
+    let expected_error = parse_expected(expected);
+
+    match expected_error {
+      None => {
+        if len(errors) > 0 {
+          failures = failures ++ [input_path ++ ": expected ok, got error"];
+        }
+      }
+      Some(msg) => {
+        if len(errors) == 0 {
+          failures = failures ++ [input_path ++ ": expected error, got ok"];
+        } else {
+          if !includes(errors[0].msg, msg) {
+            failures = failures ++ [input_path ++ ": error mismatch"];
+          }
+        }
+      }
+    }
+
+    let html_expected_path = Compat.replace(input_path, ".a2ml", ".html.expected");
+    if exists_sync(html_expected_path) {
+      let actual_html = normalize_html(A2ml.render_html(doc));
+      let expected_html = normalize_html(read_file_sync(html_expected_path, "utf8"));
+      if actual_html != expected_html {
+        failures = failures ++ [input_path ++ ": html mismatch"];
+      }
+    }
+    v = v + 1;
+  }
+
+  if len(failures) == 0 {
+    Compat.console_log("All vectors passed");
+    0
+  } else {
+    let f = 0;
+    while f < len(failures) { Compat.console_log(failures[f]); f = f + 1; }
+    1
+  }
+}

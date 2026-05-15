@@ -1,0 +1,412 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+//
+// Minimal Module-0 parser and checked validator for web rendering demos.
+// AffineScript port of A2ml.res. Intentionally small but deterministic.
+
+module A2ml;
+
+extern fn length(s: String) -> Int = "string" "length";
+extern fn slice(s: String, start: Int, end: Int) -> String = "string" "slice";
+extern fn slice_to_end(s: String, from: Int) -> String = "string" "slice";
+extern fn trim(s: String) -> String = "string" "trim";
+extern fn index_of(s: String, needle: String) -> Int = "string" "indexOf";
+extern fn split(s: String, sep: String) -> [String] = "string" "split";
+extern fn starts_with(s: String, p: String) -> Bool = "string" "startsWith";
+extern fn ends_with(s: String, p: String) -> Bool = "string" "endsWith";
+extern fn int_to_string(n: Int) -> String = "global" "String";
+
+pub type Attrs = [(String, String)]
+
+pub type Inline =
+  | Text(String)
+  | Emph(String)
+  | Strong(String)
+  | Link(String, String)
+
+pub type Block =
+  | Heading(Int, String)
+  | Paragraph([Inline])
+  | List([[Inline]])
+  | Directive(String, Attrs, [Block])
+
+pub type Doc = [Block]
+
+pub type ParseMode = | Lax | Checked
+
+pub type ParseError = { line: Int, msg: String }
+
+fn is_char(s: String, i: Int, ch: String) -> Bool {
+  i >= 0 && i < length(s) && slice(s, i, i + 1) == ch
+}
+
+fn index_of_opt(s: String, sub: String) -> Option<Int> {
+  let idx = index_of(s, sub);
+  if idx < 0 { None } else { Some(idx) }
+}
+
+fn index_from_opt(s: String, start: Int, sub: String) -> Option<Int> {
+  let sliced = slice_to_end(s, start);
+  let idx = index_of(sliced, sub);
+  if idx < 0 { None } else { Some(idx + start) }
+}
+
+pub fn is_heading(line: String) -> Option<(Int, String)> {
+  let trimmed = trim(line);
+  let hcount = 0;
+  while hcount < length(trimmed) && is_char(trimmed, hcount, "#") {
+    hcount = hcount + 1;
+  }
+  if hcount > 0 && hcount <= 5 {
+    Some((hcount, trim(slice_to_end(trimmed, hcount))))
+  } else {
+    None
+  }
+}
+
+pub fn parse_attrs(line: String) -> Attrs {
+  let start = match index_of_opt(line, "(") { None => -1, Some(idx) => idx };
+  let end_ = match index_of_opt(line, ")") { None => -1, Some(idx) => idx };
+  if start == -1 || end_ == -1 || end_ < start {
+    []
+  } else {
+    let inner = slice(line, start + 1, end_);
+    let parts = split(inner, ",");
+    let out = [];
+    let i = 0;
+    while i < len(parts) {
+      let kv = split(trim(parts[i]), "=");
+      if len(kv) == 2 {
+        let key = trim(kv[0]);
+        let value = trim(kv[1]);
+        let unquoted = if (starts_with(value, "\"") && ends_with(value, "\""))
+          || (starts_with(value, "'") && ends_with(value, "'")) {
+          slice(value, 1, length(value) - 1)
+        } else {
+          value
+        };
+        out = out ++ [(key, unquoted)];
+      }
+      i = i + 1;
+    }
+    out
+  }
+}
+
+fn is_directive_start(line: String) -> Bool {
+  let trimmed = trim(line);
+  starts_with(trimmed, "@") && ends_with(trimmed, ":")
+}
+
+pub fn parse_inline(text: String) -> [Inline] {
+  let acc = [];
+  let i = 0;
+  while i < length(text) {
+    if i + 1 < length(text) && slice(text, i, i + 2) == "**" {
+      match index_from_opt(text, i + 2, "**") {
+        None => { acc = acc ++ [Text("**")]; i = i + 2; }
+        Some(j) => { acc = acc ++ [Strong(slice(text, i + 2, j))]; i = j + 2; }
+      }
+    } else if is_char(text, i, "*") {
+      match index_from_opt(text, i + 1, "*") {
+        None => { acc = acc ++ [Text("*")]; i = i + 1; }
+        Some(j) => { acc = acc ++ [Emph(slice(text, i + 1, j))]; i = j + 1; }
+      }
+    } else if is_char(text, i, "[") {
+      match index_from_opt(text, i + 1, "]") {
+        None => { acc = acc ++ [Text("[")]; i = i + 1; }
+        Some(j) => {
+          if j + 1 < length(text) && is_char(text, j + 1, "(") {
+            match index_from_opt(text, j + 2, ")") {
+              None => { acc = acc ++ [Text("[")]; i = i + 1; }
+              Some(k) => {
+                acc = acc ++ [Link(slice(text, i + 1, j), slice(text, j + 2, k))];
+                i = k + 1;
+              }
+            }
+          } else {
+            acc = acc ++ [Text("[")]; i = i + 1;
+          }
+        }
+      }
+    } else {
+      let star = index_from_opt(text, i, "*");
+      let bracket = index_from_opt(text, i, "[");
+      let next = length(text);
+      match star { Some(s) => { if s < next { next = s; } } None => {} }
+      match bracket { Some(b) => { if b < next { next = b; } } None => {} }
+      if next <= i { next = i + 1; }
+      acc = acc ++ [Text(slice(text, i, next))];
+      i = next;
+    }
+  }
+  acc
+}
+
+fn parse_directive_header(line: String) -> (String, String) {
+  let trimmed = trim(line);
+  let without_at = slice_to_end(trimmed, 1);
+  let body = if ends_with(without_at, ":") {
+    slice(without_at, 0, length(without_at) - 1)
+  } else {
+    without_at
+  };
+  let name_only = match index_of_opt(body, "(") {
+    None => body,
+    Some(idx) => slice(body, 0, idx),
+  };
+  (name_only, body)
+}
+
+fn parse_directive_lines(lines: [String], start_index: Int,
+                         parse_line: fn(String) -> Option<Block>) -> ([Block], Int) {
+  let blocks = [];
+  let i = start_index;
+  while i < len(lines) {
+    if trim(lines[i]) == "@end" {
+      return (blocks, i + 1);
+    }
+    match parse_line(lines[i]) { Some(b) => { blocks = blocks ++ [b]; } None => {} }
+    i = i + 1;
+  }
+  (blocks, i)
+}
+
+pub fn parse_blocks(lines: [String], start_index: Int, stop_at_end: Bool) -> ([Block], Int) {
+  let blocks = [];
+  let i = start_index;
+  while i < len(lines) {
+    let line = lines[i];
+    if stop_at_end && trim(line) == "@end" {
+      return (blocks, i + 1);
+    } else if trim(line) == "" {
+      i = i + 1;
+    } else {
+      match is_heading(line) {
+        Some((level, text)) => { blocks = blocks ++ [Heading(level, text)]; i = i + 1; }
+        None => {
+          if is_directive_start(line) {
+            let (name_only, body) = parse_directive_header(line);
+            let attrs = parse_attrs(body);
+            if name_only == "opaque" {
+              let raw_lines = [];
+              let j = i + 1;
+              let found = false;
+              while j < len(lines) && !found {
+                if trim(lines[j]) == "@end" {
+                  found = true;
+                  j = j + 1;
+                } else {
+                  raw_lines = raw_lines ++ [lines[j]];
+                  j = j + 1;
+                }
+              }
+              let raw_text = join_lines(raw_lines, "\n");
+              blocks = blocks ++ [Directive(name_only, attrs, [Paragraph([Text(raw_text)])])];
+              i = j;
+            } else if name_only == "refs" {
+              let (ref_blocks, next_index) = parse_directive_lines(lines, i + 1, fn(ref_line) {
+                let trimmed = trim(ref_line);
+                if trimmed == "" { None } else { Some(Paragraph(parse_inline(trimmed))) }
+              });
+              blocks = blocks ++ [Directive(name_only, attrs, ref_blocks)];
+              i = next_index;
+            } else {
+              let (inner_blocks, next_index) = parse_blocks(lines, i + 1, true);
+              blocks = blocks ++ [Directive(name_only, attrs, inner_blocks)];
+              i = next_index;
+            }
+          } else if starts_with(trim(line), "-") {
+            let items = [];
+            let j = i;
+            let done = false;
+            while j < len(lines) && !done {
+              let l = trim(lines[j]);
+              if starts_with(l, "-") {
+                items = items ++ [parse_inline(trim(slice_to_end(l, 1)))];
+                j = j + 1;
+              } else {
+                done = true;
+              }
+            }
+            blocks = blocks ++ [List(items)];
+            i = j;
+          } else {
+            let parts = [];
+            let j = i;
+            let done = false;
+            while j < len(lines) && !done {
+              let l = lines[j];
+              if trim(l) == ""
+                || (stop_at_end && trim(l) == "@end")
+                || is_directive_start(l)
+                || starts_with(trim(l), "-")
+                || (match is_heading(l) { Some(_) => true, None => false }) {
+                done = true;
+              } else {
+                parts = parts ++ [trim(l)];
+                j = j + 1;
+              }
+            }
+            blocks = blocks ++ [Paragraph(parse_inline(join_lines(parts, " ")))];
+            i = j;
+          }
+        }
+      }
+    }
+  }
+  (blocks, i)
+}
+
+fn join_lines(arr: [String], sep: String) -> String {
+  let out = "";
+  let i = 0;
+  while i < len(arr) {
+    out = if i == 0 { arr[i] } else { out ++ sep ++ arr[i] };
+    i = i + 1;
+  }
+  out
+}
+
+pub fn parse(mode: ParseMode, input: String) -> Doc {
+  let _ = mode;
+  let lines = split(input, "\n");
+  let (blocks, _index) = parse_blocks(lines, 0, false);
+  blocks
+}
+
+pub fn render_inline(parts: [Inline]) -> String {
+  let out = "";
+  let i = 0;
+  while i < len(parts) {
+    out = out ++ match parts[i] {
+      Text(t)         => t,
+      Emph(t)         => "<em>" ++ t ++ "</em>",
+      Strong(t)       => "<strong>" ++ t ++ "</strong>",
+      Link(label, url) => "<a href=\"" ++ url ++ "\">" ++ label ++ "</a>",
+    };
+    i = i + 1;
+  }
+  out
+}
+
+pub fn render_blocks(blocks: [Block]) -> String {
+  let rendered = [];
+  let i = 0;
+  while i < len(blocks) {
+    let s = match blocks[i] {
+      Heading(level, text) =>
+        "<h" ++ int_to_string(level) ++ ">" ++ text ++ "</h" ++ int_to_string(level) ++ ">",
+      Paragraph(parts) => "<p>" ++ render_inline(parts) ++ "</p>",
+      List(items) => {
+        let lis = "";
+        let j = 0;
+        while j < len(items) { lis = lis ++ "<li>" ++ render_inline(items[j]) ++ "</li>"; j = j + 1; }
+        "<ul>" ++ lis ++ "</ul>"
+      }
+      Directive(name, attrs, body) => {
+        let content = render_blocks(body);
+        let attrs_string = "";
+        let k = 0;
+        while k < len(attrs) {
+          let (ak, av) = attrs[k];
+          let seg = ak ++ "=\"" ++ av ++ "\"";
+          attrs_string = if k == 0 { seg } else { attrs_string ++ " " ++ seg };
+          k = k + 1;
+        }
+        let data_attr = if attrs_string == "" { "" } else { " " ++ attrs_string };
+        "<div data-a2ml=\"" ++ name ++ "\"" ++ data_attr ++ ">" ++ content ++ "</div>"
+      }
+    };
+    rendered = rendered ++ [s];
+    i = i + 1;
+  }
+  join_lines(rendered, "\n")
+}
+
+pub fn render_html(doc: Doc) -> String {
+  render_blocks(doc)
+}
+
+pub type StringSet = [String]
+
+fn set_has(set: StringSet, value: String) -> Bool {
+  let i = 0;
+  while i < len(set) { if set[i] == value { return true; } i = i + 1; }
+  false
+}
+
+fn set_add(set: StringSet, value: String) -> StringSet {
+  if set_has(set, value) { set } else { set ++ [value] }
+}
+
+pub fn validate(doc: Doc) -> [ParseError] {
+  let ids = [];
+  let refs = [];
+  let errors = [];
+
+  fn walk(blocks: [Block], depth_line: Int) -> Unit {
+    let i = 0;
+    while i < len(blocks) {
+      let line_no = depth_line + i + 1;
+      match blocks[i] {
+        Directive(_name, attrs, body) => {
+          let a = 0;
+          while a < len(attrs) {
+            let (k, v) = attrs[a];
+            if k == "id" {
+              if set_has(ids, v) {
+                errors = errors ++ [ParseError { line: line_no, msg: "duplicate id: " ++ v }];
+              } else {
+                ids = set_add(ids, v);
+              }
+            } else if k == "ref" {
+              refs = refs ++ [(v, line_no)];
+            }
+            a = a + 1;
+          }
+          walk(body, line_no);
+        }
+        _ => {}
+      }
+      i = i + 1;
+    }
+  }
+
+  walk(doc, 0);
+
+  let r = 0;
+  while r < len(refs) {
+    let (ref_id, line_no) = refs[r];
+    if !set_has(ids, ref_id) {
+      errors = errors ++ [ParseError { line: line_no, msg: "unresolved reference \"" ++ ref_id ++ "\"" }];
+    }
+    r = r + 1;
+  }
+
+  errors
+}
+
+pub fn validate_checked(doc: Doc) -> [ParseError] {
+  let errors = validate(doc);
+  let allowed = ["abstract", "refs", "fig", "table", "opaque", "section", "requires"];
+
+  fn walk(blocks: [Block], depth_line: Int) -> Unit {
+    let i = 0;
+    while i < len(blocks) {
+      let line_no = depth_line + i + 1;
+      match blocks[i] {
+        Directive(name, _attrs, body) => {
+          if !set_has(allowed, name) {
+            errors = errors ++ [ParseError { line: line_no, msg: "unknown directive: " ++ name }];
+          }
+          walk(body, line_no);
+        }
+        _ => {}
+      }
+      i = i + 1;
+    }
+  }
+
+  walk(doc, 0);
+  errors
+}

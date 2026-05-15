@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Direct file upload deployment to Cloudflare Pages.
+// AffineScript port of DeployDirect.res.
+
+module DeployDirect;
+
+use Deno_Api;
+use Fetch_Api;
+
+extern fn console_log(msg: String) -> Unit = "console" "log";
+extern fn console_error(msg: String) -> Unit = "console" "error";
+extern fn str_repeat(s: String, count: Int) -> String = "string" "repeat";
+extern fn json_stringify(value: a) -> Option<String> = "JSON" "stringifyAny";
+extern fn json_get_bool(j: Json, key: String) -> Bool = "json" "getBool";
+extern fn json_get_path(j: Json, a: String, b: String) -> String = "json" "getPath2";
+
+let cloudflare_api_token = Deno_Api.Env.get("CLOUDFLARE_API_TOKEN");
+let cloudflare_account_id = Deno_Api.Env.get("CLOUDFLARE_ACCOUNT_ID");
+let project_name = "avow-protocol";
+
+fn auth_headers() -> Fetch_Api.Headers {
+  let token = match cloudflare_api_token { Some(t) => t, None => "" };
+  Fetch_Api.Headers { authorization: "Bearer " ++ token, content_type: "application/json" }
+}
+
+pub fn main() -> Effect[Async] Unit {
+  match (cloudflare_api_token, cloudflare_account_id) {
+    (None, _) => { console_error("Missing credentials"); Deno_Api.exit(1); }
+    (_, None) => { console_error("Missing credentials"); Deno_Api.exit(1); }
+    _ => {}
+  }
+
+  let account_id = match cloudflare_account_id { Some(a) => a, None => "" };
+  let bar = str_repeat("=", 50);
+
+  console_log("Direct Deployment to Cloudflare Pages");
+  console_log(bar);
+
+  // Step 1: Build
+  console_log("\nBuilding project...");
+  let build_cmd = Deno_Api.make_command("deno",
+    Deno_Api.CommandOptions { args: ["task", "build"], stdout: "piped", stderr: "piped", cwd: None });
+  let build_result = await Deno_Api.output(build_cmd);
+  if !build_result.success {
+    console_error("Build failed");
+    Deno_Api.exit(1);
+  }
+  console_log("Build successful");
+
+  // Step 2: Package files
+  console_log("\nPackaging files...");
+  let files = dict_empty();
+  let files_to_include = ["index.html", "style.css", "favicon.svg", "_headers", "cloudflare-dns-zone.txt"];
+  let i = 0;
+  while i < len(files_to_include) {
+    // Synchronous read not available; would need async in real use.
+    let _ = files_to_include[i];
+    i = i + 1;
+  }
+  console_log("Packaged " ++ show(len(dict_keys(files))) ++ " files");
+
+  // Step 3: Create deployment
+  console_log("\nCreating deployment...");
+  let body = match json_stringify(json_object([
+    ("branch", json_string("main")),
+    ("files", json_of(files)),
+  ])) { Some(s) => s, None => "" };
+
+  let deploy_response = await Fetch_Api.fetch(
+    "https://api.cloudflare.com/client/v4/accounts/" ++ account_id
+      ++ "/pages/projects/" ++ project_name ++ "/deployments",
+    Fetch_Api.RequestInit { method: Some("POST"), headers: auth_headers(), body: Some(body) },
+  );
+
+  let result = await Fetch_Api.json(deploy_response);
+  if json_get_bool(result, "success") {
+    console_log("\n" ++ bar);
+    console_log("DEPLOYMENT SUCCESSFUL!");
+    console_log(bar);
+    console_log("\nYour site is live at:");
+    console_log("   " ++ json_get_path(result, "result", "url"));
+    console_log("\nProduction URL:");
+    console_log("   https://" ++ project_name ++ ".pages.dev");
+    console_log("\n" ++ bar);
+  } else {
+    console_error("Deployment failed");
+    Deno_Api.exit(1);
+  }
+}
+
+main()

@@ -1,0 +1,119 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// A2ML_Types — core data types for A2ML documents.
+// AffineScript port of A2ML_Types.res.
+
+module A2ML_Types;
+
+extern fn str_lower(s: String) -> String = "string" "toLowerCase";
+
+pub type TrustLevel = | Unverified | Automated | Reviewed | Verified
+
+pub fn trust_level_from_string(s: String) -> Option<TrustLevel> {
+  match str_lower(s) {
+    "unverified" => Some(Unverified),
+    "automated"  => Some(Automated),
+    "reviewed"   => Some(Reviewed),
+    "verified"   => Some(Verified),
+    _            => None,
+  }
+}
+
+pub fn trust_level_to_string(level: TrustLevel) -> String {
+  match level {
+    Unverified => "unverified",
+    Automated  => "automated",
+    Reviewed   => "reviewed",
+    Verified   => "verified",
+  }
+}
+
+pub type Inline =
+  | Text(String)
+  | Emphasis([Inline])
+  | Strong([Inline])
+  | Code(String)
+  | Link([Inline], String)
+  | InlineRef(String)
+
+pub type Directive = {
+  name: String,
+  value: String,
+  attributes: [(String, String)],
+}
+
+pub fn make_directive(name: String, value: String) -> Directive {
+  Directive { name: name, value: value, attributes: [] }
+}
+
+pub type Attestation = {
+  identity: String,
+  role: String,
+  trust_level: TrustLevel,
+  timestamp: Option<String>,
+  note: Option<String>,
+}
+
+pub fn make_attestation(identity: String, role: String, trust_level: TrustLevel) -> Attestation {
+  Attestation { identity: identity, role: role, trust_level: trust_level, timestamp: None, note: None }
+}
+
+pub type Block =
+  | Heading(Int, [Inline])
+  | Paragraph([Inline])
+  | CodeBlock(Option<String>, String)
+  | DirectiveBlock(Directive)
+  | AttestationBlock(Attestation)
+  | ThematicBreak
+  | BlockQuote([Block])
+  | BulletList([[Inline]])
+  | BlankLine
+
+pub type Document = {
+  title: Option<String>,
+  directives: [Directive],
+  blocks: [Block],
+  attestations: [Attestation],
+}
+
+pub fn empty_document() -> Document {
+  Document { title: None, directives: [], blocks: [], attestations: [] }
+}
+
+pub type Manifest = {
+  version: Option<String>,
+  title: Option<String>,
+  directives: [Directive],
+  attestations: [Attestation],
+}
+
+pub fn manifest_from_document(doc: Document) -> Manifest {
+  let version = None;
+  let i = 0;
+  while i < len(doc.directives) {
+    if doc.directives[i].name == "version" {
+      version = Some(doc.directives[i].value);
+    }
+    i = i + 1;
+  }
+  Manifest { version: version, title: doc.title, directives: doc.directives, attestations: doc.attestations }
+}
+
+pub type ParseError =
+  | UnterminatedDirective(Int, String)
+  | InvalidHeadingLevel(Int, Int)
+  | UnexpectedToken(Int, String)
+  | EmptyDocument
+
+pub fn parse_error_to_string(err: ParseError) -> String {
+  match err {
+    UnterminatedDirective(line, name) =>
+      "error[A2ML]: line " ++ show(line) ++ ": unterminated directive @" ++ name,
+    InvalidHeadingLevel(line, level) =>
+      "error[A2ML]: line " ++ show(line) ++ ": invalid heading level " ++ show(level) ++ " (must be 1-5)",
+    UnexpectedToken(line, token) =>
+      "error[A2ML]: line " ++ show(line) ++ ": unexpected token \"" ++ token ++ "\"",
+    EmptyDocument => "error[A2ML]: document is empty",
+  }
+}

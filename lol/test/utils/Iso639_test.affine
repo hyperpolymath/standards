@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
+//
+// ISO 639 utilities tests. AffineScript port of Iso639_test.res.
+
+module Iso639_test;
+
+use Vitest;
+use Iso639;
+
+Vitest.describe("Iso639.Validation", fn() {
+  Vitest.describe("isValidIso639_1", fn() {
+    Vitest.test("returns true for valid 2-letter codes", fn() {
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_1("en")), true);
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_1("de")), true);
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_1("zh")), true)
+    });
+    Vitest.test("returns false for invalid codes", fn() {
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_1("eng")), false);
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_1("e")), false);
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_1("EN")), false);
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_1("")), false)
+    })
+  });
+  Vitest.describe("isValidIso639_3", fn() {
+    Vitest.test("returns true for valid 3-letter codes", fn() {
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_3("eng")), true);
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_3("deu")), true);
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_3("zho")), true)
+    });
+    Vitest.test("returns false for invalid codes", fn() {
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_3("en")), false);
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_3("english")), false);
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_3("ENG")), false);
+      Vitest.to_be(Vitest.expect(Iso639.Validation.is_valid_iso639_3("")), false)
+    })
+  });
+  Vitest.describe("detectCodeType", fn() {
+    Vitest.test("detects ISO 639-1 codes", fn() {
+      Vitest.to_equal(Vitest.expect(Iso639.Validation.detect_code_type("en")), Some(Iso639.Types.C_Iso639_1))
+    });
+    Vitest.test("detects ISO 639-3 codes", fn() {
+      Vitest.to_equal(Vitest.expect(Iso639.Validation.detect_code_type("eng")), Some(Iso639.Types.C_Iso639_3))
+    });
+    Vitest.test("returns None for invalid codes", fn() {
+      Vitest.to_equal(Vitest.expect(Iso639.Validation.detect_code_type("english")), None);
+      Vitest.to_equal(Vitest.expect(Iso639.Validation.detect_code_type("")), None)
+    })
+  });
+  Vitest.describe("normalize", fn() {
+    Vitest.test("converts to lowercase", fn() {
+      Vitest.to_be(Vitest.expect(Iso639.Validation.normalize("ENG")), "eng");
+      Vitest.to_be(Vitest.expect(Iso639.Validation.normalize("EN")), "en")
+    });
+    Vitest.test("trims whitespace", fn() {
+      Vitest.to_be(Vitest.expect(Iso639.Validation.normalize(" eng ")), "eng")
+    })
+  })
+});
+
+Vitest.describe("Iso639.SpecialCodes", fn() {
+  Vitest.test("isSpecial returns true for special codes", fn() {
+    Vitest.to_be(Vitest.expect(Iso639.SpecialCodes.is_special("und")), true);
+    Vitest.to_be(Vitest.expect(Iso639.SpecialCodes.is_special("mul")), true);
+    Vitest.to_be(Vitest.expect(Iso639.SpecialCodes.is_special("mis")), true);
+    Vitest.to_be(Vitest.expect(Iso639.SpecialCodes.is_special("zxx")), true)
+  });
+  Vitest.test("isSpecial returns false for regular codes", fn() {
+    Vitest.to_be(Vitest.expect(Iso639.SpecialCodes.is_special("eng")), false);
+    Vitest.to_be(Vitest.expect(Iso639.SpecialCodes.is_special("deu")), false)
+  })
+});
+
+Vitest.describe("Iso639.Conversion", fn() {
+  Vitest.describe("toIso639_3", fn() {
+    Vitest.test("converts ISO 639-1 to ISO 639-3", fn() {
+      Vitest.to_equal(Vitest.expect(Iso639.Conversion.to_iso639_3("en")), Some("eng"));
+      Vitest.to_equal(Vitest.expect(Iso639.Conversion.to_iso639_3("de")), Some("deu"));
+      Vitest.to_equal(Vitest.expect(Iso639.Conversion.to_iso639_3("fr")), Some("fra"))
+    });
+    Vitest.test("passes through valid ISO 639-3 codes", fn() {
+      Vitest.to_equal(Vitest.expect(Iso639.Conversion.to_iso639_3("eng")), Some("eng"))
+    });
+    Vitest.test("returns None for unknown codes", fn() {
+      Vitest.to_equal(Vitest.expect(Iso639.Conversion.to_iso639_3("xx")), None)
+    })
+  })
+});
+
+Vitest.describe("Iso639.Registry", fn() {
+  Vitest.test("empty creates empty registry", fn() {
+    let registry = Iso639.Registry.empty();
+    Vitest.to_be(Vitest.expect(Iso639.Registry.count(registry)), 0)
+  });
+  Vitest.test("add and findByCode works", fn() {
+    let registry = Iso639.Registry.empty();
+    let entry = Iso639.Types.LanguageEntry {
+      iso639_3: "eng", iso639_2b: Some("eng"), iso639_2t: Some("eng"),
+      iso639_1: Some("en"), scope: Iso639.Types.Individual,
+      type_: Iso639.Types.Living, name: "English", comment: None,
+    };
+    Iso639.Registry.add(registry, entry);
+    Vitest.to_equal(Vitest.expect(Iso639.Registry.find_by_code(registry, "eng")), Some(entry));
+    Vitest.to_equal(Vitest.expect(Iso639.Registry.find_by_code(registry, "en")), Some(entry))
+  });
+  Vitest.test("findByName works", fn() {
+    let registry = Iso639.Registry.empty();
+    let entry = Iso639.Types.LanguageEntry {
+      iso639_3: "deu", iso639_2b: Some("ger"), iso639_2t: Some("deu"),
+      iso639_1: Some("de"), scope: Iso639.Types.Individual,
+      type_: Iso639.Types.Living, name: "German", comment: None,
+    };
+    Iso639.Registry.add(registry, entry);
+    Vitest.to_equal(Vitest.expect(Iso639.Registry.find_by_name(registry, "German")), Some(entry));
+    Vitest.to_equal(Vitest.expect(Iso639.Registry.find_by_name(registry, "german")), Some(entry))
+  })
+});

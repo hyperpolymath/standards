@@ -1,0 +1,207 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
+//
+// Find.Bible crawler (API + HTML hybrid). AffineScript port of FindBible.res.
+
+module FindBible;
+
+use Crawler;
+use Http;
+use Lang1000;
+
+extern fn json_parse_exn(s: String) -> Json = "JSON" "parseExn";
+extern fn json_as_array(j: Json) -> Option<[Json]> = "json" "asArray";
+extern fn json_as_object(j: Json) -> Option<Dict<Json>> = "json" "asObject";
+extern fn json_str_field(o: Dict<Json>, key: String) -> String = "json" "strField";
+extern fn json_opt_str_field(o: Dict<Json>, key: String) -> Option<String> = "json" "optStrField";
+extern fn json_int_field(o: Dict<Json>, key: String) -> Int = "json" "intField";
+extern fn json_opt_int_field(o: Dict<Json>, key: String) -> Option<Int> = "json" "optIntField";
+
+module Config {
+  pub let base_url = "https://find.bible";
+  pub let api_url = "https://find.bible/api";
+  pub let rate_limit_ms = 1000;
+}
+
+module Endpoints {
+  pub fn languages() -> String { Config.api_url ++ "/languages" }
+  pub fn language(code: String) -> String { Config.api_url ++ "/languages/" ++ code }
+  pub fn bibles(code: String) -> String { Config.api_url ++ "/bibles?language=" ++ code }
+  pub fn bible(id: String) -> String { Config.api_url ++ "/bibles/" ++ id }
+  pub fn text(id: String, book: String, chapter: Int) -> String {
+    Config.api_url ++ "/bibles/" ++ id ++ "/" ++ book ++ "/" ++ show(chapter)
+  }
+}
+
+module Types {
+  pub type LanguageInfo = {
+    code: String,
+    name: String,
+    native_name: Option<String>,
+    bible_count: Int,
+  }
+
+  pub type BibleEntry = {
+    id: String,
+    title: String,
+    language_code: String,
+    year: Option<Int>,
+    copyright: Option<String>,
+  }
+}
+
+module Parser {
+  use Types;
+
+  fn obj_array(json: Json, data_key: String) -> Option<[Dict<Json>]> {
+    match json_as_array(json) {
+      Some(arr) => Some(collect_objs(arr)),
+      None => {
+        match json_as_object(json) {
+          Some(obj) => {
+            match dict_get(obj, data_key) {
+              Some(inner) => match json_as_array(inner) { Some(a) => Some(collect_objs(a)), None => None },
+              None => None,
+            }
+          }
+          None => None,
+        }
+      }
+    }
+  }
+
+  fn collect_objs(arr: [Json]) -> [Dict<Json>] {
+    let out = [];
+    let i = 0;
+    while i < len(arr) {
+      match json_as_object(arr[i]) { Some(o) => { out = out ++ [o]; } None => {} }
+      i = i + 1;
+    }
+    out
+  }
+
+  pub fn parse_languages(json: Json) -> Crawler.Parser.ParseResult<[Types.LanguageInfo]> {
+    match obj_array(json, "data") {
+      Some(objs) => {
+        let langs = [];
+        let i = 0;
+        while i < len(objs) {
+          let o = objs[i];
+          langs = langs ++ [Types.LanguageInfo {
+            code: json_str_field(o, "code"),
+            name: json_str_field(o, "name"),
+            native_name: json_opt_str_field(o, "nativeName"),
+            bible_count: json_int_field(o, "bibleCount"),
+          }];
+          i = i + 1;
+        }
+        Crawler.Parser.Parsed(langs)
+      }
+      None => Crawler.Parser.NoMatch,
+    }
+  }
+
+  pub fn parse_bibles(json: Json) -> Crawler.Parser.ParseResult<[Types.BibleEntry]> {
+    match obj_array(json, "data") {
+      Some(objs) => {
+        let bibles = [];
+        let i = 0;
+        while i < len(objs) {
+          let o = objs[i];
+          bibles = bibles ++ [Types.BibleEntry {
+            id: json_str_field(o, "id"),
+            title: json_str_field(o, "title"),
+            language_code: json_str_field(o, "languageCode"),
+            year: json_opt_int_field(o, "year"),
+            copyright: json_opt_str_field(o, "copyright"),
+          }];
+          i = i + 1;
+        }
+        Crawler.Parser.Parsed(bibles)
+      }
+      None => Crawler.Parser.NoMatch,
+    }
+  }
+
+  pub fn parse_verses(json: Json, language_code: String) -> Crawler.Parser.ParseResult<[Lang1000.Verse.T]> {
+    match obj_array(json, "verses") {
+      Some(objs) => {
+        let verses = [];
+        let i = 0;
+        while i < len(objs) {
+          let o = objs[i];
+          let text = json_str_field(o, "text");
+          if len(text) > 0 {
+            verses = verses ++ [Lang1000.Verse.make(
+              Lang1000.Verse.make_reference(
+                json_str_field(o, "book"),
+                json_int_field(o, "chapter"),
+                json_int_field(o, "verse")),
+              text, language_code)];
+          }
+          i = i + 1;
+        }
+        Crawler.Parser.Parsed(verses)
+      }
+      None => Crawler.Parser.NoMatch,
+    }
+  }
+}
+
+module Crawler_ {
+  use Crawler.Types;
+
+  pub type T = {
+    rate_limiter: Crawler.RateLimiter.T,
+    mut state: Crawler.Types.CrawlerState,
+  }
+
+  pub fn make() -> T {
+    T { rate_limiter: Crawler.RateLimiter.make(Config.rate_limit_ms), state: Crawler.Types.Idle }
+  }
+
+  pub fn fetch_languages(crawler: T) -> Effect[Async] Crawler.Types.CrawlResult<[Types.LanguageInfo]> {
+    crawler.state = Crawler.Types.Crawling("languages");
+    let resp = await Http.get_json(Endpoints.languages(), None);
+    crawler.state = Crawler.Types.Idle;
+    match resp {
+      Ok(json) => {
+        match Parser.parse_languages(json) {
+          Crawler.Parser.Parsed(langs) => Crawler.Types.Success(langs),
+          _ => Crawler.Types.Failure("Failed to parse language list"),
+        }
+      }
+      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
+      Err(_) => Crawler.Types.Failure("Request failed"),
+    }
+  }
+
+  pub fn fetch_bibles(crawler: T, lang_code: String) -> Effect[Async] Crawler.Types.CrawlResult<[Types.BibleEntry]> {
+    let resp = await Http.get_with_rate_limit(Endpoints.bibles(lang_code), None, crawler.rate_limiter);
+    match resp {
+      Ok(r) => {
+        match Parser.parse_bibles(json_parse_exn(r.body)) {
+          Crawler.Parser.Parsed(bibles) => Crawler.Types.Success(bibles),
+          _ => Crawler.Types.Failure("Failed to parse bibles"),
+        }
+      }
+      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
+      Err(_) => Crawler.Types.Failure("Request failed"),
+    }
+  }
+
+  pub fn fetch_chapter(crawler: T, bible_id: String, book: String, chapter: Int,
+                       language_code: String) -> Effect[Async] Crawler.Types.CrawlResult<[Lang1000.Verse.T]> {
+    let resp = await Http.get_with_rate_limit(Endpoints.text(bible_id, book, chapter), None, crawler.rate_limiter);
+    match resp {
+      Ok(r) => {
+        match Parser.parse_verses(json_parse_exn(r.body), language_code) {
+          Crawler.Parser.Parsed(verses) => Crawler.Types.Success(verses),
+          _ => Crawler.Types.Failure("Failed to parse verses"),
+        }
+      }
+      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
+      Err(_) => Crawler.Types.Failure("Request failed"),
+    }
+  }
+}

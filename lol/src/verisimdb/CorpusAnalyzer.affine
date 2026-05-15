@@ -1,0 +1,366 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
+//
+// Corpus analyzer: quality analysis for the multilingual Bible corpus.
+// AffineScript port of CorpusAnalyzer.res.
+
+module CorpusAnalyzer;
+
+use VeriSimDB;
+use Statistics;
+use Lang1000;
+
+extern fn str_split(s: String, sep: String) -> [String] = "string" "split";
+extern fn str_trim(s: String) -> String = "string" "trim";
+extern fn str_includes(s: String, needle: String) -> Bool = "string" "includes";
+extern fn math_abs(x: Float) -> Float = "Math" "abs";
+extern fn float_to_fixed(x: Float, digits: Int) -> String = "Float" "toFixed";
+extern fn date_now_iso() -> String = "Date" "toISOString";
+
+module EntropyAnalysis {
+  // Character-level entropy for a text.
+  pub fn character_entropy(text: String) -> Float {
+    let chars = str_split(text, "");
+    let total = int_to_float(len(chars));
+    if total == 0.0 {
+      0.0
+    } else {
+      let counts = dict_empty();
+      let i = 0;
+      while i < len(chars) {
+        let c = chars[i];
+        let cur = match dict_get(counts, c) { Some(n) => n, None => 0 };
+        dict_set(counts, c, cur + 1);
+        i = i + 1;
+      }
+      let vals = dict_values(counts);
+      let dist = [];
+      let j = 0;
+      while j < len(vals) {
+        dist = dist ++ [int_to_float(vals[j]) /. total];
+        j = j + 1;
+      }
+      Statistics.Information.entropy(dist)
+    }
+  }
+
+  pub fn detect_outliers(corpus: Lang1000.Corpus.T, z_threshold: Float) -> [VeriSimDB.WeakPoint] {
+    let entropies = [];
+    let i = 0;
+    while i < len(corpus.alignments) {
+      let alignment = corpus.alignments[i];
+      let texts = dict_values(alignment.translations);
+      let avg = if len(texts) == 0 {
+        0.0
+      } else {
+        let ent_vals = [];
+        let k = 0;
+        while k < len(texts) { ent_vals = ent_vals ++ [character_entropy(texts[k])]; k = k + 1; }
+        Statistics.Basic.mean(ent_vals)
+      };
+      entropies = entropies ++ [(alignment.reference_id, avg)];
+      i = i + 1;
+    }
+
+    let entropy_values = [];
+    let v = 0;
+    while v < len(entropies) {
+      let (_, e) = entropies[v];
+      entropy_values = entropy_values ++ [e];
+      v = v + 1;
+    }
+    let mean = Statistics.Basic.mean(entropy_values);
+    let sd = Statistics.Basic.standard_deviation(entropy_values);
+
+    if sd == 0.0 {
+      []
+    } else {
+      let out = [];
+      let j = 0;
+      while j < len(entropies) {
+        let (ref_id, ent) = entropies[j];
+        let z = math_abs((ent -. mean) /. sd);
+        if z > z_threshold {
+          out = out ++ [VeriSimDB.make_weak_point(
+            VeriSimDB.Category.StatisticalOutlier, VeriSimDB.Severity.Medium, ref_id,
+            "Entropy z-score " ++ float_to_fixed(z, 2) ++ " exceeds threshold "
+              ++ float_to_fixed(z_threshold, 1) ++ " (entropy=" ++ float_to_fixed(ent, 3) ++ ")",
+            None, None, None)];
+        }
+        j = j + 1;
+      }
+      out
+    }
+  }
+}
+
+module MissingVerseDetection {
+  pub fn detect(corpus: Lang1000.Corpus.T, ref_lang: String) -> [VeriSimDB.WeakPoint] {
+    let out = [];
+    let i = 0;
+    while i < len(corpus.alignments) {
+      let alignment = corpus.alignments[i];
+      let has_ref = match dict_get(alignment.translations, ref_lang) { Some(_) => true, None => false };
+      if has_ref {
+        let langs = dict_keys(alignment.translations);
+        let missing = [];
+        let l = 0;
+        while l < len(corpus.languages) {
+          let code = corpus.languages[l].code;
+          if code != ref_lang && !array_includes(langs, code) {
+            missing = missing ++ [code];
+          }
+          l = l + 1;
+        }
+        if len(missing) > 0 {
+          let sev = if len(missing) > 5 { VeriSimDB.Severity.High } else { VeriSimDB.Severity.Low };
+          out = out ++ [VeriSimDB.make_weak_point(
+            VeriSimDB.Category.MissingVerse, sev, alignment.reference_id,
+            "Missing in " ++ show(len(missing)) ++ " languages: " ++ join_with(missing, ", "),
+            None, None, None)];
+        }
+      }
+      i = i + 1;
+    }
+    out
+  }
+}
+
+module EncodingDetection {
+  pub fn has_encoding_error(text: String) -> Bool {
+    str_includes(text, "\u{FFFD}")
+      || str_includes(text, "\u{0000}")
+      || str_includes(text, "\u{00C3}\u{00A9}")
+      || str_includes(text, "\u{00C3}\u{00A0}")
+      || str_includes(text, "\u{00C2}\u{00BB}")
+  }
+
+  pub fn detect(corpus: Lang1000.Corpus.T) -> [VeriSimDB.WeakPoint] {
+    let out = [];
+    let i = 0;
+    while i < len(corpus.alignments) {
+      let alignment = corpus.alignments[i];
+      let pairs = dict_entries(alignment.translations);
+      let j = 0;
+      while j < len(pairs) {
+        let (lang, text) = pairs[j];
+        if has_encoding_error(text) {
+          out = out ++ [VeriSimDB.make_weak_point(
+            VeriSimDB.Category.EncodingError, VeriSimDB.Severity.Medium,
+            alignment.reference_id, "Encoding error detected in text", None, Some(lang), None)];
+        }
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+    out
+  }
+}
+
+module TruncationDetection {
+  pub fn detect(corpus: Lang1000.Corpus.T, ref_lang: String, min_ratio: Float) -> [VeriSimDB.WeakPoint] {
+    let out = [];
+    let i = 0;
+    while i < len(corpus.alignments) {
+      let alignment = corpus.alignments[i];
+      match dict_get(alignment.translations, ref_lang) {
+        None => {}
+        Some(ref_text) => {
+          let ref_len = int_to_float(len(ref_text));
+          if ref_len >= 5.0 {
+            let pairs = dict_entries(alignment.translations);
+            let j = 0;
+            while j < len(pairs) {
+              let (lang, text) = pairs[j];
+              if lang != ref_lang {
+                let text_len = int_to_float(len(text));
+                let ratio = text_len /. ref_len;
+                if ratio < min_ratio && text_len > 0.0 {
+                  out = out ++ [VeriSimDB.make_weak_point(
+                    VeriSimDB.Category.TruncatedContent, VeriSimDB.Severity.Medium,
+                    alignment.reference_id,
+                    "Text length ratio " ++ float_to_fixed(ratio, 2) ++ " below threshold "
+                      ++ float_to_fixed(min_ratio, 2) ++ " (" ++ show(float_to_int(text_len))
+                      ++ " vs " ++ show(float_to_int(ref_len)) ++ " chars)",
+                    None, Some(lang), None)];
+                }
+              }
+              j = j + 1;
+            }
+          }
+        }
+      }
+      i = i + 1;
+    }
+    out
+  }
+}
+
+module DuplicateDetection {
+  pub fn detect(corpus: Lang1000.Corpus.T) -> [VeriSimDB.WeakPoint] {
+    let lang_texts = dict_empty();
+
+    let i = 0;
+    while i < len(corpus.alignments) {
+      let alignment = corpus.alignments[i];
+      let pairs = dict_entries(alignment.translations);
+      let j = 0;
+      while j < len(pairs) {
+        let (lang, text) = pairs[j];
+        let trimmed = str_trim(text);
+        if len(trimmed) > 10 {
+          let lang_dict = match dict_get(lang_texts, lang) {
+            Some(d) => d,
+            None => { let d = dict_empty(); dict_set(lang_texts, lang, d); d }
+          };
+          let refs = match dict_get(lang_dict, trimmed) { Some(r) => r, None => [] };
+          dict_set(lang_dict, trimmed, refs ++ [alignment.reference_id]);
+        }
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+
+    let out = [];
+    let langs = dict_entries(lang_texts);
+    let l = 0;
+    while l < len(langs) {
+      let (lang, text_dict) = langs[l];
+      let texts = dict_entries(text_dict);
+      let t = 0;
+      while t < len(texts) {
+        let (_, refs) = texts[t];
+        if len(refs) > 1 {
+          let head = [];
+          let h = 0;
+          while h < len(refs) && h < 5 { head = head ++ [refs[h]]; h = h + 1; }
+          out = out ++ [VeriSimDB.make_weak_point(
+            VeriSimDB.Category.DuplicateContent, VeriSimDB.Severity.High, refs[0],
+            "Identical text in " ++ show(len(refs)) ++ " verses: " ++ join_with(head, ", "),
+            None, Some(lang), None)];
+        }
+        t = t + 1;
+      }
+      l = l + 1;
+    }
+    out
+  }
+}
+
+module CoverageAnalysis {
+  pub fn detect_gaps(source_coverage: [(String, [String])]) -> [VeriSimDB.WeakPoint] {
+    let all_langs = dict_empty();
+    let i = 0;
+    while i < len(source_coverage) {
+      let (source, langs) = source_coverage[i];
+      let j = 0;
+      while j < len(langs) {
+        let lang = langs[j];
+        let sources = match dict_get(all_langs, lang) { Some(s) => s, None => [] };
+        dict_set(all_langs, lang, sources ++ [source]);
+        j = j + 1;
+      }
+      i = i + 1;
+    }
+
+    let total_sources = len(source_coverage);
+    let out = [];
+    let entries = dict_entries(all_langs);
+    let k = 0;
+    while k < len(entries) {
+      let (lang, sources) = entries[k];
+      if len(sources) < total_sources && len(sources) == 1 {
+        out = out ++ [VeriSimDB.make_weak_point(
+          VeriSimDB.Category.CoverageGap, VeriSimDB.Severity.Low, lang,
+          "Only available from " ++ sources[0] ++ ", missing from "
+            ++ show(total_sources - 1) ++ " other sources",
+          None, Some(lang), None)];
+      }
+      k = k + 1;
+    }
+    out
+  }
+}
+
+fn join_with(parts: [String], sep: String) -> String {
+  let out = "";
+  let i = 0;
+  while i < len(parts) {
+    out = if i == 0 { parts[i] } else { out ++ sep ++ parts[i] };
+    i = i + 1;
+  }
+  out
+}
+
+pub fn analyze_full(corpus: Lang1000.Corpus.T, ref_lang: String,
+                     repo: String, version: String) -> VeriSimDB.ScanResult {
+  let weak_points = EntropyAnalysis.detect_outliers(corpus, 2.0)
+    ++ MissingVerseDetection.detect(corpus, ref_lang)
+    ++ EncodingDetection.detect(corpus)
+    ++ TruncationDetection.detect(corpus, ref_lang, 0.2)
+    ++ DuplicateDetection.detect(corpus);
+
+  let total_lines = 0;
+  let a = 0;
+  while a < len(corpus.alignments) {
+    total_lines = total_lines + len(dict_keys(corpus.alignments[a].translations));
+    a = a + 1;
+  }
+
+  fn count_unsafe(wps: [VeriSimDB.WeakPoint]) -> Int {
+    let n = 0;
+    let i = 0;
+    while i < len(wps) {
+      if VeriSimDB.Severity.to_numeric(wps[i].severity) >= 4 { n = n + 1; }
+      i = i + 1;
+    }
+    n
+  }
+
+  let files = [];
+  let l = 0;
+  while l < len(corpus.languages) {
+    let lang = corpus.languages[l];
+    let lang_wps = [];
+    let w = 0;
+    while w < len(weak_points) {
+      let wp = weak_points[w];
+      if (match wp.language { Some(x) => x, None => "" }) == lang.code {
+        lang_wps = lang_wps ++ [wp];
+      }
+      w = w + 1;
+    }
+    let lines = 0;
+    let aa = 0;
+    while aa < len(corpus.alignments) {
+      match dict_get(corpus.alignments[aa].translations, lang.code) {
+        Some(_) => { lines = lines + 1; }
+        None => {}
+      }
+      aa = aa + 1;
+    }
+    files = files ++ [VeriSimDB.FileStatistic {
+      file: lang.code,
+      total_lines: lines,
+      weak_points: len(lang_wps),
+      unsafe_blocks: count_unsafe(lang_wps),
+    }];
+    l = l + 1;
+  }
+
+  VeriSimDB.ScanResult {
+    repo: repo,
+    version: version,
+    timestamp: date_now_iso(),
+    scanner: "lol-corpus-analyzer",
+    scanner_version: "0.1.0",
+    weak_points: weak_points,
+    statistics: VeriSimDB.CorpusStatistics {
+      total_files: Lang1000.Corpus.language_count(corpus),
+      total_lines: total_lines,
+      total_weak_points: len(weak_points),
+      total_unsafe_blocks: count_unsafe(weak_points),
+      files: files,
+    },
+  }
+}
