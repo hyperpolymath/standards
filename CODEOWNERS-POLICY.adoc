@@ -1,0 +1,152 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Hyperpolymath CODEOWNERS Policy
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:revnumber: 1.0.0
+:revdate: 2026-05-15
+:toc:
+:toc-placement: preamble
+
+Canonical `CODEOWNERS` policy for all `hyperpolymath/*` repositories.
+All maintainers and AI agents must follow this document. It resolves
+link:https://github.com/hyperpolymath/standards/issues/55[standards#55].
+
+== Problem
+
+GitHub auto-requests review from every matching `CODEOWNERS` entry on
+*every* pull request — including Dependabot PRs. On solo-owned repos the
+only matching owner is the sole maintainer, so every dependency bump
+fires a `reason:review_requested` notification that conveys no
+information (the sole maintainer is going to review their own repo
+anyway). Across ~18 active `hyperpolymath/*` repos this produced a
+recurring notification flood.
+
+Two `CODEOWNERS` line shapes cause this:
+
+* the catch-all `* @owner` line — triggered by *all* Dependabot
+  ecosystems (cargo, mix, nix, npm, …);
+* the `/.github/workflows/` path line — triggered specifically by the
+  Dependabot `github-actions` ecosystem, which bumps action versions by
+  editing workflow files.
+
+== The Standard
+
+=== Rule 1 — Solo-owned repos carry no functional CODEOWNERS lines
+
+For a repository whose only code owner would be the sole maintainer,
+`CODEOWNERS` MUST NOT contain a catch-all (`*`) line *or* a
+`/.github/workflows/` (or `.github/workflows/`) line.
+
+Such a repo SHOULD either omit `CODEOWNERS` entirely or keep only a
+comment header (SPDX + a one-line note). Sole-maintainer review gating is
+moot, and attribution is already carried by the SPDX header on every
+file, so the lines provide neither security nor attribution value — only
+noise.
+
+=== Rule 2 — Path lines are kept only for real co-owners
+
+A path-specific `CODEOWNERS` line is justified *only* when it maps to a
+collaborator other than the sole maintainer who genuinely should be
+auto-pinged for changes under that path. When such a co-owner exists,
+keep the path line but scope it to the co-owner and drop any redundant
+self-ping of the sole maintainer.
+
+=== Rule 3 — Co-owner removal requires explicit confirmation
+
+Dropping or narrowing a path line that currently auto-requests review
+from a co-owner removes that co-owner's review gate. This MUST NOT be
+done without the co-owner's (or repo lead's) explicit confirmation.
+
+== Canonical Templates
+
+=== Solo-owned repo (`CODEOWNERS`)
+
+[source]
+----
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Solo-maintained hyperpolymath repo: no owner lines by policy.
+# See hyperpolymath/standards CODEOWNERS-POLICY.adoc (Rule 1).
+# Sole-maintainer review is moot; SPDX headers carry attribution.
+----
+
+(An absent `CODEOWNERS` file is equally compliant.)
+
+=== Multi-owner repo (`CODEOWNERS`)
+
+[source]
+----
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Path lines map ONLY to genuine co-owners (Rule 2).
+# Do not add a catch-all `*` line.
+/.github/workflows/ @co-owner-handle
+----
+
+== Decision Matrix — standards#55 remaining repos
+
+The 2026-05-14 batch already opened 18 PRs dropping the catch-all
+`* @hyperpolymath` line (cargo/mix/nix/npm noise). This matrix resolves
+the remaining `github-actions`-ecosystem `.github/workflows/` line.
+
+[cols="2,1,3", options="header"]
+|===
+| Repo | Resolution | Basis
+
+| gitbot-fleet              | Drop line | Solo-owned (Rule 1)
+| hypatia                   | Drop line | Solo-owned (Rule 1)
+| boj-server                | Drop line | Solo-owned (Rule 1)
+| bofig                     | Drop line | Solo-owned (Rule 1)
+| idaptik                   | Keep, scope to `@JoshuaJewell` | Co-owned (Rule 2); self-ping of `@hyperpolymath` dropped, `@JoshuaJewell` gate retained per Rule 3
+| proof-of-work             | Drop line | Solo-owned (Rule 1)
+| InvestigativeJournalist.jl | Drop line | Solo-owned (Rule 1)
+| TradeUnionist.jl          | Drop line | Solo-owned (Rule 1)
+| echidna                   | Drop line | Solo-owned (Rule 1)
+| coq-jr                    | Drop line | Solo-owned (Rule 1)
+| cloudguard-server         | Drop line | Solo-owned (Rule 1)
+| cloudguard-cli            | Drop line | Solo-owned (Rule 1)
+| snifs                     | Drop line | Solo-owned (Rule 1)
+| somethings-fishy          | Drop line | Solo-owned (Rule 1)
+| affinescript-vite         | Drop line | Solo-owned (Rule 1)
+|===
+
+idaptik is the sole Rule 3 case: `@JoshuaJewell` is a genuine co-owner,
+so its `.github/workflows/` gate is retained (narrowed to
+`@JoshuaJewell` only). All other 14 are solo-owned and take the Rule 1
+drop.
+
+=== Rollout tracking
+
+Per-repo `CODEOWNERS` edits land in each target repository, not in this
+standards repo (which has no `CODEOWNERS` lines of its own and is already
+compliant). This document is the canonical reference those PRs cite.
+
+[cols="3,2", options="header"]
+|===
+| Batch | Status
+
+| 18 PRs dropping catch-all `*` line (cargo/mix/nix/npm) | Opened 2026-05-14 (see standards#55 body)
+| 14 solo-owned repos dropping `.github/workflows/` line | Authorised by Rule 1 — execute per-repo
+| idaptik — narrow `.github/workflows/` to `@JoshuaJewell` | Authorised by Rule 2/3 — execute on co-owner confirmation
+|===
+
+== Enforcement
+
+* New repos: the RSR repo template ships no catch-all `CODEOWNERS` line;
+  a `CODEOWNERS` file, if present, follows the canonical templates above.
+* Audit: a repo is non-compliant if `CODEOWNERS` contains a `*` line, or
+  a `/.github/workflows/` line whose owners are limited to the sole
+  maintainer. Grep check:
++
+[source,bash]
+----
+grep -nE '^\s*\*\s|^\s*/?\.github/workflows/' CODEOWNERS 2>/dev/null
+----
++
+Any catch-all match is a violation; a workflow-path match is a violation
+unless every listed owner is a genuine co-owner (Rule 2).
+
+== See Also
+
+* link:https://github.com/hyperpolymath/standards/issues/55[standards#55] — originating decision
+* `LICENCE-POLICY.adoc` (this directory) — companion canonical policy; SPDX headers cover attribution
+* `MAINTAINERS.adoc` (this directory) — maintainer-of-record (separate from CODEOWNERS auto-ping)
+* link:https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners[GitHub: About code owners]
