@@ -1,0 +1,135 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// K9_Types — core data types for K9 (self-validating components).
+// AffineScript port of K9_Types.res.
+
+module K9_Types;
+
+extern fn str_trim(s: String) -> String = "string" "trim";
+extern fn str_lower(s: String) -> String = "string" "toLowerCase";
+extern fn str_starts_with(s: String, p: String) -> Bool = "string" "startsWith";
+extern fn str_slice_to_end(s: String, start: Int) -> String = "string" "sliceToEnd";
+
+pub type SecurityLevel = | Kennel | Yard | Hunt
+
+pub fn security_level_from_string(s: String) -> Option<SecurityLevel> {
+  let normalized = str_lower(str_trim(s));
+  let cleaned = if str_starts_with(normalized, "'") {
+    str_slice_to_end(normalized, 1)
+  } else {
+    normalized
+  };
+  match cleaned {
+    "kennel" => Some(Kennel),
+    "yard"   => Some(Yard),
+    "hunt"   => Some(Hunt),
+    _        => None,
+  }
+}
+
+pub fn security_level_to_string(level: SecurityLevel) -> String {
+  match level { Kennel => "'Kennel", Yard => "'Yard", Hunt => "'Hunt" }
+}
+
+pub type Pedigree = {
+  name: String,
+  version: String,
+  description: String,
+  author: Option<String>,
+  license: Option<String>,
+}
+
+pub fn make_pedigree(name: String, version: String, description: String) -> Pedigree {
+  Pedigree { name: name, version: version, description: description, author: None, license: None }
+}
+
+pub type SecurityPolicy = {
+  level: SecurityLevel,
+  allow_network: Bool,
+  allow_fs_write: Bool,
+  allow_subprocess: Bool,
+}
+
+pub fn default_security_policy(level: SecurityLevel) -> SecurityPolicy {
+  match level {
+    Kennel => SecurityPolicy { level: level, allow_network: false, allow_fs_write: false, allow_subprocess: false },
+    Yard   => SecurityPolicy { level: level, allow_network: true,  allow_fs_write: false, allow_subprocess: false },
+    Hunt   => SecurityPolicy { level: level, allow_network: true,  allow_fs_write: true,  allow_subprocess: true },
+  }
+}
+
+pub type Target = {
+  os: Option<String>,
+  is_edge: Bool,
+  requires_podman: Bool,
+  memory: Option<String>,
+}
+
+pub type Recipes = {
+  install: Option<String>,
+  validate: Option<String>,
+  deploy: Option<String>,
+  migrate: Option<String>,
+  custom: [(String, String)],
+}
+
+pub fn empty_recipes() -> Recipes {
+  Recipes { install: None, validate: None, deploy: None, migrate: None, custom: [] }
+}
+
+pub type Validation = {
+  checksum: String,
+  pedigree_version: String,
+  hunt_authorized: Bool,
+}
+
+pub type ContractClause = {
+  clause_type: String,
+  predicate: String,
+  verified: Bool,
+}
+
+pub type Contract = {
+  name: String,
+  clauses: [ContractClause],
+}
+
+pub type Component = {
+  pedigree: Pedigree,
+  security: SecurityPolicy,
+  target: Option<Target>,
+  recipes: Option<Recipes>,
+  validation: Option<Validation>,
+  content: [(String, String)],
+  tags: [String],
+}
+
+pub fn make_component(pedigree: Pedigree, security_level: SecurityLevel) -> Component {
+  Component {
+    pedigree: pedigree,
+    security: default_security_policy(security_level),
+    target: None,
+    recipes: None,
+    validation: None,
+    content: [],
+    tags: [],
+  }
+}
+
+pub type ParseError =
+  | MissingMagicNumber
+  | MissingPedigree(String)
+  | InvalidSecurityLevel(String)
+  | UnexpectedToken(Int, String)
+  | EmptyDocument
+
+pub fn parse_error_to_string(err: ParseError) -> String {
+  match err {
+    MissingMagicNumber       => "error[K9]: missing K9! magic number at start of file",
+    MissingPedigree(field)   => "error[K9]: missing required pedigree field \"" ++ field ++ "\"",
+    InvalidSecurityLevel(lv) => "error[K9]: invalid security level \"" ++ lv ++ "\"",
+    UnexpectedToken(line, t) => "error[K9]: line " ++ show(line) ++ ": unexpected token \"" ++ t ++ "\"",
+    EmptyDocument            => "error[K9]: document is empty",
+  }
+}
