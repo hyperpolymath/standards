@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// K9_Renderer — render K9 AST back to K9 surface syntax.
+// AffineScript port of K9_Renderer.res.
+
+module K9_Renderer;
+
+use K9_Types;
+
+pub fn render_bool(b: Bool) -> String { if b { "true" } else { "false" } }
+
+pub fn render_optional(key: String, value: Option<String>) -> [String] {
+  match value { Some(v) => [key ++ ": " ++ v], None => [] }
+}
+
+pub fn render_pedigree_section(ped: K9_Types.Pedigree) -> [String] {
+  ["metadata:",
+   "  name: " ++ ped.name,
+   "  version: " ++ ped.version,
+   "  description: " ++ ped.description]
+  ++ render_optional("  author", ped.author)
+  ++ render_optional("  license", ped.license)
+}
+
+pub fn render_security_section(sec: K9_Types.SecurityPolicy) -> [String] {
+  ["",
+   "security:",
+   "  trust_level: " ++ K9_Types.security_level_to_string(sec.level),
+   "  allow_network: " ++ render_bool(sec.allow_network),
+   "  allow_filesystem_write: " ++ render_bool(sec.allow_fs_write),
+   "  allow_subprocess: " ++ render_bool(sec.allow_subprocess)]
+}
+
+pub fn render_target_section(tgt: Option<K9_Types.Target>) -> [String] {
+  match tgt {
+    None => [],
+    Some(t) =>
+      ["", "target:"] ++ render_optional("  os", t.os)
+      ++ ["  is_edge: " ++ render_bool(t.is_edge),
+          "  requires_podman: " ++ render_bool(t.requires_podman)]
+      ++ render_optional("  memory", t.memory),
+  }
+}
+
+pub fn render_recipes_section(rec_: Option<K9_Types.Recipes>) -> [String] {
+  match rec_ {
+    None => [],
+    Some(r) => {
+      let standard = render_optional("  install", r.install)
+        ++ render_optional("  validate", r.validate)
+        ++ render_optional("  deploy", r.deploy)
+        ++ render_optional("  migrate", r.migrate);
+      let custom_lines = [];
+      let i = 0;
+      while i < len(r.custom) {
+        let (k, v) = r.custom[i];
+        custom_lines = custom_lines ++ ["  " ++ k ++ ": " ++ v];
+        i = i + 1;
+      }
+      ["", "recipes:"] ++ standard ++ custom_lines
+    }
+  }
+}
+
+pub fn render_validation_section(val_: Option<K9_Types.Validation>) -> [String] {
+  match val_ {
+    None => [],
+    Some(v) => ["",
+                "validation:",
+                "  checksum: " ++ v.checksum,
+                "  pedigree_version: " ++ v.pedigree_version,
+                "  hunt_authorized: " ++ render_bool(v.hunt_authorized)],
+  }
+}
+
+pub fn render_tags_section(tags: [String]) -> [String] {
+  if len(tags) == 0 {
+    []
+  } else {
+    let items = [];
+    let i = 0;
+    while i < len(tags) { items = items ++ ["  - " ++ tags[i]]; i = i + 1; }
+    ["", "tags:"] ++ items
+  }
+}
+
+pub fn render_k9(c: K9_Types.Component) -> String {
+  let lines = ["K9!", "---"]
+    ++ render_pedigree_section(c.pedigree)
+    ++ render_security_section(c.security)
+    ++ render_target_section(c.target)
+    ++ render_recipes_section(c.recipes)
+    ++ render_validation_section(c.validation)
+    ++ render_tags_section(c.tags);
+
+  let out = "";
+  let i = 0;
+  while i < len(lines) {
+    out = if i == 0 { lines[i] } else { out ++ "\n" ++ lines[i] };
+    i = i + 1;
+  }
+  out ++ "\n"
+}
+
+pub fn render_security_level(level: K9_Types.SecurityLevel) -> String {
+  K9_Types.security_level_to_string(level)
+}

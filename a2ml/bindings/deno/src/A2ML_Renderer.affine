@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// A2ML_Renderer — render A2ML AST back to A2ML surface syntax.
+// AffineScript port of A2ML_Renderer.res.
+
+module A2ML_Renderer;
+
+use A2ML_Types;
+
+extern fn str_includes(s: String, needle: String) -> Bool = "string" "includes";
+
+pub fn render_inline(inl: A2ML_Types.Inline) -> String {
+  match inl {
+    Text(t)             => t,
+    Emphasis(children)  => "*" ++ render_inlines(children) ++ "*",
+    Strong(children)    => "**" ++ render_inlines(children) ++ "**",
+    Code(c)             => "`" ++ c ++ "`",
+    Link(content, url)  => "[" ++ render_inlines(content) ++ "](" ++ url ++ ")",
+    InlineRef(ref_id)   => "@ref(" ++ ref_id ++ ")",
+  }
+}
+
+pub fn render_inlines(inlines: [A2ML_Types.Inline]) -> String {
+  let out = "";
+  let i = 0;
+  while i < len(inlines) {
+    out = out ++ render_inline(inlines[i]);
+    i = i + 1;
+  }
+  out
+}
+
+pub fn render_directive(dir: A2ML_Types.Directive) -> String {
+  let attr_str = if len(dir.attributes) > 0 {
+    let pairs = [];
+    let i = 0;
+    while i < len(dir.attributes) {
+      let (k, v) = dir.attributes[i];
+      pairs = pairs ++ [k ++ "=" ++ v];
+      i = i + 1;
+    }
+    let joined = "";
+    let j = 0;
+    while j < len(pairs) {
+      joined = if j == 0 { pairs[j] } else { joined ++ ", " ++ pairs[j] };
+      j = j + 1;
+    }
+    "(" ++ joined ++ ")"
+  } else {
+    ""
+  };
+
+  if str_includes(dir.value, "\n") {
+    "@" ++ dir.name ++ attr_str ++ ":\n" ++ dir.value ++ "\n@end"
+  } else {
+    "@" ++ dir.name ++ attr_str ++ ": " ++ dir.value
+  }
+}
+
+pub fn render_attestation(att: A2ML_Types.Attestation) -> String {
+  let lines = [
+    "!attest",
+    "identity: " ++ att.identity,
+    "role: " ++ att.role,
+    "trust-level: " ++ A2ML_Types.trust_level_to_string(att.trust_level),
+  ];
+  match att.timestamp { Some(ts) => { lines = lines ++ ["timestamp: " ++ ts]; } None => {} }
+  match att.note { Some(n) => { lines = lines ++ ["note: " ++ n]; } None => {} }
+  lines = lines ++ ["!end"];
+  let out = "";
+  let i = 0;
+  while i < len(lines) {
+    out = if i == 0 { lines[i] } else { out ++ "\n" ++ lines[i] };
+    i = i + 1;
+  }
+  out
+}
+
+pub fn render_block(blk: A2ML_Types.Block) -> String {
+  match blk {
+    Heading(level, content) => {
+      let hashes = "";
+      let i = 0;
+      while i < level { hashes = hashes ++ "#"; i = i + 1; }
+      hashes ++ " " ++ render_inlines(content)
+    }
+    Paragraph(inlines) => render_inlines(inlines),
+    CodeBlock(language, content) => {
+      let lang_tag = match language { Some(l) => l, None => "" };
+      "```" ++ lang_tag ++ "\n" ++ content ++ "\n```"
+    }
+    DirectiveBlock(dir)   => render_directive(dir),
+    AttestationBlock(att) => render_attestation(att),
+    ThematicBreak         => "---",
+    BlockQuote(blocks) => {
+      let parts = [];
+      let i = 0;
+      while i < len(blocks) { parts = parts ++ ["> " ++ render_block(blocks[i])]; i = i + 1; }
+      let out = "";
+      let j = 0;
+      while j < len(parts) { out = if j == 0 { parts[j] } else { out ++ "\n" ++ parts[j] }; j = j + 1; }
+      out
+    }
+    BulletList(items) => {
+      let parts = [];
+      let i = 0;
+      while i < len(items) { parts = parts ++ ["- " ++ render_inlines(items[i])]; i = i + 1; }
+      let out = "";
+      let j = 0;
+      while j < len(parts) { out = if j == 0 { parts[j] } else { out ++ "\n" ++ parts[j] }; j = j + 1; }
+      out
+    }
+    BlankLine => "",
+  }
+}
+
+pub fn render_a2ml(doc: A2ML_Types.Document) -> String {
+  let out = "";
+  let i = 0;
+  while i < len(doc.blocks) {
+    let rendered = render_block(doc.blocks[i]);
+    out = if i == 0 { rendered } else { out ++ "\n" ++ rendered };
+    i = i + 1;
+  }
+  out ++ "\n"
+}
