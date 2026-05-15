@@ -3,20 +3,22 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-tool="$root/scripts/contractiles-a2ml-tool.py"
+tool="$root/scripts/contractiles-a2ml-tool.js"
 fixtures="$root/tests/contractiles/fixtures"
 expected="$root/tests/contractiles/expected"
 
-python3 "$tool" validate \
+runtool() { deno run --quiet --allow-read --allow-write "$tool" "$@"; }
+
+runtool validate \
   "$fixtures/Mustfile.a2ml" \
   "$fixtures/Trustfile.a2ml" \
   "$fixtures/Dustfile.a2ml" \
   "$fixtures/Intentfile.a2ml"
 
-python3 "$tool" emit "$fixtures/Mustfile.a2ml" "$expected/mustfile.json.tmp"
-python3 "$tool" emit "$fixtures/Trustfile.a2ml" "$expected/trustfile.json.tmp"
-python3 "$tool" emit "$fixtures/Dustfile.a2ml" "$expected/dustfile.json.tmp"
-python3 "$tool" emit "$fixtures/Intentfile.a2ml" "$expected/intentfile.json.tmp"
+runtool emit "$fixtures/Mustfile.a2ml" "$expected/mustfile.json.tmp"
+runtool emit "$fixtures/Trustfile.a2ml" "$expected/trustfile.json.tmp"
+runtool emit "$fixtures/Dustfile.a2ml" "$expected/dustfile.json.tmp"
+runtool emit "$fixtures/Intentfile.a2ml" "$expected/intentfile.json.tmp"
 
 diff -u "$expected/mustfile.json" "$expected/mustfile.json.tmp"
 diff -u "$expected/trustfile.json" "$expected/trustfile.json.tmp"
@@ -25,7 +27,7 @@ diff -u "$expected/intentfile.json" "$expected/intentfile.json.tmp"
 
 expect_fail() {
   local file="$1"
-  if python3 "$tool" validate "$file"; then
+  if runtool validate "$file"; then
     echo "Expected validation failure: $file" >&2
     exit 1
   fi
@@ -34,7 +36,7 @@ expect_fail() {
 expect_fail_type() {
   local file="$1"
   local type="$2"
-  if python3 "$tool" validate --type "$type" "$file"; then
+  if runtool validate --type "$type" "$file"; then
     echo "Expected validation failure: $file ($type)" >&2
     exit 1
   fi
