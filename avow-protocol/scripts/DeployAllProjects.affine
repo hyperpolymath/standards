@@ -1,0 +1,156 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Deploy all hyperpolymath projects to Cloudflare Pages.
+// AffineScript port of DeployAllProjects.res.
+
+module DeployAllProjects;
+
+use Deno_Api;
+use Fetch_Api;
+
+extern fn console_log(msg: String) -> Unit = "console" "log";
+extern fn console_error(msg: String) -> Unit = "console" "error";
+extern fn str_repeat(s: String, count: Int) -> String = "string" "repeat";
+extern fn json_stringify(value: a) -> Option<String> = "JSON" "stringifyAny";
+extern fn json_get_bool(j: Json, key: String) -> Bool = "json" "getBool";
+
+let cloudflare_api_token = Deno_Api.Env.get("CLOUDFLARE_API_TOKEN");
+let cloudflare_account_id = Deno_Api.Env.get("CLOUDFLARE_ACCOUNT_ID");
+
+pub type Project = { name: String, domain: String, path: String }
+pub type DeployResult = { name: String, domain: String, status: String, url: Option<String> }
+
+let projects = [
+  Project { name: "affinescript", domain: "affinescript.dev", path: "affinescript" },
+  Project { name: "anvomidav", domain: "anvomidav.org", path: "anvomidav" },
+  Project { name: "betlang", domain: "betlang.org", path: "betlang" },
+  Project { name: "eclexia", domain: "eclexia.org", path: "eclexia" },
+  Project { name: "ephapax", domain: "ephapax.org", path: "ephapax" },
+  Project { name: "error-lang", domain: "error-lang.org", path: "error-lang" },
+  Project { name: "my-lang", domain: "my-lang.net", path: "my-lang" },
+  Project { name: "oblibeny", domain: "oblibeny.net", path: "oblibeny" },
+  Project { name: "reposystem", domain: "reposystem.dev", path: "reposystem" },
+  Project { name: "verisimdb", domain: "verisimdb.org", path: "verisimdb" },
+];
+
+fn auth_headers() -> Fetch_Api.Headers {
+  let token = match cloudflare_api_token { Some(t) => t, None => "" };
+  Fetch_Api.Headers { authorization: "Bearer " ++ token, content_type: "application/json" }
+}
+
+pub fn main() -> Effect[Async] Unit {
+  match (cloudflare_api_token, cloudflare_account_id) {
+    (None, _) => { console_error("Missing credentials"); Deno_Api.exit(1); }
+    (_, None) => { console_error("Missing credentials"); Deno_Api.exit(1); }
+    _ => {}
+  }
+
+  let account_id = match cloudflare_account_id { Some(a) => a, None => "" };
+  let home = match Deno_Api.Env.get("HOME") { Some(h) => h, None => "" };
+  let bar = str_repeat("=", 70);
+
+  console_log("Deploying all projects to Cloudflare Pages");
+  console_log(bar);
+
+  let results = [];
+
+  let i = 0;
+  while i < len(projects) {
+    let project = projects[i];
+    console_log("\nProject: " ++ project.name);
+    console_log("   Domain: " ++ project.domain);
+
+    let repo_path = home ++ "/Documents/hyperpolymath-repos/" ++ project.path;
+
+    try {
+      let _ = await Deno_Api.stat(repo_path);
+    } catch _e {
+      console_log("   Repo not found at " ++ repo_path);
+      results = results ++ [DeployResult { name: project.name, domain: project.domain, status: "repo_not_found", url: None }];
+    }
+
+    console_log("   Deploying...");
+    let deploy_cmd = Deno_Api.make_command("deno", Deno_Api.CommandOptions {
+      args: ["run", "-A", "npm:wrangler", "pages", "deploy", ".",
+             "--project-name=" ++ project.name, "--branch=main"],
+      stdout: "piped", stderr: "piped", cwd: Some(repo_path),
+    });
+
+    try {
+      let deploy_output = await Deno_Api.output(deploy_cmd);
+      if deploy_output.code == 0 {
+        let deploy_url = "https://" ++ project.name ++ ".pages.dev";
+        console_log("   Deployed: " ++ deploy_url);
+
+        console_log("   Adding custom domain: " ++ project.domain);
+        let domain_body = match json_stringify(json_object([("name", json_string(project.domain))])) {
+          Some(s) => s, None => "",
+        };
+        let domain_response = await Fetch_Api.fetch(
+          "https://api.cloudflare.com/client/v4/accounts/" ++ account_id
+            ++ "/pages/projects/" ++ project.name ++ "/domains",
+          Fetch_Api.RequestInit { method: Some("POST"), headers: auth_headers(), body: Some(domain_body) },
+        );
+        let domain_result = await Fetch_Api.json(domain_response);
+        if json_get_bool(domain_result, "success") {
+          console_log("   Custom domain added");
+        } else {
+          console_log("   Domain add failed or already exists");
+        }
+        results = results ++ [DeployResult { name: project.name, domain: project.domain, status: "success", url: Some(deploy_url) }];
+      } else {
+        console_log("   Deployment failed");
+        results = results ++ [DeployResult { name: project.name, domain: project.domain, status: "deploy_failed", url: None }];
+      }
+    } catch e {
+      console_log("   Error: " ++ exn_message(e));
+      results = results ++ [DeployResult { name: project.name, domain: project.domain, status: "error", url: None }];
+    }
+    i = i + 1;
+  }
+
+  // Summary
+  console_log("\n" ++ bar);
+  console_log("Deployment Summary\n");
+
+  let successful = [];
+  let failed = [];
+  let r = 0;
+  while r < len(results) {
+    let item = results[r];
+    if item.status == "success" {
+      successful = successful ++ [item];
+    } else {
+      failed = failed ++ [item];
+    }
+    r = r + 1;
+  }
+
+  console_log("Successfully deployed: " ++ show(len(successful)));
+  let s = 0;
+  while s < len(successful) {
+    let item = successful[s];
+    let url = match item.url { Some(u) => u, None => "unknown" };
+    console_log("   - " ++ item.name ++ ": " ++ url);
+    console_log("     Custom domain: https://" ++ item.domain);
+    s = s + 1;
+  }
+
+  if len(failed) > 0 {
+    console_log("\nFailed/Issues: " ++ show(len(failed)));
+    let f = 0;
+    while f < len(failed) {
+      console_log("   - " ++ failed[f].name ++ ": " ++ failed[f].status);
+      f = f + 1;
+    }
+  }
+
+  console_log("\nNext Steps:");
+  console_log("1. Set up DNS zones for domains not in Cloudflare");
+  console_log("2. Add CNAME records pointing to <project>.pages.dev");
+  console_log("3. Wait 1-5 minutes for DNS propagation");
+  console_log("4. Verify domains are accessible");
+  console_log(bar)
+}
+
+main()
