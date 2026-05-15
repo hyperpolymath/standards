@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Deno-native Cloudflare Pages deployment script.
+// AffineScript port of DeployDeno.res.
+
+module DeployDeno;
+
+use Deno_Api;
+use Fetch_Api;
+
+extern fn console_log(msg: String) -> Unit = "console" "log";
+extern fn console_error(msg: String) -> Unit = "console" "error";
+extern fn console_error2(msg: String, value: a) -> Unit = "console" "error";
+extern fn str_repeat(s: String, count: Int) -> String = "string" "repeat";
+extern fn json_stringify(value: a) -> Option<String> = "JSON" "stringifyAny";
+extern fn json_get_bool(j: Json, key: String) -> Bool = "json" "getBool";
+extern fn json_get(j: Json, key: String) -> Json = "json" "get";
+
+let cloudflare_api_token = Deno_Api.Env.get("CLOUDFLARE_API_TOKEN");
+let cloudflare_account_id = Deno_Api.Env.get("CLOUDFLARE_ACCOUNT_ID");
+
+fn auth_headers() -> Fetch_Api.Headers {
+  let token = match cloudflare_api_token { Some(t) => t, None => "" };
+  Fetch_Api.Headers { authorization: "Bearer " ++ token, content_type: "application/json" }
+}
+
+pub fn main() -> Effect[Async] Unit {
+  match cloudflare_api_token {
+    None => { console_error("CLOUDFLARE_API_TOKEN environment variable required"); Deno_Api.exit(1); }
+    Some(_) => {}
+  }
+  match cloudflare_account_id {
+    None => {
+      console_error("CLOUDFLARE_ACCOUNT_ID environment variable required");
+      console_log("\nGet your account ID from: https://dash.cloudflare.com/ (right sidebar)");
+      Deno_Api.exit(1);
+    }
+    Some(_) => {}
+  }
+
+  let account_id = match cloudflare_account_id { Some(a) => a, None => "" };
+  let bar = str_repeat("=", 50);
+
+  console_log("AVOW Protocol - Deno Cloudflare Deployment");
+  console_log(bar);
+
+  // Step 1: Build project
+  console_log("\nBuilding project...");
+  let build_cmd = Deno_Api.make_command("deno",
+    Deno_Api.CommandOptions { args: ["task", "build"], stdout: "inherit", stderr: "inherit", cwd: None });
+  let build_result = await Deno_Api.output(build_cmd);
+  if !build_result.success {
+    console_error("Build failed");
+    Deno_Api.exit(1);
+  }
+  console_log("Build successful");
+
+  // Step 2: Check/create project
+  console_log("\nChecking Cloudflare Pages project...");
+  let check_response = await Fetch_Api.fetch(
+    "https://api.cloudflare.com/client/v4/accounts/" ++ account_id
+      ++ "/pages/projects/avow-protocol",
+    Fetch_Api.RequestInit { method: None, headers: auth_headers(), body: None },
+  );
+
+  if !check_response.ok {
+    console_log("Creating new Pages project...");
+    let create_body = match json_stringify(json_object([
+      ("name", json_string("avow-protocol")),
+      ("production_branch", json_string("main")),
+      ("build_config", json_object([
+        ("build_command", json_string("deno task build")),
+        ("destination_dir", json_string(".")),
+        ("root_dir", json_string("/")),
+      ])),
+    ])) { Some(s) => s, None => "" };
+
+    let create_response = await Fetch_Api.fetch(
+      "https://api.cloudflare.com/client/v4/accounts/" ++ account_id ++ "/pages/projects",
+      Fetch_Api.RequestInit { method: Some("POST"), headers: auth_headers(), body: Some(create_body) },
+    );
+    let result = await Fetch_Api.json(create_response);
+    if json_get_bool(result, "success") {
+      console_log("Project created");
+    } else {
+      console_error2("Failed to create project:", json_get(result, "errors"));
+      Deno_Api.exit(1);
+    }
+  } else {
+    console_log("Project exists");
+  }
+
+  // Step 3: Instructions
+  console_log("\n" ++ bar);
+  console_log("Project configured on Cloudflare!");
+  console_log("\nNext steps to complete deployment:\n");
+  console_log("Option 1: Deploy via GitHub Integration (Recommended)");
+  console_log("  1. Go to: https://dash.cloudflare.com/pages");
+  console_log("  2. Find 'avow-protocol' project");
+  console_log("  3. Click 'Connect to Git'");
+  console_log("  4. Select: hyperpolymath/avow-protocol");
+  console_log("  5. Cloudflare will auto-deploy on push to main\n");
+  console_log("Option 2: Deploy via Wrangler CLI");
+  console_log("  1. Install: npm install -g wrangler");
+  console_log("  2. Deploy: wrangler pages deploy .\n");
+  console_log("Option 3: Manual Upload");
+  console_log("  1. Go to: https://dash.cloudflare.com/pages");
+  console_log("  2. Upload files directly via dashboard\n");
+  console_log("Your site will be available at:");
+  console_log("   https://avow-protocol.pages.dev");
+  console_log("   https://avow-protocol.org (after DNS setup)");
+  console_log("\nComplete setup guide: CLOUDFLARE-MANUAL-SETUP.md");
+  console_log(bar)
+}
+
+main()

@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+// Configure custom domains for Cloudflare Pages projects.
+// AffineScript port of SetupDomains.res.
+
+module SetupDomains;
+
+use Deno_Api;
+use Fetch_Api;
+
+extern fn console_log(msg: String) -> Unit = "console" "log";
+extern fn console_error(msg: String) -> Unit = "console" "error";
+extern fn str_repeat(s: String, count: Int) -> String = "string" "repeat";
+extern fn json_stringify(value: a) -> Option<String> = "JSON" "stringifyAny";
+extern fn json_get_bool(j: Json, key: String) -> Bool = "json" "getBool";
+extern fn json_get_path(j: Json, a: String, b: String) -> String = "json" "getPath2";
+
+let cloudflare_api_token = Deno_Api.Env.get("CLOUDFLARE_API_TOKEN");
+let cloudflare_account_id = Deno_Api.Env.get("CLOUDFLARE_ACCOUNT_ID");
+
+pub type Project = { name: String, domains: [String] }
+
+let projects = [
+  Project { name: "avow-protocol", domains: ["avow-protocol.org", "www.avow-protocol.org"] },
+  Project { name: "a2ml", domains: ["a2ml.org", "www.a2ml.org"] },
+  Project { name: "k9-svc", domains: ["k9-svc.org", "www.k9-svc.org"] },
+];
+
+fn auth_headers() -> Fetch_Api.Headers {
+  let token = match cloudflare_api_token { Some(t) => t, None => "" };
+  Fetch_Api.Headers { authorization: "Bearer " ++ token, content_type: "application/json" }
+}
+
+pub fn main() -> Effect[Async] Unit {
+  match (cloudflare_api_token, cloudflare_account_id) {
+    (None, _) => { console_error("Missing credentials"); Deno_Api.exit(1); }
+    (_, None) => { console_error("Missing credentials"); Deno_Api.exit(1); }
+    _ => {}
+  }
+
+  let account_id = match cloudflare_account_id { Some(a) => a, None => "" };
+  let bar = str_repeat("=", 60);
+
+  console_log("Setting up custom domains for Cloudflare Pages");
+  console_log(bar);
+
+  let i = 0;
+  while i < len(projects) {
+    let project = projects[i];
+    console_log("\nProject: " ++ project.name);
+
+    let j = 0;
+    while j < len(project.domains) {
+      let domain = project.domains[j];
+      console_log("\n  Adding domain: " ++ domain);
+
+      let body = match json_stringify(json_object([("name", json_string(domain))])) {
+        Some(s) => s, None => "",
+      };
+      let response = await Fetch_Api.fetch(
+        "https://api.cloudflare.com/client/v4/accounts/" ++ account_id
+          ++ "/pages/projects/" ++ project.name ++ "/domains",
+        Fetch_Api.RequestInit { method: Some("POST"), headers: auth_headers(), body: Some(body) },
+      );
+
+      let result = await Fetch_Api.json(response);
+      if json_get_bool(result, "success") {
+        console_log("  Domain added: " ++ domain);
+        console_log("  Status: " ++ json_get_path(result, "result", "status"));
+      } else {
+        console_log("  Domain already added or failed: " ++ domain);
+      }
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+
+  console_log("\n" ++ bar);
+  console_log("Domain setup complete!");
+  console_log("\nNext steps:");
+  console_log("1. DNS records will be auto-configured by Cloudflare");
+  console_log("2. Wait 1-5 minutes for activation");
+  console_log("3. Verify at: https://dash.cloudflare.com/pages");
+  console_log("\nYour sites will be available at:");
+  let k = 0;
+  while k < len(projects) {
+    if len(projects[k].domains) > 0 {
+      console_log("   https://" ++ projects[k].domains[0]);
+    }
+    k = k + 1;
+  }
+  console_log(bar)
+}
+
+main()
