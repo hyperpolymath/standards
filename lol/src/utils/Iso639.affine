@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
+//
+// ISO 639 language code utilities (639-1/2b/2t/3).
+// AffineScript port of Iso639.res.
+
+module Iso639;
+
+extern fn re_test(pattern: String, s: String) -> Bool = "regex" "test";
+extern fn str_lower(s: String) -> String = "string" "toLowerCase";
+extern fn str_trim(s: String) -> String = "string" "trim";
+
+module Types {
+  pub type Iso639_1 = String
+  pub type Iso639_2b = String
+  pub type Iso639_2t = String
+  pub type Iso639_3 = String
+
+  pub type CodeType =
+    | C_Iso639_1
+    | C_Iso639_2b
+    | C_Iso639_2t
+    | C_Iso639_3
+
+  pub type LanguageScope =
+    | Individual
+    | Macrolanguage
+    | Special
+
+  pub type LanguageType =
+    | Living
+    | Historical
+    | Extinct
+    | Ancient
+    | Constructed
+
+  pub type LanguageEntry = {
+    iso639_3: Iso639_3,
+    iso639_2b: Option<Iso639_2b>,
+    iso639_2t: Option<Iso639_2t>,
+    iso639_1: Option<Iso639_1>,
+    scope: LanguageScope,
+    type_: LanguageType,
+    name: String,
+    comment: Option<String>,
+  }
+}
+
+module Validation {
+  use Types;
+
+  pub fn is_valid_iso639_1(code: String) -> Bool { re_test("^[a-z]{2}$", code) }
+  pub fn is_valid_iso639_3(code: String) -> Bool { re_test("^[a-z]{3}$", code) }
+
+  pub fn detect_code_type(code: String) -> Option<Types.CodeType> {
+    let n = len(code);
+    if n == 2 && is_valid_iso639_1(code) {
+      Some(Types.C_Iso639_1)
+    } else if n == 3 && is_valid_iso639_3(code) {
+      Some(Types.C_Iso639_3)
+    } else {
+      None
+    }
+  }
+
+  pub fn normalize(code: String) -> String { str_trim(str_lower(code)) }
+}
+
+module SpecialCodes {
+  pub let undetermined = "und";
+  pub let multiple = "mul";
+  pub let miscellaneous = "mis";
+  pub let no_linguistic = "zxx";
+
+  pub fn is_special(code: String) -> Bool {
+    code == undetermined || code == multiple
+      || code == miscellaneous || code == no_linguistic
+  }
+}
+
+module Conversion {
+  use Types;
+
+  pub fn iso1_to_iso3_table() -> Dict<Types.Iso639_3> {
+    let d = dict_empty();
+    dict_set(d, "en", "eng"); dict_set(d, "de", "deu"); dict_set(d, "fr", "fra");
+    dict_set(d, "es", "spa"); dict_set(d, "it", "ita"); dict_set(d, "pt", "por");
+    dict_set(d, "ru", "rus"); dict_set(d, "zh", "zho"); dict_set(d, "ja", "jpn");
+    dict_set(d, "ko", "kor"); dict_set(d, "ar", "ara"); dict_set(d, "he", "heb");
+    dict_set(d, "el", "ell"); dict_set(d, "la", "lat");
+    d
+  }
+
+  pub fn to_iso639_3(code: String) -> Option<Types.Iso639_3> {
+    let normalized = Validation.normalize(code);
+    match Validation.detect_code_type(normalized) {
+      Some(Types.C_Iso639_1) => dict_get(iso1_to_iso3_table(), normalized),
+      Some(Types.C_Iso639_3) => Some(normalized),
+      _ => None,
+    }
+  }
+}
+
+module Registry {
+  use Types;
+
+  pub type T = {
+    by_iso3: Dict<Types.LanguageEntry>,
+    by_iso1: Dict<Types.LanguageEntry>,
+    by_name: Dict<Types.LanguageEntry>,
+  }
+
+  pub fn empty() -> T {
+    T { by_iso3: dict_empty(), by_iso1: dict_empty(), by_name: dict_empty() }
+  }
+
+  pub fn add(registry: T, entry: Types.LanguageEntry) -> Unit {
+    dict_set(registry.by_iso3, entry.iso639_3, entry);
+    match entry.iso639_1 {
+      Some(code) => dict_set(registry.by_iso1, code, entry),
+      None => {},
+    }
+    dict_set(registry.by_name, str_lower(entry.name), entry)
+  }
+
+  pub fn find_by_code(registry: T, code: String) -> Option<Types.LanguageEntry> {
+    let normalized = Validation.normalize(code);
+    match Validation.detect_code_type(normalized) {
+      Some(Types.C_Iso639_1) => dict_get(registry.by_iso1, normalized),
+      Some(Types.C_Iso639_3) => dict_get(registry.by_iso3, normalized),
+      Some(Types.C_Iso639_2b) => dict_get(registry.by_iso3, normalized),
+      Some(Types.C_Iso639_2t) => dict_get(registry.by_iso3, normalized),
+      None => None,
+    }
+  }
+
+  pub fn find_by_name(registry: T, name: String) -> Option<Types.LanguageEntry> {
+    dict_get(registry.by_name, str_lower(name))
+  }
+
+  pub fn count(registry: T) -> Int {
+    len(dict_keys(registry.by_iso3))
+  }
+}
