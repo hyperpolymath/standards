@@ -3,7 +3,7 @@
 
 = RSR Language Policy
 :author: Jonathan D.A. Jewell (hyperpolymath)
-:revnumber: 1.2.0
+:revnumber: 1.2.1
 :revdate: 2026-05-16
 :toc: left
 :icons: font
@@ -11,10 +11,11 @@
 
 [NOTE]
 ====
-*Version Status*: v1.2.0 — codifies the Interface & Architecture Law
-(ABI=Idris2, API+FFI=Zig; strict typed boundaries; no gatekeeperless gateways)
-as a normative section, 2026-05-16. v1.1.0 amended the allowed/banned lists
-2026-04-10. See §Amendments at the bottom for rationale and the full change list.
+*Version Status*: v1.2.1 — adds the Naming Convention (separator semantics,
+RFC 8552-grounded, with scoped override for foreign/inverted conventions).
+v1.2.0 codified the Interface & Architecture Law (ABI=Idris2, API+FFI=Zig;
+strict typed boundaries; no gatekeeperless gateways). v1.1.0 amended the
+allowed/banned lists 2026-04-10. See §Amendments for the full change list.
 ====
 
 == Terminology: "Rust" means "Rust/SPARK"
@@ -288,11 +289,101 @@ Every gateway / API edge MUST front a policy gate (authentication + entitlement
 nicety. (This is a *runtime access-control* rule and is distinct from the
 social "graduated trust without gatekeeping" contribution model.)
 
+== Naming Convention: separator semantics (NORMATIVE)
+
+Estate-wide, the name separator carries meaning so a reader or agent can tell
+*code from data* at a glance:
+
+* **`-` (hyphen) → a program or application** (repo, service, app, library,
+  CLI). e.g. `v-graphql`, `v-api-interfaces/`.
+* **`_` (underscore) → structured data/content that a program acts upon**
+  (config, metadata, attribute payloads). e.g. `machine_readable/`,
+  `bot_directives/`.
+
+[NOTE]
+====
+*Precedent.* This deliberately mirrors DNS underscore-prefixed labels
+(`_dmarc`, `_acme-challenge`, `_domainkey`, `_spf` TXT records), where a
+leading underscore marks structured metadata a protocol consumes, kept
+distinct from real host names (which never use underscores). Formalised in
+**RFC 8552 ("DNS Attrleaf")**. The estate convention is the same idea applied
+to repo/directory names; it is a deliberate, standards-grounded rule, not a
+stylistic preference.
+====
+
+=== Resolution when a language/OS/protocol mandates a separator
+
+This convention is *layered* and must not be enforced flatly:
+
+. **Technical mandate wins at its own layer.** Where a language, OS, package
+  manager, or protocol *requires* a particular separator, or *assigns it a
+  different or inverted meaning* (imagine a language whose ecosystem uses `_`
+  for programs and `-` for data — the exact opposite of this convention),
+  that requirement is authoritative within that language/ecosystem and is
+  **NOT drift**. Tools and agents MUST NOT "auto-correct" a language-mandated
+  or foreign-convention separator. A genuinely required component (e.g. a
+  mandatory networking component that must be written in such a language)
+  keeps its native naming internally.
+. **Scoped convention override (the general solution for foreign/inverted
+  conventions).** The boundary of a foreign subtree MUST carry a
+  machine-readable convention-scope marker in its `.machine_readable/`
+  declaring the in-scope separator semantics (e.g. `convention: foreign` /
+  `program-separator: _`). Inside a declared scope, estate separator
+  *inference is suspended*: tools classify by the subtree's declared rules
+  and explicit kind metadata only, never by the estate separator. Tools MUST
+  detect the marker and never infer across a declared convention boundary in
+  either direction. Absence of a marker = estate convention applies. The
+  marker sits at the same place as the typed boundary required by the
+  Interface & Architecture Law — the foreign subtree is itself such a
+  boundary.
+. **The estate convention governs the discretionary layer** — repo names,
+  directory names, project/app names — where the namer has free choice.
+. **Collision is a documented cross-layer mapping, not a contradiction.** A
+  program repo is `v-graphql` (discretionary layer); its in-language Rust
+  crate is legitimately `v_graphql` (Rust mandate). The repo SHOULD record the
+  mapping (e.g. in `.machine_readable/`) so the language form is not read as a
+  violation.
+. **Machine-readable backstop.** When the separator is constrained and cannot
+  carry the program-vs-data signal, the kind (`program` | `data`) MUST be
+  declared in the repo's `.machine_readable/` metadata. Classification never
+  depends solely on the separator; tooling reads the declaration.
+
+=== Application
+
+The sanctioned `developer-ecosystem/v-ecosystem/v-api-interfaces/` (hyphen,
+holds V *programs*) is correct. The parallel
+`developer-ecosystem/v-ecosystem/v_api_interfaces/` (underscore, also holds
+programs) is a **misnamed duplicate** introduced by tooling that did not know
+this convention — it is to be collapsed into the hyphen form, not treated as a
+valid parallel structure. Underscore is reserved for genuine data/content dirs.
+
 == Machine-Readable Policy
 
 See link:../spec.scm/language-policy.scm[spec.scm/language-policy.scm] for tooling integration.
+The separator convention above MUST be mirrored there so agents/tools enforce
+it from the machine-readable policy, not prose alone.
 
 == Amendments
+
+=== v1.2.1 — 2026-05-16 (Jonathan D.A. Jewell)
+
+Added the *Naming Convention: separator semantics* normative section:
+`-` = program/application, `_` = structured data acted upon, grounded in
+RFC 8552 ("DNS Attrleaf") underscore-label precedent. Includes the layered
+resolution for language/OS/protocol-mandated separators and the
+**scoped convention override** (machine-readable convention-boundary marker
+that suspends estate separator-inference inside foreign or inverted-convention
+subtrees, in either direction). Convention MUST be mirrored into the
+machine-readable policy.
+
+=== v1.2.0 — 2026-05-16 (Jonathan D.A. Jewell)
+
+Codified the *Interface & Architecture Law* as a normative section: ABI=Idris2,
+API+FFI=Zig (Rust/SPARK is app-logic only and never the abi/api/ffi layer or a
+migration target; "→ Rust" migration docs are themselves drift); V-lang only
+when it is Coq; strict typed boundaries (Idris2 correctness contract + Zig
+transaction interface; exemplars `snifs`/`typed-wasm`); no gatekeeperless
+gateways.
 
 === v1.1.0 — 2026-04-10 (Jonathan D.A. Jewell)
 
