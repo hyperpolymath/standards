@@ -241,6 +241,36 @@ jobs:
             exit 1
           fi
           echo "✅ Security policy check passed"
+      - name: Tooling version integrity
+        # Estate Tooling Version Integrity policy (root cause: burble#39).
+        # Inline + dependency-free so it runs in any caller repo.
+        # R0 just>=1.19.0 floor (blocking when just present) and R1
+        # unversioned family-tool install (blocking) are hard; R4
+        # unexplained continue-on-error is advisory-first per the
+        # documented "advisory now, --strict later" gating doctrine.
+        run: |
+          set -uo pipefail
+          FAMILY='just|must|trust|adjust|bust|dust|intend'
+          if command -v just >/dev/null 2>&1; then
+            jv=$(just --version 2>/dev/null | cut -d' ' -f2)
+            maj=${jv%%.*}; rest=${jv#*.}; min=${rest%%.*}
+            if [ -z "$jv" ] || ! { [ "${maj:-0}" -gt 1 ] || { [ "${maj:-0}" -eq 1 ] && [ "${min:-0}" -ge 19 ]; }; }; then
+              echo "❌ [R0] just ${jv:-?} < 1.19.0 — import? unsupported"; exit 1
+            fi
+            echo "✅ [R0] just $jv >= 1.19.0"
+          else
+            echo "ℹ️  [R0] just not on PATH — skipped"
+          fi
+          R1=0
+          if [ -d .github/workflows ]; then
+            while IFS= read -r hit; do
+              [ -n "$hit" ] || continue
+              echo "❌ [R1] unversioned family-tool install: $hit"
+              R1=$((R1+1))
+            done < <(grep -rnE "^[[:space:]]*tool:[[:space:]]*(${FAMILY})[[:space:]]*$" .github/workflows 2>/dev/null || true)
+          fi
+          [ "$R1" -gt 0 ] && { echo "❌ [R1] $R1 unversioned family-tool install(s) — pin tool: <name>@<ver>"; exit 1; }
+          echo "✅ Tooling version integrity passed (R1 clean; R4 advisory via standards/tasks/tooling-integrity-lint.sh)"
 
   quality:
     name: Code quality + docs
@@ -258,6 +288,10 @@ jobs:
           path: ./
           base: ${{ github.event.pull_request.base.sha || github.event.before }}
           head: ${{ github.sha }}
+        # by-design: trufflehog is a best-effort advisory scan; a scanner
+        # diff/range hiccup must not fail the whole governance gate. The
+        # blocking secret check is the inline grep in the security job.
+        # (Tooling Version Integrity Rule 4 — documented soft-gate.)
         continue-on-error: true
       - name: Check TODO/FIXME
         run: |
