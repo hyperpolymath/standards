@@ -385,7 +385,7 @@ When using Standards, we recommend:
 |---------|---------|
 | **Security issues** | [Report via GitHub](https://github.com/hyperpolymath/standards/security/advisories/new) or 6759885+hyperpolymath@users.noreply.github.com |
 | **General questions** | [GitHub Discussions](https://github.com/hyperpolymath/standards/discussions) |
-| **Other enquiries** | See [README](README.md) for contact information |
+| **Other enquiries** | See [README](README.adoc) for contact information |
 
 ---
 
