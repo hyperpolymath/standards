@@ -1,0 +1,375 @@
+# SPDX-License-Identifier: PMPL-1.0
+# governance-reusable.yml — Reusable estate governance bundle (RSR).
+#
+# This is a `workflow_call` reusable workflow: downstream repos invoke it with
+# ONE `uses:` line instead of carrying ~8 separate governance workflow copies.
+# It consolidates the portable, side-effect-free estate governance checks:
+#
+#   language-policy   <- rsr-antipattern.yml  (superset of npm-bun-blocker,
+#                                               ts-blocker)
+#   package-policy    <- guix-nix-policy.yml
+#   security-policy   <- security-policy.yml
+#   quality           <- quality.yml
+#   wellknown         <- wellknown-enforcement.yml
+#   workflow-lint     <- workflow-linter.yml
+#
+# Load-bearing build/security workflows (rust-ci, codeql, dependabot, release,
+# secret-scanner SARIF, scorecard SARIF) are intentionally NOT bundled here —
+# they stay as standalone workflows in the consuming repo.
+#
+# Caller example (single wrapper):
+#   jobs:
+#     governance:
+#       uses: hyperpolymath/standards/.github/workflows/governance-reusable.yml@main
+
+name: Estate Governance (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label for all governance jobs
+        type: string
+        required: false
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+jobs:
+  language-policy:
+    name: Language / package anti-pattern policy
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Check for TypeScript
+        run: |
+          python3 << 'PYEOF'
+          import re, sys, pathlib
+
+          DIR_NAMES_ALLOWED = {
+              'bindings', 'tests', 'test', 'scripts',
+              'mcp-adapter', 'cli', 'vendor', 'examples', 'ffi',
+              'node_modules', 'benchmarks',
+          }
+
+          def builtin_allowed(p):
+              if p.endswith('.d.ts'):
+                  return True
+              base = p.rsplit('/', 1)[-1]
+              if base == 'mod.ts':
+                  return True
+              if base in ('lsp-server.ts', 'lsp_server.ts', 'lsp.ts') or base.endswith('-lsp.ts'):
+                  return True
+              if base.endswith('.bench.ts') or base.endswith('_bench.ts'):
+                  return True
+              segs = p.split('/')
+              for s in segs[:-1]:
+                  if s in DIR_NAMES_ALLOWED:
+                      return True
+                  if 'vscode' in s:
+                      return True
+                  if s.startswith('deno-'):
+                      return True
+              return False
+
+          def glob_to_regex(g):
+              out = []
+              for c in g.lstrip('./'):
+                  if c == '*': out.append('.*')
+                  elif c == '?': out.append('.')
+                  elif c in '.+(){}[]|^$\\': out.append(re.escape(c))
+                  else: out.append(c)
+              return re.compile('^' + ''.join(out) + '$')
+
+          exemption_patterns = []
+          claude_md = pathlib.Path('.claude/CLAUDE.md')
+          if claude_md.exists():
+              in_table = False
+              for line in claude_md.read_text(encoding='utf-8').splitlines():
+                  if re.search(r'TypeScript [Ee]xemptions', line):
+                      in_table = True
+                      continue
+                  if in_table and line.startswith(('### ', '## ', '# ')):
+                      break
+                  if in_table and line.startswith('|'):
+                      m = re.match(r'\|\s*`([^`]+)`', line)
+                      if m:
+                          exemption_patterns.append((m.group(1), glob_to_regex(m.group(1))))
+
+          def exempt(p):
+              for raw, regex in exemption_patterns:
+                  if regex.match(p):
+                      return True
+                  if p == raw.lstrip('./'):
+                      return True
+                  if raw.endswith('/') and p.startswith(raw.lstrip('./')):
+                      return True
+              return False
+
+          found = []
+          for ext in ('ts', 'tsx'):
+              for p in pathlib.Path('.').rglob(f'*.{ext}'):
+                  parts = p.parts
+                  if any(part.startswith('.') and part not in ('.', '..') for part in parts):
+                      continue
+                  found.append(p.as_posix().lstrip('./'))
+
+          bad = sorted(f for f in found if not (builtin_allowed(f) or exempt(f)))
+          if bad:
+              print("❌ TypeScript files detected outside the allowlist.\n")
+              for f in bad:
+                  print(f"  {f}")
+              print()
+              print("To resolve, choose one:")
+              print("  (a) migrate the file to AffineScript")
+              print("  (b) move to an allowlisted bridge path")
+              print("  (c) add an entry to the 'TypeScript Exemptions' table in .claude/CLAUDE.md")
+              if exemption_patterns:
+                  print(f"\n(Currently {len(exemption_patterns)} exemption(s) parsed from .claude/CLAUDE.md.)")
+              sys.exit(1)
+          print(f"✅ No TypeScript files outside allowlist ({len(exemption_patterns)} per-repo exemption(s) parsed).")
+          PYEOF
+
+      - name: Check for ReScript
+        run: |
+          RES_FILES=$(find . -name "*.res" | grep -v node_modules || true)
+          if [ -n "$RES_FILES" ]; then
+            echo "❌ ReScript files detected - use AffineScript instead"
+            echo "$RES_FILES"
+            exit 1
+          fi
+          echo "✅ No ReScript files"
+
+      - name: Check for Go
+        run: |
+          if find . -name "*.go" | grep -q .; then
+            echo "❌ Go files detected - use Rust/WASM instead"
+            find . -name "*.go"
+            exit 1
+          fi
+          echo "✅ No Go files"
+
+      - name: Check for Python (non-SaltStack)
+        run: |
+          PY_FILES=$(find . -name "*.py" | grep -v salt | grep -v _states | grep -v _modules | grep -v pillar | grep -v venv | grep -v __pycache__ || true)
+          if [ -n "$PY_FILES" ]; then
+            echo "❌ Python files detected - only allowed for SaltStack"
+            echo "$PY_FILES"
+            exit 1
+          fi
+          echo "✅ No non-SaltStack Python files"
+
+      - name: Check for npm/bun artifacts
+        run: |
+          if [ -f "package-lock.json" ] || [ -f "bun.lockb" ] || [ -f ".npmrc" ] || [ -f "yarn.lock" ]; then
+            echo "❌ npm/bun/yarn artifacts detected. Use Deno instead."
+            exit 1
+          fi
+          echo "✅ No npm/bun violations"
+
+      - name: Check for tsconfig / rescript config
+        run: |
+          if [ -f "tsconfig.json" ]; then
+            echo "❌ tsconfig.json detected - use AffineScript instead"
+            exit 1
+          fi
+          if [ -f "rescript.json" ] || [ -f "bsconfig.json" ]; then
+            echo "❌ rescript.json/bsconfig.json detected - use AffineScript config instead"
+            exit 1
+          fi
+          echo "✅ No tsconfig.json / rescript config"
+
+      - name: Summary
+        run: |
+          echo "RSR language/package policy passed — allowed: AffineScript, Deno,"
+          echo "WASM, Rust, OCaml, Haskell, Guile/Scheme, SaltStack (Python)."
+
+  package-policy:
+    name: Guix primary / Nix fallback policy
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Enforce Guix primary / Nix fallback
+        run: |
+          HAS_GUIX=$(find . -name "*.scm" -o -name ".guix-channel" -o -name "guix.scm" 2>/dev/null | head -1)
+          HAS_NIX=$(find . -name "*.nix" 2>/dev/null | head -1)
+          NEW_LOCKS=$(git diff --name-only --diff-filter=A HEAD~1 2>/dev/null | grep -E 'package-lock\.json|yarn\.lock|Gemfile\.lock|Pipfile\.lock|poetry\.lock' || true)
+          if [ -n "$NEW_LOCKS" ]; then
+            echo "⚠️ Lock files detected. Prefer Guix manifests for reproducibility."
+          fi
+          if [ -n "$HAS_GUIX" ]; then
+            echo "✅ Guix package management detected (primary)"
+          elif [ -n "$HAS_NIX" ]; then
+            echo "✅ Nix package management detected (fallback)"
+          else
+            echo "ℹ️ Consider adding guix.scm or flake.nix for reproducible builds"
+          fi
+          echo "✅ Package policy check passed"
+
+  security-policy:
+    name: Security policy checks
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Security checks
+        run: |
+          FAILED=false
+          WEAK_CRYPTO=$(grep -rE 'md5\(|sha1\(' --include="*.py" --include="*.rb" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" . 2>/dev/null | grep -v 'checksum\|cache\|test\|spec' | head -5 || true)
+          if [ -n "$WEAK_CRYPTO" ]; then
+            echo "⚠️ Weak crypto (MD5/SHA1) detected. Use SHA256+ for security:"
+            echo "$WEAK_CRYPTO"
+          fi
+          HTTP_URLS=$(grep -rE 'http://[^l][^o][^c]' --include="*.py" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" --include="*.yaml" --include="*.yml" . 2>/dev/null | grep -v 'localhost\|127.0.0.1\|example\|test\|spec' | head -5 || true)
+          if [ -n "$HTTP_URLS" ]; then
+            echo "⚠️ HTTP URLs found. Use HTTPS:"
+            echo "$HTTP_URLS"
+          fi
+          SECRETS=$(grep -rEi '(api_key|apikey|secret_key|password)\s*[=:]\s*["\x27][A-Za-z0-9+/=]{20,}' --include="*.py" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" --include="*.env" . 2>/dev/null | grep -v 'example\|sample\|test\|mock\|placeholder' | head -3 || true)
+          if [ -n "$SECRETS" ]; then
+            echo "❌ Potential hardcoded secrets detected!"
+            FAILED=true
+          fi
+          if [ "$FAILED" = true ]; then
+            exit 1
+          fi
+          echo "✅ Security policy check passed"
+
+  quality:
+    name: Code quality + docs
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Check file permissions
+        run: |
+          find . -type f -perm /111 -name "*.sh" | head -10 || true
+      - name: Check for secrets
+        uses: trufflesecurity/trufflehog@6c05c4a00b91aa542267d8e32a8254774799d68d # v3.93.8
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha || github.event.before }}
+          head: ${{ github.sha }}
+        continue-on-error: true
+      - name: Check TODO/FIXME
+        run: |
+          echo "=== TODOs ==="
+          grep -rn "TODO\|FIXME\|HACK\|XXX" --include="*.rs" --include="*.res" --include="*.py" --include="*.ex" . | head -20 || echo "None found"
+      - name: Check for large files
+        run: |
+          find . -type f -size +1M -not -path "./.git/*" | head -10 || echo "No large files"
+      - name: EditorConfig check
+        uses: editorconfig-checker/action-editorconfig-checker@4b6cd6190d435e7e084fb35e36a096e98506f7b9 # v2.1.0
+        continue-on-error: true
+      - name: Check documentation
+        run: |
+          MISSING=""
+          [ ! -f "README.md" ] && [ ! -f "README.adoc" ] && MISSING="$MISSING README"
+          [ ! -f "LICENSE" ] && [ ! -f "LICENSE.txt" ] && [ ! -f "LICENSE.md" ] && MISSING="$MISSING LICENSE"
+          [ ! -f "CONTRIBUTING.md" ] && [ ! -f "CONTRIBUTING.adoc" ] && MISSING="$MISSING CONTRIBUTING"
+          if [ -n "$MISSING" ]; then
+            echo "::warning::Missing docs:$MISSING"
+          else
+            echo "✅ Core documentation present"
+          fi
+
+  wellknown:
+    name: Well-Known (RFC 9116 + RSR)
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: RFC 9116 security.txt validation
+        run: |
+          SECTXT=""
+          [ -f ".well-known/security.txt" ] && SECTXT=".well-known/security.txt"
+          [ -f "security.txt" ] && SECTXT="security.txt"
+          if [ -z "$SECTXT" ]; then
+            echo "::warning::No security.txt found."
+            exit 0
+          fi
+          grep -q "^Contact:" "$SECTXT" || { echo "::error::Missing Contact field"; exit 1; }
+          if ! grep -q "^Expires:" "$SECTXT"; then
+            echo "::error::Missing Expires field"
+            exit 1
+          fi
+          EXPIRES=$(grep "^Expires:" "$SECTXT" | cut -d: -f2- | tr -d ' ' | head -1)
+          if date -d "$EXPIRES" > /dev/null 2>&1; then
+            DAYS=$(( ($(date -d "$EXPIRES" +%s) - $(date +%s)) / 86400 ))
+            if [ $DAYS -lt 0 ]; then
+              echo "::error::security.txt EXPIRED"
+              exit 1
+            elif [ $DAYS -lt 30 ]; then
+              echo "::warning::security.txt expires in $DAYS days"
+            else
+              echo "✅ security.txt valid ($DAYS days)"
+            fi
+          fi
+      - name: RSR well-known compliance
+        run: |
+          MISSING=""
+          [ ! -f ".well-known/security.txt" ] && [ ! -f "security.txt" ] && MISSING="$MISSING security.txt"
+          [ ! -f ".well-known/ai.txt" ] && MISSING="$MISSING ai.txt"
+          [ ! -f ".well-known/humans.txt" ] && MISSING="$MISSING humans.txt"
+          if [ -n "$MISSING" ]; then
+            echo "::warning::Missing RSR recommended files:$MISSING"
+          else
+            echo "✅ RSR well-known compliant"
+          fi
+      - name: Mixed content check
+        run: |
+          MIXED=$(grep -rE 'src="http://|href="http://' --include="*.html" --include="*.htm" . 2>/dev/null | grep -vE 'localhost|127\.0\.0\.1|example\.com|lol/|node_modules/|third-party/|vendor/' | head -5 || true)
+          if [ -n "$MIXED" ]; then
+            echo "::error::Mixed content (HTTP in HTML)"
+            echo "$MIXED"
+            exit 1
+          fi
+          echo "✅ No mixed content"
+
+  workflow-lint:
+    name: Workflow security linter
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Check SPDX headers + permissions
+        run: |
+          failed=0
+          for file in .github/workflows/*.yml .github/workflows/*.yaml; do
+            [ -f "$file" ] || continue
+            if ! head -1 "$file" | grep -q "^# SPDX-License-Identifier:"; then
+              echo "ERROR: $file missing SPDX header"; failed=1
+            fi
+            if ! grep -q "^permissions:" "$file"; then
+              echo "ERROR: $file missing top-level 'permissions:' declaration"; failed=1
+            fi
+          done
+          [ $failed -eq 1 ] && { echo "Add SPDX header + permissions:"; exit 1; }
+          echo "All workflows have SPDX headers + permissions"
+      - name: Check SHA-pinned actions
+        run: |
+          unpinned=$(grep -rnE "^[[:space:]]+uses:" .github/workflows/ | \
+            grep -v "@[a-f0-9]\{40\}" | \
+            grep -v "uses: \./\|uses: docker://\|uses: actions/github-script\|uses: hyperpolymath/standards/" || true)
+          if [ -n "$unpinned" ]; then
+            echo "ERROR: Found unpinned actions:"
+            echo "$unpinned"
+            exit 1
+          fi
+          echo "All actions are SHA-pinned"
+      - name: Check for duplicate workflows
+        run: |
+          if [ -f .github/workflows/codeql.yml ] && [ -f .github/workflows/codeql-analysis.yml ]; then
+            echo "ERROR: Duplicate CodeQL workflows found"; exit 1
+          fi
+          echo "No critical duplicates found"
