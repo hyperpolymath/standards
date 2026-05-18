@@ -51,7 +51,7 @@ The CCCP is the ideological and aesthetic framework that gives RSR its purpose.
 3. **Distributed State Without Coordination**: CRDTs eliminate locking and cache invalidation
 4. **Formal Verification as Mutual Aid**: Correctness is an act of solidarity
 5. **Community Over Ego**: Architecture enforces collaborative patterns
-6. **Language Polyglotism as Resistance**: Using Ada, Rust, Elixir, Haskell, ReScript instead of JavaScript/Python monoculture
+6. **Language Polyglotism as Resistance**: Using Ada, Rust, Elixir, Haskell, AffineScript instead of JavaScript/Python monoculture
 
 ---
 

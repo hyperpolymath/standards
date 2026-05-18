@@ -1,4 +1,4 @@
-# Python → Rust/ReScript Migration Guide
+# Python → Rust/AffineScript Migration Guide
 
 ## Policy
 This repo contains Python code that should be migrated to:
