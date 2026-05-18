@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= Hyperpolymath Tooling Version Integrity Policy
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toc-placement: preamble
+
+Canonical policy for how the rhyming command-runner family
+(`just`/Justfile, `must`/Mustfile, `trust`/Trustfile, `adjust`/Adjustfile,
+`bust`/Bustfile, `dust`/Dustfile, `intend`/Intentfile) and their
+`contractile`-generated fragments are versioned, installed, and gated
+across all hyperpolymath repositories. All contributors and AI agents must
+follow this document.
+
+== Why this policy exists (the burble#39 post-mortem)
+
+For months a burble Elixir test gate was bolted open
+(`continue-on-error: true`) on the belief that "the suite is red for a
+pre-existing reason". It was not. CI installed `just` *unversioned* via an
+install-action's bundled manifest, which shipped `just` 1.14.0. The
+Justfile used `import?` (optional import, requires `just >= 1.19.0`), so
+`just` died at *parse time* with `error: Unknown start of token` —
+**before any recipe ran**. `mix test --no-start` never executed. A
+runner-layer crash was misdiagnosed for months as an inner-layer test
+failure, and a suppressed signal froze the wrong diagnosis in place.
+
+Root causes, generalised:
+
+. *Silent transitive version skew* — nobody chose 1.14.0; a bundled
+  manifest did, invisibly.
+. *Feature/version coupling with no declared floor* — `import?` needs
+  `just >= 1.19.0`; nothing declared or enforced that minimum.
+. *Outer-layer failure misattributed to an inner layer* — `just` crashed
+  before the tests; the redness was labelled "failing tests".
+. *A suppressed signal froze a wrong diagnosis* — `continue-on-error`
+  added on an unverified root cause, hiding the real state indefinitely.
+
+The transferable invariant: **a green/red bit cannot distinguish "passed"
+from "never ran".** Every gate is blind to this unless it proves the work
+actually happened.
+
+== Rule 1 — Never install a family tool unversioned
+
+Any workflow step that installs a rhyming-family tool MUST pin an explicit
+version that satisfies every feature the consumed files use.
+
+[source,yaml]
+----
+# WRONG — resolves via the action's bundled manifest (may be ancient)
+- uses: taiki-e/install-action@<sha>  # vX
+  with:
+    tool: just
+
+# RIGHT — explicit, satisfies `import?` (>= 1.19.0)
+- uses: taiki-e/install-action@<sha>  # vX
+  with:
+    tool: just@1.34.0
+----
+
+`just@1.34.0` is the current estate-canonical pin. Bump it centrally via
+the canonical CI templates (`rsr-template-repo` → `v3-templater` /
+`reposystem`), never per-repo.
+
+== Rule 2 — Declare the minimum tool version in the file
+
+Every `Justfile`/`Mustfile`/`Trustfile`/etc. MUST carry a machine-greppable
+floor annotation near the top, immediately documenting the coupling:
+
+----
+# requires: just >= 1.19.0   (import? optional-import support)
+----
+
+This annotation is *documentation and a lint target*. It is **not
+self-enforcing**: `import?` fails at parse time, before any recipe or
+guard inside the file can run. The executable assertion lives in Rule 3.
+
+== Rule 3 — Gates must prove execution, not exit 0
+
+A "passed" check MUST assert that the underlying work actually ran, not
+merely that nothing returned non-zero. Concretely:
+
+* The canonical `must` contract carries a `tooling-version-integrity`
+  check (see `contractiles/must/Mustfile`) that asserts the installed
+  `just` satisfies the declared floor *and* runs the workflow lint. This
+  check runs after `just` is on `PATH`, so it catches the parse-time
+  class that an in-file guard structurally cannot.
+* Test steps SHOULD emit a positive execution sentinel (e.g. a non-zero
+  test count or an explicit marker line); CI SHOULD fail on the
+  *absence* of that sentinel, which is what catches "the runner died
+  before the work".
+
+== Rule 4 — Every soft-gate must be explained
+
+`continue-on-error: true` (or any soft-gate) MUST be explained, in a
+comment within the 12 lines above it, in exactly one of two ways:
+
+. *Suppressed gate* — a known-failing gate temporarily bolted open. The
+  comment MUST contain `GATE DEACTIVATED <ISO-DATE>`, the *verified* root
+  cause (not a guess — burble#39's guess was wrong), and the explicit
+  single-line re-arm trigger. This form is debt and must carry a path
+  back to armed.
+. *By-design advisory* — a step that is best-effort by nature (e.g.
+  resilience to an upstream outage, optional enrichment). The comment
+  MUST carry a `by-design:` or `advisory:` rationale. This form is not
+  debt; it documents intent so reviewers do not mistake it for a
+  suppressed gate.
+
+A bare `continue-on-error` with neither is a policy violation, flagged by
+`tasks/tooling-integrity-lint.sh` (rule R4).
+
+=== Rollout: advisory first, tighten later
+
+R4 ships *advisory* (reported, non-blocking) by default; R1 (unversioned
+installs) is blocking immediately. This deliberately follows the same
+"advisory first, tighten later" gating doctrine the estate adopted for
+Hypatia SARIF (burble#35 item 3) — a new policy gate enforced as a
+hard estate-wide failure on day one would itself be bolted open, exactly
+the failure mode this policy exists to end. Promote R4 to blocking
+(`--strict`) per repo as its existing soft-gates are explained.
+
+== Rule 5 — Resolve at source, never per-repo
+
+Fixes to any of the above are made in the canonical source
+(`contractile` source under `contractiles/`, the canonical CI/Justfile
+templates in `rsr-template-repo` → `v3-templater` / `reposystem`) and
+propagated by re-adoption. Per-repo patches recreate the drift this
+policy exists to prevent.
+
+NOTE: The `contractile` generator itself is currently out-of-band (the
+generator repository is not part of the working estate). Until it is
+in-tree, changes to generated `contractile.just` content are made in the
+`contractiles/` *source* fragments and regenerated by whoever holds the
+generator; consumers must re-run `contractile gen-just --dir contractiles`
+to pick them up. This gap is tracked estate-wide (see the Tooling Version
+Integrity sweep tracking issue).
+
+== Enforcement
+
+* `tasks/tooling-integrity-lint.sh` — scans `.github/workflows/` for
+  unversioned family-tool installs (Rule 1) and bare `continue-on-error`
+  (Rule 4). Exit non-zero on any violation.
+* `contractiles/must/Mustfile` (canonical template) and this repo's live
+  `Mustfile` carry a `tooling-version-integrity` mandatory check that
+  runs the lint — so every repo adopting the canonical `must` contract
+  inherits the gate (Rule 3, Rule 5).

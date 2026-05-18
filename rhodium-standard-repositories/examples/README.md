@@ -255,7 +255,7 @@ Want to contribute a new example?
 - Must have .well-known/ directory
 - Must have SPDX headers on all source files
 
-See [../CONTRIBUTING.md](../CONTRIBUTING.md) for details.
+See [../CONTRIBUTING.md](../CONTRIBUTING.adoc) for details.
 
 ---
 
