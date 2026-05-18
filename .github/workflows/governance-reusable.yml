@@ -134,34 +134,63 @@ jobs:
           print(f"✅ No TypeScript files outside allowlist ({len(exemption_patterns)} per-repo exemption(s) parsed).")
           PYEOF
 
-      - name: Check for ReScript
+      # Shared escape hatch for the banned-language-file checks below.
+      # Honours the estate's declared machine-readable exemption (standards#72,
+      # Explicit-Escape Principle): a file is exempt from the
+      # `cicd_rules/banned_language_file` rule if EITHER
+      #   * `.hypatia-ignore` contains the exact line
+      #     `cicd_rules/banned_language_file:<relpath>`, OR
+      #   * the file carries an inline `# hypatia:ignore ...
+      #     cicd_rules/banned_language_file` pragma in its first 8 lines
+      # — the same escape the Hypatia scanner itself honours.
+      - name: Check for ReScript / Go / Python (banned language files)
         run: |
+          rule="cicd_rules/banned_language_file"
+
+          is_exempt() {
+            f="${1#./}"
+            if [ -f .hypatia-ignore ] && grep -qxF "${rule}:${f}" .hypatia-ignore; then
+              return 0
+            fi
+            if head -n 8 "$1" 2>/dev/null | grep -q "hypatia:ignore.*${rule}"; then
+              return 0
+            fi
+            return 1
+          }
+
+          # $1 = human label, $2 = remediation hint, $3 = newline-separated
+          # candidate paths (possibly empty). Reads via here-string so this
+          # runs in the current shell — no subshell, exit propagates.
+          enforce() {
+            label="$1"; hint="$2"; candidates="$3"; violations=""
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if is_exempt "$f"; then
+                echo "⏭️  exempt (${rule}): $f"
+                continue
+              fi
+              violations="${violations}${f}
+          "
+            done <<< "$candidates"
+            if [ -n "$(printf '%s' "$violations" | tr -d '[:space:]')" ]; then
+              echo "❌ ${label} detected - ${hint}"
+              printf '%s' "$violations"
+              echo "   (declare an exemption via .hypatia-ignore or an inline"
+              echo "    '# hypatia:ignore ${rule}' pragma if intentional)"
+              exit 1
+            fi
+            echo "✅ No non-exempt ${label}"
+          }
+
           RES_FILES=$(find . -name "*.res" | grep -v node_modules || true)
-          if [ -n "$RES_FILES" ]; then
-            echo "❌ ReScript files detected - use AffineScript instead"
-            echo "$RES_FILES"
-            exit 1
-          fi
-          echo "✅ No ReScript files"
+          GO_FILES=$(find . -name "*.go" || true)
+          PY_FILES=$(find . -name "*.py" | grep -v salt | grep -v _states \
+            | grep -v _modules | grep -v pillar | grep -v venv \
+            | grep -v __pycache__ || true)
 
-      - name: Check for Go
-        run: |
-          if find . -name "*.go" | grep -q .; then
-            echo "❌ Go files detected - use Rust/WASM instead"
-            find . -name "*.go"
-            exit 1
-          fi
-          echo "✅ No Go files"
-
-      - name: Check for Python (non-SaltStack)
-        run: |
-          PY_FILES=$(find . -name "*.py" | grep -v salt | grep -v _states | grep -v _modules | grep -v pillar | grep -v venv | grep -v __pycache__ || true)
-          if [ -n "$PY_FILES" ]; then
-            echo "❌ Python files detected - only allowed for SaltStack"
-            echo "$PY_FILES"
-            exit 1
-          fi
-          echo "✅ No non-SaltStack Python files"
+          enforce "ReScript files" "use AffineScript instead" "$RES_FILES"
+          enforce "Go files" "use Rust/WASM instead" "$GO_FILES"
+          enforce "Python files" "only allowed for SaltStack" "$PY_FILES"
 
       - name: Check for npm/bun artifacts
         run: |
