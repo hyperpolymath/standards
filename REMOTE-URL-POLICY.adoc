@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Hyperpolymath Git Remote URL Policy (SSH-only)
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:revnumber: 1.0.0
+:revdate: 2026-05-17
+:toc:
+:toc-placement: preamble
+
+Canonical git remote-URL policy for all `hyperpolymath/*` repositories
+and every local clone. All maintainers and AI agents must follow this
+document. It resolves
+link:https://github.com/hyperpolymath/standards/issues/69[standards#69]
+(parent link:https://github.com/hyperpolymath/standards/issues/66[#66]).
+
+== Problem
+
+A clone of `claude-integrations` (a second checkout under `repos/ci`)
+had an `x-access-token:gho_…` token embedded directly in its `origin`
+URL. Token-in-URL remotes leak credentials into:
+
+* `.git/config` (plaintext, world-readable in many setups)
+* shell history and process listings on every `git` invocation
+* CI logs and `git remote -v` output pasted into issues
+
+== Policy
+
+[discrete]
+=== 1. SSH-only remotes
+
+All remotes for `hyperpolymath/*` repositories MUST use the SSH form:
+
+[source]
+----
+git@github.com:hyperpolymath/<repo>.git
+----
+
+The following are PROHIBITED for tracked/long-lived clones:
+
+* `https://x-access-token:<token>@github.com/…`
+* `https://<user>:<PAT>@github.com/…`
+* any URL embedding a `gho_`, `ghp_`, `ghs_`, or `github_pat_` secret
+
+HTTPS without an embedded credential (auth delegated to the `gh`
+credential helper / `git-credential`) is acceptable for ephemeral,
+throw-away CI checkouts only.
+
+[discrete]
+=== 2. Token handling
+
+Tokens are supplied exclusively via the `gh` credential helper or an
+environment variable consumed by `git-credential`. They are never
+written into a remote URL, a tracked file, or a commit.
+
+[discrete]
+=== 3. Audit
+
+Run estate-wide before any sync:
+
+[source,bash]
+----
+for d in ~/dev/*/; do
+  [ -d "$d/.git" ] || continue
+  u=$(git -C "$d" remote get-url origin 2>/dev/null)
+  case "$u" in
+    *x-access-token*|*ghp_*|*gho_*|*ghs_*|*github_pat_*|https://*:*@*)
+      echo "TOKEN-IN-URL: $d" ;;
+  esac
+done
+----
+
+Audit of `2026-05-17`: 20 local `~/dev` clones scanned, *0*
+token-in-URL remotes (the exposed `repos/ci` clone was scrubbed to
+SSH in the originating session).
+
+[discrete]
+=== 4. Remediation of an exposed token
+
+A token that has appeared in a URL is considered compromised and MUST
+be rotated at
+link:https://github.com/settings/tokens[github.com/settings/tokens]
+(or the issuing GitHub App) regardless of whether the URL was pushed.
+Rotation is a manual browser action owned by the maintainer and is the
+one remaining open item under standards#69.
+
+== Enforcement
+
+`gitbot` rejects any push whose `.git/config` (when present in tree) or
+remediation script reintroduces a token-in-URL remote. New clones in
+provisioning scripts use the SSH form by default.
