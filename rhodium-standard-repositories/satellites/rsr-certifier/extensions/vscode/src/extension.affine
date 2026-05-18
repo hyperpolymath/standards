@@ -1,14 +1,41 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
-// RSR-Certified VS Code extension — port of extension.ts to AffineScript.
-// Closes the standards side of affinescript#64. Unblock conditions:
-//   - affinescript#35  (Node-target codegen + Vscode.affine bindings)
-//   - affinescript#102 (vscode-binding surface expansion for this port)
+// RSR-Certified VS Code extension — AffineScript port of extension.ts.
+// Closes the standards side of affinescript#64.
 //
-// Source of truth for out/extension.cjs, produced by
+// Compliance resolution is THREE-TIER, BoJ-first
+// (hyperpolymath/boj-server is the canonical provider for tooling
+// surfaces; a standalone rsr LSP / CLI are fallbacks only):
+//
+//   1. PRIMARY  — BoJ `reposystem-mcp` cartridge, tool
+//      `reposystem_run_audit`, via an in-process JSON POST to
+//      boj-server (`httpPostJson`, affinescript#210). Endpoint +
+//      repo name are configurable (`rsr.bojEndpoint`,`rsr.repoName`).
+//   2. FALLBACK — the standalone rsr LSP server, via
+//      `languageClientSendRequest "workspace/executeCommand"` with
+//      command `rsr.checkCompliance` (the method the server actually
+//      answers; README's `rsr/getCompliance` is doc drift). Settled
+//      with the #205 thenable primitives (`thenableThen` #199 closure
+//      callback + `thenableResultJson`), result fields read with
+//      `jsonField` (affinescript#211 — the guest has no JSON parser).
+//   3. LAST RESORT — `rsr` CLI in a terminal (the always-reachable
+//      floor; the extension is never worse than CLI-only).
+//
+// Each tier's result is observed asynchronously: command handlers
+// return immediately; the #205 settle callback updates the status bar
+// (and, for the report command, the webview) when the host Thenable
+// resolves. On error/empty/unusable payload a tier cascades to the
+// next; the CLI tier always succeeds at *launching* the check.
+//
+// NOT wired: `vscode.window.withProgress` — `withProgressNotification`
+// is declared in stdlib but has no wasm/Node runtime impl yet, so
+// calling it would fault. Progress UI is a tracked follow-up; its
+// absence does not affect correctness of the three tiers.
+//
+// Source of truth for out/extension.cjs:
 //   affinescript compile src/extension.affine -o out/extension.cjs
-// The runtime entry the host loads is src/index.cjs (vendored adapter +
+// Runtime entry the host loads is src/index.cjs (vendored adapter +
 // extraImports wiring); package.json `main` points there.
 
 use Vscode::{
@@ -17,7 +44,6 @@ use Vscode::{
   workspaceConfigGetBool,
   workspaceConfigGetString,
   showErrorMessage,
-  showWarningMessage,
   showInformationMessage,
   createTerminal,
   terminalShow,
@@ -27,12 +53,10 @@ use Vscode::{
   execSync,
   stringConcat,
   stringEndsWith,
-  stringReplaceSuffix,
   stringIsEmpty,
   workspaceFolderFirstPath,
   uriFromPath,
   uriJoinPath,
-  uriPath,
   fsWriteFile,
   openTextDocument,
   showTextDocument,
@@ -40,7 +64,6 @@ use Vscode::{
   statusBarItemSetText,
   statusBarItemSetTooltip,
   statusBarItemSetCommand,
-  statusBarItemSetBackgroundColorTheme,
   statusBarItemShow,
   statusBarItemAsDisposable,
   createDiagnosticCollection,
@@ -50,22 +73,24 @@ use Vscode::{
   clipboardWriteText,
   onDidSaveTextDocument,
   pathJoin,
+  pathBasename,
   processPlatform,
-  extensionAbsolutePath
+  extensionAbsolutePath,
+  httpPostJson,
+  thenableThen,
+  thenableResultJson,
+  jsonField
 };
 use VscodeLanguageClient::{
   newLanguageClient,
-  languageClientStart
+  languageClientStart,
+  languageClientSendRequest
 };
 
 // ── String-building helpers ──────────────────────────────────────────
 
 fn concat3(a: String, b: String, c: String) -> String {
   return stringConcat(stringConcat(a, b), c);
-}
-
-fn concat4(a: String, b: String, c: String, d: String) -> String {
-  return stringConcat(stringConcat(stringConcat(a, b), c), d);
 }
 
 fn concat5(a: String, b: String, c: String, d: String, e: String) -> String {
@@ -79,31 +104,190 @@ fn run_in_terminal(name: String, cmd: String) -> Int {
   return 0;
 }
 
-// ── Command handlers ─────────────────────────────────────────────────
+// ── Result interpretation ────────────────────────────────────────────
 //
-// All four commands shell out to the `rsr` CLI in a fresh terminal. The
-// original TS extension had a "preferred" path that used a custom LSP
-// request (`rsr/getCompliance`) + `vscode.window.withProgress` for live
-// in-process compliance results, with a CLI fallback for the no-LSP
-// case. The current AffineScript extern-call ABI is synchronous, so
-// Thenable-returning APIs (sendRequest, withProgress) cannot be bound;
-// we use the CLI-fallback path unconditionally. The downstream effects
-// of the LSP path (status-bar mutation, diagnostic-collection updates)
-// are also absent here for the same reason. The status bar still shows
-// a static initial value set in activate(); the diagnostic collection
-// is created so it can join subscriptions for clean disposal.
+// Both the BoJ audit payload and the LSP RsrComplianceResult are JSON
+// objects; we only ever need a few top-level scalars, read one at a
+// time with jsonField (empty string = absent). A payload is an "error"
+// if it is empty (not settled / not JSON), carries the httpPostJson
+// reject sentinel `__error`, or a server `error` field.
 
-pub fn handler_check_compliance() -> Int {
+fn json_is_error(json: String) -> Int {
+  if stringIsEmpty(json) == 1 {
+    return 1;
+  }
+  if stringIsEmpty(jsonField(json, "__error")) == 0 {
+    return 1;
+  }
+  if stringIsEmpty(jsonField(json, "error")) == 0 {
+    return 1;
+  }
+  return 0;
+}
+
+// Pick the most specific tier label available across both shapes.
+fn pick_tier(json: String) -> String {
+  let t = jsonField(json, "tier");
+  if stringIsEmpty(t) == 0 {
+    return t;
+  }
+  let tc = jsonField(json, "tier_code");
+  if stringIsEmpty(tc) == 0 {
+    return tc;
+  }
+  return "";
+}
+
+// Pick a numeric-ish summary: LSP `score`, else BoJ audit count fields.
+fn pick_score(json: String) -> String {
+  let s = jsonField(json, "score");
+  if stringIsEmpty(s) == 0 {
+    return s;
+  }
+  let cp = jsonField(json, "checks_passed");
+  if stringIsEmpty(cp) == 0 {
+    return cp;
+  }
+  return jsonField(json, "passed");
+}
+
+// Render a settled payload to the status bar. Returns 1 if the payload
+// carried something usable (so the caller knows not to cascade), 0 if
+// it was unusable and the next tier should be tried.
+fn render_status(sb: StatusBarItem, source: String, json: String) -> Int {
+  if json_is_error(json) == 1 {
+    return 0;
+  }
+  let tier = pick_tier(json);
+  let score = pick_score(json);
+  if stringIsEmpty(tier) == 1 {
+    if stringIsEmpty(score) == 1 {
+      return 0;
+    }
+  }
+  let mut tier_txt = tier;
+  if stringIsEmpty(tier_txt) == 1 {
+    tier_txt = "RSR";
+  }
+  let head = stringConcat(stringConcat("$(verified) ", tier_txt), " ");
+  let text = stringConcat(head, score);
+  let _ = statusBarItemSetText(sb, text);
+  let _ = statusBarItemSetTooltip(sb,
+    concat5("RSR compliance via ", source, "\ntier: ",
+            tier_txt, "\nClick to open the report"));
+  return 1;
+}
+
+// Build report HTML from a settled payload (honest: shows whatever the
+// provider returned, or a neutral "run a check" panel if unavailable).
+fn report_html(source: String, json: String) -> String {
+  let style = "<style>body{font-family:var(--vscode-font-family);padding:20px}h1{color:var(--vscode-foreground)}.k{color:var(--vscode-descriptionForeground)}code{background:var(--vscode-textBlockQuote-background);padding:2px 4px}</style>";
+  if json_is_error(json) == 1 {
+    return stringConcat(
+      stringConcat("<!DOCTYPE html><html><head>", style),
+      "</head><body><h1>RSR Compliance Report</h1><p class=\"k\">No live result yet. Run <code>RSR: Check Compliance</code> (BoJ \xE2\x86\x92 LSP \xE2\x86\x92 CLI).</p></body></html>");
+  }
+  let tier = pick_tier(json);
+  let score = pick_score(json);
+  let rows = concat5(
+    "<p>tier: <strong>", tier, "</strong></p><p>score: <strong>",
+    score, "</strong></p>");
+  return concat5(
+    "<!DOCTYPE html><html><head>", style,
+    "</head><body><h1>RSR Compliance Report</h1><p class=\"k\">source: ",
+    source,
+    stringConcat("</p>", stringConcat(rows, "</body></html>")));
+}
+
+// ── Tier 3: CLI (always-reachable floor) ─────────────────────────────
+
+fn tier_cli(ws: String) -> Int {
+  let cmd = stringConcat(stringConcat("rsr check \"", ws), "\"");
+  return run_in_terminal("RSR Check", cmd);
+}
+
+// ── Tier 2: standalone rsr LSP (dogfoods #199/#205/jsonField) ─────────
+
+fn settle_lsp(t: Thenable, sb: StatusBarItem, ws: String) -> Int {
+  let json = thenableResultJson(t);
+  if render_status(sb, "rsr LSP", json) == 1 {
+    return 0;
+  }
+  return tier_cli(ws);
+}
+
+fn tier_lsp(client: LanguageClient, sb: StatusBarItem, ws: String) -> Int {
+  let params = "{\"command\":\"rsr.checkCompliance\",\"arguments\":[]}";
+  let t = languageClientSendRequest(client, "workspace/executeCommand", params);
+  let _ = thenableThen(t, fn(u: Unit) => settle_lsp(t, sb, ws));
+  return 0;
+}
+
+// ── Tier 1: BoJ reposystem-mcp (PRIMARY, dogfoods httpPostJson) ───────
+
+fn boj_endpoint() -> String {
+  let cfg = getConfiguration("rsr");
+  return workspaceConfigGetString(cfg, "bojEndpoint",
+    "http://127.0.0.1:7700/cartridge/reposystem-mcp/invoke");
+}
+
+fn boj_repo_name(ws: String) -> String {
+  let cfg = getConfiguration("rsr");
+  let configured = workspaceConfigGetString(cfg, "repoName", "");
+  if stringIsEmpty(configured) == 0 {
+    return configured;
+  }
+  return pathBasename(ws);
+}
+
+fn boj_body(repo: String) -> String {
+  return stringConcat(stringConcat(
+    "{\"tool\":\"reposystem_run_audit\",\"arguments\":{\"repo_name\":\"",
+    repo), "\"}}");
+}
+
+fn settle_boj(t: Thenable, client: LanguageClient,
+              sb: StatusBarItem, ws: String) -> Int {
+  let json = thenableResultJson(t);
+  if render_status(sb, "BoJ reposystem-mcp", json) == 1 {
+    return 0;
+  }
+  return tier_lsp(client, sb, ws);
+}
+
+fn refresh_compliance(client: LanguageClient,
+                      sb: StatusBarItem) -> Int {
   let ws = workspaceFolderFirstPath();
   if stringIsEmpty(ws) == 1 {
     let _ = showErrorMessage("No workspace folder open");
     return 1;
   }
-  let cmd = concat3("rsr check \"", ws, "\"");
-  return run_in_terminal("RSR Check", cmd);
+  let _ = statusBarItemSetText(sb, "$(sync~spin) RSR\xE2\x80\xA6");
+  let repo = boj_repo_name(ws);
+  let t = httpPostJson(boj_endpoint(), boj_body(repo));
+  let _ = thenableThen(t, fn(u: Unit) => settle_boj(t, client, sb, ws));
+  return 0;
 }
 
-pub fn handler_init_config() -> Int {
+// ── Report webview ───────────────────────────────────────────────────
+
+fn settle_report(t: Thenable, panel: WebviewPanel) -> Int {
+  let _ = webviewPanelSetHtml(panel, report_html("BoJ reposystem-mcp",
+                                                  thenableResultJson(t)));
+  return 0;
+}
+
+fn cmd_show_report(ws: String) -> Int {
+  let panel = createWebviewPanel("rsrReport", "RSR Compliance Report", 1);
+  let _ = webviewPanelSetHtml(panel, report_html("", ""));
+  let t = httpPostJson(boj_endpoint(), boj_body(boj_repo_name(ws)));
+  let _ = thenableThen(t, fn(u: Unit) => settle_report(t, panel));
+  return 0;
+}
+
+// ── .rsr.toml scaffolding (unchanged; the CLI path always worked) ────
+
+fn cmd_init_config() -> Int {
   let ws = workspaceFolderFirstPath();
   if stringIsEmpty(ws) == 1 {
     let _ = showErrorMessage("No workspace folder open");
@@ -112,9 +296,6 @@ pub fn handler_init_config() -> Int {
   let cfg = getConfiguration("rsr");
   let target_tier = workspaceConfigGetString(cfg, "targetTier", "silver");
 
-  // Build the .rsr.toml body. Kept as a single chained string for
-  // simplicity; if/when AffineScript grows multi-line raw-string
-  // literals this becomes a heredoc.
   let line_header = "# RSR (Rhodium Standard Repository) Configuration\n# https://github.com/Hyperpolymath/git-rsr-certified\n\n";
   let line_compl_open = "[compliance]\ntarget_tier = \"";
   let line_compl_close = "\"\nstrict_mode = false\n\n";
@@ -122,7 +303,7 @@ pub fn handler_init_config() -> Int {
   let line_ignore = "[ignore]\n# Paths to exclude from compliance scanning\npaths = [\n    \"vendor/\",\n    \"third_party/\",\n    \"node_modules/\",\n    \".git/\",\n]\n\n";
   let line_badges = "[badges]\nstyle = \"flat-square\"\ninclude_score = true\n";
 
-  let body_compl = concat3(line_compl_open, target_tier, line_compl_close);
+  let body_compl = stringConcat(stringConcat(line_compl_open, target_tier), line_compl_close);
   let body = concat5(line_header, body_compl, line_checks, line_ignore, line_badges);
 
   let ws_uri = uriFromPath(ws);
@@ -139,45 +320,18 @@ pub fn handler_init_config() -> Int {
   return 0;
 }
 
-/// Returns the constant report HTML. The original TS extension built
-/// this dynamically from compliance-check data; in the absence of a
-/// sendRequest binding (see top-of-file note) we render a static
-/// placeholder with the same shape so users can see the panel works.
-fn report_html() -> String {
-  let head = "<!DOCTYPE html><html><head><style>body{font-family:var(--vscode-font-family);padding:20px}h1{color:var(--vscode-foreground)}.tier{font-size:24px;margin:20px 0}.tier.silver{color:#C0C0C0}.score{font-size:18px;color:var(--vscode-descriptionForeground)}.checks{margin-top:20px}.check{padding:10px;margin:5px 0;border-radius:4px}.check.placeholder{background:var(--vscode-textBlockQuote-background)}</style></head>";
-  let body = "<body><h1>RSR Compliance Report</h1><div class=\"tier silver\">\xE2\x98\x86 SILVER</div><div class=\"score\">Run <code>RSR: Check Compliance</code> in a terminal for live results.</div><div class=\"checks\"><h2>Checks</h2><div class=\"check placeholder\">Live in-panel results require an async-extern ABI (see affinescript#64). The CLI path via <code>rsr check</code> reports full compliance status.</div></div></body></html>";
-  return stringConcat(head, body);
-}
-
-pub fn handler_show_report() -> Int {
-  let panel = createWebviewPanel("rsrReport", "RSR Compliance Report", 1);
-  let _ = webviewPanelSetHtml(panel, report_html());
-  return 0;
-}
-
-pub fn handler_generate_badge() -> Int {
-  let ws = workspaceFolderFirstPath();
-  if stringIsEmpty(ws) == 1 {
-    let _ = showErrorMessage("No workspace folder open");
-    return 1;
-  }
-  // Hardcoded `silver` placeholder — matches the TS original's TODO
-  // ("Get actual tier from compliance check"). The real tier comes from
-  // the LSP sendRequest path which is unavailable in this port.
-  let badge = "[![RSR Certification](https://rsr-certified.dev/badge/silver.svg)](https://rsr-certified.dev)";
+// Badge: no longer fakes a "silver" tier (the old hardcoded TODO). We
+// copy a tier-agnostic badge and tell the user to run a check; the
+// tier-specific badge belongs to `rsr generateBadge` on the CLI/LSP.
+fn cmd_generate_badge() -> Int {
+  let badge = "[![RSR Certified](https://rsr-certified.dev/badge.svg)](https://rsr-certified.dev)";
   let _ = clipboardWriteText(badge);
-  let _ = showInformationMessage("Badge markdown copied to clipboard!");
+  let _ = showInformationMessage(
+    "RSR badge copied. Run \"RSR: Check Compliance\" for the tier-specific badge.");
   return 0;
 }
 
 // ── LSP startup ──────────────────────────────────────────────────────
-//
-// Resolves the rsr-lsp binary path in this order:
-//   1. `rsr.serverPath` config value if non-empty
-//   2. bundled at <extensionRoot>/server/rsr-lsp[.exe]
-// then starts the LanguageClient. Probe is `which`-based; failures
-// surface through vscode-languageclient's own error UI rather than a
-// pre-flight existsSync check (which would require an extra binding).
 
 fn resolve_server_path(ctx: ExtensionContext) -> String {
   let cfg = getConfiguration("rsr");
@@ -186,10 +340,8 @@ fn resolve_server_path(ctx: ExtensionContext) -> String {
     return configured;
   }
   let platform = processPlatform();
-  let exe_name = "rsr-lsp";
-  let exe_name_win = "rsr-lsp.exe";
-  let rel = pathJoin("server", exe_name);
-  let rel_win = pathJoin("server", exe_name_win);
+  let rel = pathJoin("server", "rsr-lsp");
+  let rel_win = pathJoin("server", "rsr-lsp.exe");
   if stringEndsWith(platform, "win32") == 1 {
     return extensionAbsolutePath(ctx, rel_win);
   } else {
@@ -197,109 +349,67 @@ fn resolve_server_path(ctx: ExtensionContext) -> String {
   }
 }
 
-fn start_lsp(ctx: ExtensionContext) -> Int {
-  let server_path = resolve_server_path(ctx);
-  let probe_cmd = stringConcat("which \"", stringConcat(server_path, "\""));
-  let probe_rc = execSync(probe_cmd);
-  if probe_rc != 0 {
-    let _ = showWarningMessage("RSR LSP server not found. Some features may be limited.");
-    return 1;
-  }
-  let client = newLanguageClient(
-    "rsrCertified",
-    "RSR-Certified Language Server",
-    server_path,
-    "",         // no args
-    0           // stdio transport
-  );
-  let _ = languageClientStart(client);
-  return 0;
-}
+// ── On-save (unchanged: the FFI boundary drops the TextDocument arg,
+// so we cannot filter by basename; register a no-op so the disposable
+// is still tracked and the rsr.checkOnSave flag keeps its shape) ─────
 
-// ── Status bar ───────────────────────────────────────────────────────
-//
-// The original TS extension mutated the status-bar text on every
-// compliance result (driven by the LSP sendRequest path that we cannot
-// bind in the current ABI). Here we set a single initial value at
-// activate() time and leave it for the session. Reading the live tier
-// requires running the CLI from the command palette.
-
-fn setup_status_bar(ctx: ExtensionContext) -> Int {
-  let cfg = getConfiguration("rsr");
-  if workspaceConfigGetBool(cfg, "showStatusBarItem", 1) == 0 {
-    return 0;
-  }
-  let item = createStatusBarItem(1, 100);   // 1 = StatusBarAlignment.Right
-  let _ = statusBarItemSetText(item, "\xE2\x98\x86 RSR: SILVER 75%");
-  let _ = statusBarItemSetTooltip(item,
-    "RSR Compliance: silver tier (75% score, placeholder)\nClick to view report");
-  let _ = statusBarItemSetCommand(item, "rsr.showReport");
-  let _ = statusBarItemSetBackgroundColorTheme(item, "");  // empty = no background
-  let _ = statusBarItemShow(item);
-  let _ = pushSubscription(ctx, statusBarItemAsDisposable(item));
-  return 0;
-}
-
-// ── On-save handler ──────────────────────────────────────────────────
-//
-// The original filtered saves by basename (README.md, LICENSE, etc.).
-// The current Vscode.affine binding drops the TextDocument arg at the
-// FFI boundary, so we cannot read the saved doc's path here. As a
-// degradation, we either:
-//   - re-run check on every save (noisy), OR
-//   - don't register a save handler at all.
-// We register a no-op handler that does nothing so the disposable is
-// still pushed for clean tracking; users who want check-on-save can
-// re-run the command manually. This preserves the `rsr.checkOnSave`
-// config flag's *registration* shape without spawning a terminal for
-// every keystroke-save.
-
-pub fn handler_on_save() -> Int {
+fn handler_on_save(u: Unit) -> Int {
   return 0;
 }
 
 // ── Lifecycle ────────────────────────────────────────────────────────
 
 pub fn activate(ctx: ExtensionContext) -> Int {
-  let _ = consoleLog("RSR-Certified extension is activating...");
+  let _ = consoleLog("RSR-Certified extension activating (BoJ-first 3-tier)");
 
-  let _ = setup_status_bar(ctx);
+  let cfg = getConfiguration("rsr");
 
-  // Register commands. Wasm-table indices must match the order command
-  // handler functions appear in this file:
-  //   0  handler_check_compliance
-  //   1  handler_init_config
-  //   2  handler_show_report
-  //   3  handler_generate_badge
-  //   4  handler_on_save
-  let _ = pushSubscription(ctx, registerCommand("rsr.checkCompliance", 0));
-  let _ = pushSubscription(ctx, registerCommand("rsr.initConfig", 1));
-  let _ = pushSubscription(ctx, registerCommand("rsr.showReport", 2));
-  let _ = pushSubscription(ctx, registerCommand("rsr.generateBadge", 3));
+  // Status bar (created first so command closures can capture it).
+  let sb = createStatusBarItem(1, 100);
+  let _ = statusBarItemSetText(sb, "$(verified) RSR");
+  let _ = statusBarItemSetTooltip(sb, "RSR compliance — run a check");
+  let _ = statusBarItemSetCommand(sb, "rsr.showReport");
+  if workspaceConfigGetBool(cfg, "showStatusBarItem", 1) != 0 {
+    let _ = statusBarItemShow(sb);
+  }
+  let _ = pushSubscription(ctx, statusBarItemAsDisposable(sb));
 
-  // Diagnostic collection — created so it can join subscriptions for
-  // disposal-on-deactivate. Empty by design (population would require
-  // the sendRequest path).
+  // LanguageClient for the fallback tier. Created unconditionally so
+  // the cascade always has a handle; if the binary is absent the
+  // sendRequest simply rejects and settle_lsp cascades to the CLI.
+  let server_path = resolve_server_path(ctx);
+  let probe = execSync(stringConcat(stringConcat("which \"", server_path), "\""));
+  let client = newLanguageClient(
+    "rsrCertified", "RSR-Certified Language Server",
+    server_path, "", 0);
+  if probe == 0 {
+    let _ = languageClientStart(client);
+  }
+
+  // Commands — #199 function-value ABI: thin capturing closures over
+  // sb / client; the named helpers carry the logic.
+  let _ = pushSubscription(ctx,
+    registerCommand("rsr.checkCompliance",
+      fn(u: Unit) => refresh_compliance(client, sb)));
+  let _ = pushSubscription(ctx,
+    registerCommand("rsr.initConfig", fn(u: Unit) => cmd_init_config()));
+  let _ = pushSubscription(ctx,
+    registerCommand("rsr.showReport",
+      fn(u: Unit) => cmd_show_report(workspaceFolderFirstPath())));
+  let _ = pushSubscription(ctx,
+    registerCommand("rsr.generateBadge", fn(u: Unit) => cmd_generate_badge()));
+
   let dc = createDiagnosticCollection("rsr");
   let _ = pushSubscription(ctx, diagnosticCollectionAsDisposable(dc));
 
-  let _ = start_lsp(ctx);
-
-  // Honour the rsr.checkOnSave config flag's registration shape (no-op
-  // handler under the current ABI — see handler_on_save docstring).
-  let cfg = getConfiguration("rsr");
   if workspaceConfigGetBool(cfg, "checkOnSave", 1) != 0 {
-    let _ = pushSubscription(ctx, onDidSaveTextDocument(4));
+    let _ = pushSubscription(ctx,
+      onDidSaveTextDocument(fn(u: Unit) => handler_on_save(u)));
   }
 
   return 0;
 }
 
 pub fn deactivate() -> Int {
-  // LanguageClient handle is not retained across activations under the
-  // current binding shape; the host process exit closes the server
-  // pipe. Status-bar item, diagnostic collection, webview panels, and
-  // command disposables are all pushed to ctx.subscriptions and
-  // released by the host.
   return 0;
 }
