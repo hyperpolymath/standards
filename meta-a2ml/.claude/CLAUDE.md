@@ -44,7 +44,7 @@ in A2ML format (migrated from Guile Scheme on 2026-04-12):
 | Bun | Deno |
 | pnpm/yarn | Deno |
 | Go | Rust |
-| Python | Julia/Rust/ReScript |
+| Python | Julia/Rust/AffineScript |
 | Java/Kotlin | Rust/Tauri/Dioxus |
 | Swift | Tauri/Dioxus |
 | React Native | Tauri/Dioxus |

@@ -395,7 +395,7 @@ Conflict-free Replicated Data Types (CRDTs) solve distributed consistency withou
 - RSR: 10+ dimensions for defense-in-depth
 
 **Dimensions 1-3: Safety (15 min)**
-- Type safety: Rust/ReScript/Ada compile-time verification
+- Type safety: Rust/AffineScript/Ada compile-time verification
 - Memory safety: Ownership, SPARK proofs, no unsafe code
 - Data security: CRDTs, no cache invalidation
 - Live exploit: TypeScript unsoundness
