@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: PMPL-1.0-or-later
 # justfile - Just recipes for this project
 # See: https://github.com/hyperpolymath/mustfile
+#
+# requires: just >= 1.19.0   (import? optional-import support)
+# Enforced by the `tooling-version-integrity` must-check, not self-
+# enforcing: import? fails at parse time before any recipe can guard it.
+# See TOOLING-VERSION-INTEGRITY-POLICY.adoc (root cause: burble#39).
 
 # Default recipe
 import? "contractile.just"
