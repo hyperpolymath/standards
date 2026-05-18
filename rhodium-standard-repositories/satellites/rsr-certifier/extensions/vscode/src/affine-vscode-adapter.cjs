@@ -1,20 +1,30 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// VENDORED from affinescript `packages/affine-vscode/mod.js` (the
+// canonical, contract-matched runtime) — kept byte-for-byte except this
+// header, so the post-#199 closure-pointer + #205 thenable + #210
+// httpPostJson + #211 jsonField conventions stay in lock-step with the
+// compiler. MIT here to match the rsr-certifier subtree (same author).
+// Do not hand-edit; re-vendor from affinescript main when bumping.
 //
 // affine-vscode: JS-side adapter for stdlib/Vscode.affine + stdlib/VscodeLanguageClient.affine.
 //
-// Issue #35 Phase 2 deliverable. Plug this into your Node-CJS extension's
-// `_extraImports()` so each `extern fn` declared in the bindings resolves
-// to the right vscode API call.
+// Issue #35 Phase 2 deliverable. Resolves each `extern fn` declared in the
+// bindings to the right vscode API call.
 //
-// Usage from a hand-written .cjs (until Phase 3 automates the wiring):
+// Preferred wiring (issue #105): compile with `--vscode-extension` and the
+// generated .cjs installs `exports.extraImports` calling this adapter
+// automatically — no hand-written entry point.
 //
-//   const vscodeBindings = require("@hyperpolymath/affine-vscode")(
+// Manual wiring (fallback), from a hand-written .cjs:
+//
+//   const shim = require("./extension.cjs");
+//   shim.extraImports = () => require("@hyperpolymath/affine-vscode")(
 //     require("vscode"),
 //     require("vscode-languageclient/node"),
-//     instance,                         // WebAssembly.Instance, set after instantiate
+//     shim,                             // the .cjs shim module (hostShim)
 //   );
-//   // Pass vscodeBindings into the Wasm imports map under "env".
 //
 // The adapter maintains a per-process JS-side handle table keyed by Int
 // so opaque handles passed across the FFI boundary survive round-trips.
@@ -30,6 +40,8 @@ module.exports = function makeVscodeBindings(vscode, lcModule, hostShim) {
   const reg = (obj) => hostShim._registerHandle(obj);
   const get = (h) => hostShim._getHandle(h);
   const getInstance = () => hostShim._instance;
+  // Settled host-Thenable values, keyed by Thenable handle (issue #205).
+  const __thenableResults = new Map();
 
   // ── String marshalling ─────────────────────────────────────────────
   // AffineScript's WASM 1.0 codegen stores string literals at the offset
@@ -44,16 +56,28 @@ module.exports = function makeVscodeBindings(vscode, lcModule, hostShim) {
     return new TextDecoder("utf-8").decode(bytes);
   }
 
-  // ── Wasm-table callbacks → JS callable ─────────────────────────────
-  // Wasm function-pointer args (e.g. command handlers) come in as table
-  // indices. Wrap each in a JS thunk that re-enters the Wasm module.
-  function wrapHandler(idx) {
+  // ── Wasm closure callbacks → JS callable ───────────────────────────
+  // Post-#199 (function-value callback ABI) a handler arrives as a
+  // *closure pointer*, not a bare table index: an 8-byte heap pair
+  // [i32 function_id @ +0][i32 env_ptr @ +4] (codegen.ml). To invoke,
+  // read the pair from exported memory, look the compiled lambda up in
+  // __indirect_function_table by function_id, and call it with env_ptr
+  // as the first argument (the closure calling convention), zero-filling
+  // any further declared params (e.g. the `Unit` handler arg).
+  function wrapHandler(closurePtr) {
     return () => {
       const inst = getInstance();
-      const tbl = inst && inst.exports && inst.exports.__indirect_function_table;
+      if (!inst || !inst.exports || !inst.exports.memory) return;
+      const tbl = inst.exports.__indirect_function_table;
       if (!tbl) return;
-      const fn = tbl.get(idx);
-      if (typeof fn === "function") fn();
+      const dv = new DataView(inst.exports.memory.buffer);
+      const fnId = dv.getInt32(closurePtr, true);
+      const envPtr = dv.getInt32(closurePtr + 4, true);
+      const fn = tbl.get(fnId);
+      if (typeof fn !== "function") return;
+      const args = [envPtr];
+      while (args.length < fn.length) args.push(0);
+      return fn(...args);
     };
   }
 
@@ -63,9 +87,9 @@ module.exports = function makeVscodeBindings(vscode, lcModule, hostShim) {
   // import map's top-level keys must match.
   const Vscode = {
     // ── vscode.commands ──────────────────────────────────────────────
-    registerCommand: (namePtr, handlerIdx) => {
+    registerCommand: (namePtr, handlerPtr) => {
       const name = readString(namePtr);
-      const handler = wrapHandler(handlerIdx);
+      const handler = wrapHandler(handlerPtr);
       const disposable = vscode.commands.registerCommand(name, handler);
       return reg(disposable);
     },
@@ -299,8 +323,8 @@ module.exports = function makeVscodeBindings(vscode, lcModule, hostShim) {
     },
 
     // ── Events ─────────────────────────────────────────────────────
-    onDidSaveTextDocument: (handlerIdx) => {
-      const thunk = wrapHandler(handlerIdx);
+    onDidSaveTextDocument: (handlerPtr) => {
+      const thunk = wrapHandler(handlerPtr);
       // The vscode event ships a TextDocument; we deliberately drop it at
       // the FFI boundary (see Vscode.affine docstring). Handlers that
       // need the saved file path can call editorActiveFilePath().
@@ -317,6 +341,76 @@ module.exports = function makeVscodeBindings(vscode, lcModule, hostShim) {
     extensionAbsolutePath: (ctxHandle, relPtr) => {
       const ctx = get(ctxHandle);
       return reg(ctx ? ctx.asAbsolutePath(readString(relPtr)) : "");
+    },
+
+    // ── Thenable resolution (issue #205) ───────────────────────────
+    // The wasm guest cannot await; these let it observe a settled host
+    // Thenable. thenableThen registers the guest closure (reusing the
+    // #199 closure-pointer marshalling via wrapHandler) and stores the
+    // settled value keyed by the Thenable handle; thenableResultJson
+    // returns it JSON-encoded (same reg(string) return convention as
+    // every other `-> String` extern).
+    thenableThen: (tHandle, onSettlePtr) => {
+      const thenable = get(tHandle);
+      const cb = wrapHandler(onSettlePtr);
+      if (!thenable || typeof thenable.then !== "function") {
+        return reg({ dispose() {} });
+      }
+      Promise.resolve(thenable).then(
+        (val) => { __thenableResults.set(tHandle, val); try { cb(); } catch (_e) {} },
+        (err) => {
+          __thenableResults.set(tHandle, { __error: String(err) });
+          try { cb(); } catch (_e) {}
+        }
+      );
+      return reg({ dispose() {} });
+    },
+    thenableResultJson: (tHandle) => {
+      if (!__thenableResults.has(tHandle)) return reg("");
+      try { return reg(JSON.stringify(__thenableResults.get(tHandle))); }
+      catch (_e) { return reg(""); }
+    },
+
+    // `httpPostJson(url, body_json)` — out-of-process JSON POST for BoJ
+    // cartridge calls (e.g. boj-server :7700 reposystem_run_audit). Like
+    // languageClientSendRequest, we register the response Thenable in the
+    // handle table and let the guest observe it via thenableThen /
+    // thenableResultJson. Resolves with the parsed JSON body so
+    // thenableResultJson re-serialises it consistently; a non-JSON or
+    // failed response settles as { __error } (same shape thenableThen
+    // uses for rejections), so the guest can branch to its fallback.
+    httpPostJson: (urlPtr, bodyPtr) => {
+      const url = readString(urlPtr);
+      const body = readString(bodyPtr);
+      const doFetch = (typeof fetch === "function")
+        ? fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+          }).then((r) => r.json())
+        : Promise.reject(new Error("fetch unavailable"));
+      return reg(doFetch.catch((err) => ({ __error: String(err) })));
+    },
+
+    // `jsonField(json, key)` — minimal one-level JSON field read for
+    // guests with no JSON parser. Mirrors thenableResultJson's
+    // synchronous reg(string) shape; "" on parse failure / non-object /
+    // missing key (the guest treats "" as absent). Scalars are coerced
+    // to their string form; objects/arrays are re-serialised so the
+    // guest can at least detect presence / pass them on.
+    jsonField: (jsonPtr, keyPtr) => {
+      const raw = readString(jsonPtr);
+      const key = readString(keyPtr);
+      try {
+        const obj = JSON.parse(raw);
+        if (obj === null || typeof obj !== "object") return reg("");
+        if (!(key in obj)) return reg("");
+        const v = obj[key];
+        if (v === null || v === undefined) return reg("");
+        return reg(typeof v === "object" ? JSON.stringify(v) : String(v));
+      } catch (_e) {
+        return reg("");
+      }
     },
   };
 
@@ -341,6 +435,27 @@ module.exports = function makeVscodeBindings(vscode, lcModule, hostShim) {
       const c = get(cHandle);
       if (c) c.stop();
       return 0;
+    },
+    // `LanguageClient.sendRequest(method, params)` (issue #103). `params`
+    // arrives as a JSON string (the binding's synchronous extern shape);
+    // we parse it, invoke the LSP request, and register the returned
+    // Thenable in the handle table. The consumer awaits it on the
+    // source-to-source path (the wasm path additionally needs the
+    // thenable-resolution primitives — tracked in #199). An empty or
+    // malformed params string is treated as no params.
+    languageClientSendRequest: (cHandle, methodPtr, paramsJsonPtr) => {
+      const c = get(cHandle);
+      if (!c) return 0;
+      const method = readString(methodPtr);
+      const raw = readString(paramsJsonPtr);
+      let params;
+      if (raw && raw.length > 0) {
+        try { params = JSON.parse(raw); } catch (_e) { params = undefined; }
+      }
+      const thenable = params === undefined
+        ? c.sendRequest(method)
+        : c.sendRequest(method, params);
+      return reg(thenable);
     },
   };
 
