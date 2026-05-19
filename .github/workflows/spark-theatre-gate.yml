@@ -1,0 +1,137 @@
+# SPDX-License-Identifier: PMPL-1.0
+name: SPARK Theatre Gate
+
+# Estate anti-theatre lint (hyperpolymath/standards#135, sub-issue of #124).
+#
+# Kills "SPARK proof theatre": an Ada unit that declares SPARK_Mode (On)
+# and banners itself "formally verified" / "(Gold)" / "SPARK Proof Level"
+# while no GNATprove run has ever discharged an obligation for it.
+#
+# Per SPARK_Mode-On compilation unit, with no repo-wide prover evidence:
+#
+#   T1  HEADER PROOF-CLAIM WITHOUT PROVER  (hard fail, always)
+#       A strong proof assertion ("formally verified", "SPARK Proof
+#       Level", "(Gold)", "all preconditions and postconditions are
+#       verified", "proving the invariant holds") appears in the file
+#       HEADER BANNER (the comment block before the first code token) of a
+#       SPARK_Mode-On unit. Header-scoped on purpose: an incidental phrase
+#       in a comment deep in the body (e.g. an enum-literal description) is
+#       NOT a claim about the unit and must not trip the gate.
+#
+#   T2  ZERO-CONTRACT SPARK_Mode  (issue #135 verbatim; warn by default)
+#       SPARK_Mode (On) with no Pre/Post/Global/Depends/Contract_Cases.
+#       Hollow SPARK_Mode that proves nothing. Emitted as a warning so
+#       repos mid Ada/SPARK->Rust/SPARK migration are not broken on
+#       rollout; escalates to a hard failure when the caller passes
+#       enforce_zero_contract: true (target end-state per #135).
+#
+# Genuine SPARK repos (echidna, stapeln, ...) pass: GNATprove runs in CI,
+# so "prover evidence" is present and neither T1 nor T2 fires. The gate
+# only bites a regression that re-introduces a hollow "verified" claim.
+#
+# Reusable: a consumer repo adds a 3-line caller (see ambientops
+# .github/workflows/spark-proof-gate.yml). It also self-runs on standards.
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: "Space-separated roots to scan (default: repo root)."
+        required: false
+        type: string
+        default: "."
+      enforce_zero_contract:
+        description: "Escalate T2 (zero-contract SPARK_Mode) from warning to hard failure."
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  spark-theatre-gate:
+    name: SPARK Theatre Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+
+      - name: Scan for SPARK proof theatre
+        env:
+          SCAN_PATHS: ${{ inputs.paths || '.' }}
+          ENFORCE_T2: ${{ inputs.enforce_zero_contract && 'on' || 'off' }}
+        run: |
+          set -uo pipefail
+
+          # --- Repo-wide: is GNATprove ever actually run? -------------------
+          prover_evidence=0
+          if grep -rIlE 'gnatprove' .github/workflows 2>/dev/null | grep -q .; then
+            prover_evidence=1
+          fi
+          for bf in Justfile justfile Mustfile Dustfile; do
+            [ -f "$bf" ] && grep -qI 'gnatprove' "$bf" && prover_evidence=1
+          done
+          if find . \( -name 'gnatprove.out' -o -name '*.spark' \
+                      -o -path '*/gnatprove/*.json' \) \
+                -not -path '*/.git/*' 2>/dev/null | grep -q .; then
+            prover_evidence=1
+          fi
+          echo "prover_evidence=$prover_evidence  enforce_t2=$ENFORCE_T2"
+
+          claim_re='formally verified|SPARK Proof Level|\(Gold\)|all preconditions and postconditions are verified|proving the invariant holds'
+          contract_re='Pre[[:space:]]*=>|Post[[:space:]]*=>|Global[[:space:]]*=>|Depends[[:space:]]*=>|Contract_Cases'
+          sparkon_re='pragma[[:space:]]+SPARK_Mode[[:space:]]*\([[:space:]]*On[[:space:]]*\)|with[[:space:]]+SPARK_Mode[[:space:]]*=>[[:space:]]*On'
+
+          fail=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+
+            # Active SPARK_Mode-On aspect, ignoring commented-out lines.
+            grep -vE '^[[:space:]]*--' "$f" | grep -qE "$sparkon_re" || continue
+
+            # Header banner = the leading run of comment / blank lines up to
+            # (but excluding) the first non-comment, non-blank code token.
+            header="$(awk '
+              /^[[:space:]]*--/ || /^[[:space:]]*$/ { print; next }
+              { exit }' "$f")"
+
+            has_header_claim=0
+            printf '%s\n' "$header" | grep -qiE "$claim_re" && has_header_claim=1
+            has_contract=0
+            grep -qE "$contract_re" "$f" && has_contract=1
+
+            [ "$prover_evidence" -eq 1 ] && continue   # prover runs: not theatre
+
+            if [ "$has_header_claim" -eq 1 ]; then
+              echo "::error file=$f::T1 SPARK theatre: header banner claims formal proof but no GNATprove run exists in this repo. Wire gnatprove into CI, or remove the claim and set SPARK_Mode Off (see proven#24 / ambientops safety_boundary for the honest-demotion pattern)."
+              fail=1
+            elif [ "$has_contract" -eq 0 ]; then
+              if [ "$ENFORCE_T2" = "on" ]; then
+                echo "::error file=$f::T2 zero-contract SPARK_Mode (standards#135): SPARK_Mode (On) with no Pre/Post/Global/Depends/Contract_Cases and no prover. Add real contracts + a gnatprove gate, or set SPARK_Mode Off."
+                fail=1
+              else
+                echo "::warning file=$f::T2 zero-contract SPARK_Mode (standards#135): SPARK_Mode (On) proves nothing here (no contracts, no prover). Demote to SPARK_Mode Off or add contracts. Escalates to a hard failure once enforce_zero_contract is set."
+              fi
+            fi
+          done < <(
+            for root in $SCAN_PATHS; do
+              find "$root" \( -name '*.ads' -o -name '*.adb' \) \
+                -not -path '*/.git/*' -not -path '*/obj/*' \
+                -not -path '*/node_modules/*' 2>/dev/null
+            done
+          )
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::SPARK Theatre Gate FAILED — see annotations. Doctrine: a SPARK_Mode-On unit must either be genuinely proved (GNATprove in CI) or honestly demoted (SPARK_Mode Off + tracked obligation). No hollow 'verified' claims."
+            exit 1
+          fi
+          echo "✓ SPARK Theatre Gate passed (no hollow header proof claims found)."
