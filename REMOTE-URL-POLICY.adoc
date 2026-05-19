@@ -2,8 +2,8 @@
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 = Hyperpolymath Git Remote URL Policy (SSH-only)
 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-:revnumber: 1.0.0
-:revdate: 2026-05-17
+:revnumber: 1.1.0
+:revdate: 2026-05-19
 :toc:
 :toc-placement: preamble
 
@@ -55,23 +55,42 @@ written into a remote URL, a tracked file, or a commit.
 [discrete]
 === 3. Audit
 
-Run estate-wide before any sync:
+Run estate-wide before any sync (recurses all `.git` trees):
 
 [source,bash]
 ----
-for d in ~/dev/*/; do
-  [ -d "$d/.git" ] || continue
-  u=$(git -C "$d" remote get-url origin 2>/dev/null)
-  case "$u" in
-    *x-access-token*|*ghp_*|*gho_*|*ghs_*|*github_pat_*|https://*:*@*)
-      echo "TOKEN-IN-URL: $d" ;;
-  esac
-done
+find ~/dev -name "config" -path "*/.git/config" \
+  | xargs grep -l \
+    "x-access-token\|:gho_\|:ghp_\|:ghs_\|:github_pat_\|://[^@]*:[^@]*@" \
+    2>/dev/null \
+  | while IFS= read -r cfg; do
+      dir="${cfg%/.git/config}"
+      echo "TOKEN-IN-URL: $dir"
+      grep -E "url\s*=" "$cfg" | sed 's/\(x-access-token:\|gho_\|ghp_\|ghs_\|github_pat_\)[^@]*/\1****/g'
+    done
 ----
 
 Audit of `2026-05-17`: 20 local `~/dev` clones scanned, *0*
 token-in-URL remotes (the exposed `repos/ci` clone was scrubbed to
 SSH in the originating session).
+
+Audit of `2026-05-19` (standards#69): full recursive sweep of ~130
+`.git/config` files across `/home/hyperpolymath/dev` (repos, scratch,
+tools, worktrees, audit clones).  *1* offender found and remediated:
+
+[cols="1,1,1,1"]
+|===
+|Repo path |Remote |Offending URL (masked) |Remediated to
+
+|`dev/repos/file-soup`
+|`origin`
+|`https://x-access-token:gho_****@github.com/hyperpolymath/file-soup`
+|`git@github.com:hyperpolymath/file-soup.git`
+|===
+
+The token `gho_****` (prefix `gho_1q9dB2…`) that appeared in
+`file-soup/.git/config` is considered compromised and MUST be rotated
+— see <<_remediation_of_an_exposed_token>>.
 
 [discrete]
 === 4. Remediation of an exposed token
@@ -85,6 +104,35 @@ one remaining open item under standards#69.
 
 == Enforcement
 
-`gitbot` rejects any push whose `.git/config` (when present in tree) or
-remediation script reintroduces a token-in-URL remote. New clones in
-provisioning scripts use the SSH form by default.
+=== CI gate (estate-wide, automated)
+
+The `security-policy` job in
+`.github/workflows/governance-reusable.yml` now includes a
+`SSH-remote policy` step.  It scans every `.git/config` that is
+checked-in or present in the working tree for the token-in-URL
+patterns and fails the PR gate if any are found.  Downstream repos
+inherit this check automatically via the single `uses:` delegation.
+
+=== Local pre-push hook (recommended)
+
+Add the following to `.git/hooks/pre-push` (or the estate hook
+installer) to catch tokens before they reach CI:
+
+[source,bash]
+----
+#!/usr/bin/env bash
+# hypatia:ignore cicd_rules/banned_language_file
+# pre-push hook: reject token-in-URL remotes
+if git -C . config --get-all remote.origin.url \
+     | grep -qE "x-access-token:|:gho_|:ghp_|:ghs_|:github_pat_|://[^@]+:[^@]+@"; then
+  echo "ERROR: token-in-URL remote detected — see REMOTE-URL-POLICY.adoc"
+  exit 1
+fi
+----
+
+=== Provisioning
+
+New clones created by provisioning scripts MUST use the SSH form.  The
+`gitbot` fleet creates remotes with `git@github.com:hyperpolymath/…`
+by default; HTTPS-with-credentials is explicitly blocked in
+`gitbot-fleet` clone templates.
