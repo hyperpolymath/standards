@@ -193,9 +193,37 @@ jobs:
           enforce "Python files" "only allowed for SaltStack" "$PY_FILES"
 
       - name: Check for npm/bun artifacts
+        # standards#67 — npm-avoidant: package-lock.json must never be tracked
+        # estate-wide. Check recursively (not just root) to catch monorepo
+        # sub-packages. See docs/JS-RUNTIME-POLICY.adoc.
         run: |
-          if [ -f "package-lock.json" ] || [ -f "bun.lockb" ] || [ -f ".npmrc" ] || [ -f "yarn.lock" ]; then
-            echo "❌ npm/bun/yarn artifacts detected. Use Deno instead."
+          LOCK_FILES=$(git ls-files 'package-lock.json' '**/package-lock.json' 2>/dev/null || true)
+          BUN_FILES=$(find . -name "bun.lockb" -not -path "./.git/*" 2>/dev/null || true)
+          YARN_FILES=$(find . -name "yarn.lock" -not -path "./.git/*" 2>/dev/null || true)
+          NPMRC_FILES=$(find . -name ".npmrc" -not -path "./.git/*" 2>/dev/null || true)
+          FAILED=""
+          if [ -n "$LOCK_FILES" ]; then
+            echo "❌ Tracked package-lock.json detected (standards#67 — npm-avoidant):"
+            printf '%s\n' "$LOCK_FILES"
+            FAILED=1
+          fi
+          if [ -n "$BUN_FILES" ]; then
+            echo "❌ bun.lockb detected. Use Deno instead."
+            printf '%s\n' "$BUN_FILES"
+            FAILED=1
+          fi
+          if [ -n "$YARN_FILES" ]; then
+            echo "❌ yarn.lock detected. Use Deno instead."
+            printf '%s\n' "$YARN_FILES"
+            FAILED=1
+          fi
+          if [ -n "$NPMRC_FILES" ]; then
+            echo "❌ .npmrc detected. Use Deno deno.json for JS config."
+            printf '%s\n' "$NPMRC_FILES"
+            FAILED=1
+          fi
+          if [ -n "$FAILED" ]; then
+            echo "See hyperpolymath/standards docs/JS-RUNTIME-POLICY.adoc for remediation."
             exit 1
           fi
           echo "✅ No npm/bun violations"
