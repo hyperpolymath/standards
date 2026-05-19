@@ -270,6 +270,29 @@ jobs:
             exit 1
           fi
           echo "✅ Security policy check passed"
+      - name: SSH-remote policy (token-in-URL detection)
+        # Estate Remote-URL policy (standards#69 / REMOTE-URL-POLICY.adoc).
+        # Scans every .git/config present in the checkout tree for token-in-URL
+        # remotes. Fails hard so a compromised credential cannot silently reach
+        # a PR or main-branch push.
+        run: |
+          found=0
+          while IFS= read -r cfg; do
+            if grep -qE "url[[:space:]]*=[[:space:]]*https://[^[:space:]]*(x-access-token:|:gho_|:ghp_|:ghs_|:github_pat_)" "$cfg" 2>/dev/null; then
+              echo "❌ token-in-URL remote detected in: $cfg"
+              grep -E "url[[:space:]]*=" "$cfg" \
+                | sed 's/\(x-access-token:\|gho_\|ghp_\|ghs_\|github_pat_\)[^@]*/\1****/g'
+              found=$((found + 1))
+            fi
+          done < <(find . -name "config" -path "*/.git/config" 2>/dev/null)
+          if [ "$found" -gt 0 ]; then
+            echo ""
+            echo "Remediation: git remote set-url <name> git@github.com:<org>/<repo>.git"
+            echo "Policy: REMOTE-URL-POLICY.adoc — SSH-only remotes; no PAT/token in URL ever."
+            exit 1
+          fi
+          echo "✅ SSH-remote policy: no token-in-URL remotes detected"
+
       - name: Tooling version integrity
         # Estate Tooling Version Integrity policy (root cause: burble#39).
         # Inline + dependency-free so it runs in any caller repo.
