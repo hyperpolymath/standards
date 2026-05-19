@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= JS Runtime & Package Management Policy
+:revdate: 2026-05-19
+:status: ACTIVE
+:issue-67: hyperpolymath/standards#67
+:issue-68: hyperpolymath/standards#68
+
+This document is the canonical estate-wide policy for JavaScript/TypeScript
+runtimes and package management.  It is referenced by
+`governance-reusable.yml` (enforcement) and the canonical template
+`.gitignore` files (rsr-template-repo, v3-templater).
+
+See also: `scripts/purge-node-modules.sh` (remediation utility).
+
+== Runtime Hierarchy
+
+Tool selection MUST follow this hierarchy:
+
+[cols="1,2,3", options="header"]
+|===
+| Priority | Tool | Rationale
+
+| 1
+| *Deno*
+| Architectural standard.  Secure-by-default, no `node_modules` pollution,
+built-in TypeScript support.  All new JS/TS work starts here.
+
+| 2
+| *Bun*
+| Practical performance fallback.  Drop-in Node compatibility.  Use where
+specific npm-ecosystem libraries are required and Deno cannot reach.
+
+| 3
+| *pnpm*
+| Efficiency fallback.  Prefer over npm when Bun is incompatible.
+
+| 4
+| *npm*
+| Absolute last resort.  Only permitted for platform-specific requirements
+(e.g. VSCode Extension publishing) or legacy audits.  Every npm use must
+carry a `# hypatia:ignore` inline exemption comment.
+|===
+
+== Hard Rules (enforced by governance-reusable.yml)
+
+1. `package-lock.json` MUST NOT be tracked in any repo. ({issue-67})
+   - Add to `.gitignore` via canonical template propagation.
+   - If already tracked: `git rm --cached package-lock.json` and add to
+     `.gitignore`.  Use `purge-node-modules.sh --force` to clean local
+     copies.
+2. `bun.lockb`, `yarn.lock`, `.npmrc` MUST NOT be tracked.
+3. `node_modules/` MUST NOT be tracked (already in canonical `.gitignore`).
+4. `.editorconfig` and `.claude/` MUST NOT be tracked. ({issue-68})
+   - These are local-only (agent scaffolding + editor config).
+   - Add to `.gitignore` via canonical template propagation.
+
+== Canonical .gitignore Entries (template source of truth)
+
+The following entries MUST be present in every repo's `.gitignore` (carried
+from rsr-template-repo and v3-templater via template propagation):
+
+----
+# npm-avoidant (standards#67): estate JS-runtime policy is Deno>Bun>pnpm>npm.
+# npm lockfiles must never be committed estate-wide.
+package-lock.json
+**/package-lock.json
+
+# Agent & editor scaffolding (standards#68) — local-only, never committed
+# estate-wide. Owner decision 2026-05-16: gitignore both rather than commit
+# per-repo agent/editor config.
+.editorconfig
+.claude/
+----
+
+== Remediation
+
+=== Remove a tracked package-lock.json
+
+[source,bash]
+----
+git rm --cached package-lock.json
+echo 'package-lock.json' >> .gitignore
+echo '**/package-lock.json' >> .gitignore
+git commit -m "chore(gitignore): remove tracked package-lock.json (standards#67)"
+----
+
+=== Bulk remediation (estate-wide audit)
+
+Use the propagation script at `scripts/propagate-gitignore-67-68.sh` in this
+repo to identify and prepare per-repo branches.  The script is READ-ONLY by
+default (dry-run); pass `--fix` to stage changes for review.
+
+See also: `npm-avoidant/scripts/purge-node-modules.sh` for removing local
+`node_modules/` and lockfile debris.
+
+== Consumer-repo Audit (2026-05-19 snapshot)
+
+Obtained via `git ls-files` sweep across `/home/hyperpolymath/dev/repos/`:
+
+[cols="2,1", options="header"]
+|===
+| Metric | Count
+
+| Repos with tracked `package-lock.json`
+| 10
+
+| Repos with tracked `.editorconfig`
+| 118
+
+| Repos with tracked `.claude/` files
+| 56
+|===
+
+Detailed list of repos with tracked `package-lock.json` (primary blocker for
+standards#67):
+
+* `ci` (nested: `firefox-lsp/vscode-extension/package-lock.json`)
+* `claude-integrations` (nested: `firefox-lsp/vscode-extension/package-lock.json`)
+* `developer-ecosystem` (nested: `rescript-ecosystem/rescript-tea/package-lock.json`)
+* `git-scripts` (nested: `ui/package-lock.json`)
+* `hyperpolymath-archive` (nested: `flatracoon-netstack/interface/package-lock.json`)
+* `panll` (root)
+* `repos-monorepo` (nested: multiple `boj-cartridges/` sub-packages)
+* `rescript-tea` (root)
+* `typed-wasm` (root)
+* `v3-templater` (root — RESOLVED by PR #68/69, now in `.gitignore`)
+
+NOTE: `.editorconfig` (118 repos) and `.claude/` (56 repos) are already-committed
+historical files.  The gitignore fix prevents new commits; removing existing
+tracked copies is a separate per-repo chore, owner-gated.  See
+`scripts/propagate-gitignore-67-68.sh` for the propagation recipe.
