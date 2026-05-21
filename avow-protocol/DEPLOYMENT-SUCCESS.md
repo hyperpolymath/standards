@@ -39,7 +39,7 @@
 
 **API Authentication:**
 - Cloudflare API Token (with Pages Edit permissions)
-- Account ID: b72dd54ed3ee66088950c82e0301edbb
+- Account ID: (private — see ~/.config/hyperpolymath/cloudflare.env)
 
 **Deployment Method:**
 ```bash
