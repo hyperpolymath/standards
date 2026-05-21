@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: PMPL-1.0-or-later
 # Deploy all repos to Cloudflare Pages
+#
+# Required environment:
+#   CLOUDFLARE_API_TOKEN   Cloudflare API token with Pages:Edit
+#   CLOUDFLARE_ACCOUNT_ID  Cloudflare account ID
+#
+# Source these from a private location (e.g. ~/.config/hyperpolymath/cloudflare.env)
+# before invoking. Do NOT hardcode them in this file.
 
-export CLOUDFLARE_API_TOKEN="xjmFyko52yeQ-3DPYxDTOZwM3DYwqRFU84f0UN40"
-export CLOUDFLARE_ACCOUNT_ID="b72dd54ed3ee66088950c82e0301edbb"
+set -euo pipefail
+
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN must be set (do not hardcode)}"
+: "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID must be set (do not hardcode)}"
+export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
 
 REPOS_DIR="$HOME/Documents/hyperpolymath-repos"
 
