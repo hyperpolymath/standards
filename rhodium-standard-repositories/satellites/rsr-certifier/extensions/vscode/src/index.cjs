@@ -7,15 +7,15 @@
 //   src/extension.affine   ──affinescript compile──>   out/extension.cjs
 //   src/index.cjs          ──this file──>             exports.{activate,deactivate}
 //
-// Wires the vendored affine-vscode adapter into the wasm shim's
-// `extraImports` hook before activation, so AffineScript extern fns
+// Wires the published @hyperpolymath/affine-vscode adapter into the wasm
+// shim's `extraImports` hook before activation, so AffineScript extern fns
 // declared in stdlib/Vscode.affine + stdlib/VscodeLanguageClient.affine
 // resolve to live vscode / vscode-languageclient API calls.
 
 "use strict";
 
 const shim = require("../out/extension.cjs");
-const makeVscodeBindings = require("./affine-vscode-adapter.cjs");
+const makeVscodeBindings = require("@hyperpolymath/affine-vscode");
 
 shim.extraImports = function extraImports() {
   return makeVscodeBindings(
