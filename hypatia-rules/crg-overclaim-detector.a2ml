@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # HYP-S005 — CRG Overclaim Detector
 # Flags repos self-declaring a CRG grade that lacks the evidence artefacts
 # required by CRG v2.0 (STRICT). Sibling rule to HYP-S001 (demotion detector):
@@ -162,7 +162,11 @@ sections:
 #
 # Contradiction rule: a repo cannot self-consistently claim C (or higher) if
 # its own metadata says it is <50% complete and pre-0.5.0. Either the grade
-# is wrong, the version is wrong, or the completion-percentage is wrong.
+# is wrong, the version is wrong, or the completion score is wrong.
+#
+# Canonical field: `overall-completion` in STATE.a2ml. A legacy
+# `completion-percentage` field may still appear in older snapshots, but it is
+# not the primary schema key and must not be required for modern repos.
 # The audit convention is: trust version + completion, demote the grade.
 #
 # This fires BEFORE the file-tree evidence checks; if it fires, a full audit
@@ -173,8 +177,8 @@ grade_ge_c_but_early_stage:
     parse_state.crg-grade IN {"C", "B", "A"}
     AND parse_state.version < "0.5.0"
     AND (
-      parse_state.completion-percentage < 50
-      OR parse_state.completion-percentage IS empty_or_absent
+      parse_state.overall-completion < 50
+      OR parse_state.overall-completion IS empty_or_absent
     )
     AND parse_state.dogfooding-status IS empty_or_absent
   severity: high
@@ -194,13 +198,13 @@ grade_ge_c_but_missing_self_consistency_inputs:
     parse_state.crg-grade IN {"C", "B", "A"}
     AND (
       parse_state.version IS empty_or_absent
-      OR parse_state.completion-percentage IS empty_or_absent
+      OR parse_state.overall-completion IS empty_or_absent
     )
   severity: high
   finding_kind: self-inconsistent-claim
   message: >-
     {component} claims {declared} but STATE.a2ml is missing version and/or
-    completion-percentage. The CRG self-consistency precheck cannot run
+    overall-completion. The CRG self-consistency precheck cannot run
     without these keys — treat this as a structural overclaim until state
     metadata is completed.
 
