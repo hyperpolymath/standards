@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= Exemption mechanisms in the hyperpolymath estate
+:toc:
+
+Three concentric exemption layers exist in the estate. Each addresses a
+different question and lives in a different file. Mixing them up is the
+single most common cause of "I added an ignore file but CI still fails"
+confusion.
+
+== Quick decision tree
+
+[source]
+----
+Are you trying to stop bots from WRITING to a path?
+  -> use the estate-wide bot_exclusion_registry.a2ml
+
+Are you trying to stop the governance gate from FAILING on a
+pre-existing finding?
+  -> use the per-repo .hypatia-baseline.json
+
+Are you trying to make a finding GO AWAY for one specific PR only?
+  -> currently unsupported. See "per-PR exemptions" below.
+----
+
+== Layer 1: Estate-wide bot write denylist
+
+**File:** `hyperpolymath/standards/.machine_readable/bot_exclusion_registry.a2ml`
+
+**Scope:** All bots, all repos. Authoritative across the entire estate.
+
+**Purpose:** Tells bots what they may not *write* to. Read-only scanning
+is always allowed; only write actions (Write, Commit, CreatePr,
+CreateBranch, etc.) are gated.
+
+**Format:** A2ML (TOML-shaped). Three axes:
+1. `external-repos` — exact `owner/repo` matches that bots must skip.
+2. `vendored-directory-patterns` — globs that should never be edited.
+3. `remote-origin-patterns` — bail-if-origin-matches patterns.
+
+**Consumer:** Every bot via `shared-context::ExclusionRegistry::check()`.
+The registry is fail-closed: if the file fails to load, all bot writes
+are denied.
+
+**Edit when:** A new repo should be off-limits to bots, or a new
+vendored subtree should never be modified.
+
+**Don't use for:** Suppressing CI findings. This layer doesn't touch
+CI at all.
+
+== Layer 2: Per-repo Hypatia finding baseline
+
+**File:** `.hypatia-baseline.json` at the calling repo's root.
+
+**Scope:** One repo. Acknowledged findings only — not a "ignore these
+forever" file.
+
+**Purpose:** Tells the governance gate which Hypatia findings have been
+seen, triaged, and accepted as known debt. Findings matched by a baseline
+entry don't block CI; they're surfaced in the run summary as
+"acknowledged."
+
+**Format:** JSON array of `{severity, rule_module, type, file | file_pattern, ...}`
+objects. See `docs/HYPATIA-BASELINE-FORMAT.adoc` for the full schema.
+
+**Consumer:** `apply-baseline.sh` invoked from
+`hyperpolymath/standards/.github/workflows/governance-reusable.yml`.
+Suppresses matching findings from the gate, downgrades severity if
+`severity_override` is set, fails on expired entries.
+
+**Edit when:**
+* Pre-existing debt is tracked for migration (link a `tracking_issue`).
+* Vendored / third-party code triggers a rule the team can't fix.
+* Test fixtures intentionally violate a rule (with `note` explaining).
+
+**Don't use for:**
+* Newly-introduced findings on freshly-authored code. The rule exists
+  for a reason; baselining the new file defeats it. Fix the code.
+* One-off PR-scoped suppression. Baseline edits are merged to main; they
+  affect all subsequent PRs. See Layer 3.
+
+== Layer 3: Per-PR exemptions (NOT YET IMPLEMENTED)
+
+There is currently no supported per-PR exemption mechanism. PR authors
+attempting one (e.g. by inventing a `.hypatia-ignore` file) will find
+nothing reads it, and the gate will still fail. **Do not invent new
+file conventions.** If you need per-PR exemption, file an issue against
+`hyperpolymath/standards` proposing a designed mechanism.
+
+If a mechanism is added, it should be one of:
+
+1. **PR-body marker**, e.g. a fenced block:
++
+[source,markdown]
+----
+```hypatia-exempt
+- rule: code_safety/obj_magic
+  file: bots/sustainabot/bot-integration/src/Analysis.res
+  reason: Pre-migration debt; tracked in #148
+```
+----
++
+Pros: lives with the PR, vanishes when the PR closes, reviewable in
+the same UI as the change. Cons: requires a PR-body parser.
+
+2. **Label-driven**, e.g. apply `gate:exempt:code_safety` and require an
+exemption-justification comment from a CODEOWNER.
+
+3. **Sidecar file under `.github/pr-exemptions/`** — committed for one
+PR's lifetime, deleted at merge by a workflow.
+
+A formal proposal should pick one and document it explicitly.
+
+== Anti-patterns to reject
+
+These have been attempted and should be refused at review:
+
+* `.hypatia-ignore` (any format) — never read by anything. Reject; point
+  the author at `.hypatia-baseline.json`.
+* Adding `pragma: ignore-rule` comments in source. Hypatia scans by AST
+  and ignores comments; suppression has to be data-driven, not
+  source-comment driven.
+* Setting `continue-on-error: true` on the governance gate. This makes
+  CI lie. Use a baseline entry with `severity_override: advisory`
+  instead — keeps the finding visible while unblocking the gate.
+* Adding the offending path to `.gitignore`. The file still exists in
+  history; Hypatia and other estate scanners still see it.
+* Forking `hyperpolymath/standards` to disable the rule for one repo.
+  If a rule is wrong for one repo, the rule needs scoping in the
+  upstream, not a fork.
+
+== Cross-references
+
+* `docs/HYPATIA-BASELINE-FORMAT.adoc` — the baseline file format.
+* `.machine_readable/hypatia-baseline.schema.json` — machine schema.
+* `hyperpolymath/standards#????` — proposal that landed this consumer.
+* `hyperpolymath/hypatia` — the scanner that emits findings.

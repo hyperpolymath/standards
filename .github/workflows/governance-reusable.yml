@@ -21,6 +21,24 @@
 #   jobs:
 #     governance:
 #       uses: hyperpolymath/standards/.github/workflows/governance-reusable.yml@main
+#
+# Hypatia baseline integration (added 2026-05-25):
+#   - A caller repo may carry `.hypatia-baseline.json` (array of
+#     acknowledged Hypatia findings; schema lives at
+#     `.machine_readable/hypatia-baseline.schema.json` in this repo and
+#     is documented in `docs/HYPATIA-BASELINE-FORMAT.adoc`).
+#   - `validate-baseline` (below) checks the file shape and reports
+#     stale entries — it never fails the gate when the baseline is
+#     absent or matches.
+#   - `language-policy` consults the baseline for
+#     `cicd_rules/banned_language_file` exemptions; the legacy
+#     `.hypatia-ignore` flat-file support is retained for
+#     backward-compat and will be retired in a follow-up PR once the
+#     estate has converged on `.hypatia-baseline.json`.
+#   - Rollout mode is controlled by `vars.HYPATIA_BASELINE_MODE`
+#     (`advisory` | `blocking`); the default is `advisory` for the
+#     one-week soak. Flip to `blocking` once the conversion is
+#     observed-clean.
 
 name: Estate Governance (reusable)
 
@@ -37,6 +55,71 @@ permissions:
   contents: read
 
 jobs:
+  validate-baseline:
+    name: Validate Hypatia baseline
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+
+      - name: Detect baseline file
+        id: detect
+        run: |
+          if [ -f .hypatia-baseline.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Found .hypatia-baseline.json — entries will be honoured by the language-policy gate."
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No .hypatia-baseline.json — language-policy gate will treat every banned-language file as new."
+          fi
+
+      - name: Validate baseline against schema
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          # Schema lives in this reusable workflow's repo so consumers
+          # don't need to bundle their own copy.
+          SCHEMA_URL="https://raw.githubusercontent.com/hyperpolymath/standards/main/.machine_readable/hypatia-baseline.schema.json"
+          curl -sSfL "$SCHEMA_URL" -o /tmp/hypatia-baseline.schema.json || {
+            echo "::warning::Could not fetch baseline schema from $SCHEMA_URL — skipping schema validation."
+            exit 0
+          }
+          # `ajv` is preferred but a pure-jq sanity check is enough for
+          # the advisory-mode rollout: array of objects, required keys
+          # present.
+          if command -v ajv >/dev/null 2>&1; then
+            ajv validate --spec=draft2020 \
+              -s /tmp/hypatia-baseline.schema.json \
+              -d .hypatia-baseline.json
+          else
+            jq -e 'type == "array"
+                   and all(.[]; type == "object"
+                                and has("severity")
+                                and has("rule_module")
+                                and has("type")
+                                and (has("file") or has("file_pattern"))
+                   )' .hypatia-baseline.json >/dev/null
+            echo "✅ baseline shape OK (jq fallback — install ajv for full schema validation)"
+          fi
+
+      - name: Detect stale baseline entries
+        if: steps.detect.outputs.present == 'true'
+        run: |
+          # Soft-fail: a baseline entry pointing at a file that no
+          # longer exists is a warning, not a hard failure. Flips to
+          # blocking once estate-wide convergence is observed.
+          STALE_COUNT=0
+          while IFS= read -r file; do
+            if [ -n "$file" ] && [ ! -e "$file" ]; then
+              echo "::warning file=.hypatia-baseline.json::Stale baseline entry: $file does not exist in the working tree."
+              STALE_COUNT=$((STALE_COUNT + 1))
+            fi
+          done < <(jq -r '.[].file // empty' .hypatia-baseline.json)
+          echo "Stale entries: $STALE_COUNT"
+
   language-policy:
     name: Language / package anti-pattern policy
     runs-on: ${{ inputs.runs-on }}
@@ -138,20 +221,52 @@ jobs:
           PYEOF
 
       # Shared escape hatch for the banned-language-file checks below.
-      # Honours the estate's declared machine-readable exemption (standards#72,
-      # Explicit-Escape Principle): a file is exempt from the
-      # `cicd_rules/banned_language_file` rule if EITHER
-      #   * `.hypatia-ignore` contains the exact line
-      #     `cicd_rules/banned_language_file:<relpath>`, OR
-      #   * the file carries an inline `# hypatia:ignore ...
-      #     cicd_rules/banned_language_file` pragma in its first 8 lines
-      # — the same escape the Hypatia scanner itself honours.
+      # Honours three exemption mechanisms (see
+      # standards/docs/EXEMPTION-MECHANISMS.adoc):
+      #   1. `.hypatia-baseline.json` — array of acknowledged findings,
+      #      shape mirrors the Hypatia findings themselves. Schema is
+      #      `.machine_readable/hypatia-baseline.schema.json` in this
+      #      repo. The validate-baseline job above schema-checks this.
+      #      Added 2026-05-25 as part of the convergence on a single
+      #      exemption mechanism.
+      #   2. `.hypatia-ignore` flat-file — legacy single-rule-per-line
+      #      format (`cicd_rules/banned_language_file:<relpath>`).
+      #      Will be retired in a follow-up PR once .hypatia-baseline.json
+      #      is in active use across the estate.
+      #   3. Inline `# hypatia:ignore ...` pragma in the file's first
+      #      8 lines — the same escape the Hypatia scanner itself
+      #      honours.
       - name: Check for ReScript / Go / Python (banned language files)
         run: |
-          rule="cicd_rules/banned_language_file"
+          rule_module="cicd_rules"
+          rule_type="banned_language_file"
+          rule="${rule_module}/${rule_type}"
+
+          # Baseline lookup: returns 0 (exempt) if the file appears in
+          # .hypatia-baseline.json with a matching rule_module + type.
+          # `file_pattern` glob match is intentionally NOT implemented
+          # here; the advisory-rollout window only honours exact `file`
+          # matches. Pattern support arrives with the blocking-mode
+          # flip and the apply-baseline.sh upgrade (see
+          # standards/scripts/apply-baseline.sh).
+          in_baseline() {
+            local target="$1"
+            [ -f .hypatia-baseline.json ] || return 1
+            command -v jq >/dev/null 2>&1 || return 1
+            jq -e \
+              --arg rm "$rule_module" \
+              --arg rt "$rule_type" \
+              --arg f  "$target" \
+              'any(.[]; .rule_module == $rm and .type == $rt and .file == $f)' \
+              .hypatia-baseline.json >/dev/null 2>&1
+          }
 
           is_exempt() {
             f="${1#./}"
+            if in_baseline "$f"; then
+              echo "⏭️  exempt (baseline): $f"
+              return 0
+            fi
             if [ -f .hypatia-ignore ] && grep -qxF "${rule}:${f}" .hypatia-ignore; then
               return 0
             fi
