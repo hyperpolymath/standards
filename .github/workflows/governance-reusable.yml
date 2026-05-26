@@ -172,15 +172,47 @@ jobs:
               return re.compile('^' + ''.join(out) + '$')
 
           exemption_patterns = []
+
+          # Source 1 — `.governance-allowlist` (plain glob lines, optional
+          # `# comment`). This is the foundational, format-stable allowlist
+          # mechanism: each repo can carry one file with one glob per line,
+          # decoupled from any prose-heading text in `.claude/CLAUDE.md`. The
+          # `.claude/CLAUDE.md` Exemptions tables remain authoritative for
+          # human-facing rationale; this file is the machine-readable index.
+          # Added 2026-05-26 (Refs affinescript false-positive sweep).
+          allowlist_file = pathlib.Path('.governance-allowlist')
+          if allowlist_file.exists():
+              for raw_line in allowlist_file.read_text(encoding='utf-8').splitlines():
+                  stripped = raw_line.split('#', 1)[0].strip()
+                  if stripped:
+                      exemption_patterns.append((stripped, glob_to_regex(stripped)))
+
+          # Source 2 — `.claude/CLAUDE.md` "Exemptions" markdown tables.
+          # Multiple tables per file are supported (TS-specific, TS+JS,
+          # Runtime+TS, etc.); the regex permits any heading whose text
+          # mentions TypeScript / JavaScript / TS / JS together with
+          # "Exemption(s)". Previously the regex was `TypeScript [Ee]xemptions`
+          # which is a literal pattern requiring exactly one space, so a
+          # heading like `### TypeScript / JavaScript Exemptions (Approved)`
+          # (as carried by affinescript) silently failed to match and the
+          # repo's exemptions were never loaded -- leading to a false-fail
+          # on every PR in that repo. Also: the previous loop broke on the
+          # *first* heading after entering the table, which misses any
+          # *additional* exemption tables further down the file.
+          heading_re = re.compile(r'^#{1,6}\s')
+          exemption_heading_re = re.compile(
+              r'(?:TypeScript|JavaScript|TS|JS|\.tsx?)\b[^#\n]*[Ee]xemption', re.IGNORECASE)
           claude_md = pathlib.Path('.claude/CLAUDE.md')
           if claude_md.exists():
               in_table = False
               for line in claude_md.read_text(encoding='utf-8').splitlines():
-                  if re.search(r'TypeScript [Ee]xemptions', line):
-                      in_table = True
+                  if heading_re.match(line):
+                      # Enter a new section: in_table iff this heading is an
+                      # exemption heading. Multiple exemption sections per
+                      # file are allowed; non-exemption headings close any
+                      # open table.
+                      in_table = bool(exemption_heading_re.search(line))
                       continue
-                  if in_table and line.startswith(('### ', '## ', '# ')):
-                      break
                   if in_table and line.startswith('|'):
                       m = re.match(r'\|\s*`([^`]+)`', line)
                       if m:
@@ -214,8 +246,9 @@ jobs:
               print("  (a) migrate the file to AffineScript")
               print("  (b) move to an allowlisted bridge path")
               print("  (c) add an entry to the 'TypeScript Exemptions' table in .claude/CLAUDE.md")
+              print("  (d) add a one-line glob to `.governance-allowlist` at the repo root")
               if exemption_patterns:
-                  print(f"\n(Currently {len(exemption_patterns)} exemption(s) parsed from .claude/CLAUDE.md.)")
+                  print(f"\n(Currently {len(exemption_patterns)} exemption(s) parsed from .claude/CLAUDE.md + .governance-allowlist.)")
               sys.exit(1)
           print(f"✅ No TypeScript files outside allowlist ({len(exemption_patterns)} per-repo exemption(s) parsed).")
           PYEOF
