@@ -91,9 +91,9 @@ This means nested copies are one of:
 | `mirror.yml` | 289 | 133 | 422 |
 | `secret-scanner.yml` | 281 | 282 | 563 |
 | `codeql.yml` | 263 | ~518 (per-repo verified for top-10 monorepos) | ~781 |
-| `scorecard.yml` | 258 | 0 | 258 |
+| `scorecard.yml` | 258 | 626 | 884 |
 
-`scorecard.yml` is the only template with no monorepo nesting — making it the cleanest sweep target if/when #195 lands.
+**Correction (post-helper validation):** an earlier version of this table reported scorecard.yml as having ZERO nested copies — that figure came from the broad `gh /search/code` query, which under-reported due to the Layer-2 truncation documented above. After [#204](https://github.com/hyperpolymath/standards/pull/204) added the `list-workflow-paths.sh` helper that walks the Git Tree API directly, per-repo enumeration found 626 nested scorecard.yml copies the broad query missed entirely. Scorecard is NOT immune to nested-copy proliferation; it has the second-highest nested count of the 5 candidates (behind hypatia-scan). The Layer-3 caveat still applies (nested copies are inert) — the disposition is single-source-of-truth cleanup, not security gain.
 
 ## Classifier tooling pattern (`scripts/sweep-classifiers/`)
 
