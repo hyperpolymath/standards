@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+name: launcher-standard lock-step
+
+# Enforces the sync requirement declared in launcher/README.adoc §Sync
+# requirement: the machine-readable form (launcher-standard.a2ml) and the
+# prose form (docs/UX-standards/launcher-standard.adoc) MUST be edited in
+# the same PR. Drift between the two is a standards-compliance bug.
+#
+# How it works: the workflow triggers only when one of the two files in
+# the lock-step group is touched. Inside the job we then verify that the
+# other file is *also* in the PR diff. If not, fail with an actionable
+# message naming the missing file.
+
+on:
+  pull_request:
+    paths:
+      - 'launcher/launcher-standard.a2ml'
+      - 'docs/UX-standards/launcher-standard.adoc'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lockstep:
+    name: Verify launcher-standard lock-step
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for base/head diff)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify both files changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # The lock-step group. Editing any of these MUST be accompanied
+          # by edits to the others in the same PR.
+          declare -a GROUP=(
+            "launcher/launcher-standard.a2ml"
+            "docs/UX-standards/launcher-standard.adoc"
+          )
+
+          mapfile -t CHANGED < <(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+
+          declare -a TOUCHED=()
+          declare -a MISSING=()
+          for f in "${GROUP[@]}"; do
+            found=0
+            for c in "${CHANGED[@]}"; do
+              if [[ "$c" == "$f" ]]; then
+                found=1
+                break
+              fi
+            done
+            if [[ $found -eq 1 ]]; then
+              TOUCHED+=("$f")
+            else
+              MISSING+=("$f")
+            fi
+          done
+
+          # If the workflow ran, paths: filter matched at least one group
+          # member — so TOUCHED is non-empty. The check is whether MISSING
+          # is also non-empty (partial-touch = drift).
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "::error::launcher-standard lock-step violation"
+            echo ""
+            echo "Per launcher/README.adoc §Sync requirement, the machine-readable"
+            echo "form (a2ml) and the prose form (adoc) MUST be edited in the"
+            echo "same PR. Drift between them is a standards-compliance bug."
+            echo ""
+            echo "Touched in this PR:"
+            for f in "${TOUCHED[@]}"; do
+              echo "  + ${f}"
+            done
+            echo ""
+            echo "Required but NOT touched:"
+            for f in "${MISSING[@]}"; do
+              echo "  - ${f}"
+            done
+            echo ""
+            echo "Fix: add the matching edit to the file(s) above. If your"
+            echo "change is genuinely one-sided (e.g. a prose-only typo fix"
+            echo "with no a2ml equivalent), add a no-op whitespace touch to"
+            echo "the other file with a commit message explaining why."
+            exit 1
+          fi
+
+          echo "::notice::launcher-standard lock-step: OK — both files touched"
+          printf '  + %s\n' "${TOUCHED[@]}"
