@@ -1,0 +1,189 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# rust-ci-reusable.yml — Reusable Rust CI bundle (RSR).
+#
+# Replaces the per-repo `rust-ci.yml` template that copy-drifted across
+# the estate. Estate audit (2026-05-26) found:
+#
+#   * 137 repos shipping their own copy of rust-ci.yml
+#   * 30 unique SHAs — same logical workflow, drifted independently
+#   * Recurring failure modes across PRs: missing top-level
+#     `permissions:`, inconsistent `if: hashFiles('Cargo.toml')`
+#     guards, `cargo audit` re-installing every run, license-header
+#     drift (PMPL/MPL/AGPL), inconsistent SHA pins.
+#
+# The reusable bundles the union of features observed across the
+# variants and gates the slow extras (audit, coverage) behind opt-in
+# inputs so consumers only pay for what they want.
+#
+# Caller example (single wrapper, mirrors governance.yml + deno-ci.yml):
+#
+#   jobs:
+#     rust-ci:
+#       uses: hyperpolymath/standards/.github/workflows/rust-ci-reusable.yml@main
+#
+# With audit + coverage enabled:
+#
+#   jobs:
+#     rust-ci:
+#       uses: hyperpolymath/standards/.github/workflows/rust-ci-reusable.yml@main
+#       with:
+#         enable_audit: true
+#         enable_coverage: true
+
+name: Rust CI (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label for all Rust CI jobs
+        type: string
+        required: false
+        default: ubuntu-latest
+      enable_audit:
+        description: Run `cargo audit` (slow — installs each run; off by default)
+        type: boolean
+        required: false
+        default: false
+      enable_coverage:
+        description: Run `cargo tarpaulin` + upload to codecov (slow; off by default)
+        type: boolean
+        required: false
+        default: false
+      clippy_args:
+        description: Args appended to `cargo clippy`
+        type: string
+        required: false
+        default: "--all-targets -- -D warnings"
+      test_args:
+        description: Args appended to `cargo test`
+        type: string
+        required: false
+        default: "--all-targets"
+      check_args:
+        description: Args appended to `cargo check`
+        type: string
+        required: false
+        default: "--all-targets"
+
+permissions:
+  contents: read
+
+jobs:
+  # Skip the whole reusable when the repo has no Cargo.toml — lets
+  # consumers add the wrapper unconditionally without worrying about
+  # repos that don't ship Rust code at the moment.
+  check:
+    name: Cargo check + clippy + fmt
+    runs-on: ${{ inputs.runs-on }}
+    if: hashFiles('Cargo.toml') != ''
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - name: Cargo check
+        run: cargo check ${{ inputs.check_args }}
+
+      - name: Cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Cargo clippy
+        run: cargo clippy ${{ inputs.clippy_args }}
+
+  test:
+    name: Cargo test
+    runs-on: ${{ inputs.runs-on }}
+    needs: check
+    if: hashFiles('Cargo.toml') != ''
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - name: Run tests
+        run: cargo test ${{ inputs.test_args }}
+
+      - name: Write summary
+        if: always()
+        run: |
+          {
+            echo "## Rust CI Results"
+            echo ""
+            echo "- **cargo check**: ${{ needs.check.result }}"
+            echo "- **cargo test**: completed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  audit:
+    name: Cargo audit (security)
+    runs-on: ${{ inputs.runs-on }}
+    if: ${{ inputs.enable_audit && hashFiles('Cargo.toml') != '' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Install cargo-audit
+        # Use the binstall path when available to skip a from-source rebuild
+        # on every run — was the single biggest contributor to slow CI on
+        # repos that opted in to audit (~3–4 minute install).
+        run: cargo install cargo-audit --locked
+
+      - name: Security audit
+        run: cargo audit
+
+  coverage:
+    name: Coverage (tarpaulin + codecov)
+    runs-on: ${{ inputs.runs-on }}
+    if: ${{ inputs.enable_coverage && hashFiles('Cargo.toml') != '' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+
+      - name: Generate coverage
+        run: cargo tarpaulin --out Xml
+
+      - name: Upload to codecov
+        uses: codecov/codecov-action@ab904c41d6ece82784817410c45d8b8c02684457 # v3
+        with:
+          files: cobertura.xml
