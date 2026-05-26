@@ -1,0 +1,103 @@
+= Sweep classifiers
+:SPDX-License-Identifier: PMPL-1.0-or-later
+
+Per-template classifiers used to triage the wrapper-sweep work that
+follows each of the foundational reusable PRs filed against
+`standards`:
+
+[cols="2,1,3", options="header"]
+|===
+| Classifier | Reusable PR | Template
+| `classify-mirror.sh`         | #187 | `mirror.yml` (7-forge mirror bundle)
+| `classify-secret-scanner.sh` | #190 | `secret-scanner.yml` (trufflehog/gitleaks/rust/shell)
+| `classify-codeql.sh`         | #192 | `codeql.yml` (CodeQL security analysis)
+| `classify-hypatia-scan.sh`   | #193 | `hypatia-scan.yml` (Hypatia neurosymbolic scan)
+|===
+
+== Pipeline
+
+. Paginate `gh api /search/code` for the template across the estate.
+. Group results by blob SHA; fetch each unique blob exactly once.
+. Classify each blob (job-set match / line-count band / language matrix).
+. Emit per-repo TSV: `<repo>\t<sha>\t<class>\t<reason>\t<lines>\t<details>`.
+
+The expensive step (blob fetch) is cached in `$BLOBS_DIR`, so reruns
+are fast.
+
+== Usage
+
+[source,bash]
+----
+# 1. Paginate the search (one-time per template):
+gh api --paginate -X GET '/search/code' \
+  -f q='filename:mirror.yml path:.github/workflows org:hyperpolymath' \
+  --jq '.items[] | {repo: .repository.name, sha: .sha}' \
+  > /tmp/mirror-full.json
+
+# 2. Run the classifier:
+BLOBS_DIR=/tmp/mirror-blobs \
+  ./classify-mirror.sh /tmp/mirror-full.json > /tmp/mirror-classification.tsv
+
+# 3. Summarise:
+awk -F'\t' '{print $3}' /tmp/mirror-classification.tsv | sort | uniq -c | sort -rn
+----
+
+== Nested-path caveat — 3 layers of undercount
+
+`gh api /search/code` undercounts monorepo-nested workflow files in
+three compounding ways:
+
+. *Layer 1 — `path:` filter is a prefix match.* `path:.github/workflows`
+  excludes paths like `a2ml/bindings/deno/.github/workflows/mirror.yml`
+  outright.
+. *Layer 2 — even broad queries are org-scope-truncated.* Removing the
+  `path:` filter and running `filename:codeql.yml org:hyperpolymath`
+  returns ~190 paths, but per-repo enumeration of just
+  `developer-ecosystem` finds 170 codeql.yml files. The endpoint
+  silently caps results once it hits internal limits. Empirically
+  validated against `scorecard.yml`: broad query saw 152 paths, all
+  top-level; per-repo enumeration revealed 626 nested copies the
+  broad query missed entirely.
+. *Layer 3 — nested workflows do not execute.* GitHub Actions only runs
+  workflows from the repo-root `.github/workflows/` directory. Nested
+  copies are inert vendored templates or stale leftover. Security-driven
+  campaigns (e.g. propagating a missing guardrail) do NOT close
+  additional attack surface via nested wrappers. Single-source-of-truth
+  campaigns still benefit.
+
+For accurate counts, use `list-workflow-paths.sh` (this directory),
+which walks `gh repo list` and queries each repo's Git Tree API
+directly — bypassing Layers 1 and 2.
+
+[source,bash]
+----
+./list-workflow-paths.sh codeql.yml \
+  > /tmp/drift-survey/codeql-all-tuples.tsv
+
+# Top-level vs nested split:
+awk -F'\t' '{print $4}' /tmp/drift-survey/codeql-all-tuples.tsv \
+  | sort | uniq -c
+----
+
+Output format: `<repo>\t<path>\t<blob-sha>\t<top-level|nested>`.
+
+The legacy `gh api /search/code` query is still useful as a quick first
+look, but `list-workflow-paths.sh` is the source of truth for any
+sweep-planning decision.
+
+== Output classes (varies by classifier)
+
+* `TRIVIAL` / `TRIVIAL_CURRENT` / `TRIVIAL_DEFAULT` — canonical match;
+  pure mechanical wrapper conversion.
+* `MISSING_*` / `SLIM_*` / `OLDER_*` — propagation lag; same wrapper as
+  TRIVIAL upgrades the workflow body on first run after merge.
+* `SINGLE_NON_DEFAULT` / `MULTI_LANGUAGE` — requires one or more input
+  overrides at the call site.
+* `NEEDS_REVIEW` — extra jobs, line count out of any known band, or
+  custom workflow body. Per-repo diff required before wrapper.
+
+== Related
+
+* `scripts/apply-baseline.sh` — Hypatia-finding baseline filter (paired
+  with `scripts/tests/apply-baseline-test.sh`).
+* PRs #187, #190, #192, #193 — the reusables these classifiers triage.
