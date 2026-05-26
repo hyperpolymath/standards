@@ -173,21 +173,20 @@ echo "[INFO] Found $marker_count soundness-relevant escape hatch(es)."
 #   - enumerated in docs/proof-debt.md (substring match on file:line OR on the
 #     identifier captured)
 # ─────────────────────────────────────────────────────────────────────────────
-debt_doc=""
+debt_docs=()
 for cand in docs/proof-debt.md docs/proof-debt.adoc PROOF-NEEDS.md docs/PROOF-NEEDS.md; do
   if [ -f "$cand" ]; then
-    debt_doc="$cand"
-    break
+    debt_docs+=("$cand")
   fi
 done
 
-if [ -z "$debt_doc" ]; then
+if [ ${#debt_docs[@]} -eq 0 ]; then
   echo "[ERROR] No docs/proof-debt.md (or equivalent) found, but $marker_count escape hatches exist."
   echo "[ERROR] Seed one per the schema at hyperpolymath/standards/docs/TRUSTED-BASE-REDUCTION-POLICY.adoc."
   exit 1
 fi
 
-echo "[OK] proof-debt document found: $debt_doc"
+echo "[OK] proof-debt document(s) found: ${debt_docs[*]}"
 
 # For each marker, check documentation
 undocumented=0
@@ -202,12 +201,21 @@ while IFS=$'\t' read -r f ln kind ctx; do
     continue
   fi
 
-  # 2. Mention in proof-debt document — match on `<file>:<line>` substring,
-  #    or on the file path alone (in which case we accept any reference)
-  if grep -qF "$f_clean:$ln" "$debt_doc" 2>/dev/null; then
-    continue
-  fi
-  if grep -qF "$f_clean" "$debt_doc" 2>/dev/null; then
+  # 2. Mention in ANY of the proof-debt documents — match on `<file>:<line>`
+  #    substring, or on the file path alone (in which case we accept any
+  #    reference).
+  documented_in=""
+  for doc in "${debt_docs[@]}"; do
+    if grep -qF "$f_clean:$ln" "$doc" 2>/dev/null; then
+      documented_in="$doc"
+      break
+    fi
+    if grep -qF "$f_clean" "$doc" 2>/dev/null; then
+      documented_in="$doc"
+      break
+    fi
+  done
+  if [ -n "$documented_in" ]; then
     continue
   fi
 
@@ -215,17 +223,17 @@ while IFS=$'\t' read -r f ln kind ctx; do
   echo "[ERROR] Undocumented escape hatch at $f_clean:$ln ($kind):"
   echo "        $ctx"
   echo "        Annotate with a 'TRUSTED:' or 'AXIOM:' leading comment, or"
-  echo "        enumerate in $debt_doc per the schema."
+  echo "        enumerate in any of: ${debt_docs[*]}"
   undocumented=$((undocumented + 1))
 done < "$markers_tsv"
 
 if [ "$undocumented" -gt 0 ]; then
   echo ""
   echo "[ERROR] $undocumented/$marker_count escape hatch(es) are undocumented."
-  echo "[ERROR] Each must be annotated inline OR enumerated in $debt_doc."
+  echo "[ERROR] Each must be annotated inline OR enumerated in one of: ${debt_docs[*]}"
   echo "[ERROR] See https://github.com/hyperpolymath/standards/blob/main/docs/TRUSTED-BASE-REDUCTION-POLICY.adoc"
   exit 1
 fi
 
-echo "[OK] All $marker_count escape hatch(es) are documented (inline annotation or $debt_doc entry)."
+echo "[OK] All $marker_count escape hatch(es) are documented (inline annotation or entry in: ${debt_docs[*]})."
 exit 0
