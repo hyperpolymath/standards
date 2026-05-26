@@ -1,0 +1,193 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+#
+# changelog-reusable.yml — Generate CHANGELOG.md from conventional commits.
+#
+# Closes Item 3 of the 2026-05-26 estate tech-debt audit follow-up: 65% of
+# estate repos (180/279) had no CHANGELOG.md. This reusable wires up git-cliff
+# with the canonical config at `hyperpolymath/standards/templates/cliff.toml`.
+#
+# Caller example (auto-update CHANGELOG.md on every push to main):
+#   jobs:
+#     changelog:
+#       uses: hyperpolymath/standards/.github/workflows/changelog-reusable.yml@main
+#       permissions:
+#         contents: write
+#         pull-requests: write
+#
+# Modes (controlled by the `mode` input):
+#   `commit-back`   - default. On push to main, regenerate CHANGELOG.md and
+#                     commit it back to the same branch (uses
+#                     `GITHUB_TOKEN`). Skip if no change.
+#   `pr-back`       - On push to main, open a PR with the regenerated
+#                     CHANGELOG.md (good for repos with branch protection
+#                     that disallows direct pushes to main).
+#   `release-only`  - Only generate on a `release` event; attach as an artifact
+#                     to the release. Does not modify the repo state.
+#   `check-only`    - Render the changelog but do NOT commit. Fail the job if
+#                     the on-disk CHANGELOG.md disagrees with the regenerated
+#                     output. Use as a `pull_request` gate.
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: 'commit-back | pr-back | release-only | check-only'
+        required: false
+        type: string
+        default: 'commit-back'
+      runs-on:
+        description: 'Runner label'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      git-cliff-version:
+        description: 'Version of git-cliff to install (semver, no leading v)'
+        required: false
+        type: string
+        default: '2.6.1'
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate CHANGELOG.md
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout caller repository (full history)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          path: caller
+
+      - name: Checkout standards (for canonical cliff.toml)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: standards
+
+      - name: Install git-cliff
+        run: |
+          set -euo pipefail
+          version="${{ inputs.git-cliff-version }}"
+          asset="git-cliff-${version}-x86_64-unknown-linux-gnu.tar.gz"
+          url="https://github.com/orhun/git-cliff/releases/download/v${version}/${asset}"
+          tmp="$(mktemp -d)"
+          curl -fsSL "$url" -o "$tmp/${asset}"
+          tar -C "$tmp" -xzf "$tmp/${asset}"
+          # Move binary onto PATH (the tarball extracts to a versioned dir).
+          install -m 0755 "$tmp"/git-cliff-*/git-cliff /usr/local/bin/git-cliff
+          git-cliff --version
+
+      - name: Pick the cliff.toml to use
+        id: cfg
+        run: |
+          set -euo pipefail
+          if [ -f caller/cliff.toml ]; then
+            echo "Using caller's own cliff.toml"
+            echo "path=caller/cliff.toml" >> "$GITHUB_OUTPUT"
+          else
+            echo "Using canonical cliff.toml from standards"
+            echo "path=standards/templates/cliff.toml" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate CHANGELOG.md
+        working-directory: caller
+        run: |
+          set -euo pipefail
+          git-cliff \
+            --config "../${{ steps.cfg.outputs.path }}" \
+            --output CHANGELOG.md.new
+          wc -l CHANGELOG.md.new
+          echo "::group::CHANGELOG preview (first 40 lines)"
+          head -40 CHANGELOG.md.new
+          echo "::endgroup::"
+
+      - name: Mode = check-only — verify no drift
+        if: ${{ inputs.mode == 'check-only' }}
+        working-directory: caller
+        run: |
+          set -euo pipefail
+          if [ ! -f CHANGELOG.md ]; then
+            echo "ERROR: caller has no CHANGELOG.md; check-only mode requires one to exist."
+            echo "Adopt mode=commit-back to seed it, then switch to check-only."
+            exit 1
+          fi
+          if ! diff -q CHANGELOG.md CHANGELOG.md.new >/dev/null; then
+            echo "ERROR: CHANGELOG.md is out of date relative to commit history."
+            echo "Run git-cliff locally or switch to mode=commit-back."
+            diff -u CHANGELOG.md CHANGELOG.md.new | head -60 || true
+            exit 1
+          fi
+          echo "CHANGELOG.md is up to date."
+
+      - name: Mode = commit-back — commit regenerated CHANGELOG.md
+        if: ${{ inputs.mode == 'commit-back' && github.event_name == 'push' }}
+        working-directory: caller
+        run: |
+          set -euo pipefail
+          if [ -f CHANGELOG.md ] && diff -q CHANGELOG.md CHANGELOG.md.new >/dev/null; then
+            echo "No CHANGELOG changes; skipping commit."
+            exit 0
+          fi
+          mv CHANGELOG.md.new CHANGELOG.md
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "Nothing to commit after move (race condition)."
+            exit 0
+          fi
+          git commit -m "chore(changelog): regenerate from conventional commits
+
+Auto-generated by hyperpolymath/standards changelog-reusable.yml.
+See standards/templates/cliff.toml for the canonical config.
+
+Closes part of the 2026-05-26 CHANGELOG gap (standards#197 audit)."
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Mode = pr-back — open PR with regenerated CHANGELOG.md
+        if: ${{ inputs.mode == 'pr-back' && github.event_name == 'push' }}
+        working-directory: caller
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -f CHANGELOG.md ] && diff -q CHANGELOG.md CHANGELOG.md.new >/dev/null; then
+            echo "No CHANGELOG changes; skipping PR."
+            exit 0
+          fi
+          mv CHANGELOG.md.new CHANGELOG.md
+          branch="bot/changelog-$(date +%Y%m%d-%H%M%S)"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git checkout -b "$branch"
+          git add CHANGELOG.md
+          git commit -m "chore(changelog): regenerate from conventional commits"
+          git push -u origin "$branch"
+          gh pr create \
+            --title "chore(changelog): regenerate from conventional commits" \
+            --body "Auto-generated by hyperpolymath/standards changelog-reusable.yml.
+
+Closes part of the 2026-05-26 CHANGELOG gap (standards#197 audit)." \
+            --base "${{ github.ref_name }}" \
+            --head "$branch"
+
+      - name: Mode = release-only — attach to release
+        if: ${{ inputs.mode == 'release-only' && github.event_name == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          gh release upload "$tag" caller/CHANGELOG.md.new \
+            --clobber \
+            --repo "${{ github.repository }}"
+          echo "Attached CHANGELOG.md to release $tag"
