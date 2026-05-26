@@ -20,11 +20,16 @@ The reference implementation is provided in link:comprehensive-launcher-template
 ----
 # Standardized structure for all launchers
 APP_NAME="MyApp"              # Application name
-REPO_DIR="/path/to/repo"       # Repository directory  
+REPO_DIR="/path/to/repo"       # Repository directory
 COMMAND="command to run"      # Startup command
 URL="http://localhost:PORT"     # Web URL (if applicable)
-PID_FILE="/tmp/app-server.pid" # Process ID tracking
-LOG_FILE="/tmp/app-server.log" # Log file location
+# PID file in XDG_RUNTIME_DIR (mode 0700, user-scoped) — falls back to
+# $TMPDIR (macOS) then /tmp (last resort). See §Best Practices > Security.
+PID_FILE="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/${APP_NAME}-server.pid"
+# Log file in XDG_STATE_HOME (defaults to $HOME/.local/state per spec).
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/${APP_NAME}"
+LOG_FILE="${LOG_DIR}/server.log"
+mkdir -p "$LOG_DIR"
 MODE="${1:---auto}"            # Default mode
 ----
 
@@ -281,13 +286,13 @@ system". The `--disinteg` mode is its exact inverse.
 
 Everything `--integ` created, plus:
 
-* The PID file (`/tmp/<app>-server.pid`)
+* The PID file (`$XDG_RUNTIME_DIR/<app>-server.pid`, or the resolved equivalent — see §Best Practices > Security)
 * Any `.bat` fallback shortcuts written when PowerShell wasn't available
 
 It deliberately **does not** remove:
 
 * `~/.config/<app>/` — user preferences survive reinstall
-* `/tmp/<app>-server.log` — logs stay for post-mortem
+* `$XDG_STATE_HOME/<app>/` (defaults to `$HOME/.local/state/<app>/`) — logs stay for post-mortem
 * The source repository at `REPO_DIR`
 
 The removal instructions for those are printed after `--disinteg` so the user
@@ -316,7 +321,7 @@ feedback.
 [Desktop Entry]
 Type=Application
 Name=Application Name
-Exec=/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh "AppName" "/path/to/repo" "GUI_CMD" "TUI_CMD" "/tmp/app.log"
+Exec=/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh "AppName" "/path/to/repo" "GUI_CMD" "TUI_CMD" "$HOME/.local/state/app/server.log"
 Terminal=true   # keepopen needs a terminal for its loud banners and shell fallback
 Icon=/path/to/icon.png
 Categories=Category;
@@ -390,7 +395,7 @@ a `tail -f LOG` after the launcher so the terminal stays open:
 
 [source,bash]
 ----
-"aerie-launcher.sh --auto && tail -f /tmp/aerie.log"
+"aerie-launcher.sh --auto && tail -f $HOME/.local/state/aerie/server.log"
 ----
 
 === The three stages
@@ -478,10 +483,10 @@ Exec=launcher.sh --auto
 
 === Debugging Checklist
 
-1. Check log file: `tail -f /tmp/app-server.log`
+1. Check log file: `tail -f "$LOG_FILE"` (resolves to `$XDG_STATE_HOME/<app>/server.log`)
 2. Verify process: `ps aux | grep app-name`
 3. Test URL manually: `curl -v http://localhost:PORT`
-4. Check PID file: `cat /tmp/app-server.pid`
+4. Check PID file: `cat "$PID_FILE"` (resolves to `$XDG_RUNTIME_DIR/<app>-server.pid`)
 5. Test browser opening: `xdg-open http://localhost:PORT`
 6. Verify dependencies: `command -v required-command`
 7. Check port availability: `ss -tlnp | grep PORT`
@@ -529,7 +534,7 @@ APP_NAME="AppName"
 [ ] Implement `wait_for_server()` with reasonable timeout
 [ ] Add proper error handling and user feedback
 [ ] Provide clear success/failure messages
-[ ] Log to predictable location (`/tmp/app-name.log`)
+[ ] Log to XDG state dir (`$XDG_STATE_HOME/<app>/server.log`, defaults to `$HOME/.local/state/<app>/server.log`); never use `/tmp/<app>.log`
 [ ] Handle browser launch failures gracefully
 [ ] Provide manual fallback instructions
 [ ] Implement `--start`, `--stop`, `--status` modes
@@ -540,7 +545,8 @@ APP_NAME="AppName"
 == Best Practices
 
 === Logging
-- Log to `/tmp/app-name.log` for easy debugging
+- Log to `$XDG_STATE_HOME/<app>/server.log` (defaults to `$HOME/.local/state/<app>/server.log` per XDG spec). Per-user, survives reboot, not world-writable.
+- Never log to `/tmp/<app>.log`. Predictable names in a world-writable dir are a symlink-attack target on shared hosts — see §Best Practices > Security.
 - Include timestamps for long-running processes
 - Rotate logs if they grow large
 - Provide log location in error messages
@@ -559,7 +565,9 @@ APP_NAME="AppName"
 - Optimize startup sequence
 
 === Security
-- Use predictable but unique PID file names
+- **PID files MUST go in `$XDG_RUNTIME_DIR`** (Linux) / `$TMPDIR` (macOS), not `/tmp`. `$XDG_RUNTIME_DIR` is mode `0700` and user-scoped per the XDG Base Directory spec; `$TMPDIR` on macOS is `/var/folders/.../T` (per-user). `/tmp` is world-writable: an attacker on a shared host can pre-create `/tmp/<app>-server.pid` containing their own PID, after which the launcher's `is_running()` returns true and `stop_server()` will `kill <attacker-pid>` — DoS or signal-handling abuse vector. The fallback ladder `${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}` exists only as a last resort for hosts that set neither (rare).
+- **Log files MUST go in `$XDG_STATE_HOME`** for the same reason — never `/tmp/<app>.log`.
+- Use predictable but unique PID file *names within the chosen dir* (not in `/tmp`).
 - Clean up PID files on exit
 - Don't log sensitive information
 - Validate URLs before opening
