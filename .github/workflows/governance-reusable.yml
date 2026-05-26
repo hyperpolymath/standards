@@ -140,9 +140,14 @@ jobs:
       #
       # Implementation note: a reusable workflow only auto-checks-out its
       # YAML, not sibling files in its repo. So we explicitly check out
-      # this repo at the same ref the caller picked (via
-      # `github.workflow_sha`, the SHA actually loaded by the runner)
-      # into `.standards-checkout/`, then run the script from there.
+      # this repo into `.standards-checkout/`, then run the script from
+      # there. We pin to `main` because `github.workflow_sha` resolves to
+      # the caller repo's commit SHA (not standards'), which makes the
+      # fetch fail with exit 128 ("No commit found for SHA"). Caller
+      # repos already pin the reusable's YAML by SHA, so the bounded
+      # drift is just whatever's on standards/main between the reusable
+      # version and the script version — acceptable since scripts here
+      # are read-only governance checks.
       - name: Set up Deno
         uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2.0.3
         with:
@@ -152,7 +157,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: hyperpolymath/standards
-          ref: ${{ github.workflow_sha }}
+          ref: main
           path: .standards-checkout
           # Sparse-checkout only the scripts dir to keep this fast.
           sparse-checkout: |
