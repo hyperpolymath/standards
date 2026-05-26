@@ -1,0 +1,220 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= Trusted-Base Reduction Policy
+:revdate: 2026-05-26
+:status: PROPOSED
+:audit: hyperpolymath/standards#195
+:audit-licence: hyperpolymath/standards#196
+:audit-docs: hyperpolymath/standards#197
+:precedent: hyperpolymath/boj-server backend-assurance harness
+
+This document is the canonical estate-wide policy for managing
+*soundness-relevant escape hatches* in proof-bearing code — the
+unconditional, unproven primitives that every formal-methods toolchain
+provides for ergonomic or extraction-boundary reasons:
+
+[cols="1,2", options="header"]
+|===
+| Language | Escape hatches in scope
+
+| Coq      | `Axiom`, `Admitted`, `admit.`
+| Lean     | `axiom`, `sorry`, `noncomputable`
+| Agda     | top-level `postulate`
+| Idris2   | `believe_me`, `really_believe_me`, `assert_total`, top-level `partial`
+| F\*      | `assume val`, `admit_p`
+| Dafny    | top-level `:axiom`
+| Cross-lang | `TODO PROOF` / `OWED:` / `FIXME PROOF` markers
+| Rust/Haskell | `unsafePerformIO`, `unsafeCoerce` (where used in soundness-relevant positions)
+|===
+
+The 2026-05-26 estate proof-debt audit (link:{audit}[#195]) found these
+markers spread across ~30 active repos, with concentrations of
+`believe_me` at extraction boundaries (Rust↔Idris2 FFI, codec runtime)
+and `partial` clusters that conflate "totality just hard to prove" with
+"totality genuinely impossible". This policy gives every such marker a
+canonical disposition path so the trusted base shrinks over time
+instead of accreting.
+
+== Three permissible dispositions
+
+Every soundness-relevant escape hatch in the estate MUST be one of:
+
+[cols="1,1,3", options="header"]
+|===
+| Disposition | Marker | Definition
+
+| (a) DISCHARGED
+| —
+| A proof exists. The escape hatch has been deleted or replaced with a
+proof term / total function / proven instance.
+
+| (b) BUDGETED
+| `// TRUSTED: <kind>; <budget>`
+| The escape hatch is necessary at this layer (FFI boundary, foreign
+extraction target, performance corner case). It is covered by
+property-based or adversarial tests at a documented refutation budget
+(e.g. "tested at N=10⁹ inputs across `cargo test --release --features fuzz`").
+The budget is the load-bearing component — without it, "covered by
+tests" is unfalsifiable.
+
+| (c) NECESSARY AXIOM
+| `-- AXIOM: <name>; <justification>`
+| The escape hatch encodes a metatheoretic assumption that cannot be
+discharged within the working logic (e.g. function extensionality,
+propositional truncation, classical choice, certain decision procedures).
+It is enumerated in `docs/proof-debt.md` with a one-paragraph
+justification and a citation pointing to the canonical formalisation
+elsewhere (echo-types, MathLib4, agda-stdlib, etc.).
+|===
+
+A marker that is *none of (a)/(b)/(c)* is **debt**, and must appear in
+the repo's `docs/proof-debt.md` with a deadline (or "INDEFINITE" with a
+reason) and an owner.
+
+== `docs/proof-debt.md` schema
+
+Every proof-bearing repo MUST maintain a `docs/proof-debt.md` (or `.adoc`)
+with the following structure:
+
+[source,markdown]
+----
+# Proof debt
+
+## (a) Discharged in this repo
+- (none — entries removed when proof lands)
+
+## (b) Budgeted — tested with refutation budget
+- `path/to/file.rs:LINE` — `unsafe_extract_bytes`
+  - **Kind**: extraction boundary (Rust→Idris2 ABI)
+  - **Test**: `cargo test --release --features fuzz extract_bytes_qc`
+  - **Budget**: 10⁹ inputs / N=10000 shrinks
+  - **Last run**: 2026-05-26 (CI run #12345 — green)
+
+## (c) Necessary axiom
+- `formal/Foo.v:LINE` — `axiom funExt`
+  - **Justification**: function extensionality; not derivable in
+    constructive Coq without UIP. Standard practice; see Mathlib4
+    `Mathlib.Logic.Function.Basic`.
+  - **Citation**: Univalent Foundations §2.9; Mathlib4 commit abc1234.
+
+## (d) DEBT — actively to be closed
+- `formal/Bar.v:LINE` — `Admitted` `preservation_lemma`
+  - **Owner**: @maintainer
+  - **Plan**: discharge by induction on typing-derivation; subgoals
+    (1)-(7); blocked on (4) which needs the substitution lemma.
+  - **Deadline**: 2026-08-01 / "INDEFINITE: dependent on echo-types
+    Lift ⊤ rung-C settlement".
+----
+
+Disposition (d) is the only category that should *shrink* over time.
+(a) shrinks too, but only by promotion through proof; (b) and (c) are
+load-bearing and should stay stable.
+
+== Annotation conventions in source
+
+Mark every escape hatch inline so the disposition is local to the code:
+
+[source,rust]
+----
+// TRUSTED: extraction-boundary; tested via `cargo test fuzz` (10⁹ inputs).
+//   See docs/proof-debt.md §(b) entry "unsafe_extract_bytes".
+unsafe fn unsafe_extract_bytes(...) -> ... { ... }
+----
+
+[source,idris]
+----
+-- TRUSTED: extraction-boundary; tested via `idris2 --test` (Hedgehog, N=10⁶).
+--   See docs/proof-debt.md §(b) entry "wasm_marshal_u64".
+wasm_marshal_u64 : Bits64 -> ByteArray
+wasm_marshal_u64 x = believe_me ...
+----
+
+[source,coq]
+----
+(* AXIOM: function extensionality.
+   Necessary; see docs/proof-debt.md §(c) entry "funExt".
+   Cited from echo-types. *)
+Axiom funExt : forall (A B : Type) (f g : A -> B),
+  (forall x, f x = g x) -> f = g.
+----
+
+[source,agda]
+----
+-- AXIOM: propositional truncation; necessary; see proof-debt.md §(c).
+postulate
+  ∥_∥ : Set → Set
+----
+
+The leading-comment marker (`TRUSTED:` / `AXIOM:`) is itself part of the
+contract — the audit script in section "Enforcement" below greps for it.
+
+== Enforcement
+
+A future PR will wire `scripts/check-trusted-base.sh` into
+`governance-reusable.yml`. The script:
+
+. Counts every soundness-relevant escape hatch in the caller repo.
+. Verifies each is either preceded by a `TRUSTED:` or `AXIOM:` comment,
+  OR enumerated in `docs/proof-debt.md`.
+. Fails CI when a marker is naked (no annotation AND no proof-debt.md
+  entry).
+. Optionally fails CI when `docs/proof-debt.md` §(d) DEBT entries are
+  past their deadline.
+
+This is the same shape as `check-licence-consistency.sh`
+(standards#201) — local script, called from the governance bundle, no
+network dependencies.
+
+== Precedent: boj-server backend-assurance harness
+
+The pattern this policy codifies is already deployed in
+link:{precedent}[boj-server's backend-assurance harness] (memory:
+`project_boj_server_backend_assurance_harness`):
+
+* 5 class-J axioms identified as irreducible in Idris2 0.8.0 (cannot
+  be discharged within the type theory).
+* Each one is property-tested *and* extracted to Rust where the
+  property runs against the real Idris2 RTS implementation, not a
+  mocked one.
+* The trusted base is documented in `docs/proof-debt.md` and shrinks
+  one entry per PR over a ~3-month roadmap.
+
+That harness is the reference implementation. New proof-bearing repos
+adopting this policy should adapt it rather than reinvent it.
+
+== Initial migration order (proof-bearing repos with active debt)
+
+Per the audit, the high-density repos that should adopt this policy
+first (rough P0/P1/P2 ordering):
+
+[cols="1,1,2", options="header"]
+|===
+| Priority | Repo | Why this one first
+
+| P0 | `ephapax`             | 3 `Admitted`s in `formal/Semantics.v` already have a discharge plan (memory: `project_ephapax_preservation_closure_plan`); annotate while closing.
+| P0 | `boj-server`          | Reference implementation — formalise the existing harness as the canonical example.
+| P1 | `absolute-zero`       | 72 Coq + 315 Lean markers across 6638 proof files; needs the schema before any single-repo close-out is tractable.
+| P1 | `maa-framework`       | 134 markers in 25 files (high density); investigate whether vendored or original.
+| P1 | `betlang`             | Single named axiom (`substTop_preserves_typing`) — clean (b) or (c) classification.
+| P1 | `proven`              | 372 `TODO PROOF` markers; convert to §(d) entries with deadlines.
+| P2 | `standards`           | 4 Agda postulate + 11 Idris partial — set the example for downstream.
+| P2 | `typed-wasm`, `stapeln`, `vcl-ut`, `hypatia`, `snifs`, `somethings-fishy` | Each 5–15 `believe_me`; audit and classify in a single PR each.
+|===
+
+== Status
+
+[cols="1,3", options="header"]
+|===
+| Date | Event
+
+| 2026-05-26 | Policy filed (standards#202).
+| TBD       | `scripts/check-trusted-base.sh` filed (separate PR).
+| TBD       | Per-repo `docs/proof-debt.md` files seeded across P0 repos.
+|===
+
+== Companion documents
+
+* link:{audit}[standards#195] — estate proof-debt audit (the empirical motivation)
+* link:{audit-licence}[standards#196] — estate licence-debt audit
+* link:{audit-docs}[standards#197] — estate documentation-debt audit
+* `scripts/check-licence-consistency.sh` (standards#201) — the precedent for the eventual `check-trusted-base.sh`
