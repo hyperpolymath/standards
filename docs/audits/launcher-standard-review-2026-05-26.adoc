@@ -1,0 +1,251 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= Launcher Standard Review — 2026-05-26
+:toc:
+:toclevels: 3
+
+== Summary
+
+Top-to-bottom review of the launcher standard surface area —
+`launcher/launcher-standard.a2ml`, `launcher/keepopen.sh`,
+`launcher/README.adoc`, `docs/UX-standards/launcher-standard.adoc`, and
+`docs/UX-standards/LM-LA-LIFECYCLE-STANDARD.adoc` (~2,000 lines total)
+— performed in a single session on 2026-05-26.
+
+Output: **8 PRs** filed against `main`, all independent, all
+GPG-signed, none in conflict with each other. The 9th PR (this audit
+document) is filed alongside so reviewers landing on any individual PR
+can find the full picture.
+
+== Headline findings (and where they were addressed)
+
+[cols="1,3,1"]
+|===
+| Class | Finding | Addressed in
+
+| **CONTRADICTION**
+| `sudo` paths in LM-LA-LIFECYCLE install templates directly contradicted
+  `launcher-standard.adoc` §System Integration Modes design principle 5
+  (*"No elevated privileges. No sudo."*).
+| #170
+
+| **CONTRADICTION**
+| `--integ` / `--disinteg` (per `launcher-standard.adoc` v0.2.0)
+  supersede the standalone `scripts/install.sh` / `scripts/uninstall.sh`
+  scripts, but `LM-LA-LIFECYCLE-STANDARD.adoc` never absorbed the
+  supersedence and still mandated the standalone scripts.
+| #170
+
+| **CONTRADICTION**
+| `--browser` listed as an independent required mode in the a2ml while
+  prose calls it an alias for `--auto`. Aliases shouldn't be listed
+  alongside canonical modes as independent obligations.
+| #170
+
+| **BLOCKER**
+| `launcher-standard.a2ml` hard-coded `/var/mnt/eclipse/repos/...` as
+  the sole literal-fallback path for `launch-scaffolder` finding the
+  standard, for `.desktop` files finding `keepopen.sh`, and for
+  `--integ` finding `verify-desktop-integrity.sh`. On any host that
+  doesn't use the eclipse-mount layout (verified: this one), the
+  documented default fallback pointed at a non-existent path. Standard's
+  defaults did not work outside one specific layout.
+| #171
+
+| **DRIFT RISK**
+| `launcher/README.adoc` §Sync requirement declared prose↔a2ml
+  lock-step a "standards-compliance bug" when violated, but nothing
+  enforced it. The fixes in #170 were exactly the drift this rule was
+  meant to prevent.
+| #172 (CI gate)
+
+| **MISSING MODE**
+| `--version` not required. Field bug reports consistently lack a build
+  identity — "it's broken on my machine" with no way to bisect or even
+  tell which build.
+| #173
+
+| **SECURITY**
+| `/tmp/{app-name}-server.{pid,log}` predictable names in a
+  world-writable directory: an attacker on a shared host can
+  pre-create `/tmp/<app>-server.pid` containing their own PID, after
+  which the launcher's `is_running()` returns true and `stop_server()`
+  will `kill <attacker-pid>` — DoS or signal-handling abuse.
+| #175
+
+| **UX / OBSERVABILITY**
+| `keepopen.sh` always emitted ANSI colour escapes, even when stdout
+  was piped to a file/CI capture and even when `NO_COLOR=1` was set
+  (the canonical opt-out env var since 2017).
+| #176
+
+| **CROSS-PLATFORM GAP**
+| `open_browser()` covered only `xdg-open` / `firefox` / `chromium`
+  despite the standard's stated cross-platform commitment (macOS,
+  Windows-via-Git-Bash, WSL). `$BROWSER` env var not honoured.
+| #177
+
+| **UNDER-SPECIFIED CONTRACT**
+| `wait-for-url-timeout-seconds = 15` declared in a2ml but the prose
+  template hardcoded `wait_for_server 15` and had no per-request curl
+  timeout. Operators on slow hosts had no way to extend the timeout.
+| #177
+
+| **UNDER-SPECIFIED CONTRACT**
+| `[soft-attach]` and `[error-visibility].gui-dialog-chain` declared
+  in a2ml but had no reference implementations. Every downstream
+  launcher had to re-implement the "if-installed-then-invoke" pattern
+  and the GUI dialog ladder — guaranteed drift.
+| #179
+
+|===
+
+== PR map
+
+[cols="1,1,2,2"]
+|===
+| PR | Branch | Files touched | Class
+
+| **#170** | `fix/launcher-standard-contradictions`
+| `launcher/launcher-standard.a2ml`, `docs/UX-standards/LM-LA-LIFECYCLE-STANDARD.adoc`
+| contradictions
+
+| **#171** | `fix/launcher-standard-path-resolution`
+| `launcher/launcher-standard.a2ml`, `docs/UX-standards/launcher-standard.adoc`,
+  `launcher/README.adoc`, new `launcher/resolve-desktop-tools.sh`
+| path resolution (**blocker**)
+
+| **#172** | `ci/launcher-standard-lockstep`
+| new `.github/workflows/launcher-standard-lockstep.yml`
+| lock-step CI gate (forcing function)
+
+| **#173** | `feat/launcher-version-mode`
+| `launcher/launcher-standard.a2ml`, `docs/UX-standards/launcher-standard.adoc`
+| `--version` mode
+
+| **#175** | `fix/launcher-xdg-pid-log-paths`
+| `launcher/launcher-standard.a2ml`, `docs/UX-standards/launcher-standard.adoc`
+| XDG PID/log hardening (**security**)
+
+| **#176** | `fix/keepopen-honour-no-color`
+| `launcher/keepopen.sh`
+| `keepopen` `NO_COLOR` honour
+
+| **#177** | `feat/launcher-browser-and-wait-timing`
+| `launcher/launcher-standard.a2ml`, `docs/UX-standards/launcher-standard.adoc`
+| cross-platform browser + wait timing
+
+| **#179** | `feat/launcher-soft-attach-and-gui-error`
+| `launcher/launcher-standard.a2ml`, `docs/UX-standards/launcher-standard.adoc`,
+  new `launcher/gui-error.sh`, new `launcher/soft-attach.sh`
+| `soft-attach` + `gui-error` reference impls
+|===
+
+All 8 PRs are GPG-signed and independent off `main`. Merge order is
+**not** strictly constrained, but two coordination notes apply:
+
+1. **`[spec].version` bumps**: PR #170 bumps to 0.3.0; PR #175 also
+   wants a bump. Whichever lands second needs a trivial conflict-resolve
+   on the version line (suggested: #170 → 0.3.0, #175 → 0.4.0). All
+   other PRs deliberately did not touch the version line.
+2. **Lock-step gate triggers**: once #172 lands, every subsequent PR
+   that touches `launcher-standard.a2ml` OR `launcher-standard.adoc`
+   without touching both will be blocked. All of #170, #171, #173,
+   #175, #177, #179 touch both, so they pass; #176 (keepopen only) and
+   #172 itself touch neither, so the gate doesn't fire.
+
+== What this campaign produces
+
+Before this campaign, the launcher standard was internally inconsistent
+(three concrete contradictions), unrunnable on any host layout outside
+`/var/mnt/eclipse/` (the documented default fallback path simply did
+not exist on a `$HOME/developer/repos`-layout host), security-exposed
+on `/tmp/` symlink-attack vectors, cross-platform in stated principle
+but Linux-only in practice, and prone to drift because two declared
+contracts had no reference implementations.
+
+After this campaign, it is:
+
+- **Internally consistent.** Contradictions removed (#170). Future
+  drift caught mechanically by the lock-step CI gate (#172).
+- **Runnable on any host layout.** New `[resolution]` table in the
+  a2ml + bash reference resolver in `launcher/resolve-desktop-tools.sh`
+  (#171). Verified on this host: previously the documented default
+  returned nothing; now resolves correctly via the
+  `$HOME/developer/repos` rung of the ladder.
+- **Security-hardened.** PID and log paths moved to
+  `$XDG_RUNTIME_DIR` and `$XDG_STATE_HOME` respectively, with
+  documented fallback ladders (#175). PR body documents the concrete
+  attack vector.
+- **Cross-platform in practice.** `open_browser` now covers macOS
+  (`open`), WSL (`wslview` via `/proc/version` detect), and Windows
+  (`start` via Git Bash) (#177). `$BROWSER` env var honoured first.
+- **Operationally tunable.** `WAIT_FOR_URL_TIMEOUT_SECONDS` and
+  `WAIT_FOR_URL_POLL_INTERVAL` env-var overrides are now part of the
+  contract; per-request curl timeout caps individual probes (#177).
+- **Field-debuggable.** `--version` is now required with a
+  machine-greppable format `{app-name} {version} ({build-sha-short}) [{platform}]`
+  (#173).
+- **Friendly to non-TTY consumers.** `keepopen.sh` honours `NO_COLOR`
+  and auto-strips ANSI when stdout is not a TTY (#176).
+- **Drift-resistant on previously unspecified contracts.** Two new
+  sourceable bash helpers — `gui-error.sh` and `soft-attach.sh` —
+  implement the `[error-visibility]` and `[soft-attach]` contracts
+  with graceful-degradation patterns so downstream launchers stop
+  reinventing them (#179).
+
+== Deferred follow-ups (gated on merges)
+
+Two items are deliberately not included in this campaign because they
+depend on merges landing first:
+
+1. **Extend the lock-step gate** (#172) to include the three new
+   helper scripts (`resolve-desktop-tools.sh`, `gui-error.sh`,
+   `soft-attach.sh`). Gated on #171 and #179 — the files need to
+   exist on `main` before the gate can list them. ~10-line workflow edit.
+2. **Update `launch-scaffolder`** (separate Rust workspace) to consume
+   the new contract additions: `[resolution]` / `[browser-launch]` /
+   `[aliases]` / `[soft-attach].style+trigger` /
+   `[error-visibility].suppress-env-var`. Roughly: replace the
+   hard-coded `/var/mnt/eclipse/...` literal in the Rust loader with
+   the search ladder; respect the new aliases when generating mode
+   dispatchers; emit `style`/`trigger`-aware soft-attach call sites in
+   generated launchers; thread `NO_GUI_ERROR` into generated error
+   paths. Until that lands, this campaign is documentation-and-helper
+   only for the `launch-scaffolder` consumer — but it already unblocks
+   any new launcher that sources `resolve-desktop-tools.sh` /
+   `gui-error.sh` / `soft-attach.sh` directly.
+
+== Method notes
+
+- **Initial review** identified 17 issues across 3 contradictions, a
+  blocker, a missing CI gate, and various deferred quality-of-life
+  items. The user prioritised iteratively: "do blockers first" → "ci
+  gate" → "version mode then xdg fix" → "yes" (browser + wait-timing
+  + NO_COLOR) → "yes" (soft-attach + gui-dialog reference impls).
+- **Independent PRs off main**, never stacked. Each PR is reviewable
+  on its own and can be merged in any order modulo the two
+  coordination notes above.
+- **GPG-signed commits** throughout. One cherry-pick mid-recovery
+  produced an SSH-signed commit; re-signed with GPG via `--amend`
+  to stay consistent.
+- **Two parallel-session interleaves** occurred during the campaign
+  (foreign session swapped branches under the working checkout). One
+  caused a `git commit --amend` to swallow 327 lines of unrelated
+  staged work into PR #175. Recovery: rescue the contaminated files
+  to `/tmp/`, reset, re-extract only the intended files via
+  `git checkout <bad-sha> -- <files>`, re-commit, force-push with
+  explicit `--force-with-lease=branch:remote-sha`. Lesson written up
+  for future sessions; always use `--only <paths>` when amending in a
+  multi-session checkout.
+
+== See also
+
+- link:launcher-standard-review-2026-05-26.a2ml[Machine-readable
+  manifest] — same PR set as a parseable A2ML document.
+- `../UX-standards/launcher-standard.adoc` — the standard being
+  revised.
+- `../../launcher/launcher-standard.a2ml` — its machine-readable
+  companion.
+- `../../launcher/README.adoc` — §Sync requirement that this campaign
+  added a CI gate for.
