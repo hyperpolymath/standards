@@ -121,6 +121,13 @@ open_browser() {
 
 === Error Handling
 
+Stderr-only `err()` is the right default for TUI invocation, but when a
+launcher is started from a desktop entry there is no terminal for the
+user to see — every failure looks identical (a brief flash and nothing
+else). The reference helper `launcher/gui-error.sh` surfaces errors via
+the platform's dialog ladder AND stderr, so the failure is visible no
+matter how the launcher was started.
+
 [source,bash]
 ----
 # Always provide actionable feedback
@@ -129,12 +136,64 @@ err() {
   echo "[$APP_NAME] Try: check $LOG_FILE for details" >&2
 }
 
-# Example usage
+# Source the shared GUI-error helper (reference impl of [error-visibility]
+# from launcher-standard.a2ml). Falls back to err() if not available so
+# every launcher works even without the shared helper on PATH.
+if [ -r "$(hp_resolve_desktop_tools gui-error.sh 2>/dev/null)" ]; then
+  # shellcheck disable=SC1090
+  . "$(hp_resolve_desktop_tools gui-error.sh)"
+else
+  hp_gui_error() { err "$2"; }   # graceful degradation
+fi
+
+# Example usage — fails LOUDLY whether GUI or TUI
 if ! start_server; then
-  err "Failed to start server"
+  hp_gui_error "$APP_NAME failed to start" \
+               "Check log: $LOG_FILE\n\nOverride wait timeout: WAIT_FOR_URL_TIMEOUT_SECONDS=<N>"
   exit 1
 fi
 ----
+
+NOTE: `hp_gui_error` writes to stderr unconditionally per
+`[error-visibility].always-also-to-stderr = true`. Set `NO_GUI_ERROR=1`
+to suppress the dialog attempt (useful in CI).
+
+=== Soft-Attach (optional ecosystem integrations)
+
+A "soft-attach" tool is one the launcher calls IF it is installed, and
+silently skips otherwise. The estate ships three by default
+(`feedback-o-tron`, `hypatia`, `panic-attack`) — see
+`[soft-attach].tools` in `launcher-standard.a2ml` for the live list.
+
+Downstream launchers SHOULD source `launcher/soft-attach.sh` rather
+than re-implementing the if-installed-then-invoke pattern, so behaviour
+stays consistent across the estate.
+
+[source,bash]
+----
+# Source the shared soft-attach helper. Graceful degradation: if the
+# helper is not on the resolution ladder, every soft-attach call
+# becomes a silent no-op.
+if [ -r "$(hp_resolve_desktop_tools soft-attach.sh 2>/dev/null)" ]; then
+  # shellcheck disable=SC1090
+  . "$(hp_resolve_desktop_tools soft-attach.sh)"
+else
+  hp_soft_attach_event() { :; }
+  hp_soft_attach_run()   { :; }
+fi
+
+# Call sites: typically wired into start_server() on failure path
+on_start_failed() {
+  hp_soft_attach_event "feedback-o-tron" "launcher:start_failed" \
+      --app "$APP_NAME" --log "$LOG_FILE"
+  hp_soft_attach_run "hypatia diagnose --app $APP_NAME --log $LOG_FILE"
+  hp_soft_attach_run "panic-attack assail $REPO_DIR"
+}
+----
+
+Note that template substitution (`{app-name}`, `{log-file}`,
+`{repo-dir}` in the a2ml) is the launcher's responsibility — interpolate
+before passing the command line to `hp_soft_attach_run`.
 
 == Standard Modes
 
