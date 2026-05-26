@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# elixir-ci-reusable.yml — Reusable Elixir CI bundle (RSR).
+#
+# Replaces the per-repo `elixir-ci.yml` template that copy-drifted (and
+# in several cases got corrupted) across the estate. Estate audit
+# (2026-05-26) found 9 repos shipping their own copy, with 9 unique
+# SHAs — 100% drift. One copy (`bofig`) was YAML-broken with literal
+# `npermissions:` lines from a botched permissions injection.
+#
+# Recurring failure modes observed across the estate:
+#
+#   * Elixir version pinned to 1.15 while mix.exs declared ~> 1.17,
+#     producing `(Mix) … but it has declared in its mix.exs file
+#     it supports only Elixir ~> 1.17` (tma-mark2 #41 lived this).
+#   * `mix compile --warnings-as-errors` applied to the whole
+#     build, so transitive-dep warnings (e.g. rustler's
+#     `:json.decode` reference needing Elixir 1.18) failed CI even
+#     when the project's own code was clean.
+#   * Inconsistent `permissions:` placement (some at top, some
+#     mid-file, some missing).
+#
+# This reusable:
+#   * Pins to the tma-mark2 #41-validated canonical shape.
+#   * Compiles deps WITHOUT --warnings-as-errors first, then app code
+#     with the strict flag — so deps warnings don't fail us but our
+#     own code still gets the hygiene gate.
+#   * Gates dialyzer behind an opt-in input (~5-minute cold-cache run
+#     on most repos).
+#   * Guards every job on `mix.exs` presence so consumers can add
+#     the wrapper unconditionally.
+#
+# Caller example:
+#
+#   jobs:
+#     elixir-ci:
+#       uses: hyperpolymath/standards/.github/workflows/elixir-ci-reusable.yml@main
+#
+# With dialyzer + customised versions:
+#
+#   jobs:
+#     elixir-ci:
+#       uses: hyperpolymath/standards/.github/workflows/elixir-ci-reusable.yml@main
+#       with:
+#         elixir-version: "1.18"
+#         enable_dialyzer: true
+
+name: Elixir CI (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label for the Elixir CI job
+        type: string
+        required: false
+        default: ubuntu-latest
+      otp-version:
+        description: OTP version selector for erlef/setup-beam
+        type: string
+        required: false
+        default: "26"
+      elixir-version:
+        description: Elixir version selector for erlef/setup-beam
+        type: string
+        required: false
+        default: "1.17"
+      enable_dialyzer:
+        description: Run `mix dialyzer` (slow cold-cache; off by default)
+        type: boolean
+        required: false
+        default: false
+      enable_credo:
+        description: Run `mix credo --strict`
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Compile + test
+    runs-on: ${{ inputs.runs-on }}
+    # Guard on mix.exs so the wrapper is safe to add unconditionally.
+    if: hashFiles('mix.exs') != ''
+    permissions:
+      contents: read
+    env:
+      MIX_ENV: test
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+
+      - name: Set up BEAM (OTP + Elixir)
+        uses: erlef/setup-beam@5304e04ea2b355f03681464e683d92e3b2f18451 # v1.18.2
+        with:
+          otp-version: ${{ inputs.otp-version }}
+          elixir-version: ${{ inputs.elixir-version }}
+
+      - name: Cache deps
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: deps
+          key: deps-${{ inputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+
+      - name: Cache _build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: _build
+          key: build-${{ inputs.elixir-version }}-${{ hashFiles('mix.lock') }}
+
+      - name: Install deps
+        run: mix deps.get
+
+      # Compile deps WITHOUT --warnings-as-errors so upstream warnings
+      # (rustler's :json.decode needing Elixir 1.18, deprecated
+      # `use Bitwise`, etc.) don't fail the build. Strict mode then
+      # applies only to the project's own modules in the next step.
+      - name: Compile dependencies
+        run: mix deps.compile
+
+      - name: Compile project (strict)
+        run: mix compile --warnings-as-errors
+
+      - name: Credo lint
+        if: ${{ inputs.enable_credo }}
+        run: mix credo --strict
+
+      - name: Dialyzer
+        if: ${{ inputs.enable_dialyzer }}
+        run: mix dialyzer
+
+      - name: Run tests
+        run: mix test --cover
