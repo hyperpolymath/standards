@@ -70,8 +70,18 @@ startup-command-search = [
 [error-visibility]
 # When the launcher runs in a GUI context (no tty + DISPLAY/WAYLAND_DISPLAY set),
 # errors must be visible to the user via a GUI dialog, not only to stderr.
-gui-dialog-chain = ["kdialog", "zenity", "notify-send", "xmessage"]
+#
+# Reference implementation: launcher/gui-error.sh — exposes
+# `hp_gui_error "title" "message"`. Downstream launchers SHOULD source
+# this rather than re-implement the dialog ladder, so the spec stays
+# consistent across the estate.
+#
+# Env override: NO_GUI_ERROR=1 suppresses the dialog attempt (stderr
+# still gets the message). Useful in CI / scripted invocation.
+reference-impl    = "launcher/gui-error.sh"
+gui-dialog-chain  = ["kdialog", "zenity", "notify-send", "xmessage"]
 always-also-to-stderr = true
+suppress-env-var  = "NO_GUI_ERROR"
 
 [integration.linux]
 apps-dir = "$HOME/.local/share/applications"
@@ -126,11 +136,24 @@ preserve = [
 ]
 
 [soft-attach]
-# Optional integrations — called if present, silently skipped if absent.
+# Optional ecosystem integrations — called if present, silently skipped
+# if absent. Each tool entry carries an explicit `trigger` naming the
+# hook point at which the launcher should invoke it.
+#
+# Reference implementation: launcher/soft-attach.sh — exposes three
+# primitives:
+#   hp_soft_attach_present "command"          → 0 if on PATH
+#   hp_soft_attach_run "command line"         → run if first token present
+#   hp_soft_attach_event "tool" "event" [...] → invoke `tool emit event ...`
+# Downstream launchers SHOULD source this rather than re-implement.
+#
+# Trigger values: "on-start-failed", "on-start-succeeded", "on-integ-failed",
+# "on-user-request". Additional triggers may be added as the lifecycle grows.
+reference-impl = "launcher/soft-attach.sh"
 tools = [
-    { name = "feedback-o-tron", event-on-failure = "launcher:start_failed" },
-    { name = "hypatia", command = "hypatia diagnose --app {app-name} --log {log-file}" },
-    { name = "panic-attack", command = "panic-attack assail {repo-dir}" },
+    { name = "feedback-o-tron", style = "event",   trigger = "on-start-failed", event = "launcher:start_failed" },
+    { name = "hypatia",         style = "command", trigger = "on-start-failed", command = "hypatia diagnose --app {app-name} --log {log-file}" },
+    { name = "panic-attack",    style = "command", trigger = "on-start-failed", command = "panic-attack assail {repo-dir}" },
 ]
 
 [a2ml-metadata-block]
