@@ -72,8 +72,18 @@ mode = "--auto"
 [runtime]
 # Required runtime behaviour.
 background = "nohup"
-pid-file-pattern = "/tmp/{app-name}-server.pid"
-log-file-pattern = "/tmp/{app-name}-server.log"
+# PID files live in the user's runtime-state dir — wiped on logout,
+# user-scoped (mode 0700 per XDG spec), no symlink-attack target.
+# Bash-expansion ladder:
+#   1. $XDG_RUNTIME_DIR — Linux per freedesktop XDG Base Directory spec
+#   2. $TMPDIR          — macOS / BSDs (typically /var/folders/.../T, per-user)
+#   3. /tmp             — last resort (predictable, world-writable; flagged
+#                         in §Best Practices > Security)
+pid-file-pattern = "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/{app-name}-server.pid"
+# Logs go to XDG_STATE_HOME (per spec, defaults to $HOME/.local/state).
+# Per-user, survives reboot, not world-writable. The {app-name} subdir
+# isolates each launcher's logs.
+log-file-pattern = "${XDG_STATE_HOME:-$HOME/.local/state}/{app-name}/server.log"
 wait-for-url-timeout-seconds = 15
 startup-command-search = [
     "{repo-dir}/scripts/run.sh",
@@ -134,7 +144,7 @@ remove = [
 ]
 preserve = [
     "$HOME/.config/{app-name}/",
-    "/tmp/{app-name}-server.log",
+    "${XDG_STATE_HOME:-$HOME/.local/state}/{app-name}/",
     "{repo-dir}",
 ]
 
