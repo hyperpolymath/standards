@@ -6,27 +6,30 @@
 
 ## Summary
 
-This campaign extracted 4 (so far) drifting per-repo workflow templates into reusable workflows hosted in this repo, plus shipped the classifier tooling that planned the wrapper sweeps. A 5th template (`scorecard.yml`) is surveyed and recommended for a follow-up PR.
+This campaign extracted 5 drifting per-repo workflow templates into reusable workflows hosted in this repo, plus shipped the classifier tooling and a Git-Tree-walk helper that planned the wrapper sweeps and validated the deployment counts.
 
-The campaign also surfaced a **methodology gotcha** that affects every future drift survey in this estate: `gh api /search/code` queries undercount monorepo-nested workflow files in two compounding ways, and the standard `path:.github/workflows` filter excludes them entirely. The corrected counts revise the LOC-retirement estimate upward by ~3× across affected templates.
+The campaign also surfaced a **methodology gotcha** that affects every future drift survey in this estate: `gh api /search/code` queries undercount workflow files in three compounding ways. After the campaign-meta-doc filed its first cut, the helper at [#204](https://github.com/hyperpolymath/standards/pull/204) walked the Git Tree API for all 5 templates and revised the count tables — top-level deployments were undercounted by 1–35% depending on template, and nested copies were undercounted by 100%+ for several templates. See [Corrected estate counts](#corrected-estate-counts) for the helper-validated tables.
 
 ## Filed PRs
 
-| PR | Template | Estate deploys (top-level) | Reusable LOC | Top SHA share |
-|---|---|---|---|---|
-| [#187](https://github.com/hyperpolymath/standards/pull/187) | `mirror-reusable.yml` | 289 | 165 | 76% |
-| [#190](https://github.com/hyperpolymath/standards/pull/190) | `secret-scanner-reusable.yml` | 281 | 159 | 69% (across top 4 SHAs) |
-| [#192](https://github.com/hyperpolymath/standards/pull/192) | `codeql-reusable.yml` | 263 | 96 | 83% single-language |
-| [#193](https://github.com/hyperpolymath/standards/pull/193) | `hypatia-scan-reusable.yml` | 255 | 459 | 83.5% top-5 |
-| [#194](https://github.com/hyperpolymath/standards/pull/194) | sweep-classifier scripts | — | — | tooling |
+Deploy counts here are the **helper-validated top-level counts** (from `list-workflow-paths.sh` walking each repo's Git Tree). The initial path-filtered survey numbers — which are listed in the PR bodies themselves — are 1–35% lower depending on template.
 
-All 5 PRs have auto-merge enabled (per the [auto-merge-on-all-PRs standing policy](https://github.com/hyperpolymath/.github)). The wrapper sweep does NOT fire automatically — each template is owner-gated post-merge.
+| PR | Template | Top-level (helper) | Top-level (PR body) | Reusable LOC | Top SHA share |
+|---|---|---:|---:|---:|---|
+| [#187](https://github.com/hyperpolymath/standards/pull/187) | `mirror-reusable.yml` | 293 | 289 | 165 | 76% |
+| [#190](https://github.com/hyperpolymath/standards/pull/190) | `secret-scanner-reusable.yml` | 299 | 281 | 159 | 69% (across top 4 SHAs) |
+| [#192](https://github.com/hyperpolymath/standards/pull/192) | `codeql-reusable.yml` | 280 | 263 | 96 | 83% single-language |
+| [#193](https://github.com/hyperpolymath/standards/pull/193) | `hypatia-scan-reusable.yml` | 344 | 255 | 459 | 83.5% top-5 |
+| [#194](https://github.com/hyperpolymath/standards/pull/194) | sweep-classifier scripts | — | — | — | tooling |
+| [#199](https://github.com/hyperpolymath/standards/pull/199) | this campaign meta-doc | — | — | — | docs |
+| [#204](https://github.com/hyperpolymath/standards/pull/204) | `list-workflow-paths.sh` helper + classifier ingestion | — | — | — | tooling |
+| [#205](https://github.com/hyperpolymath/standards/pull/205) | `scorecard-reusable.yml` | 278 | 258 | 87 | 38.8% |
 
-## Recommended next PR
+All PRs have auto-merge enabled (per the [auto-merge-on-all-PRs standing policy](https://github.com/hyperpolymath/.github)). The wrapper sweep does NOT fire automatically — each template is owner-gated post-merge.
 
-| PR | Template | Estate deploys | Why now |
-|---|---|---|---|
-| #195 (recommended) | `scorecard-reusable.yml` | 258 | Highest dominant-cluster (top SHA = 38.8%); ZERO feature variance; all drift mechanical (SPDX header + action-SHA-pin churn); smallest canonical (41 lines); no nested-path complication. |
+## Convergence set status
+
+The 5-candidate convergence set is **fully filed** (#187 mirror / #190 secret-scanner / #192 codeql / #193 hypatia-scan / #205 scorecard). #194 (classifiers), #199 (this doc), and #204 (helper + nested-path classifier ingestion) close out the supporting infrastructure.
 
 ## Ranking methodology
 
@@ -72,6 +75,8 @@ GitHub Code Search's org-scoped result set is capped well below the true file co
 
 Broad-query undercount factor: **~2.6×** inside heavily-nested monorepos. Per-repo queries (`gh api repos/<org>/<repo>/git/trees/HEAD?recursive=1 --jq '.tree[] | select(.path | endswith("/<file>.yml"))'`) are the only reliable source of truth for monorepo-nested workflow files.
 
+**Layer 2 also affects path-filtered queries** (a finding from the helper re-survey). `path:.github/workflows filename:hypatia-scan.yml` returned 255 results, but the Git-Tree walk found 344 top-level files — a 35% gap on the most-deployed template. The path filter is less severely truncated than the broad query, but both are sub-truth. Only direct Git-Tree enumeration is reliable.
+
 ### Layer 3: nested workflows are inert
 
 **GitHub Actions only runs workflows from the repo-root `.github/workflows/` directory.** Workflows under any other path (e.g. `a2ml/bindings/deno/.github/workflows/secret-scanner.yml` inside the `standards` repo) are **never triggered**.
@@ -85,15 +90,56 @@ This means nested copies are one of:
 
 ### Corrected estate counts
 
-| Template | Top-level | Nested (true ≥) | Total wrapper sites |
-|---|---:|---:|---:|
-| `hypatia-scan.yml` | 255 | 449 | 704 |
-| `mirror.yml` | 289 | 133 | 422 |
-| `secret-scanner.yml` | 281 | 282 | 563 |
-| `codeql.yml` | 263 | ~518 (per-repo verified for top-10 monorepos) | ~781 |
-| `scorecard.yml` | 258 | 626 | 884 |
+After [#204](https://github.com/hyperpolymath/standards/pull/204) shipped `list-workflow-paths.sh`, all 5 templates were re-enumerated by walking each repo's Git Tree API directly. The results invalidated **both** the broad-query and path-filtered survey numbers — even top-level counts were undercounted across the board.
 
-**Correction (post-helper validation):** an earlier version of this table reported scorecard.yml as having ZERO nested copies — that figure came from the broad `gh /search/code` query, which under-reported due to the Layer-2 truncation documented above. After [#204](https://github.com/hyperpolymath/standards/pull/204) added the `list-workflow-paths.sh` helper that walks the Git Tree API directly, per-repo enumeration found 626 nested scorecard.yml copies the broad query missed entirely. Scorecard is NOT immune to nested-copy proliferation; it has the second-highest nested count of the 5 candidates (behind hypatia-scan). The Layer-3 caveat still applies (nested copies are inert) — the disposition is single-source-of-truth cleanup, not security gain.
+#### Helper-validated counts (Git-Tree walk, all 5 templates)
+
+| Template | Top-level | Nested | Total | Unique blob SHAs (all) |
+|---|---:|---:|---:|---:|
+| `hypatia-scan.yml` | **344** | 603 | **947** | 32 |
+| `mirror.yml` | **293** | 335 | **628** | 120 |
+| `secret-scanner.yml` | **299** | 292 | **591** | 83 |
+| `codeql.yml` | **280** | 646 | **926** | 175 |
+| `scorecard.yml` | **278** | 626 | **904** | 114 |
+
+#### Top-level-only drift
+
+The drift % when nested copies are excluded is the figure relevant for the *executing* surface (since nested workflows are inert, per Layer 3):
+
+| Template | Top-level | Unique blob SHAs (top-level only) | Drift |
+|---|---:|---:|---:|
+| `hypatia-scan.yml` | 344 | **3** | **0.9%** |
+| `secret-scanner.yml` | 299 | 54 | 18.1% |
+| `scorecard.yml` | 278 | 46 | 16.5% |
+| `mirror.yml` | 293 | 75 | 25.6% |
+| `codeql.yml` | 280 | 75 | 26.8% |
+
+**hypatia-scan top-level is byte-near-identical across 344 sites** — only 3 unique blob SHAs total. The reusable wrapper sweep for hypatia-scan is therefore essentially mechanical with near-zero per-repo variance, much tighter than the 11.8% drift the PR body reports (which was the drift across top-level + nested).
+
+#### Initial-survey undercount summary
+
+| Template | PR-body top-level | Helper top-level | Top-level undercount | Original nested estimate | Helper nested |
+|---|---:|---:|---:|---:|---:|
+| `hypatia-scan.yml` | 255 | 344 | **+89 (35%)** | 449 | 603 |
+| `secret-scanner.yml` | 281 | 299 | +18 (6%) | 282 | 292 |
+| `codeql.yml` | 263 | 280 | +17 (6%) | ~518 | 646 |
+| `scorecard.yml` | 258 | 278 | +20 (8%) | 626 | 626 |
+| `mirror.yml` | 289 | 293 | +4 (1%) | 133 | 335 |
+
+The `path:.github/workflows`-filtered query under-reports top-level counts at the rate above, and the broad query under-reports nested counts even more severely (most extremely for mirror: 133 reported vs 335 true). Some of the gap is creation-of-new-repos between survey-and-helper runs, but most is search-index truncation.
+
+#### LOC retirement (top-level only — the executing surface)
+
+| Template | Top-level | × Canonical LOC | LOC retired |
+|---|---:|---:|---:|
+| `hypatia-scan.yml` | 344 | 416 | **~143,000** |
+| `mirror.yml` | 293 | 145 | ~42,500 |
+| `codeql.yml` | 280 | ~150 | ~42,000 |
+| `secret-scanner.yml` | 299 | ~120 | ~36,000 |
+| `scorecard.yml` | 278 | 41 | ~11,400 |
+| **Total (5 reusables, top-level)** | | | **~275,000** |
+
+Including nested copies (single-source-of-truth cleanup, not the executing surface): **~732,000 LOC** estate-wide eligible for wrapper replacement.
 
 ## Classifier tooling pattern (`scripts/sweep-classifiers/`)
 
@@ -153,11 +199,11 @@ The agreement between sessions was strong on `hypatia-scan.yml` (both: pursue, H
 
 ## Standing follow-ups
 
-1. **Owner-review on the 5 PRs** (#187/#190/#192/#193/#194) — auto-merge enabled; CI-green will auto-land.
-2. **File #195** (scorecard-reusable) to close the 5-candidate convergence set.
-3. **Per-repo recursive-tree classifier inputs** — extend `scripts/sweep-classifiers/` to emit one row per `(repo, nested-path)` tuple, not just per repo. Required before any wrapper sweep that targets nested copies.
-4. **Wrapper sweep firing** is owner-gated per template. The 82-PR rust-ci sweep is the upper bound the user has signalled comfort with; mirror's 267-PR sweep would need explicit per-batch sign-off.
-5. **Nested-copy disposition decision** — for each monorepo (developer-ecosystem, ssg-collection, ambientops, etc.), are the nested workflows vendored templates (keep, sync to reusable) or stale leftover (delete)? This is a per-monorepo judgement call; the campaign defers it.
+1. **Owner-review on the 8 PRs** (#187/#190/#192/#193/#194/#199/#204/#205) — auto-merge enabled; CI-green will auto-land.
+2. **Per-repo recursive-tree classifier inputs** — DONE in #204. Classifiers now accept the helper's TSV output (`<repo>\t<path>\t<blob-sha>`) and emit one row per `(repo, path)` tuple. Backward-compatible with legacy JSONL.
+3. **Wrapper sweep firing** is owner-gated per template. The 82-PR rust-ci sweep is the upper bound the user has signalled comfort with; mirror's 293-PR sweep would need explicit per-batch sign-off. With the helper-validated counts, sweeps now have ground-truth target lists.
+4. **Nested-copy disposition decision** — for each monorepo (developer-ecosystem, ssg-collection, ambientops, julia-ecosystem, asdf-tool-plugins, etc.), are the nested workflows vendored templates (keep, sync to reusable) or stale leftover (delete)? This is a per-monorepo judgement call; the campaign defers it.
+5. **Re-run helper periodically** — the Git-Tree-walk truth shifts as new repos land. Suggest a quarterly re-run of `list-workflow-paths.sh` against each of the 5 templates to keep this doc's count tables fresh.
 
 ## Cross-references
 
