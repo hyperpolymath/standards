@@ -42,23 +42,48 @@ BLOBS_DIR=/tmp/mirror-blobs \
 awk -F'\t' '{print $3}' /tmp/mirror-classification.tsv | sort | uniq -c | sort -rn
 ----
 
-== Nested-path caveat
+== Nested-path caveat — 3 layers of undercount
 
-`path:.github/workflows` in the GitHub code-search API matches the path
-PREFIX. Monorepo nested workflow files (e.g.,
-`a2ml/bindings/deno/.github/workflows/mirror.yml`) are EXCLUDED by that
-filter. To include them, use:
+`gh api /search/code` undercounts monorepo-nested workflow files in
+three compounding ways:
+
+. *Layer 1 — `path:` filter is a prefix match.* `path:.github/workflows`
+  excludes paths like `a2ml/bindings/deno/.github/workflows/mirror.yml`
+  outright.
+. *Layer 2 — even broad queries are org-scope-truncated.* Removing the
+  `path:` filter and running `filename:codeql.yml org:hyperpolymath`
+  returns ~190 paths, but per-repo enumeration of just
+  `developer-ecosystem` finds 170 codeql.yml files. The endpoint
+  silently caps results once it hits internal limits. Empirically
+  validated against `scorecard.yml`: broad query saw 152 paths, all
+  top-level; per-repo enumeration revealed 626 nested copies the
+  broad query missed entirely.
+. *Layer 3 — nested workflows do not execute.* GitHub Actions only runs
+  workflows from the repo-root `.github/workflows/` directory. Nested
+  copies are inert vendored templates or stale leftover. Security-driven
+  campaigns (e.g. propagating a missing guardrail) do NOT close
+  additional attack surface via nested wrappers. Single-source-of-truth
+  campaigns still benefit.
+
+For accurate counts, use `list-workflow-paths.sh` (this directory),
+which walks `gh repo list` and queries each repo's Git Tree API
+directly — bypassing Layers 1 and 2.
 
 [source,bash]
 ----
-gh api --paginate -X GET '/search/code' \
-  -f q='filename:mirror.yml org:hyperpolymath' \
-  --jq '.items[] | {repo: .repository.name, path: .path, sha: .sha}' \
-  > /tmp/mirror-full-with-nested.json
+./list-workflow-paths.sh codeql.yml \
+  > /tmp/drift-survey/codeql-all-tuples.tsv
+
+# Top-level vs nested split:
+awk -F'\t' '{print $4}' /tmp/drift-survey/codeql-all-tuples.tsv \
+  | sort | uniq -c
 ----
 
-Then filter on `.path` ending in `/.github/workflows/<template>.yml` to
-keep only workflow files.
+Output format: `<repo>\t<path>\t<blob-sha>\t<top-level|nested>`.
+
+The legacy `gh api /search/code` query is still useful as a quick first
+look, but `list-workflow-paths.sh` is the source of truth for any
+sweep-planning decision.
 
 == Output classes (varies by classifier)
 
