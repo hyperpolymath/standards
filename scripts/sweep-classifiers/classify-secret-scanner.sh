@@ -15,7 +15,11 @@
 
 set -euo pipefail
 
-REPOS_JSON="${1:-/tmp/drift-survey/secret-scanner-full.json}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_lib.sh
+. "$SCRIPT_DIR/_lib.sh"
+
+INPUT="${1:-/tmp/drift-survey/secret-scanner-full.json}"
 BLOBS_DIR="${BLOBS_DIR:-/tmp/drift-survey/secret-blobs}"
 mkdir -p "$BLOBS_DIR"
 
@@ -50,10 +54,10 @@ classify_blob() {
 
 # 1. Fetch unique blobs (cached).
 echo "[fetch] retrieving unique blobs..." >&2
-jq -r '.sha' "$REPOS_JSON" | sort -u | grep -v '^null$' | while read -r sha; do
+normalize_input "$INPUT" | awk -F'\t' '{print $3 "\t" $1}' | sort -u | while IFS=$'\t' read -r sha repo; do
+  [ -z "$sha" ] || [ "$sha" = "null" ] && continue
   blob_file="$BLOBS_DIR/$sha.yml"
   [ -s "$blob_file" ] && continue
-  repo=$(jq -r --arg s "$sha" 'select(.sha == $s) | .repo' "$REPOS_JSON" | head -1)
   gh api "/repos/hyperpolymath/$repo/git/blobs/$sha" --jq '.content' 2>/dev/null \
     | base64 -d > "$blob_file" || echo "::warn fetch failed for $sha ($repo)" >&2
 done
@@ -67,8 +71,8 @@ for blob in "$BLOBS_DIR"/*.yml; do
   SHA_CLASS[$sha]=$(classify_blob "$blob")
 done
 
-# 3. Per-repo TSV.
-jq -r '"\(.repo)\t\(.sha)"' "$REPOS_JSON" | while IFS=$'\t' read -r repo sha; do
-  [ -z "$sha" ] || [ "$sha" = "null" ] && { printf '%s\t%s\tNEEDS_REVIEW\tnull_sha\t-\t-\n' "$repo" "$sha"; continue; }
-  printf '%s\t%s\t%s\n' "$repo" "$sha" "${SHA_CLASS[$sha]:-NEEDS_REVIEW	fetch_failed	-	-}"
+# 3. Per-(repo, path) TSV.
+normalize_input "$INPUT" | while IFS=$'\t' read -r repo path sha; do
+  [ -z "$sha" ] || [ "$sha" = "null" ] && { printf '%s\t%s\t%s\tNEEDS_REVIEW\tnull_sha\t-\t-\n' "$repo" "$path" "$sha"; continue; }
+  printf '%s\t%s\t%s\t%s\n' "$repo" "$path" "$sha" "${SHA_CLASS[$sha]:-NEEDS_REVIEW	fetch_failed	-	-}"
 done
