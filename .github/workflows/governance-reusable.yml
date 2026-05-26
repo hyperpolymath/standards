@@ -244,20 +244,42 @@ jobs:
 
           # Baseline lookup: returns 0 (exempt) if the file appears in
           # .hypatia-baseline.json with a matching rule_module + type.
-          # `file_pattern` glob match is intentionally NOT implemented
-          # here; the advisory-rollout window only honours exact `file`
-          # matches. Pattern support arrives with the blocking-mode
-          # flip and the apply-baseline.sh upgrade (see
-          # standards/scripts/apply-baseline.sh).
+          # Honours both `file` (exact) and `file_pattern` (glob) entries.
+          # The glob → regex translation mirrors apply-baseline.sh exactly:
+          #   `**` matches any depth (incl. `/`); `*` matches one segment.
+          # Pattern support unblocks language-demo repos (absolute-zero
+          # carries ~30 banned-language example files under `examples/`)
+          # and any repo that vendors such subtrees, replacing per-file
+          # `.hypatia-ignore` enumeration with one `file_pattern` entry.
           in_baseline() {
             local target="$1"
             [ -f .hypatia-baseline.json ] || return 1
             command -v jq >/dev/null 2>&1 || return 1
+            # Note: the `as $pat` capture is essential — inside `test(...)`
+            # the dot rebinds to test's input ($f, a string), so
+            # `.file_pattern` would error with "Cannot index string". We
+            # capture file_pattern in $pat first, then reference it inside
+            # the test() argument.
             jq -e \
               --arg rm "$rule_module" \
               --arg rt "$rule_type" \
               --arg f  "$target" \
-              'any(.[]; .rule_module == $rm and .type == $rt and .file == $f)' \
+              'any(.[];
+                   .rule_module == $rm and .type == $rt
+                   and (
+                     (.file? // null) == $f
+                     or (
+                       (.file_pattern? // null) as $pat
+                       | $pat != null
+                       and ($f | test(
+                         $pat
+                         | gsub("\\*\\*"; "DOUBLESTAR")
+                         | gsub("\\*"; "[^/]*")
+                         | gsub("DOUBLESTAR"; ".*")
+                         | "^" + . + "$"
+                       ))
+                     )
+                   ))' \
               .hypatia-baseline.json >/dev/null 2>&1
           }
 
