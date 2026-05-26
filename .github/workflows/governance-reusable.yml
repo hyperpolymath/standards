@@ -236,7 +236,7 @@ jobs:
       #   3. Inline `# hypatia:ignore ...` pragma in the file's first
       #      8 lines — the same escape the Hypatia scanner itself
       #      honours.
-      - name: Check for ReScript / Go / Python (banned language files)
+      - name: Check banned-language files (ReScript / Go / Python / Java / Kotlin / Swift / Dart / V-lang / ATS2 / Makefile)
         run: |
           rule_module="cicd_rules"
           rule_type="banned_language_file"
@@ -300,15 +300,36 @@ jobs:
             echo "✅ No non-exempt ${label}"
           }
 
-          RES_FILES=$(find . -name "*.res" | grep -v node_modules || true)
-          GO_FILES=$(find . -name "*.go" || true)
-          PY_FILES=$(find . -name "*.py" | grep -v salt | grep -v _states \
+          RES_FILES=$(find . -name "*.res" -not -path "./node_modules/*" -not -path "./.git/*" || true)
+          GO_FILES=$(find . -name "*.go" -not -path "./.git/*" || true)
+          PY_FILES=$(find . -name "*.py" -not -path "./.git/*" \
+            | grep -v salt | grep -v _states \
             | grep -v _modules | grep -v pillar | grep -v venv \
             | grep -v __pycache__ || true)
+          MAKE_FILES=$(find . \( -name "Makefile" -o -name "Makefile.*" -o -name "*.mk" \) \
+            -not -path "./.git/*" -not -path "./.github/*" || true)
+          JAVA_FILES=$(find . \( -name "*.java" -o -name "*.kt" -o -name "*.kts" \) \
+            -not -path "./.git/*" || true)
+          SWIFT_FILES=$(find . -name "*.swift" -not -path "./.git/*" || true)
+          DART_FILES=$(find . \( -name "*.dart" -o -name "pubspec.yaml" \) \
+            -not -path "./.git/*" || true)
+          # V-lang detected by manifest (v.mod / vpkg.json); the .v extension
+          # collides with Verilog so we never key on it.
+          VMOD_FILES=$(find . \( -name "v.mod" -o -name "vpkg.json" \) \
+            -not -path "./node_modules/*" -not -path "./.git/*" || true)
+          # ATS2 source extensions: rejected in favour of Idris2 / Rust/SPARK.
+          ATS2_FILES=$(find . \( -name "*.dats" -o -name "*.sats" -o -name "*.hats" \) \
+            -not -path "./.git/*" || true)
 
           enforce "ReScript files" "use AffineScript instead" "$RES_FILES"
           enforce "Go files" "use Rust/WASM instead" "$GO_FILES"
           enforce "Python files" "only allowed for SaltStack" "$PY_FILES"
+          enforce "Makefiles" "use Mustfile/justfile instead" "$MAKE_FILES"
+          enforce "Java/Kotlin files" "use Rust/Tauri/Dioxus instead" "$JAVA_FILES"
+          enforce "Swift files" "use Tauri/Dioxus instead" "$SWIFT_FILES"
+          enforce "Flutter/Dart files" "use Tauri/Dioxus instead (Google lock-in)" "$DART_FILES"
+          enforce "V-lang manifests (v.mod / vpkg.json)" "V-lang is banned since 2026-04-10 — migrate to Zig" "$VMOD_FILES"
+          enforce "ATS2 files (.dats / .sats / .hats)" "use Idris2 or Rust/SPARK instead" "$ATS2_FILES"
 
       - name: Check for npm/bun artifacts
         # standards#67 — npm-avoidant: package-lock.json must never be tracked
@@ -338,6 +359,15 @@ jobs:
           if [ -n "$NPMRC_FILES" ]; then
             echo "❌ .npmrc detected. Use Deno deno.json for JS config."
             printf '%s\n' "$NPMRC_FILES"
+            FAILED=1
+          fi
+          # Root package.json with runtime "dependencies" — moved here from
+          # the now-deleted language-policy.yml. devDependencies-only is
+          # tolerated for transitional tooling (e.g., a legacy bundler
+          # invoked from Justfile), but a `"dependencies"` field
+          # indicates Node.js runtime use, which Deno replaces.
+          if [ -f package.json ] && grep -q '"dependencies"[[:space:]]*:[[:space:]]*{[^}]' package.json; then
+            echo "❌ package.json with runtime \"dependencies\" detected. Use deno.json imports instead."
             FAILED=1
           fi
           if [ -n "$FAILED" ]; then
