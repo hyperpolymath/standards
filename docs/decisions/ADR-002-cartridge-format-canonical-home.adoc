@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= ADR-002: Cartridge format — canonical home in standards, mirrored in boj-server
+:adr-status: Accepted
+:adr-date: 2026-05-26
+:adr-author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+
+== Status
+
+*Accepted* 2026-05-26.
+
+== Context
+
+Two cartridge schemas have lived in parallel in the estate:
+
+* `boj-server/schemas/cartridge-v1.json` — single-cartridge manifest, MCP-only
+  (`name` regex requires `-mcp` suffix). Schema URL: `https://boj.dev/schemas/cartridge/v1.json`.
+* `panll/src/abi/cartridge-schema.json` v0.3.0 — multi-cartridge "fleet" manifest
+  enumerating cartridges with their `tier`, `domain`, `protocols`, `states`,
+  and `tools`. Protocols listed include MCP, LSP, DAP, BSP, NeSy, Agentic,
+  Fleet, GRPC, REST — the full BoJ server-role taxonomy.
+
+A separate planned initiative will:
+
+1. Extract the 125 cartridges currently bundled in `boj-server/cartridges/` to
+   a new repository `hyperpolymath/boj-server-cartridges`.
+2. Wire boj-server's catalog to fetch cartridges on demand rather than ship them
+   baked-in.
+3. Expand cartridge coverage beyond MCP into the LSP/DAP/BSP/Format/Lint/Build/
+   NeSy/Agentic/Fleet roles already enumerated in panll's schema.
+
+This requires a single canonical, role-agnostic cartridge schema accessible to
+multiple consumers (boj-server, panll, the new cartridges repo).
+
+== Decision
+
+* The canonical cartridge format is owned by *`standards/cartridges/`*:
+** `standards/cartridges/cartridge-v1.json` — JSON Schema
+** `standards/cartridges/CARTRIDGE-FORMAT.adoc` — prose specification
+** `standards/cartridges/0.2-AI-MANIFEST.a2ml` — directory manifest
+* Canonical schema URL: `https://hyperpolymath.dev/standards/cartridges/cartridge-v1.json`.
+* `boj-server/schemas/cartridge-v1.json` becomes a *SHA-pinned mirror* of the
+  canonical file, refreshed by a separate PR when standards advances the schema.
+* `panll/src/abi/cartridge-schema.json` v0.3.0 is *absorbed* — the v1 schema
+  here takes panll's broader protocol set into the single-cartridge form.
+  Panll's fleet manifest semantics (multiple cartridges in one file) is
+  reconstructible as an array of v1 manifests; we do not preserve the
+  fleet-manifest container shape.
+* The v1 schema *admits* the full role suffix list:
+  `(mcp|lsp|dap|bsp|debug|format|lint|build|nesy|agentic|fleet)`. boj-server's
+  prior `-mcp`-only restriction is dropped.
+* New fields added on top of boj-server's prior schema:
+** `category` — taxonomy bin (`domain` | `cross-cutting` | `template`).
+** `states` — state-machine states (per panll's v0.3.0).
+** `source` — `{registry, path, sha256}` for remote-fetched cartridges.
+* Versioning: the new schema is v1 at this canonical home; v2 will accompany
+  any backwards-incompatible change with its own ADR.
+
+== Consequences
+
+*Positive:*
+
+* One canonical specification across the estate; mechanical to verify.
+* Schema URL becomes stable (`hyperpolymath.dev/standards/...` rather than
+  `boj.dev/...` — the latter URL is not currently served).
+* Future cartridge work (LSP/DAP/BSP/format/lint/build/nesy/agentic ports of
+  polystack components) becomes legal at the schema level on day one.
+* `boj-server-cartridges` consumes the schema directly from standards, removing
+  the implicit dependency on the boj-server repo.
+
+*Negative:*
+
+* All existing 125 cartridges in `boj-server/cartridges/` need a `category`
+  field added (mechanical sweep; mostly `domain` with a few `cross-cutting`).
+* Schema URL has changed; consumers referencing the old URL need an update.
+  (Currently only `cartridge.json` files inside boj-server's cartridges
+  reference it — same-PR sweep can update them.)
+
+*Neutral:*
+
+* Panll's `cartridge-schema.json` v0.3.0 file is not deleted by this ADR; it
+  remains until panll's own catalog code is migrated to consume the v1 schema
+  (separate PR).
+
+== Implementation plan (referenced from companion PRs)
+
+1. *This PR* — land `standards/cartridges/` with spec + schema + ADR.
+2. *boj-server PR* — replace `schemas/cartridge-v1.json` with SHA-pinned vendor
+   of the canonical, update `$schema` URLs in all 125 cartridges.
+3. *Future:* boj-server-cartridges repo creation + cartridge extraction +
+   catalog refactor + polystack LSP-half ports.
