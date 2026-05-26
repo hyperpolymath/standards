@@ -1,0 +1,152 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= `.hypatia-baseline.json` — per-repo Hypatia finding baseline
+:toc:
+:toclevels: 2
+
+Authoritative format documentation for `.hypatia-baseline.json`, the
+per-repo file that records acknowledged Hypatia findings.
+
+A baseline entry tells the governance gate: "yes, this finding exists,
+yes we know about it, do not block CI on it."
+
+== File location
+
+`.hypatia-baseline.json` lives at the **repository root**. One file per
+repo. No subdirectory variants — the baseline is repo-scoped, not
+subtree-scoped (use `file_pattern` to scope an entry to a subtree).
+
+== Schema
+
+Authoritative JSON Schema:
+`hyperpolymath/standards/.machine_readable/hypatia-baseline.schema.json`
+
+Validate locally with `ajv` or any JSON Schema 2020-12 validator:
+
+[source,sh]
+----
+curl -sSfL \
+  https://raw.githubusercontent.com/hyperpolymath/standards/main/.machine_readable/hypatia-baseline.schema.json \
+  -o /tmp/schema.json
+ajv validate --spec=draft2020 -s /tmp/schema.json -d .hypatia-baseline.json
+----
+
+== Top-level structure
+
+A JSON array. Each element is a *baseline entry* — same shape as a
+Hypatia finding, plus optional metadata.
+
+[source,json]
+----
+[
+  {
+    "severity": "high",
+    "rule_module": "code_safety",
+    "type": "obj_magic",
+    "file": "bots/sustainabot/bot-integration/src/Analysis.res",
+    "tracking_issue": "hyperpolymath/gitbot-fleet#148",
+    "note": "ReScript → AffineScript migration in flight",
+    "expires_at": "2026-08-31"
+  }
+]
+----
+
+== Required fields
+
+`severity`:: One of `critical`, `high`, `medium`, `low`, `info`. Must
+match the finding's reported severity exactly for the entry to apply.
+
+`rule_module`:: Hypatia rule module (e.g. `cicd_rules`, `code_safety`,
+`migration_rules`).
+
+`type`:: Finding type within the rule module (e.g. `banned_language_file`,
+`obj_magic`, `deprecated_api`).
+
+**Exactly one of** `file` or `file_pattern`:
+
+`file`:: Repo-relative path to a single file.
+`file_pattern`:: gitignore-style glob (e.g. `bots/**/src/*.res`). Use
+for subtree exemptions.
+
+== Optional fields
+
+`severity_override`:: Downgrade the matched finding to this severity
+instead of suppressing it. Useful for advisory triage during migration
+windows. Example: an entry with `"severity_override": "advisory"` keeps
+the finding visible but stops it from blocking the gate.
+
+`expires_at`:: ISO-8601 date (`YYYY-MM-DD`). After this date the entry is
+treated as expired and stops suppressing findings. Bounds migration
+windows and prevents baseline rot.
+
+`note`:: Free-text rationale. Strongly recommended for any non-obvious
+entry. Surfaced in the gate's run summary.
+
+`tracking_issue`:: GitHub issue reference (`owner/repo#number`) that
+tracks the underlying work to remove the need for the exemption. Surfaced
+in the gate's run summary as a link.
+
+== Matching rules
+
+A finding is acknowledged by a baseline entry iff:
+
+. `severity` matches exactly, AND
+. `rule_module` matches exactly, AND
+. `type` matches exactly, AND
+. either:
+.. `file` is set and equals the finding's `file`, OR
+.. `file_pattern` is set and the glob matches the finding's `file`.
+
+First-match wins (entries are scanned in document order).
+
+== What goes in the baseline (and what doesn't)
+
+**Good** entries:
+
+* Pre-existing tech debt being tracked for migration.
+* Findings on vendored/third-party code the repo cannot modify.
+* Test fixtures intentionally violating a rule (with `note` explaining).
+
+**Bad** entries — fix the underlying code instead:
+
+* Single new findings on freshly-introduced code (the rule exists for a
+  reason — adding the file to the baseline defeats it).
+* Findings the team hasn't read. Every entry should have a `note` if the
+  acknowledgement isn't obvious from the file path alone.
+
+== Lifecycle and maintenance
+
+1. **Adding** — append an entry when a new finding is acknowledged. Open
+   a tracking issue and reference it via `tracking_issue` unless the
+   exemption is permanent (e.g. vendored code).
+2. **Reviewing** — entries without `expires_at` should be reviewed
+   quarterly. CI emits a warning per entry older than 6 months.
+3. **Removing** — when the underlying finding is fixed (or the file
+   deleted), remove the entry. CI emits a warning per stale entry
+   (file no longer exists).
+4. **Expiring** — `expires_at` is a forcing function. Past the date, the
+   gate fails again on the finding — forcing either a fix, an extension
+   (with renewed justification), or a permanent acknowledgement.
+
+== Relationship to other exemption mechanisms
+
+See `docs/EXEMPTION-MECHANISMS.adoc` for the full picture.
+
+Short version:
+
+[cols="1,2,3"]
+|===
+| Layer | File | Use for
+
+| Estate-wide
+| `standards/.machine_readable/bot_exclusion_registry.a2ml`
+| What bots may never *write* to (read-only repos, vendored paths).
+
+| Per-repo baseline
+| `.hypatia-baseline.json` (this file)
+| Findings the team has *acknowledged* and CI should not block on.
+
+| Per-PR (not yet implemented)
+| (none)
+| One-off PR-scoped exemptions. Currently use the baseline + remove
+  after merge.
+|===
