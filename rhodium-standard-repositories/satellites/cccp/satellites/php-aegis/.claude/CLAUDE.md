@@ -1,70 +1,15 @@
-# CLAUDE.md - AI Assistant Instructions
+# CLAUDE.md — see canonical
 
-## Language Policy (Hyperpolymath Standard)
+This satellite follows the hyperpolymath estate-wide policy. The
+authoritative `CLAUDE.md` is at the standards-repo root:
 
-### ALLOWED Languages & Tools
+- <https://github.com/hyperpolymath/standards/blob/main/.claude/CLAUDE.md>
 
-| Language/Tool | Use Case | Notes |
-|---------------|----------|-------|
-| **ReScript** | Primary application code | Compiles to JS, type-safe |
-| **Deno** | Runtime & package management | Replaces Node/npm/bun |
-| **Rust** | Performance-critical, systems, WASM | Preferred for CLI tools |
-| **Tauri 2.0+** | Mobile apps (iOS/Android) | Rust backend + web UI |
-| **Dioxus** | Mobile apps (native UI) | Pure Rust, React-like |
-| **Gleam** | Backend services | Runs on BEAM or compiles to JS |
-| **Bash/POSIX Shell** | Scripts, automation | Keep minimal |
-| **JavaScript** | Only where ReScript cannot | MCP protocol glue, Deno APIs |
-| **Python** | SaltStack only | No other Python permitted |
-| **Nickel** | Configuration language | For complex configs |
-| **Guile Scheme** | State/meta files | STATE.scm, META.scm, ECOSYSTEM.scm |
-| **Julia** | Batch scripts, data processing | Per RSR |
-| **OCaml** | AffineScript compiler | Language-specific |
-| **Ada** | Safety-critical systems | Where required |
+The previous body of this file was a 2025-11-22 snapshot that listed
+ReScript as primary (banned in new code as of 2026-04-30), GitLab as
+the source-of-truth host (estate is on GitHub), and other guidance
+superseded by the canonical policy. Duplicating policy tables across
+satellites caused the drift; this pointer replaces the duplicate.
 
-### BANNED - Do Not Use
-
-| Banned | Replacement |
-|--------|-------------|
-| TypeScript | ReScript |
-| Node.js | Deno |
-| npm | Deno |
-| Bun | Deno |
-| pnpm/yarn | Deno |
-| Go | Rust |
-| Python (general) | ReScript/Rust |
-| Java/Kotlin | Rust/Tauri/Dioxus |
-| Swift | Tauri/Dioxus |
-| React Native | Tauri/Dioxus |
-| Flutter/Dart | Tauri/Dioxus |
-
-### Mobile Development
-
-**No exceptions for Kotlin/Swift** - use Rust-first approach:
-
-1. **Tauri 2.0+** - Web UI (ReScript) + Rust backend, MIT/Apache-2.0
-2. **Dioxus** - Pure Rust native UI, MIT/Apache-2.0
-
-Both are FOSS with independent governance (no Big Tech).
-
-### Enforcement Rules
-
-1. **No new TypeScript files** - Convert existing TS to ReScript
-2. **No package.json for runtime deps** - Use deno.json imports
-3. **No node_modules in production** - Deno caches deps automatically
-4. **No Go code** - Use Rust instead
-5. **Python only for SaltStack** - All other Python must be rewritten
-6. **No Kotlin/Swift for mobile** - Use Tauri 2.0+ or Dioxus
-
-### Package Management
-
-- **Primary**: Guix (guix.scm)
-- **Fallback**: Nix (flake.nix)
-- **JS deps**: Deno (deno.json imports)
-
-### Security Requirements
-
-- No MD5/SHA1 for security (use SHA256+)
-- HTTPS only (no HTTP URLs)
-- No hardcoded secrets
-- SHA-pinned dependencies
-- SPDX license headers on all files
+Add satellite-specific guidance below this line only — never re-paste
+the language-policy / tooling tables here.
