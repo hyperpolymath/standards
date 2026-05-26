@@ -1,0 +1,78 @@
+= Sweep classifiers
+:SPDX-License-Identifier: PMPL-1.0-or-later
+
+Per-template classifiers used to triage the wrapper-sweep work that
+follows each of the foundational reusable PRs filed against
+`standards`:
+
+[cols="2,1,3", options="header"]
+|===
+| Classifier | Reusable PR | Template
+| `classify-mirror.sh`         | #187 | `mirror.yml` (7-forge mirror bundle)
+| `classify-secret-scanner.sh` | #190 | `secret-scanner.yml` (trufflehog/gitleaks/rust/shell)
+| `classify-codeql.sh`         | #192 | `codeql.yml` (CodeQL security analysis)
+| `classify-hypatia-scan.sh`   | #193 | `hypatia-scan.yml` (Hypatia neurosymbolic scan)
+|===
+
+== Pipeline
+
+. Paginate `gh api /search/code` for the template across the estate.
+. Group results by blob SHA; fetch each unique blob exactly once.
+. Classify each blob (job-set match / line-count band / language matrix).
+. Emit per-repo TSV: `<repo>\t<sha>\t<class>\t<reason>\t<lines>\t<details>`.
+
+The expensive step (blob fetch) is cached in `$BLOBS_DIR`, so reruns
+are fast.
+
+== Usage
+
+[source,bash]
+----
+# 1. Paginate the search (one-time per template):
+gh api --paginate -X GET '/search/code' \
+  -f q='filename:mirror.yml path:.github/workflows org:hyperpolymath' \
+  --jq '.items[] | {repo: .repository.name, sha: .sha}' \
+  > /tmp/mirror-full.json
+
+# 2. Run the classifier:
+BLOBS_DIR=/tmp/mirror-blobs \
+  ./classify-mirror.sh /tmp/mirror-full.json > /tmp/mirror-classification.tsv
+
+# 3. Summarise:
+awk -F'\t' '{print $3}' /tmp/mirror-classification.tsv | sort | uniq -c | sort -rn
+----
+
+== Nested-path caveat
+
+`path:.github/workflows` in the GitHub code-search API matches the path
+PREFIX. Monorepo nested workflow files (e.g.,
+`a2ml/bindings/deno/.github/workflows/mirror.yml`) are EXCLUDED by that
+filter. To include them, use:
+
+[source,bash]
+----
+gh api --paginate -X GET '/search/code' \
+  -f q='filename:mirror.yml org:hyperpolymath' \
+  --jq '.items[] | {repo: .repository.name, path: .path, sha: .sha}' \
+  > /tmp/mirror-full-with-nested.json
+----
+
+Then filter on `.path` ending in `/.github/workflows/<template>.yml` to
+keep only workflow files.
+
+== Output classes (varies by classifier)
+
+* `TRIVIAL` / `TRIVIAL_CURRENT` / `TRIVIAL_DEFAULT` — canonical match;
+  pure mechanical wrapper conversion.
+* `MISSING_*` / `SLIM_*` / `OLDER_*` — propagation lag; same wrapper as
+  TRIVIAL upgrades the workflow body on first run after merge.
+* `SINGLE_NON_DEFAULT` / `MULTI_LANGUAGE` — requires one or more input
+  overrides at the call site.
+* `NEEDS_REVIEW` — extra jobs, line count out of any known band, or
+  custom workflow body. Per-repo diff required before wrapper.
+
+== Related
+
+* `scripts/apply-baseline.sh` — Hypatia-finding baseline filter (paired
+  with `scripts/tests/apply-baseline-test.sh`).
+* PRs #187, #190, #192, #193 — the reusables these classifiers triage.
