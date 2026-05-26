@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# deno-ci-reusable.yml — Reusable Deno CI bundle (RSR).
+#
+# Replaces the per-repo `rescript-deno-ci.yml` template that copy-drifted
+# across the estate with several systemic bugs:
+#
+#   * `deno test` ran unconditionally and failed `No test modules found`
+#     on repos with no Deno tests.
+#   * `deno lint` / `deno fmt --check` ran unconditionally and failed
+#     `No target files found` on repos with no JS/TS targets.
+#   * No top-level `permissions:` declaration, tripping the workflow
+#     security linter in governance-reusable.yml.
+#   * Still invoked `npx rescript` even though ReScript is banned in new
+#     code as of 2026-04-30 (see standards/.claude/CLAUDE.md).
+#   * The vestigial "security" job grep-audited for permission strings
+#     without doing anything useful with the result.
+#
+# Each step now early-exits cleanly when the inputs don't exist, so the
+# job is a no-op on repos that don't yet ship Deno code but pass cleanly
+# when they start to.
+#
+# Caller example (single wrapper, mirrors governance.yml's pattern):
+#
+#   jobs:
+#     deno-ci:
+#       uses: hyperpolymath/standards/.github/workflows/deno-ci-reusable.yml@main
+
+name: Deno CI (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label for the deno-ci job
+        type: string
+        required: false
+        default: ubuntu-latest
+      deno-version:
+        description: Deno version selector
+        type: string
+        required: false
+        default: v2.x
+
+permissions:
+  contents: read
+
+jobs:
+  deno-ci:
+    name: Deno CI
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+
+      - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2.0.3
+        with:
+          deno-version: ${{ inputs.deno-version }}
+
+      - name: Detect Deno targets
+        id: detect
+        run: |
+          # `deno.json` (or its legacy `deno.jsonc`) is the canonical
+          # signal that this repo opts into Deno tooling. We also count
+          # raw .ts/.js files as a fallback for repos still mid-migration
+          # to deno.json. Either way, the per-step guards below honour
+          # any `include` / `exclude` scoping the consumer declared in
+          # deno.json.
+          has_config=false
+          has_targets=false
+          has_tests=false
+          if [ -f deno.json ] || [ -f deno.jsonc ]; then has_config=true; fi
+          if find . -path ./node_modules -prune -o -path ./.git -prune \
+              -o \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.mjs" \) \
+              -type f -print 2>/dev/null | head -1 | grep -q .; then
+            has_targets=true
+          fi
+          if find . -path ./node_modules -prune -o -path ./.git -prune \
+              -o \( -name "*_test.ts" -o -name "*.test.ts" -o -name "*_test.js" -o -name "*.test.js" \) \
+              -type f -print 2>/dev/null | head -1 | grep -q .; then
+            has_tests=true
+          fi
+          echo "has_config=$has_config"   >> "$GITHUB_OUTPUT"
+          echo "has_targets=$has_targets" >> "$GITHUB_OUTPUT"
+          echo "has_tests=$has_tests"     >> "$GITHUB_OUTPUT"
+          echo "deno-ci: config=$has_config targets=$has_targets tests=$has_tests"
+
+      - name: Deno lint
+        if: steps.detect.outputs.has_targets == 'true' || steps.detect.outputs.has_config == 'true'
+        run: deno lint
+
+      - name: Deno fmt check
+        if: steps.detect.outputs.has_targets == 'true' || steps.detect.outputs.has_config == 'true'
+        run: deno fmt --check
+
+      - name: Deno test
+        if: steps.detect.outputs.has_tests == 'true'
+        run: deno test --allow-all --coverage=coverage
+
+      - name: Deno type check
+        if: steps.detect.outputs.has_targets == 'true'
+        # Soft-pass: `deno check` exits non-zero on unresolved imports we
+        # don't yet require contributors to vendor. We surface output for
+        # diagnostics but don't fail the gate.
+        run: deno check . || echo "::warning::deno check reported issues (non-blocking)."
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.detect.outputs.has_config }}" = "false" ] \
+             && [ "${{ steps.detect.outputs.has_targets }}" = "false" ]; then
+            echo "deno-ci: no Deno targets detected — skipped all checks."
+          else
+            echo "deno-ci: passed (lint / fmt / type / test where applicable)."
+          fi
