@@ -131,94 +131,37 @@ jobs:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
 
+      # Estate language policy bans Python with no exceptions (CLAUDE.md
+      # Language Policy; SaltStack exception removed 2026-01-03). The
+      # previous in-line `python3 << PYEOF` heredoc made this very gate a
+      # self-referential violation — same structural class as the CSA001
+      # self-loop fixed in hypatia#328. Eradicated by porting the logic
+      # to a Deno script that lives in this standards repo.
+      #
+      # Implementation note: a reusable workflow only auto-checks-out its
+      # YAML, not sibling files in its repo. So we explicitly check out
+      # this repo at the same ref the caller picked (via
+      # `github.workflow_sha`, the SHA actually loaded by the runner)
+      # into `.standards-checkout/`, then run the script from there.
+      - name: Set up Deno
+        uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2.0.3
+        with:
+          deno-version: v2.x
+
+      - name: Check out standards repo for shared scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: hyperpolymath/standards
+          ref: ${{ github.workflow_sha }}
+          path: .standards-checkout
+          # Sparse-checkout only the scripts dir to keep this fast.
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
       - name: Check for TypeScript
-        run: |
-          python3 << 'PYEOF'
-          import re, sys, pathlib
-
-          DIR_NAMES_ALLOWED = {
-              'bindings', 'tests', 'test', 'scripts',
-              'mcp-adapter', 'cli', 'vendor', 'examples', 'ffi',
-              'node_modules', 'benchmarks',
-          }
-
-          def builtin_allowed(p):
-              if p.endswith('.d.ts'):
-                  return True
-              base = p.rsplit('/', 1)[-1]
-              if base == 'mod.ts':
-                  return True
-              if base in ('lsp-server.ts', 'lsp_server.ts', 'lsp.ts') or base.endswith('-lsp.ts'):
-                  return True
-              if base.endswith('.bench.ts') or base.endswith('_bench.ts'):
-                  return True
-              segs = p.split('/')
-              for s in segs[:-1]:
-                  if s in DIR_NAMES_ALLOWED:
-                      return True
-                  if 'vscode' in s:
-                      return True
-                  if s.startswith('deno-'):
-                      return True
-              return False
-
-          def glob_to_regex(g):
-              out = []
-              for c in g.lstrip('./'):
-                  if c == '*': out.append('.*')
-                  elif c == '?': out.append('.')
-                  elif c in '.+(){}[]|^$\\': out.append(re.escape(c))
-                  else: out.append(c)
-              return re.compile('^' + ''.join(out) + '$')
-
-          exemption_patterns = []
-          claude_md = pathlib.Path('.claude/CLAUDE.md')
-          if claude_md.exists():
-              in_table = False
-              for line in claude_md.read_text(encoding='utf-8').splitlines():
-                  if re.search(r'TypeScript [Ee]xemptions', line):
-                      in_table = True
-                      continue
-                  if in_table and line.startswith(('### ', '## ', '# ')):
-                      break
-                  if in_table and line.startswith('|'):
-                      m = re.match(r'\|\s*`([^`]+)`', line)
-                      if m:
-                          exemption_patterns.append((m.group(1), glob_to_regex(m.group(1))))
-
-          def exempt(p):
-              for raw, regex in exemption_patterns:
-                  if regex.match(p):
-                      return True
-                  if p == raw.lstrip('./'):
-                      return True
-                  if raw.endswith('/') and p.startswith(raw.lstrip('./')):
-                      return True
-              return False
-
-          found = []
-          for ext in ('ts', 'tsx'):
-              for p in pathlib.Path('.').rglob(f'*.{ext}'):
-                  parts = p.parts
-                  if any(part.startswith('.') and part not in ('.', '..') for part in parts):
-                      continue
-                  found.append(p.as_posix().lstrip('./'))
-
-          bad = sorted(f for f in found if not (builtin_allowed(f) or exempt(f)))
-          if bad:
-              print("❌ TypeScript files detected outside the allowlist.\n")
-              for f in bad:
-                  print(f"  {f}")
-              print()
-              print("To resolve, choose one:")
-              print("  (a) migrate the file to AffineScript")
-              print("  (b) move to an allowlisted bridge path")
-              print("  (c) add an entry to the 'TypeScript Exemptions' table in .claude/CLAUDE.md")
-              if exemption_patterns:
-                  print(f"\n(Currently {len(exemption_patterns)} exemption(s) parsed from .claude/CLAUDE.md.)")
-              sys.exit(1)
-          print(f"✅ No TypeScript files outside allowlist ({len(exemption_patterns)} per-repo exemption(s) parsed).")
-          PYEOF
+        # Read-only execution; never writes outside the runner workspace.
+        run: deno run --allow-read .standards-checkout/scripts/check-ts-allowlist.ts
 
       # Shared escape hatch for the banned-language-file checks below.
       # Honours three exemption mechanisms (see
