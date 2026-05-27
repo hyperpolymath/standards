@@ -39,6 +39,24 @@
 #     (`advisory` | `blocking`); the default is `advisory` for the
 #     one-week soak. Flip to `blocking` once the conversion is
 #     observed-clean.
+#
+# Codeload-retry resilience (added 2026-05-27, standards#208):
+#   - Every job carries `timeout-minutes: 10` so a transient
+#     `codeload.github.com` outage cannot burn the full 6-hour default
+#     when the runner hangs mid-fetch (observed 2026-05-26: single
+#     codeload glitch propagated to 44 PRs across the estate).
+#   - GitHub controls runner-side action-tarball retry; workflow files
+#     cannot meaningfully override it. The recommended downstream
+#     mitigation when a transient happens is:
+#       gh run rerun --failed --repo <owner>/<repo> <run-id>
+#     which restores 60-80% of failed runs in our experience without
+#     consuming additional minutes beyond the failing job's residual.
+#   - Consumer repos that want auto-rerun should add
+#     `.github/workflows/auto-rerun-on-codeload-fail.yml` — a
+#     workflow_run-triggered job that detects the codeload-failure
+#     signature in the failing run's logs and reruns once. Not bundled
+#     here because it requires `actions: write` permission scope which
+#     this reusable intentionally avoids.
 
 name: Estate Governance (reusable)
 
@@ -58,6 +76,7 @@ jobs:
   validate-baseline:
     name: Validate Hypatia baseline
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -123,6 +142,7 @@ jobs:
   language-policy:
     name: Language / package anti-pattern policy
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -366,6 +386,7 @@ jobs:
   package-policy:
     name: Guix primary / Nix fallback policy
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -393,6 +414,7 @@ jobs:
   security-policy:
     name: Security policy checks
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -479,6 +501,7 @@ jobs:
   quality:
     name: Code quality + docs
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -527,6 +550,7 @@ jobs:
   wellknown:
     name: Well-Known (RFC 9116 + RSR)
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -584,6 +608,7 @@ jobs:
   workflow-lint:
     name: Workflow security linter
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -626,6 +651,7 @@ jobs:
   trusted-base:
     name: Trusted-base reduction policy
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
