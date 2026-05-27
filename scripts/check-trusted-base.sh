@@ -180,19 +180,63 @@ for cand in docs/proof-debt.md docs/proof-debt.adoc PROOF-NEEDS.md docs/PROOF-NE
   fi
 done
 
-if [ ${#debt_docs[@]} -eq 0 ]; then
+# ─────────────────────────────────────────────────────────────────────────────
+# Load `.trusted-base-ignore` if present (format mirrors `.hypatia-ignore`):
+#   - lines starting with `#` are comments;
+#   - each non-comment, non-blank line is a path-fragment substring that
+#     exempts every marker whose file path contains the fragment.
+# Use for: test fixtures that exist to be detected by the scanner, local
+# worktree shadows (`.claude/worktrees/`), and other intentional self-scan
+# noise. Per-site `TRUSTED:`/`AXIOM:` comments remain the preferred
+# mechanism for one-off documented escapes; this file is for whole-path
+# exemptions that carry a stated rationale.
+# ─────────────────────────────────────────────────────────────────────────────
+trusted_base_ignores=()
+if [ -f .trusted-base-ignore ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Strip trailing whitespace/CR for cross-platform safety.
+    line="${line%$'\r'}"
+    line="${line%"${line##*[![:space:]]}"}"
+    case "$line" in
+      ''|'#'*) ;;
+      *) trusted_base_ignores+=("$line") ;;
+    esac
+  done < .trusted-base-ignore
+  if [ ${#trusted_base_ignores[@]} -gt 0 ]; then
+    echo "[INFO] Loaded ${#trusted_base_ignores[@]} pattern(s) from .trusted-base-ignore."
+  fi
+fi
+
+if [ ${#debt_docs[@]} -eq 0 ] && [ ${#trusted_base_ignores[@]} -eq 0 ]; then
   echo "[ERROR] No docs/proof-debt.md (or equivalent) found, but $marker_count escape hatches exist."
   echo "[ERROR] Seed one per the schema at hyperpolymath/standards/docs/TRUSTED-BASE-REDUCTION-POLICY.adoc."
   exit 1
 fi
 
-echo "[OK] proof-debt document(s) found: ${debt_docs[*]}"
+if [ ${#debt_docs[@]} -gt 0 ]; then
+  echo "[OK] proof-debt document(s) found: ${debt_docs[*]}"
+fi
 
 # For each marker, check documentation
 undocumented=0
+exempted=0
 while IFS=$'\t' read -r f ln kind ctx; do
   # Strip leading ./
   f_clean="${f#./}"
+
+  # 0. .trusted-base-ignore — substring match on the file path. Use for
+  #    test fixtures, worktree shadows, and other intentional self-scan
+  #    noise that should NOT need per-site documentation.
+  is_exempted=false
+  for pattern in "${trusted_base_ignores[@]}"; do
+    case "$f_clean" in
+      *"$pattern"*) is_exempted=true; break ;;
+    esac
+  done
+  if $is_exempted; then
+    exempted=$((exempted + 1))
+    continue
+  fi
 
   # 1. Inline TRUSTED:/AXIOM: comment on any of the 5 lines preceding the marker
   local_start=$(( ln - 5 ))
@@ -222,18 +266,28 @@ while IFS=$'\t' read -r f ln kind ctx; do
   # Undocumented.
   echo "[ERROR] Undocumented escape hatch at $f_clean:$ln ($kind):"
   echo "        $ctx"
-  echo "        Annotate with a 'TRUSTED:' or 'AXIOM:' leading comment, or"
-  echo "        enumerate in any of: ${debt_docs[*]}"
+  echo "        Annotate with a 'TRUSTED:' or 'AXIOM:' leading comment,"
+  echo "        enumerate in any of: ${debt_docs[*]:-<none>}, or"
+  echo "        add a path-fragment to .trusted-base-ignore if this is"
+  echo "        intentional self-scan noise (e.g. test fixture, worktree shadow)."
   undocumented=$((undocumented + 1))
 done < "$markers_tsv"
+
+if [ "$exempted" -gt 0 ]; then
+  echo "[OK] $exempted marker(s) exempted via .trusted-base-ignore."
+fi
 
 if [ "$undocumented" -gt 0 ]; then
   echo ""
   echo "[ERROR] $undocumented/$marker_count escape hatch(es) are undocumented."
-  echo "[ERROR] Each must be annotated inline OR enumerated in one of: ${debt_docs[*]}"
+  echo "[ERROR] Each must be annotated inline, enumerated in one of: ${debt_docs[*]:-<none>}, or exempted via .trusted-base-ignore."
   echo "[ERROR] See https://github.com/hyperpolymath/standards/blob/main/docs/TRUSTED-BASE-REDUCTION-POLICY.adoc"
   exit 1
 fi
 
-echo "[OK] All $marker_count escape hatch(es) are documented (inline annotation or entry in: ${debt_docs[*]})."
+if [ "$exempted" -eq "$marker_count" ]; then
+  echo "[OK] All $marker_count escape hatch(es) handled (entirely via .trusted-base-ignore exemption)."
+else
+  echo "[OK] All $marker_count escape hatch(es) are documented (inline annotation, entry in: ${debt_docs[*]:-<none>}, or .trusted-base-ignore exemption)."
+fi
 exit 0

@@ -207,13 +207,44 @@ as a `trusted-base` job. The script:
   `believe_me`, `really_believe_me`, `assert_total`, top-level `partial`,
   `assume val`, `admit_p`, `:axiom`, plus cross-language `TODO PROOF` /
   `OWED:` / `FIXME PROOF` markers in soundness-relevant positions).
-. Verifies each is either preceded within 5 lines by a `TRUSTED:`,
-  `AXIOM:`, or `OWED:` leading comment, OR enumerated by path in
-  `docs/proof-debt.md` (or `.adoc`).
-. Fails CI when a marker is naked (no annotation AND no proof-debt.md
-  entry).
+. Verifies each is one of:
+.. preceded within 5 lines by a `TRUSTED:`, `AXIOM:`, or `OWED:` leading comment, OR
+.. enumerated by path in `docs/proof-debt.md` (or `.adoc`, or `PROOF-NEEDS.md`), OR
+.. exempted via a path-fragment substring match in `.trusted-base-ignore`.
+. Fails CI when a marker is naked (no annotation, no proof-debt entry, no
+  ignore-file exemption).
 . No-ops cleanly on repos with zero proof-bearing files (true for most
   of the estate).
+
+=== `.trusted-base-ignore` — path-fragment exemption file
+
+For markers that should NOT need per-site documentation — typically
+test fixtures that exist *to be detected* by the scanner, local
+worktree shadows, or other intentional self-scan noise — the script
+consults an optional `.trusted-base-ignore` file in the repo root.
+Format mirrors `.hypatia-ignore`:
+
+[source]
+----
+# Comments start with `#`.
+# Each non-comment line is a path-fragment substring match against the
+# repo-relative file path. Narrow the fragment to avoid hiding adjacent
+# findings.
+
+# Scanner test fixtures: exist solely to verify the detector fires.
+test/soundness/fixtures/
+
+# Local agent worktree shadows: not part of the canonical tree.
+.claude/worktrees/
+----
+
+Prefer this over inline `TRUSTED:` comments only for *whole-path* or
+*whole-directory* exemptions with a documented org-policy rationale.
+Per-site `TRUSTED:` / `AXIOM:` comments remain the right tool for
+one-off documented escapes where the rationale is local to a single
+construct. `.trusted-base-ignore` is to `check-trusted-base.sh` what
+`.hypatia-ignore` is to the hypatia scanner — same shape, same
+discipline, separate scope.
 
 A follow-up may extend it to fail CI when `docs/proof-debt.md` §(d) DEBT
 entries are past their stated deadline.
