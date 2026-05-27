@@ -430,6 +430,13 @@ feedback.
 [Desktop Entry]
 Type=Application
 Name=Application Name
+# The Exec path MUST be the absolute path resolved at install time via
+# the [resolution].desktop-tools-search ladder (see §Canonical location).
+# The freedesktop spec does NOT expand environment variables in Exec=
+# lines, so `--integ` is responsible for picking the host-correct path.
+# The /var/mnt/eclipse/... value below is one possible resolution — on
+# hosts using $HOME/developer/repos or $HOME/dev/repos the resolved path
+# will differ.
 Exec=/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh "AppName" "/path/to/repo" "GUI_CMD" "TUI_CMD" "$HOME/.local/state/app/server.log"
 Terminal=true   # keepopen needs a terminal for its loud banners and shell fallback
 Icon=/path/to/icon.png
@@ -477,13 +484,28 @@ The single source of truth is:
 
     developer-ecosystem/standards/launcher/keepopen.sh
 
-For desktop files to reference a stable absolute path, a symlink is
-deployed at:
+For desktop files (which need a stable absolute path) a symlink or copy
+is deployed inside a `.desktop-tools/` directory whose location varies by
+host. Consumers MUST resolve that location via the search ladder declared
+in `launcher/launcher-standard.a2ml` `[resolution].desktop-tools-search`:
 
-    /var/mnt/eclipse/repos/.desktop-tools/keepopen.sh → ↑
+1. `$HP_DESKTOP_TOOLS`                            — explicit override
+2. `$HP_ESTATE_ROOT/.desktop-tools`               — estate-root convention
+3. `$XDG_DATA_HOME/hyperpolymath/.desktop-tools`  — XDG default
+4. `/var/mnt/eclipse/repos/.desktop-tools`        — legacy eclipse-mount layout
+5. `$HOME/developer/repos/.desktop-tools`         — alt: $HOME/developer/repos
+6. `$HOME/dev/repos/.desktop-tools`               — alt: $HOME/dev/repos
+
+First existing path wins. A reference shell implementation lives at
+`launcher/resolve-desktop-tools.sh` (sourceable; provides
+`hp_resolve_desktop_tools` and `hp_resolve_standard`). Downstream launchers
+SHOULD use the reference impl rather than re-implementing the ladder.
 
 `launch-scaffolder` copies the same script into its baked-in standards
-so regenerated launchers stay in sync.
+so regenerated launchers stay in sync. The legacy single hard-coded path
+(`/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh`) remains in the
+a2ml as `deployed-symlink` for compatibility with pre-resolution
+consumers; new code MUST use the ladder.
 
 === Calling convention
 

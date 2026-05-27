@@ -24,6 +24,38 @@ compliance = [
     "fallback-ladder-keepopen",
 ]
 
+[resolution]
+# Path-resolution ladders. Consumers (launch-scaffolder, downstream launchers,
+# the integrity verifier) MUST consult these in order; the first existing path
+# wins. This replaces single hard-coded /var/mnt/eclipse/... paths that broke
+# the standard on hosts that don't use the eclipse-mount layout.
+#
+# .desktop files MUST embed the RESOLVED ABSOLUTE PATH at install time —
+# the freedesktop spec does not expand environment variables in Exec= lines,
+# so the launcher's `--integ` mode is responsible for performing the
+# resolution and writing the literal path into the .desktop file.
+#
+# Reference implementation: launcher/resolve-desktop-tools.sh
+desktop-tools-search = [
+    "$HP_DESKTOP_TOOLS",                                  # explicit override
+    "$HP_ESTATE_ROOT/.desktop-tools",                     # estate-root convention
+    "$XDG_DATA_HOME/hyperpolymath/.desktop-tools",        # XDG default (XDG_DATA_HOME defaults to $HOME/.local/share)
+    "/var/mnt/eclipse/repos/.desktop-tools",              # legacy eclipse-mount layout
+    "$HOME/developer/repos/.desktop-tools",               # alt: $HOME/developer/repos
+    "$HOME/dev/repos/.desktop-tools",                     # alt: $HOME/dev/repos
+]
+
+# Same ladder shape for locating the canonical launcher-standard.a2ml itself
+# (consumed by launch-scaffolder when neither --standard <path> nor
+# $LAUNCH_SCAFFOLDER_STANDARD is set).
+standard-search = [
+    "$HP_ESTATE_ROOT/standards/launcher/launcher-standard.a2ml",
+    "$XDG_DATA_HOME/hyperpolymath/standards/launcher/launcher-standard.a2ml",
+    "/var/mnt/eclipse/repos/standards/launcher/launcher-standard.a2ml",
+    "$HOME/developer/repos/standards/launcher/launcher-standard.a2ml",
+    "$HOME/dev/repos/standards/launcher/launcher-standard.a2ml",
+]
+
 [fallback-ladder]
 # keepopen.sh wraps every primary desktop-file Exec line. It turns launcher
 # failures from invisible flashes into loud, labelled banners, and lands the
@@ -32,7 +64,8 @@ compliance = [
 # See launcher-standard.adoc §Fallback Ladder for the prose version.
 wrapper             = "keepopen.sh"
 canonical-path      = "developer-ecosystem/standards/launcher/keepopen.sh"
-deployed-symlink    = "/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh"
+deployed-name       = "keepopen.sh"                                # resolved via [resolution].desktop-tools-search
+deployed-symlink    = "/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh"  # DEPRECATED: legacy literal, kept for pre-resolution consumers. New code MUST use [resolution].
 calling-convention  = "keepopen.sh APP_NAME REPO_DIR \"GUI_CMD\" \"TUI_CMD\" [LOG_FILE]"
 stages = [
     { name = "gui",   colour = "yellow", on-failure = "show-banner-then-try-tui" },
@@ -167,10 +200,14 @@ bat-fallback = true
 
 [integrity]
 # Per LM-LA-LIFECYCLE §LM/LA-INSTALL: after --integ completes, generate
-# integrity hashes via an external tool.
+# integrity hashes via an external tool. The tool is located via
+# [resolution].desktop-tools-search + the tool-name below — new consumers
+# MUST use that ladder; fallback-paths is kept only for pre-resolution
+# consumers and is itself a legacy literal.
 verification-tool = "verify-desktop-integrity.sh"
+tool-name = "verify-desktop-integrity.sh"                          # resolved via [resolution].desktop-tools-search
 fallback-paths = [
-    "/var/mnt/eclipse/repos/.desktop-tools/verify-desktop-integrity.sh",
+    "/var/mnt/eclipse/repos/.desktop-tools/verify-desktop-integrity.sh",  # DEPRECATED
 ]
 fatal-on-failure = false  # missing verifier is a log line, not an error
 
