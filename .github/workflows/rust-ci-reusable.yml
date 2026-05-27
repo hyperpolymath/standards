@@ -29,6 +29,25 @@
 #       with:
 #         enable_audit: true
 #         enable_coverage: true
+#
+# Sub-crate / monorepo workspace (Cargo.toml lives in a subdirectory):
+#
+#   jobs:
+#     rust-ci-cli:
+#       uses: hyperpolymath/standards/.github/workflows/rust-ci-reusable.yml@main
+#       with:
+#         working_directory: crates/cli
+#     rust-ci-server:
+#       uses: hyperpolymath/standards/.github/workflows/rust-ci-reusable.yml@main
+#       with:
+#         working_directory: crates/server
+#
+# Out-of-scope (left bespoke per-repo): multi-OS matrices, cross-compile
+# (`cross build`), multi-Rust-version matrices. Each has too much per-repo
+# variance to share a single abstraction cleanly (verified against the 5
+# matrix-using repos as of 2026-05-26: julia-the-viper / verisimdb /
+# verisimiser / reasonably-good-token-vault use four different matrix
+# dimensions).
 
 name: Rust CI (reusable)
 
@@ -65,6 +84,17 @@ on:
         type: string
         required: false
         default: "--all-targets"
+      working_directory:
+        description: |
+          Directory containing `Cargo.toml` (relative to the repo root). All
+          cargo invocations cd into this directory; `hashFiles()` guards also
+          consult it. Default `.` keeps single-crate repos unchanged. Set
+          to e.g. `crates/server` for a sub-crate, or pass a different
+          value per wrapper call when running the reusable in a workspace
+          via separate jobs.
+        type: string
+        required: false
+        default: "."
 
 permissions:
   contents: read
@@ -76,9 +106,12 @@ jobs:
   check:
     name: Cargo check + clippy + fmt
     runs-on: ${{ inputs.runs-on }}
-    if: hashFiles('Cargo.toml') != ''
+    if: hashFiles(format('{0}/Cargo.toml', inputs.working_directory)) != ''
     permissions:
       contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -93,6 +126,8 @@ jobs:
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          workspaces: ${{ inputs.working_directory }}
 
       - name: Cargo check
         run: cargo check ${{ inputs.check_args }}
@@ -107,9 +142,12 @@ jobs:
     name: Cargo test
     runs-on: ${{ inputs.runs-on }}
     needs: check
-    if: hashFiles('Cargo.toml') != ''
+    if: hashFiles(format('{0}/Cargo.toml', inputs.working_directory)) != ''
     permissions:
       contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -122,6 +160,8 @@ jobs:
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          workspaces: ${{ inputs.working_directory }}
 
       - name: Run tests
         run: cargo test ${{ inputs.test_args }}
@@ -139,9 +179,12 @@ jobs:
   audit:
     name: Cargo audit (security)
     runs-on: ${{ inputs.runs-on }}
-    if: ${{ inputs.enable_audit && hashFiles('Cargo.toml') != '' }}
+    if: ${{ inputs.enable_audit && hashFiles(format('{0}/Cargo.toml', inputs.working_directory)) != '' }}
     permissions:
       contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -164,9 +207,12 @@ jobs:
   coverage:
     name: Coverage (tarpaulin + codecov)
     runs-on: ${{ inputs.runs-on }}
-    if: ${{ inputs.enable_coverage && hashFiles('Cargo.toml') != '' }}
+    if: ${{ inputs.enable_coverage && hashFiles(format('{0}/Cargo.toml', inputs.working_directory)) != '' }}
     permissions:
       contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
