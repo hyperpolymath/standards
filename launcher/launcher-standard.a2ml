@@ -92,11 +92,36 @@ pid-file-pattern = "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/{app-name}-server.pid"
 # Per-user, survives reboot, not world-writable. The {app-name} subdir
 # isolates each launcher's logs.
 log-file-pattern = "${XDG_STATE_HOME:-$HOME/.local/state}/{app-name}/server.log"
+# URL-readiness polling after start. The launcher polls the app's URL
+# until either it responds or total-timeout-seconds elapses.
+# All three timing values are env-var overridable so operators can tune
+# without re-minting the launcher.
 wait-for-url-timeout-seconds = 15
+wait-for-url-timeout-env-var = "WAIT_FOR_URL_TIMEOUT_SECONDS"
+wait-for-url-poll-interval-seconds = 1
+wait-for-url-poll-interval-env-var = "WAIT_FOR_URL_POLL_INTERVAL"
+# Per-request timeout: cap each individual curl probe so a hung server
+# does not eat the entire poll budget on a single request.
+wait-for-url-per-request-timeout-seconds = 2
 startup-command-search = [
     "{repo-dir}/scripts/run.sh",
     "{repo-dir}/dev.sh",
 ]
+
+[browser-launch]
+# How open_browser() resolves which command to invoke. Implementations
+# MUST honour env-var-override first (de-facto $BROWSER convention),
+# then fall back to the platform-specific ladder. Platform detected via
+# `uname -s`; on Linux, additionally probe /proc/version for "microsoft"
+# to detect WSL — under WSL, wslview is preferred so the URL opens in
+# the Windows-side default browser (Linux-side browsers either land in
+# WSLg or fail).
+env-var-override = "BROWSER"
+linux       = ["wslview", "xdg-open", "firefox", "chromium"]
+linux-wsl-detect = "/proc/version contains 'microsoft' (case-insensitive)"
+macos       = ["open"]
+windows     = ["start"]   # cmd builtin; works under Git Bash / MSYS / Cygwin
+fallback    = "log 'Open manually: <URL>'"
 
 [error-visibility]
 # When the launcher runs in a GUI context (no tty + DISPLAY/WAYLAND_DISPLAY set),
