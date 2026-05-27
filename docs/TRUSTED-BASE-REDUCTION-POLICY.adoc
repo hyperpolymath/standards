@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
 = Trusted-Base Reduction Policy
-:revdate: 2026-05-26
-:status: PROPOSED
+:revdate: 2026-05-27
+:status: ADOPTED
 :audit: hyperpolymath/standards#195
 :audit-licence: hyperpolymath/standards#196
 :audit-docs: hyperpolymath/standards#197
+:enforcement: hyperpolymath/standards#211
 :precedent: hyperpolymath/boj-server backend-assurance harness
 
 This document is the canonical estate-wide policy for managing
@@ -129,6 +130,41 @@ wasm_marshal_u64 : Bits64 -> ByteArray
 wasm_marshal_u64 x = believe_me ...
 ----
 
+For Idris2 *axioms* (disposition (c)), prefer the canonical form: a
+doc-comment header (`|||`) starting with `OWED:` and a `0`-multiplicity
+(erased) declaration. The erased multiplicity makes the term proof-only —
+it cannot escape into runtime code and disappears from compiled output —
+so the unproven assumption is structurally scoped to type-level reasoning:
+
+[source,idris]
+----
+||| OWED: function extensionality at the typed-wasm export interface.
+||| Necessary; not derivable in Idris2 0.8.0 without UIP.
+||| See docs/proof-debt.md §(c) entry "funExtTW".
+||| Citation: echo-types `Echo.FunExt`, Mathlib4 `Function.funext_iff`.
+0 funExtTW : (f, g : a -> b) -> ((x : a) -> f x = g x) -> f = g
+----
+
+The `OWED:` token is recognised by `scripts/check-trusted-base.sh`
+alongside `TRUSTED:` and `AXIOM:`. Use `OWED:` for proof-only erased
+declarations (Idris2 0-multiplicity, Coq `Axiom`-of-Prop, Lean `axiom` in
+`Prop`) and `TRUSTED:` for run-time soundness breaks (`believe_me`,
+`unsafePerformIO`, `unsafe`).
+
+[source,lean]
+----
+-- AXIOM: function extensionality; necessary; see docs/proof-debt.md §(c).
+--   Citation: Mathlib4 `Function.funext_iff` (commit abc1234).
+axiom funExt {α β : Type} (f g : α → β) :
+  (∀ x, f x = g x) → f = g
+
+-- For debt-style markers (disposition (d)), prefer the named sorry:
+-- DEBT: substitution preservation; owner @maintainer; deadline 2026-08-01.
+--   See docs/proof-debt.md §(d) entry "subst_preservation".
+theorem subst_preservation : ∀ {Γ τ e e'}, Subst e e' → Typed Γ e τ → Typed Γ e' τ :=
+  sorry
+----
+
 [source,coq]
 ----
 (* AXIOM: function extensionality.
@@ -145,25 +181,51 @@ postulate
   ∥_∥ : Set → Set
 ----
 
-The leading-comment marker (`TRUSTED:` / `AXIOM:`) is itself part of the
-contract — the audit script in section "Enforcement" below greps for it.
+The leading-comment marker (`TRUSTED:` / `AXIOM:` / `OWED:`) is itself
+part of the contract — the audit script in section "Enforcement" below
+greps for it. Choose the marker by run-time vs proof-time scope:
+
+* `TRUSTED:` — run-time soundness break (`believe_me`, `unsafe`,
+  `unsafePerformIO`, `assume val`, `:axiom`). Pair with disposition (b)
+  BUDGETED and a property-test budget.
+* `AXIOM:` — top-level named axiom (Coq `Axiom`, Lean `axiom`, Agda
+  `postulate`). Pair with disposition (c) NECESSARY AXIOM and a
+  citation.
+* `OWED:` — Idris2-style erased (`0`-multiplicity) axiom or any
+  cross-language self-documented debt marker. Pair with either (c)
+  NECESSARY AXIOM (with citation) or (d) DEBT (with deadline and
+  owner).
 
 == Enforcement
 
-A future PR will wire `scripts/check-trusted-base.sh` into
-`governance-reusable.yml`. The script:
+Enforcement landed at link:{enforcement}[standards#211] as
+`scripts/check-trusted-base.sh`, wired into `governance-reusable.yml`
+as a `trusted-base` job. The script:
 
-. Counts every soundness-relevant escape hatch in the caller repo.
-. Verifies each is either preceded by a `TRUSTED:` or `AXIOM:` comment,
-  OR enumerated in `docs/proof-debt.md`.
+. Greps every soundness-relevant escape hatch in the caller repo
+  (`Axiom`, `Admitted`, `admit.`, `axiom`, `sorry`, top-level `postulate`,
+  `believe_me`, `really_believe_me`, `assert_total`, top-level `partial`,
+  `assume val`, `admit_p`, `:axiom`, plus cross-language `TODO PROOF` /
+  `OWED:` / `FIXME PROOF` markers in soundness-relevant positions).
+. Verifies each is either preceded within 5 lines by a `TRUSTED:`,
+  `AXIOM:`, or `OWED:` leading comment, OR enumerated by path in
+  `docs/proof-debt.md` (or `.adoc`).
 . Fails CI when a marker is naked (no annotation AND no proof-debt.md
   entry).
-. Optionally fails CI when `docs/proof-debt.md` §(d) DEBT entries are
-  past their deadline.
+. No-ops cleanly on repos with zero proof-bearing files (true for most
+  of the estate).
 
-This is the same shape as `check-licence-consistency.sh`
-(standards#201) — local script, called from the governance bundle, no
-network dependencies.
+A follow-up may extend it to fail CI when `docs/proof-debt.md` §(d) DEBT
+entries are past their stated deadline.
+
+This is the same shape as `check-licence-consistency.sh` (standards#201)
+— local script, called from the governance bundle, no network
+dependencies.
+
+The seed `docs/proof-debt.md` for the `standards` repo itself landed at
+standards#213 as the canonical example of the schema in action (15
+markers triaged, 11 §(d) entries with named owners and discharge
+recipes).
 
 == Precedent: boj-server backend-assurance harness
 
@@ -207,9 +269,11 @@ first (rough P0/P1/P2 ordering):
 |===
 | Date | Event
 
-| 2026-05-26 | Policy filed (standards#202).
-| TBD       | `scripts/check-trusted-base.sh` filed (separate PR).
-| TBD       | Per-repo `docs/proof-debt.md` files seeded across P0 repos.
+| 2026-05-26 | Policy filed and merged (standards#203).
+| 2026-05-26 | `scripts/check-trusted-base.sh` filed and merged (standards#211); wired into `governance-reusable.yml` as the `trusted-base` job.
+| 2026-05-26 | Seed `docs/proof-debt.md` landed for `standards` itself (standards#213) as the schema reference.
+| 2026-05-27 | Fill-in pass: Idris2 `OWED:` + 0-multiplicity form, Lean annotation block, Enforcement cross-link to #211 (this PR). Status promoted from PROPOSED → ADOPTED.
+| TBD       | Per-repo `docs/proof-debt.md` files seeded across P0/P1 repos via the triage prompts that this policy unblocks.
 |===
 
 == Companion documents
@@ -217,4 +281,6 @@ first (rough P0/P1/P2 ordering):
 * link:{audit}[standards#195] — estate proof-debt audit (the empirical motivation)
 * link:{audit-licence}[standards#196] — estate licence-debt audit
 * link:{audit-docs}[standards#197] — estate documentation-debt audit
-* `scripts/check-licence-consistency.sh` (standards#201) — the precedent for the eventual `check-trusted-base.sh`
+* link:{enforcement}[standards#211] — `scripts/check-trusted-base.sh` and the `trusted-base` job in `governance-reusable.yml`
+* https://github.com/hyperpolymath/standards/pull/213[standards#213] — seed `docs/proof-debt.md` for the `standards` repo itself (canonical schema example)
+* `scripts/check-licence-consistency.sh` (standards#201) — the structural precedent for `check-trusted-base.sh`
