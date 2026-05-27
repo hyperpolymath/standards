@@ -75,29 +75,46 @@ stop_server() {
 [source,bash]
 ----
 wait_for_server() {
-  local max_wait=$1
+  # All three values are env-overridable per [runtime] in launcher-standard.a2ml.
+  local max_wait="${1:-${WAIT_FOR_URL_TIMEOUT_SECONDS:-15}}"
+  local poll_interval="${WAIT_FOR_URL_POLL_INTERVAL:-1}"
+  local per_request_timeout=2   # curl --max-time; caps each probe so a
+                                # hung server can't eat the whole budget
   local waited=0
-  
-  while [ $waited -lt $max_wait ]; do
-    if curl -fsS "$URL" >/dev/null 2>&1; then
+
+  while [ "$waited" -lt "$max_wait" ]; do
+    if curl -fsS --max-time "$per_request_timeout" "$URL" >/dev/null 2>&1; then
       return 0  # Success
     fi
-    sleep 1
-    waited=$((waited + 1))
+    sleep "$poll_interval"
+    waited=$((waited + poll_interval))
   done
-  
+
   return 1  # Timeout
 }
 
-# Usage
-if ! wait_for_server 15; then
-  err "Server did not start within 15 seconds"
+# Usage — pass nothing so the env-var/constant chain applies.
+if ! wait_for_server; then
+  err "Server did not start within ${WAIT_FOR_URL_TIMEOUT_SECONDS:-15}s"
   err "Check log: $LOG_FILE"
+  err "Override with WAIT_FOR_URL_TIMEOUT_SECONDS=<N> if the host needs longer"
   return 1
 fi
 ----
 
 === Browser Launching
+
+Resolution order, per `[browser-launch]` in `launcher-standard.a2ml`:
+
+1. `$BROWSER` env var (de-facto Unix convention; user/operator override)
+2. Platform-specific ladder, dispatched via `uname -s`:
+   - **macOS**: `open`
+   - **Linux**: if WSL (detected via `/proc/version` containing
+     "microsoft"), prefer `wslview` so the URL opens in the Windows-side
+     default browser. Otherwise: `xdg-open` → `firefox` → `chromium`.
+   - **Windows** (Git Bash / MSYS / Cygwin): `start` (cmd builtin)
+3. Fallback: print `"Open manually: $URL"` so the user is never silently
+   left without a URL.
 
 [source,bash]
 ----
@@ -106,16 +123,41 @@ open_browser() {
     err "Server is not running"
     return 1
   fi
-  
-  if command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$URL" &
-  elif command -v firefox >/dev/null 2>&1; then
-    firefox "$URL" &
-  elif command -v chromium >/dev/null 2>&1; then
-    chromium "$URL" &
-  else
-    log "Open manually: $URL"
+
+  # 1. $BROWSER override (canonical Unix convention)
+  if [[ -n "${BROWSER:-}" ]]; then
+    "$BROWSER" "$URL" &
+    return $?
   fi
+
+  # 2. Platform-specific ladder
+  case "$(uname -s)" in
+    Darwin*)
+      open "$URL" &
+      ;;
+    Linux*)
+      # WSL detection: /proc/version mentions "microsoft" under WSL1/2
+      if grep -qi microsoft /proc/version 2>/dev/null && \
+         command -v wslview >/dev/null 2>&1; then
+        wslview "$URL" &
+      elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$URL" &
+      elif command -v firefox >/dev/null 2>&1; then
+        firefox "$URL" &
+      elif command -v chromium >/dev/null 2>&1; then
+        chromium "$URL" &
+      else
+        log "Open manually: $URL"
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      # Git Bash / MSYS / Cygwin all carry `start` from cmd
+      start "$URL" &
+      ;;
+    *)
+      log "Open manually: $URL"
+      ;;
+  esac
 }
 ----
 
