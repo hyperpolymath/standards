@@ -72,7 +72,22 @@ function globToRegex(g: string): RegExp {
 
 interface Exemption { raw: string; rx: RegExp; }
 
-async function loadExemptions(): Promise<Exemption[]> {
+async function loadExemptionsFromClaudeMd(): Promise<Exemption[]> {
+  // Layer 2 — heading-table exemptions parsed from `.claude/CLAUDE.md`.
+  //
+  // Heading regex relaxation (was: literal `TypeScript [Ee]xemptions`):
+  // now matches any markdown heading containing the substring sequence
+  // (TypeScript|JavaScript|TS|JS|.tsx?) … Exemption(s). Picks up
+  // `### TypeScript / JavaScript Exemptions (Approved)` (the
+  // affinescript form), the singular `### TypeScript Exemption`, and
+  // `.ts` / `.tsx`-mentioning variants. Anchored to a markdown heading
+  // prefix so prose mentions of the phrase elsewhere in the file do
+  // NOT trigger table parsing.
+  //
+  // Multi-table support: scans every heading; on hitting any heading
+  // that's NOT an exemption-section heading we leave table-mode (the
+  // original "break on first heading" was correct for the heredoc but
+  // a multi-section file would miss the second exemption table).
   const exemptions: Exemption[] = [];
   let text: string;
   try {
@@ -80,11 +95,21 @@ async function loadExemptions(): Promise<Exemption[]> {
   } catch {
     return exemptions;
   }
+  const tsHeading =
+    /^#{1,4}\s+.*(?:TypeScript|JavaScript|TS|JS|\.tsx?)\b[^#\n]*[Ee]xemption/;
+  const anyHeading = /^#{1,4}\s/;
   let inTable = false;
-  const headingRx = /TypeScript [Ee]xemptions/;
   for (const line of text.split("\n")) {
-    if (headingRx.test(line)) { inTable = true; continue; }
-    if (inTable && (line.startsWith("### ") || line.startsWith("## ") || line.startsWith("# "))) break;
+    if (tsHeading.test(line)) {
+      inTable = true;
+      continue;
+    }
+    if (inTable && anyHeading.test(line)) {
+      // A different heading — leave table mode but keep scanning for
+      // another exemption section in the same file.
+      inTable = false;
+      continue;
+    }
     if (inTable && line.startsWith("|")) {
       const m = line.match(/^\|\s*`([^`]+)`/);
       if (m) {
@@ -93,6 +118,34 @@ async function loadExemptions(): Promise<Exemption[]> {
     }
   }
   return exemptions;
+}
+
+async function loadExemptionsFromAllowlistFile(): Promise<Exemption[]> {
+  // Layer 2.5 — optional plain-text allowlist at the repo root.
+  // One glob per line. Lines starting with `#` are comments; blank
+  // lines are ignored. Decouples gate-pass from documentation prose
+  // (the CLAUDE.md heading-table is the documented variant; this
+  // file is the typed-infrastructure variant). Both sources merge
+  // additively — either alone is sufficient.
+  const exemptions: Exemption[] = [];
+  let text: string;
+  try {
+    text = await Deno.readTextFile(".governance-allowlist");
+  } catch {
+    return exemptions;
+  }
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    exemptions.push({ raw: line, rx: globToRegex(line) });
+  }
+  return exemptions;
+}
+
+async function loadExemptions(): Promise<Exemption[]> {
+  const fromCm = await loadExemptionsFromClaudeMd();
+  const fromAllow = await loadExemptionsFromAllowlistFile();
+  return [...fromCm, ...fromAllow];
 }
 
 function exempt(p: string, exemptions: Exemption[]): boolean {
@@ -138,13 +191,16 @@ async function main() {
     console.log("To resolve, choose one:");
     console.log("  (a) migrate the file to AffineScript");
     console.log("  (b) move to an allowlisted bridge path");
-    console.log("  (c) add an entry to the 'TypeScript Exemptions' table in .claude/CLAUDE.md");
+    console.log("  (c) add an entry to a 'TypeScript Exemptions' table in .claude/CLAUDE.md (Layer 2)");
+    console.log("  (d) add a line to .governance-allowlist at the repo root (Layer 2.5 — typed infrastructure file)");
+    console.log("");
+    console.log("See docs/EXEMPTION-MECHANISMS.adoc for the full mechanism reference.");
     if (exemptions.length > 0) {
-      console.log(`\n(Currently ${exemptions.length} exemption(s) parsed from .claude/CLAUDE.md.)`);
+      console.log(`\n(Currently ${exemptions.length} exemption(s) parsed across both layers.)`);
     }
     Deno.exit(1);
   }
-  console.log(`✅ No TypeScript files outside allowlist (${exemptions.length} per-repo exemption(s) parsed).`);
+  console.log(`✅ No TypeScript files outside allowlist (${exemptions.length} per-repo exemption(s) parsed across CLAUDE.md + .governance-allowlist).`);
 }
 
 if (import.meta.main) {

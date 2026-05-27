@@ -128,9 +128,113 @@ These have been attempted and should be refused at review:
   If a rule is wrong for one repo, the rule needs scoping in the
   upstream, not a fork.
 
+== Layer 4: Governance language-policy TS-allowlist
+
+A separate sub-system from Layers 1-3 (which gate the Hypatia
+scanner). This layer gates the `governance / Language / package
+anti-pattern policy` workflow step that enforces "no new TypeScript"
+across the estate. Three sub-layers:
+
+=== 4a: Built-in path / filename allowlist
+
+Hard-coded in `scripts/check-ts-allowlist.ts`. Covers paths that are
+*always* exempt regardless of per-repo configuration:
+
+* Directory segments: `bindings`, `tests`, `test`, `scripts`,
+  `mcp-adapter`, `cli`, `vendor`, `examples`, `ffi`, `node_modules`,
+  `benchmarks`.
+* Any segment containing `vscode` or starting with `deno-`.
+* Filename patterns: `*.d.ts`, `mod.ts`, `lsp-server.ts`, `lsp.ts`,
+  `*-lsp.ts`, `*.bench.ts`, `*_bench.ts`.
+
+Changing this layer requires a standards-repo PR.
+
+=== 4b: Per-repo `.claude/CLAUDE.md` heading-table
+
+Per-repo exemptions documented as a markdown table under a heading
+that contains both a language token and `Exemption[s]`. The
+heading-match regex is:
+
+----
+^#{1,4}\s+.*(?:TypeScript|JavaScript|TS|JS|\.tsx?)\b[^#\n]*[Ee]xemption
+----
+
+Matches all of:
+
+* `### TypeScript Exemptions (Approved)`
+* `### TypeScript / JavaScript Exemptions (Approved)`
+* `### TypeScript Exemption`
+* `### .ts Exemptions (foo bar)`
+
+Table rows have shape `| \`<glob>\` | <count> | <rationale> | <unblock-condition> |`.
+
+Multi-section: every heading on the page is scanned, so a repo can
+keep separate exemption tables (e.g. one for `.ts` bridge code, one
+for vendored test fixtures).
+
+Best for: exemptions whose *rationale* belongs in human-readable
+documentation alongside the prose explaining why the repo exists.
+
+=== 4c: `.governance-allowlist` (typed infrastructure file)
+
+Optional plain-text file at the repo root. One glob per line. Lines
+starting with `#` are comments. Blank lines are ignored.
+
+----
+# Telegram bot binding (no AffineScript binding planned)
+avow-protocol/telegram-bot/avow-telegram-bot/**
+
+# Bench harness fixtures
+test/perf/fixtures/*.ts
+----
+
+Best for: exemptions that are *infrastructure config* (typed,
+machine-validated) rather than human-readable rationale prose. Pairs
+cleanly with the estate's "machine-readable everywhere" trajectory.
+Decoupled from CLAUDE.md heading text so reformatting the docs
+doesn't accidentally break the gate.
+
+Both 4b and 4c are additive — declaring an exemption in either is
+sufficient. Most repos will pick one or the other.
+
+=== Picking between 4b and 4c
+
+[cols="1,3,3"]
+|===
+| Layer | Use when | Avoid when
+
+| 4b (CLAUDE.md table)
+| The exemption needs human-readable rationale next to the glob.
+  Reviewers reading CLAUDE.md should immediately understand *why*.
+| The repo's CLAUDE.md is large and heading-text drift breaks the
+  gate.
+
+| 4c (`.governance-allowlist`)
+| The exemption is structural and the rationale belongs elsewhere
+  (tracked in an issue / ADR / commit message). Or the repo wants
+  the gate-pass list to live in version-controlled infrastructure
+  rather than prose.
+| The exemption is one-off and CLAUDE.md prose is the right home.
+|===
+
+=== History
+
+* Original implementation: inline Python heredoc in
+  `governance-reusable.yml`, regex literal `TypeScript [Ee]xemptions`.
+  Failed silently on every `affinescript`-style heading (the slash and
+  `JavaScript` between keywords meant the regex never matched, and 3
+  legitimate exemptions were dropped → gate red on every PR).
+* Python eradication (standards#189): ported to
+  `scripts/check-ts-allowlist.ts`. Brittle regex carried over.
+* Layer 4b fix + Layer 4c introduction (2026-05-27): regex relaxation
+  + new typed-infrastructure file. Owner picked the Layer-2.5 approach
+  (standards#185) over the minimal regex-only fix (standards#183).
+  This document seeds the doctrine.
+
 == Cross-references
 
 * `docs/HYPATIA-BASELINE-FORMAT.adoc` — the baseline file format.
 * `.machine_readable/hypatia-baseline.schema.json` — machine schema.
+* `scripts/check-ts-allowlist.ts` — the Deno detector behind Layer 4.
 * `hyperpolymath/standards#????` — proposal that landed this consumer.
 * `hyperpolymath/hypatia` — the scanner that emits findings.
