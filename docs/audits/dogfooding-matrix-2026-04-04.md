@@ -33,7 +33,7 @@ Each section tracks a dogfooding dimension. Status key:
 | feedback-o-tron soft groove | .well-known/groove/manifest.json | PUSHED ✓ |
 | Testing taxonomy v1.1.0 | standards/testing-and-benchmarking | PUSHED ✓ |
 | HYP-DOG-001..010 rules in Hypatia | hypatia/lib/rules/dogfooding.ex | PUSHED ✓ |
-| Groove CLI tool | standards/groove-protocol/cli/ | PUSHED ✓ |
+| Groove CLI tool | hyperpolymath/groove-protocol cli/ (extracted from standards/ 2026-05-28) | PUSHED ✓ |
 | VeriSimDB wiring (ambientops) | observatory + personal-sysadmin + referrals | PUSHED ✓ |
 | pre-commit hooks deployed | ~150 repos (.pre-commit-config.yaml) | PUSHED ✓ |
 | gitbot-fleet fix scripts | fix-missing-groove.sh + fix-stale-template-placeholders.sh | PUSHED ✓ |
