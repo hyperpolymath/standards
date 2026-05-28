@@ -35,7 +35,7 @@ for the canonical statement.
 | **AffineScript** | Primary application code | Compiles to typed-wasm; affine/linear types. Replaces ReScript across the estate (RS/TS/JS → AffineScript → typed-wasm). |
 | **Deno** | Runtime & package management | Replaces Node/npm/bun |
 | **Rust/SPARK** | Performance-critical, systems, WASM, CLI tools, safety-critical | "Rust" always means "Rust/SPARK" per terminology note above. Preferred over Ada where reachable. |
-| **Zig** | FFI layer (hyperpolymath ABI/FFI standard), memory-safe systems where Rust/SPARK is overkill | Also the migration target for V-lang |
+| **Zig** | **APIs, FFIs, gateways, client SDKs (estate default 2026-05-28)**, memory-safe systems where Rust/SPARK is overkill | Zig is the estate-wide default for all API/FFI/gateway/client-SDK work unless explicitly special-cased; Idris2 owns ABIs. Completed V-lang→Zig migration 2026-05-28. |
 | **Idris2** | Formal verification (primary, ABI-style proofs) | ATS2 rejected. Proven-library status in `proven` repo. |
 | **Agda** | Formal verification (foundational / type-theoretic constructions) | Used by `hyperpolymath/echo-types` (loss-with-residue / proof-relevant fibers) and other foundational formalisations. Constructive only — no postulates in load-bearing tracks. |
 | **echo-types library** | Loss-with-residue formalism (Agda) | `hyperpolymath/echo-types` — canonical formalisation of `Echo f y := Σ (x : A) , (f x ≡ y)`. Cite from this lib rather than reinventing in downstream code. |
@@ -68,7 +68,7 @@ for the canonical statement.
 | Swift | Tauri/Dioxus | |
 | React Native | Tauri/Dioxus | |
 | Flutter/Dart | Tauri/Dioxus | Google lock-in |
-| **V-lang** | Zig | Banned 2026-04-10. "Too many things, and V does not live up to it." Detected via `v.mod` / `vpkg.json` (not `.v` files, because that collides with Verilog). Migration is a direction, not a rip-out. |
+| **V-lang** | Zig | Banned 2026-04-10; migration **COMPLETED 2026-05-28** across 16 PRs. Detected via hypatia `cicd_rules/vlang_detected` (`*.v` files) + `cicd_rules/vmod_detected` (`v.mod` manifest) with `path_allow_prefixes` mechanism for: v-ecosystem R&D carve-out, asdf-vlang toolchain installers, Coq proof scripts (`.v` shared with Coq + Verilog), interop targets (`/v-cartridge`, `/v-adapter`, `/v-bindings`, `/v-client` — where we expose work to V consumers without writing V), archived repos (`polystack/`). |
 | **ATS2** | Idris2 (formal), Rust/SPARK (safety-critical operational) | Rejected in favour of Idris2 and Rust/SPARK. |
 | **Makefiles** | Mustfile/justfile | |
 
