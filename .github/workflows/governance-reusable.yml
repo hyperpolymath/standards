@@ -290,26 +290,30 @@ jobs:
             echo "✅ No non-exempt ${label}"
           }
 
-          RES_FILES=$(find . -name "*.res" -not -path "./node_modules/*" -not -path "./.git/*" || true)
-          GO_FILES=$(find . -name "*.go" -not -path "./.git/*" || true)
-          PY_FILES=$(find . -name "*.py" -not -path "./.git/*" \
+          # Use `git ls-files` instead of `find` so only TRACKED files are
+          # inspected. This respects .gitignore by definition — vendored
+          # deps in deps/, node_modules/, _build/ etc. are never tracked
+          # and cannot produce false-positives. Root cause for the switch:
+          # developer-ecosystem@baab1534 had false-positive governance
+          # failures because `find` crawled gitignored vendor directories.
+          # `git ls-files` works correctly on fresh PR checkouts because
+          # actions/checkout populates the index before running workflows.
+          RES_FILES=$(git ls-files '*.res' || true)
+          GO_FILES=$(git ls-files '*.go' || true)
+          PY_FILES=$(git ls-files '*.py' \
             | grep -v salt | grep -v _states \
             | grep -v _modules | grep -v pillar | grep -v venv \
             | grep -v __pycache__ || true)
-          MAKE_FILES=$(find . \( -name "Makefile" -o -name "Makefile.*" -o -name "*.mk" \) \
-            -not -path "./.git/*" -not -path "./.github/*" || true)
-          JAVA_FILES=$(find . \( -name "*.java" -o -name "*.kt" -o -name "*.kts" \) \
-            -not -path "./.git/*" || true)
-          SWIFT_FILES=$(find . -name "*.swift" -not -path "./.git/*" || true)
-          DART_FILES=$(find . \( -name "*.dart" -o -name "pubspec.yaml" \) \
-            -not -path "./.git/*" || true)
+          MAKE_FILES=$(git ls-files 'Makefile' 'Makefile.*' '*.mk' \
+            | grep -v '\.github/' || true)
+          JAVA_FILES=$(git ls-files '*.java' '*.kt' '*.kts' || true)
+          SWIFT_FILES=$(git ls-files '*.swift' || true)
+          DART_FILES=$(git ls-files '*.dart' 'pubspec.yaml' || true)
           # V-lang detected by manifest (v.mod / vpkg.json); the .v extension
           # collides with Verilog so we never key on it.
-          VMOD_FILES=$(find . \( -name "v.mod" -o -name "vpkg.json" \) \
-            -not -path "./node_modules/*" -not -path "./.git/*" || true)
+          VMOD_FILES=$(git ls-files 'v.mod' 'vpkg.json' || true)
           # ATS2 source extensions: rejected in favour of Idris2 / Rust/SPARK.
-          ATS2_FILES=$(find . \( -name "*.dats" -o -name "*.sats" -o -name "*.hats" \) \
-            -not -path "./.git/*" || true)
+          ATS2_FILES=$(git ls-files '*.dats' '*.sats' '*.hats' || true)
 
           enforce "ReScript files" "use AffineScript instead" "$RES_FILES"
           enforce "Go files" "use Rust/WASM instead" "$GO_FILES"
