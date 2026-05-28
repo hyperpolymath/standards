@@ -128,10 +128,18 @@ Both are FOSS with independent governance (no Big Tech).
 
 ### TypeScript Exemptions (Approved)
 
-The hyperpolymath "no new TypeScript" policy has the following approved exemptions in this repo. These are *not* policy violations — they are documented carve-outs.
+The hyperpolymath "no new TypeScript" policy has the following approved exemptions, encoded as `path_allow_prefixes` on the hypatia rule `cicd_rules/typescript_detected` (matches `*.ts`). These are *not* policy violations — they are documented carve-outs.
 
-| Path | Files | Rationale | Unblock condition |
+Existing pre-2026-04-30 `.ts`/`.tsx` outside these carve-outs is grandfathered while in-flight migration proceeds (~288 estate-authored files across ~40 repos as of 2026-05-28; see project tracker `project_estate_ts_to_affinescript_2026_05_28.md`). New TS files in non-carve-out paths are blocked.
+
+| Path / Pattern | Class | Rationale | Unblock condition |
 |---|---|---|---|
-| `avow-protocol/telegram-bot/avow-telegram-bot/**` | 4 | Telegram bot — Telegraf / node-telegram-bot-api are the canonical TS-native libraries for the Bot API; no AffineScript binding planned. | AffineScript Telegram-bot bindings (no scheduled issue). |
+| `**/*.d.ts` | declaration | FFI/library type definitions (headers, not implementation). | Never — declaration files are the boundary, not the code. |
+| `**/bindings/deno/**`, `**/bindings/typescript/**`, `**/bindings/ts/**` | interop target | We expose work to TS/Deno consumers without authoring TS as primary code path. Exemplar: `proven/bindings/deno/` (72 files — Idris2 ABI exposed as Deno-native module). Parallel to V-lang `v-cartridge`/`v-adapter`/`v-bindings`/`v-client` carve-out. | Never — these are consumer-facing bindings. |
+| `avow-protocol/telegram-bot/avow-telegram-bot/**` | PERMANENT | Telegraf / node-telegram-bot-api are the canonical TS-native libraries for the Bot API; no AffineScript binding planned. | AffineScript Telegram-bot bindings (no scheduled issue). |
+| `**/vite.config.ts`, `**/vitest.config.ts`, `**/tsup.config.ts`, `**/tsconfig.json` | tooling | Build orchestration, not application code. | When AffineScript ships native equivalents. |
+| `affinescript-deno-test/**`, `affinescript-cli/**` | bootstrap shim | TS/JS shims used to bootstrap the AffineScript test runner / CLI. | When AffineScript self-hosts these. |
+| `rescript/**`, `servers/**`, `repos-monorepo/**` | upstream fork | Not estate-authored — vendored upstream code (ReScript compiler, third-party MCP servers, mass aggregator). | Never — upstream fork. |
+| `hyperpolymath-archive/**` | archived | GitHub-archived repos cannot accept PRs; TS is dormant. | Never — archived. |
 
-Adding to this list requires explicit user approval and an unblock condition. New TypeScript files outside this list are blocked by the RSR antipattern check.
+Adding to this list requires explicit user approval and an unblock condition (except the structural classes above, which are estate-wide policy). The detection rule and its `path_allow_prefixes` field are the single source of truth; this table mirrors that for human readability.
