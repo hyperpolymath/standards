@@ -371,16 +371,50 @@ jobs:
           echo "✅ No npm/bun violations"
 
       - name: Check for tsconfig / rescript config
+        # Honours the same `.hypatia-ignore` exemption mechanism as the
+        # banned-language-files step (standards#72, Explicit-Escape
+        # Principle). A config file is exempt if either
+        #   * `.hypatia-ignore` contains the exact line
+        #     `cicd_rules/banned_config_file:<config>`, OR
+        #   * the file carries an inline `# hypatia:ignore … banned_config_file`
+        #     pragma in its first 8 lines (works for JSONC-style configs;
+        #     not for strict JSON variants).
+        # Required so repos that legitimately retain ReScript while in
+        # mid-migration (per their `.claude/CLAUDE.md`, e.g. verisimdb)
+        # can declare the exemption explicitly instead of being globally
+        # blocked. Same pattern as the .res file step above.
         run: |
-          if [ -f "tsconfig.json" ]; then
-            echo "❌ tsconfig.json detected - use AffineScript instead"
-            exit 1
-          fi
-          if [ -f "rescript.json" ] || [ -f "bsconfig.json" ]; then
-            echo "❌ rescript.json/bsconfig.json detected - use AffineScript config instead"
-            exit 1
-          fi
-          echo "✅ No tsconfig.json / rescript config"
+          rule="cicd_rules/banned_config_file"
+
+          is_exempt() {
+            f="$1"
+            if [ -f .hypatia-ignore ] && grep -qxF "${rule}:${f}" .hypatia-ignore; then
+              return 0
+            fi
+            if head -n 8 "$f" 2>/dev/null | grep -q "hypatia:ignore.*${rule}"; then
+              return 0
+            fi
+            return 1
+          }
+
+          check_config() {
+            cfg="$1"; hint="$2"
+            if [ -f "$cfg" ]; then
+              if is_exempt "$cfg"; then
+                echo "⏭️  exempt (${rule}): $cfg"
+                return 0
+              fi
+              echo "❌ ${cfg} detected - ${hint}"
+              echo "   (declare an exemption via .hypatia-ignore line"
+              echo "    '${rule}:${cfg}' if intentional)"
+              exit 1
+            fi
+          }
+
+          check_config "tsconfig.json" "use AffineScript instead"
+          check_config "rescript.json" "use AffineScript config instead"
+          check_config "bsconfig.json" "use AffineScript config instead"
+          echo "✅ No non-exempt tsconfig.json / rescript config"
 
       - name: Summary
         run: |
