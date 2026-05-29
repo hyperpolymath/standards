@@ -20,11 +20,16 @@ The reference implementation is provided in link:comprehensive-launcher-template
 ----
 # Standardized structure for all launchers
 APP_NAME="MyApp"              # Application name
-REPO_DIR="/path/to/repo"       # Repository directory  
+REPO_DIR="/path/to/repo"       # Repository directory
 COMMAND="command to run"      # Startup command
 URL="http://localhost:PORT"     # Web URL (if applicable)
-PID_FILE="/tmp/app-server.pid" # Process ID tracking
-LOG_FILE="/tmp/app-server.log" # Log file location
+# PID file in XDG_RUNTIME_DIR (mode 0700, user-scoped) — falls back to
+# $TMPDIR (macOS) then /tmp (last resort). See §Best Practices > Security.
+PID_FILE="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/${APP_NAME}-server.pid"
+# Log file in XDG_STATE_HOME (defaults to $HOME/.local/state per spec).
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/${APP_NAME}"
+LOG_FILE="${LOG_DIR}/server.log"
+mkdir -p "$LOG_DIR"
 MODE="${1:---auto}"            # Default mode
 ----
 
@@ -70,29 +75,46 @@ stop_server() {
 [source,bash]
 ----
 wait_for_server() {
-  local max_wait=$1
+  # All three values are env-overridable per [runtime] in launcher-standard.a2ml.
+  local max_wait="${1:-${WAIT_FOR_URL_TIMEOUT_SECONDS:-15}}"
+  local poll_interval="${WAIT_FOR_URL_POLL_INTERVAL:-1}"
+  local per_request_timeout=2   # curl --max-time; caps each probe so a
+                                # hung server can't eat the whole budget
   local waited=0
-  
-  while [ $waited -lt $max_wait ]; do
-    if curl -fsS "$URL" >/dev/null 2>&1; then
+
+  while [ "$waited" -lt "$max_wait" ]; do
+    if curl -fsS --max-time "$per_request_timeout" "$URL" >/dev/null 2>&1; then
       return 0  # Success
     fi
-    sleep 1
-    waited=$((waited + 1))
+    sleep "$poll_interval"
+    waited=$((waited + poll_interval))
   done
-  
+
   return 1  # Timeout
 }
 
-# Usage
-if ! wait_for_server 15; then
-  err "Server did not start within 15 seconds"
+# Usage — pass nothing so the env-var/constant chain applies.
+if ! wait_for_server; then
+  err "Server did not start within ${WAIT_FOR_URL_TIMEOUT_SECONDS:-15}s"
   err "Check log: $LOG_FILE"
+  err "Override with WAIT_FOR_URL_TIMEOUT_SECONDS=<N> if the host needs longer"
   return 1
 fi
 ----
 
 === Browser Launching
+
+Resolution order, per `[browser-launch]` in `launcher-standard.a2ml`:
+
+1. `$BROWSER` env var (de-facto Unix convention; user/operator override)
+2. Platform-specific ladder, dispatched via `uname -s`:
+   - **macOS**: `open`
+   - **Linux**: if WSL (detected via `/proc/version` containing
+     "microsoft"), prefer `wslview` so the URL opens in the Windows-side
+     default browser. Otherwise: `xdg-open` → `firefox` → `chromium`.
+   - **Windows** (Git Bash / MSYS / Cygwin): `start` (cmd builtin)
+3. Fallback: print `"Open manually: $URL"` so the user is never silently
+   left without a URL.
 
 [source,bash]
 ----
@@ -101,20 +123,52 @@ open_browser() {
     err "Server is not running"
     return 1
   fi
-  
-  if command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$URL" &
-  elif command -v firefox >/dev/null 2>&1; then
-    firefox "$URL" &
-  elif command -v chromium >/dev/null 2>&1; then
-    chromium "$URL" &
-  else
-    log "Open manually: $URL"
+
+  # 1. $BROWSER override (canonical Unix convention)
+  if [[ -n "${BROWSER:-}" ]]; then
+    "$BROWSER" "$URL" &
+    return $?
   fi
+
+  # 2. Platform-specific ladder
+  case "$(uname -s)" in
+    Darwin*)
+      open "$URL" &
+      ;;
+    Linux*)
+      # WSL detection: /proc/version mentions "microsoft" under WSL1/2
+      if grep -qi microsoft /proc/version 2>/dev/null && \
+         command -v wslview >/dev/null 2>&1; then
+        wslview "$URL" &
+      elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$URL" &
+      elif command -v firefox >/dev/null 2>&1; then
+        firefox "$URL" &
+      elif command -v chromium >/dev/null 2>&1; then
+        chromium "$URL" &
+      else
+        log "Open manually: $URL"
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      # Git Bash / MSYS / Cygwin all carry `start` from cmd
+      start "$URL" &
+      ;;
+    *)
+      log "Open manually: $URL"
+      ;;
+  esac
 }
 ----
 
 === Error Handling
+
+Stderr-only `err()` is the right default for TUI invocation, but when a
+launcher is started from a desktop entry there is no terminal for the
+user to see — every failure looks identical (a brief flash and nothing
+else). The reference helper `launcher/gui-error.sh` surfaces errors via
+the platform's dialog ladder AND stderr, so the failure is visible no
+matter how the launcher was started.
 
 [source,bash]
 ----
@@ -124,12 +178,64 @@ err() {
   echo "[$APP_NAME] Try: check $LOG_FILE for details" >&2
 }
 
-# Example usage
+# Source the shared GUI-error helper (reference impl of [error-visibility]
+# from launcher-standard.a2ml). Falls back to err() if not available so
+# every launcher works even without the shared helper on PATH.
+if [ -r "$(hp_resolve_desktop_tools gui-error.sh 2>/dev/null)" ]; then
+  # shellcheck disable=SC1090
+  . "$(hp_resolve_desktop_tools gui-error.sh)"
+else
+  hp_gui_error() { err "$2"; }   # graceful degradation
+fi
+
+# Example usage — fails LOUDLY whether GUI or TUI
 if ! start_server; then
-  err "Failed to start server"
+  hp_gui_error "$APP_NAME failed to start" \
+               "Check log: $LOG_FILE\n\nOverride wait timeout: WAIT_FOR_URL_TIMEOUT_SECONDS=<N>"
   exit 1
 fi
 ----
+
+NOTE: `hp_gui_error` writes to stderr unconditionally per
+`[error-visibility].always-also-to-stderr = true`. Set `NO_GUI_ERROR=1`
+to suppress the dialog attempt (useful in CI).
+
+=== Soft-Attach (optional ecosystem integrations)
+
+A "soft-attach" tool is one the launcher calls IF it is installed, and
+silently skips otherwise. The estate ships three by default
+(`feedback-o-tron`, `hypatia`, `panic-attack`) — see
+`[soft-attach].tools` in `launcher-standard.a2ml` for the live list.
+
+Downstream launchers SHOULD source `launcher/soft-attach.sh` rather
+than re-implementing the if-installed-then-invoke pattern, so behaviour
+stays consistent across the estate.
+
+[source,bash]
+----
+# Source the shared soft-attach helper. Graceful degradation: if the
+# helper is not on the resolution ladder, every soft-attach call
+# becomes a silent no-op.
+if [ -r "$(hp_resolve_desktop_tools soft-attach.sh 2>/dev/null)" ]; then
+  # shellcheck disable=SC1090
+  . "$(hp_resolve_desktop_tools soft-attach.sh)"
+else
+  hp_soft_attach_event() { :; }
+  hp_soft_attach_run()   { :; }
+fi
+
+# Call sites: typically wired into start_server() on failure path
+on_start_failed() {
+  hp_soft_attach_event "feedback-o-tron" "launcher:start_failed" \
+      --app "$APP_NAME" --log "$LOG_FILE"
+  hp_soft_attach_run "hypatia diagnose --app $APP_NAME --log $LOG_FILE"
+  hp_soft_attach_run "panic-attack assail $REPO_DIR"
+}
+----
+
+Note that template substitution (`{app-name}`, `{log-file}`,
+`{repo-dir}` in the a2ml) is the launcher's responsibility — interpolate
+before passing the command line to `hp_soft_attach_run`.
 
 == Standard Modes
 
@@ -170,6 +276,14 @@ fi
 | `--help` / `-h`
 | Print usage text, including a description of every mode, the files the
   launcher reads/writes, and the detected platform.
+
+| `--version` / `-V`
+| Print the launcher's version on a single machine-greppable first line,
+  then exit 0. Format: `<app-name> <version> (<build-sha-short>) [<platform>]`
+  (e.g. `aerie-launcher 0.4.2 (a1b2c3d) [linux-x86_64]`). Additional lines
+  (build date, runtime versions) MAY follow. Required so field bug reports
+  can quote a specific build — a launcher without `--version` produces
+  unactionable issues.
 |===
 
 NOTE: `--integ` and `--disinteg` replace the earlier pattern of separate
@@ -281,13 +395,13 @@ system". The `--disinteg` mode is its exact inverse.
 
 Everything `--integ` created, plus:
 
-* The PID file (`/tmp/<app>-server.pid`)
+* The PID file (`$XDG_RUNTIME_DIR/<app>-server.pid`, or the resolved equivalent — see §Best Practices > Security)
 * Any `.bat` fallback shortcuts written when PowerShell wasn't available
 
 It deliberately **does not** remove:
 
 * `~/.config/<app>/` — user preferences survive reinstall
-* `/tmp/<app>-server.log` — logs stay for post-mortem
+* `$XDG_STATE_HOME/<app>/` (defaults to `$HOME/.local/state/<app>/`) — logs stay for post-mortem
 * The source repository at `REPO_DIR`
 
 The removal instructions for those are printed after `--disinteg` so the user
@@ -316,7 +430,14 @@ feedback.
 [Desktop Entry]
 Type=Application
 Name=Application Name
-Exec=/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh "AppName" "/path/to/repo" "GUI_CMD" "TUI_CMD" "/tmp/app.log"
+# The Exec path MUST be the absolute path resolved at install time via
+# the [resolution].desktop-tools-search ladder (see §Canonical location).
+# The freedesktop spec does NOT expand environment variables in Exec=
+# lines, so `--integ` is responsible for picking the host-correct path.
+# The /var/mnt/eclipse/... value below is one possible resolution — on
+# hosts using $HOME/developer/repos or $HOME/dev/repos the resolved path
+# will differ.
+Exec=/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh "AppName" "/path/to/repo" "GUI_CMD" "TUI_CMD" "$HOME/.local/state/app/server.log"
 Terminal=true   # keepopen needs a terminal for its loud banners and shell fallback
 Icon=/path/to/icon.png
 Categories=Category;
@@ -363,13 +484,28 @@ The single source of truth is:
 
     developer-ecosystem/standards/launcher/keepopen.sh
 
-For desktop files to reference a stable absolute path, a symlink is
-deployed at:
+For desktop files (which need a stable absolute path) a symlink or copy
+is deployed inside a `.desktop-tools/` directory whose location varies by
+host. Consumers MUST resolve that location via the search ladder declared
+in `launcher/launcher-standard.a2ml` `[resolution].desktop-tools-search`:
 
-    /var/mnt/eclipse/repos/.desktop-tools/keepopen.sh → ↑
+1. `$HP_DESKTOP_TOOLS`                            — explicit override
+2. `$HP_ESTATE_ROOT/.desktop-tools`               — estate-root convention
+3. `$XDG_DATA_HOME/hyperpolymath/.desktop-tools`  — XDG default
+4. `/var/mnt/eclipse/repos/.desktop-tools`        — legacy eclipse-mount layout
+5. `$HOME/developer/repos/.desktop-tools`         — alt: $HOME/developer/repos
+6. `$HOME/dev/repos/.desktop-tools`               — alt: $HOME/dev/repos
+
+First existing path wins. A reference shell implementation lives at
+`launcher/resolve-desktop-tools.sh` (sourceable; provides
+`hp_resolve_desktop_tools` and `hp_resolve_standard`). Downstream launchers
+SHOULD use the reference impl rather than re-implementing the ladder.
 
 `launch-scaffolder` copies the same script into its baked-in standards
-so regenerated launchers stay in sync.
+so regenerated launchers stay in sync. The legacy single hard-coded path
+(`/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh`) remains in the
+a2ml as `deployed-symlink` for compatibility with pre-resolution
+consumers; new code MUST use the ladder.
 
 === Calling convention
 
@@ -390,7 +526,7 @@ a `tail -f LOG` after the launcher so the terminal stays open:
 
 [source,bash]
 ----
-"aerie-launcher.sh --auto && tail -f /tmp/aerie.log"
+"aerie-launcher.sh --auto && tail -f $HOME/.local/state/aerie/server.log"
 ----
 
 === The three stages
@@ -478,10 +614,10 @@ Exec=launcher.sh --auto
 
 === Debugging Checklist
 
-1. Check log file: `tail -f /tmp/app-server.log`
+1. Check log file: `tail -f "$LOG_FILE"` (resolves to `$XDG_STATE_HOME/<app>/server.log`)
 2. Verify process: `ps aux | grep app-name`
 3. Test URL manually: `curl -v http://localhost:PORT`
-4. Check PID file: `cat /tmp/app-server.pid`
+4. Check PID file: `cat "$PID_FILE"` (resolves to `$XDG_RUNTIME_DIR/<app>-server.pid`)
 5. Test browser opening: `xdg-open http://localhost:PORT`
 6. Verify dependencies: `command -v required-command`
 7. Check port availability: `ss -tlnp | grep PORT`
@@ -529,7 +665,7 @@ APP_NAME="AppName"
 [ ] Implement `wait_for_server()` with reasonable timeout
 [ ] Add proper error handling and user feedback
 [ ] Provide clear success/failure messages
-[ ] Log to predictable location (`/tmp/app-name.log`)
+[ ] Log to XDG state dir (`$XDG_STATE_HOME/<app>/server.log`, defaults to `$HOME/.local/state/<app>/server.log`); never use `/tmp/<app>.log`
 [ ] Handle browser launch failures gracefully
 [ ] Provide manual fallback instructions
 [ ] Implement `--start`, `--stop`, `--status` modes
@@ -540,7 +676,8 @@ APP_NAME="AppName"
 == Best Practices
 
 === Logging
-- Log to `/tmp/app-name.log` for easy debugging
+- Log to `$XDG_STATE_HOME/<app>/server.log` (defaults to `$HOME/.local/state/<app>/server.log` per XDG spec). Per-user, survives reboot, not world-writable.
+- Never log to `/tmp/<app>.log`. Predictable names in a world-writable dir are a symlink-attack target on shared hosts — see §Best Practices > Security.
 - Include timestamps for long-running processes
 - Rotate logs if they grow large
 - Provide log location in error messages
@@ -559,7 +696,9 @@ APP_NAME="AppName"
 - Optimize startup sequence
 
 === Security
-- Use predictable but unique PID file names
+- **PID files MUST go in `$XDG_RUNTIME_DIR`** (Linux) / `$TMPDIR` (macOS), not `/tmp`. `$XDG_RUNTIME_DIR` is mode `0700` and user-scoped per the XDG Base Directory spec; `$TMPDIR` on macOS is `/var/folders/.../T` (per-user). `/tmp` is world-writable: an attacker on a shared host can pre-create `/tmp/<app>-server.pid` containing their own PID, after which the launcher's `is_running()` returns true and `stop_server()` will `kill <attacker-pid>` — DoS or signal-handling abuse vector. The fallback ladder `${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}` exists only as a last resort for hosts that set neither (rare).
+- **Log files MUST go in `$XDG_STATE_HOME`** for the same reason — never `/tmp/<app>.log`.
+- Use predictable but unique PID file *names within the chosen dir* (not in `/tmp`).
 - Clean up PID files on exit
 - Don't log sensitive information
 - Validate URLs before opening

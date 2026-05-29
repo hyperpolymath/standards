@@ -1,0 +1,158 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= BoJ Cartridge Format — Canonical Specification
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc: macro
+:icons: font
+
+toc::[]
+
+== Status
+
+*Stable v1* — supersedes the locally-held schemas at:
+
+* `boj-server/schemas/cartridge-v1.json` (MCP-only subset; now a SHA-pinned mirror of this file)
+* `panll/src/abi/cartridge-schema.json` v0.3.0 (multi-protocol fleet manifest; absorbed)
+
+See link:../docs/decisions/ADR-002-cartridge-format-canonical-home.adoc[ADR-002] for the
+canonicalisation rationale.
+
+== What is a cartridge?
+
+A *cartridge* is a self-contained server unit consumed by a host (typically `boj-server`)
+to extend its tool surface, language-server reach, debug-adapter capabilities, build-tool
+integration, or other server-role mode. Cartridges are *process-isolated* (each backend
+listens on its own loopback port) and *content-addressable* (each manifest may include
+an optional `source.sha256` for fetched cartridges).
+
+A cartridge directory at rest looks like:
+
+----
+<cartridge-name>/
+├── cartridge.json        ← manifest (this spec)
+├── mod.js                ← host entry point (calls loopback backend)
+├── abi/                  ← Idris2 ABI definitions (REQUIRED for Teranga/Shield tier)
+├── ffi/                  ← Zig FFI implementation
+├── adapter/              ← Zig or Deno adapter (the running server). V-lang
+│                            is permitted ONLY in interop-target subdirs
+│                            named `v-cartridge`, `v-adapter`, `v-bindings`,
+│                            or `v-client` (where we expose work to V
+│                            consumers without authoring V). See the
+│                            hypatia `cicd_rules/vlang_detected` rule's
+│                            `path_allow_prefixes` allowlist.
+├── panels/               ← optional UI panels
+├── schemas/              ← cartridge-internal JSON schemas
+└── README.adoc
+----
+
+== Naming and role suffix
+
+Cartridge names *must* end in one of the canonical role suffixes:
+
+[cols="1,3", options="header"]
+|===
+| Suffix | Role
+
+| `-mcp` | Model Context Protocol server (default for tool surfaces)
+| `-lsp` | Language Server Protocol
+| `-dap` | Debug Adapter Protocol
+| `-bsp` | Build Server Protocol
+| `-debug` | Debugger / debug-only operations (when not strictly DAP)
+| `-format` | Code formatter
+| `-lint` | Linter / static analyser
+| `-build` | Build orchestration
+| `-nesy` | Neurosymbolic reasoning surface
+| `-agentic` | Agent harness (OODA-style state machine)
+| `-fleet` | Fleet orchestrator / multi-cartridge coordinator
+|===
+
+Regex: `^[a-z0-9]+(-[a-z0-9]+)*-(mcp|lsp|dap|bsp|debug|format|lint|build|nesy|agentic|fleet)$`
+
+A single domain may have multiple cartridges across roles: e.g. `database-mcp`,
+`database-lsp`, `database-format` are three cartridges sharing the `database` domain.
+
+== Taxonomy (directory layout in registries)
+
+Cartridge registries (canonically `hyperpolymath/boj-server-cartridges`) lay out
+their contents as the *Hybrid taxonomy*:
+
+----
+cartridges/
+├── domains/
+│   ├── cloud/
+│   │   ├── mcp.cartridge/        ← cloud-mcp
+│   │   ├── lsp.cartridge/        ← cloud-lsp
+│   │   └── format.cartridge/     ← cloud-format
+│   ├── database/
+│   │   ├── mcp.cartridge/
+│   │   ├── lsp.cartridge/
+│   │   ├── postgres-adapter/     ← collection: database/<provider>-adapter
+│   │   └── mongodb-adapter/
+│   └── orchestration/
+│       └── fleet-mcp/
+├── cross-cutting/
+│   ├── nesy/
+│   ├── agentic/
+│   └── debug-harness/
+└── templates/
+    └── gossamer-mcp/             ← canonical scaffold for new cartridges
+----
+
+The directory name `<role>.cartridge` is preferred for in-domain cartridges; the
+cartridge.json `name` field carries the role suffix explicitly
+(e.g. `"name": "cloud-mcp"`).
+
+== Manifest fields
+
+See link:cartridge-v1.json[`cartridge-v1.json`] for the machine-readable schema.
+
+Required:
+
+* `$schema` — must point to this canonical URL
+* `spdx`, `copyright` — licensing
+* `name` — role-suffix-terminated, kebab-case
+* `version` — semver (pre-release suffix permitted)
+* `description` — one-line human prose
+* `domain` — functional domain (cloud, database, git, ...)
+* `category` — `domain` | `cross-cutting` | `template`
+* `tier` — `Teranga` (core) | `Shield` (security-critical) | `Ayo` (community)
+* `protocols` — at least one of {MCP, LSP, DAP, BSP, REST, GraphQL, gRPC, NeSy,
+  Agentic, Fleet, Format, Lint, Build, Debug}
+* `auth` — `{method, env_var, credential_source}`. `method` ∈ {none, api-key, oauth2, vault}
+* `api` — `{base_url, content_type}`. `base_url` form: `local://<name>` (canonical loopback) or `http://127.0.0.1:<port>` (explicit port)
+* `tools` — array of `{name, description, inputSchema}`
+
+Optional:
+
+* `ports` — `{allowed, denied}` port permission lists
+* `states` — state-machine states (per panll v0.3.0 — useful for Agentic/BSP cartridges)
+* `source` — `{registry, path, sha256}` for cartridges loaded from a remote registry
+
+== Trust tiers
+
+* *Teranga* (core) — always available; ships with the host or fetched at first run.
+  Requires Idris2 ABI + Zig FFI + formal correctness proof. Cannot be removed by
+  user without reinstall.
+* *Shield* (security-critical) — handles credentials, audit trails, sandboxing
+  boundaries. Same proof obligations as Teranga; additionally requires CVE-watch
+  subscription + signed releases.
+* *Ayo* (community-contributed) — broader surface; formal proofs are encouraged
+  but not mandatory for v1 admission. Subject to sandbox quarantine on first run.
+
+== Registry and on-demand fetch
+
+The canonical cartridge registry is the GitHub repository
+`hyperpolymath/boj-server-cartridges`. Hosts fetch cartridges from this registry
+on demand into a host-local cache (e.g. `~/.boj/cartridges/` for boj-server).
+The host catalog (e.g. `BojRest.Catalog`) loads cartridge.json from the cache
+at boot or on demand. See ADR-002 for the catalog-refresh contract.
+
+Cartridges may also be fetched from other registries identified by GitHub URL.
+The `tray` UI exposes "Add cartridge source" with optional verification against
+`source.sha256`.
+
+== Versioning
+
+This document is v1. Backwards-incompatible changes will be published as
+`cartridge-v2.json` with a migration ADR. v1 manifests remain consumable
+indefinitely; hosts implementing v2 must accept both.

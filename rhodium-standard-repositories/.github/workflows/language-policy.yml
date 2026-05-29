@@ -44,5 +44,38 @@ jobs:
               exit 1
             fi
           fi
-          
+
+          # Block new TypeScript files (banned 2026-04-30, replacement: AffineScript).
+          # Carve-outs (parallel to hypatia cicd_rules/typescript_detected path_allow_prefixes):
+          #   *.d.ts                          declaration files (headers, not impl)
+          #   */bindings/{deno,ts,typescript}/  interop targets (consumers of our work)
+          #   avow-protocol/telegram-bot/avow-telegram-bot/  Telegraf PERMANENT exemption
+          #   *.config.ts / vite.config.ts / vitest.config.ts / tsup.config.ts  tooling
+          #   affinescript-deno-test/ + affinescript-cli/  bootstrap shims
+          #   rescript/ + servers/ + repos-monorepo/ + linguist/  upstream forks
+          #   hyperpolymath-archive/  archived repos
+          #   **/deps/                        Mix-style vendored package-manager deps
+          #   **/vscode/                      VSCode extension entry points (blocked on AS bindings)
+          NEW_TS=$(git diff --name-only --diff-filter=A HEAD~1 2>/dev/null \
+            | grep -E '\.tsx?$' \
+            | grep -vE '\.d\.ts$' \
+            | grep -vE '/bindings/(deno|typescript|ts)/' \
+            | grep -vE '^avow-protocol/telegram-bot/avow-telegram-bot/' \
+            | grep -vE '(^|/)(vite|vitest|tsup)\.config\.ts$' \
+            | grep -vE '\.config\.ts$' \
+            | grep -vE '^(affinescript-deno-test|affinescript-cli)/' \
+            | grep -vE '^(rescript|servers|repos-monorepo|linguist|hyperpolymath-archive)/' \
+            | grep -vE '/deps/' \
+            | grep -vE '/vscode/' \
+            || true)
+          if [ -n "$NEW_TS" ]; then
+            echo "❌ New TypeScript files detected (banned 2026-04-30). Use AffineScript instead."
+            echo "$NEW_TS"
+            echo ""
+            echo "If this file genuinely belongs to a carve-out class, add it via"
+            echo "the hypatia rule's path_allow_prefixes — see standards/.claude/CLAUDE.md"
+            echo "§TypeScript Exemptions (Approved)."
+            exit 1
+          fi
+
           echo "✅ Language policy check passed"

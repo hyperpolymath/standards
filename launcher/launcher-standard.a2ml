@@ -15,13 +15,45 @@
 #   - standards/docs/UX-standards/LM-LA-LIFECYCLE-STANDARD.adoc (install/uninstall)
 
 [spec]
-version = "0.2.0"
-date = "2026-04-17"
+version = "0.3.0"
+date = "2026-05-26"
 compliance = [
     "launcher-standard.adoc",
     "LM-LA-LIFECYCLE-STANDARD.adoc",
     "cross-platform-system-integration-modes",
     "fallback-ladder-keepopen",
+]
+
+[resolution]
+# Path-resolution ladders. Consumers (launch-scaffolder, downstream launchers,
+# the integrity verifier) MUST consult these in order; the first existing path
+# wins. This replaces single hard-coded /var/mnt/eclipse/... paths that broke
+# the standard on hosts that don't use the eclipse-mount layout.
+#
+# .desktop files MUST embed the RESOLVED ABSOLUTE PATH at install time —
+# the freedesktop spec does not expand environment variables in Exec= lines,
+# so the launcher's `--integ` mode is responsible for performing the
+# resolution and writing the literal path into the .desktop file.
+#
+# Reference implementation: launcher/resolve-desktop-tools.sh
+desktop-tools-search = [
+    "$HP_DESKTOP_TOOLS",                                  # explicit override
+    "$HP_ESTATE_ROOT/.desktop-tools",                     # estate-root convention
+    "$XDG_DATA_HOME/hyperpolymath/.desktop-tools",        # XDG default (XDG_DATA_HOME defaults to $HOME/.local/share)
+    "/var/mnt/eclipse/repos/.desktop-tools",              # legacy eclipse-mount layout
+    "$HOME/developer/repos/.desktop-tools",               # alt: $HOME/developer/repos
+    "$HOME/dev/repos/.desktop-tools",                     # alt: $HOME/dev/repos
+]
+
+# Same ladder shape for locating the canonical launcher-standard.a2ml itself
+# (consumed by launch-scaffolder when neither --standard <path> nor
+# $LAUNCH_SCAFFOLDER_STANDARD is set).
+standard-search = [
+    "$HP_ESTATE_ROOT/standards/launcher/launcher-standard.a2ml",
+    "$XDG_DATA_HOME/hyperpolymath/standards/launcher/launcher-standard.a2ml",
+    "/var/mnt/eclipse/repos/standards/launcher/launcher-standard.a2ml",
+    "$HOME/developer/repos/standards/launcher/launcher-standard.a2ml",
+    "$HOME/dev/repos/standards/launcher/launcher-standard.a2ml",
 ]
 
 [fallback-ladder]
@@ -32,7 +64,8 @@ compliance = [
 # See launcher-standard.adoc §Fallback Ladder for the prose version.
 wrapper             = "keepopen.sh"
 canonical-path      = "developer-ecosystem/standards/launcher/keepopen.sh"
-deployed-symlink    = "/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh"
+deployed-name       = "keepopen.sh"                                # resolved via [resolution].desktop-tools-search
+deployed-symlink    = "/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh"  # DEPRECATED: legacy literal, kept for pre-resolution consumers. New code MUST use [resolution].
 calling-convention  = "keepopen.sh APP_NAME REPO_DIR \"GUI_CMD\" \"TUI_CMD\" [LOG_FILE]"
 stages = [
     { name = "gui",   colour = "yellow", on-failure = "show-banner-then-try-tui" },
@@ -44,9 +77,30 @@ final-shell       = "bash -l at REPO_DIR (never 'press enter to close')"
 
 [required-modes]
 # These are the modes every compliant launcher MUST implement.
-runtime = ["--start", "--stop", "--status", "--auto", "--browser"]
+# Aliases (see [aliases] below) are not listed here — they are accepted
+# inputs, not independent obligations.
+runtime = ["--start", "--stop", "--status", "--auto"]
 integration = ["--integ", "--disinteg"]
-meta = ["--help"]
+meta = ["--help", "--version"]
+
+[version-output]
+# Required format for the `--version` mode. The first line MUST be
+# machine-greppable so field bug reports can quote it verbatim. Optional
+# additional lines (build SHA, build date, libc / runtime versions) MAY
+# follow on subsequent lines.
+#
+# Rationale: a launcher with no --version produces unactionable bug
+# reports — "it's broken on my machine" with no way to tell which build.
+first-line-format = "{app-name} {version} ({build-sha-short}) [{platform}]"
+example          = "aerie-launcher 0.4.2 (a1b2c3d) [linux-x86_64]"
+exit-code        = 0
+machine-greppable = true
+
+[aliases]
+# Documented mode aliases. Launchers MUST accept these and route them to
+# the canonical mode. Prose: launcher-standard.adoc §Required Modes.
+"--browser" = "--auto"
+"--web"     = "--auto"
 
 [optional-modes]
 # Modes launchers MAY implement for extra functionality.
@@ -59,19 +113,64 @@ mode = "--auto"
 [runtime]
 # Required runtime behaviour.
 background = "nohup"
-pid-file-pattern = "/tmp/{app-name}-server.pid"
-log-file-pattern = "/tmp/{app-name}-server.log"
+# PID files live in the user's runtime-state dir — wiped on logout,
+# user-scoped (mode 0700 per XDG spec), no symlink-attack target.
+# Bash-expansion ladder:
+#   1. $XDG_RUNTIME_DIR — Linux per freedesktop XDG Base Directory spec
+#   2. $TMPDIR          — macOS / BSDs (typically /var/folders/.../T, per-user)
+#   3. /tmp             — last resort (predictable, world-writable; flagged
+#                         in §Best Practices > Security)
+pid-file-pattern = "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/{app-name}-server.pid"
+# Logs go to XDG_STATE_HOME (per spec, defaults to $HOME/.local/state).
+# Per-user, survives reboot, not world-writable. The {app-name} subdir
+# isolates each launcher's logs.
+log-file-pattern = "${XDG_STATE_HOME:-$HOME/.local/state}/{app-name}/server.log"
+# URL-readiness polling after start. The launcher polls the app's URL
+# until either it responds or total-timeout-seconds elapses.
+# All three timing values are env-var overridable so operators can tune
+# without re-minting the launcher.
 wait-for-url-timeout-seconds = 15
+wait-for-url-timeout-env-var = "WAIT_FOR_URL_TIMEOUT_SECONDS"
+wait-for-url-poll-interval-seconds = 1
+wait-for-url-poll-interval-env-var = "WAIT_FOR_URL_POLL_INTERVAL"
+# Per-request timeout: cap each individual curl probe so a hung server
+# does not eat the entire poll budget on a single request.
+wait-for-url-per-request-timeout-seconds = 2
 startup-command-search = [
     "{repo-dir}/scripts/run.sh",
     "{repo-dir}/dev.sh",
 ]
 
+[browser-launch]
+# How open_browser() resolves which command to invoke. Implementations
+# MUST honour env-var-override first (de-facto $BROWSER convention),
+# then fall back to the platform-specific ladder. Platform detected via
+# `uname -s`; on Linux, additionally probe /proc/version for "microsoft"
+# to detect WSL — under WSL, wslview is preferred so the URL opens in
+# the Windows-side default browser (Linux-side browsers either land in
+# WSLg or fail).
+env-var-override = "BROWSER"
+linux       = ["wslview", "xdg-open", "firefox", "chromium"]
+linux-wsl-detect = "/proc/version contains 'microsoft' (case-insensitive)"
+macos       = ["open"]
+windows     = ["start"]   # cmd builtin; works under Git Bash / MSYS / Cygwin
+fallback    = "log 'Open manually: <URL>'"
+
 [error-visibility]
 # When the launcher runs in a GUI context (no tty + DISPLAY/WAYLAND_DISPLAY set),
 # errors must be visible to the user via a GUI dialog, not only to stderr.
-gui-dialog-chain = ["kdialog", "zenity", "notify-send", "xmessage"]
+#
+# Reference implementation: launcher/gui-error.sh — exposes
+# `hp_gui_error "title" "message"`. Downstream launchers SHOULD source
+# this rather than re-implement the dialog ladder, so the spec stays
+# consistent across the estate.
+#
+# Env override: NO_GUI_ERROR=1 suppresses the dialog attempt (stderr
+# still gets the message). Useful in CI / scripted invocation.
+reference-impl    = "launcher/gui-error.sh"
+gui-dialog-chain  = ["kdialog", "zenity", "notify-send", "xmessage"]
 always-also-to-stderr = true
+suppress-env-var  = "NO_GUI_ERROR"
 
 [integration.linux]
 apps-dir = "$HOME/.local/share/applications"
@@ -101,10 +200,14 @@ bat-fallback = true
 
 [integrity]
 # Per LM-LA-LIFECYCLE §LM/LA-INSTALL: after --integ completes, generate
-# integrity hashes via an external tool.
+# integrity hashes via an external tool. The tool is located via
+# [resolution].desktop-tools-search + the tool-name below — new consumers
+# MUST use that ladder; fallback-paths is kept only for pre-resolution
+# consumers and is itself a legacy literal.
 verification-tool = "verify-desktop-integrity.sh"
+tool-name = "verify-desktop-integrity.sh"                          # resolved via [resolution].desktop-tools-search
 fallback-paths = [
-    "/var/mnt/eclipse/repos/.desktop-tools/verify-desktop-integrity.sh",
+    "/var/mnt/eclipse/repos/.desktop-tools/verify-desktop-integrity.sh",  # DEPRECATED
 ]
 fatal-on-failure = false  # missing verifier is a log line, not an error
 
@@ -121,16 +224,29 @@ remove = [
 ]
 preserve = [
     "$HOME/.config/{app-name}/",
-    "/tmp/{app-name}-server.log",
+    "${XDG_STATE_HOME:-$HOME/.local/state}/{app-name}/",
     "{repo-dir}",
 ]
 
 [soft-attach]
-# Optional integrations — called if present, silently skipped if absent.
+# Optional ecosystem integrations — called if present, silently skipped
+# if absent. Each tool entry carries an explicit `trigger` naming the
+# hook point at which the launcher should invoke it.
+#
+# Reference implementation: launcher/soft-attach.sh — exposes three
+# primitives:
+#   hp_soft_attach_present "command"          → 0 if on PATH
+#   hp_soft_attach_run "command line"         → run if first token present
+#   hp_soft_attach_event "tool" "event" [...] → invoke `tool emit event ...`
+# Downstream launchers SHOULD source this rather than re-implement.
+#
+# Trigger values: "on-start-failed", "on-start-succeeded", "on-integ-failed",
+# "on-user-request". Additional triggers may be added as the lifecycle grows.
+reference-impl = "launcher/soft-attach.sh"
 tools = [
-    { name = "feedback-o-tron", event-on-failure = "launcher:start_failed" },
-    { name = "hypatia", command = "hypatia diagnose --app {app-name} --log {log-file}" },
-    { name = "panic-attack", command = "panic-attack assail {repo-dir}" },
+    { name = "feedback-o-tron", style = "event",   trigger = "on-start-failed", event = "launcher:start_failed" },
+    { name = "hypatia",         style = "command", trigger = "on-start-failed", command = "hypatia diagnose --app {app-name} --log {log-file}" },
+    { name = "panic-attack",    style = "command", trigger = "on-start-failed", command = "panic-attack assail {repo-dir}" },
 ]
 
 [a2ml-metadata-block]

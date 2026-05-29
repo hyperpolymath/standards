@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # governance-reusable.yml — Reusable estate governance bundle (RSR).
 #
 # This is a `workflow_call` reusable workflow: downstream repos invoke it with
@@ -39,6 +39,24 @@
 #     (`advisory` | `blocking`); the default is `advisory` for the
 #     one-week soak. Flip to `blocking` once the conversion is
 #     observed-clean.
+#
+# Codeload-retry resilience (added 2026-05-27, standards#208):
+#   - Every job carries `timeout-minutes: 10` so a transient
+#     `codeload.github.com` outage cannot burn the full 6-hour default
+#     when the runner hangs mid-fetch (observed 2026-05-26: single
+#     codeload glitch propagated to 44 PRs across the estate).
+#   - GitHub controls runner-side action-tarball retry; workflow files
+#     cannot meaningfully override it. The recommended downstream
+#     mitigation when a transient happens is:
+#       gh run rerun --failed --repo <owner>/<repo> <run-id>
+#     which restores 60-80% of failed runs in our experience without
+#     consuming additional minutes beyond the failing job's residual.
+#   - Consumer repos that want auto-rerun should add
+#     `.github/workflows/auto-rerun-on-codeload-fail.yml` — a
+#     workflow_run-triggered job that detects the codeload-failure
+#     signature in the failing run's logs and reruns once. Not bundled
+#     here because it requires `actions: write` permission scope which
+#     this reusable intentionally avoids.
 
 name: Estate Governance (reusable)
 
@@ -58,6 +76,7 @@ jobs:
   validate-baseline:
     name: Validate Hypatia baseline
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -123,6 +142,7 @@ jobs:
   language-policy:
     name: Language / package anti-pattern policy
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -131,94 +151,42 @@ jobs:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
 
+      # Estate language policy bans Python with no exceptions (CLAUDE.md
+      # Language Policy; SaltStack exception removed 2026-01-03). The
+      # previous in-line `python3 << PYEOF` heredoc made this very gate a
+      # self-referential violation — same structural class as the CSA001
+      # self-loop fixed in hypatia#328. Eradicated by porting the logic
+      # to a Deno script that lives in this standards repo.
+      #
+      # Implementation note: a reusable workflow only auto-checks-out its
+      # YAML, not sibling files in its repo. So we explicitly check out
+      # this repo into `.standards-checkout/`, then run the script from
+      # there. We pin to `main` because `github.workflow_sha` resolves to
+      # the caller repo's commit SHA (not standards'), which makes the
+      # fetch fail with exit 128 ("No commit found for SHA"). Caller
+      # repos already pin the reusable's YAML by SHA, so the bounded
+      # drift is just whatever's on standards/main between the reusable
+      # version and the script version — acceptable since scripts here
+      # are read-only governance checks.
+      - name: Set up Deno
+        uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2.0.3
+        with:
+          deno-version: v2.x
+
+      - name: Check out standards repo for shared scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          # Sparse-checkout only the scripts dir to keep this fast.
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
       - name: Check for TypeScript
-        run: |
-          python3 << 'PYEOF'
-          import re, sys, pathlib
-
-          DIR_NAMES_ALLOWED = {
-              'bindings', 'tests', 'test', 'scripts',
-              'mcp-adapter', 'cli', 'vendor', 'examples', 'ffi',
-              'node_modules', 'benchmarks',
-          }
-
-          def builtin_allowed(p):
-              if p.endswith('.d.ts'):
-                  return True
-              base = p.rsplit('/', 1)[-1]
-              if base == 'mod.ts':
-                  return True
-              if base in ('lsp-server.ts', 'lsp_server.ts', 'lsp.ts') or base.endswith('-lsp.ts'):
-                  return True
-              if base.endswith('.bench.ts') or base.endswith('_bench.ts'):
-                  return True
-              segs = p.split('/')
-              for s in segs[:-1]:
-                  if s in DIR_NAMES_ALLOWED:
-                      return True
-                  if 'vscode' in s:
-                      return True
-                  if s.startswith('deno-'):
-                      return True
-              return False
-
-          def glob_to_regex(g):
-              out = []
-              for c in g.lstrip('./'):
-                  if c == '*': out.append('.*')
-                  elif c == '?': out.append('.')
-                  elif c in '.+(){}[]|^$\\': out.append(re.escape(c))
-                  else: out.append(c)
-              return re.compile('^' + ''.join(out) + '$')
-
-          exemption_patterns = []
-          claude_md = pathlib.Path('.claude/CLAUDE.md')
-          if claude_md.exists():
-              in_table = False
-              for line in claude_md.read_text(encoding='utf-8').splitlines():
-                  if re.search(r'TypeScript [Ee]xemptions', line):
-                      in_table = True
-                      continue
-                  if in_table and line.startswith(('### ', '## ', '# ')):
-                      break
-                  if in_table and line.startswith('|'):
-                      m = re.match(r'\|\s*`([^`]+)`', line)
-                      if m:
-                          exemption_patterns.append((m.group(1), glob_to_regex(m.group(1))))
-
-          def exempt(p):
-              for raw, regex in exemption_patterns:
-                  if regex.match(p):
-                      return True
-                  if p == raw.lstrip('./'):
-                      return True
-                  if raw.endswith('/') and p.startswith(raw.lstrip('./')):
-                      return True
-              return False
-
-          found = []
-          for ext in ('ts', 'tsx'):
-              for p in pathlib.Path('.').rglob(f'*.{ext}'):
-                  parts = p.parts
-                  if any(part.startswith('.') and part not in ('.', '..') for part in parts):
-                      continue
-                  found.append(p.as_posix().lstrip('./'))
-
-          bad = sorted(f for f in found if not (builtin_allowed(f) or exempt(f)))
-          if bad:
-              print("❌ TypeScript files detected outside the allowlist.\n")
-              for f in bad:
-                  print(f"  {f}")
-              print()
-              print("To resolve, choose one:")
-              print("  (a) migrate the file to AffineScript")
-              print("  (b) move to an allowlisted bridge path")
-              print("  (c) add an entry to the 'TypeScript Exemptions' table in .claude/CLAUDE.md")
-              if exemption_patterns:
-                  print(f"\n(Currently {len(exemption_patterns)} exemption(s) parsed from .claude/CLAUDE.md.)")
-              sys.exit(1)
-          print(f"✅ No TypeScript files outside allowlist ({len(exemption_patterns)} per-repo exemption(s) parsed).")
-          PYEOF
+        # Read-only execution; never writes outside the runner workspace.
+        run: deno run --allow-read .standards-checkout/scripts/check-ts-allowlist.ts
 
       # Shared escape hatch for the banned-language-file checks below.
       # Honours three exemption mechanisms (see
@@ -244,20 +212,42 @@ jobs:
 
           # Baseline lookup: returns 0 (exempt) if the file appears in
           # .hypatia-baseline.json with a matching rule_module + type.
-          # `file_pattern` glob match is intentionally NOT implemented
-          # here; the advisory-rollout window only honours exact `file`
-          # matches. Pattern support arrives with the blocking-mode
-          # flip and the apply-baseline.sh upgrade (see
-          # standards/scripts/apply-baseline.sh).
+          # Honours both `file` (exact) and `file_pattern` (glob) entries.
+          # The glob → regex translation mirrors apply-baseline.sh exactly:
+          #   `**` matches any depth (incl. `/`); `*` matches one segment.
+          # Pattern support unblocks language-demo repos (absolute-zero
+          # carries ~30 banned-language example files under `examples/`)
+          # and any repo that vendors such subtrees, replacing per-file
+          # `.hypatia-ignore` enumeration with one `file_pattern` entry.
           in_baseline() {
             local target="$1"
             [ -f .hypatia-baseline.json ] || return 1
             command -v jq >/dev/null 2>&1 || return 1
+            # Note: the `as $pat` capture is essential — inside `test(...)`
+            # the dot rebinds to test's input ($f, a string), so
+            # `.file_pattern` would error with "Cannot index string". We
+            # capture file_pattern in $pat first, then reference it inside
+            # the test() argument.
             jq -e \
               --arg rm "$rule_module" \
               --arg rt "$rule_type" \
               --arg f  "$target" \
-              'any(.[]; .rule_module == $rm and .type == $rt and .file == $f)' \
+              'any(.[];
+                   .rule_module == $rm and .type == $rt
+                   and (
+                     (.file? // null) == $f
+                     or (
+                       (.file_pattern? // null) as $pat
+                       | $pat != null
+                       and ($f | test(
+                         $pat
+                         | gsub("\\*\\*"; "DOUBLESTAR")
+                         | gsub("\\*"; "[^/]*")
+                         | gsub("DOUBLESTAR"; ".*")
+                         | "^" + . + "$"
+                       ))
+                     )
+                   ))' \
               .hypatia-baseline.json >/dev/null 2>&1
           }
 
@@ -300,26 +290,30 @@ jobs:
             echo "✅ No non-exempt ${label}"
           }
 
-          RES_FILES=$(find . -name "*.res" -not -path "./node_modules/*" -not -path "./.git/*" || true)
-          GO_FILES=$(find . -name "*.go" -not -path "./.git/*" || true)
-          PY_FILES=$(find . -name "*.py" -not -path "./.git/*" \
+          # Use `git ls-files` instead of `find` so only TRACKED files are
+          # inspected. This respects .gitignore by definition — vendored
+          # deps in deps/, node_modules/, _build/ etc. are never tracked
+          # and cannot produce false-positives. Root cause for the switch:
+          # developer-ecosystem@baab1534 had false-positive governance
+          # failures because `find` crawled gitignored vendor directories.
+          # `git ls-files` works correctly on fresh PR checkouts because
+          # actions/checkout populates the index before running workflows.
+          RES_FILES=$(git ls-files '*.res' || true)
+          GO_FILES=$(git ls-files '*.go' || true)
+          PY_FILES=$(git ls-files '*.py' \
             | grep -v salt | grep -v _states \
             | grep -v _modules | grep -v pillar | grep -v venv \
             | grep -v __pycache__ || true)
-          MAKE_FILES=$(find . \( -name "Makefile" -o -name "Makefile.*" -o -name "*.mk" \) \
-            -not -path "./.git/*" -not -path "./.github/*" || true)
-          JAVA_FILES=$(find . \( -name "*.java" -o -name "*.kt" -o -name "*.kts" \) \
-            -not -path "./.git/*" || true)
-          SWIFT_FILES=$(find . -name "*.swift" -not -path "./.git/*" || true)
-          DART_FILES=$(find . \( -name "*.dart" -o -name "pubspec.yaml" \) \
-            -not -path "./.git/*" || true)
+          MAKE_FILES=$(git ls-files 'Makefile' 'Makefile.*' '*.mk' \
+            | grep -v '\.github/' || true)
+          JAVA_FILES=$(git ls-files '*.java' '*.kt' '*.kts' || true)
+          SWIFT_FILES=$(git ls-files '*.swift' || true)
+          DART_FILES=$(git ls-files '*.dart' 'pubspec.yaml' || true)
           # V-lang detected by manifest (v.mod / vpkg.json); the .v extension
           # collides with Verilog so we never key on it.
-          VMOD_FILES=$(find . \( -name "v.mod" -o -name "vpkg.json" \) \
-            -not -path "./node_modules/*" -not -path "./.git/*" || true)
+          VMOD_FILES=$(git ls-files 'v.mod' 'vpkg.json' || true)
           # ATS2 source extensions: rejected in favour of Idris2 / Rust/SPARK.
-          ATS2_FILES=$(find . \( -name "*.dats" -o -name "*.sats" -o -name "*.hats" \) \
-            -not -path "./.git/*" || true)
+          ATS2_FILES=$(git ls-files '*.dats' '*.sats' '*.hats' || true)
 
           enforce "ReScript files" "use AffineScript instead" "$RES_FILES"
           enforce "Go files" "use Rust/WASM instead" "$GO_FILES"
@@ -430,6 +424,7 @@ jobs:
   package-policy:
     name: Guix primary / Nix fallback policy
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -457,6 +452,7 @@ jobs:
   security-policy:
     name: Security policy checks
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -543,6 +539,7 @@ jobs:
   quality:
     name: Code quality + docs
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -591,6 +588,7 @@ jobs:
   wellknown:
     name: Well-Known (RFC 9116 + RSR)
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -648,6 +646,7 @@ jobs:
   workflow-lint:
     name: Workflow security linter
     runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -686,3 +685,48 @@ jobs:
             echo "ERROR: Duplicate CodeQL workflows found"; exit 1
           fi
           echo "No critical duplicates found"
+
+  trusted-base:
+    name: Trusted-base reduction policy
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          path: caller
+      - name: Checkout standards (for the check script)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: standards
+      - name: Run trusted-base check on caller repo
+        run: |
+          bash standards/scripts/check-trusted-base.sh caller
+
+  licence-consistency:
+    name: Licence consistency
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          path: caller
+      - name: Checkout standards (for the check script)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: standards
+      - name: Run licence-consistency check on caller repo
+        run: |
+          bash standards/scripts/check-licence-consistency.sh caller

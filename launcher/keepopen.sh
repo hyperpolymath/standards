@@ -38,12 +38,21 @@ GUI_CMD="${3:?keepopen: GUI_CMD required (arg 3) — pass '' if not applicable}"
 TUI_CMD="${4:?keepopen: TUI_CMD required (arg 4) — pass '' if not applicable}"
 LOG_FILE="${5:-}"
 
-C_RED=$'\033[1;31m'
-C_YEL=$'\033[1;33m'
-C_CYA=$'\033[1;36m'
-C_GRN=$'\033[1;32m'
-C_BOLD=$'\033[1m'
-C_RST=$'\033[0m'
+# Honour NO_COLOR (https://no-color.org/) and auto-detect non-TTY stdout.
+# When set, banners and prefix labels emit no ANSI escapes — still loud
+# and clearly labelled, just plain text. The freedesktop-style desktop
+# launch redirects stdout to a real terminal so this rarely triggers
+# automatically, but covers `keepopen.sh ... | tee` and CI captures.
+if [[ -n "${NO_COLOR:-}" ]] || [[ ! -t 1 ]]; then
+    C_RED='' C_YEL='' C_CYA='' C_GRN='' C_BOLD='' C_RST=''
+else
+    C_RED=$'\033[1;31m'
+    C_YEL=$'\033[1;33m'
+    C_CYA=$'\033[1;36m'
+    C_GRN=$'\033[1;32m'
+    C_BOLD=$'\033[1m'
+    C_RST=$'\033[0m'
+fi
 
 banner() {
     # $1 = colour; $2 = title; remaining args = body lines.

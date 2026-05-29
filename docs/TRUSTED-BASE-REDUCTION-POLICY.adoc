@@ -1,0 +1,317 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= Trusted-Base Reduction Policy
+:revdate: 2026-05-27
+:status: ADOPTED
+:audit: hyperpolymath/standards#195
+:audit-licence: hyperpolymath/standards#196
+:audit-docs: hyperpolymath/standards#197
+:enforcement: hyperpolymath/standards#211
+:precedent: hyperpolymath/boj-server backend-assurance harness
+
+This document is the canonical estate-wide policy for managing
+*soundness-relevant escape hatches* in proof-bearing code — the
+unconditional, unproven primitives that every formal-methods toolchain
+provides for ergonomic or extraction-boundary reasons:
+
+[cols="1,2", options="header"]
+|===
+| Language | Escape hatches in scope
+
+| Coq      | `Axiom`, `Admitted`, `admit.`
+| Lean     | `axiom`, `sorry`, `noncomputable`
+| Agda     | top-level `postulate`
+| Idris2   | `believe_me`, `really_believe_me`, `assert_total`, top-level `partial`
+| F\*      | `assume val`, `admit_p`
+| Dafny    | top-level `:axiom`
+| Cross-lang | `TODO PROOF` / `OWED:` / `FIXME PROOF` markers
+| Rust/Haskell | `unsafePerformIO`, `unsafeCoerce` (where used in soundness-relevant positions)
+|===
+
+The 2026-05-26 estate proof-debt audit (link:{audit}[#195]) found these
+markers spread across ~30 active repos, with concentrations of
+`believe_me` at extraction boundaries (Rust↔Idris2 FFI, codec runtime)
+and `partial` clusters that conflate "totality just hard to prove" with
+"totality genuinely impossible". This policy gives every such marker a
+canonical disposition path so the trusted base shrinks over time
+instead of accreting.
+
+== Three permissible dispositions
+
+Every soundness-relevant escape hatch in the estate MUST be one of:
+
+[cols="1,1,3", options="header"]
+|===
+| Disposition | Marker | Definition
+
+| (a) DISCHARGED
+| —
+| A proof exists. The escape hatch has been deleted or replaced with a
+proof term / total function / proven instance.
+
+| (b) BUDGETED
+| `// TRUSTED: <kind>; <budget>`
+| The escape hatch is necessary at this layer (FFI boundary, foreign
+extraction target, performance corner case). It is covered by
+property-based or adversarial tests at a documented refutation budget
+(e.g. "tested at N=10⁹ inputs across `cargo test --release --features fuzz`").
+The budget is the load-bearing component — without it, "covered by
+tests" is unfalsifiable.
+
+| (c) NECESSARY AXIOM
+| `-- AXIOM: <name>; <justification>`
+| The escape hatch encodes a metatheoretic assumption that cannot be
+discharged within the working logic (e.g. function extensionality,
+propositional truncation, classical choice, certain decision procedures).
+It is enumerated in `docs/proof-debt.md` with a one-paragraph
+justification and a citation pointing to the canonical formalisation
+elsewhere (echo-types, MathLib4, agda-stdlib, etc.).
+|===
+
+A marker that is *none of (a)/(b)/(c)* is **debt**, and must appear in
+the repo's `docs/proof-debt.md` with a deadline (or "INDEFINITE" with a
+reason) and an owner.
+
+== `docs/proof-debt.md` schema
+
+Every proof-bearing repo MUST maintain a `docs/proof-debt.md` (or `.adoc`)
+with the following structure:
+
+[source,markdown]
+----
+# Proof debt
+
+## (a) Discharged in this repo
+- (none — entries removed when proof lands)
+
+## (b) Budgeted — tested with refutation budget
+- `path/to/file.rs:LINE` — `unsafe_extract_bytes`
+  - **Kind**: extraction boundary (Rust→Idris2 ABI)
+  - **Test**: `cargo test --release --features fuzz extract_bytes_qc`
+  - **Budget**: 10⁹ inputs / N=10000 shrinks
+  - **Last run**: 2026-05-26 (CI run #12345 — green)
+
+## (c) Necessary axiom
+- `formal/Foo.v:LINE` — `axiom funExt`
+  - **Justification**: function extensionality; not derivable in
+    constructive Coq without UIP. Standard practice; see Mathlib4
+    `Mathlib.Logic.Function.Basic`.
+  - **Citation**: Univalent Foundations §2.9; Mathlib4 commit abc1234.
+
+## (d) DEBT — actively to be closed
+- `formal/Bar.v:LINE` — `Admitted` `preservation_lemma`
+  - **Owner**: @maintainer
+  - **Plan**: discharge by induction on typing-derivation; subgoals
+    (1)-(7); blocked on (4) which needs the substitution lemma.
+  - **Deadline**: 2026-08-01 / "INDEFINITE: dependent on echo-types
+    Lift ⊤ rung-C settlement".
+----
+
+Disposition (d) is the only category that should *shrink* over time.
+(a) shrinks too, but only by promotion through proof; (b) and (c) are
+load-bearing and should stay stable.
+
+== Annotation conventions in source
+
+Mark every escape hatch inline so the disposition is local to the code:
+
+[source,rust]
+----
+// TRUSTED: extraction-boundary; tested via `cargo test fuzz` (10⁹ inputs).
+//   See docs/proof-debt.md §(b) entry "unsafe_extract_bytes".
+unsafe fn unsafe_extract_bytes(...) -> ... { ... }
+----
+
+[source,idris]
+----
+-- TRUSTED: extraction-boundary; tested via `idris2 --test` (Hedgehog, N=10⁶).
+--   See docs/proof-debt.md §(b) entry "wasm_marshal_u64".
+wasm_marshal_u64 : Bits64 -> ByteArray
+wasm_marshal_u64 x = believe_me ...
+----
+
+For Idris2 *axioms* (disposition (c)), prefer the canonical form: a
+doc-comment header (`|||`) starting with `OWED:` and a `0`-multiplicity
+(erased) declaration. The erased multiplicity makes the term proof-only —
+it cannot escape into runtime code and disappears from compiled output —
+so the unproven assumption is structurally scoped to type-level reasoning:
+
+[source,idris]
+----
+||| OWED: function extensionality at the typed-wasm export interface.
+||| Necessary; not derivable in Idris2 0.8.0 without UIP.
+||| See docs/proof-debt.md §(c) entry "funExtTW".
+||| Citation: echo-types `Echo.FunExt`, Mathlib4 `Function.funext_iff`.
+0 funExtTW : (f, g : a -> b) -> ((x : a) -> f x = g x) -> f = g
+----
+
+The `OWED:` token is recognised by `scripts/check-trusted-base.sh`
+alongside `TRUSTED:` and `AXIOM:`. Use `OWED:` for proof-only erased
+declarations (Idris2 0-multiplicity, Coq `Axiom`-of-Prop, Lean `axiom` in
+`Prop`) and `TRUSTED:` for run-time soundness breaks (`believe_me`,
+`unsafePerformIO`, `unsafe`).
+
+[source,lean]
+----
+-- AXIOM: function extensionality; necessary; see docs/proof-debt.md §(c).
+--   Citation: Mathlib4 `Function.funext_iff` (commit abc1234).
+axiom funExt {α β : Type} (f g : α → β) :
+  (∀ x, f x = g x) → f = g
+
+-- For debt-style markers (disposition (d)), prefer the named sorry:
+-- DEBT: substitution preservation; owner @maintainer; deadline 2026-08-01.
+--   See docs/proof-debt.md §(d) entry "subst_preservation".
+theorem subst_preservation : ∀ {Γ τ e e'}, Subst e e' → Typed Γ e τ → Typed Γ e' τ :=
+  sorry
+----
+
+[source,coq]
+----
+(* AXIOM: function extensionality.
+   Necessary; see docs/proof-debt.md §(c) entry "funExt".
+   Cited from echo-types. *)
+Axiom funExt : forall (A B : Type) (f g : A -> B),
+  (forall x, f x = g x) -> f = g.
+----
+
+[source,agda]
+----
+-- AXIOM: propositional truncation; necessary; see proof-debt.md §(c).
+postulate
+  ∥_∥ : Set → Set
+----
+
+The leading-comment marker (`TRUSTED:` / `AXIOM:` / `OWED:`) is itself
+part of the contract — the audit script in section "Enforcement" below
+greps for it. Choose the marker by run-time vs proof-time scope:
+
+* `TRUSTED:` — run-time soundness break (`believe_me`, `unsafe`,
+  `unsafePerformIO`, `assume val`, `:axiom`). Pair with disposition (b)
+  BUDGETED and a property-test budget.
+* `AXIOM:` — top-level named axiom (Coq `Axiom`, Lean `axiom`, Agda
+  `postulate`). Pair with disposition (c) NECESSARY AXIOM and a
+  citation.
+* `OWED:` — Idris2-style erased (`0`-multiplicity) axiom or any
+  cross-language self-documented debt marker. Pair with either (c)
+  NECESSARY AXIOM (with citation) or (d) DEBT (with deadline and
+  owner).
+
+== Enforcement
+
+Enforcement landed at link:{enforcement}[standards#211] as
+`scripts/check-trusted-base.sh`, wired into `governance-reusable.yml`
+as a `trusted-base` job. The script:
+
+. Greps every soundness-relevant escape hatch in the caller repo
+  (`Axiom`, `Admitted`, `admit.`, `axiom`, `sorry`, top-level `postulate`,
+  `believe_me`, `really_believe_me`, `assert_total`, top-level `partial`,
+  `assume val`, `admit_p`, `:axiom`, plus cross-language `TODO PROOF` /
+  `OWED:` / `FIXME PROOF` markers in soundness-relevant positions).
+. Verifies each is one of:
+.. preceded within 5 lines by a `TRUSTED:`, `AXIOM:`, or `OWED:` leading comment, OR
+.. enumerated by path in `docs/proof-debt.md` (or `.adoc`, or `PROOF-NEEDS.md`), OR
+.. exempted via a path-fragment substring match in `.trusted-base-ignore`.
+. Fails CI when a marker is naked (no annotation, no proof-debt entry, no
+  ignore-file exemption).
+. No-ops cleanly on repos with zero proof-bearing files (true for most
+  of the estate).
+
+=== `.trusted-base-ignore` — path-fragment exemption file
+
+For markers that should NOT need per-site documentation — typically
+test fixtures that exist *to be detected* by the scanner, local
+worktree shadows, or other intentional self-scan noise — the script
+consults an optional `.trusted-base-ignore` file in the repo root.
+Format mirrors `.hypatia-ignore`:
+
+[source]
+----
+# Comments start with `#`.
+# Each non-comment line is a path-fragment substring match against the
+# repo-relative file path. Narrow the fragment to avoid hiding adjacent
+# findings.
+
+# Scanner test fixtures: exist solely to verify the detector fires.
+test/soundness/fixtures/
+
+# Local agent worktree shadows: not part of the canonical tree.
+.claude/worktrees/
+----
+
+Prefer this over inline `TRUSTED:` comments only for *whole-path* or
+*whole-directory* exemptions with a documented org-policy rationale.
+Per-site `TRUSTED:` / `AXIOM:` comments remain the right tool for
+one-off documented escapes where the rationale is local to a single
+construct. `.trusted-base-ignore` is to `check-trusted-base.sh` what
+`.hypatia-ignore` is to the hypatia scanner — same shape, same
+discipline, separate scope.
+
+A follow-up may extend it to fail CI when `docs/proof-debt.md` §(d) DEBT
+entries are past their stated deadline.
+
+This is the same shape as `check-licence-consistency.sh` (standards#201)
+— local script, called from the governance bundle, no network
+dependencies.
+
+The seed `docs/proof-debt.md` for the `standards` repo itself landed at
+standards#213 as the canonical example of the schema in action (15
+markers triaged, 11 §(d) entries with named owners and discharge
+recipes).
+
+== Precedent: boj-server backend-assurance harness
+
+The pattern this policy codifies is already deployed in
+link:{precedent}[boj-server's backend-assurance harness] (memory:
+`project_boj_server_backend_assurance_harness`):
+
+* 5 class-J axioms identified as irreducible in Idris2 0.8.0 (cannot
+  be discharged within the type theory).
+* Each one is property-tested *and* extracted to Rust where the
+  property runs against the real Idris2 RTS implementation, not a
+  mocked one.
+* The trusted base is documented in `docs/proof-debt.md` and shrinks
+  one entry per PR over a ~3-month roadmap.
+
+That harness is the reference implementation. New proof-bearing repos
+adopting this policy should adapt it rather than reinvent it.
+
+== Initial migration order (proof-bearing repos with active debt)
+
+Per the audit, the high-density repos that should adopt this policy
+first (rough P0/P1/P2 ordering):
+
+[cols="1,1,2", options="header"]
+|===
+| Priority | Repo | Why this one first
+
+| P0 | `ephapax`             | 1 `Admitted` in `formal/Semantics.v` (`preservation`); was 3 at audit time, 2 discharged via https://github.com/hyperpolymath/ephapax/pull/146[ephapax#146]. Discharge plan in `ROADMAP.adoc` § "Preservation closure plan" + `formal/PRESERVATION-DESIGN.md` (four-layer redesign on branch `proof/l1-region-threading-design`). Migration filed: https://github.com/hyperpolymath/ephapax/pull/164[ephapax#164].
+| P0 | `boj-server`          | Reference implementation — formalise the existing harness as the canonical example.
+| P1 | `absolute-zero`       | Phase-1 triage MERGED via https://github.com/hyperpolymath/absolute-zero/pull/58[absolute-zero#58] + https://github.com/hyperpolymath/absolute-zero/pull/59[#59]: **72 Coq Axioms classified** (52 §(c) + 17 §(a)-backlog + 3 §(b)). Remaining outside Phase 1: **52 Lean `axiom` decls + 7 Idris2 `postulate`s + 124 Lean `sorry`s** (canonical count via `check-trusted-base.sh`; the audit-time "315 Lean across 6638 proof files" figure was debunked — no source reproduces 315). Phase 2 work tracked in absolute-zero.
+| P1 | `maa-framework`       | 134 markers in 25 files (high density); investigate whether vendored or original.
+| P1 | `betlang`             | Single named axiom (`substTop_preserves_typing`) — clean (b) or (c) classification.
+| P1 | `proven`              | Real debt surface (per Phase-1 triage 2026-05-27, `docs/proof-debt-triage.md`): **280 `\|\|\| OWED:` annotations** across 44 `Proofs.idr` modules (Fork A form), **4 `@ Assumed:` postulate tags** in `src/Proven/SafeDigest.idr` (needs migration to Fork A), and **~70 `Safe*.idr` modules** with `Prevents:`/`Guarantees:` overclaim docs and no discharged theorem. ("372 `TODO PROOF`" from the original audit prompt does not match the codebase — the string `TODO PROOF` is absent; 280 OWED is the canonical count.)
+| P2 | `standards`           | 4 Agda postulate + 11 Idris partial — set the example for downstream.
+| P2 | `typed-wasm`, `stapeln`, `vcl-ut`, `hypatia`, `snifs`, `somethings-fishy` | Each 5–15 `believe_me`; audit and classify in a single PR each.
+|===
+
+== Status
+
+[cols="1,3", options="header"]
+|===
+| Date | Event
+
+| 2026-05-26 | Policy filed and merged (standards#203).
+| 2026-05-26 | `scripts/check-trusted-base.sh` filed and merged (standards#211); wired into `governance-reusable.yml` as the `trusted-base` job.
+| 2026-05-26 | Seed `docs/proof-debt.md` landed for `standards` itself (standards#213) as the schema reference.
+| 2026-05-27 | Fill-in pass: Idris2 `OWED:` + 0-multiplicity form, Lean annotation block, Enforcement cross-link to #211 (this PR). Status promoted from PROPOSED → ADOPTED.
+| TBD       | Per-repo `docs/proof-debt.md` files seeded across P0/P1 repos via the triage prompts that this policy unblocks.
+|===
+
+== Companion documents
+
+* link:{audit}[standards#195] — estate proof-debt audit (the empirical motivation)
+* link:{audit-licence}[standards#196] — estate licence-debt audit
+* link:{audit-docs}[standards#197] — estate documentation-debt audit
+* link:{enforcement}[standards#211] — `scripts/check-trusted-base.sh` and the `trusted-base` job in `governance-reusable.yml`
+* https://github.com/hyperpolymath/standards/pull/213[standards#213] — seed `docs/proof-debt.md` for the `standards` repo itself (canonical schema example)
+* `scripts/check-licence-consistency.sh` (standards#201) — the structural precedent for `check-trusted-base.sh`

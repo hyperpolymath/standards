@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= Batch-Fix Outcome Categorisation
+:toc:
+:status: ACTIVE
+:version: 1.0.0
+
+== Purpose
+
+Every batch-fix script in the hyperpolymath estate — any tool that walks an inventory and applies a per-row transform across many targets — MUST classify each row's outcome into one of the canonical four terms defined here. Stable vocabulary means a `cut -f4 | sort | uniq -c` summary is readable across any script, any topic, any session.
+
+== The Four Terms
+
+[cols="1,2,2,1",options="header"]
+|===
+| Term | Meaning | Typical cause | Followup needed?
+
+| `ok`
+| Transform applied successfully. Target now matches the corrected state.
+| Happy path — pre-flight passed, mutation landed.
+| No.
+
+| `corrected_not_emitted`
+| Pre-flight safety check failed: the desired post-fix state isn't observable on the target. Script deliberately skipped to avoid creating a *different* broken state.
+| Workflow not currently producing the corrected name; corrected file not on disk; target version not reachable; upstream dependency not yet landed.
+| Yes — usually unblocked by external change (budget reset, workflow re-run, dependency merge). Re-run script later.
+
+| `skip_long_tail`
+| Row's input isn't in the script's known transform map. Single-instance edge cases the script intentionally leaves alone.
+| Phantom/inventory entry that doesn't match the high-frequency patterns the script was designed to handle.
+| Per-target human investigation, not batched.
+
+| `error_patching`
+| The mutation itself (API PUT/PATCH, file write, etc.) returned non-zero. Pre-flight passed but the write didn't land.
+| Auth scope mismatch, body shape rejection, transient network, idempotency artefact (target already fixed by a prior pass).
+| Yes — investigate the single failure (or confirm it's an idempotency-rerun artefact, in which case no action).
+|===
+
+== Why these four
+
+The vocabulary disambiguates the two skip modes that otherwise look identical:
+
+* `corrected_not_emitted` — "could not safely apply" (script's pre-flight defended against a deferred external state)
+* `skip_long_tail` — "would not apply" (script chose not to handle this row's transform)
+
+A user reading `73 corrected_not_emitted, 25 skip_long_tail` knows immediately:
+
+* the 73 are *temporary* and re-running later will pick them up
+* the 25 are *permanent* parked entries needing per-target review
+
+Conflating them under a single `skipped` would erase that distinction.
+
+Separately, `error_patching` keeps script/auth defects visible distinct from environmental skips. A high `error_patching` count means fix-the-script; a high `corrected_not_emitted` count means fix-the-environment or wait.
+
+== Required output format
+
+Batch-fix scripts MUST emit a TSV with at minimum these columns:
+
+* `target` (repo, file path, package name — whatever the batch operates over)
+* `input_key` (the inventory entry being processed)
+* `source` (where the transform is applied — `classic`, `ruleset:<id>`, `file`, `api`, `-` for skips)
+* `outcome` (exactly one of the four canonical strings above)
+* `corrected_value` (the post-fix value, or `-` for long-tail skips)
+
+The `outcome` column MUST be column 4 by convention so the canonical summary command works without flag tweaking:
+
+[source,bash]
+----
+tail -n +2 results.tsv | cut -f4 | sort | uniq -c | sort -rn
+----
+
+== Adding new outcome shapes
+
+If a new outcome category genuinely doesn't fit one of the four (e.g. `partial_apply`, `requires_consent`), add it *here* in a follow-up edit to this spec before forking the vocabulary per-script. Per-script synonyms (`success`, `failed`, `skipped`, `done`) are forbidden — they erode the cross-topic readability the spec exists to preserve.
+
+== Canonical example
+
+The 2026-05-28 BP008 phantom-required-context batch fix (`bp008_fix.sh` against `bp008_phantoms_2026-05-28.tsv`, 195 rows) produced:
+
+|===
+| Outcome | Count | Interpretation
+| `ok` | 71 | Phantom renamed; auto-merge unblocked
+| `corrected_not_emitted` | 96 | Workflow not currently emitting corrected name (Actions budget exhausted); re-run after billing reset will recover most
+| `skip_long_tail` | 27 | Phantom not in 5-pattern rename map; per-repo investigation pending
+| `error_patching` | 1 | Spurious — same target was fixed by an earlier pilot pass (idempotency artefact)
+|===
+
+Read aloud: "71 fixed, 96 parked pending budget reset, 27 long-tail, 0 real failures." The four-term split makes that decomposition immediate.
+
+== Related
+
+* `claude-watch` (estate dashboard tool) renders the canonical summary for any `*_results.tsv` it discovers under `/tmp/`. Scripts that emit the canonical format get free real-time monitoring.
+* `hypatia.Rules.AdminMergeEligibility` (AM010) and `hypatia.Rules.BranchProtection` (BP008) are the upstream detectors whose findings drive the BP008 canonical-example batch.

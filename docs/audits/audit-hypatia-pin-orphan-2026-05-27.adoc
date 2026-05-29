@@ -1,0 +1,166 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+
+= Reusable-Workflow Orphan-SHA Pin + BP Name-Prefix Mismatch — 2026-05-27
+:toc:
+:toclevels: 2
+:source-highlighter: rouge
+:icons: font
+
+Companion machine-readable manifest: `audit-hypatia-pin-orphan-2026-05-27.a2ml`.
+Sidecar to: `audit-admin-merge-wrapper-sweep-2026-05-26.adoc` (the parent
+reusables-campaign closure).
+
+== Summary
+
+The hypatia-scan wrapper sweep (`audit-admin-merge-wrapper-sweep-2026-05-26.adoc`)
+filed 278 thin wrappers across the estate, each pinning to the standards-side
+reusable's HEAD SHA at sweep time:
+
+```yaml
+uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@97df762107501909f50bb770e9bc200b6c415600
+```
+
+After standards#193 was squash-merged into `standards/main` on 2026-05-26T19:37,
+the `97df762...` SHA was **orphaned** — it lives only on the feature branch and
+is no longer reachable from `main`:
+
+```
+$ gh api repos/hyperpolymath/standards/compare/main...97df762107501909f50bb770e9bc200b6c415600
+{ "status": "diverged", "ahead_by": 1, "behind_by": 24 }
+```
+
+The merge-commit SHA on `main` is `915139d73560e65a8240b8fc7768698658502c89`.
+File content at both SHAs is byte-identical (`diff -q` returns empty); only the
+reachability differs.
+
+**Symptom.** GitHub Actions cannot resolve reusable-workflow references to
+orphaned commits. Every hypatia-scan run on any repo with the orphan pin fails
+at parse-stage with banner "This run likely failed because of a workflow file
+issue" and `jobs: []` in the run JSON — no job is ever instantiated.
+
+**Estate scope.** `gh search code "@97df762" --owner hyperpolymath` returns
+**100 repos** with the orphan pin in `.github/workflows/hypatia-scan.yml`.
+
+**Fix sweep** (2026-05-27, this session): 99 PRs filed (one per repo bar
+typed-wasm, which received the fix via PR #75 directly), each replacing the SHA
+in the wrapper. Filing via Contents API + auto-merge SQUASH armed.
+
+== Two distinct failure classes — diagnose both
+
+The pre-existing-baseline-rot diagnosis from the parent campaign (per `audit-
+admin-merge-wrapper-sweep-2026-05-26.adoc`) is **not** the same failure class.
+Two distinct phenomena are at play in the post-sweep CI red on hypatia-scan:
+
+. **Orphan-SHA class** (this audit). Reusable reference does not resolve; the
+  job never starts; no check is published. Banner: "workflow file issue".
+. **Wrapper-prefix BP mismatch class** (sidebar §3 below). The reusable does
+  resolve and the job runs successfully, but the published check name is
+  `hypatia / Hypatia Neurosymbolic Analysis` (caller-job-name `/` reusable-
+  job-display-name) — whereas branch protection still requires the bare
+  pre-wrapper name `Hypatia Neurosymbolic Analysis`. Required check is never
+  marked done.
+
+The fix for class (1) is the SHA repin, mechanical, covered by the sweep below.
+The fix for class (2) requires either a per-repo branch-protection patch
+(changing the required context string) or an upstream redesign of the reusable
+to suppress the prefix (not currently supported by GitHub Actions for the
+`<caller-job> / <reusable-job-display-name>` convention).
+
+== Why orphan SHAs slip through CI
+
+The original sweep PR (filed via the parent campaign) was generated *before*
+standards#193 was squash-merged. At generation time, the only SHA pointing
+to the reusable file was the feature-branch commit `97df762...`. The wrappers
+pinned to that SHA, opened, and auto-merged — but the receiving repos' CI did
+not yet exercise the wrapper because each receiving repo's `pull_request`-triggered
+hypatia-scan runs the *previous* `hypatia-scan.yml` file off the receiving
+repo's main (not the PR's wrapper version). So the wrapper landed on main
+with the orphaned SHA, and the orphan was only exercised on the *next* PR
+opened against that repo — at which point standards#193 had been squash-merged
+and the original feature-branch commit was unreachable.
+
+In other words: the orphan was created by the time-ordering of the merge.
+The wrappers were *technically correct* at filing time and only became broken
+once `97df762` was orphaned.
+
+== Sidebar: wrapper-prefix BP mismatch (class 2)
+
+A reusable workflow called by:
+
+```yaml
+jobs:
+  hypatia:                                  # caller job
+    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@<sha>
+```
+
+invoking a reusable with:
+
+```yaml
+jobs:
+  scan:
+    name: Hypatia Neurosymbolic Analysis   # reusable display name
+```
+
+publishes the status check as **`hypatia / Hypatia Neurosymbolic Analysis`** —
+the caller-job-name, a literal ` / `, then the reusable's display name.
+
+The pre-wrapper monolithic `hypatia-scan.yml` published the same check as the
+**bare** `Hypatia Neurosymbolic Analysis` (no prefix), because the scan job
+was at the caller's top level.
+
+Branch protection's required-status-checks list still references the bare
+name on every estate repo. The two strings never match → required check is
+never satisfied → no PR can auto-merge.
+
+Evidence (`Exnovation.jl#12`, a known-merged sample):
+
+```
+SUCCESS  hypatia / Hypatia Neurosymbolic Analysis    (wrapper-emitted)
+SUCCESS  Hypatia                                       (caller-job aggregate)
+required:  Hypatia Neurosymbolic Analysis             (BP requirement, neither matches)
+```
+
+That PR landed via owner manual-merge through the `--admin` path — the same
+admin-merge pattern the parent campaign documents, but applied to the post-
+sweep regression class rather than the pre-existing baseline rot.
+
+== Fix recipe (per repo)
+
+. **SHA repin.** Replace `97df762107501909f50bb770e9bc200b6c415600` with
+  `915139d73560e65a8240b8fc7768698658502c89` in
+  `.github/workflows/hypatia-scan.yml`.
+. **BP context update.** PATCH branch protection's required-status-checks
+  contexts: `Hypatia Neurosymbolic Analysis` → `hypatia / Hypatia Neurosymbolic Analysis`.
+
+Both fixes are mechanical and idempotent.
+
+== Lessons for future reusable rollouts
+
+. **Pin to merge-commit SHA, not PR-branch SHA.** When generating sweep PRs
+  against a not-yet-merged reusable, gate the sweep on the parent reusable PR
+  being merged first. Or accept that the sweep PRs land first with the
+  feature-branch SHA, then file a follow-up sweep to repin (this audit is
+  effectively that follow-up).
+. **Test the wrapper-emitted check name before sweeping.** A single test
+  wrapper run on one repo would have surfaced the `hypatia / Hypatia
+  Neurosymbolic Analysis` prefix, allowing the BP patch to be bundled with
+  the sweep instead of split out as a second audit.
+. **Idempotent re-pin sweeps are cheap.** The Contents API + auto-merge
+  SQUASH path applies cleanly across 99 repos in ~4 minutes (paced at
+  5-per-12s per `audit-admin-merge-wrapper-sweep-2026-05-26.adoc`'s
+  rate-limit recovery pattern). Future audits can adopt the same shape.
+
+== What this campaign does NOT discharge
+
+* The wrapper-prefix BP-mismatch class (sidebar §3) on the 99 estate repos
+  outside typed-wasm is **not** patched by the SHA-repin sweep. It requires
+  a separate per-repo `gh api -X PATCH .../branches/main/protection/required_status_checks`
+  pass. Out of scope for this audit; tracked as follow-up.
+* The same orphan-SHA pattern probably exists for **the other four reusables**
+  introduced in the parent campaign (#187 mirror, #190 secret-scanner, #192
+  codeql, #205 scorecard). Search the estate for each reusable's feature-branch
+  SHA before assuming this audit covers them.
+* The structural cause — workflow-sweep PRs pinning to non-merged SHAs — is
+  policy work for the standards repo's PR review checklist, not a code change
+  in any single repo.

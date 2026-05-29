@@ -74,18 +74,31 @@ EXPIRED_COUNT=$((EXPIRED_COUNT - ACTIVE_COUNT))
 ANNOTATED="$(jq -n \
   --argjson findings "$FINDINGS_JSON" \
   --argjson baseline "$ACTIVE_BASELINE" '
+  # Two captures are essential here:
+  #   `f as $finding` — without this, references like `f.file` inside the
+  #   select() get re-evaluated against the current baseline entry (the
+  #   re-bound `.`), not the finding. Binding $finding once captures the
+  #   finding before we enter the map(select()) over the baseline.
+  #
+  #   `(.file_pattern? // null) as $pat` — inside `test(arg)` the dot
+  #   rebinds to the input of test ($finding.file, a string), so
+  #   referencing `.file_pattern` there would error with "Cannot index
+  #   string". Capture the entry pattern first, then reference $pat
+  #   inside the test() regex argument.
   def match_entry(f):
-    $baseline
+    f as $finding
+    | $baseline
     | map(select(
-        .severity == f.severity
-        and .rule_module == f.rule_module
-        and .type == f.type
+        .severity == $finding.severity
+        and .rule_module == $finding.rule_module
+        and .type == $finding.type
         and (
-          (.file? // null) == f.file
+          (.file? // null) == $finding.file
           or (
-            .file_pattern? != null
-            and (f.file | test(
-              .file_pattern
+            (.file_pattern? // null) as $pat
+            | $pat != null
+            and ($finding.file | test(
+              $pat
               | gsub("\\*\\*"; "DOUBLESTAR")
               | gsub("\\*"; "[^/]*")
               | gsub("DOUBLESTAR"; ".*")

@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: MPL-2.0
+# scorecard-reusable.yml — Reusable OSSF Scorecard analysis.
+#
+# Consolidates the per-repo `scorecard.yml` workflow (estate-wide:
+# 258 top-level deployments, 46 unique blob SHAs, 17.8% structural
+# drift — top SHA covers 100/258 (38.8%), top 7 SHAs cover 80%).
+# Sampled top + long-tail variants are all the same single-`analysis`-
+# job shape (41 lines canonical); 100% of drift is mechanical:
+# SPDX-header lag (PMPL-1.0 / PMPL-1.0-or-later / MPL-2.0),
+# `github/codeql-action/upload-sarif` SHA-pin drift, and
+# `permissions: read-all` vs `permissions: contents: read` wording.
+# Zero feature variance across all 46 SHAs.
+#
+# Plus 626 nested copies in monorepos (asdf-tool-plugins, developer-
+# ecosystem, ssg-collection, standards, ambientops, julia-ecosystem,
+# etc.). Per Layer-3 caveat (see scripts/sweep-classifiers/README.adoc),
+# nested workflows are inert — GitHub Actions only runs the repo-root
+# `.github/workflows/` directory. Sweeping nested copies is
+# single-source-of-truth cleanup, not security hardening.
+#
+# Design:
+#   - One input only: `runs-on` (default ubuntu-latest).
+#   - No `secrets: inherit` needed — scorecard uses `GITHUB_TOKEN`
+#     directly, which is available without inherit.
+#   - Caller MUST grant `security-events: write` and `id-token: write`
+#     on the calling job. The reusable re-asserts these on its own
+#     `analysis` job, but called-workflow permissions are CAPPED by
+#     the caller's permissions block.
+#   - Caller keeps its own `on:` triggers and `concurrency:` group, so
+#     the read-only cancel-superseded behaviour stays in the wrapper.
+#
+# Caller example (wrapper):
+#   # SPDX-License-Identifier: MPL-2.0
+#   name: OSSF Scorecard
+#   on:
+#     push:
+#       branches: [main, master]
+#     schedule:
+#       - cron: '23 4 * * 1'   # Weekly (Monday 04:23 UTC) — match canonical
+#     workflow_dispatch:
+#   concurrency:
+#     group: ${{ github.workflow }}-${{ github.ref }}
+#     cancel-in-progress: true
+#   permissions:
+#     contents: read
+#   jobs:
+#     scorecard:
+#       permissions:
+#         security-events: write
+#         id-token: write
+#       uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@<sha>
+#
+# CANONICAL SCHEDULE — WEEKLY, NOT DAILY (2026-05-28).
+# Estate audit found 180 repos running daily at 04:00 UTC ('0 4 * * *')
+# vs 29 on canonical weekly ('23 4 * * 1') — drift driven by an older
+# version of the example above. The actual canonical caller in
+# `hyperpolymath/standards/.github/workflows/scorecard.yml` has always
+# been weekly. The example now matches.
+#
+# GH Actions budget impact of the drift: 180 daily × (365 − 52) ≈ 56k
+# extra runs/year × ~1.5 min/run ≈ ~84k Actions-minutes/year. Fan-out
+# to convert the 180 estate repos from daily→weekly is tracked
+# separately (GH-Actions budget rebalancing 2026-05-27).
+#
+# When to deviate: a repo with a very high merge/push cadence AND
+# scorecard-sensitive supply-chain churn (heavy dependency refresh)
+# MAY opt into more frequent runs. Daily is rarely worth it; the
+# scorecard signal moves on the order of weeks, not hours.
+
+name: Scorecard (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label
+        type: string
+        required: false
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.3.1
+        with:
+          results_file: results.sarif
+          results_format: sarif
+
+      - name: Upload results
+        uses: github/codeql-action/upload-sarif@c6f931105cb2c34c8f901cc885ba1e2e259cf745 # v3.31.8
+        with:
+          sarif_file: results.sarif
