@@ -43,9 +43,11 @@ NOTE: For full rationale and migration guides, see the link:{source-repo}[CCCP r
 |===
 | Language | Use Case | Notes
 
-| *ReScript*
-| Primary application code
-| Compiles to JS, OCaml type safety
+| *AffineScript*
+| Primary application code (front-end + AS-reachable backend)
+| Compiles to typed-wasm; affine/linear types. Estate-wide go-forward
+  language for the RS/TS/JS → AffineScript → typed-wasm path. See
+  hyperpolymath/affinescript for the toolchain.
 
 | *Rust/SPARK*
 | Systems, performance, WASM, CLI tools, safety-critical (preferred over Ada where reachable)
@@ -157,13 +159,91 @@ NOTE: For full rationale and migration guides, see the link:{source-repo}[CCCP r
   the underlying technical objection; AffineScript provides affine/linear
   types plus typed-wasm output.
 
+| *ReScript*
+| AffineScript
+| Banned in NEW code 2026-05-25. Existing `.res`/`.resi` is
+  grandfathered while in-flight migration to AffineScript proceeds
+  (~3,996 files across ~80 repos; tracker
+  `project_estate_rescript_to_affinescript_2026_05_28.md`; umbrella
+  hyperpolymath/standards#252; STEPS #260/#264/#267/#269/#272/#276/#278/#279/#280).
+  Detection: hypatia rules `cicd_rules/rescript_detected` (matches
+  `*.res`) and `cicd_rules/rescript_interface_detected` (matches
+  `*.resi`) with `path_allow_prefixes` covering eight carve-out
+  classes:
+  (1) `bsconfig.json`, `*.config.res` tooling configs;
+  (2) `rescript/`, `servers/`, `repos-monorepo/`, `linguist/`
+  upstream forks not estate-authored;
+  (3) `hyperpolymath-archive/**` archived repos;
+  (4) `**/deps/**`, `**/node_modules/**` vendored package-manager
+  deps;
+  (5) `**/vscode/**` editor-host extensions (blocked on AS
+  VSCode-extension API binding);
+  (6) `**/lib/js/**`, `**/lib/es6/**`, `**/lib/bs/**` bsc compilation
+  output (not source);
+  (7) `affinescript-deno-test/`, `affinescript-cli/` bootstrap shims;
+  (8) `avow-protocol/telegram-bot/avow-telegram-bot/**` Telegraf
+  carve-out (PERMANENT exemption mirror of TS class 3).
+  Existing `.res` migrates to `.affine` directly (do not pass through
+  ReScript-to-TS first).
+
 | *Node.js*
 | Deno
-| Insecure by default
+| Insecure by default. Detection via hypatia
+  `cicd_rules/nodejs_detected` (matches `package-lock.json`) with
+  `path_allow_prefixes` covering six carve-out classes:
+  (1) `**/vscode/**` VSCode extension host-required toolchain
+  (extension toolchain runs under Node; lockfile contractually
+  required by the host);
+  (2) `affinescript-deno-test/`, `affinescript-cli/` bootstrap shims;
+  (3) `rescript/`, `servers/`, `repos-monorepo/`, `linguist/` upstream
+  forks;
+  (4) `hyperpolymath-archive/**` archived repos;
+  (5) `**/deps/**`, `**/node_modules/**` vendored package-manager
+  deps;
+  (6) `**/example/**`, `**/examples/**`, `**/test-fixtures/**`,
+  `**/fixtures/**` example/test fixtures (demonstrate npm consumer
+  without making the repo itself an npm consumer).
+  In-flight migration tracked under hyperpolymath/standards#253
+  (172 `package.json` manifests; tracker
+  `project_estate_npm_to_deno_2026_05_28.md`; STEPS
+  #261/#262/#265/#268/#270/#273/#275).
 
 | *npm/Bun/pnpm/yarn*
 | Deno
-| Supply chain risks
+| Supply chain risks. Same six carve-outs as Node.js above (the
+  detection rule keys on `package-lock.json` which is npm's lockfile
+  format; other lockfiles like `pnpm-lock.yaml` are caught by the
+  same path-allow logic where present).
+
+| *JavaScript (Unnecessarily-)*
+| AffineScript
+| Banned in NEW code 2026-05-25 where AffineScript bindings exist.
+  Distinct from TS/RS policy: JavaScript is *allowed* where AS cannot
+  reach (MCP servers, plugin entry points where JS is the host
+  contract). The rule targets the gap between current AS bindings and
+  current JS usage — JS that COULD be AS today but isn't. Existing JS
+  grandfathered while in-flight migration proceeds (1,609 `.js`/`.jsx`
+  files; tracker `project_estate_unnecessary_js_2026_05_28.md`;
+  umbrella hyperpolymath/standards#254; STEPS
+  #263/#266/#271/#274/#277). Detection: hypatia rules
+  `cicd_rules/javascript_detected` (matches `*.js`) and
+  `cicd_rules/javascript_jsx_detected` (matches `*.jsx`) with
+  `path_allow_prefixes` covering eight carve-out classes:
+  (1) `mcp-bridge/`, `**/plugins/**` host-required (JS is the host
+  contract);
+  (2) `**/*.config.{js,cjs,mjs}` tooling configs;
+  (3) `affinescript-deno-test/`, `affinescript-cli/` bootstrap shims;
+  (4) `rescript/`, `servers/`, `repos-monorepo/`, `linguist/` upstream
+  forks;
+  (5) `hyperpolymath-archive/**` archived repos;
+  (6) `**/deps/**`, `**/node_modules/**` vendored deps;
+  (7) `**/out/**`, `**/lib/js/**`, `**/.deno/**` compiled output
+  (AS / RS / Deno-cache, not source);
+  (8) `**/vscode/**`, `**/extensions/vscode/**` editor-host extension
+  entry (often shipped as compiled `.js` even when authored as `.ts`).
+  Ship mode: HARD-BLOCK + extensive carve-outs (umbrella#254 STEP 1
+  design question resolved 2026-05-30 in favour of HARD-BLOCK; WARNING
+  mode preserved as per-PR inline-pragma suppression).
 
 | *Go*
 | Rust/SPARK
@@ -451,6 +531,36 @@ mirrored there so agents/tools enforce them from the machine-readable policy,
 not prose alone.
 
 == Amendments
+
+=== v1.4.0 — 2026-05-30 (Jonathan D.A. Jewell)
+
+Codified the *ReScript / npm / Unnecessarily-JavaScript Layer-1 policy
+batch* paralleling the v1.3.0 TS Layer-1.
+
+* ReScript moved from Allowed → Banned table with full carve-out class
+  detail (eight classes, mirroring hypatia#391 `rescript_detected` +
+  `rescript_interface_detected` `path_allow_prefixes`). Removed the
+  stale "Primary application code" line that conflicted with the
+  2026-04-30 ban; AffineScript now correctly listed as primary.
+* Node.js / npm Banned entries extended with the six carve-out classes
+  from hypatia#391 `nodejs_detected`.
+* JavaScript (Unnecessarily-) added as a Banned entry with eight
+  carve-out classes from hypatia#391 `javascript_detected` +
+  `javascript_jsx_detected`. Ship-mode design question (umbrella#254
+  STEP 1) resolved in favour of HARD-BLOCK + extensive carve-outs.
+
+This amendment closes the doc-vs-policy drift across all three
+campaigns. Trackers:
+
+* RS: `project_estate_rescript_to_affinescript_2026_05_28.md` —
+  umbrella hyperpolymath/standards#252
+* npm: `project_estate_npm_to_deno_2026_05_28.md` — umbrella
+  hyperpolymath/standards#253
+* JS: `project_estate_unnecessary_js_2026_05_28.md` — umbrella
+  hyperpolymath/standards#254
+
+Detection rule landing: hypatia#391 (Layer-1 batch — single PR for
+all three campaigns per the batch-seam finding).
 
 === v1.3.0 — 2026-05-28 (Jonathan D.A. Jewell)
 
