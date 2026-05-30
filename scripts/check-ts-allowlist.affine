@@ -8,9 +8,19 @@
 
 use Deno::{
   readTextFile, walkRecursive, exit, consoleError,
-  regexMatch, endsWith
+  regexMatch
 };
 use string::{ split };
+
+// `Deno.endsWith` (extern) has no Deno-ESM codegen lowering — it resolves
+// to an unbound reference at runtime. Inline a `string_sub`-backed
+// equivalent (the merged seed's defensive pattern, restored here).
+fn ends_with(s: String, suffix: String) -> Bool {
+  let slen = len(s);
+  let sfxlen = len(suffix);
+  if sfxlen > slen { false }
+  else { string_sub(s, slen - sfxlen, sfxlen) == suffix }
+}
 
 const DIR_NAMES_ALLOWED: [String] = [
   "bindings", "tests", "test", "scripts",
@@ -19,16 +29,16 @@ const DIR_NAMES_ALLOWED: [String] = [
 ];
 
 fn builtinAllowed(p: String) -> Bool {
-  if (endsWith(p, ".d.ts")) { return true; }
+  if (ends_with(p, ".d.ts")) { return true; }
   let segs = split(p, "/");
   let segs_len = len(segs);
   let base = segs[segs_len - 1];
   if (base == "mod.ts") { return true; }
   if (
     base == "lsp-server.ts" || base == "lsp_server.ts" || base == "lsp.ts" ||
-    endsWith(base, "-lsp.ts")
+    ends_with(base, "-lsp.ts")
   ) { return true; }
-  if (endsWith(base, ".bench.ts") || endsWith(base, "_bench.ts")) { return true; }
+  if (ends_with(base, ".bench.ts") || ends_with(base, "_bench.ts")) { return true; }
   
   let mut i = 0;
   while (i < segs_len - 1) {
@@ -154,7 +164,7 @@ fn isExempt(p: String, exemptions: [Exemption]) -> Bool {
       bare = string_sub(bare, 1, len(bare) - 1);
     }
     if (p == bare) { return true; }
-    if (endsWith(e.raw, "/") && regexMatch(p, "^" ++ bare)) { return true; }
+    if (ends_with(e.raw, "/") && regexMatch(p, "^" ++ bare)) { return true; }
     i = i + 1;
   }
   return false;
@@ -173,7 +183,7 @@ pub fn main() -> Int {
   let af_len = len(all_files);
   while (i < af_len) {
     let f = all_files[i];
-    if (endsWith(f, ".ts") || endsWith(f, ".tsx")) {
+    if (ends_with(f, ".ts") || ends_with(f, ".tsx")) {
       let mut skip = false;
       let segs = split(f, "/");
       let mut j = 0;
@@ -204,27 +214,27 @@ pub fn main() -> Int {
   }
   
   if (len(bad) > 0) {
-    let _ = consoleError("❌ TypeScript files detected outside the allowlist.\n");
+    consoleError("❌ TypeScript files detected outside the allowlist.\n");
     let mut m = 0;
     let bad_len = len(bad);
     while (m < bad_len) {
       let f = bad[m];
-      let _ = consoleError("  " ++ f);
+      consoleError("  " ++ f);
       m = m + 1;
     }
-    let _ = consoleError("");
-    let _ = consoleError("To resolve, choose one:");
-    let _ = consoleError("  (a) migrate the file to AffineScript");
-    let _ = consoleError("  (b) move to an allowlisted bridge path");
-    let _ = consoleError("  (c) add an entry to a 'TypeScript Exemptions' table in .claude/CLAUDE.md (Layer 2)");
-    let _ = consoleError("  (d) add a line to .governance-allowlist at the repo root (Layer 2.5 — typed infrastructure file)");
-    let _ = consoleError("");
-    let _ = consoleError("See docs/EXEMPTION-MECHANISMS.adoc for the full mechanism reference.");
+    consoleError("");
+    consoleError("To resolve, choose one:");
+    consoleError("  (a) migrate the file to AffineScript");
+    consoleError("  (b) move to an allowlisted bridge path");
+    consoleError("  (c) add an entry to a 'TypeScript Exemptions' table in .claude/CLAUDE.md (Layer 2)");
+    consoleError("  (d) add a line to .governance-allowlist at the repo root (Layer 2.5 — typed infrastructure file)");
+    consoleError("");
+    consoleError("See docs/EXEMPTION-MECHANISMS.adoc for the full mechanism reference.");
     if (len(exemptions) > 0) {
-      let _ = consoleError("\n(Currently " ++ int_to_string(len(exemptions)) ++ " exemption(s) parsed across both layers.)");
+      consoleError("\n(Currently " ++ int_to_string(len(exemptions)) ++ " exemption(s) parsed across both layers.)");
     }
     return exit(1);
   }
-  let _ = println("✅ No TypeScript files outside allowlist (" ++ int_to_string(len(exemptions)) ++ " per-repo exemption(s) parsed across CLAUDE.md + .governance-allowlist).");
+  println("✅ No TypeScript files outside allowlist (" ++ int_to_string(len(exemptions)) ++ " per-repo exemption(s) parsed across CLAUDE.md + .governance-allowlist).");
   return 0;
 }
