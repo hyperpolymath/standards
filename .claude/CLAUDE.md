@@ -171,11 +171,16 @@ In-flight migration tracked under `hyperpolymath/standards#253` (172 manifests a
 
 | Path / Pattern | Class | Rationale | Unblock condition |
 |---|---|---|---|
-| `**/vscode/**` | VSCode extension host-required | VSCode extension toolchain runs under Node; lockfile is contractually required by the host. | When AffineScript ships the VSCode-extension API binding. |
+| `**/vscode/**` | VSCode extension host-required (segment) | VSCode extension toolchain runs under Node; lockfile is contractually required by the host. | When AffineScript ships the VSCode-extension API binding. |
+| `vscode-` substring (`vscode-extension/`, `editors/vscode-007/`, `vscode-a2ml`, `vscode-k9`, …) | VSCode-* extension repos / subdirs | Same VSCode host-required toolchain rationale; different path-segment shape than `/vscode/`. | When AffineScript ships the VSCode-extension API binding. |
+| `tree-sitter-` substring (`tree-sitter-a2ml`, `tree-sitter-k9`, `editors/tree-sitter-ephapax`, `tree-sitter-affinescript/`, …) | tree-sitter grammar npm-publish target | Class C consumer artifact — tree-sitter grammars ship via npm with `node-gyp` native binding because every consumer (Atom/Neovim/VSCode TextMate) links the native addon. | Never — npm-publishable consumer artifact with native binding. |
 | `affinescript-deno-test/**`, `affinescript-cli/**` | bootstrap shim | Bootstrap the AffineScript toolchain itself. | When AffineScript self-hosts these. |
 | `rescript/**`, `servers/**`, `repos-monorepo/**`, `linguist/**` | upstream fork | Not estate-authored — vendored upstream code. | Never — upstream fork. |
 | `hyperpolymath-archive/**` | archived | Archived repos cannot accept PRs. | Never — archived. |
 | `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Vendored deps. | Never — vendored upstream. |
+| `**/.lake/**` | Lean4 vendored package | Lean4's package manager directory, parallel to `/deps/`. | Never — vendored. |
+| `**/office-addin/**` | Office.js add-in host-required | Office host loads `.js` from a Node-packaged manifest, parallel to VSCode extension carve-out. | When AffineScript ships an Office.js binding. |
+| `**/bindings/javascript/**`, `**/bindings/typescript/**` | consumer-facing estate export | Proven JS/TS bindings published to npm consumers, parallel to `/bindings/deno/` under `:typescript_detected`. | Never — consumer-facing bindings. |
 | `**/example/**`, `**/examples/**`, `**/test-fixtures/**`, `**/fixtures/**` | example/test fixture | Demonstrates an npm consumer (e.g., showing how a library is used from a Node project) without making the repo itself an npm consumer. | Never — fixture, not own toolchain. |
 
 ### JavaScript Exemptions (Approved)
