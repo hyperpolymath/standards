@@ -1,43 +1,26 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: PMPL-1.0-or-later
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 //
-// check-ts-allowlist.affine — AffineScript port (seed) of
-// `scripts/check-ts-allowlist.ts`, filed under the estate
-// TS → AffineScript migration tracked by hyperpolymath/standards#239
-// (umbrella) / hyperpolymath/standards#241 (STEP 2 — tail-batch-1).
+// check-ts-allowlist.affine — AffineScript port of standards/scripts/check-ts-allowlist.ts.
 //
-// Behaviour must stay byte-identical to the running `.ts` so the
-// `scripts/tests/check-ts-allowlist-test.sh` regression suite continues
-// to pass against whichever entry point is wired into the workflow.
-//
-// Migration sequencing (follows the phronesis#19 seed pattern):
-//   1. THIS PR — add `.affine` alongside `.ts` (source of truth going
-//      forward). No workflow change. CI keeps invoking the `.ts`.
-//   2. Follow-up — compile `.affine` to `.deno.js` (Deno-ESM backend),
-//      add a tiny `.mjs` wrapper that imports `main()`, point
-//      `.github/workflows/governance-reusable.yml` at the wrapper,
-//      retire the `.ts`.
-//
-// Stdlib surface used (all already in `stdlib/Deno.affine` after
-// affinescript#445): walkRecursive, args, exit, dateNowIso (unused),
-// consoleError, regexMatch, readTextFile, endsWith, stripSuffix.
-//
-// Gaps explicitly NOT addressed by this seed PR (each one would be a
-// stdlib expansion, hence a separate per-affinescript-repo PR):
-//   * `Deno.affine` has no `consoleLog` extern; we use `println`
-//     (lowered to `console.log(String(s))` by codegen_deno) for the
-//     human-readable success / failure output.
-//   * `Deno.affine` has no `cwd`/`Deno.cwd()` surface; this script
-//     walks `.` like the original, relying on CI's working directory.
+// Step 2 of the estate-wide TypeScript → AffineScript migration campaign
+// (hyperpolymath/standards#239 umbrella, #241 tail-batch-1 issue).
 
-use prelude::{ Option, Some, None };
-use Deno::{ args, exit, readTextFile, walkRecursive, regexMatch, consoleError };
+use Deno::{
+  readTextFile, walkRecursive, exit, consoleError,
+  regexMatch
+};
+use string::{ split };
 
-// ── Built-in directory allowlist ────────────────────────────────────
-//
-// Mirrors `DIR_NAMES_ALLOWED` in the TS original. AffineScript has no
-// `Set` literal in the surface syntax, so we model it as a `[String]`
-// + linear `contains` (small fixed list, O(n) is fine).
+// `Deno.endsWith` (extern) has no Deno-ESM codegen lowering — it resolves
+// to an unbound reference at runtime. Inline a `string_sub`-backed
+// equivalent (the merged seed's defensive pattern, restored here).
+fn ends_with(s: String, suffix: String) -> Bool {
+  let slen = len(s);
+  let sfxlen = len(suffix);
+  if sfxlen > slen { false }
+  else { string_sub(s, slen - sfxlen, sfxlen) == suffix }
+}
 
 const DIR_NAMES_ALLOWED: [String] = [
   "bindings", "tests", "test", "scripts",
@@ -45,480 +28,213 @@ const DIR_NAMES_ALLOWED: [String] = [
   "node_modules", "benchmarks",
 ];
 
-fn list_contains(xs: [String], needle: String) -> Bool {
+fn builtinAllowed(p: String) -> Bool {
+  if (ends_with(p, ".d.ts")) { return true; }
+  let segs = split(p, "/");
+  let segs_len = len(segs);
+  let base = segs[segs_len - 1];
+  if (base == "mod.ts") { return true; }
+  if (
+    base == "lsp-server.ts" || base == "lsp_server.ts" || base == "lsp.ts" ||
+    ends_with(base, "-lsp.ts")
+  ) { return true; }
+  if (ends_with(base, ".bench.ts") || ends_with(base, "_bench.ts")) { return true; }
+  
   let mut i = 0;
-  let n = len(xs);
-  while i < n {
-    if xs[i] == needle {
-      return true;
-    }
-    i = i + 1;
-  }
-  false
-}
-
-// ── String helpers ──────────────────────────────────────────────────
-//
-// `ends_with` and `starts_with` are in `stdlib/string.affine` but
-// re-implemented inline here to avoid taking a dependency on stdlib
-// path resolution (the original `.ts` consumer is a single-file Deno
-// script with no module-resolution context other than its host).
-
-fn s_starts_with(s: String, prefix: String) -> Bool {
-  let plen = len(prefix);
-  if plen > len(s) {
-    false
-  } else {
-    string_sub(s, 0, plen) == prefix
-  }
-}
-
-fn s_ends_with(s: String, suffix: String) -> Bool {
-  let slen = len(s);
-  let sfxlen = len(suffix);
-  if sfxlen > slen {
-    false
-  } else {
-    string_sub(s, slen - sfxlen, sfxlen) == suffix
-  }
-}
-
-fn s_contains(haystack: String, needle: String) -> Bool {
-  string_find(haystack, needle) >= 0
-}
-
-/// Split `s` on `delim`. Reimplemented inline (see header note).
-fn s_split(s: String, delim: String) -> [String] {
-  let slen = len(s);
-  let dlen = len(delim);
-  if dlen == 0 {
-    // Degenerate: return whole string in a singleton list.
-    return [s];
-  }
-  let mut result = [];
-  let mut current_start = 0;
-  let mut i = 0;
-  while i <= slen - dlen {
-    if string_sub(s, i, dlen) == delim {
-      result = result ++ [string_sub(s, current_start, i - current_start)];
-      current_start = i + dlen;
-      i = i + dlen;
-    } else {
-      i = i + 1;
-    }
-  }
-  result = result ++ [string_sub(s, current_start, slen - current_start)];
-  result
-}
-
-/// Last path segment after the final `/`. `basename("a/b/c") == "c"`.
-fn s_basename(p: String) -> String {
-  let segs = s_split(p, "/");
-  if len(segs) == 0 {
-    p
-  } else {
-    segs[len(segs) - 1]
-  }
-}
-
-/// True iff `c` is one of {space, tab, LF, CR}.
-fn is_ws(c: Char) -> Bool {
-  let code = char_to_int(c);
-  code == 32 || code == 9 || code == 10 || code == 13
-}
-
-/// Trim ASCII whitespace from both ends. (AffineScript has no `break`
-/// in `while`, so the loop guards combine the index test with the
-/// whitespace test.)
-fn s_trim(s: String) -> String {
-  let slen = len(s);
-  let mut start = 0;
-  while start < slen && is_ws(string_get(s, start)) {
-    start = start + 1;
-  }
-  let mut endp = slen;
-  while endp > start && is_ws(string_get(s, endp - 1)) {
-    endp = endp - 1;
-  }
-  string_sub(s, start, endp - start)
-}
-
-/// Strip leading `.` / `/` characters (mirrors the TS `while` loop
-/// over `g2[0]`). Used in both glob normalisation and the literal
-/// `bare` comparison in `exempt`.
-fn strip_leading_dot_slash(g: String) -> String {
-  let mut s = g;
-  let mut keep_going = true;
-  while keep_going && len(s) > 0 {
-    let c = string_get(s, 0);
-    if c == '.' || c == '/' {
-      s = string_sub(s, 1, len(s) - 1);
-    } else {
-      keep_going = false;
-    }
-  }
-  s
-}
-
-// ── Built-in allowlist (mirrors TS `builtinAllowed`) ────────────────
-
-fn builtin_allowed(p: String) -> Bool {
-  if s_ends_with(p, ".d.ts") {
-    return true;
-  }
-  let base = s_basename(p);
-  if base == "mod.ts" {
-    return true;
-  }
-  if base == "lsp-server.ts"
-    || base == "lsp_server.ts"
-    || base == "lsp.ts"
-    || s_ends_with(base, "-lsp.ts") {
-    return true;
-  }
-  if s_ends_with(base, ".bench.ts") || s_ends_with(base, "_bench.ts") {
-    return true;
-  }
-  // Per-segment directory checks (skip the file segment itself —
-  // mirrors `i < segs.length - 1` in the TS original).
-  let segs = s_split(p, "/");
-  let n = len(segs);
-  let mut i = 0;
-  while i < n - 1 {
+  while (i < segs_len - 1) {
     let s = segs[i];
-    if list_contains(DIR_NAMES_ALLOWED, s) {
-      return true;
+    let mut j = 0;
+    let dn_len = len(DIR_NAMES_ALLOWED);
+    while (j < dn_len) {
+      if (s == DIR_NAMES_ALLOWED[j]) { return true; }
+      j = j + 1;
     }
-    if s_contains(s, "vscode") {
-      return true;
-    }
-    if s_starts_with(s, "deno-") {
-      return true;
-    }
+    if (regexMatch(s, "vscode")) { return true; }
+    if (regexMatch(s, "^deno-")) { return true; }
     i = i + 1;
   }
-  false
+  return false;
 }
 
-// ── glob → regex (mirrors TS `globToRegex`) ─────────────────────────
-
-const REGEX_ESC: String = ".+(){}[]|^$\\";
-
-/// Translate a `*`/`?` glob to a JS regex source anchored with `^`/`$`.
-/// Returns the regex SOURCE STRING (not a compiled object); we compile
-/// per-call via `regexMatch`, since `Deno.affine` has no opaque
-/// `RegExp` extern type and adding one would belong in a separate
-/// per-affinescript-repo PR.
-fn glob_to_regex(g: String) -> String {
-  let g2 = strip_leading_dot_slash(g);
+fn globToRegex(g: String) -> String {
+  let mut g2 = g;
+  while (len(g2) > 0 && (string_sub(g2, 0, 1) == "." || string_sub(g2, 0, 1) == "/")) {
+    g2 = string_sub(g2, 1, len(g2) - 1);
+  }
   let mut out = "";
   let mut i = 0;
-  let n = len(g2);
-  while i < n {
-    let c = string_get(g2, i);
-    if c == '*' {
-      out = out ++ ".*";
-    } else if c == '?' {
-      out = out ++ ".";
-    } else if s_contains(REGEX_ESC, string_sub(g2, i, 1)) {
-      out = out ++ "\\" ++ string_sub(g2, i, 1);
-    } else {
-      out = out ++ string_sub(g2, i, 1);
+  let g2_len = len(g2);
+  while (i < g2_len) {
+    let c = string_sub(g2, i, 1);
+    if (c == "*") { out = out ++ ".*"; }
+    else if (c == "?") { out = out ++ "."; }
+    else if (
+      c == "." || c == "+" || c == "(" || c == ")" || c == "{" || c == "}" ||
+      c == "[" || c == "]" || c == "|" || c == "^" || c == "$" || c == "\\"
+    ) {
+      out = out ++ "\\" ++ c;
     }
+    else { out = out ++ c; }
     i = i + 1;
   }
-  "^" ++ out ++ "$"
+  return "^" ++ out ++ "$";
 }
 
-// ── Exemption record ────────────────────────────────────────────────
-//
-// `raw` retains the original glob string for the literal `p == bare`
-// fallback path (a non-glob exemption matches an exact path even if
-// the glob→regex translation diverges); `regex` is the precompiled
-// regex source for `regexMatch`.
+type Exemption = { raw: String, rx: String }
 
-struct Exemption { raw: String, regex: String }
+fn loadExemptionsFromClaudeMd() -> [Exemption] {
+  let mut exemptions = [];
+  let text = try {
+    readTextFile(".claude/CLAUDE.md")
+  } catch {
+    _ => ""
+  };
+  if (text == "") { return exemptions; }
 
-// ── Layer 2: parse .claude/CLAUDE.md TypeScript-Exemption tables ────
-//
-// Heading regex is identical to the TS original; we re-compile it on
-// every line via `regexMatch` (no compiled-RegExp boundary).
-
-const TS_HEADING_RE: String =
-  "^#{1,4}\\s+.*(TypeScript|JavaScript|TS|JS|\\.tsx?)\\b[^#\\n]*[Ee]xemption";
-const ANY_HEADING_RE: String = "^#{1,4}\\s";
-// Table-row capture: anchored to `|` then optional whitespace then a
-// backticked path. Used in two passes (presence test + extraction).
-const TABLE_ROW_RE: String = "^\\|\\s*`([^`]+)`";
-
-fn parse_claude_md_exemptions(text: String) -> [Exemption] {
-  let lines = s_split(text, "\n");
-  let n = len(lines);
-  let mut out: [Exemption] = [];
-  let mut in_table = false;
+  let tsHeading = "^#{1,4}\\s+.*(?:TypeScript|JavaScript|TS|JS|\\.tsx?)\\b[^#\\n]*[Ee]xemption";
+  let anyHeading = "^#{1,4}\\s";
+  let mut inTable = false;
+  
+  let lines = split(text, "\n");
   let mut i = 0;
-  while i < n {
+  let lines_len = len(lines);
+  while (i < lines_len) {
     let line = lines[i];
-    if regexMatch(line, TS_HEADING_RE) {
-      in_table = true;
-    } else if in_table && regexMatch(line, ANY_HEADING_RE) {
-      // Different heading — leave table mode but keep scanning the
-      // file for a second TS-Exemption table.
-      in_table = false;
-    } else if in_table && s_starts_with(line, "|") && regexMatch(line, TABLE_ROW_RE) {
-      // The TS uses `line.match(...)` to capture group 1; we have no
-      // capture-extract extern. Hand-extract by locating the first
-      // and second backticks (the regex already vouched for shape).
-      let first = string_find(line, "`");
-      if first >= 0 {
-        let rest = string_sub(line, first + 1, len(line) - first - 1);
-        let second_rel = string_find(rest, "`");
-        if second_rel >= 0 {
-          let raw = string_sub(rest, 0, second_rel);
-          out = out ++ [Exemption #{ raw: raw, regex: glob_to_regex(raw) }];
+    if (regexMatch(line, tsHeading)) {
+      inTable = true;
+      i = i + 1;
+      continue;
+    }
+    if (inTable && regexMatch(line, anyHeading)) {
+      inTable = false;
+      i = i + 1;
+      continue;
+    }
+    if (inTable && len(line) > 0 && string_sub(line, 0, 1) == "|") {
+      if (regexMatch(line, "^\\|\\s*`[^`]+`")) {
+        let parts = split(line, "`");
+        if (len(parts) >= 3) {
+          let raw = parts[1];
+          exemptions = exemptions ++ [#{ raw: raw, rx: globToRegex(raw) }];
         }
       }
     }
     i = i + 1;
   }
-  out
+  return exemptions;
 }
 
-// ── Layer 2.5: parse .governance-allowlist flat-file ───────────────
-
-fn parse_allowlist_file(text: String) -> [Exemption] {
-  let lines = s_split(text, "\n");
-  let n = len(lines);
-  let mut out: [Exemption] = [];
-  let mut i = 0;
-  while i < n {
-    let line = s_trim(lines[i]);
-    if line != "" && !s_starts_with(line, "#") {
-      out = out ++ [Exemption #{ raw: line, regex: glob_to_regex(line) }];
-    }
-    i = i + 1;
-  }
-  out
-}
-
-/// Try-read a file; `None` on NotFound (mirrors the TS `try { ... }
-/// catch { return [] }` shape — we swallow ANY read error, matching
-/// the original's lenient policy).
-fn try_read(path: String) -> Option<String> {
-  try {
-    Some(readTextFile(path))
+fn loadExemptionsFromAllowlistFile() -> [Exemption] {
+  let mut exemptions = [];
+  let text = try {
+    readTextFile(".governance-allowlist")
   } catch {
-    _ => None
-  }
-}
-
-fn load_exemptions() -> [Exemption] {
-  let cm = match try_read(".claude/CLAUDE.md") {
-    Some(text) => parse_claude_md_exemptions(text),
-    None => [],
+    _ => ""
   };
-  let al = match try_read(".governance-allowlist") {
-    Some(text) => parse_allowlist_file(text),
-    None => [],
-  };
-  cm ++ al
-}
+  if (text == "") { return exemptions; }
 
-// ── Exemption test ──────────────────────────────────────────────────
-
-fn exempt(p: String, exemptions: [Exemption]) -> Bool {
-  let nx = len(exemptions);
+  let lines = split(text, "\n");
   let mut i = 0;
-  while i < nx {
-    let e = exemptions[i];
-    if regexMatch(p, e.regex) {
-      return true;
-    }
-    let bare = strip_leading_dot_slash(e.raw);
-    if p == bare {
-      return true;
-    }
-    if s_ends_with(e.raw, "/") && s_starts_with(p, bare) {
-      return true;
-    }
-    i = i + 1;
-  }
-  false
-}
-
-// ── Path normalisation post-walk ────────────────────────────────────
-//
-// `walkRecursive(".")` returns paths like `./src/foo.ts`. The original
-// `walkTs(".")` yields `src/foo.ts` (no leading `./`). Strip a single
-// leading `./` so the per-segment dotted-dir check + the glob matches
-// line up with the TS behaviour.
-
-fn normalise_walked(p: String) -> String {
-  if s_starts_with(p, "./") {
-    string_sub(p, 2, len(p) - 2)
-  } else {
-    p
-  }
-}
-
-/// True if ANY path segment (other than literal "." or "..") starts
-/// with `.`. Mirrors the TS `walkTs` skip-dotted-dirs guard, which we
-/// can't apply at walk time (the `walkRecursive` extern walks
-/// everything) so we filter post-walk.
-fn has_dotted_segment(p: String) -> Bool {
-  let segs = s_split(p, "/");
-  let n = len(segs);
-  let mut i = 0;
-  while i < n {
-    let s = segs[i];
-    if len(s) > 0 && string_get(s, 0) == '.' && s != "." && s != ".." {
-      return true;
-    }
-    i = i + 1;
-  }
-  false
-}
-
-fn is_ts_file(p: String) -> Bool {
-  s_ends_with(p, ".ts") || s_ends_with(p, ".tsx")
-}
-
-// ── Insertion-sort the `bad` list ───────────────────────────────────
-//
-// The TS uses `.sort()` (lexicographic). AffineScript has no built-in
-// `<` on `String` and no `[String]` sort, so we implement both inline:
-// byte-wise lex compare via `char_to_int` + insertion sort. The `bad`
-// list is small (estate violations are rare) so O(n²) is fine.
-
-fn str_lt(a: String, b: String) -> Bool {
-  let la = len(a);
-  let lb = len(b);
-  let mut i = 0;
-  let mut lt = false;
-  let mut decided = false;
-  while !decided && i < la && i < lb {
-    let ca = char_to_int(string_get(a, i));
-    let cb = char_to_int(string_get(b, i));
-    if ca < cb {
-      lt = true;
-      decided = true;
-    } else if ca > cb {
-      lt = false;
-      decided = true;
-    } else {
+  let lines_len = len(lines);
+  while (i < lines_len) {
+    let rawLine = lines[i];
+    let line = trim(rawLine);
+    if (line == "" || string_sub(line, 0, 1) == "#") {
       i = i + 1;
+      continue;
     }
-  }
-  if decided {
-    lt
-  } else {
-    // Common prefix exhausted — shorter string is "less".
-    la < lb
-  }
-}
-
-fn sort_strings(xs: [String]) -> [String] {
-  let n = len(xs);
-  let mut out: [String] = [];
-  let mut i = 0;
-  while i < n {
-    let v = xs[i];
-    let mut inserted = false;
-    let mut j = 0;
-    let mut acc: [String] = [];
-    let nout = len(out);
-    while j < nout {
-      let cur = out[j];
-      if !inserted && str_lt(v, cur) {
-        acc = acc ++ [v];
-        inserted = true;
-      }
-      acc = acc ++ [cur];
-      j = j + 1;
-    }
-    if !inserted {
-      acc = acc ++ [v];
-    }
-    out = acc;
+    exemptions = exemptions ++ [#{ raw: line, rx: globToRegex(line) }];
     i = i + 1;
   }
-  out
+  return exemptions;
 }
 
-// ── Entry point ─────────────────────────────────────────────────────
+fn loadExemptions() -> [Exemption] {
+  loadExemptionsFromClaudeMd() ++ loadExemptionsFromAllowlistFile()
+}
 
-/// Runs the check and terminates via `Deno.exit(code)` rather than
-/// returning.
-///
-/// Why exit rather than return: the Deno-ESM backend emits a top-level
-/// `await main();` (no `process.exit(main())` wiring), so a returned
-/// `Int` would be discarded and the script would always exit 0.
-/// Matching the TS original's `Deno.exit(1)` on violation requires the
-/// host-side terminate.
-///
-/// The `Int` return type is kept so the type checker accepts both
-/// branches; in practice the `exit(...)` calls never return (their
-/// signature in `Deno.affine` documents this — the type is just for
-/// flow-compatibility with the if/else arms).
+fn isExempt(p: String, exemptions: [Exemption]) -> Bool {
+  let mut i = 0;
+  let ex_len = len(exemptions);
+  while (i < ex_len) {
+    let e = exemptions[i];
+    if (regexMatch(p, e.rx)) { return true; }
+    let mut bare = e.raw;
+    while (len(bare) > 0 && (string_sub(bare, 0, 1) == "." || string_sub(bare, 0, 1) == "/")) {
+      bare = string_sub(bare, 1, len(bare) - 1);
+    }
+    if (p == bare) { return true; }
+    if (ends_with(e.raw, "/") && regexMatch(p, "^" ++ bare)) { return true; }
+    i = i + 1;
+  }
+  return false;
+}
+
 pub fn main() -> Int {
-  let exemptions = load_exemptions();
-
-  // Walk + filter.
-  let walked = walkRecursive(".");
-  let mut found: [String] = [];
-  let nw = len(walked);
-  let mut wi = 0;
-  while wi < nw {
-    let raw = walked[wi];
-    let p = normalise_walked(raw);
-    if !has_dotted_segment(p) && is_ts_file(p) {
-      found = found ++ [p];
+  let exemptions = loadExemptions();
+  let mut found = [];
+  let all_files = try {
+    walkRecursive(".")
+  } catch {
+    _ => []
+  };
+  
+  let mut i = 0;
+  let af_len = len(all_files);
+  while (i < af_len) {
+    let f = all_files[i];
+    if (ends_with(f, ".ts") || ends_with(f, ".tsx")) {
+      let mut skip = false;
+      let segs = split(f, "/");
+      let mut j = 0;
+      let segs_len = len(segs);
+      while (j < segs_len) {
+        let seg = segs[j];
+        if (len(seg) > 0 && string_sub(seg, 0, 1) == "." && seg != "." && seg != "..") {
+          skip = true;
+        }
+        j = j + 1;
+      }
+      if (!skip) {
+        found = found ++ [f];
+      }
     }
-    wi = wi + 1;
+    i = i + 1;
   }
 
-  // Apply allowlist + per-repo exemptions.
-  let mut bad: [String] = [];
-  let nf = len(found);
-  let mut fi = 0;
-  while fi < nf {
-    let p = found[fi];
-    if !(builtin_allowed(p) || exempt(p, exemptions)) {
-      bad = bad ++ [p];
+  let mut bad = [];
+  let mut k = 0;
+  let found_len = len(found);
+  while (k < found_len) {
+    let f = found[k];
+    if (!builtinAllowed(f) && !isExempt(f, exemptions)) {
+      bad = bad ++ [f];
     }
-    fi = fi + 1;
+    k = k + 1;
   }
-  let bad_sorted = sort_strings(bad);
-  let nb = len(bad_sorted);
-  let nx = len(exemptions);
-
-  // Output uses ASCII-only sentinels. The TS original prints `❌` /
-  // `✅`; non-ASCII string literals currently lower to octal escape
-  // sequences (e.g. `"\226\157\140"`), illegal in strict-mode ESM
-  // (ESM is implicitly strict). Filed as a stdlib-codegen follow-up;
-  // the regression suite asserts substrings ("No TypeScript files
-  // outside allowlist" / "per-repo exemption") that don't depend on
-  // the leading glyph.
-  if nb > 0 {
-    println("[FAIL] TypeScript files detected outside the allowlist.\n");
-    let mut bi = 0;
-    while bi < nb {
-      println("  " ++ bad_sorted[bi]);
-      bi = bi + 1;
+  
+  if (len(bad) > 0) {
+    consoleError("❌ TypeScript files detected outside the allowlist.\n");
+    let mut m = 0;
+    let bad_len = len(bad);
+    while (m < bad_len) {
+      let f = bad[m];
+      consoleError("  " ++ f);
+      m = m + 1;
     }
-    println("");
-    println("To resolve, choose one:");
-    println("  (a) migrate the file to AffineScript");
-    println("  (b) move to an allowlisted bridge path");
-    println("  (c) add an entry to a 'TypeScript Exemptions' table in .claude/CLAUDE.md (Layer 2)");
-    println("  (d) add a line to .governance-allowlist at the repo root (Layer 2.5 -- typed infrastructure file)");
-    println("");
-    println("See docs/EXEMPTION-MECHANISMS.adoc for the full mechanism reference.");
-    if nx > 0 {
-      println("\n(Currently " ++ int_to_string(nx) ++ " exemption(s) parsed across both layers.)");
+    consoleError("");
+    consoleError("To resolve, choose one:");
+    consoleError("  (a) migrate the file to AffineScript");
+    consoleError("  (b) move to an allowlisted bridge path");
+    consoleError("  (c) add an entry to a 'TypeScript Exemptions' table in .claude/CLAUDE.md (Layer 2)");
+    consoleError("  (d) add a line to .governance-allowlist at the repo root (Layer 2.5 — typed infrastructure file)");
+    consoleError("");
+    consoleError("See docs/EXEMPTION-MECHANISMS.adoc for the full mechanism reference.");
+    if (len(exemptions) > 0) {
+      consoleError("\n(Currently " ++ int_to_string(len(exemptions)) ++ " exemption(s) parsed across both layers.)");
     }
     return exit(1);
   }
-  println("[OK] No TypeScript files outside allowlist (" ++ int_to_string(nx) ++ " per-repo exemption(s) parsed across CLAUDE.md + .governance-allowlist).");
-  exit(0)
+  println("✅ No TypeScript files outside allowlist (" ++ int_to_string(len(exemptions)) ++ " per-repo exemption(s) parsed across CLAUDE.md + .governance-allowlist).");
+  return 0;
 }
