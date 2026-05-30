@@ -238,10 +238,41 @@ while IFS=$'\t' read -r f ln kind ctx; do
     continue
   fi
 
-  # 1. Inline TRUSTED:/AXIOM: comment on any of the 5 lines preceding the marker
-  local_start=$(( ln - 5 ))
-  [ "$local_start" -lt 1 ] && local_start=1
-  if sed -n "${local_start},${ln}p" "$f" 2>/dev/null | grep -qE 'TRUSTED:|AXIOM:'; then
+  # 1. Inline TRUSTED:/AXIOM: comment in the preceding comment block. We walk
+  #    backwards from the marker through consecutive comment lines (-- / // /
+  #    ||| / # / * / (*) until we hit a non-comment line, then check the
+  #    whole block for the magic word. A 5-line ceiling (the historical
+  #    window) was too narrow for real Agda postulates with a 7-15 line
+  #    prose justification labelled `-- AXIOM:` on its opening line. See
+  #    standards#296.
+  walk_start="$ln"
+  while [ "$walk_start" -gt 1 ]; do
+    prev_ln=$(( walk_start - 1 ))
+    prev_line="$(sed -n "${prev_ln}p" "$f" 2>/dev/null)"
+    case "$prev_line" in
+      *[!\ \	]*) ;;  # non-blank — fall through to comment test
+      *)
+        # blank line breaks the comment block.
+        break
+        ;;
+    esac
+    trimmed="$(echo "$prev_line" | sed -E 's/^[[:space:]]+//')"
+    case "$trimmed" in
+      --*|"|||"*|"|||"|"//"*|"/*"*|"*"*|"(*"*|"#"*)
+        walk_start="$prev_ln"
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+  # Also bound by ln-15 as a sanity check — a 15-line "comment block"
+  # without a magic word is almost certainly something other than a
+  # documented escape hatch.
+  hard_floor=$(( ln - 15 ))
+  [ "$hard_floor" -gt "$walk_start" ] && walk_start="$hard_floor"
+  [ "$walk_start" -lt 1 ] && walk_start=1
+  if sed -n "${walk_start},${ln}p" "$f" 2>/dev/null | grep -qE 'TRUSTED:|AXIOM:'; then
     continue
   fi
 
