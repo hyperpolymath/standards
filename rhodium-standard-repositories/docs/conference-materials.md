@@ -458,16 +458,17 @@ Conflict-free Replicated Data Types (CRDTs) solve distributed consistency withou
 
 ## Target Venues
 
-### Technical Conferences (2025-2026)
+### Technical Conferences (2026-2027 cycle)
 
-| Conference | Location | Dates (2025) | Submission Deadline | Focus Tracks |
-|-----------|----------|--------------|---------------------|--------------|
-| **FOSDEM** | Brussels, Belgium | Feb 1-2 | Dec 15, 2024 | Community, Rust, Ada, Security |
-| **RustConf** | Online/Hybrid | TBA | ~May 2025 | Rust, Systems Programming |
-| **ElixirConf** | USA | Aug | ~Mar 2025 | Elixir, OTP, Distributed Systems |
-| **Strange Loop** | St. Louis, USA | Sep | ~Apr 2025 | Languages, Architecture |
-| **Ada-Europe** | Europe | Jun | ~Jan 2025 | Ada, Safety-Critical Systems |
-| **ICFP** | Various | Sep | ~Mar 2025 | Functional Programming |
+| Conference | Location | Dates | Submission Deadline | Focus Tracks |
+|-----------|----------|-------|---------------------|--------------|
+| **FOSDEM 2027** | Brussels, Belgium | Feb 6-7, 2027 (TBC) | ~Oct-Nov 2026 (dev-room CfPs roll); main-track CFP usually Sep 2026 | Community, Rust, Ada, Security, Lang-design, Formal Methods |
+| **EuroRust 2026** | Europe (rotates; 2025 was Paris) | Oct 2026 (TBC) | ~May-Jul 2026 | Rust, Systems Programming, FFI, formal methods |
+| **RustConf 2026** | Online/Hybrid | TBA | ~May 2026 | Rust, Systems Programming |
+| **ElixirConf 2026** | USA (Orlando in recent cycles) | Aug-Sep 2026 | ~Mar-Apr 2026 | Elixir, OTP, Distributed Systems |
+| **Strange Loop** | (sunset 2024 — no longer running; retained for historical reference) | — | — | — |
+| **Ada-Europe 2026** | Europe | Jun 2026 | ~Jan-Feb 2026 | Ada, SPARK, Safety-Critical Systems |
+| **ICFP 2026** | TBA | Sep 2026 | ~Mar-Apr 2026 | Functional Programming |
 | **PolyConf** | Online | TBA | TBA | Polyglot Programming |
 
 ### Security Conferences
@@ -499,6 +500,56 @@ Conflict-free Replicated Data Types (CRDTs) solve distributed consistency withou
 | **ICSE** | Ottawa, Canada | Apr | ~Aug 2024 | Software engineering |
 | **ESEC/FSE** | TBA | Sep | ~Mar 2025 | Software engineering |
 | **ECOOP** | TBA | Jun | ~Jan 2025 | Object-oriented programming |
+
+---
+
+## 2026-2027 Cycle Submission Mapping
+
+This section maps the existing abstract bank above to the operator's three priority venues for the 2026-2027 cycle: **FOSDEM 2027, EuroRust 2026, ElixirConf 2026**. Use these as the candidate-set when preparing submissions; do not re-author abstracts that already cover the topic.
+
+### FOSDEM 2027 (Brussels, Feb 6-7 2027 TBC)
+
+- **Dev-room track** *(preferred — lower competition, better fit for estate work)*: target one of:
+  - `Rust dev-room` → "Rust + Ada/SPARK Polyglot" abstract
+  - `Declarative + Minimalist Computing` → "Post-JavaScript Liberation" abstract (full RSR pitch)
+  - `Free Java / Formal Methods` → "Formal Verification for Everyday Developers" (re-pitched to lay audience)
+  - `Community` → "Emotional Safety in Open Source (CCCP)" abstract
+- **Main track** *(if time permits multiple submissions)*: "10+ Dimensions of Security" — closest fit to FOSDEM main-stage taste for systems content.
+- **Format**: 20-30 min slots in dev-rooms; 50 min for main track. Most dev-room CFPs open Oct-Nov 2026.
+- **Speaker requirement**: light bio + abstract (already on file); FOSDEM does NOT require slides at submission.
+- **Estate-side gap**: no FOSDEM-specific FOSS-community-temperature framing (the CCCP "emotional temperature" angle resonates strongly with FOSDEM dev-rooms — consider a one-paragraph customisation).
+
+### EuroRust 2026 (Europe, Oct 2026 TBC)
+
+- **Primary candidate**: "Rust + Ada/SPARK polyglot iSOS" — most novel content for a Rust-specific audience. Note that EuroRust historically welcomes typed-wasm / formal-methods crossover talks.
+- **Secondary candidate**: "WASM, Type Safety, and Multi-Language FFI" — frame around typed-wasm and the affinescript→typed-wasm lowering pipeline. Talks to the EuroRust core (Rust + emerging-targets) audience.
+- **Tertiary candidate**: "Idris2 ABIs for Rust libraries" — pitches `proven` and its `idris2-zig-<lang>` bindings as a verified-FFI story. Niche but distinctive.
+- **Format**: typically 25 min talks + 10 min Q&A. CFP usually opens May-Jul; speaker travel grants available some years.
+- **Estate-side gap**: NO EuroRust-tailored abstract in the bank above. The closest substitute is "Post-JavaScript Liberation" which is too broad. Consider drafting a focused "AffineScript→typed-wasm: a typed-system polyglot for Rust ecosystems" abstract before the May 2026 CFP window.
+
+### ElixirConf 2026 (USA, Aug-Sep 2026)
+
+- **Primary candidate**: "CRDTs for Everyday Developers" — strongest fit for ElixirConf's distributed-systems audience.
+- **Secondary candidate**: "Software-Defined Perimeter & Zero Trust" — ElixirConf does occasionally welcome ops/security content (Membrane talks, Phoenix-LiveView security).
+- **Tertiary candidate**: "Tri-Perimeter Contribution Framework (TPCF)" — fits ElixirConf's community track if one runs.
+- **Format**: 30-40 min talks. CFP usually closes Mar-Apr.
+- **Estate-side gap**: ElixirConf prefers concrete Elixir/Phoenix code on stage. The existing CRDT abstract is mostly framework-agnostic — consider adding a 5-minute live-demo segment using Elixir's `:gen_event` + an AWSet CRDT to ground it.
+
+### Generic-prep items (apply to all three)
+
+- [ ] Speaker headshot (500×500px PNG; required by most CFPs; not currently in the asset bundle)
+- [ ] Prior-talk video links (helpful for first-time submitters; CFPs ask "have you spoken before?" — collect 1-2 links if any exist)
+- [ ] Per-venue customisation pass on the speaker bio (FOSDEM = FOSS-emphasis short; EuroRust = Rust-ecosystem credentials; ElixirConf = BEAM/OTP credentials)
+
+### Status snapshot (2026-05-30)
+
+| Venue | Abstract drafted | Customisation done | Submitted | Outcome |
+|---|---|---|---|---|
+| FOSDEM 2027 | ✅ (3-4 candidates above) | ❌ | ❌ (CFP not yet open) | — |
+| EuroRust 2026 | ⚠️ partial (closest fit is too broad) | ❌ | ❌ (CFP not yet open) | — |
+| ElixirConf 2026 | ✅ (CRDT abstract) | ❌ | ❌ (CFP not yet open) | — |
+
+This row in the matrix is the closing of the project-board "Conference proposals: FOSDEM 2027, EuroRust, ElixirConf" item from the docs-explicit deliverable side. The submission step itself depends on each CFP opening + the operator's go/no-go.
 
 ---
 
