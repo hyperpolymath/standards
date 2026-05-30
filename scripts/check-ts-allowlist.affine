@@ -447,9 +447,19 @@ fn sort_strings(xs: [String]) -> [String] {
 
 // ── Entry point ─────────────────────────────────────────────────────
 
-/// Returns the intended process exit code (0 on success, 1 on
-/// violation). The caller (a one-line `.mjs` wrapper, written in the
-/// follow-up PR) invokes `Deno.exit(main())`.
+/// Runs the check and terminates via `Deno.exit(code)` rather than
+/// returning.
+///
+/// Why exit rather than return: the Deno-ESM backend emits a top-level
+/// `await main();` (no `process.exit(main())` wiring), so a returned
+/// `Int` would be discarded and the script would always exit 0.
+/// Matching the TS original's `Deno.exit(1)` on violation requires the
+/// host-side terminate.
+///
+/// The `Int` return type is kept so the type checker accepts both
+/// branches; in practice the `exit(...)` calls never return (their
+/// signature in `Deno.affine` documents this — the type is just for
+/// flow-compatibility with the if/else arms).
 pub fn main() -> Int {
   let exemptions = load_exemptions();
 
@@ -507,8 +517,8 @@ pub fn main() -> Int {
     if nx > 0 {
       println("\n(Currently " ++ int_to_string(nx) ++ " exemption(s) parsed across both layers.)");
     }
-    return 1;
+    return exit(1);
   }
   println("[OK] No TypeScript files outside allowlist (" ++ int_to_string(nx) ++ " per-repo exemption(s) parsed across CLAUDE.md + .governance-allowlist).");
-  0
+  exit(0)
 }
