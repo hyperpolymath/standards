@@ -145,3 +145,52 @@ Existing pre-2026-04-30 `.ts`/`.tsx` outside these carve-outs is grandfathered w
 | `**/vscode/**` (covers `editors/vscode/`, `extensions/vscode/`, `clients/vscode/`) | editor-host extension | VSCode extension entry points target the `vscode` extension-host API. Five estate repos (`universal-language-server-plugin`, `reposystem`, `proof-burrower`, `phronesis`, `bofj-kitt`) have a single `vscode/extension.ts`. | When AffineScript ships the VSCode-extension API binding (top-50 roadmap, unshipped). |
 
 Adding to this list requires explicit user approval and an unblock condition (except the structural classes above, which are estate-wide policy). The detection rule and its `path_allow_prefixes` field are the single source of truth; this table mirrors that for human readability.
+
+### ReScript Exemptions (Approved)
+
+The hyperpolymath "no new ReScript" policy (banned 2026-05-25) has the following approved exemptions, encoded as `path_allow_prefixes` on the hypatia rules `cicd_rules/rescript_detected` (matches `*.res`) and `cicd_rules/rescript_interface_detected` (matches `*.resi`).
+
+Existing pre-2026-05-25 `.res`/`.resi` outside these carve-outs is grandfathered while in-flight migration proceeds (~3,996 files across ~80 repos as of 2026-05-30; see project tracker `project_estate_rescript_to_affinescript_2026_05_28.md` and umbrella `hyperpolymath/standards#252`). New `.res`/`.resi` files in non-carve-out paths are blocked.
+
+| Path / Pattern | Class | Rationale | Unblock condition |
+|---|---|---|---|
+| `**/bsconfig.json`, `**/*.config.res` | tooling | Build orchestration, not application code. | When AffineScript ships native equivalents. |
+| `rescript/**`, `servers/**`, `repos-monorepo/**`, `linguist/**` | upstream fork | Not estate-authored — vendored upstream code (ReScript compiler, third-party MCP servers, mass aggregator, GitHub linguist samples). | Never — upstream fork. |
+| `hyperpolymath-archive/**` | archived | GitHub-archived repos cannot accept PRs; ReScript is dormant. | Never — archived. |
+| `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Mix-style vendored deps and Node-style node_modules. | Never — vendored upstream. |
+| `**/vscode/**` (covers `editors/vscode/`, `extensions/vscode/`, `clients/vscode/`) | editor-host extension | VSCode extension entry points target the `vscode` extension-host API. | When AffineScript ships the VSCode-extension API binding (top-50 roadmap, unshipped). |
+| `**/lib/js/**`, `**/lib/es6/**`, `**/lib/bs/**` | compiled output | bsc (the ReScript compiler) emits to these paths. They are not source. | Never — compiler output, not source. |
+| `affinescript-deno-test/**`, `affinescript-cli/**` | bootstrap shim | Bootstrap the AffineScript toolchain itself. | When AffineScript self-hosts these. |
+| `avow-protocol/telegram-bot/avow-telegram-bot/**` | PERMANENT | Mirrors TS Telegraf carve-out for any `.res` file in the same directory. | Never. |
+
+### npm Exemptions (Approved)
+
+The hyperpolymath "npm banned" policy (2026-05-25) has the following approved exemptions on the hypatia rule `cicd_rules/nodejs_detected` (matches `package-lock.json`).
+
+In-flight migration tracked under `hyperpolymath/standards#253` (172 manifests across the estate; see `project_estate_npm_to_deno_2026_05_28.md`).
+
+| Path / Pattern | Class | Rationale | Unblock condition |
+|---|---|---|---|
+| `**/vscode/**` | VSCode extension host-required | VSCode extension toolchain runs under Node; lockfile is contractually required by the host. | When AffineScript ships the VSCode-extension API binding. |
+| `affinescript-deno-test/**`, `affinescript-cli/**` | bootstrap shim | Bootstrap the AffineScript toolchain itself. | When AffineScript self-hosts these. |
+| `rescript/**`, `servers/**`, `repos-monorepo/**`, `linguist/**` | upstream fork | Not estate-authored — vendored upstream code. | Never — upstream fork. |
+| `hyperpolymath-archive/**` | archived | Archived repos cannot accept PRs. | Never — archived. |
+| `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Vendored deps. | Never — vendored upstream. |
+| `**/example/**`, `**/examples/**`, `**/test-fixtures/**`, `**/fixtures/**` | example/test fixture | Demonstrates an npm consumer (e.g., showing how a library is used from a Node project) without making the repo itself an npm consumer. | Never — fixture, not own toolchain. |
+
+### JavaScript Exemptions (Approved)
+
+The hyperpolymath "Unnecessarily-JavaScript banned" policy (2026-05-25) has the following approved exemptions on the hypatia rules `cicd_rules/javascript_detected` (matches `*.js`) and `cicd_rules/javascript_jsx_detected` (matches `*.jsx`).
+
+Distinct from TS/RS policy: JavaScript is *allowed* where AffineScript cannot reach. The rule targets the gap between current AS bindings and current JS usage — JS that COULD be AS today but isn't. In-flight migration tracked under `hyperpolymath/standards#254` (1,609 files across the estate; see `project_estate_unnecessary_js_2026_05_28.md`). Ship mode: HARD-BLOCK + extensive carve-outs (umbrella#254 STEP 1 design question resolved 2026-05-30). Per-PR exemption via inline pragma `// hypatia: allow cicd_rules/javascript_detected -- <reason>`.
+
+| Path / Pattern | Class | Rationale | Unblock condition |
+|---|---|---|---|
+| `mcp-bridge/**`, `**/plugins/**` | host-required by ecosystem | MCP servers and plugin entry points where JS is the host contract (the host loads .js, not .affine). | When AS plugin-host bindings ship (top-50 roadmap). |
+| `**/*.config.js`, `**/*.config.cjs`, `**/*.config.mjs` | tooling configs | Build orchestration. | When AS ships native equivalents. |
+| `affinescript-deno-test/**`, `affinescript-cli/**` | bootstrap shim | Bootstrap the AffineScript toolchain itself. | When AS self-hosts these. |
+| `rescript/**`, `servers/**`, `repos-monorepo/**`, `linguist/**` | upstream fork | Not estate-authored — vendored upstream code (linguist samples are ML training data). | Never — upstream fork. |
+| `hyperpolymath-archive/**` | archived | Archived repos cannot accept PRs. | Never — archived. |
+| `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Vendored deps. | Never — vendored upstream. |
+| `**/out/**`, `**/lib/js/**`, `**/.deno/**` | compiled output | AS / RS / Deno-cache compile output. | Never — compiler output, not source. |
+| `**/vscode/**`, `**/extensions/vscode/**` | editor-host extension entry | VSCode extension entry points (often shipped as compiled `.js` even when authored as `.ts`). | When AS VSCode-extension API binding ships (top-50 roadmap). |

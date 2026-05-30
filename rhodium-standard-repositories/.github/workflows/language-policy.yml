@@ -78,4 +78,108 @@ jobs:
             exit 1
           fi
 
+          # Block new ReScript files (banned 2026-05-25, replacement: AffineScript).
+          # Carve-outs (parallel to hypatia cicd_rules/rescript_detected +
+          # rescript_interface_detected path_allow_prefixes — 8 classes):
+          #   bsconfig.json + *.config.res    tooling
+          #   rescript/ + servers/ + repos-monorepo/ + linguist/  upstream forks
+          #   hyperpolymath-archive/  archived repos
+          #   **/deps/ + **/node_modules/  vendored package-manager deps
+          #   **/vscode/  VSCode extension entry points (blocked on AS bindings)
+          #   **/lib/js/ + **/lib/es6/ + **/lib/bs/  bsc compilation output
+          #   affinescript-deno-test/ + affinescript-cli/  bootstrap shims
+          #   avow-protocol/telegram-bot/avow-telegram-bot/  Telegraf carve-out
+          NEW_RS=$(git diff --name-only --diff-filter=A HEAD~1 2>/dev/null \
+            | grep -E '\.resi?$' \
+            | grep -vE '(^|/)bsconfig\.json$' \
+            | grep -vE '\.config\.res$' \
+            | grep -vE '^(rescript|servers|repos-monorepo|linguist|hyperpolymath-archive)/' \
+            | grep -vE '/deps/' \
+            | grep -vE '/node_modules/' \
+            | grep -vE '/vscode/' \
+            | grep -vE '/lib/(js|es6|bs)/' \
+            | grep -vE '^(affinescript-deno-test|affinescript-cli)/' \
+            | grep -vE '^avow-protocol/telegram-bot/avow-telegram-bot/' \
+            || true)
+          if [ -n "$NEW_RS" ]; then
+            echo "❌ New ReScript files detected (banned 2026-05-25). Use AffineScript instead."
+            echo "$NEW_RS"
+            echo ""
+            echo "In-flight migration tracked under hyperpolymath/standards#252."
+            echo "If this file belongs to a carve-out class, add it via"
+            echo "the hypatia rule's path_allow_prefixes — see standards/.claude/CLAUDE.md"
+            echo "§ReScript Exemptions (Approved)."
+            exit 1
+          fi
+
+          # Block new package-lock.json (npm banned 2026-05-25, replacement: Deno).
+          # Carve-outs (parallel to hypatia cicd_rules/nodejs_detected
+          # path_allow_prefixes — 6 classes):
+          #   **/vscode/  VSCode extension host-required toolchain
+          #   affinescript-deno-test/ + affinescript-cli/  bootstrap shims
+          #   rescript/ + servers/ + repos-monorepo/ + linguist/  upstream forks
+          #   hyperpolymath-archive/  archived repos
+          #   **/deps/ + **/node_modules/  vendored package-manager deps
+          #   **/example/ + **/examples/ + **/test-fixtures/ + **/fixtures/
+          NEW_NPM_LOCK=$(git diff --name-only --diff-filter=A HEAD~1 2>/dev/null \
+            | grep -E '(^|/)package-lock\.json$' \
+            | grep -vE '/vscode/' \
+            | grep -vE '^(affinescript-deno-test|affinescript-cli)/' \
+            | grep -vE '^(rescript|servers|repos-monorepo|linguist|hyperpolymath-archive)/' \
+            | grep -vE '/deps/' \
+            | grep -vE '/node_modules/' \
+            | grep -vE '/(example|examples|test-fixtures|fixtures)/' \
+            || true)
+          if [ -n "$NEW_NPM_LOCK" ]; then
+            echo "❌ New package-lock.json files detected (npm banned 2026-05-25). Use Deno instead."
+            echo "$NEW_NPM_LOCK"
+            echo ""
+            echo "In-flight migration tracked under hyperpolymath/standards#253."
+            echo "If this lockfile belongs to a carve-out class (vscode extension,"
+            echo "bootstrap shim, example fixture, etc.), add it via the hypatia rule's"
+            echo "path_allow_prefixes — see standards/.claude/CLAUDE.md §npm Exemptions."
+            exit 1
+          fi
+
+          # Block new "Unnecessarily-JavaScript" .js / .jsx files (banned in NEW
+          # code as of 2026-05-25, where AffineScript bindings exist; replacement:
+          # AffineScript). Existing JS grandfathered while in-flight migration
+          # proceeds.
+          # Carve-outs (parallel to hypatia cicd_rules/javascript_detected +
+          # javascript_jsx_detected path_allow_prefixes — 8 classes):
+          #   mcp-bridge/ + **/plugins/  host-required (JS is the host contract)
+          #   *.config.js / *.config.cjs / *.config.mjs  tooling configs
+          #   affinescript-deno-test/ + affinescript-cli/  bootstrap shims
+          #   rescript/ + servers/ + repos-monorepo/ + linguist/  upstream forks
+          #   hyperpolymath-archive/  archived repos
+          #   **/deps/ + **/node_modules/  vendored package-manager deps
+          #   **/out/ + **/lib/js/ + **/.deno/  AS / RS compile output
+          #   **/vscode/ + **/extensions/vscode/  editor-host extension entry
+          NEW_JS=$(git diff --name-only --diff-filter=A HEAD~1 2>/dev/null \
+            | grep -E '\.jsx?$' \
+            | grep -vE '^mcp-bridge/' \
+            | grep -vE '/plugins/' \
+            | grep -vE '\.config\.(js|cjs|mjs)$' \
+            | grep -vE '^(affinescript-deno-test|affinescript-cli)/' \
+            | grep -vE '^(rescript|servers|repos-monorepo|linguist|hyperpolymath-archive)/' \
+            | grep -vE '/deps/' \
+            | grep -vE '/node_modules/' \
+            | grep -vE '/(out|lib/js|\.deno)/' \
+            | grep -vE '/vscode/' \
+            | grep -vE '/extensions/vscode/' \
+            || true)
+          if [ -n "$NEW_JS" ]; then
+            echo "❌ New 'Unnecessarily-JavaScript' files detected (banned 2026-05-25 in NEW code)."
+            echo "Use AffineScript where bindings exist."
+            echo "$NEW_JS"
+            echo ""
+            echo "In-flight migration tracked under hyperpolymath/standards#254."
+            echo "If this file belongs to a carve-out class (MCP server, plugin host,"
+            echo "tooling config, etc.), add it via the hypatia rule's"
+            echo "path_allow_prefixes — see standards/.claude/CLAUDE.md §JavaScript Exemptions."
+            echo "For an ad-hoc exemption use inline pragma:"
+            echo "  // hypatia: allow cicd_rules/javascript_detected -- <reason>"
+            exit 1
+          fi
+
           echo "✅ Language policy check passed"
