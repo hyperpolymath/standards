@@ -1,0 +1,378 @@
+// SPDX-License-Identifier: MPL-2.0
+= Unnecessarily-JavaScript → AffineScript estate migration
+:revdate: 2026-05-30
+:status: ACTIVE
+:campaign: hyperpolymath/standards#254
+:label: js-to-affinescript
+
+This is the canonical campaign documentation for the
+**Unnecessarily-JavaScript → AffineScript** estate migration.
+
+Tracked under https://github.com/hyperpolymath/standards/issues/254[UMBRELLA #254].
+Step issues #263, #266, #271, #274, #277 are the canonical
+implementation plan and are labelled `js-to-affinescript`.
+
+Sibling migration campaigns (not in scope here):
+
+- https://github.com/hyperpolymath/standards/issues/239[TS → AffineScript] (#239)
+- https://github.com/hyperpolymath/standards/issues/252[ReScript → AffineScript] (#252)
+- https://github.com/hyperpolymath/standards/issues/253[npm → Deno] (#253)
+
+== Campaign overview
+
+Estate-wide migration of "unnecessarily-JavaScript" `.js` / `.jsx` files
+to AffineScript. Distinct from TS (#239) and RS (#252): **JavaScript is
+*allowed* in policy "only where AffineScript cannot reach"** — so this
+campaign targets the gap between current AffineScript bindings and
+current JavaScript usage.
+
+A `.js` / `.jsx` file qualifies as "unnecessarily JS" if every API
+surface it uses is already bound in AffineScript stdlib (Deno, json,
+Vscode, collections, etc.). Files using surface NOT yet bound stay as
+JavaScript until bindings ship.
+
+*Scope safety*: only `hyperpolymath/` repos that are non-fork. Per-PR
+ownership gate mandatory on every PR landed under this campaign.
+
+== Inventory snapshot
+
+[cols="1h,1,4", options="header"]
+|===
+| Source | Count | Notes
+
+| Initial inventory (2026-05-28)
+| 1,609
+| Post-excludes: `node_modules`, `dist`, `build`, `target`, `_build`,
+`_opam`, `.deno`, `hyperpolymath-archive`, `rescript`, `servers`,
+`repos-monorepo`, `linguist`, `deps`, `out`, `lib/js`, `.d.ts`,
+`*/bindings/{deno,typescript,ts}/`, `*.config.{js,cjs,mjs}`
+
+| Fresh `find` (2026-05-30)
+| 1,724
+| Same excludes; the +115 delta is informational only. STEP 2's
+triage tool MUST re-enumerate with documented excludes.
+|===
+
+=== Top backlog (initial inventory, 2026-05-28)
+
+[cols="1,3", options="header"]
+|===
+| Files | Repo
+
+| 144 | boj-server
+| 142 | panll
+| 105 | stapeln
+| 103 | proven-servers, idaptik
+| 78 | polyglot-i18n
+| 70 | rrecord-verity
+| 64 | ssg-collection
+| 62 | proven
+| 49 | reposystem
+| 48 | developer-ecosystem
+| 38 | ubicity
+| 34 | zotero-tools, burble
+| 33 | airborne-submarine-squadron, affinescript
+| 32 | isers
+| 25 | affinescript-stdlib-pr
+| 22 | standards, kaldor-iiot
+| <20 | tail
+|===
+
+== 4-layer architecture
+
+The campaign separates responsibility across four layers; each layer's
+work surfaces as one or more of the five step issues below.
+
+[cols="1h,2,4", options="header"]
+|===
+| Layer | Concern | Step issues
+
+| L1
+| Policy & enforcement — Hypatia rule + standards-docs carve-outs
+| #263
+
+| L2
+| Triage tooling — classifier that maps every `.js` file to one of three
+buckets (`portable now`, `blocked on binding X`, `keep as JS`)
+| #266
+
+| L3
+| Physical ports — `.js` → `.affine` for everything in the `portable
+now` bucket
+| #271
+
+| L4
+| Binding-gap discharge — ship AffineScript bindings that move files
+from `blocked on binding X` to `portable now`, then re-triage
+| #274, #277
+|===
+
+== STEP 1 — POLICY (issue #263)
+
+Ship the Hypatia `:javascript_detected` rule (parallel to
+`:typescript_detected` and `:rescript_detected`) plus matching
+standards-docs language so that new `.js` / `.jsx` outside documented
+carve-outs is automatically flagged estate-wide.
+
+=== Ship-mode decision
+
+Issue #263 left this as an open design question between two ship modes.
+The campaign documentation records the decision here so the rule
+implementation has a clear target.
+
+**DECISION: Mode A (WARNING first).**
+
+The rule emits an informational finding on every new `.js` / `.jsx`
+outside carve-outs. It flips to HARD-BLOCK only after STEP 2 triage has
+classified the bulk of the backlog and the `keep as JS` carve-outs are
+empirically validated.
+
+*Rationale.* JavaScript is *permanently* legitimate in this estate — it
+is the escape hatch for surfaces AffineScript cannot reach. Until STEP
+2's classifier has run estate-wide and STEP 5 has converged on the
+permanent-residue set, a HARD-BLOCK rule has high false-positive blast
+radius. WARNING-first preserves merge throughput while the long-tail
+classification settles.
+
+*Reversibility.* The mode flip is a one-line change in the Hypatia rule
+config (severity field). The flip itself is mechanical; the decision to
+flip is operator-driven once STEP 5 produces convergence evidence.
+
+=== Carve-out classes (Hypatia `path_allow_prefixes`)
+
+The rule allows JavaScript in these eight classes:
+
+[cols="1,2,3", options="header"]
+|===
+| # | Class | Pattern
+
+| 1 | host-required by ecosystem
+| MCP servers; plugin entry points that the upstream ecosystem
+demands be JS
+
+| 2 | tooling configs
+| `*.config.{js,cjs,mjs}` — bundler / lint / framework configs
+
+| 3 | bootstrap shims
+| `affinescript-{deno-test,cli}/` — surfaces that compile AffineScript
+to JS and therefore cannot themselves be AffineScript
+
+| 4 | upstream forks
+| `.fork == true` repos — out-of-scope per estate convention
+
+| 5 | archived
+| `hyperpolymath-archive/**` — frozen history
+
+| 6 | vendored deps
+| `**/deps/**`, `**/node_modules/**` — third-party
+
+| 7 | compiled output
+| `**/out/**`, `**/lib/js/**`, `**/.deno/**` — derived artefacts
+
+| 8 | host extension entry
+| `**/vscode/**`, `**/extensions/vscode/**` — VSCode requires JS at the
+extension activation boundary
+|===
+
+=== Acceptance (#263)
+
+- New Hypatia rule `:javascript_detected` in `hypatia` repo with the
+eight carve-out classes encoded as `path_allow_prefixes` (or
+equivalent).
+- Ship mode set to **WARNING** (Mode A) per the decision above.
+- Standards docs language updated to reference the rule + this
+campaign doc.
+- Hypatia tests cover at least one positive case per carve-out class
+and one negative case (a `.js` file outside all carve-outs that the
+rule flags).
+
+This documentation pass satisfies the *design + ship-mode-decision*
+portion of #263's acceptance. The Hypatia rule implementation + tests
+remain owed work tracked on the same issue.
+
+== STEP 2 — TRIAGE TOOLING (issue #266) — LOAD-BEARING
+
+Build the classifier that makes the rest of this campaign tractable.
+Without it, the migration is open-ended: 1,609+ `.js` / `.jsx` files
+cannot be hand-classified at scale.
+
+=== Spec
+
+The tool enumerates JavaScript API surface per file, cross-checks it
+against the current AffineScript stdlib catalogue, and outputs three
+buckets:
+
+[cols="1,3", options="header"]
+|===
+| Bucket | Meaning
+
+| `portable now`
+| Every API surface this file uses is already bound in AffineScript
+stdlib (Deno, json, collections, string, Vscode, etc.). Port directly.
+
+| `blocked on binding X`
+| Most surfaces are bound but at least one missing binding gates the
+port. Tool emits the specific missing binding name so STEP 4 can group
+work by binding.
+
+| `keep as JS`
+| File falls in one of the eight carve-out classes from STEP 1. Tool
+emits the carve-out class number.
+|===
+
+=== Implementation choices
+
+- *AST walk*: acorn-style preferred for fidelity. Regex sufficient for
+v0 — record the choice in tool docstring.
+- *Exclude list*: reproducible — record in a sibling config file
+adjacent to the tool. Re-running the enumeration must produce the same
+file set.
+- *Tool location*: `standards/scripts/js-triage/` is the suggested
+seam. If hypatia is the better home (because the rule from STEP 1
+lives there), record that decision in the commit message.
+- *Output format*: bucket counts as a comment on #254; per-file
+classifications as TSV / JSONL for STEP 3's port-order picker.
+
+This documentation gives STEP 2 a concrete spec to land against. The
+tool implementation itself remains owed.
+
+== STEP 3 — PORTS (issue #271)
+
+Execute the physical `.js` / `.jsx` → `.affine` ports for every file
+STEP 2 placed in the `portable now` bucket. Smallest-first within each
+repo to bank throughput and validate per-idiom-cluster patterns before
+tackling the long tail.
+
+=== Expected idiom clusters
+
+Many JavaScript files likely fall in 1–2 idiom clusters. STEP 2's
+bucket comment confirms:
+
+- Deno CLI scripts — small, `.ts`-equivalent surface, fully bindable.
+- VSCode extension JavaScript — covered by `Vscode.affine` 55 fns.
+- MCP glue — async stdio loop, protocol. **Should NOT appear in
+`portable now`**; if it does, treat as a triage-tool bug and fix STEP 2.
+- WebExtension scripts — blocked on host-API bindings, same as TS/RS.
+**Should NOT appear in `portable now`**; same diagnostic.
+
+=== Per-port checklist
+
+- `.affine` builds (`just check` green for the host repo).
+- Original `.js` / `.jsx` removed in the same PR.
+- Downstream build wiring updated (e.g., `package.json` `main` /
+`exports`, `deno.json` task entries).
+- Per-PR ownership gate (`gh repo view ... --json owner,isFork`).
+- PRs grouped by repo, smallest-files-first within each repo.
+- Carve-out classes from STEP 1 respected — no port attempts on
+`vscode/**`, `**/deps/**`, etc.; those belong to STEPs 4–5 or are
+permanent residue.
+
+== STEP 4 — BINDING-GAP DISCHARGE (issue #274)
+
+Discharge the AffineScript binding gaps that block ports in STEP 2's
+`blocked on binding X` bucket. For each missing binding the triage tool
+emits, ship the AffineScript binding (or escalate the binding as a
+permanent JS-residue if the API surface is fundamentally non-bindable).
+
+=== Cross-references
+
+- AffineScript bindings top-50 roadmap: `affinescript#446`. T1 covers
+idaptik blockers; T2–T5 cover estate near-term + web universals +
+backend + tooling.
+- ReScript umbrella `#252` STEP 4 has a parallel "stdlib fill" step
+that depends on the same top-50 roadmap. Cross-coordinate: when a
+binding closes a gap that unblocks both `.res` and `.js`, count both
+campaigns toward the binding's discharge priority. Avoid shipping the
+same binding twice or in inconsistent shapes.
+
+=== Disposition per binding
+
+For every binding name STEP 2 emits as blocking ports:
+
+- **Bind it.** PR merged in `affinescript` or `affinescript-stdlib*`.
+STEP 2's tool re-runs and reclassifies the affected files into
+`portable now`.
+- **Carve it out.** The binding is documented as permanent JS-residue,
+added to STEP 1's carve-out class 1 with rationale, and STEP 2's tool
+reclassifies the affected files into `keep as JS`.
+
+Each binding PR cross-references both #254 (this step) and the AS
+top-50 roadmap issue it discharges. Each binding PR cross-references
+#252 if the same gap also blocks RS ports.
+
+== STEP 5 — RE-TRIAGE (issue #277)
+
+Re-run STEP 2's triage tool after each significant batch of bindings
+lands in STEP 4. Move newly-portable files into the active port queue
+(feeding STEP 3 in a second / third / Nth wave), and reclassify files
+that turned out to be permanent JS-residue.
+
+=== Iteration pattern
+
+. STEP 4 lands a batch of N bindings.
+. Re-run STEP 2's tool with the same exclude-list as the initial
+enumeration.
+. Diff the bucket counts vs the prior comment on #254 — publish the
+delta as a fresh #254 comment.
+. Files that moved `blocked on binding X` → `portable now` feed a new
+wave of STEP 3 ports.
+. Files that triage now classifies as `keep as JS` (because the
+binding-gap analysis confirmed a permanent-residue surface) get
+codified into STEP 1's carve-out classes via a hypatia-rule update.
+. Repeat until the `blocked on binding X` bucket converges to
+"permanent residue or out-of-scope".
+
+=== Convergence criterion
+
+The campaign is "complete" when:
+
+- `portable now` bucket is empty (all ported via STEP 3 waves).
+- `blocked on binding X` bucket is empty OR every remaining entry has
+an open AS top-50 roadmap issue tracking the missing binding.
+- `keep as JS` bucket is fully covered by STEP 1's carve-out rules (no
+unexplained residue).
+
+The final closeout comment on #254 records the realistic PR count
+(umbrella estimates 50–150 — refine with actuals).
+
+== Sequencing
+
+[source]
+----
+STEP 1 (POLICY) ──┬─→ STEP 2 (TRIAGE TOOLING) ─→ STEP 3 (PORTS, wave 1)
+                  │                              │
+                  │                              ↓
+                  └─────────────────────────→ STEP 4 (BINDING-GAP) ─→ STEP 5 (RE-TRIAGE)
+                                                                        │
+                                                                        ↓
+                                                                     STEP 3 (wave N) → STEP 4 (wave N) → STEP 5 (wave N) → ...
+----
+
+STEP 1 unblocks STEP 2 (the rule needs to exist before the classifier
+matches against it). STEP 2 unblocks STEP 3 and STEP 4. STEP 5 cycles
+back into STEP 3 / STEP 4 until convergence.
+
+== Per-repo ownership gate
+
+Every PR landed under this campaign verifies the target repo is owned
+by `hyperpolymath` and is not a fork:
+
+[source,bash]
+----
+gh repo view "$REPO" --json owner,isFork \
+  --jq 'select(.owner.login == "hyperpolymath" and .isFork == false)'
+----
+
+If the gate is silent (no JSON output), the PR is rejected — the repo
+is either upstream-owned or a fork, and this campaign does not touch
+either.
+
+== Cross-reference to memory
+
+Working memory entries:
+
+- `project_estate_unnecessary_js_2026_05_28.md` — campaign trajectory
+- `feedback_estate_lang_policy_2026_05_25.md` — banned-language policy
+- `project_affinescript_bindings_top50_roadmap.md` — STEP 4 cross-link
+- `session_2026_05_30_issue_audit_branch_cleanup.md` — most recent
+housekeeping pass that surfaced this documentation gap
