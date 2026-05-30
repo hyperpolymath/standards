@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toc-placement: preamble
+
+= Dependabot policy — major-version bumps + auto-merge
+
+== TL;DR
+
+* `feedback_always_automerge_prs` is fine for **minor / patch** dependabot PRs.
+* It is **structurally unsafe** for **major** bumps without a paired call-site update — they pass the validation gates (K9 / A2ML / language-policy) which do not compile the workspace, and only break the downstream compile checks on subsequent pushes.
+* Estate policy (this document): **dependabot must not open major-version bumps unattended.** Major bumps land via the normal author-supplied PR path (issue → branch → code update + dep bump in one PR → review → merge).
+
+== Why
+
+`hyperpolymath/echidna` (2026-05-29): five dependabot major-version bumps merged in a chain over ~2h:
+
+[cols="1,3,5",options="header"]
+|===
+| PR | Bump | Real break
+
+| #120 | axum 0.7 → 0.8 | tower-http 0.6 transitive mismatch
+| #121 | rand 0.9 → 0.10 | `Rng` trait renamed to `RngExt`; `use rand::Rng` no longer brings `random_range` / `random` into scope
+| #122 | criterion 0.5 → 0.8 | bench harness changes
+| #123 | nom 7 → 8 | combinators went closure-based → trait-based: `alt(args)(input)` → `alt(args).parse(input)`
+| #124 | rustyline 15 → 18 | editor API changes
+|===
+
+Each passed the estate validation gates (`Validate K9 contracts`, `Validate A2ML manifests`, `governance / *`) — none of which compile the workspace — and was auto-merged green. Every subsequent push was red on `Rust CI` (compile errors) + `Live Provers` (all T1 + T2 fail to compile) + `MVP Smoke`. Recovery was a single revert PR (echidna#128) but `main` was effectively broken for ~24h.
+
+The root cause is the gap between **what the auto-merge hook authorises** (any green PR) and **what the green PR has actually been tested against** (the validation gates, not the compile gates).
+
+== Policy
+
+=== 1. Dependabot config — ignore major bumps by default
+
+Every estate repo's `.github/dependabot.yml` should ignore `version-update:semver-major` for each ecosystem entry. Minors and patches continue to flow normally.
+
+[source,yaml]
+----
+# .github/dependabot.yml — recommended estate shape
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      minors-and-patches:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Major bumps require paired call-site updates — open them via
+      # an author-supplied PR, not unattended dependabot auto-merge.
+      # See standards/docs/DEPENDABOT-POLICY.adoc.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+    # github-actions major bumps are usually safe (the SHA pin is the
+    # real version); group them with the others. Override per-repo if
+    # a specific action has a history of breaking major-version moves.
+
+  # Add npm / nix / pip / mix / ... entries with the same ignore rule.
+----
+
+=== 2. Branch protection — require the compile gate
+
+For Rust repos, `Rust CI` (the `rust-ci-reusable.yml` wrapper) MUST be in the required-status-checks list. This catches any version drift at PR time, regardless of how the PR was opened.
+
+For other ecosystems, the equivalent compile / test gate (e.g. `mix test` for Elixir, `deno check` for Deno) MUST be required.
+
+=== 3. `--locked` everywhere it's available
+
+Already landed in `rust-ci-reusable.yml` (standards#299). Cargo, npm, deno, bundler, mix, etc. all support a "use the lockfile verbatim" flag. CI MUST pass it. See standards#295 for the Rust case.
+
+=== 4. The (rare) legitimate major bump path
+
+When a major bump is genuinely wanted:
+
+1. Open an issue: "bump `<dep>` `<old>` → `<new>`; touches `<file list>`".
+2. Branch + commit the matching call-site update + the dep bump in one PR.
+3. Normal review, normal CI (which now includes the compile gate).
+4. Squash-merge as usual.
+
+This is the same path any other code change takes. The point of the policy is not "majors are forbidden" — it's "majors are not unattended."
+
+== Migration
+
+The estate has ~140 repos shipping `.github/dependabot.yml` (audit 2026-05-26). Fan-out the major-ignore stanza via a campaign — the patch is the same shape per repo. Track under a follow-up standards issue (TODO: file once this PR lands).
+
+== Open questions
+
+* **Per-dep override**: some deps (e.g. `serde`, `tokio`) have unusually stable major bumps and might be safe to auto-merge anyway. Carve-outs should be added with explicit rationale per repo, not as a blanket rule.
+* **Security advisories**: a major bump that's also a security fix is a different shape. Dependabot's `security-updates` flow opens those separately; this policy does not block them. See https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates.
+
+== Cross-refs
+
+* https://github.com/hyperpolymath/standards/issues/297[standards#297] — the issue this document closes.
+* https://github.com/hyperpolymath/echidna/issues/92[echidna#92] — the real-world incident the policy is derived from.
+* https://github.com/hyperpolymath/echidna/pull/128[echidna#128] — the revert that recovered echidna.
+* https://github.com/hyperpolymath/standards/pull/299[standards#299] — `--locked` in rust-ci-reusable (the complementary CI-level fix).
