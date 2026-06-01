@@ -615,6 +615,107 @@ jobs:
           fi
           echo "✅ [R5b] Documentation version-string drift: clean."
 
+      - name: Canonical-reference drift (R5 generic)
+        # Repo-local canonical-reference rules. Reads
+        # `.github/canonical-references/*.{yml,yaml}` in the calling
+        # repo; each file declares one drift pattern with its
+        # canonical pointer. Skipped silently when the directory is
+        # absent — repos opt in by creating it.
+        #
+        # Generalises echidna's R5a (bare prover counts → docs/PROVER_COUNT.md)
+        # so sibling repos with their own canonical-reference cohorts
+        # (lemma counts for proven, stdlib fn counts for affinescript,
+        # proof-obligation counts for typed-wasm, rule counts for
+        # ephapax, …) can declare their drift patterns without
+        # carrying a per-repo workflow.
+        #
+        # Rule file shape:
+        #   id: short-slug
+        #   description: one-line summary
+        #   patterns: [POSIX-ERE strings]
+        #   canonical_pointer: path/to/single-source-of-truth.md
+        #   scope:
+        #     include: [list, of, files, to, scan]
+        #
+        # Patterns are POSIX-ERE (run through `grep -E`). Each
+        # listed include path is scanned line-by-line; a match emits
+        # a `::error::` annotation and the job fails non-zero.
+        # CHANGELOG.{md,adoc} and the rule files themselves are
+        # excluded automatically; the rule's own `canonical_pointer`
+        # is also excluded so the canonical doc can name what it
+        # is the canonical answer for.
+        run: |
+          set -uo pipefail
+          DIR=.github/canonical-references
+          if [ ! -d "$DIR" ]; then
+            echo "ℹ️  [R5] no $DIR/ — skipped (repo has not opted in)"
+            exit 0
+          fi
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "❌ [R5] python3 missing on runner — required for YAML rule parsing"
+            exit 2
+          fi
+          python3 - <<'PY'
+          import os, sys, glob, subprocess
+          try:
+              import yaml
+          except ImportError:
+              sys.exit("❌ [R5] PyYAML not installed on runner; install python3-yaml")
+
+          dir_ = ".github/canonical-references"
+          files = sorted(glob.glob(f"{dir_}/*.yml") + glob.glob(f"{dir_}/*.yaml"))
+          if not files:
+              print(f"ℹ️  [R5] {dir_}/ has no .yml/.yaml rules — skipped")
+              sys.exit(0)
+
+          total = 0
+          for rf in files:
+              with open(rf, encoding="utf-8") as fh:
+                  cfg = yaml.safe_load(fh)
+              if not isinstance(cfg, dict):
+                  print(f"❌ [R5] {rf}: top-level must be a mapping"); total += 1; continue
+              rid  = cfg.get("id", os.path.basename(rf))
+              desc = cfg.get("description", "")
+              pats = cfg.get("patterns") or []
+              canon = cfg.get("canonical_pointer", "")
+              scope = (cfg.get("scope") or {})
+              includes = scope.get("include") or []
+              if not pats or not includes:
+                  print(f"❌ [R5:{rid}] missing patterns or scope.include in {rf}")
+                  total += 1; continue
+              # exclude self-references
+              skip = set(["CHANGELOG.md", "CHANGELOG.adoc", rf])
+              if canon: skip.add(canon)
+              rule_hits = 0
+              for f_ in includes:
+                  if f_ in skip or not os.path.isfile(f_):
+                      continue
+                  for pat in pats:
+                      r = subprocess.run(
+                          ["grep", "-nE", pat, f_],
+                          capture_output=True, text=True,
+                      )
+                      if r.returncode == 0:
+                          for line in r.stdout.splitlines():
+                              ln_no, _, body = line.partition(":")
+                              tail = canon or "drop or move to a canonical source"
+                              print(f"::error file={f_},line={ln_no}::"
+                                    f"[R5:{rid}] {body}  →  route to {tail}")
+                              rule_hits += 1
+                      elif r.returncode > 1:
+                          print(f"❌ [R5:{rid}] grep error on {f_}: {r.stderr.strip()}")
+                          rule_hits += 1
+              if rule_hits:
+                  print(f"❌ [R5:{rid}] {rule_hits} hit(s). {desc}")
+              total += rule_hits
+
+          if total:
+              print()
+              print(f"❌ [R5] {total} canonical-reference drift hit(s) across {len(files)} rule(s).")
+              sys.exit(1)
+          print(f"✅ [R5] canonical-reference drift: clean across {len(files)} rule(s).")
+          PY
+
   quality:
     name: Code quality + docs
     runs-on: ${{ inputs.runs-on }}
