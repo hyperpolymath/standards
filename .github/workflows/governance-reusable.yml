@@ -572,6 +572,49 @@ jobs:
           [ "$R1" -gt 0 ] && { echo "❌ [R1] $R1 unversioned family-tool install(s) — pin tool: <name>@<ver>"; exit 1; }
           echo "✅ Tooling version integrity passed (R1 clean; R4 advisory via standards/tasks/tooling-integrity-lint.sh)"
 
+      - name: Documentation version-string drift (R5b)
+        # Estate canonical-reference drift policy. Forbids pinned
+        # `Version: x.y.z` strings in load-bearing top-level docs
+        # because they reliably go stale and disagree with each other
+        # (echidna had v1.5.0 in README.adoc, v2.3.0 in CLAUDE.md,
+        # v2.1.0 in Cargo.toml simultaneously — cleared by echidna#169
+        # / #170 / #171). CHANGELOG.md is the canonical release-history
+        # surface; Cargo.toml's [package].version is the canonical
+        # semver pin; the git log carries dates. Duplicating either
+        # in human prose invites drift.
+        #
+        # Scope: repo-root *.md + *.adoc only. Sub-tree historical
+        # docs (docs/handover/, docs/decisions/, docs/releases/,
+        # audit reports) are owner-managed snapshots and not in
+        # scope. CHANGELOG.{md,adoc} explicitly skipped.
+        #
+        # Companion rule R5a (bare prover counts) is repo-local where
+        # the count semantics are domain-specific — see
+        # `echidna/.github/workflows/governance-doc-drift.yml`.
+        run: |
+          set -uo pipefail
+          PATTERN='^[[:space:]]*[*_]{0,2}Version[*_]{0,2}[[:space:]]*[:=][[:space:]]*v?[0-9]+\.[0-9]+\.[0-9]+'
+          R5B=0
+          shopt -s nullglob
+          for doc in *.md *.adoc; do
+            [ -f "$doc" ] || continue
+            case "$doc" in CHANGELOG.md|CHANGELOG.adoc) continue ;; esac
+            while IFS= read -r hit; do
+              [ -n "$hit" ] || continue
+              echo "❌ [R5b] pinned version string: $doc:$hit"
+              R5B=$((R5B+1))
+            done < <(grep -nE "$PATTERN" "$doc" 2>/dev/null || true)
+          done
+          if [ "$R5B" -gt 0 ]; then
+            echo ""
+            echo "❌ [R5b] $R5B pinned version-string line(s) in load-bearing docs."
+            echo "Fix: drop the embedded version; defer to CHANGELOG.md (release"
+            echo "history) and Cargo.toml's [package].version (semver pin) or the"
+            echo "equivalent package manifest. Git log carries dates."
+            exit 1
+          fi
+          echo "✅ [R5b] Documentation version-string drift: clean."
+
   quality:
     name: Code quality + docs
     runs-on: ${{ inputs.runs-on }}
