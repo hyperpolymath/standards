@@ -1,5 +1,5 @@
 # Proof Spec: 007-lang (PRIVATE — Claude-only access)
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/007-lang`
 **Tier**: T2 — High (PRIVATE — Triple-confirm before release)
