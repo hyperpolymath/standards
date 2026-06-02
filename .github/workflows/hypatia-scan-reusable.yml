@@ -281,18 +281,41 @@ jobs:
           CJS
           node "$RUNNER_TEMP/hypatia-sarif.cjs"
 
+      - name: Probe code scanning availability
+        # Private repos without GitHub Advanced Security (and any repo with
+        # code scanning administratively disabled) reject upload-sarif with
+        # "Code scanning is not enabled for this repository". That's a
+        # legitimate consumer-side config choice, not a regression — skip
+        # rather than hard-fail. The empty 200 from /code-scanning/alerts
+        # means the feature is enabled and queryable; any non-2xx means it
+        # is not.
+        id: cs-probe
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/code-scanning/alerts" --jq 'length' >/dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Code scanning is not enabled on ${GITHUB_REPOSITORY}; SARIF upload will be skipped. Hypatia findings still land as a build artifact."
+          fi
+
       - name: Upload SARIF to GitHub code scanning
-        # Fork PRs get a read-only GITHUB_TOKEN, so security-events:write
-        # is unavailable and upload-sarif cannot publish — skip there
-        # rather than hard-fail (the push/schedule run on the default
-        # branch is the authoritative upload). Same-repo PRs and pushes
-        # do upload. This step is deliberately NOT continue-on-error:
-        # if the security-surface integration breaks we want a loud red,
-        # not a silently-ungated scanner (the exact failure mode #35
-        # exists to end). The empty-SARIF "clear stale alerts" path is
-        # handled in the converter above and does not error here.
+        # Skipped on three legitimate paths:
+        #   1. Fork PRs — GITHUB_TOKEN is read-only, security-events:write
+        #      unavailable, upload-sarif cannot publish. Push/schedule on
+        #      the default branch is the authoritative upload.
+        #   2. Code scanning administratively disabled — private repo
+        #      without Advanced Security, or owner-disabled feature.
+        #   3. The reusable still hard-fails on every OTHER error mode
+        #      (genuine permission regression, malformed SARIF, API outage),
+        #      so a silently-ungated scanner is still loud — exactly the
+        #      failure mode #35 exists to end.
         if: >-
           always() &&
+          steps.cs-probe.outputs.enabled == 'true' &&
           (github.event_name != 'pull_request' ||
            github.event.pull_request.head.repo.fork != true)
         uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98 # v3.28.1
