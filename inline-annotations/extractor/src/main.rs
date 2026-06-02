@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
 //
 // inline-annotations extractor — reference implementation
@@ -252,7 +252,7 @@ fn parse_attrs(s: &str) -> HashMap<String, String> {
 fn render_a2ml(anns: &[Annotation]) -> String {
     let now = iso8601_now();
     let mut s = String::new();
-    s.push_str("# SPDX-License-Identifier: PMPL-1.0-or-later\n");
+    s.push_str("# SPDX-License-Identifier: AGPL-3.0-or-later\n");
     s.push_str("# Emitted by inline-annotations extractor\n\n");
     s.push_str("@metadata:\n");
     s.push_str(&format!("extractor: inline-annotations\n"));

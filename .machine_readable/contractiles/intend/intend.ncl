@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Intend — north-star runner (verb is `intend`, file is `Intentfile.a2ml`)
 #
 # Pairs with: Intentfile.a2ml (same directory)

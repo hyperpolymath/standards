@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 #
 # Migrate hyperpolymath bot-directive SCM files to A2ML (TOML-shaped).
@@ -35,7 +35,7 @@ using Dates
 const REPOS_ROOT = "/var/mnt/eclipse/repos"
 const PREFERRED_DIR = ".machine_readable/bot_directives"
 const LEGACY_DIR = ".bot_directives"
-const SPDX_HEADER = "# SPDX-License-Identifier: PMPL-1.0-or-later"
+const SPDX_HEADER = "# SPDX-License-Identifier: AGPL-3.0-or-later"
 
 # ─── S-expression tokeniser ──────────────────────────────────────────────
 

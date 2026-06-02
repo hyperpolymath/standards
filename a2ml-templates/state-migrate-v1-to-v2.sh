@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Migrate a repo's STATE.a2ml from v1 (Scheme, bloated) to v2 (thin journal).
 #
 # Extracts: phase, next_action, last_action, blockers.
@@ -27,7 +27,7 @@ last_action="$(grep -A3 'session-history' "$V1" 2>/dev/null | grep -oE '"[^"]{1,
 today="$(date -u +%Y-%m-%d)"
 
 cat > "$V2" <<EOF
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Migrated from v1 by state-migrate-v1-to-v2.sh on $today
 
 @state(version="2.0"):

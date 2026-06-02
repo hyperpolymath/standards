@@ -33,7 +33,7 @@ say "== 1. Licensing → MPL-2.0 (REUSE) =="
 if grep -rlq "PMPL-1.0-or-later" $(git ls-files) 2>/dev/null; then
   # 1a. SPDX identifiers + the dual-license contradiction comment
   git ls-files -z | xargs -0 grep -lZ "PMPL-1.0-or-later" 2>/dev/null | xargs -0 -r sed -i \
-    -e 's|SPDX-License-Identifier: PMPL-1.0-or-later|SPDX-License-Identifier: MPL-2.0|g' \
+    -e 's|SPDX-License-Identifier: AGPL-3.0-or-later|SPDX-License-Identifier: MPL-2.0|g' \
     -e '/(PMPL-1\.0-or-later preferred; MPL-2\.0 required for Julia ecosystem)/d'
   # 1b. canonical LICENSE from the bundled MPL text (do NOT fabricate licence text)
   if [ -f LICENSES/MPL-2.0.txt ]; then

@@ -1,5 +1,5 @@
 # Archetype: a2ml-k9 (Parser/Validator)
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 **Applies to**: A2ML and K9 parsers, validators, and format tools
 
