@@ -1,5 +1,57 @@
 # CLAUDE.md - AI Assistant Instructions
 
+## License Policy — Manual Only (highest-priority guardrail)
+
+**Owner directive 2026-06-02 (verbatim):**
+
+> "mpl-2.0 is for my sole repos, all rights reserved is for 007,
+> agpl-3.0-or-later is for those shared with my son, and leave other
+> people's forked stuff alone … only palimpsest license for obvious
+> reasons should be talking about palipsest and palimpsest plasma, and
+> consent-aware-http, but in that case prospectively"
+
+### Five-way classification (mutually exclusive, exhaustive)
+
+| Category | License | Applies to |
+|---|---|---|
+| **1. Sole owner repos (default)** | `MPL-2.0` | Every repo the owner authored alone. ~all of `hyperpolymath/*` unless one of the other categories applies. |
+| **2. The 007 repo** | All Rights Reserved (ARR) | `hyperpolymath/007` specifically. Out-of-scope for any normalisation, scanning, or labelling. Surface to owner only. |
+| **3. Shared with son (Joshua)** | `AGPL-3.0-or-later` | Repos with son as co-author/maintainer. Examples: `idaptik`, `paint-type`. Permanent. |
+| **4. Third-party / forks** | DO NOT TOUCH | Whatever upstream chose. Never sweep, never normalise. Flag as out-of-scope if it surfaces in an audit. |
+| **5. Palimpsest carve-out (extremely narrow)** | `PMPL-1.0-or-later` | EXACTLY three repos: `palimpsest-license` + `palimpsest-plasma` + `consent-aware-http`. The first two retroactively; `consent-aware-http` **prospectively only** (don't flip existing content). NOWHERE ELSE. |
+
+### Hard rules for agents
+
+- **NEVER generate licence-change PRs without prior owner approval.** Manual,
+  per-file, owner-only. Triggered by neurophone#99 (auto-PR reverting PMPL →
+  MPL-2.0 across ~140 files; closed by owner 2026-06-02).
+- **NEVER sweep SPDX headers in bulk.** Every prior LLM sweep has scrambled
+  identifiers, mis-licensed third-party code, or reverted owner decisions.
+- **NEVER touch third-party / vendored / forked licence text or headers.**
+  Flag only — never edit.
+- **Findings about licence drift are FLAG-ONLY.** Hypatia / gitbot-fleet emit
+  these as `:review` strategy, not `:auto_execute`. Downstream pipelines MUST
+  honour the cap.
+- **New files an agent creates may carry the correct SPDX from birth** (that
+  is authoring, not relicensing) — but the SPDX choice must match the repo's
+  classification above, not a hard-coded default.
+
+### Canonical sources
+
+- `~/.claude/projects/.../memory/feedback_estate_license_policy_umbrella.md` —
+  canonical estate-level policy (supersedes the earlier `reference_estate_licensing_policy`).
+- `~/.claude/projects/.../memory/feedback_no_automated_licence_edits.md` —
+  no-sweep mandate.
+- `hyperpolymath/hypatia` `lib/rules/cicd_rules.ex` — `license_finding_strategy/0`
+  + `license_finding_severity_cap/1` + `license_related_finding?/1` +
+  `owner_license_classification/0`: the canonical Elixir-side cap.
+- `hyperpolymath/gitbot-fleet` `scripts/dispatch-runner.sh` — `execute_entry()`
+  early-exit refusal gate for any licence/SPDX recipe or category.
+- `hyperpolymath/gitbot-fleet` `scripts/fix-license-{hygiene,file}.sh` +
+  `fix-missing-spdx.sh` — all three carry `exit 1` refusal banners at the top.
+
+---
+
 ## Machine-Readable Artefacts
 
 Every Hyperpolymath repo must have `.machine_readable/` with these 6 A2ML files:
