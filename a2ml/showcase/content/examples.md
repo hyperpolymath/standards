@@ -13,7 +13,7 @@ Real-world A2ML manifests demonstrating the format in practice. Each example sho
 The simplest possible A2ML file. Declares an agent with a single self-attestation.
 
 ```
-;; SPDX-License-Identifier: PMPL-1.0-or-later
+;; SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Greeter Bot
 
@@ -40,7 +40,7 @@ This is enough for tooling to identify the agent, understand what it does, and r
 A GitHub Actions bot that runs in CI pipelines, with a verified attestation from the security team.
 
 ```
-;; SPDX-License-Identifier: PMPL-1.0-or-later
+;; SPDX-License-Identifier: AGPL-3.0-or-later
 
 # rhodibot — Repository Automation Agent
 
@@ -110,7 +110,7 @@ action: allow-execution
 Hypatia, a neurosymbolic security scanner, declaring its scanning capabilities with an audited attestation.
 
 ```
-;; SPDX-License-Identifier: PMPL-1.0-or-later
+;; SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Hypatia — Neurosymbolic Security Scanner
 
@@ -184,7 +184,7 @@ signature: sha256:c91e5a3b0d...
 Multiple agents referencing each other's attestations to establish a trust network for a deployment pipeline.
 
 ```
-;; SPDX-License-Identifier: PMPL-1.0-or-later
+;; SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Deployment Pipeline — Agent Trust Network
 

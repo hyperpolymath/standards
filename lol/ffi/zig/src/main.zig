@@ -6,7 +6,7 @@
 // LOL is called as a service: consumers call lol_init() with a corpus
 // data directory, perform translation lookups, then call lol_free().
 //
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 
 const std = @import("std");

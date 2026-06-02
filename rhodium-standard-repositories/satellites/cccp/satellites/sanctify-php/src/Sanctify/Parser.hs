@@ -1,5 +1,5 @@
 -- | PHP Parser using Megaparsec
--- SPDX-License-Identifier: PMPL-1.0-or-later
+-- SPDX-License-Identifier: AGPL-3.0-or-later
 module Sanctify.Parser
     ( -- * Main parsing functions
       parsePhpFile

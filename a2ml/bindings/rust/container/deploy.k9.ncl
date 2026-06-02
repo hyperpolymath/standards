@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # deploy.k9.ncl — {{PROJECT_NAME}} deployment component (Hunt level)
 #
 # k9-svc deployment specification with full pedigree (L1-L5).
