@@ -1,4 +1,4 @@
-% SPDX-License-Identifier: PMPL-1.0-or-later
+% SPDX-License-Identifier: AGPL-3.0-or-later
 % Security Error Knowledge Base for GitHub Workflows
 % Designed for use with Virtuoso Open Source and Qwen3 SLM augmentation
 
@@ -49,7 +49,7 @@
 
     fix('ERR-SEC-001', 'uses: ACTION@VERSION', 'uses: ACTION@SHA # VERSION').
     fix('ERR-SEC-002', '(no permissions)', 'permissions: read-all').
-    fix('ERR-LIC-001', '(file start)', '# SPDX-License-Identifier: PMPL-1.0-or-later').
+    fix('ERR-LIC-001', '(file start)', '# SPDX-License-Identifier: AGPL-3.0-or-later').
 
     % SHA pinning reference table
     :- public(pinned_sha/3).

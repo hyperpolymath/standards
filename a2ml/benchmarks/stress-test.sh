@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Stress testing A2ML parser with large, real-world documents
 
 set -euo pipefail
