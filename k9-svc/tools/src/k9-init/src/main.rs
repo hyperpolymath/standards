@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //! k9-init: Scaffold new K9 contractiles from templates
 
 #![forbid(unsafe_code)]
@@ -300,7 +300,7 @@ fn generate_contractile(config: &ContractileConfig) -> Result<String> {
 }
 
 fn generate_minimal_template(config: &ContractileConfig) -> String {
-    format!(r#"# SPDX-License-Identifier: PMPL-1.0-or-later
+    format!(r#"# SPDX-License-Identifier: AGPL-3.0-or-later
 # K9 Contractile: {}
 # Security Level: {}
 # Author: {}
@@ -380,7 +380,7 @@ fn generate_minimal_template(config: &ContractileConfig) -> String {
 
 fn generate_webserver_template(config: &ContractileConfig, variant: &str) -> String {
     // Similar structure but with web server specific commands
-    format!(r#"# SPDX-License-Identifier: PMPL-1.0-or-later
+    format!(r#"# SPDX-License-Identifier: AGPL-3.0-or-later
 # K9 Contractile: {} ({} Web Server)
 # Security Level: {}
 # Author: {}

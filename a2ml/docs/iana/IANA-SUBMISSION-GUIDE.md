@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 # IANA Media Type Submission Guide
 
 Guide for submitting A2ML and K9 media type registrations to IANA.
