@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: MPL-2.0
+= No Hand-Authored JavaScript (Source) Policy
+:revdate: 2026-06-02
+:status: ACTIVE (warn-first rollout)
+:issue-254: hyperpolymath/standards#254
+
+This document is the canonical estate-wide statement that estate-authored code
+MUST NOT contain hand-authored JavaScript or TypeScript *source*. It complements
+rather than replaces the existing machinery:
+
+* `docs/JS-RUNTIME-POLICY.adoc` — the JS *runtime & package-manager* hierarchy
+  (Deno > Bun > pnpm > npm) and the lockfile / `node_modules` rules.
+* `.claude/CLAUDE.md` §JavaScript Exemptions / §TypeScript Exemptions — the
+  human-readable mirror of the hypatia carve-outs.
+* hypatia `cicd_rules/javascript_detected`, `javascript_jsx_detected`,
+  `typescript_detected` — the SINGLE SOURCE OF TRUTH for detection and the
+  `path_allow_prefixes` carve-outs. This document does not override it.
+
+== The rule
+
+Estate-authored application logic is written in AffineScript (compiled to
+typed-wasm) or, for performance / systems / ABI / FFI work, in Rust + Zig
+compiled to WebAssembly with Idris2-proven ABIs. Hand-authored `.js`, `.jsx`,
+`.mjs`, `.cjs`, `.ts`, and `.tsx` source is therefore not an accepted
+destination for new estate code.
+
+This is a deliberate tightening of the earlier "JavaScript banned where
+AffineScript cannot reach" stance ({issue-254}): the target is *no* hand-authored
+JavaScript, not merely *no unnecessary* JavaScript.
+
+== What this does NOT cover (not "JavaScript source")
+
+The following are out of scope and MUST NOT be treated as violations:
+
+* *Generated / compiled output* — `*.res.js`, `*.res.mjs`, `lib/js/**`,
+  `lib/es6/**`, `lib/bs/**`, `out/**`, `dist/**`, `.deno/**`, `generated/**`,
+  `*.min.js`. Compiler output is not source.
+* *The build-time wasm host shim* — the generated wasm-bindgen-class glue that
+  lets a wasm module reach the browser DOM/canvas. It is generated, not authored,
+  and unavoidable in a browser host (wasm has no direct DOM access). "No
+  JavaScript" means no hand-authored application JavaScript.
+* *Declaration headers* — `*.d.ts` (FFI / library type boundaries).
+* *Vendored / upstream* — `node_modules/**`, `deps/**`, and vendored forks.
+* *Documented carve-outs* — every `path_allow_prefixes` entry on the hypatia
+  rules (MCP / plugin hosts, tooling configs, bootstrap shims, consumer-facing
+  bindings, VSCode extension entry points, archived repos, etc.). hypatia is
+  authoritative; the CLAUDE.md tables mirror it.
+
+== Enforcement (two deliberately distinct layers)
+
+[cols="1,3", options="header"]
+|===
+| Layer | Behaviour
+
+| hypatia `cicd_rules/javascript_detected` (authoritative)
+| HARD-BLOCK for NEW `.js` / `.jsx` in non-carve-out paths, with an inline
+  pragma escape (`// hypatia: allow cicd_rules/javascript_detected -- <reason>`).
+  Existing files are grandfathered while the {issue-254} migration proceeds.
+
+| `no-js-scan.yml` (this rollout — WARN-FIRST)
+| NON-BLOCKING companion. On any push / PR touching JS or TS it reports the full
+  count and list of hand-authored JS/TS to the run summary, so each repo's
+  migration surface is visible. It never fails the build. It excludes only the
+  generated / vendored / declaration files listed above. By owner decision a
+  repo flips from warn to block once its surface reaches zero.
+|===
+
+== Rollout status (2026-06-02)
+
+Warn-first `no-js-scan.yml` added to: `standards`, `burble`, `gossamer`.
+`gossamer` is already at zero hand-authored JS/TS. `paint-type` joins when write
+access is available — its `src/ui/app.js` is the increment-0 MVP UI, slated to
+move into Rust/wasm per that repo's ADR-0002. Other estate repos adopt via
+template propagation.
