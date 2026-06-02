@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Batch-run the inline-annotations extractor across an estate.
 # Emits one A2ML file per repo under OUT_DIR.
 #

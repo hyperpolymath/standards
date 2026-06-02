@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Overlay Protocol FFI Integration Tests
 //
 // Tests the FFI from an external consumer's perspective, verifying

@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno test --allow-read --allow-write --allow-run
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // K9 Coordination Protocol — Fuzz Tests
 // Feed malformed and adversarial input to find crashes and undefined behaviour.
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>

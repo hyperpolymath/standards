@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Adjust — accessibility runner
 #
 # Pairs with: Adjustfile.a2ml (same directory)
