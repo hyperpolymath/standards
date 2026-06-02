@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: PMPL-1.0-or-later
+-- SPDX-License-Identifier: AGPL-3.0-or-later
 -- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 --
 -- k9-writer.lua — Pandoc custom writer for K9 (Self-Validating Components)
@@ -28,7 +28,7 @@ function Writer(doc, opts)
   local function add(s) table.insert(buffer, s) end
 
   -- SPDX header
-  add("# SPDX-License-Identifier: PMPL-1.0-or-later")
+  add("# SPDX-License-Identifier: AGPL-3.0-or-later")
 
   -- Extract metadata from the document
   local meta = doc.meta or {}

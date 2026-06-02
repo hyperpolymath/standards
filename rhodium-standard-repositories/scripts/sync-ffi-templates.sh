@@ -4,7 +4,7 @@
 # This script applies standard templates for Zig FFI and Idris2 ABI to repos
 # that use the common hyperpolymath FFI pattern.
 #
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 set -e
 

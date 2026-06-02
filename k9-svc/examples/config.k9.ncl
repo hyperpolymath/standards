@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # config.k9.ncl - Example Yard-level component (Nickel validation)
 #
 # Security Level: 'Yard (Nickel evaluation, no I/O)
