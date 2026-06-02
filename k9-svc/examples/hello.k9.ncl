@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # hello.k9.ncl - Example K9 Self-Validating Component
 #
 # This is a minimal .k9 component demonstrating the pedigree structure.

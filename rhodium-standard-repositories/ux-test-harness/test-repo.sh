@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # UX Test Orchestrator — runs a repo through all platform containers
 #
 # Usage: ./test-repo.sh /path/to/repo [platform...]

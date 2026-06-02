@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //! k9-sign - Ed25519 signing and verification for K9 Hunt-level components
 //!
 //! This is a memory-safe Rust rewrite of sign.sh, eliminating:
