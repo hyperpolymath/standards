@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
 //
 // k9-init — scaffold a coordination.k9 from a repo's existing 6a2 A2ML files.
@@ -264,7 +264,7 @@ fn render_k9(f: &RepoFacts) -> String {
     let today = "TODO-DATE";
     let mut s = String::new();
     s.push_str("K9!\n");
-    s.push_str("# SPDX-License-Identifier: PMPL-1.0-or-later\n");
+    s.push_str("# SPDX-License-Identifier: AGPL-3.0-or-later\n");
     s.push_str(&format!(
         "# coordination.k9 — AI Coordination Protocol for {}\n",
         f.repo_name

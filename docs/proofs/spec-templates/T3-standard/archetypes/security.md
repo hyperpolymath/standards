@@ -1,5 +1,5 @@
 # Archetype: security (Security/Crypto Tool)
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 **Applies to**: Security tools, crypto wrappers, auth, access control
 

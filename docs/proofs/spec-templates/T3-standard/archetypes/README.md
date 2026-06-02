@@ -1,5 +1,5 @@
 # T3 Archetype Specs
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 T3 repos share common proof patterns. Each T3 repo's spec references ONE archetype and lists repo-specific items on top.
 

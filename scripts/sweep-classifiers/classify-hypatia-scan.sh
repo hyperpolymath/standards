@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # classify-hypatia-scan.sh — classify per-repo hypatia-scan.yml for #193 sweep.
 #
 # Canonical (standards/.github/workflows/hypatia-scan.yml): 416 lines,

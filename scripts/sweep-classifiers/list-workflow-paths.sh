@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # list-workflow-paths.sh — enumerate every (repo, path, blob-sha) tuple
 # for a given workflow filename across the hyperpolymath estate, INCLUDING
 # nested copies in monorepos.

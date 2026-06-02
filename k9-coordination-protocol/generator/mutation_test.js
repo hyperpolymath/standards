@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno test --allow-read --allow-write --allow-run --allow-env
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // K9 Coordination Protocol — Mutation Tests
 //
 // Systematically mutate the generator source and verify the output changes.
