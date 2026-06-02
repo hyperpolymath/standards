@@ -342,7 +342,16 @@ jobs:
             | grep -v venv | grep -v __pycache__ || true)
           MAKE_FILES=$(git ls-files 'Makefile' 'Makefile.*' '*.mk' \
             | grep -v '\.github/' || true)
-          JAVA_FILES=$(git ls-files '*.java' '*.kt' '*.kts' || true)
+          # Platform-required JVM shims carve-out 2026-06-02:
+          # Java is permitted only in Android source trees
+          # (android/**/src/**/*.java) because Android instantiates
+          # Service/BroadcastReceiver/AppWidgetProvider/Activity classes by
+          # name at platform boundaries — Rust/Zig cannot provide JVM
+          # bytecode for these. Each Android Java shim must be a minimal
+          # delegating wrapper (typically <10 LoC) that JNIs into Rust/Zig
+          # immediately. Kotlin (*.kt, *.kts) remains banned outright.
+          JAVA_FILES=$(git ls-files '*.java' '*.kt' '*.kts' \
+            | grep -vE '(^|/)android/.*/src/.*\.java$' || true)
           SWIFT_FILES=$(git ls-files '*.swift' || true)
           DART_FILES=$(git ls-files '*.dart' 'pubspec.yaml' || true)
           # V-lang detected by manifest (v.mod / vpkg.json); the .v extension
