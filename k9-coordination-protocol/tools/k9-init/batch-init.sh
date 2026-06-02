@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Batch-run k9-init across multiple repos.
 #
 # Usage: batch-init.sh [--dry-run] <repo-root-dir>

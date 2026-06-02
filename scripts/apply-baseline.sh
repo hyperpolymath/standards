@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # apply-baseline.sh — filter Hypatia findings against a per-repo baseline.
 #

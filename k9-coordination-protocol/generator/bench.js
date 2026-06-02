@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno bench --allow-read --allow-write --allow-run
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // K9 Coordination Protocol — Benchmarks
 //
 // Measures latency, throughput, and memory for the generator.

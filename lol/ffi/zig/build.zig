@@ -1,5 +1,5 @@
 // LOL i18n Service — FFI Build Configuration
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 //
 // Builds liblol as both shared and static libraries.

@@ -2,7 +2,7 @@
 ;;; lib/state-kanren.scm — minikanren Integration
 ;;; ==================================================
 ;;;
-;;; SPDX-License-Identifier: PMPL-1.0-or-later
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
 ;;; Copyright (c) 2025 Jonathan D.A. Jewell
 ;;;
 ;;; Relational/logic programming for STATE queries.

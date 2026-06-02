@@ -1,5 +1,5 @@
 # Proof Spec: k9-deno
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/k9-deno`
 **Tier**: T3 — Standard

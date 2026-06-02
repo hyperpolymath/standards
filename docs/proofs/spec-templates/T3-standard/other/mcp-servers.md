@@ -1,5 +1,5 @@
 # Proof Spec: mcp-servers
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/mcp-servers`
 **Tier**: T3 — Standard

@@ -1,5 +1,5 @@
 # Proof Spec: k9_gleam
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/k9_gleam`
 **Tier**: T3 — Standard

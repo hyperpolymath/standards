@@ -2,7 +2,7 @@
 ;;; lib/state-graph.scm — Dependency Graph Visualization
 ;;; ==================================================
 ;;;
-;;; SPDX-License-Identifier: PMPL-1.0-or-later
+;;; SPDX-License-Identifier: AGPL-3.0-or-later
 ;;; Copyright (c) 2025 Jonathan D.A. Jewell
 ;;;
 ;;; Generates GraphViz DOT and Mermaid diagrams from

@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: PMPL-1.0-or-later
+-- SPDX-License-Identifier: AGPL-3.0-or-later
 -- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
 --
 -- a2ml-writer.lua — Pandoc custom writer for A2ML (Attested Markup Language)
@@ -15,7 +15,7 @@ function Writer(doc, opts)
   local function add(s) table.insert(buffer, s) end
 
   -- SPDX header
-  add(";; SPDX-License-Identifier: PMPL-1.0-or-later")
+  add(";; SPDX-License-Identifier: AGPL-3.0-or-later")
   add("")
 
   for _, block in ipairs(doc.blocks) do

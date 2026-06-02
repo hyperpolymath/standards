@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: PMPL-1.0-or-later
+-- SPDX-License-Identifier: AGPL-3.0-or-later
 -- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
 --
 -- a2ml-reader.lua — Pandoc custom reader for A2ML (Attested Markup Language)

@@ -1,5 +1,5 @@
 K9!
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # RSR Compliance Checklist
 #
 # This K9 component defines the compliance checklist for Rhodium Standard
@@ -45,7 +45,7 @@ rsr_standards = {
 
     file_headers = {
       require_spdx = true,
-      spdx_format = "# SPDX-License-Identifier: PMPL-1.0-or-later",
+      spdx_format = "# SPDX-License-Identifier: AGPL-3.0-or-later",
       require_copyright = false,
     },
   },
