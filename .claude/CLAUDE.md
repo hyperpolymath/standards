@@ -156,6 +156,7 @@ Existing pre-2026-05-25 `.res`/`.resi` outside these carve-outs is grandfathered
 |---|---|---|---|
 | `**/bsconfig.json`, `**/*.config.res` | tooling | Build orchestration, not application code. | When AffineScript ships native equivalents. |
 | `rescript/**`, `servers/**`, `repos-monorepo/**`, `linguist/**` | upstream fork | Not estate-authored — vendored upstream code (ReScript compiler, third-party MCP servers, mass aggregator, GitHub linguist samples). | Never — upstream fork. |
+| `zotpress/**` | upstream fork | Upstream WordPress plugin fork (`hyperpolymath/hyperpolymath/zotpress`); not estate-authored, kept in tree as a vendored fork. Mirrors the per-repo `.hypatia-ignore` entry in hyperpolymath/hyperpolymath#20. | Never — upstream fork. |
 | `hyperpolymath-archive/**` | archived | GitHub-archived repos cannot accept PRs; ReScript is dormant. | Never — archived. |
 | `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Mix-style vendored deps and Node-style node_modules. | Never — vendored upstream. |
 | `**/vscode/**` (covers `editors/vscode/`, `extensions/vscode/`, `clients/vscode/`) | editor-host extension | VSCode extension entry points target the `vscode` extension-host API. | When AffineScript ships the VSCode-extension API binding (top-50 roadmap, unshipped). |
