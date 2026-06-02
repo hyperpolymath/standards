@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # K9-SVC Quick Performance Benchmark
 #
 # Minimal benchmark focusing on core K9 components without external dependencies.

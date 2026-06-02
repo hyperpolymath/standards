@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // a2ml-lsp — Language Server Protocol server for A2ML (Attested Markup Language).
 //
