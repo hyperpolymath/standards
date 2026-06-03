@@ -98,12 +98,41 @@ permissions:
   contents: read
 
 jobs:
+  # Guard on mix.exs so the wrapper is safe to add unconditionally. This must
+  # be a checked-out step, NOT a job-level `if: hashFiles(...)`: job `if:` is
+  # evaluated server-side before any checkout, so hashFiles() sees an empty
+  # workspace and always returns '' — which silently skipped the test job on
+  # EVERY repo, Elixir or not. The detect job checks out and exposes a real
+  # boolean output the test job gates on.
+  detect:
+    timeout-minutes: 5
+    name: Detect mix.exs
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+    outputs:
+      has_mix: ${{ steps.detect.outputs.has_mix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+      - name: Detect mix.exs
+        id: detect
+        run: |
+          if [ -f "${{ inputs.working_directory }}/mix.exs" ]; then
+            echo "has_mix=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_mix=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     timeout-minutes: 20
     name: Compile + test
     runs-on: ${{ inputs.runs-on }}
-    # Guard on mix.exs so the wrapper is safe to add unconditionally.
-    if: ${{ hashFiles(format('{0}/mix.exs', inputs.working_directory)) != '' }}
+    needs: detect
+    if: ${{ needs.detect.outputs.has_mix == 'true' }}
     permissions:
       contents: read
     env:
