@@ -11,18 +11,31 @@
 #   * TOPOLOGY.md                      — the human-readable map, derived
 #       from the registry + STATE.a2ml so it can never freeze again.
 #
-# `source_hash` is computed from `git ls-files -s` over each home path:
-# that listing already pins every tracked file's blob SHA + path, so any
-# content change under a home changes its hash. Hypatia rule HYP-S006
-# (registry-staleness) compares the recorded hash against a fresh compute
-# and emits a `doc.drift` finding when they diverge — drift becomes a
-# detected, routed event instead of something noticed 60 days later.
+# The registry indexes two kinds of spec:
+#   * LOCAL specs — homed in this monorepo. `source_hash` is computed from
+#     `git ls-files -s <home>`: that listing already pins every tracked
+#     file's blob SHA + path, so any content change under a home changes
+#     its hash.
+#   * EXTERNAL specs — language/service-coupled specs whose source-of-truth
+#     deliberately lives in ANOTHER repo (e.g. the AffineScript .affine /
+#     .affex / .affmap standards, SSOT = hyperpolymath/affinescript). We
+#     record a verified POINTER (canonical_url + version_pin + a recorded
+#     source_hash), never a copy — duplicating the normative text would
+#     create two sources of truth. The recorded source_hash is PINNED in
+#     the EXTERNAL_SPECS table below (sentinel until upstream lands); the
+#     OFFLINE generator emits it verbatim so `--check` stays deterministic.
+#
+# Hypatia rule HYP-S006 (hypatia-rules/registry-staleness.a2ml) recomputes
+# LOCAL hashes from the tree and (network-capable, estate-side) re-fetches
+# EXTERNAL canonical_urls, emitting a `doc.drift` finding when a recorded
+# hash goes stale.
 #
 # Principles (do not violate):
 #   * Honest. Only specs whose home directory exists are listed. A missing
 #     home is reported to stderr, never silently invented.
 #   * Deterministic + idempotent. Run twice → byte-identical output.
 #   * No network, no commit, no push. Run on a branch; review the diff.
+#     (External source_hashes are RECORDED here, never fetched at gen time.)
 #
 # Usage:  bash scripts/build-registry.sh          # write artefacts
 #         bash scripts/build-registry.sh --check   # verify, non-zero on drift
@@ -76,6 +89,30 @@ hypatia-rules|integration|hypatia-rules/|Standards Hypatia Rules|the dogfooding 
 a2ml-templates|integration|a2ml-templates/|A2ML Templates|copy-in templates for the 7 A2ML files
 TSV
 
+# ---------------------------------------------------------------------------
+# External spec table — language/service-coupled specs whose SSOT lives in
+# ANOTHER repo. The registry holds a verified POINTER, never a copy.
+# Columns: id | stream | spec_kind | owning_repo | canonical_url | version_pin |
+#          format_version | source_hash | media_type | lineage | name | route
+#   * spec_kind     ∈ language-coupled | service-coupled
+#   * format_version: only for regenerable artefacts whose format version is
+#       tracked INDEPENDENTLY of the language version_pin (e.g. .affex). Empty
+#       otherwise. (owner directive 2026-06-03)
+#   * source_hash   : RECORDED here (sentinel `PENDING-FIRST-SYNC` until the
+#       upstream spec lands). NEVER fetched at generation time — HYP-S006 does
+#       the network-side verification. NEVER fabricate a hash.
+# Field set ratified by owner 2026-06-03: 7 base (name/canonical_url/owning_repo/
+# version_pin/source_hash/conformance_level/last_synced) + provenance
+# (source_hash_algo/spec_kind/media_type/lineage). conformance_level is "draft"
+# and last_synced "never" until first sync, so they are emitted by the writer,
+# not carried per-row. source_hash_algo is sha256 (md5/sha1 are banned).
+# ---------------------------------------------------------------------------
+read -r -d '' EXTERNAL_SPECS <<'TSV' || true
+affine-spec|language|language-coupled|hyperpolymath/affinescript|https://github.com/hyperpolymath/affinescript/blob/main/spec/affine.adoc|v2.0.0||PENDING-FIRST-SYNC|application/vnd.affinescript.affine|affinescript:affine@2|AffineScript .affine (faces / source documents)|faces, canonical-lowering invariant, canonical islands, idiom packs, mimicry bindings, project face policy
+affex-manifest|language|language-coupled|hyperpolymath/affinescript|https://github.com/hyperpolymath/affinescript/blob/main/spec/affex.adoc|v2.0.0|2|PENDING-FIRST-SYNC|application/vnd.affinescript.affex|affinescript:affex@2|AffineScript .affex (face-interop manifest)|derived regenerable manifest; declaration heads not full bodies; format_version bumps independently
+affmap-provenance|language|language-coupled|hyperpolymath/affinescript|https://github.com/hyperpolymath/affinescript/blob/main/spec/affmap.adoc|v2.0.0||PENDING-FIRST-SYNC|application/vnd.affinescript.affmap|affinescript:affmap@2|AffineScript .affmap (provenance)|provenance format; own pointer for independent staleness tracking
+TSV
+
 # Pick the canonical human doc for a home: README.adoc > README.md > first *.adoc spec.
 canonical_doc() {
   local home="$1"
@@ -107,15 +144,19 @@ emit_registry() {
 # Regenerate with:  bash scripts/build-registry.sh   (or: just registry)
 # Source of truth:  the SPECS table in scripts/build-registry.sh + the file tree.
 #
-# Each entry's \`source_hash\` is a sha256 over \`git ls-files -s <home>\`, so it
-# changes whenever any tracked file under the spec's home changes. Hypatia rule
-# HYP-S006 (hypatia-rules/registry-staleness.a2ml) recomputes these and emits a
+# LOCAL entries: \`source_hash\` is a sha256 over \`git ls-files -s <home>\`, so it
+# changes whenever any tracked file under the spec's home changes.
+# EXTERNAL entries (kind = "external"): a verified POINTER to a spec whose SSOT
+# lives in another repo. \`source_hash\` is RECORDED (sentinel PENDING-FIRST-SYNC
+# until upstream lands), not computed locally — the offline generator emits it
+# verbatim. Hypatia rule HYP-S006 (hypatia-rules/registry-staleness.a2ml)
+# recomputes LOCAL hashes and re-fetches EXTERNAL canonical_urls, emitting a
 # \`doc.drift\` finding (strategy :review) when a recorded hash goes stale.
 
 [registry]
 version = "1.0.0"
 generator = "scripts/build-registry.sh"
-hash_algorithm = "sha256(git ls-files -s <home>)"
+hash_algorithm = "sha256(git ls-files -s <home>)  # local; external: recorded pin"
 entry_count = ${ENTRY_COUNT}
 
 [registry.streams]
@@ -148,6 +189,43 @@ source_hash = "sha256:${hash}"
 route = "${route}"
 ENTRY
   done <<< "$SPECS"
+
+  # External pointers — verified references to specs whose SSOT is another
+  # repo. Emitted from the recorded pin (no home, no local hash compute).
+  while IFS='|' read -r id stream spec_kind owning_repo canonical_url version_pin format_version source_hash media_type lineage name route; do
+    [ -z "$id" ] && continue
+    local sync_status conformance
+    if [ "$source_hash" = "PENDING-FIRST-SYNC" ]; then
+      sync_status="awaiting-upstream"; conformance="draft"
+    else
+      sync_status="verified"; conformance="normative"
+    fi
+    cat <<ENTRY
+
+[[spec]]
+id = "${id}"
+name = "${name}"
+stream = "${stream}"
+kind = "external"
+spec_kind = "${spec_kind}"
+owning_repo = "${owning_repo}"
+canonical_url = "${canonical_url}"
+version_pin = "${version_pin}"
+source_hash = "${source_hash}"
+source_hash_algo = "sha256"
+conformance_level = "${conformance}"
+last_synced = "never"
+sync_status = "${sync_status}"
+media_type = "${media_type}"
+lineage = "${lineage}"
+route = "${route}"
+ENTRY
+    [ -n "$format_version" ] && printf 'format_version = "%s"  # tracked independently of version_pin\n' "$format_version"
+  done <<< "$EXTERNAL_SPECS"
+
+  # NB: .affcite.a2ml is an A2ML document under the CodeCite citation profile;
+  # its citation contents live in that artefact inside the AffineScript repo,
+  # not here and not in .affex — so it is not a separate registry pointer.
 
   printf '\n### End of REGISTRY.a2ml\n'
 }
@@ -197,8 +275,8 @@ HEADER
       readiness)  label="Readiness grading — ARG / FRG / CRG / TRG";;
       integration)label="Integration — registry, hypatia rules, templates (Stream 3)";;
     esac
-    # only print the section if it has rows
-    if grep -q "|${s}|" <<< "$SPECS"; then
+    # print the section if EITHER local or external specs populate this stream
+    if grep -q "|${s}|" <<< "$SPECS" || grep -q "|${s}|" <<< "$EXTERNAL_SPECS"; then
       printf '### %s\n\n' "$label"
       printf '| Spec | Home | If you want… |\n|---|---|---|\n'
       while IFS='|' read -r id stream home name route; do
@@ -207,6 +285,12 @@ HEADER
         [ -d "$home" ] || continue
         printf '| %s | [`%s`](%s) | %s |\n' "$name" "$home" "$home" "$route"
       done <<< "$SPECS"
+      # external pointers in this stream (SSOT lives in another repo)
+      while IFS='|' read -r id stream spec_kind owning_repo canonical_url version_pin format_version source_hash media_type lineage name route; do
+        [ -z "$id" ] && continue
+        [ "$stream" = "$s" ] || continue
+        printf '| %s | [`%s`](%s) `@ %s` ⇗ | %s |\n' "$name" "$owning_repo" "$canonical_url" "$version_pin" "$route"
+      done <<< "$EXTERNAL_SPECS"
       printf '\n'
     fi
   done
@@ -227,7 +311,7 @@ CI (`registry-verify.yml`) runs `--check` and fails the build if either is stale
 FOOTER
 }
 
-ENTRY_COUNT="$(grep -c '^[a-z0-9]' <<< "$SPECS" || true)"
+ENTRY_COUNT="$(( $(grep -c '^[a-z0-9]' <<< "$SPECS" || true) + $(grep -c '^[a-z0-9]' <<< "$EXTERNAL_SPECS" || true) ))"
 
 if [ "$MODE" = "check" ]; then
   tmp_r="$(mktemp)"; tmp_t="$(mktemp)"
