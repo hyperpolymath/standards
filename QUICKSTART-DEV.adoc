@@ -1,13 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Template: QUICKSTART-DEV.adoc — clone → build → test → PR
-// Replace standards, {{BUILD_CMD}}, {{TEST_CMD}}, {{LANG_STACK}} with actuals
+// QUICKSTART-DEV.adoc — working on the standards monorepo itself
 = standards — Quick Start for Developers
 :toc:
 :toclevels: 2
 
+[NOTE]
+Working *on* the standards themselves. Canonical entry points:
+link:README.adoc[README.adoc] (human), link:0-AI-MANIFEST.a2ml[0-AI-MANIFEST.a2ml]
+(agent), link:.machine_readable/REGISTRY.a2ml[REGISTRY.a2ml] (spec index).
+
 == Tech Stack
 
-{{LANG_STACK}}
+The *product* is the specs (AsciiDoc + A2ML). The code is reference
+implementations and language bindings that prove them:
+
+* *Rust/SPARK* — `a2ml/bindings/rust`, `k9-svc/bindings/rust`
+* *Deno* — protocol reference impls (`axel-protocol`, `0-ai-gatekeeper-protocol/mcp-repo-guardian`)
+* *Zig* — FFI/reference targets
+* *AsciiDoc / A2ML* — the specs, templates, and machine-readable metadata
+
+Language + licence policy is binding: link:.claude/CLAUDE.md[.claude/CLAUDE.md].
 
 == Set Up Development Environment
 
@@ -38,14 +50,14 @@ just setup-dev
 
 [source,bash]
 ----
-{{BUILD_CMD}}
+just build          # builds the Rust/Zig sub-project artefacts
 ----
 
 == Test
 
 [source,bash]
 ----
-{{TEST_CMD}}
+just test           # runs every sub-project test suite
 ----
 
 == Project Structure
@@ -53,16 +65,30 @@ just setup-dev
 [source]
 ----
 standards/
-├── src/                  # Source code
-├── src/abi/              # Idris2 ABI definitions (if applicable)
-├── ffi/zig/              # Zig FFI bridge (if applicable)
-├── tests/                # Test suite
-├── docs/                 # Documentation
-├── .machine_readable/    # Checkpoint files (STATE, META, ECOSYSTEM)
+├── README.adoc           # Human front door (routing table)
+├── 0-AI-MANIFEST.a2ml    # Machine front door (agent entry)
+├── REGISTRY.adoc         # Prose: the registry + drift automation
+├── a2ml/  k9-svc/  *-a2ml/   # Foundation specs (Stream 1)
+├── *-protocol/           # Protocol specs
+├── *-readiness-grades/   # ARG / FRG / CRG / TRG frameworks
+├── hypatia-rules/        # Dogfooding rules incl. HYP-S006 (drift)
+├── scripts/build-registry.sh   # Generator for REGISTRY.a2ml + TOPOLOGY.md
+├── .machine_readable/    # State (6a2/), REGISTRY.a2ml, contractiles
 ├── Justfile              # Task runner recipes
-├── guix.scm              # Guix environment
-├── flake.nix             # Nix environment (fallback)
-└── 0-AI-MANIFEST.a2ml    # AI agent entry point
+├── guix.scm / flake.nix  # Guix (primary) / Nix (fallback) env
+└── .github/workflows/    # Enforcement + registry-verify CI
+----
+
+== Registry workflow (important)
+
+`.machine_readable/REGISTRY.a2ml` and `TOPOLOGY.md` are *generated*. To add or
+move a spec, edit the `SPECS` table in
+link:scripts/build-registry.sh[`scripts/build-registry.sh`], then:
+
+[source,bash]
+----
+just registry        # regenerate REGISTRY.a2ml + TOPOLOGY.md
+just registry-check  # what CI enforces — fails on drift
 ----
 
 == Key Recipes
@@ -91,7 +117,10 @@ just panic-scan     # No new security issues
 Read `.machine_readable/MUST.contractile` before making changes.
 Key invariants that must never be violated:
 
-{{MUST_INVARIANTS}}
+* A2ML state files live in `.machine_readable/6a2/` only — never the repo root.
+* `REGISTRY.a2ml` + `TOPOLOGY.md` are generated — regenerate, never hand-edit.
+* No Makefiles (use Justfile); SPDX header on every source file.
+* Licence/SPDX is Manual-Only for agents — flag drift, never edit it.
 
 == LLM/AI Agent Development
 

@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+= The Standards Registry — Verifiable Spec Index + Drift Automation
+:toc: macro
+:icons: font
+
+toc::[]
+
+This document explains the *verifiable registry* that indexes every spec in
+this monorepo, and how it is wired into the live automation so that
+documentation drift becomes a *detected, routed finding* instead of
+something noticed sixty days later.
+
+The registry is the machine half of the *front door*. If you are arriving
+here:
+
+* *Human?* Start at link:README.adoc[README.adoc].
+* *Agent?* Start at link:0-AI-MANIFEST.a2ml[0-AI-MANIFEST.a2ml].
+* *Want the raw index?* Read link:.machine_readable/REGISTRY.a2ml[`.machine_readable/REGISTRY.a2ml`].
+
+== What the registry is
+
+link:.machine_readable/REGISTRY.a2ml[`.machine_readable/REGISTRY.a2ml`] is a
+generated A2ML file with one `[[spec]]` block per standard. Each block records:
+
+[cols="1,3", options="header"]
+|===
+| Field | Meaning
+
+| `id` | Stable short identifier.
+| `name` | Human-readable name.
+| `stream` | One of `foundation`, `language`, `protocol`, `governance`, `readiness`, `integration`.
+| `home` | The canonical directory the spec lives in (verified to exist).
+| `canonical_doc` | The single doc to read first for that spec.
+| `source_hash` | `sha256` over `git ls-files -s <home>` — a content-addressed fingerprint of the whole home.
+| `route` | One-line "go here if you want X".
+|===
+
+The registry is *honest by construction*: the generator only emits a spec
+whose `home` directory actually exists, and reports a missing home to stderr
+rather than inventing one.
+
+== How `source_hash` works (and why it catches drift)
+
+`git ls-files -s <home>` lists every tracked file under a home together with
+its blob SHA and path. Hashing that listing yields a fingerprint that changes
+whenever *any* tracked file under the spec changes — content, addition, or
+removal. Recording it in the registry means a later recompute can prove
+whether a spec has moved underneath its documentation.
+
+== Regenerating (the generator)
+
+The registry and the *derived* topology map are produced by one generator:
+
+[source,bash]
+----
+just registry          # writes .machine_readable/REGISTRY.a2ml + TOPOLOGY.md
+just registry-check    # verify-only; non-zero exit on drift
+----
+
+Both `.machine_readable/REGISTRY.a2ml` and link:TOPOLOGY.md[TOPOLOGY.md] are
+*generated files — do not edit by hand*. The single source of truth is the
+`SPECS` table in link:scripts/build-registry.sh[`scripts/build-registry.sh`].
+Add a spec there and the hash, the registry entry, and the topology row all
+follow automatically. link:TOPOLOGY.md[TOPOLOGY.md] can therefore never
+freeze the way the old hand-maintained version did (it sat at `2026-04-04`
+claiming 80% while the integration layer read 0%).
+
+== The drift-detection loop
+
+Drift is caught at two layers that share the same hash algorithm:
+
+[cols="1,3", options="header"]
+|===
+| Layer | What it does
+
+| *In-repo* — link:.github/workflows/registry-verify.yml[`registry-verify.yml`]
+| Runs `build-registry.sh --check` on every push/PR and *fails the build* if the registry or topology is stale.
+
+| *Estate* — link:hypatia-rules/registry-staleness.a2ml[HYP-S006 `registry-staleness`]
+| Hypatia recomputes the hashes fleet-wide and emits a `doc.drift` Groove signal when a recorded hash is stale or a derived doc was hand-edited.
+|===
+
+[source]
+----
+file tree + STATE.a2ml ──► scripts/build-registry.sh ──► REGISTRY.a2ml ──► TOPOLOGY.md
+                                      ▲                         │
+                                      │                         ▼
+                    just registry / registry-verify.yml    HYP-S006 (registry-staleness)
+                    (fails the build on drift)              emits doc.drift → router
+----
+
+== The hybrid automation router
+
+When HYP-S006 fires, the *hybrid automation router* decides what happens to
+the finding. Its strategy is declared in the rule's `@router` block:
+
+* *Default:* `auto_execute` — regenerating a derived file from the file tree
+  is mechanical and safe, so the router may run the `rebuild-registry` recipe.
+* *Hard cap:* any drift whose content overlaps a licence/SPDX token
+  (`SPDX-License-Identifier`, `PMPL`, `MPL-2.0`, `AGPL`, `Palimpsest`,
+  `licen[cs]e`) is *demoted to `:review`* and never auto-applied.
+
+This cap mirrors the estate Manual-Only licence guardrail
+(link:.claude/CLAUDE.md[`.claude/CLAUDE.md`]) and Hypatia's own
+`license_finding_strategy/0`: *agents flag licence drift, the owner edits it*
+(the rule that closed neurophone#99). Downstream pipelines MUST honour the
+cap.
+
+== Adding or moving a spec
+
+1. Edit the `SPECS` table in link:scripts/build-registry.sh[`scripts/build-registry.sh`].
+2. Run `just registry`.
+3. Commit the regenerated `REGISTRY.a2ml` + `TOPOLOGY.md` alongside your change.
+
+CI will reject the PR if you change a spec's home without regenerating.

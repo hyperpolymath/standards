@@ -1,0 +1,228 @@
+// SPDX-License-Identifier: MPL-2.0
+= Standards Reorg — Stream Prompts
+:toc:
+:icons: font
+:revdate: 2026-06-03
+
+== Purpose
+
+This repo holds three independent jobs. Treating them as one is why it sprawls.
+This file captures the three self-contained prompts for working them, plus the
+decisions they depend on. Each prompt is designed to be dropped into a fresh
+session/agent and run more-or-less standalone.
+
+Run them in order: *Stream 1 first* — it produces the base record vocabulary and
+the verifiable registry that Streams 2 and 3 build on.
+
+== Settled principles (do not relitigate)
+
+* *SSOT + verifiable registry.* One home per spec. Standards _hosts_ estate-wide
+  formats and holds a machine-readable *registry pointer*
+  (`url + version + source_hash`, hypatia-verified for staleness) for everything
+  language/service-coupled. No duplicated normative text anywhere.
+* *SemVer-for-specs + era label.* Conformance numbers move by additive minors;
+  "v2" survives only as a roadmap heading. Lineage convention per spec dir: one
+  `SPEC.adoc` (current normative) + `archive/` (frozen prior) + `VERSIONS.adoc`
+  (lineage + era roadmap).
+* *A2ML and K9-SVC are INDEPENDENT foundations.* They name no consumer. CodeCite
+  (broad, non-semantic citations/rationale) and ProofTrace (specialist, opt-in
+  obligation/evidence/warrant linking) are standalone *consumers* living in their
+  own repos. Consumer-specific A2ML profiles (`a2ml/codecite`, `a2ml/prooftrace`)
+  live with the consumer, never in A2ML core.
+* *Owner decisions captured 2026-06-03:* A2ML v1.1 ships profile mechanism + base
+  record vocabulary + citation primitives (obligation/`contractual` -> v1.2);
+  profiles declared in-document via `@profile(id)`; the 6a2 family is re-expressed
+  as A2ML profiles; K9-SVC finishes alpha -> 1.0.0 stable with capabilities,
+  enforceable leash, pedigree restructure, and A2ML-canonical + JSON-projection
+  evidence receipts.
+
+== Stream 1 — A2ML + K9-SVC foundation (+ 6a2)
+
+[source,text]
+----
+Work in the hyperpolymath/standards repo (a2ml/, k9-svc/, .machine_readable/).
+This is the foundational layer: the substrate between attestation (A2ML) and
+validation (K9) that the whole estate uses to stay stable, in sync, and attested.
+
+DECISIONS ALREADY MADE (do not relitigate):
+- A2ML and K9-SVC are INDEPENDENT foundations. They must name no consumer.
+  CodeCite and ProofTrace are standalone CONSUMERS of them, living in their own
+  repos — never referenced normatively by A2ML/K9 core.
+- SSOT + verifiable registry: one home per spec; no duplicated normative text.
+- SemVer-for-specs + era label: additive changes are MINOR bumps; "v2" is only a
+  roadmap heading. Lineage convention per spec dir: one SPEC.adoc (current
+  normative) + archive/ (frozen prior versions) + VERSIONS.adoc (lineage + era).
+- A2ML v1.1 ships: (a) the profile mechanism, (b) a shared BASE RECORD VOCABULARY,
+  (c) CodeCite-style citation primitives. Obligation/`contractual` primitives are
+  v1.2. Profiles are declared in-document via an `@profile(id)` directive.
+- 6a2 family becomes A2ML profiles: a2ml/state, a2ml/meta, a2ml/ecosystem,
+  a2ml/agentic, a2ml/neurosym, a2ml/playbook, a2ml/anchor — all validated by the
+  one profile mechanism.
+- K9-SVC finishes alpha -> 1.0.0 STABLE: capability model (default-deny),
+  enforceable leash modes, pedigree restructure, and an evidence/receipt schema
+  canonical in A2ML with a lossless JSON projection.
+
+TASKS:
+A2ML (a2ml/):
+1. Clean the in-tree mess first: SPEC.adoc ("v0 draft"), SPEC-v1.0.adoc ("stable"),
+   and SPEC.a2ml currently coexist and the parent README calls it "v0.6.0". Apply
+   the lineage convention. Reconcile the README claim.
+2. Spec the profile mechanism: how `@profile(id)` is declared/resolved, and what a
+   profile DEFINITION may constrain (required sections, allowed directives,
+   reference classes, attestation level). Decide where profile definitions live and
+   how they're registered.
+3. Spec the base record vocabulary — the neutral set reused by CodeCite, ProofTrace,
+   K9 receipts AND .affex: id, source_span, canonical_node (OPTIONAL, so non-
+   AffineScript projects work), hash (sha256), provenance{author, tool,
+   kind in {human,ai,mechanical}, optional agent}, timestamp, artefact_ref,
+   profile_decl. This is THE anti-desync primitive — get it right.
+4. Spec citation primitives (@cite, @rationale, @origin, @source_span,
+   @canonical_node): representable in base A2ML, but only REQUIRED/validated under
+   the citation profile (never semantic by default).
+5. Opaque-payload crypto: define hashing now (canonical hash form), signing later.
+6. Add Idris2 typed-core nodes + decidable checks for profiles and new directives.
+
+6a2 (.machine_readable/):
+7. Author the seven profile definitions (a2ml/state ... a2ml/anchor).
+8. Add @profile directives to the existing 6a2 files so they validate through the
+   mechanism. Add a hypatia rule that flags a 6a2 file whose content drifts from its
+   declared profile.
+
+K9-SVC (k9-svc/):
+9. Capability model: closed core enum (fs.read, fs.write, net.fetch, process.spawn,
+   container.run, secret.read, deploy.apply, rollback.apply) + reserved extension
+   namespace; default-deny.
+10. Leash modes as normative rules: Kennel = data-only/no-eval; Yard =
+    contract-eval-only/no-fs-no-net; Hunt = controlled exec. CONFIRM WITH OWNER
+    whether Hunt requires ALL of {signature, policy, sandbox, dry-run, capability
+    grant} or a configurable subset.
+11. Pedigree restructure into explicit sections: metadata / validation-contract /
+    policy / deploy-recipe / recovery-recipe / signature / docs-rationale.
+    (recovery-recipe and docs-rationale are the new ones.)
+12. Evidence/receipt schema (component identity, contract result, leash level,
+    capabilities granted, signatures checked, dry-run plan, deploy result, rollback
+    result, policy decision, failure reason): canonical as an A2ML profile
+    (a2ml/k9-receipt) + lossless JSON projection.
+13. Add the single soft A2ML cross-reference field in pedigree (rationale/runbook).
+    NAMING HAZARD: K9's triad is must/just/nickel; the contractiles family is
+    must/trust/dust/intend — keep them distinct in all prose.
+
+OUT OF SCOPE: AffineScript .affine/.affex specs (Stream 2); the repo-wide front-door
+reorg (Stream 3); authoring the CodeCite/ProofTrace profiles (those live in their
+own repos — A2ML core ships only neutral primitives).
+
+Surface the CONFIRM-WITH-OWNER items as questions before finalising. Develop on the
+designated branch, commit per logical unit, open a draft PR.
+----
+
+== Stream 2 — AffineScript standards placement (.affine / .affex / .affmap)
+
+[source,text]
+----
+Goal: place the AffineScript v2 standards (.affine source-documents/faces,
+.affex face-interop manifest, .affmap provenance) correctly under the estate's
+SSOT + verifiable-registry policy, WITHOUT duplicating normative text.
+
+DECISIONS ALREADY MADE:
+- These specs are language-coupled, so their SOURCE OF TRUTH is the AffineScript
+  repo — NOT hyperpolymath/standards. The standards repo holds only a machine-
+  readable registry pointer for each.
+- A registry pointer records: name, canonical_url, owning_repo, version_pin,
+  source_hash, conformance_level, last_synced. hypatia verifies source_hash to
+  detect staleness (this is the anti-drift mechanism).
+- .affcite.a2ml = an A2ML document under the CodeCite citation profile (consistent
+  with the .affex sketch that already names pixi.affcite.a2ml). Citation contents
+  live in that A2ML artefact, not inside .affex.
+- Spec documents are written ONCE in AsciiDoc — never re-authored per face. Faces
+  govern how AffineScript SOURCE is written, not how SPECS are written. Multi-face
+  EXAMPLES are fine but live in the AffineScript repo.
+
+TASKS:
+IN hyperpolymath/standards:
+1. Generalise the existing SATELLITES.a2ml into (or alongside) a REGISTRY that can
+   hold language/service-coupled pointers, not just absorbed satellites.
+2. Add registry pointers for the AffineScript specs (.affine, .affex, .affmap),
+   each pointing at the AffineScript repo with version_pin + source_hash.
+3. Add/confirm a hypatia rule that flags a registry pointer whose source_hash no
+   longer matches the upstream spec (staleness detection).
+
+IN the AffineScript repo (separate session/PR — note here, don't do from standards):
+4. Land the .affine v2 (faces, canonical-lowering invariant, canonical islands,
+   idiom packs, mimicry bindings, project face policy) and .affex v2 (derived,
+   regenerable manifest; source-authoritative; declaration heads not full bodies)
+   proposed directions as that repo's specs, using the lineage convention.
+
+OPEN QUESTIONS to settle with the owner:
+- Exact registry-pointer schema fields (confirm the list above).
+- Whether .affmap gets its own registry entry now or is folded under .affex.
+- Versioning: .affex is a regenerable artefact, so its format version ("affex":"2")
+  can bump freely; confirm it's tracked independently of the language version.
+
+OUT OF SCOPE: authoring A2ML/K9 (Stream 1); the repo-wide reorg (Stream 3); writing
+any AffineScript spec text inside the standards repo (SSOT violation).
+
+Develop on the designated branch, draft PR.
+----
+
+== Stream 3 — Standards repo front door + de-sprawl
+
+[source,text]
+----
+Work in the root of hyperpolymath/standards. Goal: turn a sprawling 7,000-file
+monorepo into something where any arrival — agent or human — can read it as one
+coherent thing OR jump straight to exactly what they need, and where the repo is
+wired into the live automation (hypatia + the hybrid automation router). This is
+the "bigger job"; it builds on the verifiable registry produced by Stream 1/2.
+
+CONTEXT — confirmed drift to fix (file:line evidence exists):
+- LICENSE is MPL-2.0 (owner directive 2026-06-02) but README.adoc badge + line 28
+  + 418, PALIMPSEST.adoc, and both llm-warmup-*.md still say PMPL-1.0.
+- EXPLAINME.adoc:33 still lists ReScript as a "Primary" language (banned 2026-04-30).
+- TOPOLOGY.md + ROADMAP.adoc frozen at 2026-04-04; TOPOLOGY shows integration layer
+  at 0% while claiming 80% overall.
+- EXPLAINME Evidence table lists groove-protocol/ and palimpsest-license/ as local
+  dirs; neither exists here.
+- llm-warmup-dev.md and llm-warmup-user.md are byte-identical.
+- QUICKSTART-*.adoc still contain unfilled {{PLACEHOLDER}} markers.
+- REORGANIZATION-PLAN.md describes redundancies that no longer match reality.
+- Competing entry docs: README.adoc, EXPLAINME.adoc, TOPOLOGY.md, 0-AI-MANIFEST.a2ml,
+  QUICKSTART-{DEV,USER,MAINTAINER}.adoc, llm-warmup-*.md, ai-instruction/.
+
+CRITICAL GUARDRAIL: per .claude/CLAUDE.md, licence changes are MANUAL, OWNER-ONLY,
+FLAG-ONLY for agents. Do NOT touch any LICENSE file or SPDX header. Correcting a
+DOC BADGE that mis-describes this repo's actual licence is a documentation-accuracy
+fix, not relicensing — but still PROPOSE it for owner review and never bulk-sweep.
+
+TASKS:
+1. Decide and build the FRONT DOOR: one canonical human entry (README.adoc) + one
+   canonical machine entry (0-AI-MANIFEST.a2ml). Every other "what is this repo" doc
+   either merges into these or becomes a thin stub that points at them. Kill the
+   duplication (start with the identical llm-warmup files).
+2. Make the entry docs ROUTE: a clear map of "if you want X, go here" covering the
+   three streams, the registry, the A2ML/K9 foundation, the protocols, the readiness
+   grades, enforcement/CI. Both human-readable and machine-readable.
+3. Wire the automation: document and activate the verifiable REGISTRY (from Stream 1)
+   as the index of every spec + its home + source_hash; connect hypatia staleness
+   findings and the hybrid automation router so drift becomes a detected, routed
+   finding instead of something noticed 60 days later.
+4. Fix the confirmed drift (doc badges via owner-reviewed change; ReScript->current
+   policy; dead links -> registry pointers; fill or delete QUICKSTART placeholders).
+5. Make TOPOLOGY.md DERIVED/auto-refreshed (from STATE.a2ml / registry) rather than a
+   hand-maintained file that freezes.
+6. Supersede or retire REORGANIZATION-PLAN.md.
+
+OUT OF SCOPE: A2ML/K9 spec internals (Stream 1); AffineScript spec text (Stream 2);
+any licence/SPDX edits (owner-only, flag don't fix).
+
+Start by re-running a fresh inventory (the repo has ~57 top-level dirs / ~7,000
+files) before moving anything. Develop on the designated branch, draft PR.
+----
+
+== Notes
+
+* *Stream 1 is the dependency.* The base record vocabulary and the registry it
+  implies are what Streams 2 and 3 lean on — run it first.
+* The genuine *confirm-with-owner* points (K9 Hunt's required-set; registry-pointer
+  fields) are embedded inside the prompts so those sessions check rather than guess.
+* Stream 3 deliberately contains *no* licence/SPDX editing — only owner-reviewed
+  doc-badge correction — to respect the manual-only guardrail (ref neurophone#99).
