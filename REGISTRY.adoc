@@ -39,13 +39,48 @@ The registry is *honest by construction*: the generator only emits a spec
 whose `home` directory actually exists, and reports a missing home to stderr
 rather than inventing one.
 
+=== External pointers (specs whose SSOT lives in another repo)
+
+Some specs are *language/service-coupled*: their source-of-truth deliberately
+lives in another repo whose release cadence this monorepo must not own. The
+clearest example is the AffineScript v2 standards — `.affine` (faces / source
+documents), `.affex` (face-interop manifest) and `.affmap` (provenance) — whose
+SSOT is `hyperpolymath/affinescript`. For these the registry holds a *verified
+pointer, never a copy*; duplicating the normative text would create two sources
+of truth and guarantee drift.
+
+External entries carry `kind = "external"` and, in place of a local `home`:
+
+[cols="1,3", options="header"]
+|===
+| Field | Meaning
+
+| `spec_kind` | `language-coupled` or `service-coupled`.
+| `owning_repo` | The repo that authors + versions the spec.
+| `canonical_url` | The upstream source-of-truth document (what HYP-S006 fetches).
+| `version_pin` | The upstream version/tag this pointer is pinned to.
+| `source_hash` | The *recorded* upstream hash, or the sentinel `PENDING-FIRST-SYNC` until upstream lands. NEVER fabricated; NEVER fetched at generation time.
+| `source_hash_algo` | `sha256` (md5/sha1 are rejected as unverified).
+| `media_type` / `lineage` | Provenance fields, consistent with the lineage convention.
+| `format_version` | Only for regenerable artefacts (e.g. `.affex`) whose format version is tracked *independently* of `version_pin`.
+|===
+
+Because the generator is offline and deterministic, an external entry's
+`source_hash` is *recorded* in the `EXTERNAL_SPECS` table in the generator and
+emitted verbatim, so `--check` stays a pure function of the committed tree. The
+network-side verification (re-fetching `canonical_url`) is HYP-S006's job, and
+re-pinning a pointer is capped to `:review` — an owner decision, never an
+auto-regen. (`.affcite.a2ml` is a CodeCite-profile A2ML artefact in the
+AffineScript repo, not a separate registry pointer.)
+
 == How `source_hash` works (and why it catches drift)
 
 `git ls-files -s <home>` lists every tracked file under a home together with
 its blob SHA and path. Hashing that listing yields a fingerprint that changes
 whenever *any* tracked file under the spec changes — content, addition, or
 removal. Recording it in the registry means a later recompute can prove
-whether a spec has moved underneath its documentation.
+whether a spec has moved underneath its documentation. (For external pointers,
+the recorded hash is instead checked against a fresh fetch of `canonical_url`.)
 
 == Regenerating (the generator)
 

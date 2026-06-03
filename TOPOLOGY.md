@@ -9,7 +9,7 @@
 > It cannot freeze: every regeneration re-reads ground truth. Do not edit by hand.
 
 - **Phase:** active  &nbsp;|&nbsp; **Maturity:** experimental  &nbsp;|&nbsp; **STATE last-updated:** 2026-06-02T18:00:00Z
-- **Registry entries:** 28 specs across 6 streams
+- **Registry entries:** 31 specs across 6 streams
 - **Front door:** human → [README.adoc](README.adoc); machine → [0-AI-MANIFEST.a2ml](0-AI-MANIFEST.a2ml)
 - **Registry:** [.machine_readable/REGISTRY.a2ml](.machine_readable/REGISTRY.a2ml) (index + source hashes) · prose: [REGISTRY.adoc](REGISTRY.adoc)
 
@@ -29,6 +29,14 @@
 | NEUROSYM.a2ml spec | [`neurosym-a2ml/`](neurosym-a2ml/) | symbolic semantics / proof obligations |
 | PLAYBOOK.a2ml spec | [`playbook-a2ml/`](playbook-a2ml/) | executable operational runbooks |
 | ANCHOR.a2ml spec | [`anchor-a2ml/`](anchor-a2ml/) | project-recalibration intervention format |
+
+### Language — AffineScript + language policy (Stream 2)
+
+| Spec | Home | If you want… |
+|---|---|---|
+| AffineScript .affine (faces / source documents) | [`hyperpolymath/affinescript`](https://github.com/hyperpolymath/affinescript/blob/main/spec/affine.adoc) `@ v2.0.0` ⇗ | faces, canonical-lowering invariant, canonical islands, idiom packs, mimicry bindings, project face policy |
+| AffineScript .affex (face-interop manifest) | [`hyperpolymath/affinescript`](https://github.com/hyperpolymath/affinescript/blob/main/spec/affex.adoc) `@ v2.0.0` ⇗ | derived regenerable manifest; declaration heads not full bodies; format_version bumps independently |
+| AffineScript .affmap (provenance) | [`hyperpolymath/affinescript`](https://github.com/hyperpolymath/affinescript/blob/main/spec/affmap.adoc) `@ v2.0.0` ⇗ | provenance format; own pointer for independent staleness tracking |
 
 ### Protocols
 
