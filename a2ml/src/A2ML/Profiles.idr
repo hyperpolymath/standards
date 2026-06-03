@@ -200,17 +200,21 @@ checkProfile pd f =
 -- Fact extraction from the v1.0 core (section titles)
 -- ============================================================================
 
-||| Recursively collect every Section title. Marked partial for the same reason
-||| as TypedCore.collectIds: the walk recurses through the section-body wrapper.
-||| Decidability of conformance does not depend on this being total.
+||| Collect the TOP-LEVEL Section titles of a document. Total by construction:
+||| it recurses only on the block-list tail and never descends through section
+||| bodies, so it introduces no escape hatch (cf. TypedCore.collectIds, which is
+||| `partial`). Flat record dialects — the entire 6a2 family — have only
+||| top-level sections, so this is exact for them. Nested-section extraction for
+||| general markup is the translator's responsibility: the translator supplies
+||| `DocFacts` directly, so conformance never relies on this helper recursing.
 export
-partial
 sectionTitlesOf : Doc -> List String
-sectionTitlesOf (MkDoc blocks) = concatMap go blocks
+sectionTitlesOf (MkDoc blocks) = collect blocks
   where
-    go : Block -> List String
-    go (Section s) = s.title :: sectionTitlesOf (MkDoc s.body)
-    go _           = []
+    collect : List Block -> List String
+    collect []                = []
+    collect (Section s :: bs) = s.title :: collect bs
+    collect (_ :: bs)         = collect bs
 
 -- ============================================================================
 -- Composition: union of constraints (SPEC Section 8.1)
