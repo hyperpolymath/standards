@@ -1,5 +1,29 @@
 # Standards Repo Reorganization Plan
 
+> **⚠️ SUPERSEDED (2026-06-02) — historical record only.**
+>
+> This plan predates the monorepo consolidation and the verifiable registry.
+> Its premises no longer match reality: it proposes moving content *out* to
+> separate repos (`k9-svc-repo`, `rsr-engine-repo`, `a2ml-repo`), but those
+> satellites were **absorbed into this monorepo** on 2026-02-08, and several
+> "redundancies" it lists (e.g. duplicate K9 templates / RSR workflows) have
+> since been resolved or re-scoped.
+>
+> **What replaced it:**
+> - *Discoverability* is now solved by the generated index
+>   [`.machine_readable/REGISTRY.a2ml`](.machine_readable/REGISTRY.a2ml)
+>   (prose: [`REGISTRY.adoc`](REGISTRY.adoc)) — every spec, its home, and a
+>   content-addressed `source_hash`.
+> - *"Where do I go for X"* is answered by the routing table at the top of
+>   [`README.adoc`](README.adoc) and by [`0-AI-MANIFEST.a2ml`](0-AI-MANIFEST.a2ml).
+> - *Drift* (the thing this plan tried to prevent by hand) is now detected
+>   automatically: `registry-verify.yml` (CI) + Hypatia rule HYP-S006.
+>
+> Any still-relevant idea below should be re-filed as a registry entry or an
+> issue. The text is retained unedited for provenance.
+
+---
+
 ## Current Redundancies Identified
 
 ### 1. Template Duplication
