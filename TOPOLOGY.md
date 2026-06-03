@@ -8,7 +8,7 @@
 > `.machine_readable/6a2/STATE.a2ml` by `scripts/build-registry.sh`.
 > It cannot freeze: every regeneration re-reads ground truth. Do not edit by hand.
 
-- **Phase:** active  &nbsp;|&nbsp; **Maturity:** experimental  &nbsp;|&nbsp; **STATE last-updated:** 2026-06-02T18:00:00Z
+- **Phase:** active  &nbsp;|&nbsp; **Maturity:** experimental  &nbsp;|&nbsp; **STATE last-updated:** 2026-06-03T00:00:00Z
 - **Registry entries:** 31 specs across 6 streams
 - **Front door:** human → [README.adoc](README.adoc); machine → [0-AI-MANIFEST.a2ml](0-AI-MANIFEST.a2ml)
 - **Registry:** [.machine_readable/REGISTRY.a2ml](.machine_readable/REGISTRY.a2ml) (index + source hashes) · prose: [REGISTRY.adoc](REGISTRY.adoc)
