@@ -146,27 +146,78 @@ let SecurityLevel = [| 'Kennel, 'Yard, 'Hunt |] in
         reason = "Component requires higher security level",
       }
     else if requested_level == 'Hunt then
-      # Hunt requires signature verification
-      let has_sig = std.record.has_field "security" component
-        && std.record.has_field "signature" component.security
-        && component.security.signature != null in
-      if has_sig then
-        {
-          permitted = true,
-          enforced_level = 'Hunt,
-          signature_valid = true,  # Actual verification done externally
-        }
-      else
-        {
-          permitted = false,
-          enforced_level = 'Yard,
-          reason = "Hunt level requires valid signature",
-          signature_valid = false,
-        }
+      # Hunt is NEVER authorized by check_level alone. Owner directive
+      # (2026-06-03): Hunt requires ALL FIVE preconditions, ALWAYS — signature,
+      # policy, sandbox, dry_run, capability_grant — which are runtime evidence,
+      # not static component fields. check_level only confirms the component is
+      # *allowed to reach* Hunt; the real gate is `authorize_hunt evidence`.
+      # A signature alone is INSUFFICIENT (this is the normative change from
+      # the alpha, where signature-only permitted Hunt).
+      {
+        permitted = false,
+        enforced_level = 'Yard,
+        reason = "Hunt requires authorize_hunt(evidence): all five preconditions, always",
+      }
     else
       {
         permitted = true,
         enforced_level = requested_level,
+      },
+
+  # ─────────────────────────────────────────────────────────────
+  # Hunt Preconditions (NORMATIVE — all five, always)
+  # ─────────────────────────────────────────────────────────────
+  #
+  # Owner directive (2026-06-03): Hunt requires ALL FIVE of the following,
+  # ALWAYS. There is no configurable subset. Any single unmet precondition
+  # refuses execution and downgrades the enforced level to 'Yard.
+  #
+  #   signature        - a valid Ed25519 signature over the payload hash
+  #   policy           - an explicit policy decision = allow
+  #   sandbox          - an isolation sandbox is in force
+  #   dry_run          - a dry-run plan was produced (and reviewed)
+  #   capability_grant - every requested capability is explicitly granted
+  #                      (see capabilities.ncl; default-deny)
+  hunt_preconditions = [
+    "signature",
+    "policy",
+    "sandbox",
+    "dry_run",
+    "capability_grant",
+  ],
+
+  # The host supplies one Bool of evidence per precondition.
+  HuntEvidence = {
+    signature | Bool,
+    policy | Bool,
+    sandbox | Bool,
+    dry_run | Bool,
+    capability_grant | Bool,
+  },
+
+  # Hunt is authorized iff EVERY precondition holds. Returns the enforced level
+  # and, on refusal, exactly which preconditions were unmet (for the receipt).
+  authorize_hunt = fun evidence =>
+    let unmet =
+      (if evidence.signature then [] else ["signature"])
+      @ (if evidence.policy then [] else ["policy"])
+      @ (if evidence.sandbox then [] else ["sandbox"])
+      @ (if evidence.dry_run then [] else ["dry_run"])
+      @ (if evidence.capability_grant then [] else ["capability_grant"])
+    in
+    if std.array.length unmet == 0 then
+      {
+        permitted = true,
+        enforced_level = 'Hunt,
+        unmet_preconditions = [],
+      }
+    else
+      {
+        permitted = false,
+        enforced_level = 'Yard,
+        reason = "Hunt requires all five preconditions; unmet: "
+          ++ std.string.join ", " unmet,
+        unmet_preconditions = unmet,
       },
 
   # ─────────────────────────────────────────────────────────────
