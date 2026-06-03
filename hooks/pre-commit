@@ -74,6 +74,23 @@ for file in $SOURCE_FILES; do
     fi
 done
 
+# Registry / topology drift guard (standards repo only — runs where the
+# generator is present). The verifiable spec registry records a content
+# hash per spec home; when a tracked file under a home changes without
+# regenerating, the recorded source_hash goes stale and registry-verify.yml
+# reds main. (It did, three times, when spec-home edits merged without a
+# regenerate.) Catch it locally, before the commit, instead of in CI.
+if [ -f scripts/build-registry.sh ]; then
+    if ! bash scripts/build-registry.sh --check >/dev/null 2>&1; then
+        echo -e "${RED}✗ REGISTRY.a2ml / TOPOLOGY.md are stale — regenerate before committing.${NC}"
+        echo "  A tracked file under a spec home (or STATE.a2ml) changed without"
+        echo "  regenerating the derived registry/topology."
+        echo "  Fix:  bash scripts/build-registry.sh"
+        echo "        git add .machine_readable/REGISTRY.a2ml TOPOLOGY.md"
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
 # Final result
 echo ""
 if [ $ERRORS -gt 0 ]; then
