@@ -2,8 +2,8 @@
 = K9 SVC Specification
 :subtitle: Self-Validating Components for Multi-Architecture Permanence
 :author: hyperpolymath
-:revnumber: 1.0.0-alpha
-:revdate: 2026-01-16
+:revnumber: 1.0.0
+:revdate: 2026-06-03
 :toc: left
 :toclevels: 3
 :icons: font
@@ -19,13 +19,21 @@ self-validating, and environment-aware components.
 The format operates via the **must-just-nickel** triad: environment detection (must),
 task orchestration (Just), and typed validation (Nickel).
 
+[IMPORTANT]
+.Naming hazard — keep these distinct
+====
+K9's execution triad is *must / just / nickel*. It is *not* the contractiles
+family *must / trust / dust / intend*, which is a separate estate concept. The
+word `must` appears in both and means different things; never conflate them.
+====
+
 == Status
 
 [cols="1,2"]
 |===
 |Standard ID |`application/vnd.k9+nickel`
-|Version |1.0.0-alpha
-|Stability |Alpha
+|Version |1.0.0
+|Stability |Stable
 |Magic Number |`K9!` (`\x4B\x39\x21`)
 |===
 
@@ -144,26 +152,51 @@ Podman-first deployment prevents host pollution while supporting native fallback
 
 == Security Model
 
-=== The Leash System
+=== The Leash System (Normative)
 
-To prevent abuse, `.k9` mandates tiered execution levels:
+To prevent abuse, `.k9` mandates tiered execution levels. These are NORMATIVE:
+an implementation MUST enforce them. The canonical encoding is `leash.ncl`.
 
-[cols="1,2,3"]
+[cols="1,2,3",options="header"]
 |===
-|Level |Name |Permissions
+|Level |Name |Rule
 
 |`'Kennel`
-|Pure Data
-|No execution. Read-only. Safe to open anywhere.
+|Data-only
+|No evaluation of any kind. Read/parse/display only. Safe to open anywhere.
 
 |`'Yard`
-|Validation Only
-|Nickel evaluation permitted. No filesystem/network access.
+|Contract-eval-only
+|Nickel contract evaluation permitted. NO filesystem access, NO network, NO
+ subprocess. Pure, side-effect-free.
 
 |`'Hunt`
-|Full Execution
-|Complete triad execution. Requires cryptographic handshake.
+|Controlled execution
+|Triad execution permitted — but ONLY when all five Hunt preconditions hold
+ (below). Any unmet precondition refuses execution and downgrades to `'Yard`.
 |===
+
+==== Hunt preconditions — all five, always
+
+Owner directive (2026-06-03): Hunt requires *all five* of the following,
+*always*. There is no configurable subset, and a valid signature alone is
+NOT sufficient (this is the normative change from the alpha).
+
+[cols="1,4",options="header"]
+|===
+|Precondition |Meaning
+
+|`signature` |A valid Ed25519 signature over the payload hash.
+|`policy` |An explicit policy decision of `allow`.
+|`sandbox` |An isolation sandbox is in force for the run.
+|`dry_run` |A dry-run plan was produced (and reviewed).
+|`capability_grant` |Every requested capability is explicitly granted (default-deny; see Capability Model).
+|===
+
+The gate is `authorize_hunt(evidence)` in `leash.ncl`: it permits `'Hunt` iff
+all five evidence flags are true, and otherwise returns `permitted = false`,
+`enforced_level = 'Yard`, and the exact list of unmet preconditions (which the
+receipt records).
 
 === Dependability Collapse Prevention
 
@@ -201,6 +234,91 @@ until explicitly permitted.
 |`'Kennel` mode for constrained environments
 |===
 
+== Capability Model (Normative)
+
+K9 is *default-deny*: a component is granted *no* capability unless it is
+explicitly listed in its pedigree `policy.capabilities`. The leash checks the
+grant before any Hunt-level action; an action needing an ungranted capability
+is refused even at `'Hunt`. The canonical encoding is `capabilities.ncl`.
+
+=== Closed core capabilities
+
+The core capability set is *closed and exhaustive*. Adding or removing a core
+capability is a breaking (MAJOR) change.
+
+[cols="2,4",options="header"]
+|===
+|Capability |Grants
+
+|`fs.read` |Read named filesystem paths.
+|`fs.write` |Write named filesystem paths.
+|`net.fetch` |Outbound network fetch to named hosts.
+|`process.spawn` |Spawn a child process.
+|`container.run` |Run a container image.
+|`secret.read` |Read a named secret.
+|`deploy.apply` |Apply a deployment.
+|`rollback.apply` |Apply a rollback.
+|===
+
+=== Reserved extension namespace
+
+Non-core capabilities MUST be namespaced `x-<vendor>.<path>` (e.g.
+`x-acme.gpu.alloc`) so they can never collide with a future core name. Core
+names (no `x-` prefix) are reserved to this specification.
+
+== The Active Pedigree (Seven Sections)
+
+v1.0.0 restructures the pedigree (`pedigree.ncl`) into seven explicit, named
+sections. Two are new in v1.0.0: *recovery_recipe* and *docs_rationale*.
+
+[cols="1,2,4",options="header"]
+|===
+|# |Section |Purpose
+
+|1 |`metadata` |Identity: name, version, breed, magic number.
+|2 |`validation_contract` |What MUST pass first: checksum, the contract files to evaluate, fail-closed flag.
+|3 |`policy` |Leash level + capability grant (default-deny) + target environment.
+|4 |`deploy_recipe` |install / validate / deploy / migrate.
+|5 |`recovery_recipe` |*(new)* rollback / recover / verify-recovery / backup. A deploy is only as safe as its rollback.
+|6 |`signature` |Cryptographic provenance (Ed25519, key id, signed payload hash).
+|7 |`docs_rationale` |*(new)* human summary + rationale, and the single soft A2ML cross-reference (below).
+|===
+
+== Evidence and Receipts
+
+Every K9 run emits a *receipt*: the attested record of what the component did
+and was permitted to do — component identity, contract result, enforced leash
+level, capabilities granted/denied, signatures checked, dry-run plan, deploy
+result, rollback result, policy decision, and (on failure) the reason.
+
+The receipt is *canonical in A2ML* as the `a2ml/k9-receipt` profile, with a
+*lossless JSON projection*. Both live under `receipt/`:
+
+* `receipt/PROFILE.a2ml` — the canonical schema (an A2ML profile).
+* `receipt/receipt.schema.json` — the lossless JSON projection.
+
+Because the receipt's `component` block uses the A2ML base record vocabulary
+(hash + provenance), a receipt is hash-pinned and attributable and cannot
+desync from the artefact it describes. K9 is a *consumer* of A2ML here
+(dependency direction K9 → A2ML); A2ML core ships only neutral primitives and
+names no consumer.
+
+== A2ML Cross-Reference (one soft field)
+
+The pedigree carries exactly *one* soft cross-reference into A2ML:
+`docs_rationale.a2ml_ref`. It points at an A2ML rationale/runbook artefact (a
+repo-relative path, URI, or A2ML record id). It is *soft*: a dangling reference
+is a WARNING, never a hard validation failure. This is the only A2ML bridge
+field in the pedigree — K9 remains an independent foundation and does not
+otherwise depend on A2ML.
+
+[NOTE]
+====
+Naming hazard (restated): the soft reference and the runbook are about K9's
+*must / just / nickel* triad, never the contractiles *must / trust / dust /
+intend* family. Keep them distinct in all prose and tooling.
+====
+
 == Repository Requirements
 
 To be listed as a conforming `.k9` repository:
@@ -210,10 +328,20 @@ To be listed as a conforming `.k9` repository:
 |File |Purpose
 
 |`pedigree.ncl`
-|Root Nickel file defining component breed, version, and security level
+|Root Nickel file: the seven-section pedigree (metadata, validation_contract,
+ policy, deploy_recipe, recovery_recipe, signature, docs_rationale)
+
+|`leash.ncl`
+|Leash modes + the normative `authorize_hunt` five-precondition gate
+
+|`capabilities.ncl`
+|Closed core capability set + reserved extension namespace (default-deny)
+
+|`receipt/`
+|Receipt schema: `a2ml/k9-receipt` profile + lossless JSON projection
 
 |`justfile`
-|Cookbook containing `install`, `validate`, `deploy` recipes
+|Cookbook containing `install`, `validate`, `deploy`, `rollback`, `recover` recipes
 
 |`must`
 |Bootstrap script ensuring triad executes on target architecture
