@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- TOPOLOGY.md — DERIVED architecture map. Generated: 2026-06-02 -->
+<!-- TOPOLOGY.md — DERIVED architecture map (generated from REGISTRY.a2ml + STATE.a2ml) -->
 <!-- GENERATED FILE — DO NOT EDIT BY HAND. Run: just topology (scripts/build-registry.sh) -->
 
 # Hyperpolymath Standards — Topology (derived)

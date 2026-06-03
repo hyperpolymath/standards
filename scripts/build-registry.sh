@@ -35,7 +35,9 @@ MODE="write"
 
 REGISTRY=".machine_readable/REGISTRY.a2ml"
 TOPOLOGY="TOPOLOGY.md"
-GEN_DATE="$(git log -1 --format=%cs 2>/dev/null || date -u +%Y-%m-%d)"
+# Intentionally NO generation timestamp: a volatile date would make every
+# regeneration differ and defeat `--check`. The content (hashes + STATE) is the
+# only source of truth, so the output is a pure function of the committed tree.
 
 # ---------------------------------------------------------------------------
 # Spec table — the single source of truth for what this monorepo standardises.
@@ -112,7 +114,6 @@ emit_registry() {
 
 [registry]
 version = "1.0.0"
-generated = "${GEN_DATE}"
 generator = "scripts/build-registry.sh"
 hash_algorithm = "sha256(git ls-files -s <home>)"
 entry_count = ${ENTRY_COUNT}
@@ -168,7 +169,7 @@ emit_topology() {
   updated="$(state_field last-updated)"
   cat <<HEADER
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- TOPOLOGY.md — DERIVED architecture map. Generated: ${GEN_DATE} -->
+<!-- TOPOLOGY.md — DERIVED architecture map (generated from REGISTRY.a2ml + STATE.a2ml) -->
 <!-- GENERATED FILE — DO NOT EDIT BY HAND. Run: just topology (scripts/build-registry.sh) -->
 
 # Hyperpolymath Standards — Topology (derived)
