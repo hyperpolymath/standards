@@ -13,6 +13,23 @@ import? "contractile.just"
 default:
     @just --list
 
+# Regenerate the verifiable spec registry + DERIVED topology from the file tree
+registry:
+    @bash scripts/build-registry.sh
+
+# Alias: same generator also (re)writes TOPOLOGY.md
+topology: registry
+
+# Fail if REGISTRY.a2ml or TOPOLOGY.md has drifted from the file tree
+registry-check:
+    @bash scripts/build-registry.sh --check
+
+# Print role-appropriate LLM warm-up context (machine front door)
+llm-context role="dev":
+    @echo "# Front door: 0-AI-MANIFEST.a2ml (machine) + README.adoc (human)"
+    @echo "# Registry:   .machine_readable/REGISTRY.a2ml  ·  prose: REGISTRY.adoc"
+    @cat "llm-warmup-{{role}}.md" 2>/dev/null || cat 0-AI-MANIFEST.a2ml
+
 # Build all sub-project artefacts
 build:
     @echo "=== Standards Monorepo Build ==="
