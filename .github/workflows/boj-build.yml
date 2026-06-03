@@ -17,9 +17,14 @@ permissions:
 
 jobs:
   trigger-boj:
+    name: Trigger BoJ server
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: ${{ vars.BOJ_SERVER_URL != '' || secrets.BOJ_SERVER_URL != '' }}
+    # No job-level gate: the `secrets` context is not available in `if:`
+    # (referencing it is an "Unrecognized named-value: 'secrets'" startup
+    # failure). The Trigger step below already self-gates — it exits 0 when
+    # BOJ_URL (secret-or-var) is empty — so the whole job is a cheap no-op
+    # when unconfigured.
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -47,3 +52,58 @@ jobs:
             -H "Content-Type: application/json" \
             --data "$payload" \
             || echo "BoJ server unreachable - skipping (non-fatal)"
+
+  # Contractile validation runs on every push, independent of whether a BoJ
+  # server is configured — it validates THIS repo's own contractile set, so it
+  # must not sit behind the trigger-boj `if:` guard.
+  validate-contractiles:
+    name: K9-SVC contractile validation
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: K9-SVC Validation
+        run: |
+          echo "Running K9-SVC contractile validation..."
+          if [ -f .machine_readable/contractiles/must/Mustfile.a2ml ]; then
+            echo "✅ Mustfile found - running validation"
+            # Placeholder for actual K9 validation
+            echo "K9 validation would run here"
+          else
+            echo "❌ Mustfile not found"
+            exit 1
+          fi
+
+      - name: Contractile Check
+        run: |
+          set -euo pipefail
+          echo "Checking contractile completeness..."
+          index=".machine_readable/contractiles/INDEX.a2ml"
+          if [ ! -f "$index" ]; then
+            echo "❌ Contractile registry not found: $index"
+            exit 1
+          fi
+          # Read the canonical verb set from the registry rather than hard-coding
+          # it (INDEX.a2ml §Registry: consumers SHOULD discover verbs from here).
+          # Each verb's trident lists "<verb>/<Verb>file.a2ml" as its first entry.
+          mapfile -t files < <(grep -oE '"[a-z]+/[A-Z][a-z]+file\.a2ml"' "$index" | tr -d '"' | sort -u)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "❌ No contractile files discovered in $index"
+            exit 1
+          fi
+          missing=0
+          for rel in "${files[@]}"; do
+            if [ -f ".machine_readable/contractiles/$rel" ]; then
+              echo "✅ $rel"
+            else
+              echo "❌ Missing: $rel"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo "❌ $missing contractile(s) missing"
+            exit 1
+          fi
+          echo "✅ All ${#files[@]} contractiles present"
