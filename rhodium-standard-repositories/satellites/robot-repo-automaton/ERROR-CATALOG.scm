@@ -1,4 +1,4 @@
-;; SPDX-License-Identifier: MPL-2.0-or-later
+;; SPDX-License-Identifier: MPL-2.0
 ;; SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
 ;; ERROR-CATALOG.scm - Machine-readable catalog of common repo security errors
 ;; Format: Guile Scheme (homoiconic, parseable by robot-repo-cleaner)

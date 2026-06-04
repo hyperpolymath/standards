@@ -1,5 +1,5 @@
 # Proof Spec: polyglot-i18n
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/polyglot-i18n`
 **Tier**: T3 — Standard

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # register.ncl - MIME Registration Logic for .k9 SVC
 #
 # Generates OS-specific MIME type registration based on target environment.

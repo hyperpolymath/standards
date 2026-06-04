@@ -1,5 +1,5 @@
 # Proof Spec: tree-sitter-k9
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/tree-sitter-k9`
 **Tier**: T3 — Standard

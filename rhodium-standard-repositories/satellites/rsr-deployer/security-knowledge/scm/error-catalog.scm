@@ -1,4 +1,4 @@
-; SPDX-License-Identifier: MPL-2.0-or-later
+; SPDX-License-Identifier: MPL-2.0
 ; Security Error Catalog for GitHub Workflows
 ; Designed for Datalog reasoning and Qwen3 SLM augmentation
 

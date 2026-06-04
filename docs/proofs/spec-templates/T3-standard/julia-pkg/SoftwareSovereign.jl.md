@@ -1,5 +1,5 @@
 # Proof Spec: SoftwareSovereign.jl
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/SoftwareSovereign.jl`
 **Tier**: T3 — Standard

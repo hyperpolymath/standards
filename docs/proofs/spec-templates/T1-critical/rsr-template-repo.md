@@ -1,5 +1,5 @@
 # Proof Spec: rsr-template-repo
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/rsr-template-repo`
 **Tier**: T1 — Critical (baseline for ALL repos)

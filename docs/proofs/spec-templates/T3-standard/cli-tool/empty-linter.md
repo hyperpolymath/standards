@@ -1,5 +1,5 @@
 # Proof Spec: empty-linter
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/empty-linter`
 **Tier**: T3 — Standard

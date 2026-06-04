@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: AGPL-3.0-or-later
+-- SPDX-License-Identifier: MPL-2.0
 ||| A2ML v1.1 base record vocabulary (SPEC.adoc Section 7).
 |||
 ||| This is the anti-desync primitive: one neutral shape for "a thing that can be

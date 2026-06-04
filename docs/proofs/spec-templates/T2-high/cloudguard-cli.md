@@ -1,5 +1,5 @@
 # Proof Spec: cloudguard-cli
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/cloudguard-cli`
 **Tier**: T2 — High

@@ -1,5 +1,5 @@
 # Archetype: julia-pkg (Julia Package)
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Applies to**: `*.jl` packages
 

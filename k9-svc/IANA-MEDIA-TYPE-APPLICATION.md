@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # IANA Media Type Registration Application: application/vnd.k9
 
 > Prepared for submission to IANA per RFC 6838 (Vendor Tree)

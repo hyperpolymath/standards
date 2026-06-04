@@ -1,5 +1,5 @@
 # Proof Spec: dicti0nary-attack
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/dicti0nary-attack`
 **Tier**: T3 — Standard

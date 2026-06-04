@@ -1,5 +1,5 @@
 # Proof Spec: zerotier-k8s-link
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/zerotier-k8s-link`
 **Tier**: T3 — Standard

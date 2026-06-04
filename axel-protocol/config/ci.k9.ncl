@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # K9 Contractile: Yard Level (Validated Config)
 # CI/CD configuration with Nickel contracts
 

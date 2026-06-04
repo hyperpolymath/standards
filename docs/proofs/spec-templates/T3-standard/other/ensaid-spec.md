@@ -1,5 +1,5 @@
 # Proof Spec: ensaid-spec
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/ensaid-spec`
 **Tier**: T3 — Standard

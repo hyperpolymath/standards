@@ -1,4 +1,4 @@
-% SPDX-License-Identifier: AGPL-3.0-or-later
+% SPDX-License-Identifier: MPL-2.0
 % Security Error Knowledge Base for GitHub Workflows
 % Designed for use with Virtuoso Open Source and Qwen3 SLM augmentation
 

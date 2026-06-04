@@ -1,5 +1,5 @@
 # Proof Spec: echidna
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/echidna`
 **Tier**: T1 — Critical
@@ -689,7 +689,7 @@ Note: The existing Idris2 ABI in `src/abi/` has **0 believe_me** — do not add 
 
 - [ ] All 13 theorems proven
 - [ ] No banned patterns anywhere in new proof files
-- [ ] All files have SPDX-License-Identifier: AGPL-3.0-or-later header
+- [ ] All files have SPDX-License-Identifier: MPL-2.0 header
 - [ ] `just proof-check-all` returns PASS
 - [ ] `just proof-scan-dangerous` returns PASS
 - [ ] `PROOF-STATUS.md` updated

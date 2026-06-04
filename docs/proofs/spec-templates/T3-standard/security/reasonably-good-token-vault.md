@@ -1,5 +1,5 @@
 # Proof Spec: reasonably-good-token-vault
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/reasonably-good-token-vault`
 **Tier**: T3 — Standard

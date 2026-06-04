@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # container-deploy.k9.ncl - Multi-service container deployment component
 #
 # Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)

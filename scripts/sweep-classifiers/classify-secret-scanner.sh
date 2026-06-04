@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # classify-secret-scanner.sh — classify per-repo secret-scanner.yml for #190 sweep.
 #
 # Canonical (standards/.github/workflows/secret-scanner.yml @ 080c394):

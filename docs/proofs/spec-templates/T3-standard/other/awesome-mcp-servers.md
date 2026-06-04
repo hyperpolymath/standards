@@ -1,5 +1,5 @@
 # Proof Spec: awesome-mcp-servers
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/awesome-mcp-servers`
 **Tier**: T3 — Standard

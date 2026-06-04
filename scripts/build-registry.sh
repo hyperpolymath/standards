@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # build-registry.sh — regenerate the verifiable spec registry and the
@@ -135,7 +135,7 @@ home_hash() {
 # ---------------------------------------------------------------------------
 emit_registry() {
   cat <<HEADER
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # REGISTRY.a2ml — the verifiable index of every spec/standard in this monorepo.
@@ -246,7 +246,7 @@ emit_topology() {
   phase="$(state_field phase)"; maturity="$(state_field maturity)"
   updated="$(state_field last-updated)"
   cat <<HEADER
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 <!-- TOPOLOGY.md — DERIVED architecture map (generated from REGISTRY.a2ml + STATE.a2ml) -->
 <!-- GENERATED FILE — DO NOT EDIT BY HAND. Run: just topology (scripts/build-registry.sh) -->
 

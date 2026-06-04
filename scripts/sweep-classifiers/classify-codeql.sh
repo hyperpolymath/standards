@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # classify-codeql.sh — classify per-repo codeql.yml for #192 sweep.
 #
 # Canonical: 49 lines, single `analyze` job, matrix language=javascript-typescript

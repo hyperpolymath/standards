@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: CC-BY-4.0
 # Cloudflare Pages Deployment - Success Report
 
 **Date:** 2026-02-04

@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno test --allow-read --allow-write --allow-run
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // K9 Coordination Protocol — Compatibility Tests
 // Verify backward/forward compatibility of K9 schema versions.
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>

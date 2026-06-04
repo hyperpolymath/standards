@@ -1,5 +1,5 @@
 # Proof Spec: valence-shell
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/valence-shell`
 **Tier**: T3 — Standard

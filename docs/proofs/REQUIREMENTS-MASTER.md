@@ -1,5 +1,5 @@
 # Proof Requirements Master — All 292 Repos
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 <!-- Generated: 2026-04-04 by Claude Opus -->
 <!-- Purpose: Single-source mapping of formal verification needs across entire ecosystem -->
 

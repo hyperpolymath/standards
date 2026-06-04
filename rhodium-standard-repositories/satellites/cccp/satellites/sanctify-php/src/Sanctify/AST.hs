@@ -1,6 +1,6 @@
 {-# LANGUAGE StrictData #-}
 -- | PHP Abstract Syntax Tree
--- SPDX-License-Identifier: AGPL-3.0-or-later
+-- SPDX-License-Identifier: MPL-2.0
 module Sanctify.AST
     ( -- * Top-level structures
       PhpFile(..)

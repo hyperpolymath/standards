@@ -1,5 +1,5 @@
 # Archetype: cli-tool (Command-Line Tool)
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Applies to**: CLI tools (Rust, Deno, Julia)
 

@@ -1,5 +1,5 @@
 <!--
-SPDX-License-Identifier: AGPL-3.0-or-later
+SPDX-License-Identifier: CC-BY-4.0
 (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
 -->
 
@@ -81,7 +81,7 @@ You are implementing <one-line task statement> in <repo path>.
 
 # Hard rules
 
-- <License headers: SPDX-License-Identifier: AGPL-3.0-or-later unless otherwise
+- <License headers: SPDX-License-Identifier: MPL-2.0 unless otherwise
   stated (AGPL-3.0-or-later for IDApTIK / Airborne Submarine Squadron)>
 - <Language policy: AffineScript / Rust(+SPARK) / Deno / Zig / Idris2 / Agda / Gleam; no
   TypeScript, ReScript, Node, npm/bun/yarn, Go, general Python (RS/TS/JS → AffineScript → typed-wasm; Agda for foundational proofs incl. echo-types)>

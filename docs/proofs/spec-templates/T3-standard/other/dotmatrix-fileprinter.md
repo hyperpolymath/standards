@@ -1,5 +1,5 @@
 # Proof Spec: dotmatrix-fileprinter
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/dotmatrix-fileprinter`
 **Tier**: T3 — Standard

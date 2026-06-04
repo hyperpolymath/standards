@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # setup.sh — Universal setup script for standards
 #
 # Detects your shell, platform, and installs prerequisites.
@@ -252,7 +252,7 @@ main() {
     # Write report
     REPORT_FILE="INSTALL-SECURITY-REPORT.adoc"
     {
-        printf "// SPDX-License-Identifier: AGPL-3.0-or-later\n"
+        printf "// SPDX-License-Identifier: CC-BY-4.0\n"
         printf "= Install Security Report\n"
         printf ":date: %s\n\n" "$(date -Iseconds 2>/dev/null || date)"
         printf "== Platform\n"

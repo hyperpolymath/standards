@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # Dust — exnovation / code-removal runner
 #
 # Pairs with: Dustfile.a2ml (same directory)

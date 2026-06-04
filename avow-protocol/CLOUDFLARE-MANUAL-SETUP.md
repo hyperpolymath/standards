@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: CC-BY-4.0
 # Cloudflare Manual Setup - Detailed Step-by-Step Instructions
 
 Complete visual guide for deploying AVOW Protocol to Cloudflare via dashboard.

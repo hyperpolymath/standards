@@ -1,5 +1,5 @@
 # Proof Spec: ipv6-tools
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/ipv6-tools`
 **Tier**: T3 — Standard

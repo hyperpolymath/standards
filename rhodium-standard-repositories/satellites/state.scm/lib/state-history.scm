@@ -2,7 +2,7 @@
 ;;; lib/state-history.scm — History Tracking & Estimation
 ;;; ==================================================
 ;;;
-;;; SPDX-License-Identifier: MPL-2.0-or-later
+;;; SPDX-License-Identifier: MPL-2.0
 ;;; Copyright (c) 2025 Jonathan D.A. Jewell
 ;;;
 ;;; Tracks project completion over time and estimates
