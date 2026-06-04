@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+= K9 Validate Action
+:author: Jonathan D.A. Jewell
+:revdate: 2026-03-17
+:toc: preamble
+:icons: font
+
+GitHub Action that scans and validates K9 configuration files (`.k9` and
+`.k9.ncl`) in your repository. Checks structural integrity, security level
+compliance, pedigree completeness, and hunt-level signature requirements.
+
+== What It Validates
+
+The action performs five checks on every K9 file discovered:
+
+[cols="1,1,3"]
+|===
+| Check | Severity | Description
+
+| K9! magic number
+| Error
+| The first non-empty line must be exactly `K9!`.
+
+| SPDX header
+| Warning
+| An `SPDX-License-Identifier` must appear within the first 10 lines.
+
+| Pedigree block
+| Error
+| A `pedigree = { ... }` section must exist, containing at minimum a `name`
+  field. A `version` or `schema_version` field is expected (warning if missing).
+
+| Security level
+| Error
+| The `leash` or `security_level` field must be one of: `kennel`, `yard`,
+  `hunt` (case-insensitive). Nickel enum tick syntax (`'Kennel`) is handled.
+
+| Hunt-level signature
+| Error
+| Files with security level `hunt` must include a `signature` or
+  `signature_required` field.
+|===
+
+== Usage
+
+Add this step to any workflow to validate K9 files on push or pull request:
+
+[source,yaml]
+----
+name: Validate K9
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hyperpolymath/standards/self-validating/actions/validate@main
+        with:
+          path: '.'        # Directory to scan (default: repo root)
+          strict: 'false'  # Promote warnings to errors (default: false)
+----
+
+=== Using Outputs
+
+[source,yaml]
+----
+      - uses: hyperpolymath/standards/self-validating/actions/validate@main
+        id: k9
+      - run: |
+          echo "Scanned: ${{ steps.k9.outputs.files-scanned }}"
+          echo "Errors:  ${{ steps.k9.outputs.errors }}"
+          echo "Warnings: ${{ steps.k9.outputs.warnings }}"
+----
+
+== Inputs
+
+[cols="1,1,3"]
+|===
+| Input | Default | Description
+
+| `path`
+| `.`
+| Directory path to scan for `.k9` and `.k9.ncl` files. The scan is recursive
+  and excludes `.git/`.
+
+| `strict`
+| `false`
+| When `true`, all warnings are promoted to errors and the action fails on any
+  validation issue.
+|===
+
+== Outputs
+
+[cols="1,3"]
+|===
+| Output | Description
+
+| `files-scanned`
+| Total number of K9 files discovered and processed.
+
+| `errors`
+| Count of validation errors found. Non-zero causes exit code 1.
+
+| `warnings`
+| Count of validation warnings found. In strict mode, these become errors.
+|===
+
+== Exit Codes
+
+[cols="1,3"]
+|===
+| Code | Meaning
+
+| `0`
+| All files valid (or warnings only in non-strict mode).
+
+| `1`
+| One or more validation errors were found.
+|===
+
+Validation results are also emitted as GitHub Actions annotations (the
+`::error` and `::warning` workflow commands), so issues appear inline on the
+Files Changed tab of pull requests.
+
+== Security Levels
+
+K9 uses a "leash" metaphor for trust tiers:
+
+[cols="1,1,3"]
+|===
+| Level | Trust | Requirements
+
+| `kennel`
+| Data-only
+| No signature required. Pure configuration values. No execution capabilities.
+
+| `yard`
+| Validated
+| Nickel contracts enforced. Type-checked before use. Limited permissions.
+
+| `hunt`
+| Full access
+| *Signature required.* Can execute commands and access system resources.
+|===
+
+== Implementation
+
+The action is a composite action (`using: composite`) that runs
+`validate-k9.sh` -- a portable Bash script with no external dependencies
+beyond `bash` and `find`. It uses `set -euo pipefail` for safety and
+produces structured output via `$GITHUB_OUTPUT`.
+
+== Part of the K9 Ecosystem
+
+This action is part of the
+https://github.com/hyperpolymath/standards/tree/main/k9-svc[K9 Self-Validating Components]
+suite within the `standards` monorepo. Related tools:
+
+* link:../../bindings/[`bindings/`] -- Language bindings (Deno, Rust, Gleam, Elixir, Haskell)
+* link:../../pandoc/[`pandoc/`] -- Pandoc reader, writer, and filter
+* link:../../editors/vscode/[`editors/vscode/`] -- VS Code extension
+* link:../../SPEC.adoc[`SPEC.adoc`] -- K9 format specification

@@ -79,7 +79,7 @@ The `nickel` section of K9 contractiles uses Nickel contracts to validate config
 
 Here's where it gets fun: **K9 releases itself using a K9 component**!
 
-See: https://github.com/hyperpolymath/standards/blob/main/k9-svc/release-k9.k9.ncl
+See: https://github.com/hyperpolymath/standards/blob/main/self-validating/release-k9.k9.ncl
 
 This contractile:
 - Validates the build environment
@@ -146,7 +146,7 @@ I'd love to hear thoughts from the Nickel community:
 
 - **K9 Specification:** https://github.com/hyperpolymath/standards/tree/main/k9-svc
 - **K9 Tools:** https://github.com/hyperpolymath/k9-tools
-- **Examples:** https://github.com/hyperpolymath/k9-svc/tree/main/examples
+- **Examples:** https://github.com/hyperpolymath/self-validating/tree/main/examples
 
 Thanks for building such an excellent configuration language! K9 wouldn't be possible without Nickel's solid foundation.
 

@@ -18,8 +18,8 @@ build:
     @echo "=== Standards Monorepo Build ==="
     @echo "[1/3] a2ml/bindings/rust"
     @cd a2ml/bindings/rust && cargo build 2>&1 || echo "  SKIP: cargo not available"
-    @echo "[2/3] k9-svc/bindings/rust"
-    @cd k9-svc/bindings/rust && cargo build 2>&1 || echo "  SKIP: cargo not available"
+    @echo "[2/3] self-validating/bindings/rust"
+    @cd self-validating/bindings/rust && cargo build 2>&1 || echo "  SKIP: cargo not available"
     @echo "[3/3] groove-protocol/reference/ipv6t"
     @cd groove-protocol/reference/ipv6t && zig build 2>&1 || echo "  SKIP: zig not available"
     @echo "=== Build complete ==="
@@ -40,8 +40,8 @@ test:
     @echo "[4/5] a2ml/bindings/rust (Rust — 47 tests)"
     @cd a2ml/bindings/rust && cargo test 2>&1 || echo "  SKIP: cargo not available or tests failed"
     @echo ""
-    @echo "[5/5] k9-svc/bindings/rust (Rust — 45 tests)"
-    @cd k9-svc/bindings/rust && cargo test 2>&1 || echo "  SKIP: cargo not available or tests failed"
+    @echo "[5/5] self-validating/bindings/rust (Rust — 45 tests)"
+    @cd self-validating/bindings/rust && cargo test 2>&1 || echo "  SKIP: cargo not available or tests failed"
     @echo ""
     @echo "=== Test run complete ==="
 
@@ -49,7 +49,7 @@ test:
 fmt:
     @echo "=== Standards Monorepo Format ==="
     @cd a2ml/bindings/rust && cargo fmt 2>&1 || echo "  SKIP"
-    @cd k9-svc/bindings/rust && cargo fmt 2>&1 || echo "  SKIP"
+    @cd self-validating/bindings/rust && cargo fmt 2>&1 || echo "  SKIP"
     @cd 0-ai-gatekeeper-protocol/mcp-repo-guardian && deno fmt 2>&1 || echo "  SKIP"
     @echo "=== Format complete ==="
 
@@ -58,7 +58,7 @@ lint:
     @echo "=== Standards Monorepo Lint ==="
     @echo "[1/2] Rust clippy"
     @cd a2ml/bindings/rust && cargo clippy --all-targets 2>&1 || echo "  SKIP"
-    @cd k9-svc/bindings/rust && cargo clippy --all-targets 2>&1 || echo "  SKIP"
+    @cd self-validating/bindings/rust && cargo clippy --all-targets 2>&1 || echo "  SKIP"
     @echo "[2/2] Deno lint"
     @cd 0-ai-gatekeeper-protocol/mcp-repo-guardian && deno lint 2>&1 || echo "  SKIP"
     @echo "=== Lint complete ==="
@@ -67,7 +67,7 @@ lint:
 clean:
     @echo "=== Cleaning ==="
     @cd a2ml/bindings/rust && cargo clean 2>&1 || true
-    @cd k9-svc/bindings/rust && cargo clean 2>&1 || true
+    @cd self-validating/bindings/rust && cargo clean 2>&1 || true
     @cd groove-protocol/reference/ipv6t && rm -rf zig-out zig-cache .zig-cache 2>/dev/null || true
     @echo "=== Clean complete ==="
 

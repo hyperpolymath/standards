@@ -141,9 +141,9 @@ CRG C integration tests (`tests/crg_c_tests.rs`):
 - Round-trip (parse+render) for small/medium/large
 - TrustLevel comparison micro-benchmark
 
-### k9-svc/bindings/rust — 45 tests (Rust)
+### self-validating/bindings/rust — 45 tests (Rust)
 
-Run: `cargo test` from `k9-svc/bindings/rust/`
+Run: `cargo test` from `self-validating/bindings/rust/`
 
 All 45 tests pass (9 inline unit tests + 3 doc tests + 33 CRG C integration tests).
 
@@ -156,7 +156,7 @@ CRG C integration tests (`tests/crg_c_tests.rs`):
 - [x] **Aspect/Error**: K9Error diagnostic non-empty, NickelFormat error message (2 tests)
 - [x] **E2E/Reflexive**: parse .k9 fixtures from k9-svc dir, round-trip constructed component (2 tests)
 
-**Benchmarks**: `cargo bench` from `k9-svc/bindings/rust/`
+**Benchmarks**: `cargo bench` from `self-validating/bindings/rust/`
 - Parse small/medium/multi-component throughput
 - Render medium throughput
 - Round-trip (parse+render) for small/medium/multi
@@ -165,11 +165,11 @@ CRG C integration tests (`tests/crg_c_tests.rs`):
 ## What Was Fixed in This Session (2026-04-04, session 2)
 
 - [x] Added `proptest` + `criterion` dev-dependencies to `a2ml/bindings/rust/Cargo.toml`
-- [x] Added `proptest` + `criterion` dev-dependencies to `k9-svc/bindings/rust/Cargo.toml`
+- [x] Added `proptest` + `criterion` dev-dependencies to `self-validating/bindings/rust/Cargo.toml`
 - [x] Created `a2ml/bindings/rust/tests/crg_c_tests.rs` — 36 tests covering all CRG C categories
 - [x] Created `a2ml/bindings/rust/benches/a2ml_bench.rs` — Criterion benchmarks (6 bench functions)
-- [x] Created `k9-svc/bindings/rust/tests/crg_c_tests.rs` — 33 tests covering all CRG C categories
-- [x] Created `k9-svc/bindings/rust/benches/k9_bench.rs` — Criterion benchmarks (6 bench functions)
+- [x] Created `self-validating/bindings/rust/tests/crg_c_tests.rs` — 33 tests covering all CRG C categories
+- [x] Created `self-validating/bindings/rust/benches/k9_bench.rs` — Criterion benchmarks (6 bench functions)
 - [x] All 158+ tests pass across all 6 test suites
 
 ## What Was Fixed in Previous Session (2026-04-04, session 1)

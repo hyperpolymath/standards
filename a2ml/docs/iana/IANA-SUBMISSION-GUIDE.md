@@ -28,7 +28,7 @@ Section 4.2.8, unregistered suffixes SHOULD NOT be used. The base type
   - [x] application/vnd.k9 (format-registrations/iana/k9-media-type.txt)
 - [x] Specifications publicly available
   - [x] A2ML: github.com/hyperpolymath/standards/blob/main/a2ml/SPEC-v1.0.adoc
-  - [x] K9: github.com/hyperpolymath/standards/blob/main/k9-svc/SPEC.adoc
+  - [x] K9: github.com/hyperpolymath/standards/blob/main/self-validating/SPEC.adoc
 - [x] Reference implementations published
   - [x] A2ML: github.com/hyperpolymath/standards/tree/main/a2ml
   - [x] K9: github.com/hyperpolymath/standards/tree/main/k9-svc
@@ -157,9 +157,9 @@ Content-Type: application/vnd.k9; security-level=hunt; version=1.0.0
 | A2ML registration (canonical) | format-registrations/iana/a2ml-media-type.txt |
 | K9 registration (canonical) | format-registrations/iana/k9-media-type.txt |
 | A2ML registration (standards sync) | standards/a2ml/docs/iana/application-vnd.a2ml-registration.txt |
-| K9 registration (standards sync) | standards/k9-svc/docs/iana/application-vnd.k9+nickel-registration.txt |
+| K9 registration (standards sync) | standards/self-validating/docs/iana/application-vnd.k9+nickel-registration.txt |
 | A2ML application (Markdown) | standards/a2ml/IANA-MEDIA-TYPE-APPLICATION.md |
-| K9 application (Markdown) | standards/k9-svc/IANA-MEDIA-TYPE-APPLICATION.md |
+| K9 application (Markdown) | standards/self-validating/IANA-MEDIA-TYPE-APPLICATION.md |
 
 ---
 

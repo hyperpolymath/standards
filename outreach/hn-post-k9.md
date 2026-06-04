@@ -206,7 +206,7 @@ A: For kennel/yard levels, you can. Hunt-level components have system-wide privi
 A: Depends on your definition. I'm using it in production for 10 repos (including releasing itself). The tooling is v1.0. The spec is stable. But it's a small ecosystem—you're an early adopter.
 
 **Q: What's PMPL-1.0?**
-A: Polymath Public Meta-License. It's an open-source license designed for meta-tools (tools that generate/validate other tools). Similar to MPL-2.0 but with provisions for generated artifacts. Details: https://github.com/hyperpolymath/standards/blob/main/k9-svc/LICENSE
+A: Polymath Public Meta-License. It's an open-source license designed for meta-tools (tools that generate/validate other tools). Similar to MPL-2.0 but with provisions for generated artifacts. Details: https://github.com/hyperpolymath/standards/blob/main/self-validating/LICENSE
 
 **Q: Can I use K9 without Nickel?**
 A: Technically, yes—the `nickel` section is optional. But you lose configuration validation. K9 without Nickel is just Justfile with prerequisite checks. Still useful, but not the full power.
