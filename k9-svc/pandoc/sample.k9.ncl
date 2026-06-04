@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: MPL-2.0
 # hello.k9.ncl - Example K9 Self-Validating Component
 #
 # This is a minimal .k9 component demonstrating the pedigree structure.
