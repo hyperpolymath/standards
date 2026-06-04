@@ -600,7 +600,7 @@ This is **graduated trust without gatekeeping**—everyone can contribute, but s
    - Offline-first considerations
 
 3. **Then dive into specific details**
-   - Type safety guarantees (ReScript/Rust/Ada)
+   - Type safety guarantees (AffineScript/Rust/Ada)
    - CRDT operations if applicable
    - Supervision tree structure if Elixir
 
@@ -627,7 +627,7 @@ This is **graduated trust without gatekeeping**—everyone can contribute, but s
    - Offline-first violations
 
 3. **Suggest improvements for clarity**
-   - Type annotations (ReScript/Rust/Haskell)
+   - Type annotations (AffineScript/Rust/Haskell)
    - Error handling (Elixir supervision, Rust Result)
    - Security boundaries (Deno permissions)
 
@@ -724,7 +724,7 @@ just check-offline    # Offline-first capability
 
 ### Migrating from JavaScript/Python
 
-#### JavaScript → ReScript/Rust
+#### JavaScript → AffineScript/Rust
 ```bash
 # 1. Identify JS files
 fd -e js -e jsx
@@ -835,7 +835,7 @@ end Process_Data;
 2. **Offline-First**: Intermittent connectivity never blocks work
 3. **Formally Verified**: Correctness is care, use SPARK/Coq where critical
 4. **Community Over Ego**: TPCF graduated trust model
-5. **Post-JavaScript**: Eliminate JS/Python, use ReScript/Rust/Elixir/Ada/Haskell
+5. **Post-JavaScript**: Eliminate JS/Python, use AffineScript/Rust/Elixir/Ada/Haskell
 6. **Holistic Lifecycle**: Consider upstream dependencies to downstream human impact
 7. **Maximum Principal Reduction**: Only necessary processing, minimal exposure
 8. **Mutually Assured Accountability**: MAA framework embedded in architecture

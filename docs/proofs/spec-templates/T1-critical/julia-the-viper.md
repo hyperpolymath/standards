@@ -1,5 +1,5 @@
 # Proof Spec: julia-the-viper
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/nextgen-languages/julia-the-viper`
 **Tier**: T1 — Critical

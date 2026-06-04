@@ -1,6 +1,6 @@
 # NPM Publishing Guide
 
-**SPDX-License-Identifier: AGPL-3.0-or-later**
+**SPDX-License-Identifier: CC-BY-SA-4.0**
 
 This document describes how to publish `@hyperpolymath/mcp-repo-guardian` to npm.
 

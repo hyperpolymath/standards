@@ -1,5 +1,5 @@
 // {{PROJECT}} Integration Tests
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 //
 // These tests verify that the Zig FFI correctly implements the Idris2 ABI
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
 //
 // playbook-to-recipe — convert PLAYBOOK.a2ml runbook procedures into
@@ -261,7 +261,7 @@ fn balanced_sexp(s: &str) -> &str {
 
 fn render_recipe(repo: &str, proc_name: &str, steps: &[(String, String)]) -> String {
     let mut s = String::new();
-    s.push_str("# SPDX-License-Identifier: AGPL-3.0-or-later\n");
+    s.push_str("# SPDX-License-Identifier: MPL-2.0\n");
     s.push_str("# Hypatia recipe (A2ML) — generated from PLAYBOOK.a2ml\n\n");
     s.push_str("@recipe(version=\"1.0\"):\n");
     s.push_str(&format!("id: recipe-{repo}-{proc_name}\n"));

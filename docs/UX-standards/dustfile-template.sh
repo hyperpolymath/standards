@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # Dustfile Template - Targeted, automated repair for application launchers
 # 
 # Dustfiles are self-diagnostic, self-healing scripts that:

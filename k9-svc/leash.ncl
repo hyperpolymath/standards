@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # leash.ncl - Security Level Detection and Enforcement for K9 SVC
 #
 # The Leash system controls what a .k9 component can do:

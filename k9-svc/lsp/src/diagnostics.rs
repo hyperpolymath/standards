@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 //
 // diagnostics.rs — K9 diagnostic checks (linting)
 //
@@ -82,7 +82,7 @@ fn check_spdx_header(_text: &str, lines: &[&str], diags: &mut Vec<Diagnostic>) {
             code: Some(NumberOrString::String("K9-D002".to_string())),
             source: Some(SOURCE.to_string()),
             message: "Missing SPDX-License-Identifier header. Add a comment like: \
-                      # SPDX-License-Identifier: AGPL-3.0-or-later"
+                      # SPDX-License-Identifier: MPL-2.0"
                 .to_string(),
             ..Default::default()
         });
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_has_magic_number_via_field() {
-        let text = "# SPDX-License-Identifier: AGPL-3.0-or-later\nmagic_number = \"K9!\"\n";
+        let text = "# SPDX-License-Identifier: MPL-2.0\nmagic_number = \"K9!\"\n";
         let diags = diagnose(text);
         assert!(!diags.iter().any(|d| d.code == Some(NumberOrString::String("K9-D001".to_string()))));
     }

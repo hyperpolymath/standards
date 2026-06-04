@@ -196,5 +196,5 @@
 
     (ERR-LIC-001
      pattern: "(first line of file)"
-     replacement: "# SPDX-License-Identifier: AGPL-3.0-or-later"
+     replacement: "# SPDX-License-Identifier: MPL-2.0"
      position: "line 1")))

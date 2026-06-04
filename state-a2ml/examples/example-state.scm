@@ -2,7 +2,7 @@
 ;;; example-state.scm — Sample STATE.scm File
 ;;; ==================================================
 ;;;
-;;; SPDX-License-Identifier: AGPL-3.0-or-later
+;;; SPDX-License-Identifier: MPL-2.0
 ;;; Copyright (c) 2025 Jonathan D.A. Jewell
 ;;;
 ;;; This is an example showing a realistic state checkpoint

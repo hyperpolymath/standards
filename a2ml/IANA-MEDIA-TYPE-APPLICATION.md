@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # IANA Media Type Registration Application: application/vnd.a2ml
 
 > Prepared for submission to IANA per RFC 6838 (Vendor Tree)

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # ux-batch-rollout.jl — Batch rollout UX Manifesto infrastructure to all repos
@@ -331,7 +331,7 @@ function deploy_templates(repo_path::String; dry_run::Bool=false)::Int
     # Ensure guix.scm exists
     guix_path = joinpath(repo_path, "guix.scm")
     if !isfile(guix_path)
-        guix_content = """; SPDX-License-Identifier: AGPL-3.0-or-later
+        guix_content = """; SPDX-License-Identifier: MPL-2.0
 ;; guix.scm — GNU Guix package definition for $repo_name
 ;; Usage: guix shell -f guix.scm
 

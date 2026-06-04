@@ -109,7 +109,7 @@ for the canonical statement.
 | Banned | Replacement | Notes |
 |--------|-------------|-------|
 | TypeScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
-| **ReScript** | AffineScript | Banned in new code as of 2026-04-30. Existing `.res` files migrate to `.affine` directly (do not pass through ReScript). |
+| **AffineScript** | AffineScript | Banned in new code as of 2026-04-30. Existing `.res` files migrate to `.affine` directly (do not pass through ReScript). |
 | Node.js | Deno | |
 | npm | Deno | |
 | Bun | Deno | |
@@ -151,7 +151,7 @@ Both are FOSS with independent governance (no Big Tech).
 ### Enforcement Rules
 
 1. **No new TypeScript or ReScript files** - Convert existing TS/RS to AffineScript directly (`.affine`); ReScript is no longer the destination
-2. **No package.json for runtime deps** - Use deno.json imports
+2. **No package.json - use deno.json deps** - Use deno.json imports
 3. **No node_modules in production** - Deno caches deps automatically
 4. **No Go code** - Use Rust instead
 5. **No Python** - All Python must be rewritten

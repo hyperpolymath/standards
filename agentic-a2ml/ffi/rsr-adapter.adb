@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: AGPL-3.0-or-later
+-- SPDX-License-Identifier: MPL-2.0
 -- (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
 -- SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 --
@@ -110,7 +110,7 @@ package body RSR_Adapter is
       Readme_Path : constant String := "README.adoc";
       File        : File_Type;
       Template    : constant String :=
-        "// SPDX-License-Identifier: AGPL-3.0-or-later" & ASCII.LF &
+        "// SPDX-License-Identifier: MPL-2.0" & ASCII.LF &
         "// SPDX-FileCopyrightText: 2026 " & To_String (Author) & ASCII.LF &
         "= " & To_String (Project_Name) & ASCII.LF &
         ASCII.LF &

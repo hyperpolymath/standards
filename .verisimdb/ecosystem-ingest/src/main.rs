@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
 //
 // ecosystem-ingest — derive ecosystem-link octads from dependency manifests.
@@ -460,7 +460,7 @@ fn display(p: &Path) -> String {
 fn render_octads(edges: &[Edge]) -> String {
     let now = iso8601_now();
     let mut s = String::new();
-    s.push_str("# SPDX-License-Identifier: AGPL-3.0-or-later\n");
+    s.push_str("# SPDX-License-Identifier: MPL-2.0\n");
     s.push_str("# ecosystem-link octads — emitted by ecosystem-ingest\n\n");
     s.push_str("@metadata:\n");
     s.push_str("tool: ecosystem-ingest\n");

@@ -1,5 +1,5 @@
 <!--
-SPDX-License-Identifier: AGPL-3.0-or-later
+SPDX-License-Identifier: CC-BY-SA-4.0
 Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 -->
 
@@ -364,7 +364,7 @@ their `peer-type` in `ECOSYSTEM.scm`.
 ## Appendix A: Full ECOSYSTEM.scm Example (o-extension)
 
 ```scheme
-;; SPDX-License-Identifier: AGPL-3.0-or-later
+;; SPDX-License-Identifier: CC-BY-SA-4.0
 (ecosystem
   ((metadata
      ((version . "1.0.0")
@@ -397,7 +397,7 @@ their `peer-type` in `ECOSYSTEM.scm`.
 ## Appendix B: Full ECOSYSTEM.scm Example (aggregate-library)
 
 ```scheme
-;; SPDX-License-Identifier: AGPL-3.0-or-later
+;; SPDX-License-Identifier: CC-BY-SA-4.0
 (ecosystem
   ((metadata
      ((version . "1.0.0")

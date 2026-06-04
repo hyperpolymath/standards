@@ -266,7 +266,7 @@
      (fix
       (action . "modify")
       (modification . "Add SPDX header as first line")
-      (template . "# SPDX-License-Identifier: AGPL-3.0-or-later")))
+      (template . "# SPDX-License-Identifier: MPL-2.0")))
 
     ;;=========================================================================
     ;; PROPAGATION RULES

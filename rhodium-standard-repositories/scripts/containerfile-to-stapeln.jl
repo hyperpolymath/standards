@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # containerfile-to-stapeln.jl — Convert Containerfiles to stapeln.toml service definitions
@@ -272,7 +272,7 @@ commands = $(isempty(info["run_commands"]) ? "[]" : "[\"$(join(info["run_command
         "\nentrypoint = [\"/app/$repo_name\"]"
     end
 
-    return """# SPDX-License-Identifier: AGPL-3.0-or-later
+    return """# SPDX-License-Identifier: MPL-2.0
 # stapeln.toml — Layer-based container build for $repo_name
 #
 # stapeln builds containers as composable layers (German: "to stack").

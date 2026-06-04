@@ -1,5 +1,5 @@
 <!--
-SPDX-License-Identifier: AGPL-3.0-or-later
+SPDX-License-Identifier: CC-BY-SA-4.0
 SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 -->
 
@@ -24,7 +24,7 @@ The classification is **mutually exclusive and exhaustive** — every repo in th
 |---|---|---|---|
 | **1** | **Sole owner repos (default)** | `MPL-2.0` | Every repo authored by the owner alone. Default for ~all of `hyperpolymath/*` unless one of the other rows applies. |
 | **2** | **All Rights Reserved** | ARR | `hyperpolymath/007` specifically (dual-use classified). Out of scope for any normalisation, scanning, or labelling. Surface to owner only. |
-| **3** | **Shared with son (Joshua)** | `AGPL-3.0-or-later` | Repos with son as co-author/maintainer. **Confirmed**: `idaptik`, `burble`, `standards`, `rattlescript`, `vcl-ut`. Permanent. |
+| **3** | **Shared with son (Joshua)** | `AGPL-3.0-or-later` | Repos with son as co-author/maintainer. **Confirmed**: `idaptik`, `burble`. Permanent. |
 | **4** | **Third-party / forks / not yours** | LEAVE ALONE | Whatever upstream chose. Never sweep, never normalise. Flag as out-of-scope if it surfaces in an audit. |
 | **5** | **Palimpsest carve-out (extremely narrow)** | `PMPL-1.0-or-later` (palimpsest-license + palimpsest-plasma) / **hybrid** (consent-aware-http) | TWO repos as `PMPL-1.0-or-later`: `palimpsest-license` + `palimpsest-plasma`. `consent-aware-http` (currently subdir of `standards/consent-aware-http/`, possibly future standalone) has **hybrid** licensing — see below. NOWHERE ELSE PMPL. |
 
@@ -78,7 +78,7 @@ The PMPL→target sweep that surfaced this canonical policy landed via these PRs
 | neurophone | #102 (canonical revert), #120 (docs reintro) | 100 + 8 | MPL-2.0 |
 | developer-ecosystem | #103/#104/#105/#106 | 7,033 | MPL-2.0 |
 | nextgen-databases | #29 / #30 | 226 | MPL-2.0 |
-| standards | #344 / #345 | 3,417 | **AGPL-3.0-or-later** |
+| standards | #344 / #345 | 3,417 | **MPL-2.0** |
 | stapeln | #86 / #87 | 875 | MPL-2.0 |
 | reposystem | #90 (Phase 1) | 401 | MPL-2.0 |
 | ephapax | #285 | 343 | MPL-2.0 |
@@ -87,7 +87,7 @@ The PMPL→target sweep that surfaced this canonical policy landed via these PRs
 | zerotier-k8s-link | #63 | 110 | MPL-2.0 |
 | verisimiser | #156 | 274 | MPL-2.0 |
 | squisher-corpus | #26 | 126 | MPL-2.0 |
-| rattlescript | #29 | 240 | **AGPL-3.0-or-later** |
+| rattlescript | #29 | 240 | **MPL-2.0** |
 | pimcore-fortress | #22 | 87 | MPL-2.0 |
 | tree-navigator | #41 | 75 | MPL-2.0 |
 | snapcreate | #29 | 65 | MPL-2.0 |
@@ -98,7 +98,7 @@ The PMPL→target sweep that surfaced this canonical policy landed via these PRs
 | sdp-hkdf-deployment | #26 | 81 | MPL-2.0 |
 | robot-vacuum-cleaner | #64 | 81 | MPL-2.0 |
 | gitbot-fleet | #250 | 148 | MPL-2.0 |
-| vcl-ut | #46 | 32 | **AGPL-3.0-or-later** |
+| vcl-ut | #46 | 32 | **MPL-2.0** |
 | resource-record-fluctuator | #38 | 55 | MPL-2.0 |
 | proof-of-work | #83 | 118 | MPL-2.0 |
 | project-wharf | #49 | 68 | MPL-2.0 |

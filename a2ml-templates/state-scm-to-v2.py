@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # state_scm_to_v2.py — convert a v1 STATE.scm (s-expr machine state) to the
@@ -160,7 +160,7 @@ def convert(path):
                     blockers.append((sev, desc))
 
     lines = []
-    lines.append('# SPDX-License-Identifier: AGPL-3.0-or-later')
+    lines.append('# SPDX-License-Identifier: MPL-2.0')
     lines.append(f'# Migrated from {os.path.basename(path)} by state_scm_to_v2.py on '
                  f'{datetime.date.today().isoformat()}')
     lines.append('')

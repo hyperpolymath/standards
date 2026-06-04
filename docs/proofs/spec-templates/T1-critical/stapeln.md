@@ -1,5 +1,5 @@
 # Proof Spec: stapeln
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/stapeln`
 **Tier**: T1 — Critical

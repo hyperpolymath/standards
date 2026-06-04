@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 //
 // a2ml-lsp — Diagnostic checks for A2ML documents.
 //
@@ -441,7 +441,7 @@ mod tests {
 
     #[test]
     fn spdx_present_no_warning() {
-        let text = "// SPDX-License-Identifier: AGPL-3.0-or-later\n# Title\n";
+        let text = "// SPDX-License-Identifier: MPL-2.0\n# Title\n";
         let diags = run_all_checks(text);
         assert_eq!(count_with_code(&diags, "missing-spdx"), 0);
     }

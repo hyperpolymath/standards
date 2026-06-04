@@ -2,7 +2,7 @@
 # Source directory: contractiles
 # Re-generate with: contractile gen-just --dir contractiles
 #
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 
 # === INTEND (Declared Future Intent) ===
 # Source: Intentfile.a2ml

@@ -66,7 +66,7 @@ You should now see syntax highlighting for `.a2ml` files, including directive bl
 Create a file called `0-AI-MANIFEST.a2ml` in your repository root. This is the entry point that AI agents and tooling will read first.
 
 ```
-;; SPDX-License-Identifier: AGPL-3.0-or-later
+;; SPDX-License-Identifier: CC-BY-SA-4.0
 
 # AI Manifest — my-project
 
@@ -136,7 +136,7 @@ mkdir -p .machine_readable/anchors .machine_readable/policies
 Create `.machine_readable/STATE.a2ml`:
 
 ```
-;; SPDX-License-Identifier: AGPL-3.0-or-later
+;; SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Project State
 
@@ -158,7 +158,7 @@ None currently.
 Create `.machine_readable/META.a2ml`:
 
 ```
-;; SPDX-License-Identifier: AGPL-3.0-or-later
+;; SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Project Metadata
 
