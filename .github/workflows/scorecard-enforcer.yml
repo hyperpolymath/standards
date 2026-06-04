@@ -54,28 +54,33 @@ jobs:
         with:
           sarif_file: results.sarif
 
-      - name: Persist SARIF for downstream score-gate job
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
-        with:
-          name: scorecard-results
-          path: results.sarif
-          retention-days: 1
-
+  # Gate on the aggregate score. The score is NOT present in the SARIF output
+  # (the previous `jq '.runs[0].tool.driver.properties.score'` always returned
+  # null → 0 → this gate failed on every push regardless of the real posture).
+  # The aggregate score only exists in scorecard's JSON output, so run the
+  # action here with `results_format: json` (and `publish_results: false`, so
+  # this job needs no OIDC/id-token) and read `.score`.
   check-score:
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: scorecard
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - name: Download SARIF from scorecard job
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          name: scorecard-results
+          persist-credentials: false
+
+      - name: Compute Scorecard score (JSON)
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.json
+          results_format: json
+          publish_results: false
 
       - name: Check minimum score
         run: |
-          SCORE=$(jq -r '.runs[0].tool.driver.properties.score // 0' results.sarif 2>/dev/null || echo "0")
+          SCORE=$(jq -r '.score // 0' results.json 2>/dev/null || echo "0")
 
           echo "OpenSSF Scorecard Score: $SCORE"
 
