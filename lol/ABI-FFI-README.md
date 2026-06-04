@@ -197,6 +197,6 @@ curl -X POST http://localhost:7802/graphql \
 
 ## License
 
-SPDX-License-Identifier: AGPL-3.0-or-later
+SPDX-License-Identifier: MPL-2.0
 
 Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
