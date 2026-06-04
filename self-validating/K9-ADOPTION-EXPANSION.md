@@ -108,7 +108,7 @@ Successfully deployed **10 K9 components** across **9 unique repositories** in t
 
 ---
 
-### 6. k9-svc (K9 Self-Validating Components) **DOGFOODING!**
+### 6. self-validating (K9 Self-Validating Components) **DOGFOODING!**
 
 #### release-k9.k9.ncl (Hunt)
 - **Purpose:** K9-SVC releasing itself using K9 components - ultimate dogfooding!
@@ -122,7 +122,7 @@ Successfully deployed **10 K9 components** across **9 unique repositories** in t
   - Changelog automation
 - **Demonstrates:** Ultimate dogfooding, complex multi-stage workflows, cryptographic signing
 
-**Repository:** https://github.com/hyperpolymath/standards/tree/main/k9-svc
+**Repository:** https://github.com/hyperpolymath/standards/tree/main/self-validating
 **Commit:** 2fcbb39
 
 ---
@@ -195,7 +195,7 @@ Successfully deployed **10 K9 components** across **9 unique repositories** in t
 | Domain | Count | Repos |
 |--------|-------|-------|
 | **Infrastructure** | 3 | robot-repo-automaton, hypatia, gitbot-fleet |
-| **Development Tools** | 3 | bunsenite, k9-svc, echidna |
+| **Development Tools** | 3 | bunsenite, self-validating, echidna |
 | **Standards/Schemas** | 2 | rhodium-standard-repositories, poly-git-mcp |
 | **Simulation** | 1 | robot-vacuum-cleaner |
 
@@ -252,7 +252,7 @@ Coordinated 6-bot fleet with shared context layer and priority-based execution.
 1. **robot-repo-automaton** ← Uses RSR compliance checklist
 2. **hypatia** ← Feeds findings to robot-repo-automaton
 3. **gitbot-fleet** ← Coordinates with hypatia and robot-repo-automaton
-4. **k9-sign** ← Used by k9-svc release automation
+4. **k9-sign** ← Used by self-validating release automation
 
 ### With Future Systems
 1. **Nickel-based configs** can import these K9 components
@@ -283,7 +283,7 @@ Coordinated 6-bot fleet with shared context layer and priority-based execution.
 
 ## Conclusion
 
-K9 adoption has expanded from **1 repo (k9-svc)** to **10 repos** spanning infrastructure, development tools, standards, and simulation. The components demonstrate K9's flexibility across all three security levels (Kennel, Yard, Hunt) and show real-world use cases from simple config validation to complex release automation.
+K9 adoption has expanded from **1 repo (self-validating)** to **10 repos** spanning infrastructure, development tools, standards, and simulation. The components demonstrate K9's flexibility across all three security levels (Kennel, Yard, Hunt) and show real-world use cases from simple config validation to complex release automation.
 
 **Most importantly:** K9 now "eats its own dog food" by releasing itself using a K9 component, validating the core philosophy that **a format should be able to validate and deploy itself**.
 

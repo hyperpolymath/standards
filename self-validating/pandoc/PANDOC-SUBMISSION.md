@@ -36,7 +36,7 @@ pandoc -f k9.lua input.k9.ncl -t k9-writer.lua -o roundtrip.k9.ncl
 
 ## Spec
 
-- K9 SVC specification: <https://github.com/hyperpolymath/standards/tree/main/k9-svc>
+- K9 SVC specification: <https://github.com/hyperpolymath/standards/tree/main/self-validating>
 - Media type: `application/vnd.k9+nickel` (IANA registration pending)
 
 ## Related

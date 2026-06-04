@@ -75,13 +75,13 @@ K9!
 
 ---
 metadata:
-  name: k9-svc-deploy
+  name: self-validating-deploy
   version: 1.0.0
-  description: Deployment manifest for k9-svc container
+  description: Deployment manifest for self-validating container
   license: PMPL-1.0-or-later
 
 deployment:
-  image: cgr.dev/hyperpolymath/k9-svc:1.0.0
+  image: cgr.dev/hyperpolymath/self-validating:1.0.0
   replicas: 3
   port: 8443
   protocol: https
@@ -247,8 +247,8 @@ pedigree.K9Pedigree & {
     deploy = m%"
       #!/bin/sh
       set -euo pipefail
-      podman build -t k9-svc:latest -f Containerfile .
-      podman push k9-svc:latest cgr.dev/hyperpolymath/k9-svc:latest
+      podman build -t self-validating:latest -f Containerfile .
+      podman push self-validating:latest cgr.dev/hyperpolymath/self-validating:latest
     "%,
 
     migrate = m%"

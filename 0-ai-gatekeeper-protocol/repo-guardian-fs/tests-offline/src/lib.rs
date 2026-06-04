@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 pub struct CanonicalLocations {
     pub scm_files: String,
     pub bot_directives: String,
-    pub agent_instructions: Vec<String>,
+    pub bot_directives: Vec<String>,
 }
 
 impl Default for CanonicalLocations {
@@ -45,7 +45,7 @@ impl Default for CanonicalLocations {
         Self {
             scm_files: ".machine_readable/".to_string(),
             bot_directives: ".bot_directives/".to_string(),
-            agent_instructions: vec![
+            bot_directives: vec![
                 ".claude/CLAUDE.md".to_string(),
                 "AI.a2ml".to_string(),
                 "0-AI-MANIFEST.a2ml".to_string(),
@@ -342,10 +342,10 @@ Bot directives go in `.bot_directives/`.
     }
 
     #[test]
-    fn manifest_always_has_agent_instructions() {
+    fn manifest_always_has_bot_directives() {
         let m = parse_manifest_from_content(MINIMAL_MANIFEST);
-        assert!(m.canonical_locations.agent_instructions.contains(&"0-AI-MANIFEST.a2ml".to_string()));
-        assert!(m.canonical_locations.agent_instructions.contains(&".claude/CLAUDE.md".to_string()));
+        assert!(m.canonical_locations.bot_directives.contains(&"0-AI-MANIFEST.a2ml".to_string()));
+        assert!(m.canonical_locations.bot_directives.contains(&".claude/CLAUDE.md".to_string()));
     }
 
     // -----------------------------------------------------------------------
@@ -418,7 +418,7 @@ Bot directives go in `.bot_directives/`.
             "Path traversal should be rejected; safe default should be used"
         );
         // Agent instructions are always the safe defaults
-        assert!(m.canonical_locations.agent_instructions.contains(&"0-AI-MANIFEST.a2ml".to_string()));
+        assert!(m.canonical_locations.bot_directives.contains(&"0-AI-MANIFEST.a2ml".to_string()));
     }
 
     #[test]

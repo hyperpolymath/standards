@@ -154,7 +154,7 @@ The name comes from "canine" (K9). Dogs have three behavioral states: kennel (co
 Also, I'm dogfooding it. Literally.
 
 **Links:**
-- Spec: https://github.com/hyperpolymath/standards/tree/main/k9-svc
+- Spec: https://github.com/hyperpolymath/standards/tree/main/self-validating
 - Tools: https://github.com/hyperpolymath/k9-tools
 - Examples: 10+ real contractiles across repos
 

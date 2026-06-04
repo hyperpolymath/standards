@@ -31,7 +31,7 @@ Section 4.2.8, unregistered suffixes SHOULD NOT be used. The base type
   - [x] K9: github.com/hyperpolymath/standards/blob/main/self-validating/SPEC.adoc
 - [x] Reference implementations published
   - [x] A2ML: github.com/hyperpolymath/standards/tree/main/a2ml
-  - [x] K9: github.com/hyperpolymath/standards/tree/main/k9-svc
+  - [x] K9: github.com/hyperpolymath/standards/tree/main/self-validating
 - [x] No naming conflicts with existing IANA registrations
   - [x] Confirmed A2ML is distinct from ASAM A2L (application/A2L)
   - [x] No existing vnd.k9 registration

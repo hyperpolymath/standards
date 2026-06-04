@@ -6,7 +6,7 @@
 # Security Level: 'Hunt (requires cryptographic handshake)
 #
 # This is a realistic container deployment component that demonstrates
-# how k9-svc wraps selur-compose deployments with typed configuration,
+# how self-validating wraps selur-compose deployments with typed configuration,
 # security-level enforcement, rolling deployment, and rollback.
 #
 # It deploys a three-service stack (app, database, cache) across
@@ -97,7 +97,7 @@ let component_pedigree = {
 # Nickel contracts enforce that port numbers are valid, memory
 # limits are reasonable, and required fields are present.
 #
-# This is where k9-svc shines compared to raw docker-compose.yml:
+# This is where self-validating shines compared to raw docker-compose.yml:
 # invalid configurations are caught at evaluation time, BEFORE
 # any container is started.
 # ─────────────────────────────────────────────────────────────────────

@@ -147,7 +147,7 @@ Each section tracks a dogfooding dimension. Status key:
 | cloudguard-cli | 1+ | container/deploy.k9.ncl |
 | typell | 1+ | container/deploy.k9.ncl |
 | hypatia | 1 | deploy-security-scan.k9.ncl |
-| standards/k9-svc | 2 | examples/hello.k9, pandoc/sample.k9 |
+| standards/self-validating | 2 | examples/hello.k9, pandoc/sample.k9 |
 | airborne-submarine-squadron | 1 | coordination.k9 |
 
 ### Repos with k9iser.toml (NEW — 2026-04-04)

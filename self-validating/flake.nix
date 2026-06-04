@@ -8,8 +8,8 @@
 #   nix flake check      # Run tests
 #
 # To use in another flake:
-#   inputs.k9-svc.url = "github:hyperpolymath/k9-svc";
-#   packages = [ inputs.k9-svc.packages.${system}.default ];
+#   inputs.self-validating.url = "github:hyperpolymath/self-validating";
+#   packages = [ inputs.self-validating.packages.${system}.default ];
 
 {
   description = "K9 SVC - Self-Validating Components";
@@ -24,8 +24,8 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        k9-svc = pkgs.stdenv.mkDerivation {
-          pname = "k9-svc";
+        self-validating = pkgs.stdenv.mkDerivation {
+          pname = "self-validating";
           version = "1.0.0";
 
           src = ./.;
@@ -45,7 +45,7 @@
             mkdir -p $out/bin
             mkdir -p $out/share/k9/{examples,assets}
             mkdir -p $out/share/mime/packages
-            mkdir -p $out/share/doc/k9-svc
+            mkdir -p $out/share/doc/self-validating
 
             # Install scripts
             install -m755 must $out/bin/k9-must
@@ -84,7 +84,7 @@
 
           meta = with pkgs.lib; {
             description = "Self-Validating Components - a file format that eats its own dog food";
-            homepage = "https://github.com/hyperpolymath/standards/tree/main/k9-svc";
+            homepage = "https://github.com/hyperpolymath/standards/tree/main/self-validating";
             license = licenses.agpl3Plus;
             maintainers = [];
             platforms = platforms.unix;
@@ -93,12 +93,12 @@
 
       in {
         packages = {
-          default = k9-svc;
-          k9-svc = k9-svc;
+          default = self-validating;
+          self-validating = self-validating;
         };
 
         apps.default = flake-utils.lib.mkApp {
-          drv = k9-svc;
+          drv = self-validating;
           exePath = "/bin/k9";
         };
 
@@ -124,13 +124,13 @@
           '';
         };
 
-        checks.default = pkgs.runCommand "k9-svc-check" {
-          buildInputs = [ pkgs.nickel k9-svc ];
+        checks.default = pkgs.runCommand "self-validating-check" {
+          buildInputs = [ pkgs.nickel self-validating ];
         } ''
           # Typecheck schemas
-          nickel typecheck ${k9-svc}/share/k9/pedigree.ncl
-          nickel typecheck ${k9-svc}/share/k9/register.ncl
-          nickel typecheck ${k9-svc}/share/k9/leash.ncl
+          nickel typecheck ${self-validating}/share/k9/pedigree.ncl
+          nickel typecheck ${self-validating}/share/k9/register.ncl
+          nickel typecheck ${self-validating}/share/k9/leash.ncl
           echo "All schema checks passed" > $out
         '';
       });

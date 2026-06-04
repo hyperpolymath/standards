@@ -1,4 +1,4 @@
-# AUR Submission Guide for k9-svc
+# AUR Submission Guide for self-validating
 
 ## Prerequisites
 
@@ -11,8 +11,8 @@
 ### 1. Clone the AUR package base
 
 ```bash
-git clone ssh://aur@aur.archlinux.org/k9-svc.git aur-k9-svc
-cd aur-k9-svc
+git clone ssh://aur@aur.archlinux.org/self-validating.git aur-self-validating
+cd aur-self-validating
 ```
 
 If this fails (package doesn't exist yet), it will create an empty repo.
@@ -38,7 +38,7 @@ makepkg -si
 
 ```bash
 git add PKGBUILD .SRCINFO
-git commit -m "Initial upload: k9-svc 1.0.0"
+git commit -m "Initial upload: self-validating 1.0.0"
 git push origin master
 ```
 
@@ -53,7 +53,7 @@ When releasing a new version:
 
 ## Package Details
 
-- **Package name**: k9-svc
+- **Package name**: self-validating
 - **Version**: 1.0.0
 - **Dependencies**: nickel, just, openssl
 - **Optional**: podman, asciidoctor

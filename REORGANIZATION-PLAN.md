@@ -8,7 +8,7 @@
 - `0-ai-gatekeeper-protocol/contractiles/k9/template-*.k9.ncl` (3 copies per subdir)
 - `0-ai-gatekeeper-protocol/*/contractiles/k9/template-*.k9.ncl` (multiple copies)
 
-**Solution:** Consolidate into single source in k9-svc monorepo
+**Solution:** Consolidate into single source in self-validating monorepo
 
 ### 2. RSR Workflow Duplication
 **Issue:** `rsr-antipattern.yml` appears in:
@@ -29,9 +29,9 @@
 
 ### 1. Contractile Templates
 **Current:** Scattered across `.machine_readable/contractiles/` and protocol dirs
-**Better:** Centralize in k9-svc-repo with clear categorization:
+**Better:** Centralize in self-validating-repo with clear categorization:
 ```
-k9-svc-repo/
+self-validating-repo/
   templates/
     contractiles/
       dust/
@@ -105,7 +105,7 @@ standards/
 ## Implementation Checklist
 
 ### Phase 1: Eliminate Redundancies
-- [ ] Consolidate K9 templates into k9-svc-repo
+- [ ] Consolidate K9 templates into self-validating-repo
 - [ ] Remove duplicate RSR workflow files
 - [ ] Separate A2ML vs RSR templates
 - [ ] Clean up scattered contractile templates
@@ -113,7 +113,7 @@ standards/
 ### Phase 2: Relocate Misplaced Items
 - [ ] Move RSR badges to rsr-engine-repo/badges/
 - [ ] Reorganize machine-readable specs by standard
-- [ ] Centralize contractile templates in k9-svc-repo
+- [ ] Centralize contractile templates in self-validating-repo
 - [ ] Promote RSR workflows to reusable GitHub actions
 
 ### Phase 3: Fill Coverage Gaps

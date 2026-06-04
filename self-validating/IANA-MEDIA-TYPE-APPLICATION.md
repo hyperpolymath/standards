@@ -206,7 +206,7 @@ K9 SVC files are used by:
 - Edge and ASIC deployment (Kennel-level data components)
 - The Contractile CLI system (must/trust/dust/intend/k9)
 
-Reference implementation: https://github.com/hyperpolymath/standards/tree/main/k9-svc
+Reference implementation: https://github.com/hyperpolymath/standards/tree/main/self-validating
 
 ---
 

@@ -25,9 +25,9 @@
 - **Status:** ✅ Live
 
 ### 3. K9-SVC
-- **Project:** k9-svc
-- **URL:** https://295504e4.k9-svc.pages.dev
-- **Production URL:** https://k9-svc.pages.dev
+- **Project:** self-validating
+- **URL:** https://295504e4.self-validating.pages.dev
+- **Production URL:** https://self-validating.pages.dev
 - **Files:** 1280 uploaded
 - **Status:** ✅ Live
 
@@ -111,7 +111,7 @@ curl -I https://ca8ba13d.avow-protocol.pages.dev
 curl -I https://8f8410aa.a2ml.pages.dev
 
 # K9-SVC
-curl -I https://295504e4.k9-svc.pages.dev
+curl -I https://295504e4.self-validating.pages.dev
 ```
 
 All should return:

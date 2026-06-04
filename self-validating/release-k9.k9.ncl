@@ -34,7 +34,7 @@ config = {
   # Signing
   signing = {
     sign_release_artifacts | Bool = true,
-    signing_key_name | String = "k9-svc-release",
+    signing_key_name | String = "self-validating-release",
     verify_signatures | Bool = true,
   },
 
@@ -216,28 +216,28 @@ recipes = {
     commands = [
       "echo 'Creating release tarball...'",
 
-      "mkdir -p release/k9-svc-%{new_version.version}",
+      "mkdir -p release/self-validating-%{new_version.version}",
 
       # Copy essential files
-      "cp -r README.adoc SPEC.adoc GUIDE.adoc LICENSE SECURITY.md must justfile pedigree.ncl register.ncl examples/ release/k9-svc-%{new_version.version}/",
+      "cp -r README.adoc SPEC.adoc GUIDE.adoc LICENSE SECURITY.md must justfile pedigree.ncl register.ncl examples/ release/self-validating-%{new_version.version}/",
 
       # Copy k9-sign binary and docs
-      "cp k9-sign/target/release/k9-sign release/k9-svc-%{new_version.version}/",
-      "cp k9-sign/README.md k9-sign/MIGRATION.md release/k9-svc-%{new_version.version}/",
+      "cp k9-sign/target/release/k9-sign release/self-validating-%{new_version.version}/",
+      "cp k9-sign/README.md k9-sign/MIGRATION.md release/self-validating-%{new_version.version}/",
 
       # Copy k9-scan
-      "cp k9-scan release/k9-svc-%{new_version.version}/",
+      "cp k9-scan release/self-validating-%{new_version.version}/",
 
       # Copy security docs
-      "cp -r docs/ release/k9-svc-%{new_version.version}/",
+      "cp -r docs/ release/self-validating-%{new_version.version}/",
 
       # Create tarball
-      "cd release && tar czf k9-svc-%{new_version.version}.tar.gz k9-svc-%{new_version.version}/",
+      "cd release && tar czf self-validating-%{new_version.version}.tar.gz self-validating-%{new_version.version}/",
 
       # Create checksums
-      "cd release && sha256sum k9-svc-%{new_version.version}.tar.gz > k9-svc-%{new_version.version}.tar.gz.sha256",
+      "cd release && sha256sum self-validating-%{new_version.version}.tar.gz > self-validating-%{new_version.version}.tar.gz.sha256",
 
-      "ls -lh release/k9-svc-%{new_version.version}.tar.gz",
+      "ls -lh release/self-validating-%{new_version.version}.tar.gz",
       "echo 'Release tarball created!'",
     ],
   },
@@ -250,10 +250,10 @@ recipes = {
       "echo 'Signing release artifacts...'",
 
       # Sign tarball
-      "k9-sign sign release/k9-svc-%{new_version.version}.tar.gz %{config.signing.signing_key_name}",
+      "k9-sign sign release/self-validating-%{new_version.version}.tar.gz %{config.signing.signing_key_name}",
 
       # Verify signature
-      "if [ %{std.string.from config.signing.verify_signatures} = 'true' ]; then k9-sign verify release/k9-svc-%{new_version.version}.tar.gz; fi",
+      "if [ %{std.string.from config.signing.verify_signatures} = 'true' ]; then k9-sign verify release/self-validating-%{new_version.version}.tar.gz; fi",
 
       "echo 'Release artifacts signed!'",
     ],
@@ -276,9 +276,9 @@ recipes = {
         (if config.github_release.prerelease then "--prerelease " else "") ++
         (if config.github_release.generate_notes then "--generate-notes " else "") ++
         "--title 'K9-SVC v%{new_version.version}' " ++
-        "release/k9-svc-%{new_version.version}.tar.gz " ++
-        "release/k9-svc-%{new_version.version}.tar.gz.sha256 " ++
-        "release/k9-svc-%{new_version.version}.tar.gz.sig",
+        "release/self-validating-%{new_version.version}.tar.gz " ++
+        "release/self-validating-%{new_version.version}.tar.gz.sha256 " ++
+        "release/self-validating-%{new_version.version}.tar.gz.sig",
 
       "echo 'GitHub release created!'",
       "echo 'Release URL: https://github.com/hyperpolymath/standards/tree/main/self-validating/releases/tag/v%{new_version.version}'",
@@ -305,7 +305,7 @@ recipes = {
       "echo ''",
       "echo 'Version: %{new_version.version}'",
       "echo 'Release type: %{std.string.from config.release_type}'",
-      "echo 'Tarball: release/k9-svc-%{new_version.version}.tar.gz'",
+      "echo 'Tarball: release/self-validating-%{new_version.version}.tar.gz'",
       "echo 'GitHub: https://github.com/hyperpolymath/standards/tree/main/self-validating/releases/tag/v%{new_version.version}'",
       "echo ''",
       "echo 'Next steps:'",

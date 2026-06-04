@@ -35,7 +35,7 @@ let OS = [| 'Linux, 'Minix, 'MacOS |] in
   <array>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>org.k9-svc.component</string>
+      <string>org.self-validating.component</string>
       <key>UTTypeConformsTo</key>
       <array>
         <string>public.data</string>

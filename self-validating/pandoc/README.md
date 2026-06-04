@@ -137,4 +137,4 @@ Requirements
 
 - Pandoc 3.0+ with Lua support
 
-[K9]: https://github.com/hyperpolymath/standards/tree/main/k9-svc
+[K9]: https://github.com/hyperpolymath/standards/tree/main/self-validating

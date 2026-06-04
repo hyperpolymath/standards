@@ -165,7 +165,7 @@ No manual steps. No forgotten tags. No "did I run the tests?" anxiety.
 
 K9 is open source:
 
-- **Spec:** https://github.com/hyperpolymath/standards/tree/main/k9-svc
+- **Spec:** https://github.com/hyperpolymath/standards/tree/main/self-validating
 - **Tools:** https://github.com/hyperpolymath/k9-tools
 - **Examples:** 10 real-world contractiles across multiple repos
 
@@ -184,6 +184,6 @@ That's the power of meta-dogfooding.
 Jonathan D.A. Jewell is a researcher at The Open University working on provable software systems. K9 is part of his broader work on formally verified infrastructure.
 
 **Links:**
-- K9: https://github.com/hyperpolymath/standards/tree/main/k9-svc
+- K9: https://github.com/hyperpolymath/standards/tree/main/self-validating
 - A2ML: https://github.com/hyperpolymath/standards/tree/main/a2ml (formally verified markup language)
 - Email: j.d.a.jewell@open.ac.uk

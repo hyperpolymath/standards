@@ -26,7 +26,7 @@ pub struct CanonicalLocations {
     /// Location for bot directives (e.g., ".bot_directives/")
     pub bot_directives: String,
     /// Agent-specific instruction files
-    pub agent_instructions: Vec<String>,
+    pub bot_directives: Vec<String>,
 }
 
 impl Default for CanonicalLocations {
@@ -34,7 +34,7 @@ impl Default for CanonicalLocations {
         Self {
             scm_files: ".machine_readable/".to_string(),
             bot_directives: ".bot_directives/".to_string(),
-            agent_instructions: vec![
+            bot_directives: vec![
                 ".claude/CLAUDE.md".to_string(),
                 "AI.a2ml".to_string(),
                 "0-AI-MANIFEST.a2ml".to_string(),

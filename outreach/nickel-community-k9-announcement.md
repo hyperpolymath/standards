@@ -144,7 +144,7 @@ I'd love to hear thoughts from the Nickel community:
 
 ## Links
 
-- **K9 Specification:** https://github.com/hyperpolymath/standards/tree/main/k9-svc
+- **K9 Specification:** https://github.com/hyperpolymath/standards/tree/main/self-validating
 - **K9 Tools:** https://github.com/hyperpolymath/k9-tools
 - **Examples:** https://github.com/hyperpolymath/self-validating/tree/main/examples
 

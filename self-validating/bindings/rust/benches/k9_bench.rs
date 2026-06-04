@@ -2,7 +2,7 @@
 // (PMPL-1.0-or-later preferred; MPL-2.0 required for crates.io)
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 //
-// Criterion benchmarks for the k9-svc crate.
+// Criterion benchmarks for the self-validating crate.
 //
 // Baseline categories covered:
 //   - Small K9 document parse throughput (single component)

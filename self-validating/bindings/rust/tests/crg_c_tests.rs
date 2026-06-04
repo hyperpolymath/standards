@@ -2,7 +2,7 @@
 // (PMPL-1.0-or-later preferred; MPL-2.0 required for crates.io)
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 //
-// CRG C test suite for the k9-svc crate.
+// CRG C test suite for the self-validating crate.
 //
 // Test categories covered (all required for CRG Grade C):
 //
@@ -505,16 +505,16 @@ fn e2e_dogfood_parse_k9_fixtures() {
         .and_then(|p| p.parent()) // standards/
         .expect("could not traverse to standards root");
 
-    // Look for .k9 files in the k9-svc directory.
-    let k9_dir = standards_root.join("k9-svc");
+    // Look for .k9 files in the self-validating directory.
+    let k9_dir = standards_root.join("self-validating");
     if !k9_dir.exists() {
-        eprintln!("[E2E] Skipping: k9-svc dir not found at {}", k9_dir.display());
+        eprintln!("[E2E] Skipping: self-validating dir not found at {}", k9_dir.display());
         return;
     }
 
     // Enumerate .k9 files (non-recursive for simplicity).
     let entries: Vec<_> = std::fs::read_dir(&k9_dir)
-        .expect("[E2E] k9-svc dir must be readable")
+        .expect("[E2E] self-validating dir must be readable")
         .filter_map(|e| e.ok())
         .filter(|e| {
             e.path()

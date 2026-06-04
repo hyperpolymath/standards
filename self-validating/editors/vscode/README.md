@@ -1,6 +1,6 @@
 # K9-SVC for Visual Studio Code
 
-Syntax highlighting for [K9](https://github.com/hyperpolymath/standards/tree/main/k9-svc) (Self-Validating Components) — a security-tiered service configuration language built on Nickel.
+Syntax highlighting for [K9](https://github.com/hyperpolymath/standards/tree/main/self-validating) (Self-Validating Components) — a security-tiered service configuration language built on Nickel.
 
 ## Features
 

@@ -19,7 +19,7 @@ command -v nickel
 
 **Repo state:**
 ```bash
-cd ~/Documents/hyperpolymath-repos/k9-svc
+cd ~/Documents/hyperpolymath-repos/self-validating
 git status  # Clean working tree
 git branch  # On main
 git log -1  # Note current version
@@ -83,7 +83,7 @@ cat release-k9.k9.ncl
      config = {
        current_version = "0.9.0",
        new_version = "1.0.0",
-       github_repo = "hyperpolymath/k9-svc",
+       github_repo = "hyperpolymath/self-validating",
      },
    }
    ```

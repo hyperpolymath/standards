@@ -100,7 +100,7 @@ original recommendations retained verbatim.
 
 ## Task status snapshot (complete / pending / deferred)
 
-**Complete (22 tasks):** #1, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #32, #35, #36, #37, k9-svc spot-fix, echidna L3 Wave-1 + Wave-2.
+**Complete (22 tasks):** #1, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12, #13, #14, #15, #16, #17, #32, #35, #36, #37, self-validating spot-fix, echidna L3 Wave-1 + Wave-2.
 
 **Pending P0/P1:** #33, #34, 007-mcp-1/2, echidna Wave-2 CI verification, 6a2 reconciliation, Harvard DataExpr, sidecar revert, intend.k9.ncl adoption.
 

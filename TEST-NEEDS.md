@@ -7,10 +7,10 @@ All CRG C categories are present and passing. See breakdown below.
 | CRG C Category | Status | Count | Details |
 |----------------|--------|-------|---------|
 | **Unit** | PASS | 100+ | Inline (#[test]) in parser.rs, renderer.rs + integration tests |
-| **Smoke** | PASS | 9 | smoke_* tests in a2ml + k9-svc crg_c_tests.rs |
-| **P2P (property-based)** | PASS | 15+ | proptest suites in a2ml + k9-svc crg_c_tests.rs |
+| **Smoke** | PASS | 9 | smoke_* tests in a2ml + self-validating crg_c_tests.rs |
+| **P2P (property-based)** | PASS | 15+ | proptest suites in a2ml + self-validating crg_c_tests.rs |
 | **E2E / Reflexive** | PASS | 4 | Dogfood: parse standards manifest + round-trip constructed docs |
-| **Contract** | PASS | 13 | Pre/post-condition tests in a2ml + k9-svc crg_c_tests.rs |
+| **Contract** | PASS | 13 | Pre/post-condition tests in a2ml + self-validating crg_c_tests.rs |
 | **Aspect** | PASS | 14 | Security (injection, large input, null bytes, unicode) + error-handling |
 | **Benchmarks (baselined)** | PASS | 10+ | Criterion: a2ml_bench + k9_bench; Zig: grv6; Deno: manifest |
 
@@ -20,11 +20,11 @@ All CRG C categories are present and passing. See breakdown below.
 |----------|-------|---------|
 | **Source modules** | 358+ | Massive monorepo: 0-ai-gatekeeper-protocol (mcp-repo-guardian, repo-guardian-fs), a2ml, axel-protocol, groove-protocol, contractiles, and many more sub-projects |
 | **Unit tests** | 158+ | Real tests across 6 test suites (see breakdown below) |
-| **P2P (property) tests** | 15+ | proptest in a2ml + k9-svc integration test files |
-| **Contract tests** | 13 | Pre/post-condition tests in a2ml + k9-svc |
+| **P2P (property) tests** | 15+ | proptest in a2ml + self-validating integration test files |
+| **Contract tests** | 13 | Pre/post-condition tests in a2ml + self-validating |
 | **Aspect tests** | 14 | Security + error-handling cross-cutting tests |
 | **E2E tests** | 4 | Dogfood: parse real manifests + round-trip stability |
-| **Benchmarks** | 22+ | Criterion (a2ml + k9-svc) + Zig (grv6) + Deno (manifest) |
+| **Benchmarks** | 22+ | Criterion (a2ml + self-validating) + Zig (grv6) + Deno (manifest) |
 | **Fuzz tests** | 0 | Placeholder removed; real fuzz TODO |
 
 ## Test Suite Breakdown (as of 2026-04-04)
@@ -154,7 +154,7 @@ CRG C integration tests (`tests/crg_c_tests.rs`):
 - [x] **Contract**: parse("") -> empty vec, render([]) empty, render always UTF-8, Nickel format rejected, SecurityLevel total order, missing pedigree Err, unknown security level Err (7 tests)
 - [x] **Aspect/Security**: no shell injection in origin, 1MB no panic, null bytes no panic, unicode no panic (4 tests)
 - [x] **Aspect/Error**: K9Error diagnostic non-empty, NickelFormat error message (2 tests)
-- [x] **E2E/Reflexive**: parse .k9 fixtures from k9-svc dir, round-trip constructed component (2 tests)
+- [x] **E2E/Reflexive**: parse .k9 fixtures from self-validating dir, round-trip constructed component (2 tests)
 
 **Benchmarks**: `cargo bench` from `self-validating/bindings/rust/`
 - Parse small/medium/multi-component throughput
@@ -208,7 +208,7 @@ CRG C integration tests (`tests/crg_c_tests.rs`):
 - [ ] `consent-aware-http` — no tests
 - [ ] `lol` — no tests
 - [ ] `overlay-protocol` — no tests
-- [ ] `k9-svc` — no tests (mirrors a2ml structure, same test pattern applies)
+- [ ] `self-validating` — no tests (mirrors a2ml structure, same test pattern applies)
 - [ ] All Zig `integration_test.zig` files in sub-projects — all are templates with `{{project}}` placeholders
 
 #### Idris2

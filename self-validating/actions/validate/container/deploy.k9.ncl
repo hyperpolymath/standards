@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # deploy.k9.ncl — k9-validate-action deployment component (Hunt level)
 #
-# k9-svc deployment specification with full pedigree (L1-L5).
+# self-validating deployment specification with full pedigree (L1-L5).
 # Security Level: 'Hunt (requires cryptographic handshake for execution).
 #
 # WARNING: This component can execute shell commands!
@@ -9,8 +9,8 @@
 #
 # Usage:
 #   nickel typecheck container/deploy.k9.ncl
-#   k9-svc validate container/deploy.k9.ncl
-#   k9-svc deploy container/deploy.k9.ncl --env production
+#   self-validating validate container/deploy.k9.ncl
+#   self-validating deploy container/deploy.k9.ncl --env production
 
 # The component's pedigree (self-description across five layers)
 let component_pedigree = {
@@ -161,6 +161,6 @@ Before running, ensure you have:
 2. Verified the signature (when implemented)
 3. Explicitly authorised Hunt-level execution
 
-Run with: k9-svc authorize container/deploy.k9.ncl && k9-svc deploy container/deploy.k9.ncl
+Run with: self-validating authorize container/deploy.k9.ncl && self-validating deploy container/deploy.k9.ncl
 "%,
 }

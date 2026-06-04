@@ -13,7 +13,7 @@
 - **Cadre-TEA-Router** - Type-safe client-side routing
 
 ### Verification Layers
-- **k9-svc** - Self-Validating Components
+- **self-validating** - Self-Validating Components
   - Validates form inputs
   - Proves unsubscribe links work before sending
   - Runtime invariant checking
@@ -44,7 +44,7 @@ User Interaction (click demo)
     ↓
 TEA Update (pure state transition)
     ↓
-k9-svc Validates (proves correctness)
+self-validating Validates (proves correctness)
     ↓
 a2ml Generates Proof (cryptographic)
     ↓
@@ -66,7 +66,7 @@ DOM Updated (ReScript)
 - ✅ Model-Update-View pattern
 - ✅ Compile-time guarantees
 
-### k9-svc
+### self-validating
 - ✅ Components prove their own correctness
 - ✅ Runtime validation with proofs
 - ✅ Used where relevant (form validation, link checking)
@@ -99,10 +99,10 @@ let update = (model, msg) =>
   }
 ```
 
-### With k9-svc
+### With self-validating
 ```rescript
 // Component proves it maintains invariants
-(k9-svc-check unsubscribe-link
+(self-validating-check unsubscribe-link
   (response-code 200)
   (response-time < 200ms)
   (proof validated))
@@ -128,7 +128,7 @@ parseUrl : String -> Either ProofOfError (Url, ProofOfValid)
 - ✅ **Haskell (Casket)** - Still generates static HTML
 - ✅ **ReScript** - Adds type safety on top
 - ✅ **TEA** - Adds state management on top
-- ✅ **k9-svc** - Adds validation where relevant
+- ✅ **self-validating** - Adds validation where relevant
 - ✅ **a2ml** - Adds typed proofs where relevant
 - ✅ **proven** - Adds formal verification for critical operations
 

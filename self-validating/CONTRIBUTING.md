@@ -1,14 +1,14 @@
 # Clone the repository
 git clone https://github.com/hyperpolymath/standards.git
-# Note: K9-SVC is located in standards/k9-svc
-cd k9-svc
+# Note: K9-SVC is located in standards/self-validating
+cd self-validating
 
 # Using Nix (recommended for reproducibility)
 nix develop
 
 # Or using toolbox/distrobox
-toolbox create k9-svc-dev
-toolbox enter k9-svc-dev
+toolbox create self-validating-dev
+toolbox enter self-validating-dev
 # Install dependencies manually
 
 # Verify setup

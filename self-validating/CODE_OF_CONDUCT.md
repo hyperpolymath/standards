@@ -7,7 +7,7 @@ TEMPLATE INSTRUCTIONS (delete this block before publishing)
 Replace all {{PLACEHOLDER}} values:
   Standards     - Your project name
   hyperpolymath            - GitHub/GitLab username or org
-  k9-svc             - Repository name
+  self-validating             - Repository name
   {{CONDUCT_EMAIL}}    - Email for conduct reports
   {{CONDUCT_TEAM}}     - Name of conduct team/committee
   {{RESPONSE_TIME}}    - Initial response SLA (e.g., 48 hours)
