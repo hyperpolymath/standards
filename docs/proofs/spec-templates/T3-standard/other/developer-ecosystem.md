@@ -1,5 +1,5 @@
 # Proof Spec: developer-ecosystem
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/developer-ecosystem`
 **Tier**: T3 — Standard

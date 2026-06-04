@@ -1,5 +1,5 @@
 # T3 Archetype Specs
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 T3 repos share common proof patterns. Each T3 repo's spec references ONE archetype and lists repo-specific items on top.
 

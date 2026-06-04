@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # IANA Media Type Registration Application: application/vnd.k9
 
 > Prepared for submission to IANA per RFC 6838 (Vendor Tree)

@@ -1,5 +1,5 @@
 # Proof Spec: 007-lang (PRIVATE — Claude-only access)
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/007-lang`
 **Tier**: T2 — High (PRIVATE — Triple-confirm before release)

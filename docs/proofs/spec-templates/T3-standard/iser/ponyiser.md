@@ -1,5 +1,5 @@
 # Proof Spec: ponyiser
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/ponyiser`
 **Tier**: T3 — Standard

@@ -1,5 +1,5 @@
 # Proof Specifications — LLM Handoff Directory
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 <!-- Generated: 2026-04-04 -->
 
 ## Purpose

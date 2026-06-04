@@ -1,5 +1,5 @@
 # Proof Spec: a2ml-rs
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/a2ml-rs`
 **Tier**: T3 — Standard

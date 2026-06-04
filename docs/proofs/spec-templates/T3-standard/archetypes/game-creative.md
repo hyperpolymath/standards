@@ -1,5 +1,5 @@
 # Archetype: game-creative (Games/Creative Apps)
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Applies to**: Games, creative tools, interactive content
 

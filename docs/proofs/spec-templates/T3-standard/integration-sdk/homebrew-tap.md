@@ -1,5 +1,5 @@
 # Proof Spec: homebrew-tap
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/homebrew-tap`
 **Tier**: T3 — Standard

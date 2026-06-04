@@ -1,5 +1,5 @@
 # Proof Spec: befunge93-vault-cracker
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/befunge93-vault-cracker`
 **Tier**: T3 — Standard

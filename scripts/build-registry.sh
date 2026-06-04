@@ -246,7 +246,7 @@ emit_topology() {
   phase="$(state_field phase)"; maturity="$(state_field maturity)"
   updated="$(state_field last-updated)"
   cat <<HEADER
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 <!-- TOPOLOGY.md — DERIVED architecture map (generated from REGISTRY.a2ml + STATE.a2ml) -->
 <!-- GENERATED FILE — DO NOT EDIT BY HAND. Run: just topology (scripts/build-registry.sh) -->
 

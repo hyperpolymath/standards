@@ -1,5 +1,5 @@
 # Archetype: iser (Code Generator)
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Applies to**: All `*-iser` repos (29 total) — code generators from source language to target representation
 

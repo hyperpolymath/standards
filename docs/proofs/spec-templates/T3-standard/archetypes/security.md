@@ -1,5 +1,5 @@
 # Archetype: security (Security/Crypto Tool)
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Applies to**: Security tools, crypto wrappers, auth, access control
 

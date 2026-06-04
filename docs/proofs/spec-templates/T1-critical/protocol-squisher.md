@@ -1,5 +1,5 @@
 # Proof Spec: protocol-squisher
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/protocol-squisher`
 **Tier**: T1 — Critical

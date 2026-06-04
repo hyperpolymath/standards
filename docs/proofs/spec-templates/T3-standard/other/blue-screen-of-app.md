@@ -1,5 +1,5 @@
 # Proof Spec: blue-screen-of-app
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/blue-screen-of-app`
 **Tier**: T3 — Standard

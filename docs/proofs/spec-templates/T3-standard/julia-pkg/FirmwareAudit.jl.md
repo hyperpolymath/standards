@@ -1,5 +1,5 @@
 # Proof Spec: FirmwareAudit.jl
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/FirmwareAudit.jl`
 **Tier**: T3 — Standard

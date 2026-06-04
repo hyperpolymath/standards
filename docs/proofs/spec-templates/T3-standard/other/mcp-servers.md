@@ -1,5 +1,5 @@
 # Proof Spec: mcp-servers
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/mcp-servers`
 **Tier**: T3 — Standard

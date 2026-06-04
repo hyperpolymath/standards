@@ -1,5 +1,5 @@
 # Proof Spec: januskey
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/januskey`
 **Tier**: T1 — Critical

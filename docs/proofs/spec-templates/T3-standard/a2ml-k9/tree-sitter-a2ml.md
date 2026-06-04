@@ -1,5 +1,5 @@
 # Proof Spec: tree-sitter-a2ml
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/tree-sitter-a2ml`
 **Tier**: T3 — Standard

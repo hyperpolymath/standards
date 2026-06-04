@@ -1,5 +1,5 @@
 # Archetype: webapp (Web Application)
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Applies to**: ReScript web applications with TEA architecture
 

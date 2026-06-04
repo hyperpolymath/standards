@@ -1,5 +1,5 @@
 # Proof Spec: k9-deno
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/k9-deno`
 **Tier**: T3 — Standard

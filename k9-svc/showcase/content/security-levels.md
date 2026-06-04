@@ -4,7 +4,7 @@ date: 2026-03-16
 order: 2
 ---
 
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 <!-- Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) -->
 
 # Security Levels

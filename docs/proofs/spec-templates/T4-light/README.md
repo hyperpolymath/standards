@@ -1,5 +1,5 @@
 # T4 Light Tier — Template ABI Only
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 T4 repos only need the 5 ABI proofs from rsr-template-repo:
 - ABI-1: Non-null pointer safety

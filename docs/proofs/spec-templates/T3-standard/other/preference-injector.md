@@ -1,5 +1,5 @@
 # Proof Spec: preference-injector
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/preference-injector`
 **Tier**: T3 — Standard

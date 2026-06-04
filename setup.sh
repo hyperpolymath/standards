@@ -252,7 +252,7 @@ main() {
     # Write report
     REPORT_FILE="INSTALL-SECURITY-REPORT.adoc"
     {
-        printf "// SPDX-License-Identifier: CC-BY-4.0\n"
+        printf "// SPDX-License-Identifier: CC-BY-SA-4.0\n"
         printf "= Install Security Report\n"
         printf ":date: %s\n\n" "$(date -Iseconds 2>/dev/null || date)"
         printf "== Platform\n"

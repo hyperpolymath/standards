@@ -1,5 +1,5 @@
 # Archetype: integration-sdk (SDK/Client)
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Applies to**: SDKs, API clients, integration adapters
 

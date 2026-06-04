@@ -1,5 +1,5 @@
 # Proof Spec: proven
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/proven`
 **Tier**: T1 — Critical (foundational library — other repos depend on this)

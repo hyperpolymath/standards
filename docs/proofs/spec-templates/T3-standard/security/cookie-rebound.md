@@ -1,5 +1,5 @@
 # Proof Spec: cookie-rebound
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/cookie-rebound`
 **Tier**: T3 — Standard

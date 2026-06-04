@@ -1,5 +1,5 @@
 # Proof Spec: affinescript
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/nextgen-languages/affinescript`
 **Tier**: T1 — Critical (CURRENTLY NO PROOFS — urgent gap)

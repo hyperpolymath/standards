@@ -1,5 +1,5 @@
 # Proof Spec: thunderbird-template-reloaded
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/thunderbird-template-reloaded`
 **Tier**: T3 — Standard
