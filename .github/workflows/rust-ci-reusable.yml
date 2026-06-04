@@ -100,41 +100,35 @@ permissions:
   contents: read
 
 jobs:
-  # Detect whether the repo ships a Cargo.toml (and resolve the opt-in
-  # toggles) AFTER checkout, then gate every downstream job on this job's
-  # outputs. The previous design put `hashFiles(... inputs.working_directory)`
-  # directly in each job-level `if:`. That startup-failed the whole reusable
-  # on every push: the `inputs` context does not exist when GitHub compiles a
-  # workflow for a non-`workflow_call` event, and `hashFiles` at job level
-  # (pre-checkout) reads an empty workspace anyway. Gating on `needs` instead
-  # is the canonical pattern — valid in every event context, and it actually
-  # sees the files because detect checks out first.
+  # Skip the whole reusable when the repo has no Cargo.toml — lets consumers
+  # add the wrapper unconditionally without worrying about repos that don't
+  # ship Rust code yet. This MUST be a checked-out step, NOT a job-level
+  # `if: hashFiles(...)`: job `if:` is evaluated server-side before any
+  # checkout, so hashFiles() sees an empty workspace and always returns ''
+  # — which silently skipped every job on EVERY repo, Rust or not. The
+  # detect job checks out and exposes a real boolean the others gate on.
   detect:
     timeout-minutes: 5
-    name: Detect Cargo project
+    name: Detect Cargo.toml
     runs-on: ${{ inputs.runs-on }}
     permissions:
       contents: read
     outputs:
-      has_cargo: ${{ steps.d.outputs.has_cargo }}
-      run_audit: ${{ steps.d.outputs.run_audit }}
-      run_coverage: ${{ steps.d.outputs.run_coverage }}
+      has_cargo: ${{ steps.detect.outputs.has_cargo }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
-      - id: d
-        working-directory: ${{ inputs.working_directory }}
-        env:
-          ENABLE_AUDIT: ${{ inputs.enable_audit }}
-          ENABLE_COVERAGE: ${{ inputs.enable_coverage }}
+      - name: Detect Cargo.toml
+        id: detect
         run: |
-          has=false; [ -f Cargo.toml ] && has=true
-          echo "has_cargo=$has" >> "$GITHUB_OUTPUT"
-          { [ "$has" = true ] && [ "$ENABLE_AUDIT" = "true" ]; } && echo "run_audit=true" >> "$GITHUB_OUTPUT" || echo "run_audit=false" >> "$GITHUB_OUTPUT"
-          { [ "$has" = true ] && [ "$ENABLE_COVERAGE" = "true" ]; } && echo "run_coverage=true" >> "$GITHUB_OUTPUT" || echo "run_coverage=false" >> "$GITHUB_OUTPUT"
+          if [ -f "${{ inputs.working_directory }}/Cargo.toml" ]; then
+            echo "has_cargo=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_cargo=false" >> "$GITHUB_OUTPUT"
+          fi
 
   check:
     timeout-minutes: 20
@@ -222,7 +216,7 @@ jobs:
     name: Cargo audit (security)
     runs-on: ${{ inputs.runs-on }}
     needs: detect
-    if: ${{ needs.detect.outputs.run_audit == 'true' }}
+    if: ${{ inputs.enable_audit && needs.detect.outputs.has_cargo == 'true' }}
     permissions:
       contents: read
     defaults:
@@ -252,7 +246,7 @@ jobs:
     name: Coverage (tarpaulin + codecov)
     runs-on: ${{ inputs.runs-on }}
     needs: detect
-    if: ${{ needs.detect.outputs.run_coverage == 'true' }}
+    if: ${{ inputs.enable_coverage && needs.detect.outputs.has_cargo == 'true' }}
     permissions:
       contents: read
     defaults:
