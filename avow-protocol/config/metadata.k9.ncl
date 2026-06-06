@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # K9 Contractile: Kennel Level (Pure Data)
 # Project metadata for stamp-protocol
 

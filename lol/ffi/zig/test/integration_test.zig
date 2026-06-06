@@ -1,5 +1,5 @@
 // LOL i18n Service — Integration Tests
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 //
 // These tests verify that the Zig FFI correctly implements the Idris2 ABI

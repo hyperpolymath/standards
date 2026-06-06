@@ -1,4 +1,4 @@
-;;; SPDX-License-Identifier: MPL-2.0-or-later
+;;; SPDX-License-Identifier: MPL-2.0
 ;;; manifest.scm — Guix package manifest for STATE development
 ;;;
 ;;; This manifest defines all packages needed for STATE development.

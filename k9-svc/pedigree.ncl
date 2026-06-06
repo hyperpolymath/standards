@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # pedigree.ncl - The Breed Specification for .k9 SVC (v1.0.0 stable).
 #
 # Every .k9 component inherits from this pedigree. v1.0.0 restructures the

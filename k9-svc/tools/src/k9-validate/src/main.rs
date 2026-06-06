@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 //! k9-validate: Standalone validator for K9 contractiles
 
 #![forbid(unsafe_code)]

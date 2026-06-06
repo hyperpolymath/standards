@@ -76,7 +76,7 @@ git push origin feature/amazing-contribution
 
 1. **SPDX Headers**: Every file must have SPDX license identifier
    ```rust
-   // SPDX-License-Identifier: MPL-2.0-or-later
+   // SPDX-License-Identifier: MPL-2.0
    // SPDX-FileCopyrightText: 2025 The Rhodium Standard Contributors
    ```
 

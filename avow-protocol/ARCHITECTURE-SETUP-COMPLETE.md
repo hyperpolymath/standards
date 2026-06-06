@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: CC-BY-SA-4.0
 # AVOW Protocol - Architecture Setup Complete
 
 **Date:** 2026-02-04

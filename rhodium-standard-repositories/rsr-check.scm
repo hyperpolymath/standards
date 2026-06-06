@@ -1,6 +1,6 @@
 #!/usr/bin/env guile
 !#
-;; SPDX-License-Identifier: MPL-2.0-or-later
+;; SPDX-License-Identifier: MPL-2.0
 ;; SPDX-FileCopyrightText: 2024-2025 hyperpolymath
 ;;
 ;; RSR Compliance Checker - Machine-Readable Validation

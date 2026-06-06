@@ -1,5 +1,5 @@
 # Proof Spec: typell
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/typell`
 **Tier**: T2 — High (foundation for L1-L10 hierarchy)

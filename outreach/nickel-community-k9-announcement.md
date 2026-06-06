@@ -22,7 +22,7 @@ All wrapped in a single `.k9.ncl` file that's valid Nickel code.
 ## Example: Setting Up Rust Development
 
 ```nickel
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # setup-rust-env.k9.ncl
 
 {

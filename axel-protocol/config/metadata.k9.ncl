@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # K9 Contractile: Kennel Level (Pure Data)
 # Project metadata for axel-protocol
 

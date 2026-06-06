@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # register.ncl - MIME Registration Logic for .k9 SVC
 #
 # Generates OS-specific MIME type registration based on target environment.
@@ -10,7 +10,7 @@ let OS = [| 'Linux, 'Minix, 'MacOS |] in
   # Freedesktop MIME XML for Linux/Minix
   mime_xml = m%"
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: MPL-2.0 -->
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/vnd.k9+nickel">
     <comment>K9 Self-Validating Component</comment>

@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 //
 // Contractiles A2ML validator/emitter (Deno port of the former Python tool;

@@ -1,4 +1,4 @@
-;;; SPDX-License-Identifier: MPL-2.0-or-later
+;;; SPDX-License-Identifier: MPL-2.0
 ;;; channels.scm — Guix channel definition for STATE
 ;;;
 ;;; This file defines the Guix channels needed for STATE development.

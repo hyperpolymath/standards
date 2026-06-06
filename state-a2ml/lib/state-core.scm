@@ -2,7 +2,7 @@
 ;;; lib/state-core.scm — Core STATE Data Structures
 ;;; ==================================================
 ;;;
-;;; SPDX-License-Identifier: AGPL-3.0-or-later
+;;; SPDX-License-Identifier: MPL-2.0
 ;;; Copyright (c) 2025 Jonathan D.A. Jewell
 ;;;
 ;;; Core accessors and data structure definitions for STATE.

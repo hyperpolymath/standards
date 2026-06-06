@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 <!-- TOPOLOGY.md — DERIVED architecture map (generated from REGISTRY.a2ml + STATE.a2ml) -->
 <!-- GENERATED FILE — DO NOT EDIT BY HAND. Run: just topology (scripts/build-registry.sh) -->
 

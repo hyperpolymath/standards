@@ -1,5 +1,5 @@
 # Proof Spec: asdf-tool-plugins
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/asdf-tool-plugins`
 **Tier**: T3 — Standard

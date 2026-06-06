@@ -1,5 +1,5 @@
 K9!
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # K9-SVC Release Automation
 #
 # This K9 component automates the release process for K9-SVC itself - ultimate

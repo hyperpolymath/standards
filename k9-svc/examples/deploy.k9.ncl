@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # deploy.k9.ncl - Example Hunt-level component (full execution)
 #
 # Security Level: 'Hunt (requires cryptographic handshake)
