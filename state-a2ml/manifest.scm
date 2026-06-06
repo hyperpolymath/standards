@@ -1,4 +1,4 @@
-;;; SPDX-License-Identifier: MIT AND LicenseRef-Palimpsest-0.8
+;;; SPDX-License-Identifier: MPL-2.0 AND LicenseRef-Palimpsest-0.8
 ;;; manifest.scm — Guix package manifest for STATE development
 ;;;
 ;;; This manifest defines all packages needed for STATE development.

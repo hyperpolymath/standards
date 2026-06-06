@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 //! Comprehensive tests for k9-sign cryptographic operations
 
 #[cfg(test)]

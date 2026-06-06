@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 ## Summary
 
 <!-- Briefly describe what this PR does and why. Link to related issues with "Closes #N". -->

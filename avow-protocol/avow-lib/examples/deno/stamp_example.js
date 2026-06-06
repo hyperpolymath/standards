@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-ffi
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
 // Deno example using libstamp via Deno FFI (port of the former Python

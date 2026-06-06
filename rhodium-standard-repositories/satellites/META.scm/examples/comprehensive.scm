@@ -1,4 +1,4 @@
-;; SPDX-License-Identifier: MPL-2.0-or-later
+;; SPDX-License-Identifier: MPL-2.0
 ;; SPDX-FileCopyrightText: 2025 Example Corp
 ;;
 ;; DEPRECATED: This file uses the legacy Guile Scheme (.scm) format.

@@ -88,7 +88,7 @@ All functionality is self-contained:
 
 Every file has:
 ```rust
-// SPDX-License-Identifier: MPL-2.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2025 The Rhodium Standard Contributors
 ```
 

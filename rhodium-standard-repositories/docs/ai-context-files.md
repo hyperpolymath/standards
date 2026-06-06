@@ -43,7 +43,7 @@ RSR repositories include three machine-readable Scheme files (`.scm`) that provi
 
 **Example**:
 ```scheme
-;; SPDX-License-Identifier: MPL-2.0-or-later
+;; SPDX-License-Identifier: MPL-2.0
 (define-module (project-name meta)
   #:export (architecture-decisions development-practices design-rationale))
 
@@ -95,7 +95,7 @@ RSR repositories include three machine-readable Scheme files (`.scm`) that provi
 
 **Example**:
 ```scheme
-;; SPDX-License-Identifier: MPL-2.0-or-later
+;; SPDX-License-Identifier: MPL-2.0
 (ecosystem
   (version "1.0.0")
   (name "my-project")

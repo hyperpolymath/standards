@@ -1,5 +1,5 @@
 # Proof Spec: voyage-enterprise-decision-system
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/voyage-enterprise-decision-system`
 **Tier**: T3 — Standard

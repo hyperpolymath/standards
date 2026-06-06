@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: AGPL-3.0-or-later
+-- SPDX-License-Identifier: MPL-2.0
 ||| A2ML v1.1 profile mechanism (SPEC.adoc Section 8).
 |||
 ||| A profile is a NON-EXECUTABLE validation bundle. It may only raise the

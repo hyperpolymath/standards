@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 //! k9-init: Scaffold new K9 contractiles from templates
 
 #![forbid(unsafe_code)]

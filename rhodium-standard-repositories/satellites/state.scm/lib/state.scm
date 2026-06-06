@@ -2,7 +2,7 @@
 ;;; lib/state.scm — Main STATE Module Entry Point
 ;;; ==================================================
 ;;;
-;;; SPDX-License-Identifier: MPL-2.0-or-later
+;;; SPDX-License-Identifier: MPL-2.0
 ;;; Copyright (c) 2025 Jonathan D.A. Jewell
 ;;;
 ;;; Main entry point that loads and re-exports all STATE modules.

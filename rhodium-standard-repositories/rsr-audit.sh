@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT AND Palimpsest-0.8
+# SPDX-License-Identifier: MPL-2.0 AND Palimpsest-0.8
 # SPDX-FileCopyrightText: 2025 The Rhodium Standard Contributors
 #
 # RSR Audit Script - Comprehensive Repository Compliance Checker

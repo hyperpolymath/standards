@@ -1,5 +1,5 @@
 -- | WordPress-specific constraints and best practices
--- SPDX-License-Identifier: AGPL-3.0-or-later
+-- SPDX-License-Identifier: MPL-2.0
 module Sanctify.WordPress.Constraints
     ( -- * Constraint checking
       WordPressIssue(..)

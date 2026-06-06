@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // K9 Coordination Protocol — Generator
 // Reads a coordination.k9 file and emits AI tool instruction files.
 //

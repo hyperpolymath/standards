@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # Deploy the standards VeriSimDB instance (port 8097).
 #
 # Usage: .verisimdb/deploy.sh [start|stop|status|logs|rebuild]

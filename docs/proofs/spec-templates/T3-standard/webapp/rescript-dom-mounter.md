@@ -1,5 +1,5 @@
 # Proof Spec: rescript-dom-mounter
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/rescript-dom-mounter`
 **Tier**: T3 — Standard

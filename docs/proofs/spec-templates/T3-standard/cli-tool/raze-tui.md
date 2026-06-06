@@ -1,5 +1,5 @@
 # Proof Spec: raze-tui
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/raze-tui`
 **Tier**: T3 — Standard

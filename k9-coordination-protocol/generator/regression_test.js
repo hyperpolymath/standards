@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno test --allow-read --allow-write --allow-run
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // K9 Coordination Protocol — Regression Tests
 //
 // Tests for specific bugs that were found and fixed. Each fixed bug becomes

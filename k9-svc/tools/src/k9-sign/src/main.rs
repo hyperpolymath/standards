@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 //! k9-sign: Sign and verify K9 contractiles with Ed25519
 
 #![forbid(unsafe_code)]

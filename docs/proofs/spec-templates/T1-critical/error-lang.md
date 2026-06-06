@@ -1,5 +1,5 @@
 # Proof Spec: error-lang
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 **Repo Path**: `/var/mnt/eclipse/repos/nextgen-languages/error-lang`
 **Tier**: T1 — Critical
