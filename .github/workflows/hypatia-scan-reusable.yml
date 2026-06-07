@@ -220,18 +220,116 @@ jobs:
             return f || '.';
           };
 
+          const isMetaFinding = (f) =>
+            String(f.rule_module || '') === 'code_scanning_alerts';
+
+          const classificationFor = (mod, type) => {
+            if (mod === 'workflow_audit') {
+              return {
+                'hypatia.category': 'workflow-security',
+                'hypatia.class': 'ci-cd-control',
+                'hypatia.suggested_route': 'rhodibot',
+                'hypatia.dispatch_safety': 'pr-or-report'
+              };
+            }
+            if (mod === 'code_safety') {
+              const proofRules = new Set([
+                'unsafe_block', 'from_raw', 'as_ptr', 'mem_forget',
+                'zig_ptr_cast', 'agda_postulate'
+              ]);
+              const route = proofRules.has(type) ? 'echidnabot' : 'panicbot';
+              return {
+                'hypatia.category': 'code-safety',
+                'hypatia.class': 'source-risk',
+                'hypatia.suggested_route': route,
+                'hypatia.dispatch_safety': route === 'echidnabot' ? 'proof-or-review' : 'review-only'
+              };
+            }
+            if (mod === 'migration_rules') {
+              return {
+                'hypatia.category': 'language-migration',
+                'hypatia.class': 'modernisation',
+                'hypatia.suggested_route': 'rhodibot',
+                'hypatia.dispatch_safety': 'pr-only'
+              };
+            }
+            if (mod === 'structural_drift') {
+              return {
+                'hypatia.category': 'repository-structure',
+                'hypatia.class': 'lifecycle-hygiene',
+                'hypatia.suggested_route': 'rhodibot',
+                'hypatia.dispatch_safety': 'pr-or-report'
+              };
+            }
+            if (mod === 'git_state') {
+              return {
+                'hypatia.category': 'repository-state',
+                'hypatia.class': 'lifecycle-hygiene',
+                'hypatia.suggested_route': 'private-farm',
+                'hypatia.dispatch_safety': 'report-only'
+              };
+            }
+            if (mod === 'scorecard') {
+              return {
+                'hypatia.category': 'ossf-scorecard',
+                'hypatia.class': 'supply-chain-posture',
+                'hypatia.suggested_route': 'rhodibot',
+                'hypatia.dispatch_safety': 'pr-or-report'
+              };
+            }
+            if (mod === 'dependabot_alerts') {
+              return {
+                'hypatia.category': 'dependency-vulnerability',
+                'hypatia.class': 'supply-chain-risk',
+                'hypatia.suggested_route': 'rhodibot',
+                'hypatia.dispatch_safety': 'pr-gated'
+              };
+            }
+            if (mod === 'secret_scanning_alerts') {
+              return {
+                'hypatia.category': 'secret-exposure',
+                'hypatia.class': 'credential-risk',
+                'hypatia.suggested_route': 'private-farm',
+                'hypatia.dispatch_safety': 'manual-escalation'
+              };
+            }
+            if (mod === 'root_hygiene') {
+              return {
+                'hypatia.category': 'repository-hygiene',
+                'hypatia.class': 'lifecycle-hygiene',
+                'hypatia.suggested_route': 'rhodibot',
+                'hypatia.dispatch_safety': 'pr-only'
+              };
+            }
+            return {
+              'hypatia.category': 'general',
+              'hypatia.class': 'policy-finding',
+              'hypatia.suggested_route': 'sustainabot',
+              'hypatia.dispatch_safety': 'report-only'
+            };
+          };
+
           const rules = new Map();
-          const results = findings.map((f) => {
+          const results = findings.filter((f) => !isMetaFinding(f)).map((f) => {
             const mod = String(f.rule_module || 'hypatia');
             const type = String(f.type || 'finding');
             const ruleId = `hypatia/${mod}/${type}`;
             const level = levelFor(f.severity);
+            const classification = classificationFor(mod, type);
             if (!rules.has(ruleId)) {
               rules.set(ruleId, {
                 id: ruleId,
                 name: `${mod}.${type}`,
                 shortDescription: { text: `Hypatia ${mod}: ${type}` },
-                defaultConfiguration: { level }
+                defaultConfiguration: { level },
+                properties: {
+                  ...classification,
+                  tags: [
+                    classification['hypatia.category'],
+                    classification['hypatia.class'],
+                    classification['hypatia.dispatch_safety']
+                  ]
+                }
               });
             }
             const uri = relUri(f.file);
@@ -244,6 +342,7 @@ jobs:
               .createHash('sha256')
               .update([ruleId, uri, type, msg].join('|'))
               .digest('hex');
+            const findingId = `HYP-${fp.slice(0, 16)}`;
             return {
               ruleId,
               level,
@@ -256,7 +355,17 @@ jobs:
                   }
                 }
               ],
-              partialFingerprints: { 'hypatiaFindingHash/v1': fp }
+              partialFingerprints: { 'hypatiaFindingHash/v1': fp },
+              properties: {
+                ...classification,
+                'hypatia.finding_id': findingId,
+                'hypatia.rule_module': mod,
+                'hypatia.rule_type': type,
+                'hypatia.severity': String(f.severity || ''),
+                'hypatia.action': String(f.action || 'flag'),
+                'hypatia.route': String(f.route || classification['hypatia.suggested_route']),
+                'hypatia.dispatch_safety': String(f.dispatch_safety || classification['hypatia.dispatch_safety'])
+              }
             };
           });
 
