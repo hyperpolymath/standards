@@ -111,10 +111,43 @@ jobs:
           elixir-version: '1.18'
           otp-version: '27'
 
+      # --- Hypatia build caching (perf) ---------------------------------------
+      # The scanner is rebuilt from source on every run; the clone and
+      # `mix escript.build` dominate wall-clock (a full neurosymbolic build on
+      # every push, including trivial Dependabot bumps). Key the build cache on
+      # Hypatia's HEAD so a fresh clone+build happens ONLY when Hypatia actually
+      # changes; otherwise the prebuilt escript is restored and the clone/build
+      # steps short-circuit on their existing `[ ! -d ]` / `[ ! -f ]` guards.
+      - name: Resolve Hypatia version
+        id: hypatia_ref
+        run: echo "sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Hex/Mix package cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v4
+        with:
+          path: |
+            ~/.hex
+            ~/.mix
+            ~/.cache/hex
+          key: hypatia-hexmix-${{ runner.os }}-otp27-elixir1.18-${{ steps.hypatia_ref.outputs.sha }}
+          restore-keys: |
+            hypatia-hexmix-${{ runner.os }}-otp27-elixir1.18-
+
+      - name: Cache built Hypatia scanner
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v4
+        with:
+          path: ~/hypatia
+          # Exact-SHA key, NO restore-keys on purpose: an exact match guarantees
+          # we run the scanner built from that Hypatia commit. A partial (restore-
+          # keys) hit would leave a STALE ~/hypatia in place, the `[ ! -d ]` guard
+          # would then skip the re-clone, and the repo would be analysed with old
+          # rules. On a miss we simply re-clone+rebuild that commit.
+          key: hypatia-build-${{ runner.os }}-otp27-elixir1.18-${{ steps.hypatia_ref.outputs.sha }}
+
       - name: Clone Hypatia
         run: |
           if [ ! -d "$HOME/hypatia" ]; then
-            git clone https://github.com/hyperpolymath/hypatia.git "$HOME/hypatia"
+            git clone --depth 1 https://github.com/hyperpolymath/hypatia.git "$HOME/hypatia"
           fi
 
       - name: Build Hypatia scanner (if needed)
