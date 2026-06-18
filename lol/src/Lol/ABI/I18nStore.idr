@@ -26,6 +26,7 @@ import Lol.ABI.PluralForm
 import Data.So
 import Data.List
 import Data.List1
+import Data.String
 
 %default total
 
@@ -150,7 +151,7 @@ lookupWithFallback lookupFn strategy reqLocale defLocale key =
 ||| "en-US" -> "en", "zh-Hans-CN" -> "zh"
 public export
 extractLanguage : String -> String
-extractLanguage s = let (lang ::: _) = split (== '-') s in lang
+extractLanguage s = let (lang ::: _) = Data.String.split (== '-') s in lang
 
 ||| Convert a plural category to its CLDR string suffix.
 public export
@@ -213,9 +214,11 @@ interface I18nStore store => CorrectStore (store : Type) where
     (prf : KeyExists locale key) ->
     lookup st locale key = Just (guaranteedLookup st prf)
 
-  ||| The store is monotonic: adding translations never removes existing ones
-  ||| (expressed as: if a key exists, it continues to exist)
-  ||| This is an invariant the Zig store must maintain.
+  -- The store is monotonic: adding translations never removes existing ones
+  -- (expressed as: if a key exists, it continues to exist). Stated as a plain
+  -- comment, not a `|||` doc comment: a trailing doc comment with no method
+  -- following it is dangling and breaks the interface block's scope. This
+  -- invariant is enforced on the Zig store side, not provable generically here.
 
 --------------------------------------------------------------------------------
 -- Error Classification
@@ -224,15 +227,15 @@ interface I18nStore store => CorrectStore (store : Type) where
 ||| Classification of lookup failures for error reporting.
 ||| The Zig FFI maps these to the Result enum in Types.idr.
 public export
-data LookupError
-  = ||| The requested locale is not in the corpus at all
-    NoSuchLocale String
-  | ||| The locale exists but the key is not defined
-    NoSuchKey String String
-  | ||| The plural form variant is missing (e.g. "items.few" missing)
-    MissingPluralForm String String PluralCategory
-  | ||| The entire fallback chain was exhausted without finding a translation
-    FallbackExhausted String String (List String)
+data LookupError : Type where
+  ||| The requested locale is not in the corpus at all
+  NoSuchLocale : String -> LookupError
+  ||| The locale exists but the key is not defined
+  NoSuchKey : String -> String -> LookupError
+  ||| The plural form variant is missing (e.g. "items.few" missing)
+  MissingPluralForm : String -> String -> PluralCategory -> LookupError
+  ||| The entire fallback chain was exhausted without finding a translation
+  FallbackExhausted : String -> String -> List String -> LookupError
 
 ||| Map a lookup error to the appropriate Result code for FFI transport
 public export

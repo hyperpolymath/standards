@@ -32,7 +32,7 @@ paddingFor : (offset : Nat) -> (alignment : Nat) -> Nat
 paddingFor offset alignment =
   if offset `mod` alignment == 0
     then 0
-    else alignment - (offset `mod` alignment)
+    else alignment `minus` (offset `mod` alignment)
 
 ||| Proof that alignment divides aligned size
 public export
@@ -45,12 +45,21 @@ alignUp : (size : Nat) -> (alignment : Nat) -> Nat
 alignUp size alignment =
   size + paddingFor size alignment
 
-||| Proof that alignUp produces an aligned result.
-||| For any positive alignment, (alignUp s a) is divisible by a.
-public export
-alignUpCorrect : (size : Nat) -> (align : Nat) -> (align > 0) -> Divides align (alignUp size align)
-alignUpCorrect size align prf =
-  DivideBy ((size + paddingFor size align) `div` align) Refl
+-- NOTE (2026-06-18): a general lemma
+--   alignUpCorrect : (size, align : Nat) -> So (align > 0)
+--                 -> Divides align (alignUp size align)
+-- was removed here. It was unused, and its body asserted
+--   alignUp size align = (alignUp size align `div` align) * align
+-- via `Refl`, which only holds definitionally for *concrete* arguments, not
+-- symbolic ones, so the lemma did not actually typecheck. A correct general
+-- proof needs the division theorem (n = d * (n `div` d) + n `mod` d), which
+-- Idris2 `base` does not export (only the `divNatNZ`/`modNatNZ`/`divmod'`
+-- functions exist, with no accompanying equational lemma), so it would have to
+-- be hand-proved from `Data.Nat.divmod'`. The divisibility that the concrete
+-- struct layouts actually rely on is discharged per-layout below by the
+-- explicit `{aligned = DivideBy k Refl}` witnesses (which compute, since the
+-- sizes/alignments there are concrete). Re-introducing the general lemma with a
+-- real proof is tracked as future work, not a `believe_me`.
 
 --------------------------------------------------------------------------------
 -- Struct Field Layout
@@ -117,6 +126,7 @@ localeLayout =
     ]
     32  -- Total size: 32 bytes
     8   -- Alignment: 8 bytes (pointer alignment)
+    {aligned = DivideBy 4 Refl}   -- 32 = 4 * 8
 
 ||| Layout of lol_translation_result_t.
 |||
@@ -138,6 +148,7 @@ translationResultLayout =
     ]
     24  -- Total size: 24 bytes
     8   -- Alignment: 8 bytes
+    {aligned = DivideBy 3 Refl}   -- 24 = 3 * 8
 
 ||| Layout of lol_language_info_t.
 |||
@@ -167,6 +178,7 @@ languageInfoLayout =
     ]
     56  -- Total size: 56 bytes
     8   -- Alignment: 8 bytes
+    {aligned = DivideBy 7 Refl}   -- 56 = 7 * 8
 
 ||| Layout of lol_plural_rule_t.
 |||
@@ -188,6 +200,7 @@ pluralRuleLayout =
     ]
     40  -- Total size: 40 bytes
     8   -- Alignment: 8 bytes
+    {aligned = DivideBy 5 Refl}   -- 40 = 5 * 8
 
 --------------------------------------------------------------------------------
 -- C ABI Compatibility Proofs
@@ -243,3 +256,4 @@ localeLayoutWasm32 =
     ]
     16  -- Total size: 16 bytes on WASM32
     4   -- Alignment: 4 bytes
+    {aligned = DivideBy 4 Refl}   -- 16 = 4 * 4
