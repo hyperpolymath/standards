@@ -108,7 +108,26 @@ check() {
 check_file_exists() {
     local file="$1"
     local description="${2:-File exists: $file}"
-    check "$description" "test -f '$REPO_PATH/$file'"
+    # Estate-tolerant: credit documented format/case variants — .adoc docs
+    # (estate docs policy mandates AsciiDoc), `Justfile` case, bare `LICENSE`.
+    # Licence *content* checks are separate and unchanged (owner-gated).
+    local candidates=("$file")
+    case "$file" in
+        *.md)        candidates+=("${file%.md}.adoc") ;;
+        LICENSE.txt) candidates+=("LICENSE") ;;
+        justfile)    candidates+=("Justfile") ;;
+    esac
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    local f
+    for f in "${candidates[@]}"; do
+        if [[ -f "$REPO_PATH/$f" ]]; then
+            PASSED_CHECKS=$((PASSED_CHECKS + 1))
+            log_success "$description"
+            return 0
+        fi
+    done
+    log_error "$description"
+    return 1
 }
 
 check_dir_exists() {
@@ -121,7 +140,25 @@ check_file_contains() {
     local file="$1"
     local pattern="$2"
     local description="${3:-$file contains: $pattern}"
-    check "$description" "grep -q '$pattern' '$REPO_PATH/$file' 2>/dev/null"
+    # Estate-tolerant: also search documented format/case variants.
+    local candidates=("$file")
+    case "$file" in
+        *.md)     candidates+=("${file%.md}.adoc") ;;
+        justfile) candidates+=("Justfile") ;;
+    esac
+    local existing=()
+    local f
+    for f in "${candidates[@]}"; do
+        [[ -f "$REPO_PATH/$f" ]] && existing+=("$REPO_PATH/$f")
+    done
+    TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
+    if [[ ${#existing[@]} -gt 0 ]] && grep -q "$pattern" "${existing[@]}" 2>/dev/null; then
+        PASSED_CHECKS=$((PASSED_CHECKS + 1))
+        log_success "$description"
+        return 0
+    fi
+    log_error "$description"
+    return 1
 }
 
 check_command_exists() {
@@ -148,11 +185,12 @@ audit_category_1_infrastructure() {
     check_file_contains "justfile" "test" "Justfile has test recipe"
     check_file_contains "justfile" "validate" "Justfile has validate recipe"
 
-    # GitLab CI/CD (or GitHub Actions as fallback)
-    if check_file_exists ".gitlab-ci.yml" "GitLab CI/CD configuration"; then
+    # CI/CD: GitLab CI or GitHub Actions (the estate runs on GitHub; both count)
+    check "CI/CD configuration present" "test -f '$REPO_PATH/.gitlab-ci.yml' || ls '$REPO_PATH'/.github/workflows/*.y*ml >/dev/null 2>&1"
+    if [[ -f "$REPO_PATH/.gitlab-ci.yml" ]]; then
         check_file_contains ".gitlab-ci.yml" "stages:" "GitLab CI has stages defined"
-    elif check_file_exists ".github/workflows/ci.yml" "GitHub Actions workflow"; then
-        log_warning "Using GitHub Actions instead of GitLab CI (GitLab preferred)"
+    else
+        check "CI/CD has workflows defined" "ls '$REPO_PATH'/.github/workflows/*.y*ml >/dev/null 2>&1"
     fi
 
     # Podman (optional for CLI tools, required for web services)

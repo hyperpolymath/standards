@@ -24,6 +24,12 @@ topology: registry
 registry-check:
     @bash scripts/build-registry.sh --check
 
+# Aggregate compliance gate: registry drift (hard dep) + RSR self-audit (informational)
+validate: registry-check
+    @echo "=== validate: RSR compliance gate ==="
+    @bash rhodium-standard-repositories/rsr-audit.sh . text || true
+    @echo "=== validate: done (see rsr-audit output above) ==="
+
 # Print role-appropriate LLM warm-up context (machine front door)
 llm-context role="dev":
     @echo "# Front door: 0-AI-MANIFEST.a2ml (machine) + README.adoc (human)"
