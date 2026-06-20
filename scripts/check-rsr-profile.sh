@@ -30,18 +30,25 @@ section() { awk -v s="[$1]" '$0==s{f=1;next} /^\[/{f=0} f && !/^[[:space:]]*#/ &
 quoted_on_key() { grep -E "^[[:space:]]*$1[[:space:]]*=" | grep -oE '"[^"]+"' | tr -d '"' || true; }
 
 # --- target profile ---
+# Capability declaration is primary: a profile may list `capabilities = [...]`
+# directly. `preset` is optional sugar — a named bundle expanded from the gate
+# data. A profile must provide at least one of the two.
 PBODY="$(section profile "$PROFILE")"
 PRESET="$(printf '%s\n' "$PBODY" | quoted_on_key preset | sed -n 1p)"
+DIRECT="$(printf '%s\n' "$PBODY" | quoted_on_key capabilities)"
 ADD="$(printf '%s\n' "$PBODY" | quoted_on_key add)"
 REMOVE="$(printf '%s\n' "$PBODY" | quoted_on_key remove)"
-[ -n "$PRESET" ] || { echo "ERROR: profile declares no preset" >&2; exit 2; }
+[ -n "$PRESET$DIRECT" ] || { echo "ERROR: profile declares neither 'capabilities' nor 'preset'" >&2; exit 2; }
 
-# --- preset's base capabilities (from the gate data) ---
-PRESETCAPS="$(section presets "$GATES" | quoted_on_key "$PRESET")"
-[ -n "$PRESETCAPS" ] || { echo "ERROR: unknown preset '$PRESET' (not in $GATES [presets])" >&2; exit 2; }
+# --- preset's base capabilities, if a preset is named ---
+PRESETCAPS=""
+if [ -n "$PRESET" ]; then
+  PRESETCAPS="$(section presets "$GATES" | quoted_on_key "$PRESET")"
+  [ -n "$PRESETCAPS" ] || { echo "ERROR: unknown preset '$PRESET' (not in $GATES [presets])" >&2; exit 2; }
+fi
 
-# --- effective capabilities = presetcaps + add - remove ---
-EFFECTIVE="$(printf '%s\n%s\n' "$PRESETCAPS" "$ADD" | sort -u | sed '/^$/d')"
+# --- effective capabilities = capabilities + presetcaps + add - remove ---
+EFFECTIVE="$(printf '%s\n%s\n%s\n' "$DIRECT" "$PRESETCAPS" "$ADD" | sort -u | sed '/^$/d')"
 if [ -n "$REMOVE" ]; then
   EFFECTIVE="$(comm -23 <(printf '%s\n' "$EFFECTIVE") <(printf '%s\n' "$REMOVE" | sort -u))"
 fi
@@ -58,7 +65,7 @@ present() {
 }
 
 echo "repo:    $REPO"
-echo "preset:  $PRESET"
+echo "profile: ${PRESET:+preset=$PRESET }${DIRECT:+direct-capabilities}"
 echo "effective capabilities: $(printf '%s ' $EFFECTIVE)"
 echo
 
