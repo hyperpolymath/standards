@@ -29,7 +29,7 @@ jobs:
   # (49 estate repos hit this; see ROADMAP audit 2026-05-30.)
   #
   # Fix: split the threshold check into a downstream job that depends on
-  # `scorecard` and consumes the SARIF artifact. The `scorecard` job stays
+  # `scorecard` and consumes the JSON artifact. The `scorecard` job stays
   # uses-only; `check-score` is the gating job that emits the error.
   scorecard:
     timeout-minutes: 20
@@ -45,41 +45,9 @@ jobs:
       - name: Run Scorecard
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
         with:
-          results_file: results.sarif
-          results_format: sarif
-          publish_results: true
-
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
-        with:
-          sarif_file: results.sarif
-
-  # Compute the aggregate score in its OWN uses-only job. The score is NOT in
-  # the SARIF output (`jq '.runs[0].tool.driver.properties.score'` always
-  # returned null → 0 → this gate failed on every push regardless of the real
-  # posture); it only exists in scorecard's JSON output. scorecard-action and a
-  # `run:` step must never share a job (OSSF publish contract — see #304, and
-  # hypatia `scorecard_publish_with_run_step`), so this job stays uses-only and
-  # hands the JSON to check-score via an artifact. `publish_results: false`
-  # means this run neither publishes nor needs OIDC (the `scorecard` job above
-  # owns publishing).
-  compute-score:
-    timeout-minutes: 20
-    needs: scorecard
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Compute Scorecard score (JSON)
-        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
-        with:
           results_file: results.json
           results_format: json
-          publish_results: false
+          publish_results: true
 
       - name: Persist score JSON for the gate job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -90,7 +58,7 @@ jobs:
 
   check-score:
     timeout-minutes: 10
-    needs: compute-score
+    needs: scorecard
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
-# scorecard-reusable.yml — Reusable OSSF Scorecard analysis.
+# scorecard-reusable.yml — Reusable OSSF Scorecard posture analysis.
 #
 # Consolidates the per-repo `scorecard.yml` workflow (estate-wide:
 # 258 top-level deployments, 46 unique blob SHAs, 17.8% structural
@@ -23,9 +23,17 @@
 #   - No `secrets: inherit` needed — scorecard uses `GITHUB_TOKEN`
 #     directly, which is available without inherit.
 #   - Caller MUST grant `security-events: write` and `id-token: write`
-#     on the calling job. The reusable re-asserts these on its own
+#     on the calling job. These are retained for compatibility with the
+#     existing estate wrappers and private-repo scorecard behaviour. The
+#     reusable re-asserts these on its own
 #     `analysis` job, but called-workflow permissions are CAPPED by
 #     the caller's permissions block.
+#   - Intentionally does NOT upload Scorecard SARIF to GitHub Code
+#     scanning. Estate wrappers run Scorecard on default-branch pushes
+#     and weekly schedules, not every PR head SHA. Registering that as a
+#     code-scanning tool leaves PRs stuck in "waiting for results from
+#     Scorecard" for commits the workflow will never analyse. The
+#     workflow keeps the JSON artifact for inspection.
 #   - Caller keeps its own `on:` triggers and `concurrency:` group, so
 #     the read-only cancel-superseded behaviour stays in the wrapper.
 #
@@ -102,10 +110,12 @@ jobs:
       - name: Run Scorecard
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.3.1
         with:
-          results_file: results.sarif
-          results_format: sarif
+          results_file: results.json
+          results_format: json
 
-      - name: Upload results
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v3.31.8
+      - name: Upload Scorecard JSON artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          sarif_file: results.sarif
+          name: scorecard-results-json
+          path: results.json
+          retention-days: 5
