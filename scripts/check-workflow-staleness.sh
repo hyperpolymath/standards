@@ -1,70 +1,100 @@
-#!/usr/bin/env bash
-# SPDX-License-Identifier: MPL-2.0
+#!/bin/bash
+# SPDX-License-Identifier: PMPL-1.0-or-later
+set -eo pipefail
 
-set -euo pipefail
+# Staleness checker script for hyperpolymath estate repositories.
+# Ensures that workflows do not use retired patterns or stale pins.
 
-ROOT="${1:-.}"
-REPO="${GITHUB_REPOSITORY:-unknown/unknown}"
-FAILED=0
+REPO_ROOT="${1:-.}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-error() {
-  echo "ERROR: $*"
-  FAILED=1
-}
-
-workflow_files() {
-  find "$ROOT/.github/workflows" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) -type f 2>/dev/null | sort
-}
-
-if [ ! -d "$ROOT/.github/workflows" ]; then
-  echo "No root .github/workflows directory; workflow staleness check skipped."
-  exit 0
+# Determine if we are in standards repo
+IS_STANDARDS=false
+if [ "$GITHUB_REPOSITORY" = "hyperpolymath/standards" ]; then
+  IS_STANDARDS=true
+else
+  # Fallback: check Git remote origin URL
+  if [ -d "$REPO_ROOT/.git" ]; then
+    REMOTE_URL=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
+    if [[ "$REMOTE_URL" =~ "hyperpolymath/standards" ]]; then
+      IS_STANDARDS=true
+    fi
+  fi
 fi
 
-if [ "$REPO" != "hyperpolymath/standards" ] && [ -f "$ROOT/.github/workflows/scorecard-enforcer.yml" ]; then
-  error "$ROOT/.github/workflows/scorecard-enforcer.yml is a retired estate wrapper. Use scorecard.yml -> standards scorecard-reusable.yml instead."
+# Determine current approved standards SHA dynamically, or allow override from environment
+CURRENT_SHA="${STALENESS_EXPECTED_SHA:-}"
+if [ -z "$CURRENT_SHA" ]; then
+  # Look up the Git commit of the standards repo containing this script
+  if [ -d "$SCRIPT_DIR/../.git" ]; then
+    CURRENT_SHA=$(git -C "$SCRIPT_DIR/.." rev-parse HEAD 2>/dev/null || echo "")
+  elif [ -d "$SCRIPT_DIR/.git" ]; then
+    CURRENT_SHA=$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || echo "")
+  fi
 fi
 
-while IFS= read -r file; do
-  [ -f "$file" ] || continue
-
-  if grep -q 'ossf/scorecard-action@' "$file" && grep -q 'github/codeql-action/upload-sarif@' "$file"; then
-    error "$file uploads OSSF Scorecard SARIF to GitHub Code scanning. Scorecard runs on default-branch/schedule cadence, so this creates stale PR code-scanning waits."
-  fi
-
-  if grep -q 'scorecard-reusable.yml@' "$file"; then
-    ref="$(sed -n 's/.*scorecard-reusable\.yml@\([A-Za-z0-9._/-]*\).*/\1/p' "$file" | head -1)"
-    case "$ref" in
-      e0caf11508a3989574713c78f5f444f2ce5e33ef|\
-      e03686486e11b662834d7090dffae54c3e96fd59|\
-      86ea49fd3c94db3dd61dea40759e729fff356d81|\
-      6cd3772824e59c8c9affeab66061e25383544242|\
-      19995ace5f1179e9e2d4783fe1d36df0f343492d|\
-      ae5b6731e0c1ce192edc14737a226d6b201341aa)
-        error "$file pins scorecard-reusable.yml@$ref, which still publishes Scorecard as code-scanning SARIF. Refresh to the no-SARIF reusable revision."
-        ;;
-    esac
-  fi
-
-  if grep -q 'hypatia-scan-reusable.yml@' "$file"; then
-    ref="$(sed -n 's/.*hypatia-scan-reusable\.yml@\([A-Za-z0-9._/-]*\).*/\1/p' "$file" | head -1)"
-    case "$ref" in
-      5eb28d7d8790d5389b7b6a5233fe6265a775e3d0|\
-      6cd3772824e59c8c9affeab66061e25383544242|\
-      915139d73560e65a8240b8fc7768698658502c89|\
-      97df762107501909f50bb770e9bc200b6c415600|\
-      f5f0506a6ec88e574753eee701a268e0d4b3a7f2)
-        error "$file pins hypatia-scan-reusable.yml@$ref before the Hypatia build-cache fix. Refresh to a cached reusable revision."
-        ;;
-    esac
-  fi
-done < <(workflow_files)
-
-if [ "$FAILED" -ne 0 ]; then
-  echo
-  echo "Workflow staleness policy failed."
-  echo "Remediation: remove legacy scorecard-enforcer.yml, refresh standards reusable pins, and keep Scorecard out of GitHub Code scanning unless it runs for every PR head commit."
+if [ -z "$CURRENT_SHA" ]; then
+  echo "::error::Could not determine current standards SHA. Set STALENESS_EXPECTED_SHA."
   exit 1
 fi
 
-echo "Workflow staleness policy passed."
+echo "Staleness Check against Standards SHA: $CURRENT_SHA"
+
+# If no root .github/workflows exists, pass.
+if [ ! -d "$REPO_ROOT/.github/workflows" ]; then
+  echo "No .github/workflows directory found. Passing."
+  exit 0
+fi
+
+FAILED=0
+
+# Rule: no_retired_scorecard_enforcer
+if [ "$IS_STANDARDS" = "false" ] && [ -f "$REPO_ROOT/.github/workflows/scorecard-enforcer.yml" ]; then
+  echo "::error::scorecard-enforcer.yml is retired. Use scorecard.yml -> standards scorecard-reusable.yml instead."
+  FAILED=1
+fi
+
+for wf in "$REPO_ROOT"/.github/workflows/*.yml "$REPO_ROOT"/.github/workflows/*.yaml; do
+  [ -f "$wf" ] || continue
+
+  # Rule: no_scorecard_sarif_code_scanning
+  if grep -q "ossf/scorecard-action@" "$wf" && grep -q "github/codeql-action/upload-sarif@" "$wf"; then
+    echo "::error file=$wf::OSSF Scorecard must not upload SARIF to GitHub Code Scanning unless it runs for every PR head commit."
+    FAILED=1
+  fi
+
+  # Rule: no_stale_scorecard_reusable_pin
+  if grep -q "scorecard-reusable.yml@" "$wf"; then
+    PINNED_SHA=$(grep "scorecard-reusable.yml@" "$wf" | sed -E 's/.*scorecard-reusable.yml@([^ #\r\n]+).*/\1/')
+    if [ "$PINNED_SHA" != "$CURRENT_SHA" ]; then
+      echo "::error file=$wf::Workflow pins stale Scorecard reusable that publishes SARIF / causes Code Scanning waits. Refresh to current standards SHA."
+      FAILED=1
+    fi
+  fi
+
+  # Rule: no_stale_hypatia_reusable_pin
+  if grep -q "hypatia-scan-reusable.yml@" "$wf"; then
+    PINNED_SHA=$(grep "hypatia-scan-reusable.yml@" "$wf" | sed -E 's/.*hypatia-scan-reusable.yml@([^ #\r\n]+).*/\1/')
+    if [ "$PINNED_SHA" != "$CURRENT_SHA" ]; then
+      echo "::error file=$wf::Workflow pins Hypatia reusable before cache/baseline-delay fix. Refresh to current standards SHA."
+      FAILED=1
+    fi
+  fi
+
+  # Rule: estate_pin_freshness for governance.yml
+  if grep -q "governance-reusable.yml@" "$wf"; then
+    PINNED_SHA=$(grep "governance-reusable.yml@" "$wf" | sed -E 's/.*governance-reusable.yml@([^ #\r\n]+).*/\1/')
+    if [ "$PINNED_SHA" != "$CURRENT_SHA" ]; then
+      echo "::error file=$wf::Workflow pins stale governance reusable. Refresh to current standards SHA."
+      FAILED=1
+    fi
+  fi
+done
+
+if [ $FAILED -ne 0 ]; then
+  echo "::error::Remove legacy scorecard-enforcer.yml, refresh standards reusable pins, and keep Scorecard out of GitHub Code Scanning unless it runs for every PR head commit."
+  exit 1
+fi
+
+echo "All workflow staleness checks passed."
+exit 0

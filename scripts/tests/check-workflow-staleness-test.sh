@@ -1,64 +1,103 @@
-#!/usr/bin/env bash
-# SPDX-License-Identifier: MPL-2.0
-
+#!/bin/bash
+# SPDX-License-Identifier: PMPL-1.0-or-later
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-CHECK="$SCRIPT_DIR/../check-workflow-staleness.sh"
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# Regression test script for check-workflow-staleness.sh
 
-mkdir -p "$WORK/repo/.github/workflows"
+TEST_DIR=$(mktemp -d)
+trap 'rm -rf "$TEST_DIR"' EXIT
 
-cat > "$WORK/repo/.github/workflows/scorecard.yml" <<'EOF'
-name: Scorecards
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHECK_SCRIPT="$SCRIPT_DIR/../check-workflow-staleness.sh"
+
+export STALENESS_EXPECTED_SHA="currentsha123"
+
+create_mock_repo() {
+  local repo_path="$1"
+  mkdir -p "$repo_path/.github/workflows"
+}
+
+run_test_case() {
+  local desc="$1"
+  local expected_exit="$2"
+  local mock_repo="$3"
+  
+  echo "Running test: $desc"
+  set +e
+  GITHUB_REPOSITORY="hyperpolymath/test-repo" bash "$CHECK_SCRIPT" "$mock_repo" >/dev/null 2>&1
+  local exit_code=$?
+  set -e
+  
+  if [ "$exit_code" -ne "$expected_exit" ]; then
+    echo "FAIL: $desc (expected exit $expected_exit, got $exit_code)"
+    exit 1
+  else
+    echo "PASS: $desc"
+  fi
+}
+
+# --- TEST 1: Stale Scorecard reusable pin must fail ---
+REPO1="$TEST_DIR/repo1"
+create_mock_repo "$REPO1"
+cat << EOF > "$REPO1/.github/workflows/scorecard.yml"
+name: Scorecard
+on: push
 jobs:
-  analysis:
-    uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@e0caf11508a3989574713c78f5f444f2ce5e33ef
+  scorecard:
+    uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@stalesha123
 EOF
+run_test_case "Stale Scorecard reusable pin must fail" 1 "$REPO1"
 
-if GITHUB_REPOSITORY=hyperpolymath/example bash "$CHECK" "$WORK/repo" >/tmp/stale.out 2>&1; then
-  echo "expected stale scorecard reusable pin to fail"
-  cat /tmp/stale.out
-  exit 1
-fi
-
-cat > "$WORK/repo/.github/workflows/scorecard.yml" <<'EOF'
-name: Scorecards
+# --- TEST 2: Direct Scorecard SARIF upload must fail ---
+REPO2="$TEST_DIR/repo2"
+create_mock_repo "$REPO2"
+cat << EOF > "$REPO2/.github/workflows/scorecard.yml"
+name: Scorecard
+on: push
 jobs:
-  analysis:
+  scorecard:
     steps:
-      - uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a
-      - uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e
+      - uses: ossf/scorecard-action@abc
+      - uses: github/codeql-action/upload-sarif@xyz
 EOF
+run_test_case "Direct Scorecard SARIF upload must fail" 1 "$REPO2"
 
-if GITHUB_REPOSITORY=hyperpolymath/example bash "$CHECK" "$WORK/repo" >/tmp/sarif.out 2>&1; then
-  echo "expected direct Scorecard SARIF upload to fail"
-  cat /tmp/sarif.out
-  exit 1
-fi
-
-cat > "$WORK/repo/.github/workflows/hypatia-scan.yml" <<'EOF'
+# --- TEST 3: Stale Hypatia reusable pin must fail ---
+REPO3="$TEST_DIR/repo3"
+create_mock_repo "$REPO3"
+cat << EOF > "$REPO3/.github/workflows/hypatia.yml"
 name: Hypatia
+on: push
 jobs:
-  scan:
-    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@5eb28d7d8790d5389b7b6a5233fe6265a775e3d0
+  hypatia:
+    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@stalehypatia123
 EOF
+run_test_case "Stale Hypatia reusable pin must fail" 1 "$REPO3"
 
-if GITHUB_REPOSITORY=hyperpolymath/example bash "$CHECK" "$WORK/repo" >/tmp/hypatia.out 2>&1; then
-  echo "expected stale Hypatia reusable pin to fail"
-  cat /tmp/hypatia.out
-  exit 1
-fi
-
-cat > "$WORK/repo/.github/workflows/hypatia-scan.yml" <<'EOF'
+# --- TEST 4: Clean current reusable pin must pass ---
+REPO4="$TEST_DIR/repo4"
+create_mock_repo "$REPO4"
+cat << EOF > "$REPO4/.github/workflows/scorecard.yml"
+name: Scorecard
+on: push
+jobs:
+  scorecard:
+    uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@currentsha123
+EOF
+cat << EOF > "$REPO4/.github/workflows/hypatia.yml"
 name: Hypatia
+on: push
 jobs:
-  scan:
-    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@main
+  hypatia:
+    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@currentsha123
 EOF
-rm -f "$WORK/repo/.github/workflows/scorecard.yml"
+run_test_case "Clean current reusable pin must pass" 0 "$REPO4"
 
-GITHUB_REPOSITORY=hyperpolymath/example bash "$CHECK" "$WORK/repo" >/tmp/clean.out 2>&1
+# --- TEST 5: scorecard-enforcer.yml in non-standards repo must fail ---
+REPO5="$TEST_DIR/repo5"
+create_mock_repo "$REPO5"
+touch "$REPO5/.github/workflows/scorecard-enforcer.yml"
+run_test_case "scorecard-enforcer.yml in non-standards repo must fail" 1 "$REPO5"
 
-echo "check-workflow-staleness-test: ok"
+echo "All regression tests passed!"
+exit 0
