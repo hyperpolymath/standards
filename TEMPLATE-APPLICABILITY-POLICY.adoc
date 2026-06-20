@@ -1,0 +1,210 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= RSR Template-Applicability Policy
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toc-placement: preamble
+
+Canonical policy for *which parts of `rsr-template-repo` a given repository
+should carry*. It replaces "every repo looks like the full template" with a
+capability-gated model: a repo carries a template module only if it actually
+has the capability that module serves.
+
+== Why
+
+`rsr-template-repo` is maximal: it ships FFI/ABI seams, formal-proof trees,
+container scaffolding, service e2e, mobile shells, an AffineScript subtree, and
+the full governance trio — so that *some* repo can be scaffolded for *any* of
+them. The existing enforcement
+(`scripts/check-root-shape.sh` reading `.machine_readable/root-allow.txt`)
+encodes that maximum as **one canonical shape for all repos**. The result is
+over-scaffolding: a small Rust CLI is told `abi.ipkg`, `verification/`,
+`container/`, and `affinescript/` are "canonical" even though it has no ABI
+seam, no in-tree proofs, ships no container, and contains no AffineScript.
+
+Empty scaffolding is not neutral — it is vestigial cruft that misleads readers,
+invites drift, and dilutes the signal of the parts that are real. This policy
+makes "carry it only if you need it" a *rule with a test*, not a judgement call.
+
+== Model
+
+Three layers:
+
+. *Universal baseline* — modules every repo carries unconditionally (identity,
+  community-health, machine-readable state, the licence invariant).
+. *Capability gates* — every other template module is tagged with the
+  *capability* it serves. A repo carries the module **iff** it declares that
+  capability.
+. *Presets* — named capability bundles (`rust-cli`, `rust-ffi-lib`,
+  `rust-service`, `formal-proof-lib`, `docs-site`, …) a repo adopts as its base,
+  then adjusts with explicit per-capability `add` / `remove`. (The "hybrid"
+  layer: presets for ergonomics, gates for precision.)
+
+A repo's *profile* (`.machine_readable/rsr-profile.a2ml`) declares its preset
+and any adjustments. Its effective capability set drives everything else.
+
+== Capability taxonomy
+
+[cols="1,2,3"]
+|===
+| Axis | Capability | A repo declares it when…
+
+.4+| Language
+| `rust` | it contains Rust/SPARK source (`Cargo.toml`, `*.rs`).
+| `zig` | it contains Zig source (FFI/gateway/SDK layer).
+| `agda` / `idris2` / `haskell` / `gleam` / `elixir` / `affinescript` / `julia` / `ocaml`
+| it contains source in that language *as its own code* (not merely consumes a tool written in it).
+| `bash` | it ships non-trivial shell scripts (almost universal; rarely gating).
+
+.5+| Interface / seam
+| `cli` | it ships a command-line binary.
+| `library` | it is consumed/published as a library.
+| `ffi` | it exposes or consumes a C-ABI FFI seam (Zig FFI scaffold).
+| `abi` | it has a *formally specified* ABI (Idris2 `abi.ipkg` + `src/interface/Abi/` proofs + `ffi/` + `generated/`).
+| `api-service` | it runs as a network service/daemon.
+
+| Verification
+| `formal-proofs` | it *contains* mechanised proofs in-tree (`verification/proofs/`). **Consuming** a prover (e.g. a tool that shells out to Agda) is *not* this capability.
+
+.3+| Surface
+| `mobile` | it ships a Tauri/Dioxus mobile app.
+| `web-ui` | it ships a browser UI.
+| `docs-site` | it publishes a static site (casket-ssg / Pages).
+
+.3+| Distribution
+| `published-package` | it publishes to a registry (crates.io / Hackage / JSR).
+| `container` | it ships a container image.
+| `reproducible-build` | it provides a Guix/Nix reproducible build.
+
+.2+| Governance tier
+| `governance-tier` | it is load-bearing/critical enough to carry the full `AUDIT` / `AFFIRMATION` / `GOVERNANCE` / `MAINTAINERS` trio. Small leaf repos may decline it.
+| `benchmarks` | it maintains a benchmark suite (`benches/`).
+|===
+
+The machine-readable source of truth for capabilities, gates, and presets is
+`.machine_readable/template-capability-gates.toml`. The tables below mirror it
+for humans.
+
+== The gate table (module → capability)
+
+*Universal baseline* (gate = ∅; always carried):
+
+`README.adoc`, `EXPLAINME.adoc`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`,
+`CODE_OF_CONDUCT.md`, `CHANGELOG.md`, `0-AI-MANIFEST.a2ml`,
+`.machine_readable/6a2/{STATE,META,ECOSYSTEM,AGENTIC,NEUROSYM,PLAYBOOK}.a2ml`,
+`.machine_readable/rsr-profile.a2ml`, `.well-known/`, `.gitignore`, `Justfile`,
+and the SPDX licence invariant (`LICENCE-POLICY.adoc`).
+
+*Gated modules:*
+
+[cols="2,1"]
+|===
+| Template module / path | Gating capability
+
+| `Cargo.toml`, `Cargo.lock`, `src/**/*.rs`, `.github/workflows/rust-ci.yml` | `rust`
+| `src/interface/ffi/**` (Zig) | `ffi`
+| `abi.ipkg`, `src/interface/Abi/**` (Idris2), `src/interface/generated/**` | `abi`
+| `verification/proofs/**`, proof-CI | `formal-proofs`
+| service e2e, `.github/workflows/e2e.yml` | `api-service`
+| `container/`, `Containerfile` | `container`
+| `build/guix.scm`, `flake.nix`, `.guix-channel` | `reproducible-build`
+| mobile shell (Tauri/Dioxus) | `mobile`
+| `affinescript/` subtree | `affinescript`
+| `benches/` | `benchmarks`
+| `AUDIT.adoc`, `AFFIRMATION.adoc`, `GOVERNANCE.adoc`, `MAINTAINERS.adoc` | `governance-tier`
+| `.github/workflows/release.yml`, registry metadata | `published-package`
+|===
+
+== Presets
+
+[cols="1,3"]
+|===
+| Preset | Base capabilities
+
+| `rust-cli` | `rust`, `cli`, `library`
+| `rust-ffi-lib` | `rust`, `zig`, `ffi`, `abi`, `library`
+| `rust-service` | `rust`, `api-service`, `container`, `reproducible-build`
+| `formal-proof-lib` | `agda` *or* `idris2`, `formal-proofs`, `library`
+| `docs-site` | `docs-site`
+| `affinescript-app` | `affinescript`, `web-ui`
+|===
+
+A profile may `add` or `remove` individual capabilities on top of its preset
+(e.g. `rust-cli` + `add = ["published-package"]`).
+
+== The test
+
+Let `P` be a repo's effective capability set (`preset` ∪ `add` − `remove`).
+
+----
+carries(M)   ⟺  M ∈ baseline  ∨  gate(M) ⊆ P
+----
+
+For any tracked template-module path `X`:
+
+* *OK* — `carries(X)` and `X` is present.
+* *MISSING* — `carries(X)` but `X` is absent → add it.
+* *VESTIGIAL* — `X` is a known template module, present, but `gate(X) ⊄ P` →
+  remove it *or* declare the missing capability (with justification).
+* *UNKNOWN* — `X` is project-specific (not a template module) → allowed; it is
+  the repo's own content, governed by the root-shape allowlist as before.
+
+The key new verdict is **VESTIGIAL**: scaffolding present without the capability
+that justifies it. That is the thing this policy removes.
+
+== Per-repo profile
+
+`.machine_readable/rsr-profile.a2ml` (A2ML, TOML-like; SPDX `MPL-2.0`):
+
+[source,toml]
+----
+[profile]
+preset = "rust-cli"
+add = []                       # extra capabilities beyond the preset
+remove = []                    # preset capabilities this repo does NOT have
+
+[rationale]
+# One line per non-obvious add/remove or declined capability.
+no-abi = "language-agnostic engine; no C-ABI seam, no Idris2 ABI proofs"
+no-formal-proofs = "consumes Agda (shells out); contains no in-tree proofs"
+----
+
+== Enforcement (how this evolves the existing machinery)
+
+`root-allow.txt` becomes *derived*, not hand-maintained as one shape:
+
+----
+effective-allowlist(repo) = baseline ∪ { M : gate(M) ⊆ profile(repo).capabilities }
+----
+
+* `scripts/check-rsr-profile.sh` (reference implementation, this repo) reads a
+  repo's `rsr-profile.a2ml` + `template-capability-gates.toml` and reports
+  `MISSING` / `VESTIGIAL` modules.
+* `check-root-shape.sh` / `validate-template.sh` evolve to consume
+  `effective-allowlist(repo)` instead of a static `root-allow.txt` (follow-up;
+  the static file remains valid as the `governance-tier` + all-capabilities
+  maximum until then).
+
+A repo opts in by adding its `rsr-profile.a2ml` and running the check in CI.
+
+== Worked example — arghda-core (`rust-cli`)
+
+A small language-agnostic Rust CLI. Profile: `preset = "rust-cli"`,
+`remove = []`. Effective capabilities: `rust`, `cli`, `library`.
+
+* *Carries* (gate ⊆ P): the universal baseline + `Cargo.toml`/`Cargo.lock`/
+  `src/**/*.rs`/`rust-ci.yml` (`rust`).
+* *Correctly absent* (VESTIGIAL if present): `abi.ipkg` + `src/interface/`
+  (`abi`/`ffi`), `verification/proofs/` (`formal-proofs` — arghda *consumes*
+  Agda but contains no proofs), `container/` (`container`), `affinescript/`
+  (`affinescript`), the `AUDIT`/`AFFIRMATION`/`GOVERNANCE`/`MAINTAINERS` trio
+  (`governance-tier`, declined by a leaf tool).
+
+That is precisely the lean shape arghda-core ships — now justified by a rule
+rather than a judgement call.
+
+== Status
+
+DRAFT (first pass). Open items: fold `effective-allowlist` into
+`check-root-shape.sh`; confirm the `governance-tier` boundary (which repos must
+carry the full trio); enumerate the remaining maximal-template modules into the
+gate table as they are profiled.
