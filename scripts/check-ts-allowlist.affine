@@ -88,6 +88,14 @@ fn globToRegex(g: String) -> String {
 
 type Exemption = { raw: String, rx: String }
 
+fn normalizeRepoPath(p: String) -> String {
+  let mut out = p;
+  while (len(out) > 0 && (string_sub(out, 0, 1) == "." || string_sub(out, 0, 1) == "/")) {
+    out = string_sub(out, 1, len(out) - 1);
+  }
+  return out;
+}
+
 fn loadExemptionsFromClaudeMd() -> [Exemption] {
   let mut exemptions = [];
   let text = try {
@@ -116,11 +124,11 @@ fn loadExemptionsFromClaudeMd() -> [Exemption] {
       i = i + 1;
       continue;
     }
-    if (inTable && len(line) > 0 && string_sub(line, 0, 1) == "|") {
-      if (regexMatch(line, "^\\|\\s*`[^`]+`")) {
+    if (inTable && len(line) > 0) {
+      if (regexMatch(line, "^\\s*\\|\\s*`[^`]+`")) {
         let parts = split(line, "`");
         if (len(parts) >= 3) {
-          let raw = parts[1];
+          let raw = normalizeRepoPath(trim(parts[1]));
           exemptions = exemptions ++ [#{ raw: raw, rx: globToRegex(raw) }];
         }
       }
@@ -144,7 +152,7 @@ fn loadExemptionsFromAllowlistFile() -> [Exemption] {
   let lines_len = len(lines);
   while (i < lines_len) {
     let rawLine = lines[i];
-    let line = trim(rawLine);
+    let line = normalizeRepoPath(trim(rawLine));
     if (line == "" || string_sub(line, 0, 1) == "#") {
       i = i + 1;
       continue;
@@ -160,19 +168,25 @@ fn loadExemptions() -> [Exemption] {
 }
 
 fn isExempt(p: String, exemptions: [Exemption]) -> Bool {
+  let target = normalizeRepoPath(trim(p));
   let mut i = 0;
   let ex_len = len(exemptions);
   while (i < ex_len) {
     let e = exemptions[i];
-    if (regexMatch(p, e.rx)) { return true; }
-    let mut bare = e.raw;
-    while (len(bare) > 0 && (string_sub(bare, 0, 1) == "." || string_sub(bare, 0, 1) == "/")) {
-      bare = string_sub(bare, 1, len(bare) - 1);
-    }
-    if (p == bare) { return true; }
-    if (ends_with(e.raw, "/") && regexMatch(p, "^" ++ bare)) { return true; }
+    if (regexMatch(target, e.rx)) { return true; }
+    let bare = normalizeRepoPath(trim(e.raw));
+    if (target == bare) { return true; }
+    if (ends_with(bare, "/") && regexMatch(target, "^" ++ bare)) { return true; }
     i = i + 1;
   }
+  return false;
+}
+
+fn isTypeScriptArtifact(name: String) -> Bool {
+  if (ends_with(name, ".ts")) { return true; }
+  if (ends_with(name, ".tsx")) { return true; }
+  if (ends_with(name, ".ts.bak")) { return true; }
+  if (ends_with(name, ".tsx.bak")) { return true; }
   return false;
 }
 
@@ -189,7 +203,7 @@ pub fn main() -> Int {
   let af_len = len(all_files);
   while (i < af_len) {
     let f = all_files[i];
-    if (ends_with(f, ".ts") || ends_with(f, ".tsx")) {
+    if (isTypeScriptArtifact(f)) {
       let mut skip = false;
       let segs = split(f, "/");
       let mut j = 0;

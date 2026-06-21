@@ -2,21 +2,26 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 #
-# Regression test for scripts/check-ts-allowlist.ts. Each case constructs a
-# fresh fixture tree under a tmpdir, runs the script with `--allow-read`,
-# and asserts exit code + key output substrings. Mirrors the behaviour the
-# previous inline-python step was relied on for, so a future maintenance
-# change to the Deno script cannot silently regress estate-wide policy.
+# Regression test for scripts/check-ts-allowlist.{ts,deno.js}. Each case
+# constructs a fresh fixture tree under a tmpdir, runs each script target with
+# `--allow-read`, and asserts exit code + key output substrings. Mirrors the
+# behaviour the previous inline-python step was relied on for, so a future
+# maintenance change cannot silently regress estate-wide policy.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DENO_SCRIPT="$SCRIPT_DIR/../check-ts-allowlist.ts"
+SCRIPT_TARGETS=(
+  "$SCRIPT_DIR/../check-ts-allowlist.ts"
+  "$SCRIPT_DIR/../check-ts-allowlist.deno.js"
+)
 
-if [[ ! -f "$DENO_SCRIPT" ]]; then
-  echo "FATAL: cannot locate $DENO_SCRIPT" >&2
-  exit 2
-fi
+for target in "${SCRIPT_TARGETS[@]}"; do
+  if [[ ! -f "$target" ]]; then
+    echo "FATAL: cannot locate $target" >&2
+    exit 2
+  fi
+done
 
 PASS=0
 FAIL=0
@@ -33,26 +38,30 @@ run_case() {
     cd "$tmp"
     "$setup_fn"
   )
-  set +e
-  local out
-  out="$(cd "$tmp" && deno run --allow-read "$DENO_SCRIPT" 2>&1)"
-  local actual_exit=$?
-  set -e
 
-  local ok=true
-  if [[ "$actual_exit" -ne "$expected_exit" ]]; then ok=false; fi
-  if [[ -n "$expected_substr" && "$out" != *"$expected_substr"* ]]; then ok=false; fi
+  local target
+  for target in "${SCRIPT_TARGETS[@]}"; do
+    set +e
+    local out
+    out="$(cd "$tmp" && deno run --allow-read --no-lock "$target" 2>&1)"
+    local actual_exit=$?
+    set -e
 
-  if $ok; then
-    echo "ok   $name"
-    PASS=$((PASS+1))
-  else
-    echo "FAIL $name (exit=$actual_exit, expected=$expected_exit)"
-    echo "---- output ----"
-    echo "$out"
-    echo "----------------"
-    FAIL=$((FAIL+1))
-  fi
+    local ok=true
+    if [[ "$actual_exit" -ne "$expected_exit" ]]; then ok=false; fi
+    if [[ -n "$expected_substr" && "$out" != *"$expected_substr"* ]]; then ok=false; fi
+
+    if $ok; then
+      echo "ok   $(basename "$target") :: $name"
+      PASS=$((PASS+1))
+    else
+      echo "FAIL $(basename "$target") :: $name (exit=$actual_exit, expected=$expected_exit)"
+      echo "---- output ----"
+      echo "$out"
+      echo "----------------"
+      FAIL=$((FAIL+1))
+    fi
+  done
   rm -rf "$tmp"
 }
 
@@ -111,6 +120,45 @@ setup_table_after_heading_ends() {
 | `src/A.ts` | This row should NOT count — outside exemption table |
 EOF
 }
+write_estate_claude_table() {
+  mkdir -p .claude
+  cat > .claude/CLAUDE.md <<'EOF'
+# CLAUDE.md
+
+### TypeScript Exemptions (Approved)
+
+| Path / Pattern | Rationale | Unblock condition |
+|---|---|---|
+| `affinescript-ecosystem/affinescript-deno-test/**` | Bootstrap shim. | Later. |
+| `aggregate-library/src/test-runner.ts` | Pre-migration test runner. | Later. |
+| `rescript-ecosystem/packages/core/runtime-tools/bin/rrt.ts` | Legacy runtime tool. | Later. |
+EOF
+}
+setup_estate_glob_exemption() {
+  write_estate_claude_table
+  mkdir -p affinescript-ecosystem/affinescript-deno-test
+  touch affinescript-ecosystem/affinescript-deno-test/anything.ts
+}
+setup_estate_aggregate_exact_exemption() {
+  write_estate_claude_table
+  mkdir -p aggregate-library/src
+  touch aggregate-library/src/test-runner.ts
+}
+setup_estate_rrt_exact_exemption() {
+  write_estate_claude_table
+  mkdir -p rescript-ecosystem/packages/core/runtime-tools/bin
+  touch rescript-ecosystem/packages/core/runtime-tools/bin/rrt.ts
+}
+setup_estate_other_ts_blocked() {
+  write_estate_claude_table
+  mkdir -p some/other/path
+  touch some/other/path/new-thing.ts
+}
+setup_estate_rrt_near_miss_blocked() {
+  write_estate_claude_table
+  mkdir -p rescript-ecosystem/packages/core/runtime-tools/bin
+  touch rescript-ecosystem/packages/core/runtime-tools/bin/rrt.ts.bak
+}
 
 run_case "mod.ts is builtin-allowed"               0 "No TypeScript files outside allowlist" setup_mod_ts
 run_case "bindings/ is builtin-allowed"            0 "No TypeScript files outside allowlist" setup_bindings_dir
@@ -125,6 +173,11 @@ run_case "*.d.ts is builtin-allowed"               0 "No TypeScript files outsid
 run_case "directory containing 'vscode' allowed"   0 "No TypeScript files outside allowlist" setup_vscode_dir
 run_case "directory starting 'deno-' allowed"      0 "No TypeScript files outside allowlist" setup_deno_prefix_dir
 run_case "later heading closes the exemption table" 1 "src/A.ts"                              setup_table_after_heading_ends
+run_case "estate glob exemption allows affinescript-deno-test" 0 "3 per-repo exemption"        setup_estate_glob_exemption
+run_case "estate exact exemption allows aggregate test runner" 0 "3 per-repo exemption"        setup_estate_aggregate_exact_exemption
+run_case "estate exact exemption allows rescript rrt.ts"      0 "3 per-repo exemption"        setup_estate_rrt_exact_exemption
+run_case "estate table still blocks unrelated new TS"         1 "some/other/path/new-thing.ts" setup_estate_other_ts_blocked
+run_case "estate exact exemption blocks rrt.ts.bak near miss" 1 "rrt.ts.bak"                  setup_estate_rrt_near_miss_blocked
 
 echo
 echo "=== SUMMARY ==="
