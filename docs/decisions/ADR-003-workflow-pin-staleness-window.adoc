@@ -1,0 +1,164 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+= ADR-003: Workflow reusable-pin staleness — recency window, not exact-HEAD
+:adr-status: Accepted
+:adr-date: 2026-06-21
+:adr-author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toc-placement: preamble
+
+== Status
+
+*Accepted* 2026-06-21. Supersedes the exact-HEAD comparison previously baked
+into `scripts/check-workflow-staleness.sh`.
+
+== Context
+
+`standards` hosts the estate's reusable workflows
+(`governance-reusable.yml`, `hypatia-scan-reusable.yml`,
+`scorecard-reusable.yml`, …). Consumer repos (stapeln, k9-svc, meta-a2ml, …)
+call them pinned by full commit SHA, e.g.:
+
+[source,yaml]
+----
+uses: hyperpolymath/standards/.github/workflows/governance-reusable.yml@<sha>
+----
+
+`scripts/check-workflow-staleness.sh` — run in every consumer via the
+governance reusable — *failed the consumer's CI whenever its pin != standards
+HEAD*. Because standards HEAD moves often (sometimes several times an hour),
+this turned every standards commit into a fleet-wide red:
+
+* Observed live in a stapeln session: standards HEAD moved
+  `5a93d9d` → `d72fe5a` → `4ddc926` in ~30 minutes. Each move forced a manual
+  bump of the same three pins (`governance` / `hypatia` / `scorecard`) in the
+  consumer, just to get back to green.
+* The gate was supposed to *guard* against genuinely rotten pins (the
+  pre-cache-fix Hypatia reusable; the SARIF-publishing Scorecard). Instead it
+  *nagged* on every HEAD move and produced no safety — the consumer's pin was
+  fine; standards had simply moved.
+
+The intent to automate the bump already exists as the Hypatia rule
+`lib/rules/sha_bump_propagation.ex`, but the propagation was never wired, so
+the gate just nagged.
+
+== Decision
+
+Replace exact-HEAD equality with a *recency window*, mirroring the estate's
+existing staleness idiom — Hypatia *HYP-S006 `registry-staleness`*, which
+tolerates drift for `stale_after_days: 14` before it escalates rather than
+failing on the first mismatch.
+
+A pinned SHA now *passes* `check-workflow-staleness.sh` when it is a genuine
+ancestor of standards HEAD that is *within the window*:
+
+* at most `STALENESS_WINDOW_COMMITS` commits behind HEAD (default *50*), *OR*
+* at most `STALENESS_WINDOW_DAYS` days old (default *14*, matching HYP-S006
+  `stale_after_days`).
+
+The union ("commits OR days") covers both failure shapes: a high-velocity
+burst (many commits, tiny wall-clock age) is saved by the days axis; a slow
+repo (few commits over a long span) is saved by the commits axis.
+
+A pin still *fails* when it is:
+
+* *out of the window* — older than both axes (so pins cannot rot forever, and
+  the known-bad historical pins stay blocked); or
+* *not a published standards commit* — a forged, fork, or divergent SHA that
+  is not an ancestor of HEAD (supply-chain integrity is preserved — the pin
+  must still be a real standards mainline commit).
+
+A pin that is *ahead* of the gate's HEAD view (a race during a HEAD move) is
+treated as fresh.
+
+In-window-but-behind pins emit a non-failing `::notice` nudge pointing at the
+deliberate-bump path, so the gate informs without blocking.
+
+=== Wiring the deliberate bump (the `sha_bump_propagation` half)
+
+Relaxing the gate removes the *forced* treadmill bump. A *wanted* bump (pick
+up a fix early, or a scheduled cadence) lands via
+`scripts/propagate-workflow-pins.sh` — an audit-first helper that rewrites a
+consumer's standards pins to a target SHA and stages them on a branch, *never*
+committing or pushing (mirroring `scripts/propagate-gitignore-67-68.sh` and
+the estate "no unattended mutations" guardrail). This is the concrete
+standards-side action the Hypatia `sha_bump_propagation` rule routes to:
+the rule surfaces a `:review` finding "consumer pin is behind HEAD"; gitbot-fleet
+runs this script and opens a DRAFT PR. The gate decides nothing about *when*
+to bump; it only blocks pins that have fallen out of the window.
+
+=== Mechanics
+
+The gate needs the standards commit graph (ancestry, commits-behind, commit
+age), so `governance-reusable.yml` now clones standards with
+`git clone --filter=tree:0` (a treeless partial clone: full commit history,
+minimal data) instead of `--depth 1`, with a `--depth 200` fallback.
+
+== Alternatives considered
+
+[cols="1,4,2",options="header"]
+|===
+| Option | Description | Verdict
+
+| *A — auto-propagation only*
+| A scheduled bot opens pin-bump PRs across all consumers on every HEAD move
+  (wire `sha_bump_propagation` + gitbot-fleet), leaving the gate exact-HEAD.
+| *Rejected as the sole fix.* It does not stop the in-flight consumer PR going
+  red — the red persists until the bump PR merges — so it fails the core
+  requirement ("a consumer PR no longer fails purely because standards
+  moved"). Also risks PR spam (one bump PR per consumer per HEAD move).
+  Adopted as the *complementary* deliberate-bump path, not the gate.
+
+| *B — recency window* (chosen)
+| Tolerate any in-window ancestor pin at the gate.
+| *Chosen.* Directly satisfies the requirement, self-contained in standards,
+  fully testable, and idiomatic (HYP-S006 window). Keeps supply-chain teeth
+  (ancestor-only + bounded window).
+
+| *C — released `@vN` tag*
+| Move the reusables behind a moving tag (`@v1`) the consumers pin, advanced
+  deliberately on release.
+| *Rejected.* Pinning a *mutable* tag is a supply-chain regression versus
+  full-SHA pinning — a tag can be force-moved, breaking the "the SHA is the
+  version" property the estate relies on (see `DEPENDABOT-POLICY.adoc`). It
+  also needs a release/retag process and a one-off rewrite of every consumer.
+  Heavier and weaker than B.
+|===
+
+== Consequences
+
+* *Positive*: consumer CI no longer reds purely because standards moved;
+  the treadmill is gone. The known-bad historical pins and forged SHAs remain
+  blocked. The deliberate-bump path is now wired and audit-first.
+* *Trade-off*: a consumer may run a reusable up to ~50 commits / 14 days behind
+  HEAD. This is the intended supply-chain posture: pins are still full SHAs of
+  real standards commits, just allowed a bounded lag. Tighten per-repo via
+  `STALENESS_WINDOW_COMMITS` / `STALENESS_WINDOW_DAYS` where a tighter SLA is
+  warranted (e.g. set both low to require near-HEAD).
+* *Security-relevant reusables*: if a *security fix* lands in a reusable and
+  must reach consumers faster than the window, drive it through the
+  propagation path (open bump PRs immediately) rather than narrowing the gate
+  globally.
+
+== Verification
+
+`scripts/tests/check-workflow-staleness-test.sh` (hermetic fixture history)
+covers fresh / ahead / in-window-by-commits / in-window-by-days /
+out-of-window / forged, plus the retired-enforcer and SARIF structural rules.
+`scripts/tests/propagate-workflow-pins-test.sh` covers audit/fix/idempotence
+and branch staging. End-to-end against real standards history, a
+stapeln-shaped consumer pinned 3 commits behind HEAD passes the relaxed gate
+(with a nudge), while an out-of-window pin and a forged SHA both still fail.
+
+== Cross-refs
+
+* `scripts/check-workflow-staleness.sh` — the windowed gate.
+* `scripts/propagate-workflow-pins.sh` — the audit-first deliberate-bump helper.
+* `hypatia-rules/registry-staleness.a2ml` (HYP-S006) — the window idiom this
+  mirrors.
+* `hyperpolymath/hypatia` `lib/rules/sha_bump_propagation.ex` — the rule this
+  wires.
+* `docs/DEPENDABOT-POLICY.adoc` — the "the SHA is the version" posture that
+  rules out mutable-tag pinning (option C).
+* `scripts/propagate-gitignore-67-68.sh` — the audit-first propagation pattern
+  this helper follows.
