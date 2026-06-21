@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
 // check-ts-allowlist.ts — Deno port of the inline python3 heredoc that used
 // to live in `.github/workflows/governance-reusable.yml` step
@@ -12,7 +12,8 @@
 // self-loop fixed in hypatia#328. This script eliminates the violation.
 //
 // Behaviour MUST stay byte-identical to the previous Python implementation:
-//   * Walk every `*.ts` / `*.tsx` file under cwd, skipping dotted dirs.
+//   * Walk every `*.ts` / `*.tsx` file under cwd, skipping dotted dirs
+//     and treating `.ts.bak` / `.tsx.bak` backups as banned TS artifacts.
 //   * Allow files in the built-in directory/path allowlist
 //     (bindings/tests/scripts/vendor/examples/ffi/benchmarks/cli, plus any
 //     segment containing 'vscode' or starting with 'deno-').
@@ -72,6 +73,27 @@ function globToRegex(g: string): RegExp {
 
 interface Exemption { raw: string; rx: RegExp; }
 
+function normalizeRepoPath(p: string): string {
+  let out = p.trim();
+  while (out.length > 0 && (out[0] === "." || out[0] === "/")) {
+    out = out.slice(1);
+  }
+  return out;
+}
+
+function normalizeExemptionCell(cell: string): string {
+  let out = cell.trim();
+  const codeSpan = out.match(/^`([^`]+)`$/) ?? out.match(/^`([^`]+)`/);
+  if (codeSpan) {
+    out = codeSpan[1].trim();
+  }
+  return normalizeRepoPath(out);
+}
+
+function nonExemptionCell(cell: string): boolean {
+  return cell === "" || /^:?-{3,}:?$/.test(cell) || /^path\b/i.test(cell);
+}
+
 async function loadExemptionsFromClaudeMd(): Promise<Exemption[]> {
   // Layer 2 — heading-table exemptions parsed from `.claude/CLAUDE.md`.
   //
@@ -110,10 +132,14 @@ async function loadExemptionsFromClaudeMd(): Promise<Exemption[]> {
       inTable = false;
       continue;
     }
-    if (inTable && line.startsWith("|")) {
-      const m = line.match(/^\|\s*`([^`]+)`/);
-      if (m) {
-        exemptions.push({ raw: m[1], rx: globToRegex(m[1]) });
+    const tableLine = line.trim();
+    if (inTable && tableLine.startsWith("|")) {
+      const cells = tableLine.split("|");
+      if (cells.length >= 3) {
+        const raw = normalizeExemptionCell(cells[1]);
+        if (!nonExemptionCell(raw)) {
+          exemptions.push({ raw, rx: globToRegex(raw) });
+        }
       }
     }
   }
@@ -135,7 +161,7 @@ async function loadExemptionsFromAllowlistFile(): Promise<Exemption[]> {
     return exemptions;
   }
   for (const rawLine of text.split("\n")) {
-    const line = rawLine.trim();
+    const line = normalizeExemptionCell(rawLine);
     if (line === "" || line.startsWith("#")) continue;
     exemptions.push({ raw: line, rx: globToRegex(line) });
   }
@@ -149,14 +175,19 @@ async function loadExemptions(): Promise<Exemption[]> {
 }
 
 function exempt(p: string, exemptions: Exemption[]): boolean {
+  const target = normalizeRepoPath(p);
   for (const e of exemptions) {
-    if (e.rx.test(p)) return true;
-    let bare = e.raw;
-    while (bare.length > 0 && (bare[0] === "." || bare[0] === "/")) bare = bare.slice(1);
-    if (p === bare) return true;
-    if (e.raw.endsWith("/") && p.startsWith(bare)) return true;
+    if (e.rx.test(target)) return true;
+    const bare = normalizeRepoPath(e.raw);
+    if (target === bare) return true;
+    if (bare.endsWith("/") && target.startsWith(bare)) return true;
   }
   return false;
+}
+
+function isTypeScriptArtifact(name: string): boolean {
+  return name.endsWith(".ts") || name.endsWith(".tsx") ||
+    name.endsWith(".ts.bak") || name.endsWith(".tsx.bak");
 }
 
 async function* walkTs(dir: string): AsyncIterable<string> {
@@ -168,7 +199,7 @@ async function* walkTs(dir: string): AsyncIterable<string> {
     if (entry.isDirectory) {
       yield* walkTs(full);
     } else if (entry.isFile) {
-      if (name.endsWith(".ts") || name.endsWith(".tsx")) {
+      if (isTypeScriptArtifact(name)) {
         yield full;
       }
     }
