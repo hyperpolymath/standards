@@ -24,6 +24,23 @@ topology: registry
 registry-check:
     @bash scripts/build-registry.sh --check
 
+# Run the workflow-staleness gate against a repo (default: this one)
+staleness-check path=".":
+    @bash scripts/check-workflow-staleness.sh "{{path}}"
+
+# Audit (or --fix) consumer reusable-workflow SHA pins toward a target.
+# Read-only by default; pass extra args after the path, e.g.
+#   just staleness-propagate ../stapeln --fix --to <sha>
+staleness-propagate path="." *args="":
+    @bash scripts/propagate-workflow-pins.sh {{args}} "{{path}}"
+
+# Regression tests for the staleness gate + the pin-propagation helper
+staleness-test:
+    @echo "=== check-workflow-staleness ==="
+    @bash scripts/tests/check-workflow-staleness-test.sh
+    @echo "=== propagate-workflow-pins ==="
+    @bash scripts/tests/propagate-workflow-pins-test.sh
+
 # Aggregate compliance gate: registry drift (hard dep) + RSR self-audit (informational)
 validate: registry-check
     @echo "=== validate: RSR compliance gate ==="
