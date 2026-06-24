@@ -51,7 +51,11 @@ jobs:
         id: scan
         run: |
           echo "Scanning repository: ${{ github.repository }}"
-          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . > hypatia-findings.json
+          # --exit-zero: hypatia-cli exits 1 when findings exist; under the default
+          # `bash -eo pipefail` that aborts this step before the counts/outputs/summary
+          # run AND skips the upload, so the gate fails opaquely. Gate on the severity
+          # counts below, not on the scanner's exit code.
+          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero > hypatia-findings.json
 
           FINDING_COUNT=$(jq '. | length' hypatia-findings.json 2>/dev/null || echo 0)
           CRITICAL=$(jq '[.[] | select(.severity == "critical")] | length' hypatia-findings.json 2>/dev/null || echo 0)
@@ -83,6 +87,7 @@ jobs:
           fi
 
       - name: Upload findings artifacts
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hypatia-scan-findings
