@@ -51,29 +51,34 @@ jobs:
     timeout-minutes: 20
     runs-on: ${{ inputs.runs-on }}
     if: vars.GITLAB_MIRROR_ENABLED == 'true'
+    # Map the secret to env so step `if:`s can gate on its presence: the
+    # `secrets` context is NOT available in `if:` (using it is an
+    # "Unrecognized named-value: 'secrets'" startup failure). `env` IS
+    # available in step `if:`, and secrets are valid in job-level `env`.
+    env:
+      GITLAB_KEY: ${{ secrets.GITLAB_SSH_KEY }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
-        if: ${{ secrets.GITLAB_SSH_KEY != '' }}
+        if: ${{ env.GITLAB_KEY != '' }}
         with:
           ssh-private-key: ${{ secrets.GITLAB_SSH_KEY }}
       - name: Mirror to GitLab
-        if: ${{ secrets.GITLAB_SSH_KEY != '' }}
         # continue-on-error: GitLab branch protection on the mirror repo may block
         # force-push even for a deploy key. Owner action required: in GitLab go to
         # Settings → Repository → Protected branches → main and either allow force-push
         # for Maintainers/Developers or remove the protection on the mirror repo.
         # Until then this step is advisory-only; failures do not red main.
         continue-on-error: true
-        if: ${{ secrets.GITLAB_SSH_KEY != '' }}
+        if: ${{ env.GITLAB_KEY != '' }}
         run: |
           ssh-keyscan -t ed25519 gitlab.com >> ~/.ssh/known_hosts
           git remote add gitlab git@gitlab.com:hyperpolymath/${{ github.event.repository.name }}.git || true
           git push --force gitlab main
       - name: Skipped (GITLAB_SSH_KEY not configured)
-        if: ${{ secrets.GITLAB_SSH_KEY == '' }}
+        if: ${{ env.GITLAB_KEY == '' }}
         run: |
           echo "::notice::GITLAB_MIRROR_ENABLED=true but secrets.GITLAB_SSH_KEY is empty. Skipping GitLab mirror. Configure the GITLAB_SSH_KEY org/repo secret to enable."
 
@@ -81,22 +86,26 @@ jobs:
     timeout-minutes: 20
     runs-on: ${{ inputs.runs-on }}
     if: vars.BITBUCKET_MIRROR_ENABLED == 'true'
+    # See mirror-gitlab: the `secrets` context is not valid in step `if:`;
+    # hoist to job-level `env` and gate steps on `env.BITBUCKET_KEY`.
+    env:
+      BITBUCKET_KEY: ${{ secrets.BITBUCKET_SSH_KEY }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
-        if: ${{ secrets.BITBUCKET_SSH_KEY != '' }}
+        if: ${{ env.BITBUCKET_KEY != '' }}
         with:
           ssh-private-key: ${{ secrets.BITBUCKET_SSH_KEY }}
       - name: Mirror to Bitbucket
-        if: ${{ secrets.BITBUCKET_SSH_KEY != '' }}
+        if: ${{ env.BITBUCKET_KEY != '' }}
         run: |
           ssh-keyscan -t ed25519 bitbucket.org >> ~/.ssh/known_hosts
           git remote add bitbucket git@bitbucket.org:hyperpolymath/${{ github.event.repository.name }}.git || true
           git push --force bitbucket main
       - name: Skipped (BITBUCKET_SSH_KEY not configured)
-        if: ${{ secrets.BITBUCKET_SSH_KEY == '' }}
+        if: ${{ env.BITBUCKET_KEY == '' }}
         run: |
           echo "::notice::BITBUCKET_MIRROR_ENABLED=true but secrets.BITBUCKET_SSH_KEY is empty. Skipping Bitbucket mirror. Configure the BITBUCKET_SSH_KEY org/repo secret to enable."
 
@@ -104,22 +113,26 @@ jobs:
     timeout-minutes: 20
     runs-on: ${{ inputs.runs-on }}
     if: vars.CODEBERG_MIRROR_ENABLED == 'true'
+    # See mirror-gitlab: the `secrets` context is not valid in step `if:`;
+    # hoist to job-level `env` and gate steps on `env.CODEBERG_KEY`.
+    env:
+      CODEBERG_KEY: ${{ secrets.CODEBERG_SSH_KEY }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
-        if: ${{ secrets.CODEBERG_SSH_KEY != '' }}
+        if: ${{ env.CODEBERG_KEY != '' }}
         with:
           ssh-private-key: ${{ secrets.CODEBERG_SSH_KEY }}
       - name: Mirror to Codeberg
-        if: ${{ secrets.CODEBERG_SSH_KEY != '' }}
+        if: ${{ env.CODEBERG_KEY != '' }}
         run: |
           ssh-keyscan -t ed25519 codeberg.org >> ~/.ssh/known_hosts
           git remote add codeberg git@codeberg.org:hyperpolymath/${{ github.event.repository.name }}.git || true
           git push --force codeberg main
       - name: Skipped (CODEBERG_SSH_KEY not configured)
-        if: ${{ secrets.CODEBERG_SSH_KEY == '' }}
+        if: ${{ env.CODEBERG_KEY == '' }}
         run: |
           echo "::notice::CODEBERG_MIRROR_ENABLED=true but secrets.CODEBERG_SSH_KEY is empty. Skipping Codeberg mirror. Configure the CODEBERG_SSH_KEY org/repo secret to enable."
 
@@ -127,22 +140,26 @@ jobs:
     timeout-minutes: 20
     runs-on: ${{ inputs.runs-on }}
     if: vars.SOURCEHUT_MIRROR_ENABLED == 'true'
+    # See mirror-gitlab: the `secrets` context is not valid in step `if:`;
+    # hoist to job-level `env` and gate steps on `env.SOURCEHUT_KEY`.
+    env:
+      SOURCEHUT_KEY: ${{ secrets.SOURCEHUT_SSH_KEY }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
-        if: ${{ secrets.SOURCEHUT_SSH_KEY != '' }}
+        if: ${{ env.SOURCEHUT_KEY != '' }}
         with:
           ssh-private-key: ${{ secrets.SOURCEHUT_SSH_KEY }}
       - name: Mirror to SourceHut
-        if: ${{ secrets.SOURCEHUT_SSH_KEY != '' }}
+        if: ${{ env.SOURCEHUT_KEY != '' }}
         run: |
           ssh-keyscan -t ed25519 git.sr.ht >> ~/.ssh/known_hosts
           git remote add sourcehut git@git.sr.ht:~hyperpolymath/${{ github.event.repository.name }} || true
           git push --force sourcehut main
       - name: Skipped (SOURCEHUT_SSH_KEY not configured)
-        if: ${{ secrets.SOURCEHUT_SSH_KEY == '' }}
+        if: ${{ env.SOURCEHUT_KEY == '' }}
         run: |
           echo "::notice::SOURCEHUT_MIRROR_ENABLED=true but secrets.SOURCEHUT_SSH_KEY is empty. Skipping SourceHut mirror. Configure the SOURCEHUT_SSH_KEY org/repo secret to enable."
 
@@ -150,22 +167,26 @@ jobs:
     timeout-minutes: 20
     runs-on: ${{ inputs.runs-on }}
     if: vars.DISROOT_MIRROR_ENABLED == 'true'
+    # See mirror-gitlab: the `secrets` context is not valid in step `if:`;
+    # hoist to job-level `env` and gate steps on `env.DISROOT_KEY`.
+    env:
+      DISROOT_KEY: ${{ secrets.DISROOT_SSH_KEY }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
-        if: ${{ secrets.DISROOT_SSH_KEY != '' }}
+        if: ${{ env.DISROOT_KEY != '' }}
         with:
           ssh-private-key: ${{ secrets.DISROOT_SSH_KEY }}
       - name: Mirror to Disroot
-        if: ${{ secrets.DISROOT_SSH_KEY != '' }}
+        if: ${{ env.DISROOT_KEY != '' }}
         run: |
           ssh-keyscan -t ed25519 git.disroot.org >> ~/.ssh/known_hosts
           git remote add disroot git@git.disroot.org:hyperpolymath/${{ github.event.repository.name }}.git || true
           git push --force disroot main
       - name: Skipped (DISROOT_SSH_KEY not configured)
-        if: ${{ secrets.DISROOT_SSH_KEY == '' }}
+        if: ${{ env.DISROOT_KEY == '' }}
         run: |
           echo "::notice::DISROOT_MIRROR_ENABLED=true but secrets.DISROOT_SSH_KEY is empty. Skipping Disroot mirror. Configure the DISROOT_SSH_KEY org/repo secret to enable."
 
@@ -173,22 +194,26 @@ jobs:
     timeout-minutes: 20
     runs-on: ${{ inputs.runs-on }}
     if: vars.GITEA_MIRROR_ENABLED == 'true'
+    # See mirror-gitlab: the `secrets` context is not valid in step `if:`;
+    # hoist to job-level `env` and gate steps on `env.GITEA_KEY`.
+    env:
+      GITEA_KEY: ${{ secrets.GITEA_SSH_KEY }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
-        if: ${{ secrets.GITEA_SSH_KEY != '' }}
+        if: ${{ env.GITEA_KEY != '' }}
         with:
           ssh-private-key: ${{ secrets.GITEA_SSH_KEY }}
       - name: Mirror to Gitea
-        if: ${{ secrets.GITEA_SSH_KEY != '' }}
+        if: ${{ env.GITEA_KEY != '' }}
         run: |
           ssh-keyscan -t ed25519 ${{ vars.GITEA_HOST }} >> ~/.ssh/known_hosts
           git remote add gitea git@${{ vars.GITEA_HOST }}:hyperpolymath/${{ github.event.repository.name }}.git || true
           git push --force gitea main
       - name: Skipped (GITEA_SSH_KEY not configured)
-        if: ${{ secrets.GITEA_SSH_KEY == '' }}
+        if: ${{ env.GITEA_KEY == '' }}
         run: |
           echo "::notice::GITEA_MIRROR_ENABLED=true but secrets.GITEA_SSH_KEY is empty. Skipping Gitea mirror. Configure the GITEA_SSH_KEY org/repo secret to enable."
 
