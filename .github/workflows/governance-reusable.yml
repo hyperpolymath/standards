@@ -200,7 +200,7 @@ jobs:
       #   3. Inline `# hypatia:ignore ...` pragma in the file's first
       #      8 lines — the same escape the Hypatia scanner itself
       #      honours.
-      - name: Check banned-language files (ReScript / Go / Python / Java / Kotlin / Swift / Dart / V-lang / ATS2 / Makefile)
+      - name: Check banned-language files (ReScript / Go / Python / Java / Kotlin / Groovy / Swift / Dart / V-lang / ATS2 / Makefile)
         run: |
           rule_module="cicd_rules"
           rule_type="banned_language_file"
@@ -307,9 +307,31 @@ jobs:
           # name at platform boundaries — Rust/Zig cannot provide JVM
           # bytecode for these. Each Android Java shim must be a minimal
           # delegating wrapper (typically <10 LoC) that JNIs into Rust/Zig
-          # immediately. Kotlin (*.kt, *.kts) remains banned outright.
-          JAVA_FILES=$(git ls-files '*.java' '*.kt' '*.kts' \
-            | grep -vE '(^|/)android/.*/src/.*\.java$' || true)
+          # immediately.
+          #
+          # Kotlin/JVM INTEROP carve-out 2026-06-24 (parallel to the TS
+          # `bindings/typescript/` / `bindings/deno/` / `clients/vscode/`
+          # interop carve-outs): Kotlin/Groovy is banned for MOBILE app code
+          # (→ Tauri/Dioxus), but is PERMITTED as consumer-facing JVM interop
+          # — directories where we author bindings that expose an estate
+          # library to JVM consumers, or an IDE-host plugin whose plugin API
+          # is Kotlin-native. Tauri/Dioxus cannot replace a consumer binding
+          # or an editor-host plugin. Three path classes are exempt:
+          #   * **/bindings/kotlin/**  — Kotlin bindings exposing a library to
+          #     JVM consumers (exemplars: proven-servers, proven).
+          #   * **/bindings/groovy/**  — Groovy bindings, same rationale
+          #     (exemplar: proven).
+          #   * **/clients/jetbrains/** — JetBrains IDE plugin; the IntelliJ
+          #     Platform plugin API is Kotlin-native (exemplar:
+          #     universal-language-server-plugin).
+          # Unblock condition: never (consumer binding / editor-host plugin).
+          # `.groovy` is included in the ls-files set ONLY so the carve-out is
+          # explicit and future Groovy bindings outside these dirs are caught.
+          JAVA_FILES=$(git ls-files '*.java' '*.kt' '*.kts' '*.groovy' \
+            | grep -vE '(^|/)android/.*/src/.*\.java$' \
+            | grep -vE '(^|/)bindings/kotlin/' \
+            | grep -vE '(^|/)bindings/groovy/' \
+            | grep -vE '(^|/)clients/jetbrains/' || true)
           SWIFT_FILES=$(git ls-files '*.swift' || true)
           DART_FILES=$(git ls-files '*.dart' 'pubspec.yaml' || true)
           # V-lang detected by manifest (v.mod / vpkg.json); the .v extension
@@ -322,7 +344,7 @@ jobs:
           enforce "Go files" "use Rust/WASM instead" "$GO_FILES"
           enforce "Python files" "Python is fully banned — use AffineScript/Rust/SPARK/Julia (SaltStack carveout removed 2026-01-03)" "$PY_FILES"
           enforce "Makefiles" "use Mustfile/justfile instead" "$MAKE_FILES"
-          enforce "Java/Kotlin files" "use Rust/Tauri/Dioxus instead" "$JAVA_FILES"
+          enforce "Java/Kotlin/Groovy files" "use Rust/Tauri/Dioxus instead (consumer JVM interop is exempt under bindings/kotlin, bindings/groovy, clients/jetbrains)" "$JAVA_FILES"
           enforce "Swift files" "use Tauri/Dioxus instead" "$SWIFT_FILES"
           enforce "Flutter/Dart files" "use Tauri/Dioxus instead (Google lock-in)" "$DART_FILES"
           enforce "V-lang manifests (v.mod / vpkg.json)" "V-lang is banned since 2026-04-10 — migrate to Zig" "$VMOD_FILES"
