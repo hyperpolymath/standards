@@ -167,8 +167,9 @@ Both are FOSS with independent governance (no Big Tech).
 ### Documentation Format
 
 - All docs must be `.adoc` (AsciiDoc) except GitHub-required files
-- GitHub-required `.md`: SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md
-- No duplicate formats (if `.adoc` exists, don't also have `.md`)
+- GitHub-required `.md` (must be Markdown): **README.md**, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md
+- **README must be `.md`, not `.adoc`.** README renders in GitHub community-health, the GitHub profile page (profile READMEs *only* render `README.md`), and external MCP directories (Glama) — all of which show AsciiDoc as raw markup. Keep `README.md`; do not keep a `README.adoc` alongside it. (This replaces the earlier `.adoc`-primary-with-Glama-carve-out rule for README.)
+- No duplicate formats for the `.adoc`-primary docs (if `ARCHITECTURE.adoc` etc. exists, don't also have `.md`)
 
 ### Security Requirements
 

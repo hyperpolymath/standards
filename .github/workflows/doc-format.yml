@@ -31,22 +31,22 @@ jobs:
         run: |
           DUPLICATES=0
 
-          # Check for docs that exist in both .md and .adoc (except GitHub-required)
-          for doc in README ARCHITECTURE ROADMAP PHILOSOPHY INSTALL CHANGELOG; do
+          # .adoc-primary docs: keep only .adoc. README is NOT here — README is a
+          # GitHub-required Markdown file (see the README rule below).
+          for doc in ARCHITECTURE ROADMAP PHILOSOPHY INSTALL; do
             if [ -f "${doc}.md" ] && [ -f "${doc}.adoc" ]; then
-              # Glama carve-out: the Glama MCP-server directory (glama.ai) requires a
-              # README.md to index a server and will NOT render README.adoc. When a
-              # glama.json is present, README.md is permitted alongside the canonical
-              # README.adoc. README.adoc remains the source of truth. This is a Glama
-              # limitation, not an owner-policy change. See contractiles/CANONICAL-TEMPLATES.adoc.
-              if [ "${doc}" = "README" ] && [ -f "glama.json" ]; then
-                echo "::notice::README.md kept alongside README.adoc (Glama carve-out: glama.json present; .adoc remains canonical)."
-                continue
-              fi
               echo "::error::Duplicate documentation: ${doc}.md and ${doc}.adoc both exist. Keep only .adoc"
               DUPLICATES=$((DUPLICATES + 1))
             fi
           done
+
+          # README MUST be Markdown: it renders in GitHub community-health, the GitHub
+          # profile, and external MCP directories (Glama) — all of which show AsciiDoc
+          # as raw markup. So README.md is canonical; README.adoc is a duplicate to remove.
+          if [ -f "README.md" ] && [ -f "README.adoc" ]; then
+            echo "::error::Duplicate README: keep README.md (required Markdown); remove README.adoc."
+            DUPLICATES=$((DUPLICATES + 1))
+          fi
 
           # CONTRIBUTING can have both but .md should just be a redirect
           if [ -f "CONTRIBUTING.md" ] && [ -f "CONTRIBUTING.adoc" ]; then
@@ -62,14 +62,16 @@ jobs:
 
           echo "✓ No duplicate documentation formats found"
 
-      - name: Check documentation uses .adoc
+      - name: Check documentation format
         run: |
-          # List of files that MUST be .md for GitHub community health
-          # SECURITY.md, CONTRIBUTING.md (can redirect), CODE_OF_CONDUCT.md, CHANGELOG.md
+          # Files that MUST be .md for GitHub community-health / profile / Glama:
+          # README.md, SECURITY.md, CONTRIBUTING.md (can redirect), CODE_OF_CONDUCT.md, CHANGELOG.md
 
-          # Check README is .adoc (not .md)
-          if [ -f "README.md" ] && [ ! -f "README.adoc" ]; then
-            echo "::warning::README.md found without README.adoc. Consider converting to AsciiDoc."
+          # README must be Markdown. A lone README.adoc renders as raw markup in
+          # community-health/profile/Glama — nudge to convert (warning during the
+          # estate-wide migration; the duplicate case above is the hard error).
+          if [ -f "README.adoc" ] && [ ! -f "README.md" ]; then
+            echo "::warning::README.adoc without README.md — README must be Markdown (renders raw as AsciiDoc in community-health/profile/Glama). Convert to README.md."
           fi
 
           # Check other docs are .adoc
