@@ -166,9 +166,12 @@ Both are FOSS with independent governance (no Big Tech).
 
 ### Documentation Format
 
-- All docs must be `.adoc` (AsciiDoc) except GitHub-required files
-- GitHub-required `.md` (must be Markdown): **README.md**, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md
-- **README must be `.md`, not `.adoc`.** README renders in GitHub community-health, the GitHub profile page (profile READMEs *only* render `README.md`), and external MCP directories (Glama) — all of which show AsciiDoc as raw markup. Keep `README.md`; do not keep a `README.adoc` alongside it. (This replaces the earlier `.adoc`-primary-with-Glama-carve-out rule for README.)
+- All docs must be `.adoc` (AsciiDoc), **including `README.adoc`** — this is the estate default. GitHub renders AsciiDoc natively on the repo page, so the README, its community-health view, and the file-list tab bar all display correctly.
+- GitHub-required `.md` (must be Markdown): SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md. (README is **not** in this list — see the README rule below.)
+- **README is `.adoc` by default, with exactly two `.md` exceptions:**
+  * `hyperpolymath/hyperpolymath` — the GitHub **profile** repo; profile READMEs render *only* `README.md`, never `.adoc`.
+  * `hyperpolymath/boj-server` — surfaced in external MCP directories (Glama), which show AsciiDoc as raw markup.
+  Everywhere else keep `README.adoc` and do **not** add a `README.md` alongside it. (This supersedes the short-lived 2026-06 "README must be `.md`" reversal, which was wrong: estate tooling — e.g. `rhodibot` — already treats `.adoc` as primary and deletes any stub `README.md`.)
 - No duplicate formats for the `.adoc`-primary docs (if `ARCHITECTURE.adoc` etc. exists, don't also have `.md`)
 
 ### Security Requirements
