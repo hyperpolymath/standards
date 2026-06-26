@@ -255,6 +255,7 @@ Distinct from TS/RS policy: JavaScript is *allowed* where AffineScript cannot re
 | `hyperpolymath-archive/**` | archived | Archived repos cannot accept PRs. | Never — archived. |
 | `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Vendored deps. | Never — vendored upstream. |
 | `**/out/**`, `**/lib/js/**`, `**/.deno/**` | compiled output | AS / RS / Deno-cache compile output. | Never — compiler output, not source. |
+| `**/vscode/**`, `**/extensions/vscode/**` | editor-host extension entry | VSCode extension entry points (often shipped as compiled `.js` even when authored as `.ts`). | When AS VSCode-extension API binding ships (top-50 roadmap). |
 
 ---
 
@@ -293,4 +294,3 @@ Consequences for agents:
 - Doctrine "always sign" remains the aspiration; the *mechanism* is this managed
   shim, configured once by the platform — never a manual per-repo/per-container
   key edit by an agent.
-| `**/vscode/**`, `**/extensions/vscode/**` | editor-host extension entry | VSCode extension entry points (often shipped as compiled `.js` even when authored as `.ts`). | When AS VSCode-extension API binding ships (top-50 roadmap). |
