@@ -49,6 +49,18 @@ jobs:
 
       - name: Run Hypatia scan
         id: scan
+        env:
+          # The scanner reads a single env var, GITHUB_TOKEN, to pull Dependabot,
+          # code-scanning and secret-scanning alerts (lib/rules/{dependabot,
+          # code_scanning,secret_scanning}_alerts.ex). Without it those three
+          # checks are skipped with "GITHUB_TOKEN not set" warnings.
+          #
+          # Prefer a fine-grained, read-only PAT (HYPATIA_SCAN_PAT, inherited as
+          # an org secret via the caller's `secrets: inherit`): the built-in
+          # Actions token CANNOT read Dependabot alerts (no `dependabot`
+          # permission exists for it). Fall back to the built-in token so
+          # code-scanning still works in repos where the PAT isn't present yet.
+          GITHUB_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT || secrets.GITHUB_TOKEN }}
         run: |
           echo "Scanning repository: ${{ github.repository }}"
           # --exit-zero: hypatia-cli exits 1 when findings exist; under the default
