@@ -255,4 +255,42 @@ Distinct from TS/RS policy: JavaScript is *allowed* where AffineScript cannot re
 | `hyperpolymath-archive/**` | archived | Archived repos cannot accept PRs. | Never — archived. |
 | `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Vendored deps. | Never — vendored upstream. |
 | `**/out/**`, `**/lib/js/**`, `**/.deno/**` | compiled output | AS / RS / Deno-cache compile output. | Never — compiler output, not source. |
+
+---
+
+## Commit Signing in Agent Environments — "Unverified" is not an action item
+
+**Do not chase "Unverified" / "no signature" on agent commits, and do not put
+signing keys into containers or repos to fix it.** In the managed Claude-Code
+execution environment, commit signing is **platform-mediated and already wired
+once, globally** — there is no per-repo or per-container key chore, and no
+estate-wide key rollout to do.
+
+How it actually works (ground-truthed 2026-06-26):
+
+- The container's global git config already sets, for *every* repo:
+  `commit.gpgsign = true`, `gpg.format = ssh`,
+  `gpg.ssh.program = /tmp/code-sign` (→ Anthropic's `environment-manager`
+  binary), and `user.signingkey = …/commit_signing_key.pub`.
+- On every commit, git invokes that platform shim
+  (`/tmp/code-sign -Y sign -n git -f <key> <buffer>`). The shim — **not**
+  OpenSSH — is the signer. `ssh-keygen` is not even installed.
+- When a session's managed signing identity is inactive, the shim is a no-op:
+  the commit succeeds but carries no signature (`git log --format='%G?'` → `N`),
+  and the `commit_signing_key.pub` is an empty placeholder.
+
+Consequences for agents:
+
+- **It is non-blocking.** Unverified commits push and merge normally. The
+  `stop-hook-git-check.sh` "Unverified" warning is *advisory*; `--amend
+  --reset-author` only churns SHAs and cannot add a signature (no key/identity
+  to sign with). Do not loop on it.
+- **The only real lever is platform-side**: enabling managed commit-signing for
+  the environment/account (Anthropic support / Claude-Code settings), which makes
+  the shim emit real signatures automatically and estate-wide. Alternatively,
+  merging via the GitHub UI re-signs the merge commit with GitHub's web-flow key,
+  so `main` shows Verified regardless.
+- Doctrine "always sign" remains the aspiration; the *mechanism* is this managed
+  shim, configured once by the platform — never a manual per-repo/per-container
+  key edit by an agent.
 | `**/vscode/**`, `**/extensions/vscode/**` | editor-host extension entry | VSCode extension entry points (often shipped as compiled `.js` even when authored as `.ts`). | When AS VSCode-extension API binding ships (top-50 roadmap). |
