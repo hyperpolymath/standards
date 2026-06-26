@@ -166,9 +166,12 @@ Both are FOSS with independent governance (no Big Tech).
 
 ### Documentation Format
 
-- All docs must be `.adoc` (AsciiDoc) except GitHub-required files
-- GitHub-required `.md` (must be Markdown): **README.md**, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md
-- **README must be `.md`, not `.adoc`.** README renders in GitHub community-health, the GitHub profile page (profile READMEs *only* render `README.md`), and external MCP directories (Glama) — all of which show AsciiDoc as raw markup. Keep `README.md`; do not keep a `README.adoc` alongside it. (This replaces the earlier `.adoc`-primary-with-Glama-carve-out rule for README.)
+- All docs must be `.adoc` (AsciiDoc), **including `README.adoc`** — this is the estate default. GitHub renders AsciiDoc natively on the repo page, so the README, its community-health view, and the file-list tab bar all display correctly.
+- GitHub-required `.md` (must be Markdown): SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md. (README is **not** in this list — see the README rule below.)
+- **README is `.adoc` by default, with exactly two `.md` exceptions:**
+  * `hyperpolymath/hyperpolymath` — the GitHub **profile** repo; profile READMEs render *only* `README.md`, never `.adoc`.
+  * `hyperpolymath/boj-server` — surfaced in external MCP directories (Glama), which show AsciiDoc as raw markup.
+  Everywhere else keep `README.adoc` and do **not** add a `README.md` alongside it. (This supersedes the short-lived 2026-06 "README must be `.md`" reversal, which was wrong: estate tooling — e.g. `rhodibot` — already treats `.adoc` as primary and deletes any stub `README.md`.)
 - No duplicate formats for the `.adoc`-primary docs (if `ARCHITECTURE.adoc` etc. exists, don't also have `.md`)
 
 ### Security Requirements
@@ -253,3 +256,41 @@ Distinct from TS/RS policy: JavaScript is *allowed* where AffineScript cannot re
 | `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Vendored deps. | Never — vendored upstream. |
 | `**/out/**`, `**/lib/js/**`, `**/.deno/**` | compiled output | AS / RS / Deno-cache compile output. | Never — compiler output, not source. |
 | `**/vscode/**`, `**/extensions/vscode/**` | editor-host extension entry | VSCode extension entry points (often shipped as compiled `.js` even when authored as `.ts`). | When AS VSCode-extension API binding ships (top-50 roadmap). |
+
+---
+
+## Commit Signing in Agent Environments — "Unverified" is not an action item
+
+**Do not chase "Unverified" / "no signature" on agent commits, and do not put
+signing keys into containers or repos to fix it.** In the managed Claude-Code
+execution environment, commit signing is **platform-mediated and already wired
+once, globally** — there is no per-repo or per-container key chore, and no
+estate-wide key rollout to do.
+
+How it actually works (ground-truthed 2026-06-26):
+
+- The container's global git config already sets, for *every* repo:
+  `commit.gpgsign = true`, `gpg.format = ssh`,
+  `gpg.ssh.program = /tmp/code-sign` (→ Anthropic's `environment-manager`
+  binary), and `user.signingkey = …/commit_signing_key.pub`.
+- On every commit, git invokes that platform shim
+  (`/tmp/code-sign -Y sign -n git -f <key> <buffer>`). The shim — **not**
+  OpenSSH — is the signer. `ssh-keygen` is not even installed.
+- When a session's managed signing identity is inactive, the shim is a no-op:
+  the commit succeeds but carries no signature (`git log --format='%G?'` → `N`),
+  and the `commit_signing_key.pub` is an empty placeholder.
+
+Consequences for agents:
+
+- **It is non-blocking.** Unverified commits push and merge normally. The
+  `stop-hook-git-check.sh` "Unverified" warning is *advisory*; `--amend
+  --reset-author` only churns SHAs and cannot add a signature (no key/identity
+  to sign with). Do not loop on it.
+- **The only real lever is platform-side**: enabling managed commit-signing for
+  the environment/account (Anthropic support / Claude-Code settings), which makes
+  the shim emit real signatures automatically and estate-wide. Alternatively,
+  merging via the GitHub UI re-signs the merge commit with GitHub's web-flow key,
+  so `main` shows Verified regardless.
+- Doctrine "always sign" remains the aspiration; the *mechanism* is this managed
+  shim, configured once by the platform — never a manual per-repo/per-container
+  key edit by an agent.
