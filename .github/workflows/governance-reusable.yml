@@ -63,6 +63,20 @@ jobs:
           elixir-version: '1.19.4'
           otp-version: '28.3'
 
+      - name: Resolve Hypatia HEAD commit
+        id: hypatia-rev
+        run: |
+          # Pin the cache to the *current* Hypatia main tip. Resolved before the
+          # cache step because cache restore happens before the clone, so the key
+          # cannot hash a not-yet-cloned tree — it must hash the remote ref.
+          sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
+          if [ -z "$sha" ]; then
+            echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Resolved hypatia HEAD: $sha"
+
       - name: Cache Hex/Mix and Scanner Build
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -70,7 +84,14 @@ jobs:
             ~/.mix
             ~/.hex
             ~/hypatia
-          key: hypatia-scanner-v2-${{ runner.os }}-build
+          # Source-pinned key: when Hypatia main advances, the SHA changes, the
+          # cache misses, and the clone + escript build below re-run instead of
+          # restoring a stale binary. The old keyless `...-build` key meant the
+          # first scanner ever cached was reused forever, so baseline validation
+          # ran against a stale ruleset. No restore-keys on purpose — a partial
+          # restore would repopulate ~/hypatia and the guards below would skip
+          # the rebuild, reintroducing the staleness.
+          key: hypatia-scanner-v3-${{ runner.os }}-${{ steps.hypatia-rev.outputs.sha }}
 
       - name: Clone Hypatia
         run: |
