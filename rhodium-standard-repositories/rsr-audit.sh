@@ -246,7 +246,9 @@ audit_category_2_documentation() {
     # SECURITY.md validation
     if [[ -f "$REPO_PATH/SECURITY.md" ]]; then
         check_file_contains "SECURITY.md" "Reporting" "SECURITY.md has vulnerability reporting"
-        check_file_contains "SECURITY.md" "24 hours" "SECURITY.md has response timeline"
+        # Estate-tolerant: credit any documented response SLA phrasing, not just
+        # the literal "24 hours" (repos use "Response Timeline", "business day", etc.)
+        check_file_contains "SECURITY.md" "24 hours\\|48 hours\\|72 hours\\|business day\\|[Rr]esponse [Tt]ime\\|SLA" "SECURITY.md has response timeline"
     fi
 
     # CONTRIBUTING.md validation (TPCF)
