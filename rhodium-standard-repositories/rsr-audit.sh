@@ -226,11 +226,14 @@ audit_category_2_documentation() {
     check_file_exists "MAINTAINERS.md" "MAINTAINERS.md present"
     check_file_exists "CHANGELOG.md" "CHANGELOG.md present"
 
-    # LICENSE.txt validation
-    if [[ -f "$REPO_PATH/LICENSE.txt" ]]; then
-        check_file_contains "LICENSE.txt" "SPDX-License-Identifier" "LICENSE.txt has SPDX identifier"
-        check_file_contains "LICENSE.txt" "MIT" "LICENSE.txt includes MIT license"
-        check_file_contains "LICENSE.txt" "Palimpsest" "LICENSE.txt includes Palimpsest license"
+    # LICENSE validation — estate policy: sole-owner repos are MPL-2.0
+    # (accept `LICENSE` or `LICENSE.txt`).
+    local _license=""
+    [[ -f "$REPO_PATH/LICENSE.txt" ]] && _license="LICENSE.txt"
+    [[ -z "$_license" && -f "$REPO_PATH/LICENSE" ]] && _license="LICENSE"
+    if [[ -n "$_license" ]]; then
+        check_file_contains "$_license" "SPDX-License-Identifier" "LICENSE has SPDX identifier"
+        check_file_contains "$_license" "Mozilla Public License" "LICENSE is MPL-2.0 (estate sole-owner policy)"
     fi
 
     # README validation
@@ -458,14 +461,13 @@ audit_category_7_licensing() {
     # License clarity
     check_file_exists "LICENSE.txt" "LICENSE.txt present (plain text, not LICENSE.md)"
 
-    if [[ -f "$REPO_PATH/LICENSE.txt" ]]; then
-        check_file_contains "LICENSE.txt" "MIT" "MIT license included"
-        check_file_contains "LICENSE.txt" "Palimpsest" "Palimpsest license included (ethical AI)"
-    fi
-
-    # SPDX identifier in LICENSE.txt
-    if [[ -f "$REPO_PATH/LICENSE.txt" ]]; then
-        check_file_contains "LICENSE.txt" "SPDX-License-Identifier: MIT AND Palimpsest" "Correct SPDX identifier in LICENSE.txt"
+    # estate policy: sole-owner repos are MPL-2.0 (accept LICENSE or LICENSE.txt)
+    local _license=""
+    [[ -f "$REPO_PATH/LICENSE.txt" ]] && _license="LICENSE.txt"
+    [[ -z "$_license" && -f "$REPO_PATH/LICENSE" ]] && _license="LICENSE"
+    if [[ -n "$_license" ]]; then
+        check_file_contains "$_license" "Mozilla Public License" "LICENSE is MPL-2.0"
+        check_file_contains "$_license" "SPDX-License-Identifier: MPL-2.0" "Correct SPDX identifier in LICENSE (MPL-2.0)"
     fi
 
     # FUNDING.yml for funding transparency
