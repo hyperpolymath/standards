@@ -193,6 +193,11 @@ docs:
 demo:
     @./scripts/build-demo-ddraig.sh
 
+# Build the real a2ml.net site (site/) with ddraig-ssg and deploy it to
+# Cloudflare Pages. Requires CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID.
+site-deploy:
+    @./scripts/deploy-site.sh
+
 # Run vector checks (prototype runner)
 vectors:
     @echo "Running vector checks..."
