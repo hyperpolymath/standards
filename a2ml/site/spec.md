@@ -1,8 +1,10 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+<!-- SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 ---
 title: A2ML specification
 site: A2ML
-date: 2026-06-22
+description: The normative A2ML v1.1.0 specification — surface grammar, typed core, profiles, and conformance test vectors.
+date: 2026-06-29
 ---
 
 # Specification

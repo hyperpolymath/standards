@@ -1,8 +1,10 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+<!-- SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 ---
 title: Get started with A2ML
 site: A2ML
-date: 2026-06-22
+description: Write, validate and render A2ML in three steps — from a plain-text document to a portable, typed core.
+date: 2026-06-29
 ---
 
 # Get started

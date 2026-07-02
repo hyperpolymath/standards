@@ -1,8 +1,10 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+<!-- SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 ---
 title: K9-SVC
 site: K9-SVC
-date: 2026-06-22
+description: K9-SVC is a Nickel-based format for self-validating configuration and contractiles, with a three-level trust model from inert data to signed execution.
+date: 2026-06-29
 ---
 
 # K9-SVC — Self-Validating Components
@@ -64,6 +66,10 @@ K9-SVC is safe by construction: a component declares how much trust it requires,
   data = { name = "world", repeat = 3 },
 }
 ```
+
+## Downloads & roadmap
+
+Grab a [starter template](/downloads.html) for whichever trust level fits, or see the [roadmap](/roadmap.html) for what's next — including an interactive teaching area and [k9iser](https://github.com/hyperpolymath/k9-ecosystem/tree/main/members/tooling/k9iser).
 
 ## Part of the standards estate
 

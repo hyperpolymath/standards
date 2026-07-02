@@ -1,8 +1,10 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+<!-- SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 ---
 title: A2ML
 site: A2ML
-date: 2026-06-22
+description: A2ML is a lightweight, Djot-like markup that compiles into a typed, attested core, with progressive strictness from lax to fully attested.
+date: 2026-06-29
 ---
 
 # A2ML — Attested Markup Language
@@ -71,6 +73,10 @@ A2ML is a typed, attested markup format. It verifies structure and references.
 [1] Attested Markup Language Spec (draft)
 @end
 ```
+
+## Downloads & roadmap
+
+Grab a [starter template](/downloads.html) in whichever strictness mode fits, or see the [roadmap](/roadmap.html) for what's next — including an interactive teaching area and [a2mliser](https://github.com/hyperpolymath/a2mliser).
 
 ## Part of the standards estate
 

@@ -1,8 +1,10 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+<!-- SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 ---
 title: K9-SVC specification
 site: K9-SVC
-date: 2026-06-22
+description: The normative K9-SVC v1.0.0-alpha specification — the three-level trust model, media type, and conformance fixtures.
+date: 2026-06-29
 ---
 
 # Specification

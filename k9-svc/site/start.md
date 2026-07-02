@@ -1,8 +1,10 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+<!-- SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> -->
 ---
 title: Get started with K9-SVC
 site: K9-SVC
-date: 2026-06-22
+description: Write, contract and sign a K9-SVC component in three steps, across all three trust levels.
+date: 2026-06-29
 ---
 
 # Get started
