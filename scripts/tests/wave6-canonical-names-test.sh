@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
+set -uo pipefail
+#
+# Wave-6 regression: the canonical-names reintroduction guard must block a NEW
+# deprecated token while leaving grandfathered existing occurrences alone.
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CHK="$ROOT/scripts/check-canonical-names.sh"
+
+pass=0 fail=0
+ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
+bad() { echo "  ❌ $1"; fail=$((fail + 1)); }
+
+cd "$ROOT"
+
+echo "== guard blocks a newly-added deprecated token =="
+f="wave6_guard_probe.txt"
+printf 'this file uses the 6a2 layout\n' > "$f"
+git add "$f" 2>/dev/null
+if bash "$CHK" HEAD >/dev/null 2>&1; then bad "new '6a2' token not blocked"; else ok "new '6a2' token blocked"; fi
+# agent_instructions too
+printf 'agent_instructions live here\n' > "$f"
+git add "$f" 2>/dev/null
+if bash "$CHK" HEAD >/dev/null 2>&1; then bad "new 'agent_instructions' not blocked"; else ok "new 'agent_instructions' blocked"; fi
+git reset -q "$f" 2>/dev/null; rm -f "$f"
+
+echo "== guard passes with no offending additions =="
+printf 'a perfectly canonical descriptiles + bot_directives line\n' > "$f"
+git add "$f" 2>/dev/null
+bash "$CHK" HEAD >/dev/null 2>&1 && ok "canonical names pass" || bad "canonical names wrongly blocked"
+git reset -q "$f" 2>/dev/null; rm -f "$f"
+
+echo "== the guard excludes CANONICAL-NAMES.adoc itself =="
+grep -q 'CANONICAL-NAMES.adoc' "$CHK" && ok "mandate doc is excluded from the guard" || bad "mandate doc not excluded"
+
+echo
+echo "Wave-6 canonical-names regression: $pass passed, $fail failed"
+[ "$fail" -eq 0 ]
