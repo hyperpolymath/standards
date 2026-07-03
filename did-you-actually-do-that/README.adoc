@@ -1,0 +1,99 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Did-You-Actually-Do-That (DYADT) — Post-Action Claim Verification
+:toc: preamble
+:icons: font
+
+[.lead]
+DYADT is the estate standard for *checking, mechanically, that an agent's
+claimed outcomes actually happened*. It is the missing **Tier 4** of the
+agent-accountability pipeline: the estate already gates what an agent may do
+*before* it acts; DYADT gates what an agent *says it did* after.
+
+== The problem it closes
+
+An LLM agent will report "I fixed the bug", "tests pass", "the PR is merged",
+"I closed the issue" — and be wrong, or lying, or accidentally green. Every
+prior soundness hole in this estate's own tooling (vacuous validators, `|| true`
+masks, stub steps that print success) is a special case of one disease: *a claim
+was trusted instead of verified*. The doctrine already names the cure —
+_ground-truth by running the tool, always fail loudly, report faithfully_ — but
+until now there was **no mechanical stage that takes an agent's asserted outcome
+and confirms it against reality**.
+
+DYADT is that stage. It is deliberately dumb and adversarial: it does not trust
+the agent's narration, it re-derives the outcome from primary evidence (the git
+tree, a real CI run, the actual issue state) and returns one of three verdicts —
+`confirmed`, `refuted`, or `unverifiable` — where *unverifiable is loud, never
+green*.
+
+== Where it sits: the four-tier accountability pipeline
+
+[cols="1,3,2", options="header"]
+|===
+| Tier | What it governs | Home
+
+| 1. Admission
+| An agent MUST read the manifest/context before acting.
+| `0-ai-gatekeeper-protocol/`
+
+| 2. Pre-action gating
+| Entropy budgets, intent classification, confirmation for risky ops — *before* an op runs.
+| `agentic-a2ml/` (`AGENTIC.a2ml`)
+
+| 3. In-session invariant gates
+| Contractile MUST/TRUST/BUST/DUST/ADJUST/INTEND — block at session-close / pre-push / pre-merge.
+| `contractiles/`
+
+| **4. Post-action verification (this spec)**
+| **Take the agent's claimed outcomes and mechanically confirm each against primary evidence; record the verdicts in an append-only consequence ledger.**
+| **`did-you-actually-do-that/`**
+|===
+
+Tiers 1–3 answer "should this happen / may this happen". Tier 4 answers the
+question none of them do: **"it says it happened — did it?"**
+
+== The spec set
+
+[cols="1,3", options="header"]
+|===
+| Document | What it defines
+
+| link:spec/CLAIM-FORMAT.adoc[`spec/CLAIM-FORMAT.adoc`]
+| The typed claim: `claim_class`, asserted evidence, and the verifier binding. Example: link:spec/CLAIMS.a2ml[`spec/CLAIMS.a2ml`].
+
+| link:spec/VERIFICATION-PROTOCOL.adoc[`spec/VERIFICATION-PROTOCOL.adoc`]
+| The mechanical verifier taxonomy and the `confirmed` / `refuted` / `unverifiable` verdict rules.
+
+| link:spec/CONSEQUENCE-LEDGER.adoc[`spec/CONSEQUENCE-LEDGER.adoc`]
+| The append-only, dual-signed record of verdicts and the per-actor confirmation rate that Tier 3 MAY gate on.
+
+| link:spec/conformance/[`spec/conformance/`]
+| Executable vectors (claim + fixture + expected verdict) a production verifier is TDD'd against.
+
+| link:docs/NAMING-RESOLUTION.adoc[`docs/NAMING-RESOLUTION.adoc`]
+| Resolves the "PLASMA" naming collision (claim-grounder vs. licence tooling).
+|===
+
+== Reference implementation vs. this spec
+
+This repository is the **declaration layer**. It ships:
+
+* the normative spec set above,
+* a *reference* verifier, `scripts/verify-claims.sh` (in the standards repo
+  root), that implements enough of the protocol to check a `CLAIMS.a2ml` file in
+  CI, and
+* a dogfood `CLAIMS.a2ml` that this very change verifies about itself.
+
+The *production* actuator — continuous, in-session, wired into
+hypatia/gitbot-fleet with real consequence enforcement — is built in the
+`hyperpolymath/did-you-actually-do-that` repository against the conformance
+vectors here. That work is chartered as a campaign issue; it MUST NOT diverge
+from this contract.
+
+== Dogfaced from birth
+
+The commit that introduces DYADT ships a filled `CLAIMS.a2ml` describing what it
+claims to have done, and CI runs `verify-claims.sh` over it. The spec's first
+conformance run is on itself — if a claim here is false, the check is `refuted`
+and the build fails loudly. That is the whole point.
