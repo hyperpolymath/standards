@@ -107,6 +107,76 @@ verifier = "command-transcript"
 EOF
 ( cd "$ROOT" && bash "$V" "$TMP/g.a2ml" >/dev/null 2>&1 ); [ $? -eq 0 ] && ok "all-confirmed file exits 0" || bad "all-confirmed file did not exit 0"
 
+echo "== hardening (adversarial-review fixes) =="
+mk() { printf '%s\n' "$2" > "$TMP/$1"; }
+reason_of() { # file id
+  cd "$ROOT" && DYADT_ALLOW_UNVERIFIABLE=1 bash "$V" "$1" 2>/dev/null \
+    | grep -E "$2|<block" | grep -oE '(confirmed|REFUTED|unverifiable) *\[[^]]*\] *[a-z-]+' | head -1
+}
+# missing required field -> unverifiable, still counted
+mk mf.a2ml '[claims]
+[[claim]]
+id = "C1"
+claim_class = "command-ran"
+expect = "exit==0"
+verifier = "command-transcript"'
+[[ "$(reason_of "$TMP/mf.a2ml" C1)" == unverifiable*missing-field ]] && ok "missing field -> unverifiable" || bad "missing field not caught"
+# claim with no id is NOT silently dropped (appears as a block, unverifiable)
+mk noid.a2ml '[claims]
+[[claim]]
+claim_class = "command-ran"
+target = "true"
+expect = "exit==0"
+verifier = "command-transcript"'
+( cd "$ROOT" && DYADT_ALLOW_UNVERIFIABLE=1 bash "$V" "$TMP/noid.a2ml" 2>/dev/null | grep -q 'no-id' ) && ok "missing id not silently dropped" || bad "missing id was dropped"
+# empty pattern -> unverifiable (not an always-match confirm)
+mk ep.a2ml '[claims]
+[[claim]]
+id = "C1"
+claim_class = "file-changed"
+target = "README.adoc"
+expect = "contains:"
+verifier = "git-diff"'
+[[ "$(reason_of "$TMP/ep.a2ml" C1)" == unverifiable*empty-pattern ]] && ok "empty contains pattern -> unverifiable" || bad "empty pattern not caught"
+# path traversal -> unverifiable
+mk up.a2ml '[claims]
+[[claim]]
+id = "C1"
+claim_class = "file-changed"
+target = "../etc/passwd"
+expect = "created"
+verifier = "git-diff"'
+[[ "$(reason_of "$TMP/up.a2ml" C1)" == unverifiable*unsafe-path ]] && ok "path traversal -> unverifiable" || bad "unsafe path not caught"
+# unresolvable base -> unverifiable (not confident-wrong created)
+mk nb.a2ml '[claims]
+[[claim]]
+id = "C1"
+claim_class = "file-changed"
+target = "README.adoc"
+expect = "created"
+verifier = "git-diff"'
+r="$(cd "$ROOT" && DYADT_BASE=definitely-not-a-ref DYADT_ALLOW_UNVERIFIABLE=1 bash "$V" "$TMP/nb.a2ml" 2>/dev/null | grep -oE 'unverifiable *\[[^]]*\] *[a-z-]+' | head -1)"
+[[ "$r" == unverifiable*no-base-ref ]] && ok "unresolvable base -> unverifiable" || bad "unresolvable base not caught (got: $r)"
+# stderr marker must NOT confirm a stdout-contains claim
+mk se.a2ml '[claims]
+[[claim]]
+id = "C1"
+claim_class = "command-ran"
+target = "echo marker >&2; true"
+expect = "stdout-contains:marker"
+verifier = "command-transcript"'
+[[ "$(reason_of "$TMP/se.a2ml" C1)" == REFUTED* ]] && ok "stderr does not satisfy stdout-contains" || bad "stderr false-confirmed stdout claim"
+# licence claim phrased only in the statement is still manual-only
+mk lic.a2ml '[claims]
+[[claim]]
+id = "C1"
+claim_class = "command-ran"
+statement = "added the SPDX licence header"
+target = "true"
+expect = "exit==0"
+verifier = "command-transcript"'
+[[ "$(reason_of "$TMP/lic.a2ml" C1)" == unverifiable*manual-only ]] && ok "licence-in-statement -> manual-only" || bad "licence-in-statement auto-confirmed"
+
 echo "== conformance suite =="
 bash "$ROOT/did-you-actually-do-that/spec/conformance/run-conformance.sh" >/dev/null 2>&1 && ok "conformance vectors pass" || bad "conformance vectors failed"
 
