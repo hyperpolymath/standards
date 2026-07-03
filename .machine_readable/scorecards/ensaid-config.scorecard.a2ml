@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# ensaid-config.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "ensaid-config"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "Every ENSAID_CONFIG.a2ml file in the ecosystem MUST pass basic A2ML manifest validation (SPDX header, required identity field, version field) as enforced by the shared A2ML validator."
+system = "a2ml/actions/validate/validate-a2ml.sh (scans all *.a2ml files for SPDX-License-Identifier, an identity field (agent-id/name/project), and a version field)"
+status = "fail"
+effects = "Running validate-a2ml.sh over the monorepo currently emits a 'Missing required identity field (agent-id, name, or project)' error for all 12 deployed .machine_readable/ENSAID_CONFIG.a2ml instances (a2ml/{editors/vscode,pandoc,actions/validate,bindings/rust,bindings/deno,bindings/haskell} and the equivalent k9-svc/ set), because these files declare `[ensaid] tool = \"panll\"` but no top-level `name=`, `project=`, or `agent-id=` field. In strict CI mode this validator would fail the build for every consumer repo that adopts the ENSAID_CONFIG.a2ml convention as documented."
+
+[[must]]
+id = "M2"
+text = "Deployed ENSAID_CONFIG.a2ml instances MUST use only the workspace.mode, workspace.protection, and workspace.execution enum values defined in spec/ENSAID-CONFIG-SPEC.adoc (mode: rhodium|everything|code|bespoke; protection: open|readonly|sandboxed|language-locked|transpilation-guarded|production-gated; execution: live|dry-run|simulation|emulation)."
+system = "none — no schema/enum validator exists for ENSAID_CONFIG.a2ml specifically; the generic validate-a2ml.sh does not check field values, only presence of SPDX/identity/version"
+status = "fail"
+effects = "All 12 real deployed ENSAID_CONFIG.a2ml files (in a2ml/ and k9-svc/ subprojects) instead use mode = rhodium|gold|silver|bronze, protection = open|guarded|locked, and execution = live|dry-run|approval-required — none of which appear in the spec's enum tables. Any eNSAID-compatible tool (e.g. PanLL) implementing strict version/enum negotiation per the spec's 'Version Negotiation' section would reject or misinterpret every currently-deployed config file, indicating the spec and its own reference deployments have already diverged."
+
+[[must]]
+id = "M3"
+text = "eNSAID-compatible tools MUST discover ENSAID_CONFIG.a2ml only within the repository's .machine_readable/ directory or ancestor .machine_readable/ directories up to (but not beyond) the git root, per the Discovery Algorithm section."
+system = "none — no reference discovery implementation, PanLL client, or test harness exists in this repository or elsewhere in the monorepo to exercise this algorithm"
+status = "fail"
+effects = "Consumers relying on this spec (PanLL and any future eNSAID tool) have no verified implementation to depend on; the discovery/precedence rules exist only as prose, so any tool author must implement and self-verify compliance with no shared conformance test."
+
+[[must]]
+id = "M4"
+text = "eNSAID tools MUST ignore unrecognised ENSAID_CONFIG.a2ml sections/fields (forward compatibility) and MUST reject files whose major version is unsupported (Versioning / Version Negotiation sections)."
+system = "none — no parser, conformance test suite, or fixture corpus (valid/invalid ENSAID_CONFIG.a2ml samples) exists in ensaid-config/ or elsewhere to exercise this behaviour"
+status = "fail"
+effects = "Without an executable conformance suite, forward/backward compatibility across future spec minor/major bumps is unverifiable; any consumer tool's version-negotiation logic is untested against the spec's own examples."
+
+[[must]]
+id = "M5"
+text = "The specification and its overview README MUST agree on the canonical on-disk location for the standard's files (single source of truth for where configuration lives)."
+system = "none — no lint/consistency check between README.adoc and spec/README.adoc exists"
+status = "fail"
+effects = "README.adoc (root) states the config file is `.machine_readable/ENSAID_CONFIG.a2ml` (consistent with the actual deployed files found in a2ml/ and k9-svc/), while spec/README.adoc describes 'the `.ensaid-config/` directory standard' and instructs repository authors to 'Create `.ensaid-config/` at your repository root' — a different, undefined directory layout that appears nowhere else in the spec body or in any deployed instance. A tool implementer following spec/README.adoc literally would build discovery logic for a directory structure that does not match the actual specification or any real usage, producing incompatible implementations."
+
+[[should]]
+id = "S1"
+text = "Tools SHOULD warn users (rather than silently connect) when an endpoint is a remote, non-localhost address, and SHOULD warn when panel `env` variable names match secret patterns (*_TOKEN, *_SECRET, *_KEY, *_PASSWORD), per the Security Considerations section."
+system = "none — no reference or example implementation of endpoint/env validation exists in this repository"
+status = "fail"
+effects = "Security guidance is prose-only; nothing in the monorepo demonstrates or enforces it, so a non-compliant eNSAID tool implementation would have no automated way to detect it has violated this guidance, and downstream repos adopting ENSAID_CONFIG.a2ml's [panels].env feature have no protection against accidental secret leakage across panels."
+
+[[should]]
+id = "S2"
+text = "The [panels.disabled] section SHOULD be respected by tools, hiding listed panel IDs unless the user explicitly overrides via the tool UI."
+system = "none — no PanLL or other eNSAID tool implementation ships in this monorepo to verify enforcement"
+status = "fail"
+effects = "Repositories that set panels.disabled (e.g. the example configs shown in README.adoc and the deployed a2ml/k9-svc instances) have no way to confirm any consuming tool actually honours the setting; behaviour is unverified end-to-end."
+
+[[should]]
+id = "S3"
+text = "Workflow actions SHOULD be logged for auditability and SHOULD respect the active workspace.protection level before firing (Security Considerations, [workflows] section)."
+system = "none"
+status = "fail"
+effects = "No audit-log mechanism or protection-level enforcement exists anywhere in the repo to test against; any implementer must build this from scratch with only the prose spec as a guide, risking divergent audit-trail formats across eNSAID tools."
+
+[[could]]
+id = "C1"
+text = "The spec COULD ship a machine-checkable JSON Schema (or equivalent) for ENSAID_CONFIG.a2ml so tools and CI can validate section/field/enum correctness automatically."
+system = "none — no .schema.json or equivalent exists under ensaid-config/ (contrast with, e.g., k9-svc/receipt/receipt.schema.json and .machine_readable/scorecards/scorecard.schema.json which do exist for other artefacts)"
+status = "fail"
+effects = "Without a schema, the enum-mismatch gap found in M2 (deployed files using gold/silver/bronze instead of the documented rhodium/everything/code/bespoke) went undetected by any tooling and will recur for every future adopting repository."
+
+[[could]]
+id = "C2"
+text = "The repository COULD provide a canonical, spec-conformant example ENSAID_CONFIG.a2ml template file (not just inline adoc code blocks) that other repos copy, to keep deployed instances synchronized with the spec's field/enum vocabulary."
+system = "none — the deployed instances in a2ml/*/.machine_readable/ENSAID_CONFIG.a2ml and k9-svc/*/.machine_readable/ENSAID_CONFIG.a2ml appear to derive from a shared template, but that template (and its enum vocabulary) is not sourced from, or kept in sync with, spec/ENSAID-CONFIG-SPEC.adoc"
+status = "fail"
+effects = "The identical drift across all 12 deployed files (same non-spec enum values, same missing identity field) strongly suggests a single stale template is being copy-pasted; without a canonical, spec-linked template, every future adopting repo will inherit the same non-conformance."
+
+[[could]]
+id = "C3"
+text = "An independent eNSAID-compatible tool (e.g. PanLL) COULD achieve full certified conformance to this specification, validated by an external conformance test suite."
+system = "aspirational — depends on PanLL (an external project referenced but not vendored in this monorepo) reaching a mature, testable state"
+status = "aspirational"
+effects = "None currently, since no consuming tool implementation exists in-repo to certify; this is a forward-looking target for the eNSAID ecosystem rather than a near-term gap."

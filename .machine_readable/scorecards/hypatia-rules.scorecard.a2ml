@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# hypatia-rules.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "hypatia-rules"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "Each of the seven documented rules (HYP-S001..HYP-S007) MUST exist as an `.a2ml` file in hypatia-rules/ with an `@rule` block declaring id, name, severity, category and source, matching the table in README.adoc."
+system = "none (no automated parser runs against these files in this repo's CI; a2ml/.github/workflows/a2ml-validation.yml exists but lives under a2ml/.github/workflows/ — a nested path GitHub Actions does not register — so it never fires for pushes/PRs to the standards repo root)"
+status = "pass"
+evidence = "All seven files present and manually verified to contain matching @rule blocks: crg-demotion-detector.a2ml (HYP-S001), k9-orphan-detector.a2ml (HYP-S002), proof-freshness.a2ml (HYP-S003), rsr-self-compliance.a2ml (HYP-S004), crg-overclaim-detector.a2ml (HYP-S005), registry-staleness.a2ml (HYP-S006), profile-drift-detector.a2ml (HYP-S007) — read directly from /home/user/standards/hypatia-rules/*.a2ml on 2026-07-03."
+effects = "If a file goes missing or the id/name drifts from README.adoc, any downstream Hypatia deployment loading rules by path (per the [[rules]] config snippet in README.adoc) silently fails to activate that rule, and the standards estate loses coverage for that compliance signal (e.g. CRG grade-honesty, registry drift) without any repo-side alarm."
+
+[[must]]
+id = "M2"
+text = "HYP-S006 (registry-staleness) and its companion recipe/router logic MUST stay consistent with the actual generator and gate it claims to mirror: scripts/build-registry.sh and .github/workflows/registry-verify.yml."
+system = "scripts/build-registry.sh --check (invoked via `just registry-check`, and as the HARD GATE dependency of `just validate` in the repo Justfile) — the in-repo half of the drift check that HYP-S006 describes as its 'estate-side mirror'"
+status = "pass"
+evidence = "scripts/build-registry.sh and .github/workflows/registry-verify.yml both exist at repo root; Justfile lines 16-25 and 76-81 wire `registry` / `registry-check` / `validate` to this exact script and flag, confirming the in-repo half of the mirrored check that registry-staleness.a2ml's header text describes actually exists (verified via `ls`/`grep` on 2026-07-03). This passes only for the claim that the referenced local-repo mechanism exists, not for whether HYP-S006 itself has ever executed against VeriSimDB."
+effects = "If build-registry.sh or registry-verify.yml were removed or diverged, HYP-S006's description of itself as an 'estate-side mirror' of an in-repo gate would become false, and REGISTRY.a2ml/TOPOLOGY.md staleness would go undetected both locally and estate-wide."
+
+[[must]]
+id = "M3"
+text = "HYP-S004 (rsr-self-compliance) MUST accurately enumerate RSR-mandated files/workflows that the standards repo itself actually possesses, since it exists specifically to dogfood the repo against its own constitution."
+system = "none — no script in this repo executes rsr-self-compliance.a2ml's @required_files / @required_workflows / @forbidden_files lists against the tree; it is only ever run by an external Hypatia instance against VeriSimDB, which is outside this repo"
+status = "fail"
+effects = "A stale or incorrect required-file/workflow list means RSR-self-compliance findings from Hypatia could be wrong (false pass or false fail) with no local safety net; downstream repos citing 'standards passes its own RSR self-compliance check' would be relying on an unverified claim. Concretely, README.adoc/Justfile show real files for README.adoc, SECURITY.md, CONTRIBUTING.md, LICENSE, CODE_OF_CONDUCT.md, .editorconfig, Justfile, guix.scm, flake.nix, and .machine_readable/ all exist, and hypatia-scan.yml/mirror.yml/scorecard-enforcer.yml/rsr-antipattern equivalents exist under different exact names (e.g. no literal 'rsr-antipattern.yml' file was found in .github/workflows/), so the rule's required_workflows list is not fully reconciled with the actual workflow filenames on disk."
+
+[[must]]
+id = "M4"
+text = "Rules that touch licence/SPDX-adjacent drift (HYP-S006) MUST cap automation to `:review` and MUST NOT auto-apply a fix, per the estate's Manual-Only licence guardrail."
+system = "manual review of the @router.strategy_caps block in registry-staleness.a2ml (no executable enforcement exists in this repo; the cap is declarative text interpreted by an external Hypatia router)"
+status = "manual-only"
+effects = "If an external Hypatia deployment ignored or mis-implemented this cap, a licence/SPDX-adjacent regeneration could be auto-applied without owner review, contradicting the estate's licence-guardrail policy documented in .claude/CLAUDE.md; there is no automated check in this repo that would catch such a violation."
+
+[[should]]
+id = "S1"
+text = "HYP-S007 (profile-drift-detector) SHOULD compute conformance identically to src/A2ML/Profiles.idr's `conformsB` so the dogfooding check and the formal profile model never diverge."
+system = "none — no test in this repo cross-checks profile-drift-detector.a2ml's step-by-step logic against a2ml/src/A2ML/Profiles.idr's conformsB definition; the .a2ml file's steps comment merely asserts the correspondence in prose"
+status = "fail"
+effects = "If Profiles.idr's conformsB is refactored (e.g. a new axis added) without a matching update to profile-drift-detector.a2ml, HYP-S007 would silently diverge from the formal spec it claims to mirror, producing false compliance signals for 6a2 profile conformance across the estate."
+
+[[should]]
+id = "S2"
+text = "HYP-S003 (proof-freshness) SHOULD only trigger its auto-applicable `echidna-reverify` recipe (gh workflow run echidna-verify.yml) against a workflow that genuinely exists and accepts a `target` field."
+system = ".github/workflows/echidna-verify.yml (existence check only — no test invokes the recipe end-to-end from this repo)"
+status = "pass"
+evidence = ".github/workflows/echidna-verify.yml exists at repo root (confirmed via `ls .github/workflows/`), so the recipe references a real workflow file; whether it accepts a `target` input field matching the recipe's `--field target={file_path}` was not independently verified against the workflow's `on.workflow_dispatch.inputs` schema."
+effects = "If echidna-verify.yml's workflow_dispatch inputs do not include a `target` field, HYP-S003's auto-fix would fail at dispatch time, leaving stale-proof findings unresolved despite being marked auto_fixable: true."
+
+[[should]]
+id = "S3"
+text = "The seven rules SHOULD be reachable/loadable by a documented activation path so an operator can actually turn them on in a Hypatia instance."
+system = "none — README.adoc documents a config TOML snippet (`[[rules]] id=... path=... enabled=true`) as illustrative example, not something this repo tests or CI-validates"
+status = "manual-only"
+effects = "Without any automated smoke-test of the activation path, a path typo or schema-version mismatch in the [[rules]] config would only surface at operator configuration time in the external Hypatia deployment, not in this repo's CI."
+
+[[could]]
+id = "C1"
+text = "hypatia-rules COULD have its own scorecards/*.scorecard.a2ml entry feeding COMPLIANCE-DASHBOARD.md, matching the estate's stated goal of moving every registered spec from '⚠️ no scorecard' to a scored entry."
+system = "scripts/build-scorecards.sh + `just scorecards-check` (the mechanism exists for other specs, generating COMPLIANCE-DASHBOARD.md rows from scorecards/*.scorecard.a2ml)"
+status = "fail"
+effects = "COMPLIANCE-DASHBOARD.md explicitly lists hypatia-rules among the 27 (of 28) specs still needing a scorecard (line 58); its dashboard row reads '⚠️ no scorecard' with all dash placeholders (line 49), so estate rollup metrics (2/28 specs with scorecards after this one is added) undercount actual compliance posture."
+
+[[could]]
+id = "C2"
+text = "HYP-S002 (k9-orphan-detector) COULD be exercised against this repo's own coordination.k9/Justfile pair as a self-test, verifying it correctly finds (or doesn't find) orphaned K9 components in the standards repo's own tree."
+system = "none — no script in this repo runs k9-orphan-detector.a2ml's scan logic locally; it is written for execution inside an external Hypatia scanner"
+status = "fail"
+effects = "Without a local self-test, a logic bug in the cross-reference step (matching coordination.k9 invariants against Justfile recipe text) would go undetected until it produced wrong findings against live estate repos."
+
+[[could]]
+id = "C3"
+text = "An external, independently-audited Grade-A-equivalent validation of all seven rules running cleanly against a full VeriSimDB octad store and the entire hyperpolymath estate COULD be reached as a long-term reach target."
+system = "none (aspirational — depends on infrastructure, VeriSimDB port 8097 instance and the wider estate fleet, entirely outside this repo)"
+status = "aspirational"
+effects = "Until reached, all seven rules' real-world correctness (as opposed to their static plausibility on read-through) remains unverified against production data."

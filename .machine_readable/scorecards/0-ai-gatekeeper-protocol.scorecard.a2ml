@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# 0-ai-gatekeeper-protocol.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "0-ai-gatekeeper-protocol"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "The repository MUST contain exactly one AI manifest file, named 0-AI-MANIFEST.a2ml (or a permitted alias), located in the repository root, per docs/AI-MANIFEST-SPEC.adoc §File Naming."
+system = "none (no automated validator script checks this in CI; verified manually via directory listing)"
+status = "pass"
+evidence = "find confirms exactly one manifest at /home/user/standards/0-ai-gatekeeper-protocol/0-AI-MANIFEST.a2ml; no AI.a2ml, !AI.a2ml, or duplicate found at root."
+effects = "If violated, downstream MCP/FUSE parsers (mcp-repo-guardian, repo-guardian-fs) that assume a single canonical manifest path would pick an arbitrary or wrong file, breaking attestation for every consuming repo/agent."
+
+[[must]]
+id = "M2"
+text = "The manifest MUST contain all required sections defined by AI-MANIFEST-SPEC.adoc §Required Sections (Warning Header, What Is This, Canonical Locations, Core Invariants, Repository Structure, Attestation Proof)."
+system = "none (no parser/linter script in this repo enforces the spec against 0-AI-MANIFEST.a2ml; mcp-repo-guardian's manifest_test.js only tests inline reimplementations of parsing logic, not a repo-facing validator CLI)"
+status = "pass"
+evidence = "Manual read of /home/user/standards/0-ai-gatekeeper-protocol/0-AI-MANIFEST.a2ml confirms presence of '# ⚠️ STOP', '## WHAT IS THIS?', '## CANONICAL LOCATIONS', '## CORE INVARIANTS', '## REPOSITORY STRUCTURE', and '## ATTESTATION PROOF' headings."
+effects = "Missing sections would leave AI agents without required guardrail information, defeating the protocol's stated purpose across all adopting repos."
+
+[[must]]
+id = "M3"
+text = "The repository's own machine-readable state MUST accurately reflect this repository (not stale template boilerplate), since the manifest itself declares 'No stale metadata' as a Core Invariant."
+system = "none"
+status = "fail"
+effects = "/home/user/standards/0-ai-gatekeeper-protocol/.machine_readable/6a2/STATE.a2ml declares project = \"rsr-template-repo\" (name = \"Rsr Template Repo\", completion-percentage = 5, generic scaffolding actions like 'Define project scope and objectives'), i.e. it is an un-edited template copy, not this repo's actual state — directly violating the protocol's own 'no stale metadata' invariant it asks every other repo to uphold. Any agent trusting STATE.a2ml for context (as the manifest's own Session Startup Checklist instructs) would be misled about project identity/status, undermining the protocol's core value proposition."
+
+[[must]]
+id = "M4"
+text = "Core manifest-parsing/session/guard logic (as implemented for FFI/offline consumption) MUST have an automated test suite that passes."
+system = "cargo test --manifest-path repo-guardian-fs/tests-offline/Cargo.toml (Rust unit tests for manifest parsing, session management, and path-guard invariant enforcement)"
+status = "pass"
+evidence = "Ran `cargo test` in /home/user/standards/0-ai-gatekeeper-protocol/repo-guardian-fs/tests-offline: 29 passed; 0 failed (manifest hashing, canonical-location extraction, invariant detection, session ack/expiry, path-traversal/SCM-duplication guard tests, and a dogfood test parsing the repo's real 0-AI-MANIFEST.a2ml)."
+effects = "If these regress, any FFI/native consumer (e.g. Zig bindings, future editor plugins) linking against this logic would silently mis-enforce or fail to enforce invariants."
+
+[[must]]
+id = "M5"
+text = "The repo-guardian-fs FUSE enforcement component MUST build/compile so the 'OS-level enforcement for ANY tool/agent' claim in README.adoc is actually deliverable."
+system = "cargo build (in repo-guardian-fs/, main crate, not tests-offline)"
+status = "fail"
+effects = "`cargo build` in /home/user/standards/0-ai-gatekeeper-protocol/repo-guardian-fs fails with 58+ compile errors in the fuse3 v0.7.3 dependency (missing Future::poll impl, type-inference errors) on the installed Rust toolchain — exactly the known incompatibility documented in tests-offline/Cargo.toml's own comment ('fuse3 v0.7.3 fails to compile on Rust stable >= 1.80'). The FUSE wrapper, one of the protocol's three enforcement mechanisms advertised in README.adoc §Components, is currently non-functional for any real mount/enforcement use, affecting every non-MCP AI agent (Gemini, Copilot, ChatGPT) that the README says relies on it."
+
+[[should]]
+id = "S1"
+text = "Documentation links referenced from README.adoc and 0-AI-MANIFEST.a2ml (docs/ARCHITECTURE.md, docs/INTEGRATION.md, docs/ENFORCEMENT.md, examples/github-workflows/, examples/claude-config.json) SHOULD exist and resolve."
+system = "none (no link-checker workflow present)"
+status = "fail"
+effects = "docs/ only contains AI-MANIFEST-SPEC.adoc, CITATIONS.adoc, FEEDBACK-TO-ANTHROPIC.md, RATIONALE.md (confirmed via `ls docs/`); examples/ only contains 0-AI-MANIFEST.a2ml and web-project-deno.json (confirmed via `ls examples/`). ARCHITECTURE.md, INTEGRATION.md, ENFORCEMENT.md, github-workflows/, and claude-config.json are all missing. Both README.adoc and the manifest itself (which is the file every AI agent is told to read FIRST) point new users/agents to dead links, undermining trust in the protocol's own dogfooding."
+
+[[should]]
+id = "S2"
+text = "CONTRIBUTING.md SHOULD accurately describe the actual build/test workflow for this specific repository."
+system = "none"
+status = "fail"
+effects = "/home/user/standards/0-ai-gatekeeper-protocol/CONTRIBUTING.md instructs contributors to run `just test` and references `spec/` and `tests/` directories (Perimeter 2-3 language from a generic template), but no Justfile exists anywhere under 0-ai-gatekeeper-protocol/ and there is no spec/ or top-level tests/ directory (real tests live in repo-guardian-fs/tests-offline/ and mcp-repo-guardian/test/). New contributors following CONTRIBUTING.md literally would hit an immediate 'command not found' and be unable to run any tests."
+
+[[should]]
+id = "S3"
+text = "The mcp-repo-guardian Deno/TypeScript test suite (manifest_test.js, 36 Deno.test cases covering parsing, security/injection, session and guard logic) SHOULD be executed automatically in CI on every push/PR."
+system = "none (no workflow in .github/workflows/ or .gitlab-ci.yml under mcp-repo-guardian/ invokes `deno test`; deno.json defines a `test` task but nothing calls it in CI)"
+status = "fail"
+effects = "Regressions in the TypeScript/ReScript-compiled manifest/session/guard logic (src/Manifest.mjs, Session.mjs, Guards.mjs) that ships as the actual MCP server enforcement path would not be caught until manually run; Claude/MCP-based consumers of mcp-repo-guardian are the primary enforcement channel per README.adoc, so this is the most consumer-facing untested surface."
+
+[[should]]
+id = "S4"
+text = "License metadata SHOULD be internally consistent (SPDX headers, LICENSE file body, and README/manifest license statements should agree on one license identifier)."
+system = "none"
+status = "manual-only"
+effects = "LICENSE file's SPDX-License-Identifier header says MPL-2.0 but the body text is the GNU AGPLv3 license; README.adoc footer states 'PMPL-1.0-or-later'; 0-AI-MANIFEST.a2ml Core Invariant #4 and Meta section also say 'PMPL-1.0-or-later'; most workflow/source files carry MPL-2.0 SPDX headers; docs/AI-MANIFEST-SPEC.adoc and README.adoc top banner say CC-BY-SA-4.0. At least three different licenses (MPL-2.0, AGPLv3, PMPL-1.0-or-later, CC-BY-SA-4.0) are asserted across the same repository for different artifacts without a clear per-file mapping, which is a governance/legal judgement call, not something a script can resolve — downstream consumers redistributing code or docs face real licensing ambiguity."
+
+[[could]]
+id = "C1"
+text = "The protocol COULD reach a state where FUSE-level (repo-guardian-fs) and MCP-level (mcp-repo-guardian) enforcement are both externally audited/certified as reliable universal gatekeepers across all major AI coding assistants (Claude, Gemini, Copilot, ChatGPT)."
+system = "none"
+status = "aspirational"
+effects = "This is a reach goal beyond current scope; no downstream repo depends on it today, but achieving it would let the whole hyperpolymath ecosystem rely on a single certified enforcement layer instead of ad hoc per-agent trust."
+
+[[could]]
+id = "C2"
+text = "The .machine_readable/6a2/*.a2ml files for this repo (STATE, META, ECOSYSTEM, AGENTIC, NEUROSYM, PLAYBOOK) COULD each be kept current and repo-specific rather than templated placeholders."
+system = "none"
+status = "fail"
+effects = "Beyond STATE.a2ml (see M3), consumers of AGENTIC.a2ml/PLAYBOOK.a2ml for session-startup guidance would get generic template content instead of protocol-specific operational guidance, reducing the value of the 'read STATE/AGENTIC first' checklist the manifest itself prescribes."
