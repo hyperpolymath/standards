@@ -45,9 +45,21 @@ staleness-test:
 false-green-test:
     @bash scripts/tests/wave0-false-green-test.sh
 
+# Wave-1 automation regression: Mustfile runner + hook installer
+automation-test:
+    @bash scripts/tests/wave1-automation-test.sh
+
 # Structural validation of the Mustfile contract (severity + run/verification per check)
 mustfile-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
     @bash scripts/check-mustfile-structure.sh "{{path}}"
+
+# Execute the Mustfile's `- run:` checks (critical/high failures block)
+must-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
+    @bash scripts/run-mustfile.sh "{{path}}"
+
+# Install this repo's git hooks into .git/hooks/ (pre-commit guards)
+hooks-install:
+    @bash hooks/install.sh
 
 # Aggregate compliance gate: registry drift is the HARD gate (registry-check,
 # a hard dep). The RSR self-audit is INFORMATIONAL — a monorepo is not expected
@@ -139,6 +151,10 @@ doctor:
     @command -v git >/dev/null 2>&1 && echo "  [OK] git" || echo "  [FAIL] git not found"
     @echo "Checking for hardcoded paths..."
     @grep -rn '$HOME\|$ECLIPSE_DIR' --include='*.rs' --include='*.ex' --include='*.res' --include='*.gleam' --include='*.sh' . 2>/dev/null | head -5 || echo "  [OK] No hardcoded paths"
+    @echo "Checking optional imports (import? does not fail when absent — report it)..."
+    @test -f contractile.just && echo "  [OK] contractile.just present (import resolved)" || echo "  [INFO] contractile.just absent — its recipes are unavailable (needs the external 'contractile' generator)"
+    @echo "Checking git hooks are installed..."
+    @test -f "$(git rev-parse --git-dir)/hooks/pre-commit" && echo "  [OK] pre-commit hook installed" || echo "  [INFO] pre-commit hook not installed — run 'just hooks-install'"
     @echo "Diagnostics complete."
 
 # Auto-repair common issues
