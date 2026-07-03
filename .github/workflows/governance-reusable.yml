@@ -106,18 +106,52 @@ jobs:
             mix deps.get && mix escript.build
           fi
 
+      # A reusable workflow only auto-checks-out its own YAML, not sibling
+      # scripts. Sparse-check-out standards' scripts/ to get apply-baseline.sh,
+      # mirroring the language-policy job below. Pinned to main because
+      # github.workflow_sha resolves to the *caller* repo's SHA (which would 404).
+      - name: Check out standards for the baseline filter
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
       - name: Run Hypatia scan (Baseline validation)
+        env:
+          # Preserve the historical strictness: fail on ANY finding not
+          # acknowledged by .hypatia-baseline.json (not just >= high). Set to
+          # 'high' to only block on high/critical.
+          BLOCKING_THRESHOLD: info
         run: |
           echo "Scanning repository: ${{ github.repository }} (checking baseline)"
-          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . > hypatia-findings.json
-          
-          FINDING_COUNT=$(jq '. | length' hypatia-findings.json 2>/dev/null || echo 0)
-          
-          if [ "$FINDING_COUNT" -gt 0 ]; then
-            echo "::error::Baseline validation failed. Found $FINDING_COUNT findings not in baseline."
-            exit 1
-          fi
-          echo "Baseline validation successful. No new findings."
+          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . > hypatia-findings.raw.json
+
+          # Relativize finding paths before matching. Hypatia's honest_completion
+          # and code_safety modules emit ABSOLUTE host paths in `.file`
+          # (Path.expand(repo)), while .hypatia-baseline.json uses repo-relative
+          # paths per the schema + docs/HYPATIA-BASELINE-FORMAT.adoc. Strip the
+          # workspace prefix so baseline file/file_pattern entries can match, and
+          # map the repo root itself to "." so root-scoped findings (no_tests)
+          # match. Upstream fix tracked in hypatia#566; this is the stopgap.
+          jq --arg root "$PWD" '
+            map(if (.file? // "") == $root then .file = "."
+                elif (.file? // "") | startswith($root + "/")
+                then .file = (.file | ltrimstr($root + "/"))
+                else . end)
+          ' hypatia-findings.raw.json > hypatia-findings.json
+
+          # Filter against the per-repo baseline. apply-baseline.sh KEEPS every
+          # finding not matched by an active (non-expired) baseline entry — so a
+          # genuinely new finding still fails the gate (no silent-green) — and
+          # suppresses only exact matches. Exits non-zero iff a kept finding is at
+          # or above BLOCKING_THRESHOLD. (Validated against synthetic fixtures;
+          # see the PR description.)
+          bash .standards-checkout/scripts/apply-baseline.sh \
+            hypatia-findings.json .hypatia-baseline.json blocking
   language-policy:
     name: Language / package anti-pattern policy
     runs-on: ${{ inputs.runs-on }}
