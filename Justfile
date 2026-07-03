@@ -85,12 +85,24 @@ dyadt-conformance:
 dyadt-test:
     @bash scripts/tests/wave4-dyadt-test.sh
 
+# Structural lint for per-language testing guides (required sections + R1..R9)
+language-guides-check:
+    @bash scripts/check-language-guide.sh
+
+# Block reintroduction of deprecated names (6a2, agent_instructions) in new diff
+canonical-names-check base="origin/main":
+    @bash scripts/check-canonical-names.sh "{{base}}"
+
 # Aggregate compliance gate: registry drift is the HARD gate (registry-check,
 # a hard dep). The RSR self-audit is INFORMATIONAL — a monorepo is not expected
 # to score Gold — but a *broken* audit (exit 4 / unexpected) must fail loudly
 # rather than pass silently under a blanket `|| true` (Wave-0 false-green fix).
 validate: registry-check
     @echo "=== validate: registry drift (HARD GATE) — passed as a dependency above ==="
+    @echo "=== validate: per-language testing guides (structural, HARD GATE) ==="
+    @bash scripts/check-language-guide.sh
+    @echo "=== validate: canonical-names reintroduction guard (vs origin/main) ==="
+    @bash scripts/check-canonical-names.sh origin/main || bash scripts/check-canonical-names.sh HEAD
     @echo "=== validate: RSR self-audit (INFORMATIONAL grade; errors fail loudly) ==="
     @bash scripts/rsr-selfaudit.sh .
     @echo "=== validate: done ==="
