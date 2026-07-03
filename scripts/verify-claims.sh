@@ -95,6 +95,11 @@ v_git_diff() { # target expect
     contains:*)
       local re="${expect#contains:}"
       [ -n "$re" ] || { echo "unverifiable empty-pattern"; return; }
+      # Reject a trivially-always-matching regex (`.*`, `^`, `$`, `.`, `.+`, …):
+      # a pattern with no literal character is not evidence — it confirms any
+      # non-empty file. Require at least one literal after stripping ERE metachars.
+      local bare; bare="$(printf '%s' "$re" | tr -d '.^$*+?()[]{}|\\')"
+      [ -n "$bare" ] || { echo "unverifiable trivial-pattern"; return; }
       if [ ! -f "$target" ]; then echo "unverifiable not-a-regular-file"; return; fi
       if [ ! -r "$target" ]; then echo "unverifiable unreadable"; return; fi
       # distinguish "pattern absent" (refuted) from "bad regex" (unverifiable)

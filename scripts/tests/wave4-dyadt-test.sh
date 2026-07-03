@@ -166,6 +166,16 @@ target = "echo marker >&2; true"
 expect = "stdout-contains:marker"
 verifier = "command-transcript"'
 [[ "$(reason_of "$TMP/se.a2ml" C1)" == REFUTED* ]] && ok "stderr does not satisfy stdout-contains" || bad "stderr false-confirmed stdout claim"
+# an always-matching contains: regex is not evidence (#461)
+mk am.a2ml '[claims]
+[[claim]]
+id = "C1"
+claim_class = "file-changed"
+target = "README.adoc"
+expect = "contains:.*"
+verifier = "git-diff"'
+[[ "$(reason_of "$TMP/am.a2ml" C1)" == unverifiable*trivial-pattern ]] && ok "always-matching contains: -> unverifiable" || bad "always-match pattern confirmed vacuously"
+
 # licence claim phrased only in the statement is still manual-only
 mk lic.a2ml '[claims]
 [[claim]]
