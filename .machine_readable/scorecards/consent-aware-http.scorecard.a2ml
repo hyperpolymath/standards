@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# consent-aware-http.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "consent-aware-http"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "The repository MUST provide a well-formed IETF Internet-Draft (xml2rfc XML) specification for HTTP status code 430 Consent Required."
+system = "Justfile recipe `validate-drafts` (runs `xml2rfc --v3` if installed) — not invoked in any CI workflow, so it is a local-only, opt-in check"
+status = "pass"
+evidence = "/home/user/standards/consent-aware-http/draft-jewell-http-430-consent-required-00.xml and /home/user/standards/consent-aware-http/drafts/draft-jewell-http-430-consent-required-00.xml are present, well-formed RFC-XML (rfc2629/v3 DOCTYPE, front/middle/back structure with abstract, sections, references, IANA considerations)"
+effects = "Downstream consumers (IETF reviewers, implementers of the 430 status) rely on this document as the canonical protocol text."
+
+[[must]]
+id = "M2"
+text = "The canonical draft at repo root and its copy under drafts/ MUST be kept identical (single source of truth for the spec text submitted to IETF)."
+system = "none"
+status = "fail"
+effects = "Implementers reading drafts/draft-jewell-http-430-consent-required-00.xml vs. the root copy get materially different normative text (different author org/email, different Security/IANA wording, different reference sets, different date/expiry) — ambiguous which is authoritative, risking divergent implementations."
+
+[[must]]
+id = "M3"
+text = "The repository MUST self-host a valid AIBDP manifest at `.well-known/aibdp.json`, as claimed in README.adoc (\"self-referential\") and required by RSR-COMPLIANCE.md/Justfile's `check-rsr`."
+system = "Justfile `check-rsr` / `validate-manifests` recipes check for `.well-known/aibdp.json`, `.well-known/security.txt`, `.well-known/ai.txt`, `.well-known/humans.txt` — but these recipes are not wired into any CI workflow"
+status = "fail"
+effects = "Any AI agent or crawler trying to consult this project's own boundary declaration (the core self-referential proof-of-concept the README advertises) will find nothing at that path; undermines credibility of the protocol's own dogfooding claim."
+
+[[must]]
+id = "M4"
+text = "The project's self-assessment (RSR-COMPLIANCE.md) MUST accurately reflect files actually present on disk before claiming '100% documentation compliance' / 'RSR Gold'."
+system = "none"
+status = "fail"
+effects = "RSR-COMPLIANCE.md claims PASS for LICENSE.txt (actual file is `LICENSE`, no extension), MAINTAINERS.md (actual is MAINTAINERS.adoc), CHANGELOG.md (actual is CHANGELOG.adoc), and the entire `.well-known/` directory (does not exist at all). Anyone trusting this scorecard for audit/regulatory purposes (the doc explicitly targets regulators) would be misled."
+
+[[must]]
+id = "M5"
+text = "The repository MUST NOT contain code in languages banned by its own governing policy (.claude/CLAUDE.md: Node.js/npm and ReScript are explicitly banned, replaced by Deno and AffineScript respectively)."
+system = ".github/workflows/language-policy.yml (only greps newly-added .py/.rb/.pl/.java/.kt diffs against HEAD~1) and .github/workflows/rescript-deno-ci.yml (which actively runs `npm install`/`npx rescript` when rescript.json is present)"
+status = "fail"
+effects = "examples/reference-implementations/nodejs/package.json is a live npm project (Express + ajv deps, `node test.js`/`node validate-manifest.js` scripts that don't even exist as files); rescript.json config stub remains at repo root; CI (rescript-deno-ci.yml) still performs `npm install && npx rescript` if rescript.json exists, meaning the banned toolchain is actively exercised in CI rather than blocked. The language-policy.yml gate does not check for Node/npm/ReScript at all, so violations pass silently."
+
+[[should]]
+id = "S1"
+text = "The AIBDP manifest format SHOULD be defined by a machine-checkable JSON Schema."
+system = "schemas/aibdp-schema-v0.2.json (JSON Schema draft 2020-12, required fields aibdp_version/contact/policies) — validity checkable with `jq`/`ajv` but no CI job runs this"
+status = "pass"
+evidence = "/home/user/standards/consent-aware-http/schemas/aibdp-schema-v0.2.json is a syntactically valid, reasonably complete JSON Schema (draft 2020-12) with required fields, patterns, and examples"
+effects = "Third-party AIBDP implementers (e.g. CDNs, CMS plugins) rely on this schema to validate manifests; a broken/incomplete schema would cause interoperability failures across the ecosystem."
+
+[[should]]
+id = "S2"
+text = "Example/self-referential AIBDP manifests SHOULD be validated against the schema in CI on every push/PR."
+system = "none — Justfile has `validate-manifests`/`validate-manifest` recipes (jq-based JSON syntax check only, not schema validation) but no workflow in .github/workflows/ invokes `just validate`, `just check-rsr`, `ajv`, or the schema file"
+status = "fail"
+effects = "docs/example-aibdp.json and examples/*/example-aibdp.json can silently drift out of sync with schemas/aibdp-schema-v0.2.json without any CI signal, misleading adopters who copy the example as a template."
+
+[[should]]
+id = "S3"
+text = "The documented Idris2-ABI/Zig-FFI layer SHOULD be a working implementation, not a placeholder template."
+system = "none"
+status = "fail"
+effects = "ABI-FFI-README.md, ffi/zig/src/main.zig, and ffi/zig/test/integration_test.zig all still contain literal unfilled `{{PROJECT}}`/`{{project}}` template tokens and there is no src/abi/ (Idris2) directory at all; any consumer expecting a cross-language C ABI for AIBDP enforcement (as RSR-COMPLIANCE.md's 'Interoperability (iSOS)' section implies is planned) will find only scaffolding, not code that builds."
+
+[[should]]
+id = "S4"
+text = "Reference implementations (Node/Express, Deno) SHOULD ship with a runnable, passing test suite."
+system = "none — package.json in examples/reference-implementations/nodejs declares `\"test\": \"node test.js\"` and `\"validate\": \"node validate-manifest.js .well-known/aibdp.json\"`"
+status = "fail"
+effects = "Neither test.js nor validate-manifest.js exists in examples/reference-implementations/nodejs/ (only README.md, example-aibdp.json, package.json are present), so `npm test` fails immediately for anyone following the README's stated workflow; erodes trust in the 'reference implementation' label."
+
+[[should]]
+id = "S5"
+text = "The AIBDP+HTTP 430 middleware SHOULD be ported to AffineScript (the estate's mandated replacement for ReScript/JS) and that port SHOULD be exercised by CI."
+system = "none — no CI workflow builds or type-checks src/*.affine (rescript-deno-ci.yml only handles Deno/ReScript, not AffineScript; no affinescript compiler is invocable in this environment)"
+status = "fail"
+effects = "src/Aibdp.affine, src/Express.affine, src/Node.affine exist as hand-written source but are unverified — no compiler run, no test executed against them, so correctness of the 'AffineScript port' relative to the JS original is unproven."
+
+[[could]]
+id = "C1"
+text = "The generic 'contractiles' template set (must/Mustfile, dust/Dustfile) COULD be filled in with this repo's real invariants/paths rather than left as generic placeholders."
+system = "none"
+status = "fail"
+effects = "contractiles/README.adoc explicitly says 'Copy the contractiles/ directory into a new repo' and 'Fill-In Instructions' — the checks reference config/service.yaml, policy/policy.ncl, logs/decisions.json which do not exist in this repo, so the contractiles directory currently provides no real operational guarantee for consent-aware-http specifically."
+
+[[could]]
+id = "C2"
+text = "SPDX license identifiers/headers COULD be applied consistently across all source files (dual MIT/GPL-3.0-or-later for code, CC-BY-SA-4.0 for docs)."
+system = "none (licensing determinations are always human/legal judgement calls, not automatable)"
+status = "manual-only"
+effects = "Downstream re-users need unambiguous per-file licensing to safely redistribute or fork; RSR-COMPLIANCE.md itself flags this as 'IN PROGRESS' (adding SPDX headers to all files)."
+
+[[could]]
+id = "C3"
+text = "RSR/OSSF-style third-party or automated compliance verification (Scorecard, CodeQL, Hypatia scan) COULD reach and sustain top-tier scores as an external validation of the project's governance claims."
+system = ".github/workflows/scorecard.yml, scorecard-enforcer.yml, codeql.yml, hypatia-scan.yml (all present and wired to push/PR/schedule triggers)"
+status = "aspirational"
+effects = "External security raters and downstream integrators use OSSF Scorecard/CodeQL results as a trust signal before adopting a spec's reference tooling; reaching and maintaining a top score is a reach goal beyond what a documentation-focused repo needs, but the workflows are already in place to work toward it."

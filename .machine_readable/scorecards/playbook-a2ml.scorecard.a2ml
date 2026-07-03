@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# playbook-a2ml.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "playbook-a2ml"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "PLAYBOOK.a2ml files MUST begin with SPDX license headers (SPDX-License-Identifier / SPDX-FileCopyrightText)."
+system = "none"
+status = "manual-only"
+effects = "Downstream repos relying on PLAYBOOK.a2ml for provenance/attribution would inherit unclear licensing if headers were dropped; licence correctness is always a human/legal judgement call, not a mechanical one."
+
+[[must]]
+id = "M2"
+text = "The repository MUST provide a formal specification that accurately and consistently describes the CURRENT PLAYBOOK format."
+system = "none"
+status = "fail"
+effects = "spec/PLAYBOOK-FORMAT-SPEC.adoc still documents the superseded Scheme-based `.scm` grammar (module declarations, `(define derivation-source ...)`, media type `application/playbook+scheme`), while README.adoc and both files in examples/ describe and use the current TOML-based `.a2ml` syntax. A separate leftover file, spec/playbook-spec, is an unedited pasted AI-chat transcript (references an MIT licence rather than MPL-2.0/PMPL-1.0, unrelated tooling names like 'Wharf', 'Echidna', 'Valence Shell', 'svalinn', and ends with the literal footer 'Gemini can make mistakes... Your privacy and Gemini'). Any consumer or downstream repo (playbook-spec, agentic-a2ml, neurosym-a2ml, meta-a2ml) that reads spec/PLAYBOOK-FORMAT-SPEC.adoc as the normative reference would implement the wrong (obsolete) grammar."
+
+[[must]]
+id = "M3"
+text = "The repository MUST provide reference examples of the current PLAYBOOK.a2ml (TOML) format."
+system = "none"
+status = "pass"
+evidence = "examples/minimal.a2ml (14 lines: [metadata], [derivation-source], [procedures.build] with a single step) and examples/comprehensive.a2ml (172 lines covering [derivation-source], [procedures.build/deploy/rollback], [release-process], [incident-response.*], [maintenance-operations], [[alerts]]) both exist, use the TOML syntax described in README.adoc, and are referenced from README.adoc's 'Examples' section."
+effects = "Consumers of the spec (tooling authors, other a2ml-family repos) have concrete TOML samples to build parsers/validators against, even without a formal machine-checkable grammar."
+
+[[must]]
+id = "M4"
+text = "Every PLAYBOOK.a2ml file MUST declare a `derivation-source` documenting the META rules / STATE context it derives authority from (per README.adoc 'Derivation Source' section and spec/PLAYBOOK-FORMAT-SPEC.adoc 'Derivation Declaration')."
+system = "none"
+status = "fail"
+effects = "The repository's own self-referential file, .machine_readable/6a2/PLAYBOOK.a2ml, contains only [metadata], [deployment], [incident-response], [release-process] and [maintenance-operations] — it has no [derivation-source] table at all, unlike both files in examples/. The repo fails to dogfood its own MUST requirement, which undermines confidence that other repos' 6a2/PLAYBOOK.a2ml files (k9-svc, meta-a2ml, agentic-a2ml, etc., all copied from the same template) correctly capture derivation authority."
+
+[[must]]
+id = "M5"
+text = "On PLAYBOOK execution failure, the executing system MUST rollback or branch, MUST NOT commit STATE, MUST record the failure in a journal, and MUST trigger alerts (per README.adoc 'Failure Modes' and spec 'Execution Constraints')."
+system = "none"
+status = "manual-only"
+effects = "This is a behavioural requirement on downstream execution engines (e.g. a future Wharf/Valence-Shell-style runner), not on this documentation-only repo, which contains no executor, journal implementation, or alert dispatcher to test against. Compliance can only be judged when a concrete implementation exists; any consumer building an executor must independently verify these properties since no reference implementation or conformance test ships here."
+
+[[should]]
+id = "S1"
+text = "The repository SHOULD contain a SELF-ASSESSMENT.adoc documenting its own RSR/A2ML-family compliance status."
+system = "none"
+status = "fail"
+effects = "Auditors and downstream consumers (e.g. the monorepo's registry/status tooling referenced in Justfile's `registry-check`) have no self-declared compliance record for this spec repo to cross-check against actual repo contents."
+
+[[should]]
+id = "S2"
+text = "The repository SHOULD provide or wire up automated validation of examples/*.a2ml against the format (e.g. a schema or the a2ml-playbook profile)."
+system = "none"
+status = "fail"
+effects = "A validation profile does exist elsewhere in the monorepo (a2ml/profiles/a2ml-playbook/PROFILE.a2ml, requiring metadata/incident-response/release-process sections) but nothing in playbook-a2ml/ invokes it against examples/minimal.a2ml, examples/comprehensive.a2ml, or .machine_readable/6a2/PLAYBOOK.a2ml. Format drift (as already found in M2/M4) can silently accumulate because nothing mechanically catches it."
+
+[[should]]
+id = "S3"
+text = "The repository SHOULD run CI (.github/workflows) to lint AsciiDoc and validate .a2ml files on push/PR."
+system = "none"
+status = "fail"
+effects = "There is no .github directory anywhere under playbook-a2ml/. Broken links, malformed TOML in examples, or AsciiDoc syntax errors would not be caught before merge, unlike sibling repos in the monorepo (e.g. a2ml/.github/workflows) that do have CI."
+
+[[should]]
+id = "S4"
+text = "Stray/historical artifacts (e.g. an unedited AI-chat transcript) SHOULD be removed from the spec/ directory or clearly relabelled as archived/superseded."
+system = "none"
+status = "fail"
+effects = "spec/playbook-spec (4.3KB, no file extension, containing a raw Gemini chat transcript with a 'Gemini can make mistakes' footer and a solicitation 'Would you like me to generate the first PLAYBOOK.scm for /project-wharf...') sits alongside the actual specification with no README pointer distinguishing it as historical, risking a reader mistaking it for authoritative content."
+
+[[could]]
+id = "C1"
+text = "The repository COULD ship a machine-readable schema (e.g. JSON Schema or TOML schema) for the PLAYBOOK.a2ml format to enable automated conformance checking."
+system = "none"
+status = "fail"
+effects = "Without a schema, tooling authors (editors/vscode, pandoc, LSP components seen elsewhere in the a2ml family) must hand-roll validation logic per-consumer instead of sharing one canonical schema."
+
+[[could]]
+id = "C2"
+text = "The repository COULD provide parser/binding code (e.g. Rust/Deno/Haskell, mirroring bindings/ directories in the sibling a2ml repo) specifically for PLAYBOOK.a2ml."
+system = "none"
+status = "fail"
+effects = "No bindings/ or scripts/ directory exists in playbook-a2ml/; consumers must implement their own TOML parsing plus PLAYBOOK-specific semantic checks (derivation validation, step ordering) from scratch."
+
+[[could]]
+id = "C3"
+text = "PLAYBOOK.a2ml adoption across the ecosystem COULD reach full cross-repo conformance verified by an external/automated ecosystem-wide audit."
+system = "none"
+status = "aspirational"
+effects = "This is a deliberately distant reach goal (ecosystem-wide, cross-repo automated conformance audit) rather than a near-term gap; it depends on tooling and processes (schema, CI, validators) that do not yet exist even at the single-repo level per S1-S3/C1-C2."
