@@ -42,6 +42,7 @@
 | `toolchain-readiness-grades` | ❌ gap | 1/5 | 2/4 | 0/3 | 83% | 2026-07-03 |
 | `rhodium-standard-repositories` | ❌ gap | 2/3 | 1/2 | 0/1 | 50% | 2026-07-03 |
 | `session-management-standards` | ❌ gap | 1/5 | 1/4 | 0/3 | 41% | 2026-07-03 |
+| `did-you-actually-do-that` | ✅ met | 5/5 | 2/3 | 0/2 | 90% | 2026-07-03 |
 | `ensaid-config` | ❌ gap | 0/5 | 0/3 | 0/3 | 90% | 2026-07-03 |
 | `accessibility` | ❌ gap | 2/5 | 0/5 | 0/3 | 100% | 2026-07-03 |
 | `publication-pre-flight` | ❌ gap | 0/5 | 0/4 | 0/2 | 36% | 2026-07-03 |
@@ -51,10 +52,10 @@
 
 ## Estate rollup
 
-- **Specs registered (local):** 28
-- **Specs with a scorecard:** 28 / 28
-- **MUST requirements:** 41 passing / 138 total (74 failing)
-- **Estate systems coverage:** 66% of 328 graded requirements have a mechanical check
+- **Specs registered (local):** 29
+- **Specs with a scorecard:** 29 / 29
+- **MUST requirements:** 46 passing / 143 total (74 failing)
+- **Estate systems coverage:** 67% of 338 graded requirements have a mechanical check
 
 ## How this dashboard stays honest
 
