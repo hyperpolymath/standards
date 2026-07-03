@@ -92,6 +92,45 @@ discharged by `command-transcript`.
   NOT fall back to reading the agent's cited evidence.
 . *Stale evidence is unverifiable.* If `not_before` is set and the primary
   evidence predates it, the verdict is `unverifiable` (reason `stale-evidence`).
+  A verifier that does not collect evidence timestamps MUST return
+  `unverifiable` for any claim carrying `not_before` (it cannot honour the
+  guarantee) rather than verify possibly-stale evidence as fresh.
+
+== Fail-safe requirements (normative)
+
+Every place a verifier *cannot* collect trustworthy primary evidence is
+`unverifiable`, never a confident wrong verdict. A conforming verifier MUST
+return `unverifiable` (not `confirmed`/`refuted`) when:
+
+* the diff base ref is missing or does not resolve (`no-base-ref`) for a
+  `created`/`modified`/`deleted` claim;
+* a required field (`claim_class`, `target`, `expect`, `verifier`) is absent
+  (`missing-field`), or a `[[claim]]` block carries no `id` (it MUST still
+  appear in the output — no silent drop);
+* the `target` of a file verifier is an absolute path, contains `..`, or is a
+  symlink (`unsafe-path` — evidence could be redirected);
+* an `expect` predicate is empty or otherwise always-matching
+  (`empty-pattern`), or its regex is malformed (`bad-regex`);
+* a `contains:`/`sha256:` target is not a readable regular file
+  (`not-a-regular-file` / `unreadable`).
+
+And a licence/SPDX claim — detected in ANY of `claim_class`, `target`,
+`expect`, or `statement` — MUST be `unverifiable` with reason `manual-only`
+(the Manual-Only licence policy; never auto-`confirmed`).
+
+== Command execution & sandboxing (normative)
+
+The `command-transcript` verifier EXECUTES the claim's `target`. Consequences:
+
+* `stdout-contains:` MUST match the command's *stdout only*; stderr MUST be
+  captured separately so a marker printed to stderr cannot false-confirm.
+* Because the claims file is agent-authored, executing its commands is code
+  execution. A verifier running over UNTRUSTED claims MUST sandbox the command
+  (no network, constrained filesystem, resource limits). The reference verifier
+  does NOT sandbox and is for TRUSTED (repo-authored, PR-reviewed) claims only;
+  a conforming production verifier MUST document its execution boundary.
+* `claims-compose` recursion MUST be depth-bounded to defeat self- or
+  mutually-referential claim files (the reference verifier caps depth at 8).
 
 == Multi-verifier corroboration (SHOULD)
 
