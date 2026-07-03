@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# k9-svc.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "k9-svc"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "Every `.k9` file MUST begin with the magic number `K9!` (0x4B 0x39 0x21) for L1 identification."
+system = "test.sh 'Example Components' section (checks `head -1 examples/hello.k9 | grep K9!`) and mime/k9.xml, mime/k9.magic magic-byte definitions; run in CI job 'test' and 'mime' in .github/workflows/ci.yml."
+status = "pass"
+evidence = "/home/user/standards/k9-svc/test.sh lines ~128-219 assert hello.k9, k9.xml and k9.magic all carry the K9! magic; examples/hello.k9 exists on disk and CI job `test`/`mime` in ci.yml executes test.sh and xmllint/file checks on push and PR."
+effects = "Downstream OS/kernel MIME recognition (Freedesktop, UTI, Minix mime.types) and any consumer tool that dispatches on the magic number depend on this holding; if broken, file-type detection silently fails across all K9 consumers."
+
+[[must]]
+id = "M2"
+text = "An implementation MUST enforce the three-tier Leash security model (Kennel/Yard/Hunt) with escalating capability (data-only -> pure Nickel eval -> full triad execution)."
+system = "leash.ncl (canonical encoding) typechecked in CI job 'validate' (`nickel typecheck leash.ncl`) in .github/workflows/ci.yml; test.sh 'Schema Validation' section also runs `nickel typecheck leash.ncl`."
+status = "pass"
+evidence = "/home/user/standards/k9-svc/leash.ncl defines `levels.kennel/yard/hunt` with distinct `allows` maps; CI job 'validate' in .github/workflows/ci.yml runs `nickel typecheck leash.ncl` on every push/PR, and test.sh line ~111-115 does the same locally."
+effects = "Any tool executing a .k9 component (must, Just recipes, k9-sign, future runtimes) relies on this typed contract; a break would let a Yard component perform I/O or a Kennel component execute code."
+
+[[must]]
+id = "M3"
+text = "`'Hunt`-level execution MUST require all five preconditions (signature, policy, sandbox, dry_run, capability_grant) simultaneously, always, with no configurable subset, via `authorize_hunt(evidence)` — a signature alone MUST NOT be sufficient."
+system = "none for the full 5-precondition semantics; leash.ncl encodes `authorize_hunt` but no unit/property test exercises it (no *.ncl test file, and test.sh never invokes authorize_hunt with partial evidence). The actual signing tool k9-sign's `cmd_authorize` (k9-sign/src/main.rs ~335-368) only checks for the *existence and validity of a signature file* and does not check policy/sandbox/dry_run/capability_grant at all."
+status = "fail"
+effects = "Any consumer relying on `k9-sign authorize` to gate real Hunt execution gets weaker guarantees than the spec claims (SPEC.adoc explicitly calls signature-alone-sufficient the pre-1.0 alpha behaviour that was superseded); downstream integrators trusting 'k9-sign authorize == SPEC-compliant Hunt gate' are exposed to the four unchecked preconditions."
+
+[[must]]
+id = "M4"
+text = "The capability model MUST be default-deny: a component is granted no capability unless explicitly listed in `policy.capabilities`, drawn from the closed core set or a well-formed `x-<vendor>.<path>` extension."
+system = "capabilities.ncl defines the closed core list, `is_core`/`is_extension`/`Capability` contract, but capabilities.ncl is NOT included in the CI 'validate' job's typecheck list (.github/workflows/ci.yml only runs `nickel typecheck pedigree.ncl register.ncl leash.ncl`), nor in test.sh."
+status = "fail"
+effects = "A regression in capabilities.ncl (e.g. a broken contract that silently accepts non-namespaced extension capabilities) would not be caught by CI; any binding or tool that imports capabilities.ncl for enforcement inherits an unverified contract."
+
+[[must]]
+id = "M5"
+text = "Every K9 run MUST emit a receipt (attested record of component identity, contract result, enforced leash level, capabilities granted/denied, signatures checked, dry-run plan, deploy/rollback result, policy decision) canonical in the `a2ml/k9-receipt` A2ML profile with a lossless JSON projection."
+system = "none — receipt/PROFILE.a2ml and receipt/receipt.schema.json define the schema and receipt/example-receipt.{a2ml,json} show a static example, but no code path in `must`, `Justfile`, or k9-sign/src/main.rs actually generates a receipt at runtime (grep for 'receipt' across must, Justfile, k9-sign/src/main.rs returns zero matches)."
+status = "fail"
+effects = "Auditability/attestation claims in SPEC.adoc ('Every K9 run emits a receipt') are not backed by the actual tooling; any downstream compliance or audit process expecting a receipt artefact per run will find none produced by the reference implementation."
+
+[[must]]
+id = "M6"
+text = "MIME registration for `.k9`/`.k9.ncl` MUST be provided for Linux (Freedesktop XML), macOS (UTI plist), and Minix (static mime.types mapping)."
+system = "mime/k9.xml, mime/k9.uti.plist, mime/mime.types on disk; validated by CI job 'mime' in .github/workflows/ci.yml (`xmllint --noout mime/k9.xml mime/k9.uti.plist`, `file --compile mime/k9.magic || true`) and register.ncl typechecked in CI job 'validate'."
+status = "pass"
+evidence = "/home/user/standards/k9-svc/mime/k9.xml, k9.uti.plist, mime.types, k9.magic all exist; ci.yml job 'mime' runs xmllint validation on push/PR; job 'validate' runs `nickel typecheck register.ncl`."
+effects = "OS-level file-manager/desktop integration for K9 files across the three named platforms depends on these being syntactically valid and present."
+
+[[should]]
+id = "S1"
+text = "An implementation SHOULD refuse to run as root by default, requiring an explicit `K9_ALLOW_ROOT=true` or `--allow-root` escape hatch."
+system = "must shim `check_root()` function (/home/user/standards/k9-svc/must lines ~20-40); exercised indirectly whenever `./must` is invoked (no dedicated CI job running must as root to prove the refusal path, but the code path is present and unconditional)."
+status = "pass"
+evidence = "/home/user/standards/k9-svc/must defines `check_root()` which checks `id -u` and exits with a warning unless `K9_ALLOW_ROOT=true`; this function is called before other must subcommands per the script's control flow."
+effects = "Prevents accidental privileged execution of Hunt-level components by naive users/CI runners; without it, a compromised or buggy component would have full system access by default."
+
+[[should]]
+id = "S2"
+text = "The reference signing tool (k9-sign) SHOULD be a memory-safe implementation with an automated test suite covering keygen/sign/verify/trust/list."
+system = "k9-sign/src/tests.rs (15 #[test] functions) run via CI job 'test' in .github/workflows/k9-sign-ci.yml (`cargo test --verbose` and `cargo test --release --verbose`) across ubuntu-latest/macos-latest x stable/beta matrix."
+status = "pass"
+evidence = "/home/user/standards/k9-svc/k9-sign/src/tests.rs contains 15 `#[test]` functions (grep count); k9-sign-ci.yml job 'test' runs `cargo test --verbose -- --test-threads=1` in both debug and release mode on a 2x2 OS/toolchain matrix on every push/PR touching k9-sign/**."
+effects = "Bindings and tools that shell out to k9-sign for Ed25519 signing rely on this correctness; a regression would compromise the signature precondition of the Hunt gate."
+
+[[should]]
+id = "S3"
+text = "Static security analysis (k9-scan) SHOULD flag suspicious files, dangerous commands, network exfiltration patterns, and obfuscation in .k9 components (8 checks as advertised in README/SECURITY docs)."
+system = "k9-scan script functions check_magic_number, check_security_level, check_suspicious_files, check_dangerous_commands, check_network_exfiltration, check_obfuscation, check_signature, check_pedigree (8 functions); no CI job runs k9-scan itself against examples/ or as part of ci.yml/k9-sign-ci.yml — it is not invoked in any workflow."
+status = "fail"
+effects = "README/SECURITY.md advertise 'k9-scan with 8 security checks' as a key protection, but since no CI job invokes k9-scan, regressions in these checks (e.g. a check silently becoming a no-op) would go undetected until a human runs it manually."
+
+[[should]]
+id = "S4"
+text = "Security-sensitive documentation (Security Best Practices, FAQ, Decision-Makers summary, Roadmap) SHOULD exist and be linked from README.adoc."
+system = "none (prose existence check only, no automated link-checker in this repo's CI for these specific docs)."
+status = "manual-only"
+effects = "Users/decision-makers rely on these docs for informed adoption decisions; if they drift out of date there is no automated staleness check."
+
+[[should]]
+id = "S5"
+text = "The Nickel schema files (pedigree.ncl, register.ncl, leash.ncl) SHOULD typecheck cleanly on every push and pull request."
+system = "CI job 'validate' in .github/workflows/ci.yml runs `nickel typecheck pedigree.ncl`, `nickel typecheck register.ncl`, `nickel typecheck leash.ncl` on push to main and on PRs."
+status = "pass"
+evidence = ".github/workflows/ci.yml job 'validate' step 'Validate schemas' runs the three nickel typecheck commands unconditionally on every push/PR (triggers block at top of file)."
+effects = "Any downstream binding (rust/haskell/gleam/elixir/deno) or tool that imports these .ncl files as the canonical schema depends on them being syntactically and typologically valid."
+
+[[could]]
+id = "C1"
+text = "K9 COULD ship language bindings (Rust, Haskell, Gleam, Elixir, Deno) for parsing/rendering `.k9` files outside the reference shell/Nickel toolchain."
+system = "bindings/rust/src/{lib,parser,renderer,error}.rs (497-line parser), bindings/haskell/src/Data/K9/*.hs, bindings/gleam/src/k9_gleam/*.gleam (+ test/k9_gleam_test.gleam), bindings/elixir/lib/k9/*.ex, bindings/deno/mod.ts; bindings/gleam has a dedicated .github/workflows/ present, other bindings' CI status not independently confirmed in this pass."
+status = "pass"
+evidence = "Non-trivial, non-stub source files exist for all five bindings (e.g. bindings/rust/src/parser.rs 497 lines, bindings/rust/tests/crg_c_tests.rs 580 lines; bindings/haskell/src/Data/K9/Parser.hs 234 lines; bindings/gleam has a test/ directory with k9_gleam_test.gleam)."
+effects = "Consumers wanting to parse/render .k9 in Rust/Haskell/Gleam/Elixir/Deno ecosystems depend on these; if a binding's own CI is not wired up, drift from the canonical pedigree.ncl schema would go unnoticed (not independently verified here)."
+
+[[could]]
+id = "C2"
+text = "K9 COULD provide packaging for common OS package managers (Homebrew, AUR) and a Guix/Nix definition for reproducible builds."
+system = "packaging/homebrew/, packaging/aur/, guix.scm, manifest.scm on disk; no CI job in .github/workflows builds/tests these packaging artefacts."
+status = "fail"
+effects = "Packaging manifests can silently drift from the actual repo layout (e.g. a renamed script breaking the Homebrew formula) since nothing validates them in CI; affects any user installing via `brew`/AUR/Guix."
+
+[[could]]
+id = "C3"
+text = "K9 COULD support container-based deployment as a first-class, non-root, multi-stage build on a minimal/hardened base image."
+system = "Containerfile (Chainguard wolfi-base per README); validated by CI job 'container' in .github/workflows/ci.yml (`podman build`, then `podman run --rm k9-svc:ci status` and `run typecheck`) and test.sh 'Container' section (4 tests: multi-stage build, non-root user)."
+status = "pass"
+evidence = "/home/user/standards/k9-svc/Containerfile exists; ci.yml job 'container' builds and smoke-tests the image on every push/PR (needs: validate); TESTING.adoc documents a 4-test Container section in test.sh."
+effects = "Users following the README's `podman build/run` quick-start depend on this; a break would surface immediately in CI rather than only for end users."

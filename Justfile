@@ -41,11 +41,47 @@ staleness-test:
     @echo "=== propagate-workflow-pins ==="
     @bash scripts/tests/propagate-workflow-pins-test.sh
 
-# Aggregate compliance gate: registry drift (hard dep) + RSR self-audit (informational)
+# Wave-0 anti-false-green regression: proves each fixed validator CAN fail
+false-green-test:
+    @bash scripts/tests/wave0-false-green-test.sh
+
+# Wave-1 automation regression: Mustfile runner + hook installer
+automation-test:
+    @bash scripts/tests/wave1-automation-test.sh
+
+# Structural validation of the Mustfile contract (severity + run/verification per check)
+mustfile-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
+    @bash scripts/check-mustfile-structure.sh "{{path}}"
+
+# Execute the Mustfile's `- run:` checks (critical/high failures block)
+must-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
+    @bash scripts/run-mustfile.sh "{{path}}"
+
+# Install this repo's git hooks into .git/hooks/ (pre-commit guards)
+hooks-install:
+    @bash hooks/install.sh
+
+# Regenerate the compliance dashboard from the per-spec scorecards
+scorecards:
+    @bash scripts/build-scorecards.sh
+
+# Fail if COMPLIANCE-DASHBOARD.md has drifted from the scorecards
+scorecards-check:
+    @bash scripts/build-scorecards.sh --check
+
+# Strict: also fail if any registered local spec lacks a scorecard
+scorecards-check-strict:
+    @bash scripts/build-scorecards.sh --check --strict
+
+# Aggregate compliance gate: registry drift is the HARD gate (registry-check,
+# a hard dep). The RSR self-audit is INFORMATIONAL — a monorepo is not expected
+# to score Gold — but a *broken* audit (exit 4 / unexpected) must fail loudly
+# rather than pass silently under a blanket `|| true` (Wave-0 false-green fix).
 validate: registry-check
-    @echo "=== validate: RSR compliance gate ==="
-    @bash rhodium-standard-repositories/rsr-audit.sh . text || true
-    @echo "=== validate: done (see rsr-audit output above) ==="
+    @echo "=== validate: registry drift (HARD GATE) — passed as a dependency above ==="
+    @echo "=== validate: RSR self-audit (INFORMATIONAL grade; errors fail loudly) ==="
+    @bash scripts/rsr-selfaudit.sh .
+    @echo "=== validate: done ==="
 
 # Print role-appropriate LLM warm-up context (machine front door)
 llm-context role="dev":
@@ -127,6 +163,10 @@ doctor:
     @command -v git >/dev/null 2>&1 && echo "  [OK] git" || echo "  [FAIL] git not found"
     @echo "Checking for hardcoded paths..."
     @grep -rn '$HOME\|$ECLIPSE_DIR' --include='*.rs' --include='*.ex' --include='*.res' --include='*.gleam' --include='*.sh' . 2>/dev/null | head -5 || echo "  [OK] No hardcoded paths"
+    @echo "Checking optional imports (import? does not fail when absent — report it)..."
+    @test -f contractile.just && echo "  [OK] contractile.just present (import resolved)" || echo "  [INFO] contractile.just absent — its recipes are unavailable (needs the external 'contractile' generator)"
+    @echo "Checking git hooks are installed..."
+    @test -f "$(git rev-parse --git-dir)/hooks/pre-commit" && echo "  [OK] pre-commit hook installed" || echo "  [INFO] pre-commit hook not installed — run 'just hooks-install'"
     @echo "Diagnostics complete."
 
 # Auto-repair common issues

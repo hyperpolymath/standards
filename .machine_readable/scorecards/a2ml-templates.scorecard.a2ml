@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# a2ml-templates.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "a2ml-templates"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "Each *.a2ml.template file MUST carry an SPDX-License-Identifier header."
+system = "none"
+status = "pass"
+evidence = "All 7 files in /home/user/standards/a2ml-templates/ (META.a2ml.template, AGENTIC.a2ml.template, ECOSYSTEM.a2ml.template, NEUROSYM.a2ml.template, PLAYBOOK.a2ml.template, STATE.a2ml.template, STATE.a2ml.v2.template) and both scripts carry an SPDX-License-Identifier as line 1/2 (manually verified by reading each file); however no automated check enforces this for this directory - hooks/validate-spdx.sh only scans .github/workflows/*.yml, not a2ml-templates/."
+effects = "Downstream repos copying these templates inherit correct licensing metadata by convention, but a future edit could silently drop the header with nothing to catch it."
+
+[[must]]
+id = "M2"
+text = "The spec directory MUST provide a README.adoc or SPEC.adoc describing the purpose, scope, and usage of the templates it hosts."
+system = "none"
+status = "fail"
+effects = "Consumers (other repo maintainers copying A2ML files) have no authoritative in-directory entry point; they must reconstruct intent from the root README.adoc/TOPOLOGY.md and the individual template comment headers, risking misuse or drift in how templates are filled in."
+
+[[must]]
+id = "M3"
+text = "The v1-to-v2 STATE.a2ml migration scripts (state-migrate-v1-to-v2.sh, state-scm-to-v2.jl) MUST be covered by automated tests verifying correct field extraction (phase, next_action, last_action, blockers)."
+system = "none"
+status = "fail"
+effects = "Any regression in the sed/grep or s-expression parsing logic (e.g. multi-line strings, escaped quotes, empty session-history) silently corrupts STATE.a2ml v2 output for consuming repos, and downstream tools reading STATE.a2ml (VeriSimDB STATE-journal octad, PanLL session-resume panel, k9 coordination reflex guards per STATE.a2ml.v2.spec.adoc) would ingest wrong/garbage data with no test to catch it."
+
+[[must]]
+id = "M4"
+text = "The STATE.a2ml.v2 grammar defined in STATE.a2ml.v2.spec.adoc MUST have a machine-checkable validator (parser/schema check) that a produced STATE.a2ml file conforms to the documented grammar."
+system = "none"
+status = "fail"
+effects = "Consuming repos (or the migration scripts themselves) can emit malformed @state/@blockers blocks that VeriSimDB's STATE-journal ingest or PanLL's session-resume panel cannot parse, with no automated gate to catch it before merge."
+
+[[must]]
+id = "M5"
+text = "The spec MUST be tracked in the estate compliance dashboard with a scorecard once templates stabilize."
+system = "COMPLIANCE-DASHBOARD.md rollup table"
+status = "fail"
+evidence = "COMPLIANCE-DASHBOARD.md line 50 lists `a2ml-templates | no scorecard | - | - | - | - | -` and line 58 includes a2ml-templates in the 27 specs still needing a scorecard (1/28 specs scored)."
+effects = "The estate-wide rollup (1/28 specs scored, 50% system coverage) cannot include this spec's real compliance state, so any regression here is invisible at the estate level until this scorecard is produced and merged."
+
+[[should]]
+id = "S1"
+text = "Placeholder tokens (e.g. {{PROJECT_NAME}}, {{CODE_STYLE}}, {{AGENT_ID}}, {{TIMESTAMP}}, {{PRIMARY_LANGUAGE}}) SHOULD be consistently named and documented across all *.a2ml.template files so tooling can auto-fill them."
+system = "none"
+status = "manual-only"
+effects = "Without a documented placeholder contract, any future 'a2ml init' automation (referenced as 'to be written' in STATE.a2ml.v2.spec.adoc under k9-init) has to reverse-engineer naming conventions from each template file individually, risking inconsistent substitution across the 7 files."
+
+[[should]]
+id = "S2"
+text = "STATE.a2ml v1 templates SHOULD be marked deprecated/superseded now that v2 is the canonical thin-journal format, to steer new adopters toward v2."
+system = "none"
+status = "fail"
+evidence = "STATE.a2ml.template (v1, ~100+ line full-state format) and STATE.a2ml.v2.template both exist side by side with no deprecation notice in the v1 file itself; STATE.a2ml.v2.spec.adoc explains the rationale for replacing v1 but the v1 template file carries no pointer to v2."
+effects = "New repos copying STATE.a2ml.template verbatim (rather than the v2 variant) perpetuate the bloated v1 format the spec explicitly says drifts out of sync with reality (git log, VeriSimDB CRG grade, ROADMAP.adoc), undermining the stated goal of the v2 redesign."
+
+[[should]]
+id = "S3"
+text = "The migration scripts SHOULD emit non-zero exit codes and clear diagnostics on malformed/missing input, distinguishing usage errors from parse errors."
+system = "none"
+status = "pass"
+evidence = "state-scm-to-v2.jl documents and implements distinct exit codes (0 ok, 2 parse/usage error, 3 not a (state ...) form) per its header comment and main()/convert() logic; state-migrate-v1-to-v2.sh uses `set -eu` and exits 1 with a message when the v1 file is missing (line 16)."
+effects = "Callers (CI or a future k9-init tool) can branch on exit code to decide whether to retry, prompt a human, or abort; without this, migration failures could pass silently and produce corrupt STATE.a2ml files downstream."
+
+[[could]]
+id = "C1"
+text = "A2ML templates COULD ship an accompanying `a2ml init` or `k9-init` CLI that scaffolds all 7 files into a new repo in one step."
+system = "none"
+status = "aspirational"
+effects = "Until built, adopters must manually copy each *.a2ml.template file and hand-fill placeholders, which is the exact friction the STATE.a2ml.v2 rationale section calls out as a driver of drift; this is referenced as future work ('k9-init migration tool, to be written') in STATE.a2ml.v2.spec.adoc."
+
+[[could]]
+id = "C2"
+text = "The migration tooling COULD support round-trip validation (convert v1 to v2, then verify the v2 output re-parses under the STATE.a2ml.v2 grammar) as a fuzz/property test."
+system = "none"
+status = "aspirational"
+effects = "Would give strong correctness guarantees for the s-expression and grep-based extraction logic across edge cases (nested quotes, missing sections, multiple sessions) beyond what's currently exercised (nothing, per M3)."
