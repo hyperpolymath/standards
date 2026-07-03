@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# avow-protocol.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "avow-protocol"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "The spec home MUST provide accurate, current documentation of implementation status (README/status markers reflect what actually exists)."
+system = "none"
+status = "fail"
+effects = "README.adoc (avow-protocol/README.adoc) mixes an original draft with an unedited pasted AI-assistant chat transcript (lines ~73-511, including phrases like 'I'm going to pressure-test this' and 'could you write me a replacement README.adoc') containing a proposed replacement README that was never cleanly applied. The doc also inconsistently names the project 'STAMP' vs 'AVOW' (avow-lib/README.adoc says 'formerly STAMP'; AVOW-THREAT-MODEL.adoc is titled 'STAMP Protocol: Comprehensive Threat Model'). Consumers reading the repo for protocol semantics or onboarding will be confused about actual status and even the project's name; downstream repos referencing 'avow-protocol' or 'stamp-protocol' risk drift."
+
+[[must]]
+id = "M2"
+text = "Formal-verification proofs (Idris2 ABI in avow-lib/src/abi and tests in avow-lib/tests) MUST be compiled and type-checked by an automated system before merge."
+system = "none"
+status = "fail"
+effects = "No .ipkg project file exists anywhere in the repo, and no .github/workflows/*.yml references idris2 or pack. avow-lib/tests/Main.idr, ConsentTests.idr, and UnsubscribeTests.idr exist as source but cannot be verified to even compile, let alone pass, since there is no build system wiring or CI job invoking them. Any consumer relying on the advertised 'mathematically proven' compliance properties (README/avow-lib README claims) has no evidence those proofs currently typecheck."
+
+[[must]]
+id = "M3"
+text = "The C-ABI FFI implementation (ffi/zig) MUST be a compilable, non-template implementation matching the declared Idris2 ABI."
+system = "none"
+status = "fail"
+effects = "ffi/zig/build.zig and ffi/zig/src/main.zig still contain unfilled template placeholders (`{{PROJECT}}`, `{{project}}`) and ffi/zig/test/integration_test.zig likewise references `{{project}}_init` etc. — this cannot compile as-is. (Contrast: avow-lib/ffi/zig/src/main.zig is a real, filled-in 'STAMP FFI Implementation'.) Any downstream binding (Rust example in avow-lib/examples/rust, Deno example in avow-lib/examples/deno) that expects a working libstamp/libavow shared library from ffi/zig will fail to build."
+
+[[must]]
+id = "M4"
+text = "The repository's licensing declaration MUST be single-sourced and consistent across LICENSE, README, and package manifests."
+system = "none"
+status = "manual-only"
+effects = "Three different license identifiers appear: LICENSE declares 'SPDX-License-Identifier: MPL-2.0' with a custom 'PALIMPSEST-MPL LICENSE VERSION 1.0' body; README.adoc states 'PMPL-1.0-or-later'; package.json declares 'AGPL-3.0-or-later'. Downstream consumers or legal/compliance reviewers of any repo depending on avow-protocol code cannot determine the actual applicable license terms without maintainer clarification; this is a governance/licensing judgment call, not something a script should silently resolve."
+
+[[must]]
+id = "M5"
+text = "The codebase MUST be scanned for security vulnerabilities via static analysis on every push and pull request."
+system = ".github/workflows/codeql.yml (CodeQL Advanced) — runs on push to main, pull_request to main, and weekly schedule, analyzing javascript-typescript and actions languages"
+status = "pass"
+evidence = ".github/workflows/codeql.yml defines the 'analyze' job with a language matrix (actions, javascript-typescript) using github/codeql-action/init and analyze@v3, triggered on push/pull_request/schedule; this is a real, currently configured CI workflow."
+effects = "Downstream repos/consumers get continuous automated code-scanning coverage for JS/TS and GitHub Actions definitions in this repo, reducing risk of shipping known vulnerability patterns; if this workflow were removed, that scanning safety net would be lost estate-wide for this spec."
+
+[[should]]
+id = "S1"
+text = "The spec SHOULD maintain a dedicated threat-model document covering adversaries, trust boundaries, and mitigations."
+system = "none (manually authored document, no automated freshness/consistency check)"
+status = "pass"
+evidence = "AVOW-THREAT-MODEL.adoc (24,831 bytes) exists with a substantive threat-actor analysis, threat-landscape matrix (Mass Bot Creation, Verification Bypass, Identity Theft, etc.) and mitigation mapping. Note it is still internally titled 'STAMP Protocol: Comprehensive Threat Model', indicating it has not been fully updated for the AVOW rename."
+effects = "Reviewers and integrators evaluating AVOW's security posture have a concrete artifact to consult, though the stale STAMP naming inside it means downstream readers may not immediately recognize it as the current AVOW threat model."
+
+[[should]]
+id = "S2"
+text = "The estate-wide 6SCM machine-readable metadata mirror SHOULD be kept in sync and this SHOULD be enforced by CI."
+system = ".github/workflows/6scm-sync.yml running scripts/check-6scm.sh"
+status = "fail"
+effects = "check-6scm.sh checks for AGENTIC.scm/ECOSYSTEM.scm/META.scm/NEUROSYM.scm/PLAYBOOK.scm/STATE.scm under .machine_readable/ and silently `continue`s (treats as pass) when the source file is absent. The actual repo only has .machine_readable/6a2/{META,ECOSYSTEM,STATE}.a2ml (a2ml format, different directory, different extension) — none of the six .scm files the check looks for exist, so the workflow passes vacuously without validating anything real. Consumers relying on the 6SCM governance mirror being verified have a false sense of assurance."
+
+[[should]]
+id = "S3"
+text = "The Deno/ReScript build and test tasks (deno.json) SHOULD be self-contained and runnable in CI."
+system = "none (no CI workflow runs `deno task test` or `deno task build`)"
+status = "fail"
+effects = "deno.json's imports map depends on sibling directories outside this repo via relative paths (../rescript-tea/src/, ../cadre-router/src/, ../cadre-tea-router/src/, ../rescript-dom-mounter/src/, ../proven/bindings/rescript/src/) and its build:all task chains to ../a2ml via `just cli`. None of .github/workflows/*.yml invoke deno tasks; only deploy-pages.yml runs `deno task build` for the static site deploy, with no test step. Any consumer trying to build/test avow-protocol standalone (without the full hyperpolymath monorepo checked out) will hit unresolved imports."
+
+[[should]]
+id = "S4"
+text = "The repository SHOULD be continuously assessed for OSSF Scorecard supply-chain security posture."
+system = ".github/workflows/scorecard.yml (OSSF Scorecard Action)"
+status = "pass"
+evidence = "scorecard.yml runs ossf/scorecard-action@4eaacf0... on push to main/master and a daily schedule, uploading SARIF results via github/codeql-action/upload-sarif — a real, currently configured workflow."
+effects = "Gives downstream consumers and OSSF-scorecard-consuming tooling (e.g. dependency risk dashboards) a continuously updated supply-chain security signal for this repo."
+
+[[could]]
+id = "C1"
+text = "The spec COULD provide runnable example client code demonstrating FFI consumption (Rust, Deno)."
+system = "none (no CI builds/runs these examples)"
+status = "fail"
+effects = "avow-lib/examples/rust/src/main.rs and avow-lib/examples/deno/stamp_example.js are real, substantive example code that load a compiled libstamp/libavow shared library via FFI, but no CI job builds ffi/zig or avow-lib/ffi/zig and then runs these examples against it, so they are unverified and could silently bit-rot."
+
+[[could]]
+id = "C2"
+text = "The spec COULD publish generated C headers for the FFI ABI to keep C-header/Idris2-ABI definitions in sync automatically."
+system = "none"
+status = "fail"
+effects = "avow-lib README.adoc documents an intended generated/abi/*.h directory for C headers, but no generated/ directory exists on disk and no script/CI job generates headers from the Idris2 ABI; only a hand-written avow-lib/ffi/zig/src/stamp.h exists, risking silent drift between the Idris2 source of truth and the C header consumers actually link against."
+
+[[could]]
+id = "C3"
+text = "The repository COULD reach and sustain an OSSF Scorecard score in the top tier (e.g. >=8/10) as an aspirational supply-chain hardening target."
+system = "none (aspirational; scorecard.yml reports a score but no gate enforces a minimum)"
+status = "aspirational"
+effects = "No consumer is currently blocked by this, but it represents a longer-term hardening goal beyond simply running the scorecard scan (S4)."

@@ -61,6 +61,18 @@ must-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
 hooks-install:
     @bash hooks/install.sh
 
+# Regenerate the compliance dashboard from the per-spec scorecards
+scorecards:
+    @bash scripts/build-scorecards.sh
+
+# Fail if COMPLIANCE-DASHBOARD.md has drifted from the scorecards
+scorecards-check:
+    @bash scripts/build-scorecards.sh --check
+
+# Strict: also fail if any registered local spec lacks a scorecard
+scorecards-check-strict:
+    @bash scripts/build-scorecards.sh --check --strict
+
 # Aggregate compliance gate: registry drift is the HARD gate (registry-check,
 # a hard dep). The RSR self-audit is INFORMATIONAL — a monorepo is not expected
 # to score Gold — but a *broken* audit (exit 4 / unexpected) must fail loudly
