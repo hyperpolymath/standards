@@ -1,0 +1,821 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= A2ML Record Dialect v1.0.0 Specification
+:version: 1.0.0
+:date: 2026-07-03
+:status: Draft
+:era: v1
+:toc: left
+:toclevels: 3
+:icons: font
+:sectnums:
+
+[abstract]
+== Abstract
+
+The *A2ML Record Dialect* is a second concrete surface syntax for A2ML. Where the
+markup dialect (link:SPEC.adoc[A2ML v1.1.0], "Module 0") carries prose-bearing
+documents with `@directive:` blocks, the record dialect carries *pure data
+records* with a TOML-family surface: `[section]` headers and `key = value`
+entries. It exists because the seven canonical descriptive files that the
+hyperpolymath estate deploys on every repository — `STATE`, `META`, `ECOSYSTEM`,
+`AGENTIC`, `NEUROSYM`, `PLAYBOOK`, `ANCHOR` (working name *descriptiles*) — are
+written in this surface, and until now the surface was *used* but never
+*specified*: 435 files across the estate conform to a grammar that existed only
+by imitation.
+
+The record dialect is **not a rival format**. It is a co-equal reader over the
+same typed core defined in link:SPEC.adoc[A2ML v1.1.0] §3. Every record-dialect
+document translates to an A2ML `Doc`; the validation modes (§4 of the core),
+base invariants (§6), Base Record vocabulary (§7), profile mechanism (§8), and
+canonical hash form (§9) apply *unchanged*. A profile such as `a2ml/state`
+constrains a record-dialect document exactly as it constrains a markup-dialect
+one, because both resolve to the same core structure. This is the point: one
+abstract model, two surfaces, no third generation.
+
+This specification defines the record surface grammar, its value/type system, its
+translation to the A2ML core, its conformance classes, and — normatively — its
+divergences from TOML, so that an implementer cannot conform merely by piping the
+input through a stock TOML parser. It ships with an executable conformance-vector
+suite (§16).
+
+== 1. Introduction
+
+=== 1.1 Position In The Stack
+
+A2ML has one abstract data model and (as of this document) two concrete surfaces:
+
+[cols="1,2,2",options="header"]
+|===
+| Surface | Shape | Fit
+
+| *Markup dialect* (link:SPEC.adoc[SPEC.adoc] §2)
+| Djot-like `@directive:` blocks, prose, figures, opaque payloads
+| Documents that carry human-readable text alongside structure.
+
+| *Record dialect* (this document)
+| TOML-like `[section]` headers, `key = value` entries, arrays, inline tables
+| Data records with no prose body: the descriptile family, config-like metadata.
+|===
+
+Both surfaces parse to the typed core `Doc` (link:SPEC.adoc[SPEC.adoc] §3.1). A
+consumer that operates on the core — a profile validator, the canonical hasher,
+the registry drift check — is *surface-agnostic*: it neither knows nor cares
+which dialect produced the `Doc` it is handed.
+
+[NOTE]
+====
+The markup dialect already defines an `@record` *block* directive with
+`key: value` fields (link:SPEC.adoc[SPEC.adoc] §7.3). That is a record written
+*inside a markup document*. The record dialect specified here is the *whole
+document* being a record, in the surface the estate actually deploys (`key =
+value`, not `key: value`; `[section]` headers, which the markup dialect has no
+notion of). The two are reconciled in §7 of this document: an `@record` block and
+a record-dialect `[section]` both denote the same core structure.
+====
+
+=== 1.2 Design Principles
+
+. *One model, many surfaces.* The record dialect adds a reader, never a second
+  source of truth. Semantics live in the core; this document defines only how
+  record surface maps onto it.
+. *Specify what is deployed.* Every production in §2–§6 is grounded in the
+  observed corpus of 435 record-dialect files. Where the corpus is silent, the
+  rule is the *stricter* choice (fail-loudly doctrine), not the permissive one.
+. *TOML-familiar, not TOML.* The surface is deliberately TOML-shaped so authors
+  and editors reuse muscle memory and syntax highlighting, but the conformance
+  bar is A2ML's, and the divergences (§12) are normative.
+. *Data-only by default.* A base record-dialect document carries data and at most
+  a profile declaration. It grants no execution, network, or filesystem
+  capability — the same read-only guarantee the core makes for profiles
+  (link:SPEC.adoc[SPEC.adoc] §8.2).
+. *Verifiable by construction.* A document's identity is its canonical hash (§11);
+  a profile's authority is its hash-pinned registry entry
+  (link:SPEC.adoc[SPEC.adoc] §8.5). Nothing in this dialect rests on trust of
+  surface bytes.
+
+=== 1.3 Conformance Language
+
+The key words *MUST*, *MUST NOT*, *REQUIRED*, *SHALL*, *SHALL NOT*, *SHOULD*,
+*SHOULD NOT*, *RECOMMENDED*, *MAY*, and *OPTIONAL* in this document are to be
+interpreted as described in RFC 2119 and RFC 8174 when, and only when, they
+appear in all capitals.
+
+=== 1.4 Conformance Classes
+
+Conformance classes for the record dialect mirror the core validation modes
+(link:SPEC.adoc[SPEC.adoc] §4) and are named with an `R` prefix to disambiguate
+from the markup dialect:
+
+[cols="1,2,4",options="header"]
+|===
+| Class | Core mode | Obligation
+
+| *R0 — Reader*
+| Lax
+| MUST parse every syntactically valid record-dialect document into a record tree
+  (§6) and, by extension, an A2ML `Doc` (§7). MUST accept a `@profile` declaration
+  and, if it does not resolve profiles, ignore it (inert). Emits warnings, not
+  errors, for missing/duplicate keys. This is the minimum useful class: a tool
+  that only *reads* descriptiles (a dashboard, an indexer) MAY stop here.
+
+| *R1 — Checked*
+| Checked
+| All of R0, plus: MUST reject the well-formedness errors enumerated in §2–§6
+  and §9; MUST reject duplicate keys and duplicate section paths; MUST reject any
+  directive other than `@profile` unless an active profile permits it; MUST
+  enforce an active profile's required sections and required directives (§10).
+
+| *R2 — Attested*
+| Attested
+| All of R1, plus: MUST discharge the base invariants of §9 as proof obligations;
+  MUST compute the canonical hash (§11); MUST satisfy any `min_attestation`
+  declared by an active profile. Used for documents whose integrity is relied
+  upon downstream (e.g. a registry-pinned profile definition).
+|===
+
+A conforming implementation MUST document which class it implements. Class R_n_
+conformance implies the obligations of all classes below it.
+
+== 2. Lexical Structure
+
+=== 2.1 Character Set And Encoding
+
+A record-dialect document is a sequence of Unicode scalar values encoded as UTF-8.
+A conforming parser:
+
+* MUST accept UTF-8 input and MUST NOT require a byte-order mark; if a leading
+  U+FEFF is present it MUST be ignored.
+* MUST treat the input as UTF-8 and MUST reject (R1+) input that is not
+  well-formed UTF-8.
+* MUST NOT perform newline translation, trimming, or any normalisation of bytes
+  inside a string value or a triple-quoted string (this preserves the §11 hash
+  and mirrors the core's opaque-payload fidelity rule,
+  link:SPEC.adoc[SPEC.adoc] §5).
+
+=== 2.2 Lines, Whitespace, Newlines
+
+* *Whitespace* is U+0020 SPACE and U+0009 TAB. Whitespace is insignificant except
+  inside string values and as a token separator.
+* A *newline* is U+000A LF or the sequence U+000D U+000A CRLF. A bare U+000D not
+  followed by U+000A is invalid (R1+).
+* A *blank line* is a line containing only whitespace. Blank lines are
+  insignificant and MAY appear anywhere between entries.
+
+=== 2.3 Comments
+
+A *comment* begins with U+0023 NUMBER SIGN (`#`) and continues to the end of the
+line. Two positions are recognised, both observed pervasively in the corpus
+(1,418 of 1,798 files carry trailing comments):
+
+* *Full-line comment*: a line whose first non-whitespace character is `#`.
+* *Trailing comment*: a `#` appearing after the value of a `key = value` entry,
+  after a section header, or after a `@profile` declaration.
+
+A `#` inside a string value or triple-quoted string is a literal `#`, not a
+comment. A `#` MAY appear inside a multi-line array between elements (corpus:
+placeholder markers such as `# No milestones recorded`). Comments carry no
+semantics and are discarded during translation to the core; they do not
+contribute to the canonical hash (§11).
+
+[NOTE]
+====
+The SPDX and copyright lines conventional at the top of estate files
+(`# SPDX-License-Identifier: MPL-2.0`, `# Copyright (c) …`) are ordinary full-line
+comments under this rule. They are *not* part of the record data and are not
+hashed. SPDX presence is a repository-hygiene concern enforced elsewhere, not a
+record-dialect obligation.
+====
+
+=== 2.4 Tokens
+
+The significant tokens are: `[`, `]`, `[[`, `]]`, `{`, `}`, `=`, `,`, `.`, the
+`@profile` keyword-directive, bare keys, quoted keys, string literals,
+triple-quoted string literals, integer literals, float literals, the boolean
+keywords `true` and `false`, and newlines. All are defined in §3–§4.
+
+== 3. Surface Grammar
+
+This section is normative. Appendix A consolidates the same grammar. Where the
+prose of §4–§6 and this EBNF differ, this section governs. The notation is
+ISO/IEC 14977 EBNF with the conventions: `{ x }` is zero-or-more, `[ x ]` is
+optional, `|` is alternation, `,` is concatenation, terminals are quoted.
+
+[source,ebnf]
+----
+document        = { blank-or-comment } ,
+                  { profile-decl , { blank-or-comment } } ,
+                  { section } ;
+
+blank-or-comment = ( comment-line | blank-line ) , newline ;
+
+profile-decl    = "@profile" , ws , "(" , ws , "id" , ws , "=" , ws ,
+                  qualified-id , ws , ")" , [ trailing-comment ] , newline ;
+
+section         = section-header ,
+                  { entry } ;
+
+section-header  = ( std-header | array-header ) ,
+                  [ trailing-comment ] , newline ;
+std-header      = "[" , ws , key-path , ws , "]" ;
+array-header    = "[[" , ws , key-path , ws , "]]" ;
+
+entry           = ( key-value | comment-line | blank-line ) ,
+                  ( newline | end-of-input ) ;
+
+key-value       = key , ws , "=" , ws , value , [ trailing-comment ] ;
+
+key-path        = key , { ws , "." , ws , key } ;
+key             = bare-key | quoted-key ;
+bare-key        = key-char , { key-char } ;
+key-char        = letter | digit | "_" | "-" ;
+quoted-key      = '"' , { basic-char } , '"' ;
+qualified-id    = bare-key , { "/" , bare-key } ;
+
+value           = string
+                | multiline-string
+                | integer
+                | float
+                | boolean
+                | array
+                | inline-table ;
+
+string          = '"' , { basic-char } , '"' ;
+multiline-string = '"""' , { any-char - '"""' } , '"""' ;
+boolean         = "true" | "false" ;
+integer         = [ sign ] , digit , { digit | ( "_" , digit ) } ;
+float           = [ sign ] , digit , { digit | ( "_" , digit ) } ,
+                  ( ( "." , digit , { digit | ( "_" , digit ) } , [ exponent ] )
+                  | exponent ) ;
+exponent        = ( "e" | "E" ) , [ sign ] , digit , { digit } ;
+sign            = "+" | "-" ;
+
+array           = "[" , array-body , "]" ;
+array-body      = { ws | newline | comment-line } ,
+                  [ value , { value-sep , value } , [ value-sep ] ] ,
+                  { ws | newline | comment-line } ;
+value-sep       = { ws | newline | comment-line } , "," ,
+                  { ws | newline | comment-line } ;
+
+inline-table    = "{" , ws ,
+                  [ inline-pair , { ws , "," , ws , inline-pair } ] ,
+                  ws , "}" ;
+inline-pair     = key , ws , "=" , ws , value ;
+
+comment-line    = ws , "#" , { any-char } ;
+trailing-comment = ws , "#" , { any-char } ;
+blank-line      = ws ;
+
+basic-char      = unescaped | escape-seq ;
+escape-seq      = "\" , ( '"' | "\" | "/" | "b" | "f" | "n" | "r" | "t"
+                        | ( "u" , hex , hex , hex , hex ) ) ;
+letter          = "A".."Z" | "a".."z" ;
+digit           = "0".."9" ;
+hex             = digit | "a".."f" | "A".."F" ;
+ws              = { " " | "\t" } ;
+----
+
+*Grounding notes* (informative). Every construct above appears in the deployed
+corpus: dotted `key-path` up to four segments (`[categories.CHS]`); `array-header`
+(41 files); `inline-table` and arrays thereof (104 files); `multiline-string`
+(29 files; `"""…"""` only — `'''` never observed and is not part of the grammar);
+`quoted-key` (rare — 2 lines: `"--browser"`); uppercase in section-path segments
+(81 headers). Bare *string* values were never observed (0 files); accordingly a
+bare word that is neither a number, `true`, nor `false` is a syntax error (§4.7).
+
+== 4. Values And Types
+
+The record dialect has exactly six value forms and no others. This closed set is a
+deliberate divergence from TOML (§12).
+
+=== 4.1 String
+
+A *string* is a sequence of `basic-char` delimited by `"`. It MUST be a single
+logical line (no unescaped newline). The recognised escape sequences are exactly:
+`\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`, and `\uXXXX` (four hex digits,
+denoting a Unicode scalar value). A backslash followed by any other character is
+an error (R1+). The string's *value* is the sequence of scalar values after escape
+resolution.
+
+=== 4.2 Multi-line String
+
+A *multi-line string* is delimited by `"""` and MAY contain newlines. Its bytes
+between the delimiters are preserved verbatim except that the delimiters
+themselves are removed; no escape processing and no whitespace trimming is
+performed (corpus example: `purpose = """Bot fleet for repository quality
+enforcement …"""`). A `"""` cannot appear inside a multi-line string. Byte
+fidelity here is load-bearing for the §11 hash.
+
+=== 4.3 Integer
+
+An *integer* is an optionally-signed sequence of decimal digits, optionally with
+`_` digit-group separators between digits. Leading, trailing, or doubled `_` is an
+error. No hexadecimal, octal, or binary forms exist (§12). The value is a
+mathematical integer; range is implementation-defined but an implementation MUST
+represent at least the signed 64-bit range.
+
+=== 4.4 Float
+
+A *float* is an optionally-signed decimal with a fractional part, an exponent, or
+both. `inf`, `nan`, and leading-dot forms (`.5`) do not exist (§12). The value is
+a decimal real; precision is implementation-defined but MUST be at least IEEE-754
+binary64.
+
+=== 4.5 Boolean
+
+A *boolean* is the bare keyword `true` or `false`, lowercase only.
+
+=== 4.6 Array
+
+An *array* is an ordered, possibly heterogeneous sequence of values delimited by
+`[` and `]`. It MAY span multiple lines; a trailing comma before `]` is permitted;
+full-line comments MAY appear between elements. Nesting (arrays of arrays, arrays
+of inline tables) is permitted to arbitrary depth. Order is significant to the
+reader but not to the canonical hash unless the array is the value of a hashed key
+(§11).
+
+=== 4.7 Inline Table
+
+An *inline table* is an unordered set of `key = value` pairs delimited by `{` and
+`}`, written on a single logical line. Keys within one inline table MUST be unique
+(R1+). Inline tables MAY nest and MAY be elements of an array (corpus:
+`decisions = [ { id = "ADR-001", … } ]`). An inline table is a *table value*; it
+is distinct from a `[section]` (§5), which is a document-structural construct.
+
+=== 4.8 Absence Of Bare Strings And Native Dates
+
+Any value token that is not a quoted string, a triple-quoted string, an integer, a
+float, `true`, `false`, an array, or an inline table is a syntax error in all
+classes including R0. In particular a *date* is written as a quoted string
+(corpus: `last-updated = "2026-05-15"`, `timestamp = "2026-06-03T11:00:00Z"`);
+there is no native date-time value form (§12). A profile MAY require that a given
+string key match RFC 3339 (§10), but the surface treats it as a string.
+
+== 5. Document Structure
+
+=== 5.1 Preamble
+
+A document begins with an OPTIONAL *preamble* of blank lines, comment lines, and
+zero or more `@profile` declarations. All `@profile` declarations MUST precede the
+first section header; a `@profile` appearing after any section header is a
+checked-mode error (mirrors link:SPEC.adoc[SPEC.adoc] §8.1). The SPDX/copyright
+comment block conventional at the top of estate files lives here as comments.
+
+=== 5.2 Profile Declaration
+
+`@profile(id=<qualified-id>)` declares that the document is authored under the
+named profile. Semantics are inherited from link:SPEC.adoc[SPEC.adoc] §8.1
+without change: the `id` is a `QualifiedId` `<namespace>/<name>`; multiple
+declarations compose by taking the union of constraints; the declaration is inert
+under R0 if the reader does not resolve profiles. Resolution (against
+`a2ml/profiles/REGISTRY.a2ml`) is defined by the core §8.3 and §8.5.
+
+=== 5.3 Sections
+
+A *section* is introduced by a header and contains the `key = value` entries,
+comments, and blank lines up to the next header or end of input. There are two
+header forms:
+
+* *Standard section* `[key-path]` — introduces (or, for a dotted path, addresses)
+  a table in the record tree (§6).
+* *Array-of-tables* `[[key-path]]` — appends a new table to the array named by
+  `key-path`. Every `[[key-path]]` with the same path contributes one element to
+  that array, in source order.
+
+=== 5.4 Key-Paths And Nesting
+
+A `key-path` is one or more keys joined by `.`. `[a]` addresses the top-level
+table `a`; `[a.b]` addresses table `b` nested within `a`; and so on to arbitrary
+depth (four segments observed). Whitespace around the `.` is permitted and
+insignificant. A dotted header MUST NOT redefine a path already fixed as a
+non-table value; doing so is a checked-mode error (§9.2).
+
+=== 5.5 Entries
+
+Within a section, each non-comment, non-blank line is a `key = value` entry. A key
+MAY be a `bare-key` or a `quoted-key`; a `quoted-key` is REQUIRED when the key
+contains a character outside `key-char` (corpus: `"--browser"`). Keys within a
+single table MUST be unique (§9.1).
+
+== 6. The Record Tree (Data Model)
+
+A record-dialect document denotes a *record tree*: a rooted tree whose interior
+nodes are *tables* (ordered maps from key to node) and *arrays* (ordered
+sequences of nodes), and whose leaves are the scalar values of §4.1–§4.5.
+
+Construction:
+
+. The root is a table.
+. Each `@profile` declaration contributes to the document's ordered profile list
+  (not to the record tree; profiles are metadata about the tree, mirroring
+  `Doc.profiles` in the core).
+. A standard section header `[p_1.p_2.…​.p_n]` ensures a table exists at the path
+  `p_1 → p_2 → … → p_n` from the root, creating intermediate tables as needed, and
+  makes it the *current table*.
+. An array-of-tables header `[[p_1.…​.p_n]]` ensures an array exists at that path,
+  appends a fresh table to it, and makes that table the current table.
+. Each `key = value` entry inserts `key ↦ value` into the current table. `value`
+  is realised as a leaf (scalar), a sub-table (inline table), or an array node.
+
+The record tree is the *canonical content* of the document for every downstream
+purpose: profile validation (§10), the base invariants (§9), and the canonical
+hash (§11) are all defined over the record tree, never over surface bytes.
+
+== 7. Mapping To The A2ML Core
+
+A record-dialect document translates to a core `Doc`
+(link:SPEC.adoc[SPEC.adoc] §3.1) so that surface-agnostic consumers operate on it
+unchanged. The translation is:
+
+[cols="2,3",options="header"]
+|===
+| Record-dialect construct | Core `Doc` element
+
+| Each `@profile(id=ns/name)`, in source order
+| An entry in `Doc.profiles` (`ProfileId`), identical to a markup `@profile`.
+
+| Each top-level section `[a] …`
+| A `Section` block in `Doc.blocks` whose `id` is derived from the key-path (§7.1)
+  and whose content is the sub-tree rooted at that section.
+
+| A dotted section `[a.b]`
+| Structure *within* the `Section` for `a`; it does not add a second top-level
+  block. Nesting in the record tree becomes nesting in the section's content.
+
+| An array-of-tables `[[a]]` (one or more)
+| A single `Section` (or `Record` list) for `a` whose content is an ordered list
+  of tables — the core represents the repetition as list-structured content.
+
+| A `key = value` whose sub-tree matches the Base Record field set (§7.2)
+| A `Record` block (link:SPEC.adoc[SPEC.adoc] §7): a `[section]` (or inline table)
+  carrying `id`, `source_span`, `hash`, `provenance`, `timestamp`,
+  `artefact_ref` IS a base record written in record surface, and is validated as
+  one.
+|===
+
+=== 7.1 Section Id Derivation
+
+The `id` of the `Section` produced from a top-level section is the section's
+key-path with `.` retained as the separator (e.g. `[categories.CHS]` → id
+`categories.CHS`). Ids MUST be unique within the document (core invariant §6.1);
+two top-level sections with the same key-path are a checked-mode error (§9.2). An
+implementation MAY additionally expose a slash-normalised form for `@ref` targets,
+but the dotted form is canonical.
+
+=== 7.2 Equivalence Of `@record` And Record-Surface Base Records
+
+link:SPEC.adoc[SPEC.adoc] §7.3 writes a base record as an `@record:` block with
+`key: value` fields. The record dialect writes the same base record as a
+`[section]` (or inline table) with `key = value` fields. Both denote the identical
+core `Record`; a validator MUST accept either surface for a base record and MUST
+apply the §7.2 field requirements (`id`, `source_span`, `hash`, `provenance`,
+`timestamp`, `artefact_ref` REQUIRED; `kind ∈ {human, ai, mechanical}` closed)
+identically. This equivalence is what prevents the "desync" the core §7 warns
+about: the same thing is literally the same fields regardless of surface.
+
+== 8. Validation Modes And Conformance
+
+The record dialect does not define its own modes. A document's mode is chosen by
+the validator invocation and is one of the core modes lax/checked/attested
+(link:SPEC.adoc[SPEC.adoc] §4), which correspond to classes R0/R1/R2 (§1.4).
+Mode and profile remain orthogonal and compose by taking the stricter of the two
+at every axis (link:SPEC.adoc[SPEC.adoc] §4.4). A profile MAY raise the effective
+floor (via `min_attestation`) but MUST NOT lower it.
+
+== 9. Base Invariants In The Record Dialect
+
+The core base invariants (link:SPEC.adoc[SPEC.adoc] §6) apply to the translated
+`Doc`. This section states their record-surface form.
+
+=== 9.1 Unique Keys
+
+Within any single table (a section, a dotted sub-table, one element of an
+array-of-tables, or one inline table), each key MUST appear at most once.
+Duplicate keys are a warning under R0 and an error under R1+. When an
+implementation nonetheless proceeds under R0, last-write-wins is the defined
+recovery, and the implementation MUST emit the duplicate-key warning.
+
+=== 9.2 Unique And Consistent Section Paths
+
+A given standard section path MUST be opened at most once (`[a]` … `[a]` again is
+an error, R1+). A path used as a table MUST NOT also be used as a scalar or as an
+array-of-tables, and vice versa; mixing structural kinds at one path is an error
+(R1+). Array-of-tables `[[a]]` MAY of course repeat — that is its purpose.
+
+=== 9.3 Unique Ids
+
+The derived section ids (§7.1) MUST be unique (core §6.1). This follows from §9.2
+for top-level sections and is stated here because downstream `@ref` resolution
+depends on it.
+
+=== 9.4 Resolved References
+
+If a value is used as an intra-document reference under an active profile's
+reference-class rule (link:SPEC.adoc[SPEC.adoc] §8.2), the referenced id MUST
+exist (core §6.2). The base surface imposes no reference semantics; references are
+a profile concern (§10).
+
+=== 9.5 Required Sections
+
+An active profile MAY require named sections to be present (core §6.3, §8.2). In
+the record dialect a "required section" is satisfied by a top-level `[section]`
+whose key-path equals the required name. This is exactly the axis the shipped
+`a2ml/*` profiles use (e.g. `a2ml/state` requires `metadata`, `position`,
+`maintenance-status`).
+
+== 10. Profiles In The Record Dialect
+
+Profiles are defined once, in the core (link:SPEC.adoc[SPEC.adoc] §8), and are
+surface-independent. A record-dialect document participates in the profile
+mechanism as follows:
+
+* It declares a profile with `@profile(id=ns/name)` in its preamble (§5.2).
+* The profile *definition* (`a2ml/profiles/<ns>-<name>/PROFILE.a2ml`) constrains
+  the five permitted axes: required sections, allowed directives, required
+  directives, reference classes, minimum attestation
+  (link:SPEC.adoc[SPEC.adoc] §8.2).
+* For the record dialect specifically:
+  ** *Required sections* map to required top-level `[section]` headers (§9.5).
+  ** *Allowed directives* is normally `closed [ profile ]` — a base record-dialect
+     document permits no directive other than `@profile`. A profile MAY widen this
+     (e.g. to permit an embedded `@record` block), but the base surface is
+     data-only. Any `@`-token other than a permitted directive is a checked-mode
+     error.
+  ** *Required directives*, *reference classes*, and *minimum attestation* apply
+     unchanged from the core.
+* Resolution is offline and deterministic against the hash-pinned registry
+  (link:SPEC.adoc[SPEC.adoc] §8.3, §8.5). A profile a document cannot resolve is a
+  warning under R0 and an error under R1+.
+
+[NOTE]
+====
+The seven descriptile profiles (`a2ml/state`, `a2ml/meta`, `a2ml/ecosystem`,
+`a2ml/agentic`, `a2ml/neurosym`, `a2ml/playbook`, `a2ml/anchor`) are *already*
+authored against this dialect — their `required_sections` name `[section]`
+headers, and their prose calls the target "record-dialect A2ML". This
+specification is the missing normative surface those profiles were written
+against; it does not change them.
+====
+
+== 11. Canonical Form And Hashing
+
+A record-dialect document's canonical hash is the core *document canonical hash*
+(link:SPEC.adoc[SPEC.adoc] §9.3) computed over the record tree (§6):
+
+. Translate the surface to the record tree (§6), discarding comments, blank lines,
+  and incidental whitespace, and resolving string escapes (§4.1).
+. Serialise the record tree as canonical JSON per RFC 8785 (JCS): object keys
+  sorted lexicographically, no insignificant whitespace, UTF-8, shortest number
+  forms. Tables become JSON objects; arrays and arrays-of-tables become JSON
+  arrays; scalars become the corresponding JSON scalar (a multi-line string
+  becomes a JSON string of its verbatim bytes).
+. `doc_hash = "sha256:" + lowerhex(SHA-256(canonical_json))`.
+
+Because keys are sorted and whitespace is dropped, two record-dialect documents
+that differ only in key order, comment text, or formatting hash equal; any change
+to structure, keys, or scalar values changes the hash. For a base record written
+in record surface, the record's own `hash` field is the artefact hash per core
+§9.2/§9.4 (the byte hash of the referenced artefact), *not* the `doc_hash` of the
+containing document.
+
+[NOTE]
+====
+The record tree contains no opaque payloads (those are a markup-dialect
+construct), so the payload-substitution step of core §9.3 is a no-op here. A
+multi-line string is hashed as an ordinary JSON string of its exact bytes, which
+gives multi-line string values the same byte-fidelity guarantee opaque payloads
+have in the markup dialect.
+====
+
+== 12. Divergences From TOML (Normative)
+
+The record surface is TOML-shaped, but conformance to this specification is *not*
+implied by conformance to TOML, and vice versa. An implementation MUST NOT satisfy
+R1+ merely by delegating to a stock TOML parser without applying the following
+constraints. Each divergence is grounded in the deployed corpus or the fail-loudly
+doctrine.
+
+[cols="1,3,3",options="header"]
+|===
+| # | A2ML Record Dialect | TOML
+
+| D-1
+| *No native date-time.* Dates/times are quoted strings; a profile MAY require RFC
+  3339. (Corpus: 0 native date literals; dates always quoted.)
+| Offset date-time, local date-time, local date, and local time are first-class
+  value types.
+
+| D-2
+| *No bare strings.* Every string value MUST be quoted. A bare word that is not a
+  number/`true`/`false` is a syntax error. (Corpus: 0 bare string values.)
+| TOML also requires quoting for strings, but permits bare *keys* only; A2ML
+  matches TOML on keys and is stricter in rejecting any accidental bare scalar.
+
+| D-3
+| *Reduced number forms.* Decimal integers and decimal floats only, with optional
+  `_` separators. No `0x`/`0o`/`0b`, no `inf`/`nan`, no leading-dot floats.
+| Hexadecimal, octal, binary, `inf`, `nan`, and leading/trailing-dot forms are all
+  valid.
+
+| D-4
+| *`@profile` directive.* The preamble MAY carry `@profile(id=…)` — an A2ML
+  construct with no TOML analogue. It is the only directive a base document
+  permits.
+| No directive syntax exists; a `@` at line start is a bare-key error.
+
+| D-5
+| *String value = quoted only; escapes are the JSON set.* Basic strings use
+  exactly `\" \\ \/ \b \f \n \r \t \uXXXX`. No TOML "literal strings" (single
+  quotes) and no `\U########` 8-digit form. (Corpus: 0 single-quoted string
+  values; `'''` never observed.)
+| Literal strings (`'…'`), multi-line literal strings (`'''…'''`), and the
+  `\U########` escape are all valid.
+
+| D-6
+| *Closed value set of six forms* (§4). Anything else is a syntax error at R0.
+| Extensible via the date-time and numeric-base forms above.
+
+| D-7
+| *Duplicate keys / re-opened sections are R1 errors with a defined R0 recovery*
+  (last-write-wins + mandatory warning). Structural-kind mixing at a path is an
+  error. (Fail-loudly doctrine.)
+| Duplicate keys and re-opened standard tables are errors; A2ML additionally fixes
+  the lax-mode recovery behaviour so readers agree.
+
+| D-8
+| *Canonical hash is defined* (§11): JCS over the record tree. Two documents with
+  the same data hash equal regardless of key order or formatting.
+| TOML defines no canonical form or hash.
+|===
+
+An implementation MAY use a TOML lexer as a starting point but MUST additionally:
+reject the forms in D-1/D-3/D-5, treat `@profile` per §5.2, apply the §9 invariant
+set, and compute the §11 hash.
+
+== 13. Security Considerations
+
+* *Read-only by construction.* A record-dialect document is data plus an optional
+  profile declaration. It cannot request execution, network, or filesystem
+  capability, and a profile cannot grant one (core §8.2). A consumer MUST NOT
+  derive capability from record content; any such policy lives outside A2ML.
+* *Resource exhaustion.* Arbitrary array/table nesting and multi-line strings
+  admit adversarial inputs. A conforming validator SHOULD impose configurable
+  limits on document size, nesting depth, and string length, and MUST fail closed
+  (reject) rather than truncate when a limit is exceeded (mirrors core §12.2).
+* *Injection.* Because there are no bare strings and no directive other than
+  `@profile`, the surface has no interpolation or reference-to-code affordance. A
+  `#` inside a string is literal; a validator MUST NOT treat string content as a
+  comment or directive.
+* *Hash agility.* §11 pins SHA-256. A future minor version MAY add algorithms; a
+  validator MUST reject an unrecognised `sha…:` prefix rather than accept it
+  unverified (core §12.4).
+* *Profile cycles.* Profile resolution MUST detect and reject cycles (core §12.3);
+  the record dialect adds no new resolution path.
+
+== 14. IANA And Media-Type Considerations
+
+The A2ML family's media-type registration is being consolidated; at the time of
+writing three inconsistent forms are recorded across the repository
+(`application/vnd.a2ml+text`, `text/a2ml`, `application/vnd.{format}+a2ml`). This
+specification does *not* unilaterally resolve that inconsistency. It records only
+the requirement that, once the family type is registered, the record dialect be
+distinguishable from the markup dialect — RECOMMENDED via a `dialect=record`
+parameter on the family media type rather than a separate type, since both
+dialects share one core model. Resolution of the registration is tracked as an
+open item for the A2ML maintainers (see `IANA-MEDIA-TYPE-APPLICATION.md`).
+
+== 15. Versioning
+
+* This document is versioned with SemVer, independently of the markup-dialect
+  `SPEC.adoc`, but within the same *era* (`v1`) and the same shared core.
+* Additive changes (a new inert value form that no prior-conforming document uses,
+  a new optional constraint) are MINOR bumps. A change that would reject a
+  currently-conforming corpus document is a MAJOR bump and requires a migration
+  note and a deprecation window.
+* Lineage convention: this `RECORD-DIALECT-SPEC.adoc` is the current normative
+  text; frozen prior versions live in `archive/`; lineage is recorded in
+  `VERSIONS.adoc` alongside the markup dialect.
+* *Status of this document.* `Draft`. It is a faithful specification of the
+  *deployed* surface, but it has not yet been ratified by the owner, wired into
+  CI, or exercised against the full corpus by a reference validator. It MUST NOT
+  be cited as a ratified standard until (a) the conformance-vector suite (§16)
+  passes against a reference implementation and (b) a corpus conformance run
+  reports the residual non-conforming files. Both are tracked as the immediate
+  next steps (Appendix D).
+
+== 16. Conformance Vectors
+
+A specification is only evidenced if an implementer can test against it. This
+document ships an executable conformance-vector suite at
+`a2ml/tests/record-dialect/`:
+
+* `vectors/valid/*.a2ml` — documents that MUST parse (R0) and, where a profile is
+  declared, MUST validate (R1) against the profiles in `a2ml/profiles/`.
+* `vectors/invalid/*.a2ml` — documents that MUST be rejected, each annotated with
+  the clause it violates and the class (R0/R1/R2) at which rejection is REQUIRED.
+* `MANIFEST.a2ml` — itself a record-dialect document (dogfooding) enumerating each
+  vector, its expected verdict, and the section of this spec it exercises.
+* `README.adoc` — how a validator consumes the suite and reports results.
+
+A reference validator conforms to class R_n_ iff it produces the expected verdict
+for every vector whose required class is ≤ R_n_. The suite is the normative test
+of this specification; where a vector and the prose disagree, that is a defect in
+one of them and MUST be reconciled, not silently tolerated.
+
+== Appendix A: Consolidated Grammar
+
+The complete EBNF is the block in §3, reproduced by tooling into
+`docs/GRAMMAR-RECORD.adoc` when that file is generated. §3 is normative where the
+two differ.
+
+== Appendix B: Worked Example
+
+A real deployed `STATE.a2ml`, annotated against this specification:
+
+[source]
+----
+# SPDX-License-Identifier: MPL-2.0          <1>
+# STATE.a2ml — Gitbot Fleet project state   <1>
+@profile(id=a2ml/state)                      <2>
+
+[metadata]                                   <3>
+project = "gitbot-fleet"                     <4>
+version = "2.0"
+last-updated = "2026-04-05T22:00:00Z"        <5>
+
+[route-to-mvp]
+milestones = [                               <6>
+  # No milestones recorded
+]
+
+[architecture-decisions]
+decisions = [
+  { id = "ADR-001", status = "accepted" }    <7>
+]
+
+[position]
+phase = "operational-deployment"   # design | implementation | …  <8>
+completion-percentage = 85                   <9>
+----
+<1> Preamble comments (§5.1): SPDX/copyright; discarded, not hashed (§2.3).
+<2> Profile declaration (§5.2); MUST precede the first section; inert under R0.
+<3> Standard section header (§5.3) → a table `metadata` in the record tree and a
+    `Section` block with id `metadata` in the core (§7).
+<4> `key = value` entry; the value is a quoted string (§4.1).
+<5> A date is a quoted string, not a native date-time (D-1).
+<6> Multi-line array with an interior comment (§4.6); trailing comma permitted.
+<7> Array of inline tables (§4.6, §4.7).
+<8> Trailing comment after a value (§2.3); discarded.
+<9> Bare integer value (§4.3).
+
+The `a2ml/state` profile (§10) requires the sections `metadata`, `position`, and
+`maintenance-status`; a validator at R1 checks their presence and rejects any
+directive other than `@profile`.
+
+== Appendix C: Relationship To The A2ML Core And Markup Dialect
+
+[source]
+----
+                 ┌─────────────────────────────┐
+   surface A ──▶ │  Markup dialect (SPEC.adoc)  │ ─┐
+   (@directive:) └─────────────────────────────┘  │   translate
+                                                   ├─▶  A2ML core  Doc
+                 ┌─────────────────────────────┐  │   (SPEC.adoc §3)
+   surface R ──▶ │  Record dialect (this doc)   │ ─┘        │
+   ([section])   └─────────────────────────────┘           │
+                                                            ▼
+                        modes §4 · invariants §6 · base record §7
+                        · profiles §8 · canonical hash §9  (all shared)
+----
+
+Both surfaces are readers; the core is the single source of semantics. A profile,
+a hasher, or a drift check written against the core serves both dialects with no
+per-surface code.
+
+== Appendix D: Immediate Next Steps (Informative)
+
+This document is `Draft`. To reach `Stable`, in order:
+
+. *Reference validator.* Extend the A2ML validator (Idris2 core + the shipped
+  binding) with a record-surface reader that emits the same typed `Doc`. The
+  markup reader already exists; this is a second front-end, not a second core.
+. *Green the vectors.* Run the §16 suite against that validator; every vector MUST
+  produce its expected verdict. Wire the run into the root CI (a real job, not the
+  `|| echo SKIP` pattern the audit flagged).
+. *Corpus conformance run.* Validate all 435 deployed record-dialect files at R1
+  and publish the residual non-conforming set as findings (e.g. the observed
+  malformed timestamp `"…ZT00:00:00Z"`). This turns "435 files conform by
+  imitation" into "N files conform, M flagged" — evidence, not assertion.
+. *Registry entry.* Add this spec to `.machine_readable/REGISTRY.a2ml` (stream
+  `foundation`) so its home is hash-tracked and drift-detected like every other
+  spec.
+. *Owner ratification.* On green vectors + a published corpus run, the owner may
+  bump `Status` to `Stable` and cut the first tagged release.
+
+---
+
+*Version*: 1.0.0 +
+*Status*: Draft +
+*Era*: v1 +
+*Date*: 2026-07-03 +
+*Lineage*: `VERSIONS.adoc` +
+*Core*: link:SPEC.adoc[A2ML v1.1.0] (shared typed core, profiles, hashing)
