@@ -73,6 +73,18 @@ scorecards-check:
 scorecards-check-strict:
     @bash scripts/build-scorecards.sh --check --strict
 
+# DYADT: verify a CLAIMS.a2ml against primary evidence (default: root CLAIMS.a2ml)
+verify-claims path="CLAIMS.a2ml":
+    @bash scripts/verify-claims.sh "{{path}}"
+
+# DYADT: run the conformance vector suite
+dyadt-conformance:
+    @bash did-you-actually-do-that/spec/conformance/run-conformance.sh
+
+# DYADT regression test (confirm/refute/unverifiable + guards)
+dyadt-test:
+    @bash scripts/tests/wave4-dyadt-test.sh
+
 # Aggregate compliance gate: registry drift is the HARD gate (registry-check,
 # a hard dep). The RSR self-audit is INFORMATIONAL — a monorepo is not expected
 # to score Gold — but a *broken* audit (exit 4 / unexpected) must fail loudly
