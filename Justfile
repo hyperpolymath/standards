@@ -41,11 +41,23 @@ staleness-test:
     @echo "=== propagate-workflow-pins ==="
     @bash scripts/tests/propagate-workflow-pins-test.sh
 
-# Aggregate compliance gate: registry drift (hard dep) + RSR self-audit (informational)
+# Wave-0 anti-false-green regression: proves each fixed validator CAN fail
+false-green-test:
+    @bash scripts/tests/wave0-false-green-test.sh
+
+# Structural validation of the Mustfile contract (severity + run/verification per check)
+mustfile-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
+    @bash scripts/check-mustfile-structure.sh "{{path}}"
+
+# Aggregate compliance gate: registry drift is the HARD gate (registry-check,
+# a hard dep). The RSR self-audit is INFORMATIONAL — a monorepo is not expected
+# to score Gold — but a *broken* audit (exit 4 / unexpected) must fail loudly
+# rather than pass silently under a blanket `|| true` (Wave-0 false-green fix).
 validate: registry-check
-    @echo "=== validate: RSR compliance gate ==="
-    @bash rhodium-standard-repositories/rsr-audit.sh . text || true
-    @echo "=== validate: done (see rsr-audit output above) ==="
+    @echo "=== validate: registry drift (HARD GATE) — passed as a dependency above ==="
+    @echo "=== validate: RSR self-audit (INFORMATIONAL grade; errors fail loudly) ==="
+    @bash scripts/rsr-selfaudit.sh .
+    @echo "=== validate: done ==="
 
 # Print role-appropriate LLM warm-up context (machine front door)
 llm-context role="dev":

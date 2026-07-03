@@ -30,8 +30,34 @@ RSR_FREEZE_DATE="2025-12-27"
 # Configuration
 # =============================================================================
 
-REPO_PATH="${1:-.}"
-OUTPUT_FORMAT="${2:-text}"
+# Argument parsing (standards#387).
+# Historically the second positional arg was read verbatim as the format, so the
+# DOCUMENTED `--format json` form silently fell through to the text default while
+# only the bare positional `text|json|html` worked. Accept both now, and reject
+# an unknown format loudly (exit 4) instead of silently defaulting.
+REPO_PATH="."
+OUTPUT_FORMAT="text"
+_repo_seen=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --format=*)
+            OUTPUT_FORMAT="${1#*=}"; shift ;;
+        --format)
+            OUTPUT_FORMAT="${2:-}"; shift 2 || { echo "error: --format needs a value" >&2; exit 4; } ;;
+        text|json|html)
+            # Backward-compatible bare positional format (e.g. Justfile passes `. text`).
+            OUTPUT_FORMAT="$1"; shift ;;
+        -*)
+            echo "error: unknown option: $1" >&2; exit 4 ;;
+        *)
+            if [[ $_repo_seen -eq 0 ]]; then REPO_PATH="$1"; _repo_seen=1; shift
+            else echo "error: unexpected argument: $1" >&2; exit 4; fi ;;
+    esac
+done
+case "$OUTPUT_FORMAT" in
+    text|json|html) ;;
+    *) echo "error: invalid --format '$OUTPUT_FORMAT' (want: text|json|html)" >&2; exit 4 ;;
+esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Compliance thresholds

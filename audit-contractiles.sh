@@ -8,17 +8,28 @@ set -euo pipefail
 echo "═══════════════════════════════════════════════════════════════════════════════"
 echo "  Hyperpolymath Contractile System Audit"
 echo "  $(date '+%Y-%m-%d %H:%M:%S')"
-echo "════╕══════════════════════════════════════════════════════════════════════════════"
+echo "═══════════════════════════════════════════════════════════════════════════════"
 echo ""
 
-# Repositories to audit
-REPOS=(
-  "/var/mnt/eclipse/repos/burble"
-  "/var/mnt/eclipse/repos/panll"
-  "/var/mnt/eclipse/repos/nextgen-databases"
-  "/var/mnt/eclipse/repos/rescript"
-  "/var/mnt/eclipse/repos/standards"
-)
+# Repositories to audit.
+# Previously these were hardcoded to the owner's machine (/var/mnt/eclipse/...),
+# so the script could not run in CI or on any other host (Wave-0 fix). Supply
+# repos explicitly as positional args, or via $CONTRACTILE_AUDIT_REPOS
+# (colon-separated). With neither set, default to auditing THIS repo so a bare
+# invocation is still useful — and never silently audit zero repos.
+if [ "$#" -gt 0 ]; then
+  REPOS=("$@")
+elif [ -n "${CONTRACTILE_AUDIT_REPOS:-}" ]; then
+  IFS=':' read -r -a REPOS <<< "$CONTRACTILE_AUDIT_REPOS"
+else
+  SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  REPOS=("$SELF_DIR")
+fi
+
+if [ "${#REPOS[@]}" -eq 0 ]; then
+  echo "error: no repositories to audit (pass paths as args or set CONTRACTILE_AUDIT_REPOS)" >&2
+  exit 2
+fi
 
 # Contractile types to check
 # `lust` deprecated 2026-04-18 — wishes absorbed into intend/Intentfile.a2ml
