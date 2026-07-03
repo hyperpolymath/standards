@@ -128,6 +128,14 @@ jobs:
           BLOCKING_THRESHOLD: info
         run: |
           echo "Scanning repository: ${{ github.repository }} (checking baseline)"
+          # Move the baseline filter OUT of the scanned tree, then delete the
+          # standards checkout, so `hypatia scan .` only ever sees the CALLER's
+          # own files. Without this, `.standards-checkout/` (the tooling we
+          # checked out to get apply-baseline.sh) is itself scanned, and
+          # standards' own files get reported as the caller's findings (a banned
+          # `.ts`, `shell_download` bootstrap.sh scripts, etc.).
+          cp .standards-checkout/scripts/apply-baseline.sh "$RUNNER_TEMP/apply-baseline.sh"
+          rm -rf .standards-checkout
           # hypatia's `scan` exits non-zero whenever it finds anything — that is
           # by design, and under `bash -e` it would abort this step at this line,
           # before the baseline filter (the real gate) ever runs. Tolerate the
@@ -160,7 +168,7 @@ jobs:
           # suppresses only exact matches. Exits non-zero iff a kept finding is at
           # or above BLOCKING_THRESHOLD. (Validated against synthetic fixtures;
           # see the PR description.)
-          bash .standards-checkout/scripts/apply-baseline.sh \
+          bash "$RUNNER_TEMP/apply-baseline.sh" \
             hypatia-findings.json .hypatia-baseline.json blocking
   language-policy:
     name: Language / package anti-pattern policy
