@@ -1,0 +1,273 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Rhodium Standard Repository (RSR) Specification — Version 2.0
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:revnumber: 2.0.0-draft
+:revdate: 2026-07-03
+:toc: left
+:toclevels: 3
+:icons: font
+:sectnums:
+
+[IMPORTANT]
+====
+*Status: DRAFT.* This specification MUST NOT be cited as a ratified standard
+until the ratification bar in <<ratification>> is met. Its single source of
+truth is the machine-readable criteria file
+link:rsr-criteria-v2.a2ml[`rsr-criteria-v2.a2ml`]; where this prose and that
+file disagree, *the machine-readable file is authoritative* and this prose is a
+generation defect to be fixed.
+====
+
+== 1. Why v2.0 exists
+
+RSR v1.0 (frozen 2025-12-27) can no longer describe the estate it governs, for
+three structural reasons this version fixes:
+
+. *The freeze was violated in place, not honoured.* v1.0 declared its Language
+  Policy, tiers, and required files "immutable", yet `spec/LANGUAGE-POLICY.adoc`
+  advanced to v1.2.2 and `TIERS.adoc` was edited post-freeze. A freeze enforced
+  only by a prose banner is not a freeze. v2.0 replaces it with a *hash-pinned*
+  freeze and a CI guard (<<versioning>>).
+. *The written spec, the machine spec, and reality diverged three ways.* v1.0's
+  machine criteria (`spec.scm/compliance-criteria.scm`) still require GitLab,
+  Nix flakes, ReScript, RVC, SaltRover and `META/ECOSYSTEM/STATE.scm`. The
+  estate is GitHub, Guix-primary, AffineScript, Python/V/ReScript-banned, and
+  A2ML. *Every current repo fails the v1.0 machine criteria.* v2.0 re-bases the
+  criteria on measured estate reality (<<migration>>).
+. *There was no single oracle.* At least five checkers (`rsr-audit.sh`,
+  `rsr-check.scm`, `rsr-compliance-checklist.k9.ncl`, `COMPLIANCE_CHECKLIST.md`,
+  the `rsr-certifier` product) each claimed to check RSR, disagreed on criteria,
+  and none ran in CI. v2.0 designates *exactly one* normative oracle
+  (<<oracle>>) and derives everything else from the SSOT.
+
+RSR v2.0 is a MAJOR (era) change. It does not pretend to be backward-compatible
+with v1.0 criteria; it supersedes them.
+
+== 2. Conformance language
+
+The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
+MAY, and OPTIONAL are to be interpreted as described in RFC 2119 and RFC 8174
+when, and only when, they appear in capitals.
+
+A *repository* is *RSR-conformant at tier T* iff the normative oracle
+(<<oracle>>), run against the repository's committed tree and its declared
+capability profile, computes a tier `>= T` per the scoring model (<<scoring>>).
+
+== 3. What RSR is (and is not)
+
+RSR is the estate's *repository-shape* standard: the normative definition of the
+files, policies, and machine-readable substrate a hyperpolymath repository
+carries, projected onto four tiers. It is the specification that
+`hyperpolymath/rsr-template-repo` operationalises as a scaffold and that
+`hyperpolymath/hypatia` enforces as scan rules.
+
+RSR is NOT:
+
+* a build system (that is `Justfile`/`Mustfile`);
+* the template itself (that is `rsr-template-repo`, the *operationalisation*);
+* the readiness-grade rubrics (CRG/TRG/ARG/FRG grade *maturity*; RSR grades
+  *shape*). The scales are aligned (<<scoring>>) but distinct.
+
+== 4. The single source of truth [[ssot]]
+
+All RSR v2.0 criteria live in exactly one file:
+link:rsr-criteria-v2.a2ml[`spec/rsr-criteria-v2.a2ml`], authored in the *A2ML
+record dialect* (link:../../a2ml/RECORD-DIALECT-SPEC.adoc[`RECORD-DIALECT-SPEC.adoc`]
+— RSR dogfoods the estate's own metadata format). Every derived artefact —
+
+* the human `COMPLIANCE_CHECKLIST` (prose),
+* the normative oracle's rule table,
+* the tier badge thresholds,
+* any k9 kennel data,
+
+— MUST be GENERATED from that file and MUST NOT be hand-maintained. This is
+"solutions at source" (RSR-PHILOSOPHY.adoc) applied to RSR itself: a criterion
+is added or changed in one place, and the checklist, checker, and badges follow.
+Hand-editing a generated artefact is a defect.
+
+Each criterion in the SSOT carries a `detect` field (the oracle rule id that
+checks it, or the literal `manual` when no automated check exists yet) and a
+`template_ref` field (where `rsr-template-repo` satisfies it). Together these
+make *spec → checker → template* traceability machine-checkable (<<traceability>>).
+
+== 5. Tiers and scoring [[scoring]]
+
+=== 5.1 The four tiers
+
+[cols="1,1,3",options="header"]
+|===
+| Tier | Score | Meaning
+| Bronze  | `>= 75%`  | Minimum viable RSR shape: identity, licence, security policy, CI, SPDX, no banned languages.
+| Silver  | `>= 90%`  | Professional: governance-health docs, well-known, Scorecard ≥ 7.0, SHA-pinned actions, AI manifest.
+| Gold    | `= 100%`  | Full applicable compliance: descriptiles substrate, Scorecard ≥ 9.0, hardened workflows, no silent-green.
+| Rhodium | `100% + exemplary` | Gold plus the `rhodium`-gated exemplary criteria a repo is capable of (formal proofs, succession, provenance chains).
+|===
+
+Thresholds are inclusive lower bounds and are defined authoritatively in the
+SSOT `[tiers]` block.
+
+=== 5.2 Capability-gated scoring (the core change from v1.0)
+
+v1.0 scored every repository against all 11 categories, so a small Rust CLI was
+marked non-compliant for lacking a mobile shell, an ABI proof tree, and a web
+UI it was never meant to have. v2.0 adopts the capability-gate model of
+link:../../TEMPLATE-APPLICABILITY-POLICY.adoc[`TEMPLATE-APPLICABILITY-POLICY.adoc`]:
+
+. A repository declares its capabilities in
+  `.machine_readable/rsr-profile.a2ml` (directly or via a preset).
+. A criterion is *applicable* iff its `gate` is `universal` OR the repository
+  declares the gating capability.
+. *Score* = (sum of weights of applicable criteria that pass) / (sum of weights
+  of applicable criteria). Non-applicable criteria are scored `na` and excluded
+  from the denominator — they neither help nor hurt.
+. A criterion MAY return `partial` (half weight), reported explicitly.
+
+[WARNING]
+====
+*No tier by declaring-away.* A repository MUST NOT reach a tier by omitting from
+its profile a capability it actually has (e.g. hiding that it ships a container
+to dodge the rootless-container criterion). The oracle MUST cross-check declared
+capabilities against detected ones and MUST flag under-declaration. This finding
+is `:review` (a judgement), never `:auto_execute`.
+====
+
+=== 5.3 Relation to the readiness grades
+
+RSR tiers project onto the shared `X F E D C B A` readiness scale
+(Bronze≈C, Silver≈B, Gold≈A, Rhodium≈A+). RSR measures repository *shape*; the
+CRG/TRG/ARG/FRG rubrics measure component/toolchain/adoption/foundations
+*maturity*. A repo can be Gold-shaped and still CRG-C mature; the two are
+orthogonal axes, deliberately.
+
+== 6. The normative oracle [[oracle]]
+
+There is *exactly one* normative RSR checker: the hypatia rule family
+`rsr-conformance`, which consumes the SSOT and writes a per-repository scorecard
+into verisim-data (the `.machine_readable/scorecards/<repo>.scorecard.a2ml`
+shape already used by the OpenSSF scorecard ingestor). hypatia is chosen because
+it is the estate scanner already wired to the scan → route → remediate loop.
+
+All other historical checkers are *non-normative* as of v2.0:
+
+* `rsr-audit.sh`, `rsr-check.scm`, `rsr-compliance-checklist.k9.ncl` — retired;
+  kept only as reference until the oracle ships, then removed.
+* `COMPLIANCE_CHECKLIST.md` — GENERATED from the SSOT, not authored.
+* `rhodium-pipeline`'s `rsr-certifier` — a product; it MAY consume the SSOT but
+  is not the spec's oracle.
+
+Two supporting guards are REQUIRED:
+
+* *Freeze guard* (`rsr-criteria-freeze`): fails any change to a frozen major's
+  criteria file whose byte-hash no longer matches its registry pin.
+* *Dogfood gate*: CI runs the oracle against `rsr-template-repo` on every change
+  to either repo and REQUIRES Gold for the template's applicable set. Until the
+  oracle ships, this gate is declared PENDING, not passing (no silent green).
+
+NOTE: The oracle implementation is the subject of the companion work item
+"HYP-S rule interpreter" — hypatia loading rule/criteria definitions from
+standards rather than hand-porting them. Until it lands, RSR v2.0 conformance is
+*specified but not yet machine-enforced*, and this document says so plainly
+rather than claiming an enforcement that does not exist.
+
+== 7. Traceability [[traceability]]
+
+For every criterion, the SSOT records the oracle rule that detects it and the
+template location that satisfies it. Two machine checks make this honest:
+
+. *Detection coverage*: the fraction of criteria whose `detect` is a real rule
+  id (not `manual`) is the spec's *automatable coverage*; it MUST be published,
+  not hidden. A criterion moving from `manual` to a rule id is a PATCH bump.
+. *Template satisfaction*: every `template_ref` MUST resolve in
+  `rsr-template-repo`, OR the criterion MUST be gated by a capability the
+  template's own profile does not declare. A dangling `template_ref` is a defect
+  in either the spec or the template — the dogfood gate surfaces which.
+
+This replaces v1.0's missing spec-to-template traceability matrix, under which
+"does the template implement the spec" was mechanically unanswerable.
+
+== 8. Versioning and freeze [[versioning]]
+
+RSR uses semantic versioning with an errata track. The rules are authoritative
+in the SSOT `[versioning]` block; in prose:
+
+* *MAJOR* — an era change. MAY remove/redefine criteria or move a criterion
+  between tiers. Cutting a major *freezes the prior major*: its criteria file is
+  copied to `spec/archive/rsr-criteria-vN.a2ml` and its byte-hash is pinned in
+  the registry. The freeze guard then makes the frozen file immutable in CI.
+* *MINOR* — additive only. MAY add criteria or add a capability gate, but MUST
+  NOT make a previously-conforming repo non-conforming *at the same tier*.
+* *PATCH* — editorial: wording, `detect` corrections, `template_ref` fixes. No
+  criteria-set change.
+
+A freeze is thus a cryptographic fact (a pinned hash + a CI guard), not a
+promise. This is the direct fix for v1.0's freeze-in-name-only failure.
+
+== 9. Migration from v1.0 [[migration]]
+
+The criteria set was re-based on measured estate reality. The load-bearing
+deltas (full per-criterion mapping is generated into
+`spec/RSR-V1-TO-V2-DELTA.adoc` as a follow-up):
+
+[cols="2,2,3",options="header"]
+|===
+| v1.0 criterion | v2.0 disposition | Reason
+| `nix-flake` (flake.nix)         | → `guix-primary` (guix.scm), Nix fallback retiring | Guix-primary policy; Nix-mirror retirement (standards#102).
+| `gitlab` (repo on GitLab)       | → `scm-github`                                     | Estate canonical forge is GitHub; GitLab is mirror-only.
+| `rvc`, `saltrover`              | REMOVED                                            | Obsolete tooling; not part of the estate.
+| `meta-scm`/`ecosystem-scm`/`state-scm` | → descriptiles `META/ECOSYSTEM/STATE.a2ml`  | `.scm` era retired; A2ML is the metadata format.
+| `.machine_readable/6a2/`        | → `.machine_readable/descriptiles/`               | `6a2` deprecated 2026-06-30.
+| 6 A2ML files                    | → 8 (adds `ANCHOR`, `CLADE`)                       | Canonical descriptile set expanded.
+| `LICENSE.txt`                   | → `LICENSE` + `LICENSES/` (REUSE)                  | Estate file convention; hypatia `root_hygiene` to be realigned to match.
+| `palimpsest` (everywhere)       | → `licence-classified` (5-way, FLAG-ONLY)          | Palimpsest is exactly three repos; licence detection is `:review`, never auto-edited.
+| DNSSEC / Schema.org / Webmention / POSSE | GATED by `web-ui`/`docs-site`/`api-service` | Deployment concerns, not repo-shape universals.
+| flat "all 11 categories"        | → capability-gated applicable set                  | Fixes over-scaffolding of leaf repos.
+|===
+
+The v1.0 `spec.scm/`, `VERSION.adoc` (freeze banner), and the five divergent
+checkers are superseded. They are retained read-only until the oracle ships,
+then archived — no deletion by access-recency, but no longer normative.
+
+== 10. Ratification bar [[ratification]]
+
+RSR v2.0 leaves `draft` and becomes `stable` only when ALL of the following
+hold — mirroring the estate's spec-recognition bar and the record-dialect
+spec's own Appendix-D discipline:
+
+. *Oracle exists*: the `rsr-conformance` hypatia rule family consumes the SSOT
+  and produces scorecards.
+. *Dogfood green*: the dogfood gate runs in real CI (no `|| echo SKIP`) and
+  `rsr-template-repo` scores Gold on its applicable set.
+. *Corpus run*: the oracle is run across the estate; the per-repo tier
+  distribution is published to verisim-data and the residual non-conforming set
+  is filed as findings (not hidden).
+. *Traceability green*: automatable-coverage and template-satisfaction checks
+  (<<traceability>>) pass; no dangling `template_ref`.
+. *Owner ratification*: the owner bumps the SSOT `[meta].status` to `stable` and
+  cuts `2.0.0`, freezing it per <<versioning>>.
+
+Until then, every RSR badge in the estate MUST be read as "self-asserted", and
+this specification MUST NOT be cited as ratified.
+
+== Appendix A: Security considerations
+
+A conformance oracle that writes scorecards is a *reporting* tool, not an
+enforcement capability: it MUST NOT gain execution, network, or write access to
+the repositories it scores beyond reading their trees and writing to
+verisim-data. Licence-classification criteria (`7.1.1`) are detection-only and
+`:review`-capped; the oracle MUST NOT auto-edit licence content under any tier,
+per the estate's manual-only licence guardrail.
+
+== Appendix B: Change log
+
+* *2.0.0-draft (2026-07-03)* — Initial v2.0 draft. Re-bases criteria on measured
+  estate reality; introduces capability-gated scoring, the single-oracle model,
+  the hash-pinned freeze, spec→checker→template traceability, and the A2ML
+  record-dialect SSOT. Supersedes the v1.0 frozen spec and its five checkers.
+
+'''
+*Version*: 2.0.0-draft +
+*Status*: Draft (see <<ratification>>) +
+*Era*: v2 +
+*SSOT*: `spec/rsr-criteria-v2.a2ml` +
+*Date*: 2026-07-03
