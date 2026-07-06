@@ -65,10 +65,15 @@ on:
         required: false
         default: false
       enable_coverage:
-        description: Run `cargo tarpaulin` + upload to codecov (slow; off by default)
+        description: Measure line coverage with cargo-llvm-cov and enforce `coverage_floor` (off by default)
         type: boolean
         required: false
         default: false
+      coverage_floor:
+        description: Minimum line-coverage percent when enable_coverage is set; ratchet upward, never lower.
+        type: string
+        required: false
+        default: "0"
       clippy_args:
         description: Args appended to `cargo clippy`
         type: string
@@ -254,8 +259,8 @@ jobs:
         run: cargo audit
 
   coverage:
-    timeout-minutes: 20
-    name: Coverage (tarpaulin + codecov)
+    timeout-minutes: 25
+    name: llvm-cov line coverage
     runs-on: ${{ inputs.runs-on }}
     needs: detect
     if: ${{ inputs.enable_coverage && needs.detect.outputs.has_cargo == 'true' }}
@@ -264,6 +269,9 @@ jobs:
     defaults:
       run:
         working-directory: ${{ inputs.working_directory }}
+    env:
+      # Ratcheted line-coverage floor (from the caller). Raise toward target; never lower.
+      FLOOR: ${{ inputs.coverage_floor }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -276,14 +284,25 @@ jobs:
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # stable
         with:
           toolchain: stable
+          components: llvm-tools-preview
 
-      - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin --locked
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
 
-      - name: Generate coverage
-        run: cargo tarpaulin --out Xml
+      - name: Measure line coverage
+        id: cov
+        # Self-contained: no external coverage service. Own the gate on our runner.
+        run: |
+          set -euo pipefail
+          cargo llvm-cov --workspace --locked --json --output-path cov.json
+          PCT=$(jq -r '.data[0].totals.lines.percent' cov.json)
+          printf '### Line coverage: %.2f%% (floor %s%%)\n' "$PCT" "$FLOOR" >> "$GITHUB_STEP_SUMMARY"
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
 
-      - name: Upload to codecov
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        with:
-          files: cobertura.xml
+      - name: Enforce ratchet floor
+        run: |
+          set -euo pipefail
+          awk -v p="${{ steps.cov.outputs.pct }}" -v f="$FLOOR" 'BEGIN {
+            if (p + 0 < f + 0) { printf "FAIL: line coverage %.2f%% is below floor %s%%\n", p, f; exit 1 }
+            printf "OK: line coverage %.2f%% >= floor %s%%\n", p, f
+          }'
