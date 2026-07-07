@@ -40,12 +40,19 @@ jobs:
             fi
           done
 
-          # README MUST be Markdown: it renders in GitHub community-health, the GitHub
-          # profile, and external MCP directories (Glama) — all of which show AsciiDoc
-          # as raw markup. So README.md is canonical; README.adoc is a duplicate to remove.
+          # README: AsciiDoc is canonical estate-wide (ADR-004). A README.md
+          # alongside README.adoc is legitimate ONLY when it is a *derived*
+          # artefact — it must carry the GENERATED banner and the repo must
+          # declare a [publishing.readme] consumer in descriptiles. A hand-
+          # maintained README.md next to README.adoc is the duplicate to remove
+          # (this is the case the June 2026 runaway inverted).
           if [ -f "README.md" ] && [ -f "README.adoc" ]; then
-            echo "::error::Duplicate README: keep README.md (required Markdown); remove README.adoc."
-            DUPLICATES=$((DUPLICATES + 1))
+            if grep -q "GENERATED from README.adoc" README.md 2>/dev/null; then
+              echo "✓ README.md is a derived artefact (GENERATED banner present)"
+            else
+              echo "::error::README.md alongside README.adoc is not a derived artefact (no GENERATED banner). Under ADR-004, README.adoc is canonical; either derive README.md via readme-derive-reusable.yml (with a [publishing.readme] declaration) or remove the hand-maintained README.md."
+              DUPLICATES=$((DUPLICATES + 1))
+            fi
           fi
 
           # CONTRIBUTING can have both but .md should just be a redirect
@@ -64,15 +71,15 @@ jobs:
 
       - name: Check documentation format
         run: |
-          # Files that MUST be .md for GitHub community-health / profile / Glama:
-          # README.md, SECURITY.md, CONTRIBUTING.md (can redirect), CODE_OF_CONDUCT.md, CHANGELOG.md
+          # ADR-004: README.adoc is canonical estate-wide. A lone README.adoc
+          # is correct and needs no action — do NOT nudge it to Markdown. A
+          # README.md is only produced by deriving it (readme-derive-reusable.yml)
+          # for repos that declare a [publishing.readme] consumer. GitHub renders
+          # .adoc natively; only external Markdown-only consumers (Glama, the
+          # profile repo) need the derived .md.
 
-          # README must be Markdown. A lone README.adoc renders as raw markup in
-          # community-health/profile/Glama — nudge to convert (warning during the
-          # estate-wide migration; the duplicate case above is the hard error).
-          if [ -f "README.adoc" ] && [ ! -f "README.md" ]; then
-            echo "::warning::README.adoc without README.md — README must be Markdown (renders raw as AsciiDoc in community-health/profile/Glama). Convert to README.md."
-          fi
+          # Community-health files that GitHub special-cases by exact .md name:
+          # SECURITY.md, CONTRIBUTING.md (can redirect), CODE_OF_CONDUCT.md, CHANGELOG.md
 
           # Check other docs are .adoc
           for doc in ARCHITECTURE ROADMAP PHILOSOPHY INSTALL; do

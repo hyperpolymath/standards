@@ -1,0 +1,193 @@
+# SPDX-License-Identifier: MPL-2.0
+# README single-source derivation — Reusable Workflow (ADR-004)
+#
+# Author READMEs once in AsciiDoc; derive README.md ONLY for repos that
+# declare a Markdown consumer in their descriptiles. This workflow reads that
+# declaration, regenerates the derived file behind a fail-closed vocabulary
+# gate, and (in the default check mode) fails-and-tells if the committed
+# README.md is stale — it never self-commits and never converts an undeclared
+# repo. Absence of a declaration is a machine-readable "do not convert": the
+# anti-runaway guard that the June 2026 estate-wide .adoc->.md sweep lacked.
+name: README Derive Reusable Workflow
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label
+        type: string
+        required: false
+        default: ubuntu-latest
+      threshold:
+        description: Vocabulary-preservation floor (percent). ADR-004 default 98.
+        type: number
+        required: false
+        default: 98
+      standards-ref:
+        description: Ref of hyperpolymath/standards to source the vocab-gate script from.
+        type: string
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+# Read-only check workflow — safe to cancel superseded runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  derive-readme:
+    name: Derive & verify README.md
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+
+      - name: Read publishing declaration
+        id: decl
+        run: |
+          # Prefer descriptiles; fall back to the deprecated 6a2 dir during the
+          # estate migration. No file / no [publishing.readme] table / derive
+          # not true => this repo has opted out and we do nothing.
+          ECO=""
+          for c in .machine_readable/descriptiles/ECOSYSTEM.a2ml \
+                   .machine_readable/6a2/ECOSYSTEM.a2ml; do
+            if [ -f "$c" ]; then ECO="$c"; break; fi
+          done
+
+          if [ -z "$ECO" ]; then
+            echo "No ECOSYSTEM.a2ml found — repo not opted in. Nothing to derive."
+            echo "derive=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Reading declaration from: $ECO"
+
+          # Extract the flat [publishing.readme] table into KEY=VALUE lines.
+          eval "$(
+            awk '
+              /^[[:space:]]*\[/ { inblk = ($0 ~ /^[[:space:]]*\[publishing\.readme\][[:space:]]*$/) ? 1 : 0; next }
+              inblk && /=/ {
+                key = $0; sub(/=.*/, "", key); gsub(/[[:space:]]/, "", key)
+                val = $0; sub(/^[^=]*=[[:space:]]*/, "", val)
+                sub(/[[:space:]]*(#.*)?$/, "", val)          # strip trailing comment/space
+                gsub(/^"|"$/, "", val)                        # strip surrounding quotes
+                if (key ~ /^(canonical|derive|format|path|consumer)$/)
+                  printf "DECL_%s=%s\n", toupper(key), val
+              }
+            ' "$ECO"
+          )"
+
+          if [ "${DECL_DERIVE:-false}" != "true" ]; then
+            echo "[publishing.readme] absent or derive != true — repo not opted in."
+            echo "derive=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CANONICAL="${DECL_CANONICAL:-README.adoc}"
+          DERIVED_PATH="${DECL_PATH:-README.md}"
+          FORMAT="${DECL_FORMAT:-gfm}"
+          CONSUMER="${DECL_CONSUMER:-unspecified}"
+
+          if [ ! -f "$CANONICAL" ]; then
+            echo "::error::Declared canonical '$CANONICAL' does not exist."
+            exit 1
+          fi
+          if [ "$FORMAT" != "gfm" ]; then
+            echo "::error::Unsupported derived format '$FORMAT' (only 'gfm' is implemented)."
+            exit 1
+          fi
+
+          echo "Opted in: consumer=$CONSUMER  $CANONICAL -> $DERIVED_PATH ($FORMAT)"
+          {
+            echo "derive=true"
+            echo "canonical=$CANONICAL"
+            echo "derived_path=$DERIVED_PATH"
+            echo "consumer=$CONSUMER"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install toolchain
+        if: steps.decl.outputs.derive == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pandoc
+          # asciidoctor + include-reducer from rubygems (ubuntu ships ruby)
+          sudo gem install --no-document asciidoctor asciidoctor-reducer
+          pandoc --version | head -1
+          asciidoctor --version | head -1
+
+      - name: Fetch vocab-gate script from standards
+        if: steps.decl.outputs.derive == 'true'
+        run: |
+          # Version-locked to the same standards ref that owns this workflow.
+          git clone --depth 1 --branch "${{ inputs.standards-ref }}" \
+            https://github.com/hyperpolymath/standards.git "$RUNNER_TEMP/standards"
+          chmod +x "$RUNNER_TEMP/standards/.github/scripts/readme-vocab-gate.sh"
+
+      - name: Derive Markdown from AsciiDoc
+        if: steps.decl.outputs.derive == 'true'
+        env:
+          CANONICAL: ${{ steps.decl.outputs.canonical }}
+        run: |
+          set -euo pipefail
+          # 1) flatten includes so the source is self-contained
+          asciidoctor-reducer "$CANONICAL" -o "$RUNNER_TEMP/reduced.adoc"
+          # 2) reliable route: asciidoc -> docbook -> gfm (direct converters lose structure)
+          asciidoctor -b docbook5 -a attribute-missing=drop \
+            "$RUNNER_TEMP/reduced.adoc" -o "$RUNNER_TEMP/reduced.xml"
+          pandoc -f docbook -t gfm --wrap=preserve \
+            "$RUNNER_TEMP/reduced.xml" -o "$RUNNER_TEMP/body.md"
+
+          # 3) stamp: carry the canonical SPDX line (rewritten as an HTML
+          #    comment) + a GENERATED banner so no one hand-edits the artefact.
+          SPDX="$(grep -m1 -oE 'SPDX-License-Identifier:[[:space:]]*[^[:space:]]+' "$CANONICAL" || true)"
+          {
+            [ -n "$SPDX" ] && echo "<!-- $SPDX -->"
+            echo "<!-- GENERATED from $CANONICAL by standards/.github/workflows/readme-derive-reusable.yml — do not edit. -->"
+            echo ""
+            cat "$RUNNER_TEMP/body.md"
+          } > "$RUNNER_TEMP/derived.md"
+
+      - name: Vocabulary-preservation gate
+        if: steps.decl.outputs.derive == 'true'
+        env:
+          CANONICAL: ${{ steps.decl.outputs.canonical }}
+        run: |
+          "$RUNNER_TEMP/standards/.github/scripts/readme-vocab-gate.sh" \
+            "$CANONICAL" "$RUNNER_TEMP/derived.md" "${{ inputs.threshold }}"
+
+      - name: Freshness check (fail-and-tell)
+        if: steps.decl.outputs.derive == 'true'
+        env:
+          DERIVED_PATH: ${{ steps.decl.outputs.derived_path }}
+          CANONICAL: ${{ steps.decl.outputs.canonical }}
+        run: |
+          set -euo pipefail
+          if [ ! -f "$DERIVED_PATH" ]; then
+            echo "::error::Declared derived README '$DERIVED_PATH' is missing. Regenerate and commit it."
+            SHOW_CMD=1
+          elif ! diff -q "$RUNNER_TEMP/derived.md" "$DERIVED_PATH" >/dev/null; then
+            echo "::error::'$DERIVED_PATH' is STALE relative to '$CANONICAL'. Regenerate and commit it."
+            echo "----- diff (committed vs regenerated) -----"
+            diff "$DERIVED_PATH" "$RUNNER_TEMP/derived.md" || true
+            SHOW_CMD=1
+          else
+            echo "✓ $DERIVED_PATH is up to date with $CANONICAL"
+            exit 0
+          fi
+
+          cat <<'EOF'
+
+          To regenerate locally (requires asciidoctor, asciidoctor-reducer, pandoc):
+
+            asciidoctor-reducer README.adoc -o /tmp/reduced.adoc
+            asciidoctor -b docbook5 -a attribute-missing=drop /tmp/reduced.adoc -o /tmp/reduced.xml
+            pandoc -f docbook -t gfm --wrap=preserve /tmp/reduced.xml -o /tmp/body.md
+            # then prepend the SPDX + GENERATED banner (see the workflow's stamp step)
+
+          Fail-and-tell mode (ADR-004): CI does not auto-commit. Commit the
+          regenerated README.md yourself.
+          EOF
+          exit 1
