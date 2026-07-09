@@ -98,6 +98,56 @@ Rules:
 * Any estate sweep touching README format MUST read this block first
   and skip undeclared repos. This is the anti-runaway guard.
 
+=== Bootstrapping a canonical `.adoc` from an existing `README.md`
+
+The derive direction (`.adoc → .md`) is a clean one-shot. Producing the
+*initial* canonical `.adoc` from a rich existing `README.md` is a
+one-time authoring step, not part of the CI path, and has one sharp edge
+verified on boj-server's real README (264 lines, 12 badges, 15-entry TOC):
+
+**Anchor-ID convention (mandatory when the README has an intra-doc TOC).**
+GitHub Markdown auto-anchors headings as lowercase-hyphenated
+(`## Capabilities overview` → `#capabilities-overview`). Asciidoctor
+instead defaults to `_prefixed_underscored` IDs
+(`_capabilities_overview`), so a converted `link:#capabilities-overview[]`
+TOC would dead-link on GitHub *and* re-derive to a broken Markdown anchor.
+The canonical `.adoc` MUST therefore set, in its document header:
+
+[source,asciidoc]
+----
+= Project Title
+:idprefix:
+:idseparator: -
+----
+
+With those two attributes, `== Features` → id `features`,
+`== Capabilities overview` → id `capabilities-overview` — matching GitHub
+Markdown exactly. `readme-derive-reusable.yml` enforces this: if the
+canonical source contains `link:#…[]` anchors without both attributes, the
+job fails-and-tells (the vocabulary gate cannot catch this — it checks
+words, not link targets).
+
+**One-time bootstrap recipe** (verified end-to-end on boj-server —
+faithful round-trip: 11/11 TOC anchors resolve, 12/12 badges intact,
+≥98% vocab, only AsciiDoc scaffolding tokens "lost"):
+
+[source,bash]
+----
+# 1. md -> asciidoc body
+pandoc -f gfm -t asciidoc --wrap=preserve README.md -o body.adoc
+# 2. promote every heading one level (== -> =, === -> ==, …) so the top
+#    heading becomes the '= doctitle' and section nesting stays correct
+sed -E 's/^==(=*) /=\1 /' body.adoc > body2.adoc
+# 3. assemble canonical README.adoc: SPDX header + '= Title' +
+#    :idprefix:/:idseparator: -  + body2 (minus its first title line)
+# 4. sanity: render to HTML, confirm section ids match the TOC anchors
+----
+
+pandoc wraps inline code containing `_ * { +` in AsciiDoc passthroughs
+(`++_*++`, `{plus}`) — correct and harmless (renders as literal text; the
+derived `.md` comes back clean), just visible noise in the source. Accept
+it, or tidy by hand; do not "fix" it in a way that changes rendered output.
+
 === Derivation pipeline (reusable workflow, `standards`)
 
 One reusable workflow, `readme-derive.yml`, called by opted-in repos
