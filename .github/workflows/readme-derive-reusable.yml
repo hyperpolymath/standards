@@ -110,11 +110,22 @@ jobs:
 
       - name: Install toolchain
         if: steps.decl.outputs.derive == 'true'
+        env:
+          # Pinned so derivation is REPRODUCIBLE: the same versions used to
+          # generate the committed README.md must run in CI, or the freshness
+          # check would flag cosmetic toolchain-drift diffs as staleness. Bump
+          # deliberately (and regenerate every derived README) — never float.
+          PANDOC_VERSION: "3.10"
+          ASCIIDOCTOR_VERSION: "2.0.26"
+          ASCIIDOCTOR_REDUCER_VERSION: "1.1.1"
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq pandoc
-          # asciidoctor + include-reducer from rubygems (ubuntu ships ruby)
-          sudo gem install --no-document asciidoctor asciidoctor-reducer
+          set -euo pipefail
+          curl -fsSL -o /tmp/pandoc.deb \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          sudo dpkg -i /tmp/pandoc.deb
+          sudo gem install --no-document \
+            asciidoctor -v "$ASCIIDOCTOR_VERSION" \
+            asciidoctor-reducer -v "$ASCIIDOCTOR_REDUCER_VERSION"
           pandoc --version | head -1
           asciidoctor --version | head -1
 
@@ -190,13 +201,21 @@ jobs:
           CANONICAL: ${{ steps.decl.outputs.canonical }}
         run: |
           set -euo pipefail
+          # Normalise before comparing: drop the banner comment lines, trim
+          # trailing whitespace, and squeeze blank-line runs. The toolchain is
+          # version-pinned so output is reproducible; this normalisation is a
+          # belt-and-braces layer that keeps a harmless whitespace nudge from
+          # being reported as staleness, while any real prose/structure/anchor
+          # change still shows.
+          norm() { grep -vE '^<!-- (SPDX-License-Identifier|GENERATED)' "$1" \
+                   | sed 's/[[:space:]]*$//' | cat -s; }
           if [ ! -f "$DERIVED_PATH" ]; then
             echo "::error::Declared derived README '$DERIVED_PATH' is missing. Regenerate and commit it."
             SHOW_CMD=1
-          elif ! diff -q "$RUNNER_TEMP/derived.md" "$DERIVED_PATH" >/dev/null; then
+          elif ! diff -q <(norm "$RUNNER_TEMP/derived.md") <(norm "$DERIVED_PATH") >/dev/null; then
             echo "::error::'$DERIVED_PATH' is STALE relative to '$CANONICAL'. Regenerate and commit it."
-            echo "----- diff (committed vs regenerated) -----"
-            diff "$DERIVED_PATH" "$RUNNER_TEMP/derived.md" || true
+            echo "----- diff (committed vs regenerated, normalised) -----"
+            diff <(norm "$DERIVED_PATH") <(norm "$RUNNER_TEMP/derived.md") || true
             SHOW_CMD=1
           else
             echo "✓ $DERIVED_PATH is up to date with $CANONICAL"
