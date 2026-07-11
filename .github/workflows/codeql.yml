@@ -14,13 +14,19 @@ on:
     # cut only changes the scheduled-baseline cadence.
     - cron: '0 6 1 * *'
 
-# Estate guardrail: cancel superseded runs so re-pushes / rebased PR
-# updates do not pile up queued runs against the shared account-wide
-# Actions concurrency pool. Applied only to read-only check workflows
-# (no publish/mutation), so cancelling a superseded run is always safe.
+# Estate guardrail: serialise superseded runs so re-pushes / rebased PR
+# updates do not pile up against the shared account-wide Actions pool.
+#
+# cancel-in-progress is DELIBERATELY false: CodeQL is a REQUIRED
+# code-scanning tool in the estate branch rulesets (a result must upload
+# for the head commit before a PR can merge). A cancelled run uploads
+# nothing, leaving branch protection stuck "expecting 1 result from CodeQL
+# for <sha>" indefinitely — the ghost check that blocks PRs for hours/days.
+# Queue rather than cancel so the latest commit's scan always completes and
+# uploads. (Non-required read-only workflows may still cancel-in-progress.)
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
