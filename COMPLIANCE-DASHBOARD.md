@@ -20,6 +20,7 @@
 
 | Spec | MUST status | MUST (pass/total) | SHOULD (pass/total) | COULD (pass/total) | Systems coverage | Assessed |
 |---|---|---|---|---|---|---|
+| `estate-constitution` | ❌ gap | 2/4 | 1/1 | 0/0 | 60% | 2026-07-11 |
 | `a2ml` | ✅ met | 4/5 | 4/5 | 0/3 | 84% | 2026-07-03 |
 | `k9-svc` | ❌ gap | 3/6 | 3/5 | 2/3 | 100% | 2026-07-03 |
 | `contractiles` | ❌ gap | 0/5 | 0/3 | 0/3 | 54% | 2026-07-03 |
@@ -52,10 +53,10 @@
 
 ## Estate rollup
 
-- **Specs registered (local):** 29
-- **Specs with a scorecard:** 29 / 29
-- **MUST requirements:** 46 passing / 143 total (74 failing)
-- **Estate systems coverage:** 67% of 338 graded requirements have a mechanical check
+- **Specs registered (local):** 30
+- **Specs with a scorecard:** 30 / 30
+- **MUST requirements:** 48 passing / 147 total (75 failing)
+- **Estate systems coverage:** 67% of 343 graded requirements have a mechanical check
 
 ## How this dashboard stays honest
 
