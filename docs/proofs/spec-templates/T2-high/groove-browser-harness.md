@@ -77,3 +77,7 @@ just proof-check-all
 
 - [ ] All 3 theorems proven
 - [ ] Commit: `proof: complete groove-browser-harness proofs (3/3)`
+
+> **Superseded (teardown):** the canonical groove teardown discipline is now
+> [groove-protocol/spec/GROOVE-RANKED-OWNERSHIP-CLEAVE-SPEC.adoc](../../../../groove-protocol/spec/GROOVE-RANKED-OWNERSHIP-CLEAVE-SPEC.adoc)
+> (the B2 lifecycle-residue layer, `RC-1`…`RC-13`). This harness remains a T2-high test template.
