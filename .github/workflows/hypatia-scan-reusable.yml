@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: read
-  security-events: read
+  security-events: write
 
 jobs:
   scan:
@@ -94,6 +94,14 @@ jobs:
           # counts below, not on the scanner's exit code.
           HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero > hypatia-findings.json
 
+          # Emit SARIF for the GitHub Security tab. The code_scanning_alerts
+          # meta-rules are filtered at SARIF render time (lib/hypatia/sarif.ex),
+          # so an upload can never self-echo. Same tool name ("Hypatia") and
+          # category ("hypatia") as the historical upload, so GitHub RECONCILES:
+          # findings fixed in code since the last scan auto-close instead of
+          # orphaning as stale open alerts.
+          HYPATIA_FORMAT=sarif "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero > hypatia.sarif || echo '{"version":"2.1.0","runs":[]}' > hypatia.sarif
+
           FINDING_COUNT=$(jq '. | length' hypatia-findings.json 2>/dev/null || echo 0)
           CRITICAL=$(jq '[.[] | select(.severity == "critical")] | length' hypatia-findings.json 2>/dev/null || echo 0)
           HIGH=$(jq '[.[] | select(.severity == "high")] | length' hypatia-findings.json 2>/dev/null || echo 0)
@@ -112,6 +120,14 @@ jobs:
           echo "| High     | $HIGH |" >> $GITHUB_STEP_SUMMARY
           echo "| Medium   | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
           echo "| **Total**| $FINDING_COUNT |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        continue-on-error: true          # callers granting only security-events:read skip gracefully
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v3
+        with:
+          sarif_file: hypatia.sarif
+          category: hypatia
 
       - name: Run panic-attack assail
         run: |
