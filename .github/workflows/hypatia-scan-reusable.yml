@@ -149,14 +149,30 @@ jobs:
             panic-attack-findings.json
           retention-days: 90
 
+      - name: Gate on baseline (blocking when a baseline is committed)
+        if: steps.scan.outputs.findings_count > 0
+        run: |
+          # Wave-8 gate promotion: when the calling repo commits a
+          # .hypatia-baseline.json (schema: .machine_readable/hypatia-baseline.
+          # schema.json) AND ships scripts/apply-baseline.sh, findings are
+          # filtered against the baseline and any UNBASELINED finding at or
+          # above the blocking threshold FAILS this job. Repos without a
+          # baseline keep the honest ADVISORY behaviour below — the gate arms
+          # itself the moment a baseline lands (standards#399/#437/#446).
+          if [ -f scripts/apply-baseline.sh ] && [ -f .hypatia-baseline.json ]; then
+            echo "Baseline present — running BLOCKING gate (threshold: high)."
+            bash scripts/apply-baseline.sh hypatia-findings.json .hypatia-baseline.json blocking
+          else
+            echo "No committed baseline — gate stays advisory (see next step)."
+          fi
+
       - name: Check for critical issues (ADVISORY — does not gate)
         if: steps.scan.outputs.critical > 0
         run: |
-          # This scan is ADVISORY / fix-forward: it never fails the build. The
-          # label and summary state that explicitly so a green check carrying
-          # critical findings is not mistaken for "no critical findings".
-          # (Promotion to blocking is tracked with the baseline reconciliation,
-          # standards#399/#437.)
+          # This scan is ADVISORY / fix-forward WHEN NO BASELINE IS COMMITTED
+          # (the step above becomes the blocking gate once .hypatia-baseline.json
+          # lands). The label and summary state that explicitly so a green check
+          # carrying critical findings is not mistaken for "no critical findings".
           echo "::warning title=Hypatia (ADVISORY, non-blocking)::${{ steps.scan.outputs.critical }} critical finding(s). This scan does not gate — review hypatia-findings.json and fix forward."
           {
             echo "### Hypatia scan — ADVISORY (does not gate)"
