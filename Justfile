@@ -73,6 +73,11 @@ scorecards-check:
 scorecards-check-strict:
     @bash scripts/build-scorecards.sh --check --strict
 
+# Ground-truth the dashboard: RUN every pass-row's executable `check`
+# (a claimed pass whose check fails is a hard error — DYADT on the scorecards)
+scorecards-verify:
+    @bash scripts/build-scorecards.sh --check --strict --verify
+
 # DYADT: verify a CLAIMS.a2ml against primary evidence (default: root CLAIMS.a2ml)
 verify-claims path="CLAIMS.a2ml":
     @bash scripts/verify-claims.sh "{{path}}"
