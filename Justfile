@@ -49,6 +49,10 @@ false-green-test:
 automation-test:
     @bash scripts/tests/wave1-automation-test.sh
 
+# Wave-8 gate-promotion regression: baseline gate + Mustfile PR gate can fail
+gates-test:
+    @bash scripts/tests/wave8-gates-test.sh
+
 # Structural validation of the Mustfile contract (severity + run/verification per check)
 mustfile-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
     @bash scripts/check-mustfile-structure.sh "{{path}}"
