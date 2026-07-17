@@ -150,7 +150,19 @@ Both are FOSS with independent governance (no Big Tech).
 
 ### Enforcement Rules
 
-1. **No new TypeScript or ReScript files** - Convert existing TS/RS to AffineScript directly (`.affine`); ReScript is no longer the destination
+1. **No new TypeScript or ReScript files** - Convert existing TS/RS to AffineScript directly (`.affine`); ReScript is no longer the destination.
+   **Convert proactively at the earliest opportunity** — treat any `.ts`/`.res`
+   (or otherwise-banned front-end language) as standing background work to port,
+   not a one-off, subject to two guardrails:
+   - **Portable-now only.** The `js-to-affinescript` doctrine
+     (`docs/migrations/js-to-affinescript`) carves out MCP/LSP protocol glue and
+     VSCode-host code (*"MCP glue … Should NOT appear in `portable now`"*). Those
+     stay until the AffineScript MCP/LSP/VSCode bindings ship (affinescript#446).
+     Genuinely-portable Deno CLI scripts are the convert-now bucket.
+   - **Compile-verify, wire-first.** A port is not done until the `.affine` builds
+     green (`just check`) and the compiled output is wired as the live entry with
+     the original removed *in the same PR*. Never ship an unbuilt `.affine` or
+     delete a working `.ts`/`.res` for one that has not compiled.
 2. **No package.json for runtime deps** - Use deno.json imports
 3. **No node_modules in production** - Deno caches deps automatically
 4. **No Go code** - Use Rust instead
