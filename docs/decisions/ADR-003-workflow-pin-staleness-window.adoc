@@ -223,3 +223,23 @@ Cost is zero API calls on the happy path — the server is consulted only when
 the gate is about to accuse. The deny-list gets the same fallback, so a
 degraded runner cannot silently skip it: "could not check" is reported as
 SKIPPED, never as passed.
+
+==== Rate limiting, and why it is not a hole
+
+The staleness job is given no token, so the compare call is unauthenticated: 60
+requests/hour per runner IP. Exhausting it makes the gate emit `::warning` and
+pass — verified by accident while testing, which is exactly the intended
+fail-open, and it is *loud*: two warnings naming the pin, never a silent pass.
+
+Three things keep this from mattering:
+
+. The common path never calls the API. A pin that is genuinely deny-listed is
+  caught by a local *positive*, which is trusted without the network — so the
+  294 `d7c22711` denials do not depend on it at all.
+. The API is consulted only when the gate is about to accuse, or when a
+  negative comes from a clone it cannot trust.
+. `governance-reusable.yml` now passes `GITHUB_TOKEN: ${{ github.token }}` to
+  the step, which removes the limit. This reaches a consumer only once it
+  re-pins past that commit — the script is read from `standards` HEAD, but the
+  job definition comes from the pinned SHA — so it lands naturally with the
+  propagation that these deny-listed pins need anyway.

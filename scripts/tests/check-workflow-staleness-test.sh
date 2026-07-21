@@ -91,7 +91,12 @@ run_case_out() {
     bash "$CHECK_SCRIPT" "$repo" 2>&1)
   rc=$?
   set -e
-  if [ "$rc" -eq "$expected" ] && printf '%s' "$out" | grep -qE "$regex"; then
+  # A leading '!' inverts the match: assert the gate did NOT say this.
+  local want=0
+  case "$regex" in '!'*) want=1; regex="${regex#!}" ;; esac
+  local got=0
+  printf '%s' "$out" | grep -qE "$regex" || got=1
+  if [ "$rc" -eq "$expected" ] && [ "$got" -eq "$want" ]; then
     echo "PASS: $desc"
     PASS=$((PASS + 1))
   else
@@ -213,6 +218,49 @@ write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C4"
 write_pin "$R/.github/workflows/hypatia.yml" "hypatia-scan-reusable.yml" "$C4"
 write_pin "$R/.github/workflows/scorecard.yml" "scorecard-reusable.yml" "$C4"
 run_case "clean multi-reusable repo passes" 0 "$R"
+
+# ── 13. THE PRODUCTION PATH: partial clone, where a local negative is not
+#       trustworthy ──────────────────────────────────────────────────────────
+# In CI the governance reusable clones standards with `--filter=tree:0`, so the
+# checkout is ALWAYS partial — and `merge-base --is-ancestor` is measured
+# unreliable there (awesome-haskell, four consecutive runs). Cases 1-12 all run
+# against a complete `git init` fixture, so none of them exercise the code that
+# actually protects production. Mark the fixture partial to reach it.
+#
+# The API is pointed at a closed port so these stay hermetic and fast: the
+# question is what the gate does when it can neither trust the clone nor reach
+# the server.
+UNREACHABLE="http://127.0.0.1:1"
+git -C "$FIX" config remote.origin.promisor true
+
+# 13a. A local POSITIVE is still trusted — a deny must not need the network.
+R="$TEST_DIR/partial-deny"; mk_repo "$R"
+write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C1"
+run_case_out "partial clone: local positive still denies without the network" 1 \
+  'predates' "$R" \
+  STALENESS_WINDOW_COMMITS=9999 STALENESS_WINDOW_DAYS=9999 \
+  STALENESS_API_BASE="$UNREACHABLE" \
+  STALENESS_KNOWN_BAD_BEFORE="governance-reusable.yml:$C3"
+
+# 13b. A local NEGATIVE must NOT be silently accepted. Unverifiable is reported
+#      as SKIPPED — "could not check" must never read as "passed".
+R="$TEST_DIR/partial-unchecked"; mk_repo "$R"
+write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C4"
+run_case_out "partial clone: unverifiable deny-list check is reported SKIPPED, not passed" 0 \
+  'SKIPPED, not passed' "$R" \
+  STALENESS_WINDOW_COMMITS=9999 STALENESS_WINDOW_DAYS=9999 \
+  STALENESS_API_BASE="$UNREACHABLE" \
+  STALENESS_KNOWN_BAD_BEFORE="governance-reusable.yml:$C3"
+
+# 13c. A complete clone's negative IS trusted — no warning, no network.
+git -C "$FIX" config --unset remote.origin.promisor
+R="$TEST_DIR/complete-quiet"; mk_repo "$R"
+write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C4"
+run_case_out "complete clone: local negative is trusted silently (no SKIPPED warning)" 0 \
+  '!SKIPPED' "$R" \
+  STALENESS_WINDOW_COMMITS=9999 STALENESS_WINDOW_DAYS=9999 \
+  STALENESS_API_BASE="$UNREACHABLE" \
+  STALENESS_KNOWN_BAD_BEFORE="governance-reusable.yml:$C3"
 
 echo "----------------------------------------"
 echo "$PASS/$TOTAL test cases passed."
