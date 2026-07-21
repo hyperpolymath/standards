@@ -76,6 +76,29 @@ run_case() {
   fi
 }
 
+# run_case_out desc expected_exit expected_output_regex repo [VAR=VAL ...]
+# As run_case, but also asserts the gate said the right thing — an exit code
+# alone cannot tell "passed silently" from "passed with the advisory notice
+# the propagation path depends on".
+run_case_out() {
+  local desc="$1" expected="$2" regex="$3" repo="$4"; shift 4
+  TOTAL=$((TOTAL + 1))
+  local out rc
+  set +e
+  out=$(env "$@" \
+    GITHUB_REPOSITORY="hyperpolymath/test-repo" \
+    STALENESS_STANDARDS_DIR="$FIX" \
+    bash "$CHECK_SCRIPT" "$repo" 2>&1)
+  rc=$?
+  set -e
+  if [ "$rc" -eq "$expected" ] && printf '%s' "$out" | grep -qE "$regex"; then
+    echo "PASS: $desc"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $desc (expected exit $expected + /$regex/, got exit $rc)"
+  fi
+}
+
 # ── 1. FRESH: pin == HEAD ───────────────────────────────────────────────────
 R="$TEST_DIR/fresh"; mk_repo "$R"
 write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C5"
@@ -98,11 +121,47 @@ write_pin "$R/.github/workflows/scorecard.yml" "scorecard-reusable.yml" "$C1"
 run_case "300d/4-behind pin passes on commits axis (window 5 commits / 1 day)" 0 "$R" \
   STALENESS_WINDOW_COMMITS=5 STALENESS_WINDOW_DAYS=1
 
-# ── 5. OUT_OF_WINDOW: outside both axes -> fail ─────────────────────────────
+# ── 5. OUT_OF_WINDOW: outside both axes -> ADVISORY, not a failure ──────────
+# Contract change (2026-07-21): age alone no longer fails. Making it fail turned
+# the gate into a clock that reddened the whole fleet ~14 days after every
+# propagation (294 of 350 consumers, one pin, nothing wrong with any of them).
+# The pin must still be *reported* so the propagation path has something to act
+# on — hence the output assertion, not just the exit code.
 R="$TEST_DIR/stale"; mk_repo "$R"
 write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C0"
-run_case "ancient pin (400d, 5 behind) fails (window 2 commits / 14 days)" 1 "$R" \
+run_case_out "ancient pin (400d, 5 behind) passes with an advisory notice" 0 \
+  '::notice.*outside the recency window' "$R" \
   STALENESS_WINDOW_COMMITS=2 STALENESS_WINDOW_DAYS=14
+
+# ── 5b. KNOWN-BAD: pin predates a named defect fix -> hard fail at any age ───
+# The deny-list is what the window was only ever proxying for. Strictly better
+# in both directions: it catches this, and it does not punish 5 above.
+R="$TEST_DIR/knownbad"; mk_repo "$R"
+write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C1"
+run_case_out "pin predating a known-bad fix fails regardless of window" 1 \
+  'predates.*carries the' "$R" \
+  STALENESS_WINDOW_COMMITS=9999 STALENESS_WINDOW_DAYS=9999 \
+  STALENESS_KNOWN_BAD_BEFORE="governance-reusable.yml:$C3"
+
+# ── 5c. KNOWN-BAD outranks freshness: an IN-WINDOW pin is still rejected ─────
+R="$TEST_DIR/knownbad-fresh"; mk_repo "$R"
+write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C4"
+run_case "in-window pin carrying a known defect still fails" 1 "$R" \
+  STALENESS_KNOWN_BAD_BEFORE="governance-reusable.yml:$C5"
+
+# ── 5d. The fix commit itself is NOT denied (boundary is strict) ─────────────
+R="$TEST_DIR/knownbad-boundary"; mk_repo "$R"
+write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C3"
+run_case "the fixing commit itself is not denied" 0 "$R" \
+  STALENESS_WINDOW_COMMITS=9999 STALENESS_WINDOW_DAYS=9999 \
+  STALENESS_KNOWN_BAD_BEFORE="governance-reusable.yml:$C3"
+
+# ── 5e. The deny-list is scoped per reusable, not applied globally ───────────
+R="$TEST_DIR/knownbad-scope"; mk_repo "$R"
+write_pin "$R/.github/workflows/scorecard.yml" "scorecard-reusable.yml" "$C1"
+run_case "a deny-list entry for another reusable does not fail this one" 0 "$R" \
+  STALENESS_WINDOW_COMMITS=9999 STALENESS_WINDOW_DAYS=9999 \
+  STALENESS_KNOWN_BAD_BEFORE="governance-reusable.yml:$C5"
 
 # ── 6. UNKNOWN / forged SHA -> fail ─────────────────────────────────────────
 R="$TEST_DIR/forged"; mk_repo "$R"
