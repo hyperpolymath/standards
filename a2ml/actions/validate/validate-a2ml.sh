@@ -5,14 +5,32 @@
 # validate-a2ml.sh — A2ML manifest validation script
 #
 # Scans for .a2ml files and validates:
-#   1. Required fields: agent-id or pedigree name, version
+#   1. Identity presence (warning — see below)
 #   2. SPDX-License-Identifier header presence
 #   3. Attestation block structure (if present)
 #   4. Section heading syntax ([section] or ## section)
 #
+# On identity (standards#435): the A2ML SPEC's only identity requirement is
+# per-record (`@record` needs author/tool/kind, SPEC §7) — there is NO
+# normative file-level "must have agent-id/name" rule. An earlier version of
+# this script required `agent-id|name|project =` as a hard error and flagged
+# the majority of canonical estate files (scorecards identify via `spec_id`,
+# contractile Xfiles via `@abstract` + filename, the six-file set via
+# `[metadata]`). Identity is therefore checked as a lint WARNING against the
+# real estate shapes, and skipped entirely for classes that are identity-free
+# by design:
+#   - AI manifests (AI-MANIFEST*.a2ml, AI.a2ml): markdown prose
+#   - design-rationale/example trees (INPUT_DESIGN_TREES)
+#   - templates/scaffolds: basename contains "template", or the body carries
+#     {{PLACEHOLDER}} markers — a scaffold cannot validate as concrete
+#
 # Environment variables:
-#   INPUT_PATH   — Directory to scan (default: .)
-#   INPUT_STRICT — Promote warnings to errors (default: false)
+#   INPUT_PATH         — Directory to scan (default: .)
+#   INPUT_STRICT       — Promote warnings to errors (default: false)
+#   INPUT_DESIGN_TREES — Space-separated path fragments exempt from
+#                        identity/version checks (default:
+#                        "machine-readable-design/ self-validating/examples/
+#                        docs/templates/")
 #
 # Exit codes:
 #   0 — All files valid (or only warnings in non-strict mode)
@@ -26,6 +44,12 @@ set -euo pipefail
 
 SCAN_PATH="${INPUT_PATH:-.}"
 STRICT="${INPUT_STRICT:-false}"
+DESIGN_TREES="${INPUT_DESIGN_TREES:-machine-readable-design/ self-validating/examples/ docs/templates/}"
+
+# Outside GitHub Actions GITHUB_OUTPUT is unset; under `set -u` an unset
+# expansion inside a redirection aborts the whole script (the `|| true`
+# cannot catch an expansion error). Default to /dev/null for local runs.
+GITHUB_OUTPUT="${GITHUB_OUTPUT:-/dev/null}"
 
 # Counters
 FILES_SCANNED=0
@@ -90,44 +114,65 @@ validate_a2ml() {
             "Missing SPDX-License-Identifier in first 10 lines"
     fi
 
-    # --- Check 2: Required identity fields ---
-    # A2ML files must contain either:
-    #   - agent-id = "..." or agent_id = "..."
-    #   - pedigree block with name field
-    #   - name = "..." at top level (for AI manifests)
-    #   - project = "..." (for STATE.a2ml)
+    # --- Check 2: Identity presence (lint warning; see header) ---
+    # Identity shapes actually used across the estate:
+    #   - agent-id / agent_id / name / project / spec_id = "..." (TOML-ish)
+    #   - name: "..." (colon dialect)
+    #   - a [metadata] or [scorecard] section (the six-file set and
+    #     scorecards: the filename + section carry the identity)
+    #   - an @abstract directive (contractile Xfile dialect)
     local has_identity=false
     local has_version=false
+    local has_placeholders=false
     line_num=0
 
     while IFS= read -r line; do
         line_num=$((line_num + 1))
 
         # Check for identity fields (various A2ML patterns)
-        if [[ "$line" =~ ^[[:space:]]*(agent[-_]id|name|project)[[:space:]]*= ]]; then
+        if [[ "$line" =~ ^[[:space:]]*(agent[-_]id|name|project|spec_id)[[:space:]]*= ]] \
+           || [[ "$line" =~ ^[[:space:]]*name[[:space:]]*: ]] \
+           || [[ "$line" =~ ^\[(metadata|scorecard)\] ]] \
+           || [[ "$line" =~ ^@abstract ]]; then
             has_identity=true
         fi
-        # Check for version field
-        if [[ "$line" =~ ^[[:space:]]*(version|schema_version)[[:space:]]*= ]]; then
+        # Check for version field (either separator)
+        if [[ "$line" =~ ^[[:space:]]*(version|schema_version)[[:space:]]*[=:] ]]; then
             has_version=true
+        fi
+        # Template placeholder marker ({{PROJECT_NAME}}, {{VERSION}}, …)
+        if [[ "$line" == *"{{"*"}}"* ]]; then
+            has_placeholders=true
         fi
     done < "$file"
 
-    # AI manifest files (0-AI-MANIFEST.a2ml, 0.1-AI-MANIFEST.a2ml, etc.)
-    # use markdown-style headers and free text, so identity check is relaxed
+    # Classes that are identity-free by design (see header):
     local basename
     basename="$(basename "$file")"
-    local is_manifest=false
-    if [[ "$basename" == *"AI-MANIFEST"* ]]; then
-        is_manifest=true
+    local identity_exempt=false
+    # AI manifests: markdown prose (0-AI-MANIFEST.a2ml, AI.a2ml, …)
+    if [[ "$basename" == *"AI-MANIFEST"* || "$basename" == "AI.a2ml" ]]; then
+        identity_exempt=true
+    fi
+    # Templates/scaffolds
+    if [[ "${basename,,}" == *"template"* || "$has_placeholders" == "true" ]]; then
+        identity_exempt=true
+    fi
+    # Design-rationale / example trees (standards#435 option a)
+    local tree
+    for tree in $DESIGN_TREES; do
+        if [[ "$file" == *"$tree"* ]]; then
+            identity_exempt=true
+            break
+        fi
+    done
+
+    if [[ "$has_identity" == "false" && "$identity_exempt" == "false" ]]; then
+        report_issue "warning" "$file" 1 \
+            "No identity found (agent-id/name/project/spec_id field, [metadata] or [scorecard] section, or @abstract directive)"
     fi
 
-    if [[ "$has_identity" == "false" && "$is_manifest" == "false" ]]; then
-        report_issue "error" "$file" 1 \
-            "Missing required identity field (agent-id, name, or project)"
-    fi
-
-    if [[ "$has_version" == "false" && "$is_manifest" == "false" ]]; then
+    if [[ "$has_version" == "false" && "$identity_exempt" == "false" ]]; then
         report_issue "warning" "$file" 1 \
             "Missing version or schema_version field"
     fi
