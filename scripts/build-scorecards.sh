@@ -149,7 +149,11 @@ extract_checks() {
 # fake pass. `xmllint` missing surfaced as exit 127; ripgrep missing made
 # release-pre-flight/v1-audit.sh exit 2, so its greps matched nothing and
 # returned 1. All seven were reported as "the pass is not real" — and all
-# seven passes were in fact real. See standards#381.
+# seven passes were in fact real.
+#
+# Newly diagnosed; this is NOT standards#381. That issue is REGISTRY.a2ml
+# source_hash drift in build-registry.sh — the *first* step of the same CI
+# job, a different script and a different mechanism, still unaddressed.
 #
 # Declared explicitly rather than inferred: splitting a check string to guess
 # its commands is unreliable (a quoted regex like "a\|b\|c", or `[ $(…) -ge
