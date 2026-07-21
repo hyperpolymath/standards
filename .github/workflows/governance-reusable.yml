@@ -535,22 +535,29 @@ jobs:
           # governance jobs on every PR estate-wide. github.sha resolves to the
           # same merge commit but is always fetchable.
           ref: ${{ github.sha }}
+
+      # A reusable workflow only auto-checks-out its own YAML, not sibling
+      # scripts. Sparse-check-out standards' scripts/ to get
+      # check-package-policy.sh, mirroring the baseline-filter job above.
+      - name: Check out standards for the package-policy gate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
       - name: Enforce Guix primary / Nix fallback
         run: |
-          HAS_GUIX=$(find . -name "*.scm" -o -name ".guix-channel" -o -name "guix.scm" 2>/dev/null | head -1)
-          HAS_NIX=$(find . -name "*.nix" 2>/dev/null | head -1)
-          NEW_LOCKS=$(git diff --name-only --diff-filter=A HEAD~1 2>/dev/null | grep -E 'package-lock\.json|yarn\.lock|Gemfile\.lock|Pipfile\.lock|poetry\.lock' || true)
-          if [ -n "$NEW_LOCKS" ]; then
-            echo "⚠️ Lock files detected. Prefer Guix manifests for reproducibility."
-          fi
-          if [ -n "$HAS_GUIX" ]; then
-            echo "✅ Guix package management detected (primary)"
-          elif [ -n "$HAS_NIX" ]; then
-            echo "✅ Nix package management detected (fallback)"
-          else
-            echo "ℹ️ Consider adding guix.scm or flake.nix for reproducible builds"
-          fi
-          echo "✅ Package policy check passed"
+          # Move the checker OUT of the scanned tree and delete the standards
+          # checkout before scanning: the gate walks the whole caller tree, so
+          # a packaging file shipped inside .standards-checkout/ would satisfy
+          # the policy on the caller's behalf (same trap as the baseline job).
+          cp .standards-checkout/scripts/check-package-policy.sh "$RUNNER_TEMP/"
+          rm -rf .standards-checkout
+          bash "$RUNNER_TEMP/check-package-policy.sh" .
 
   security-policy:
     name: Security policy checks
@@ -813,17 +820,14 @@ jobs:
       - name: Check file permissions
         run: |
           find . -type f -perm /111 -name "*.sh" | head -10 || true
-      - name: Check for secrets
-        uses: trufflesecurity/trufflehog@27b0417c16317ca9a472a9a8092acce143b49c55 # v3.95.9
-        with:
-          path: ./
-          base: ${{ github.event.pull_request.base.sha || github.event.before }}
-          head: ${{ github.sha }}
-        # by-design: trufflehog is a best-effort advisory scan; a scanner
-        # diff/range hiccup must not fail the whole governance gate. The
-        # blocking secret check is the inline grep in the security job.
-        # (Tooling Version Integrity Rule 4 — documented soft-gate.)
-        continue-on-error: true
+      # NOTE: the advisory trufflehog scan that used to sit here was removed
+      # (standards#505). It was `continue-on-error: true`, so it never gated,
+      # and it duplicated the estate's real secret gate — gitleaks in
+      # secret-scanner-reusable.yml, which became genuinely blocking in #500
+      # (pinned + checksummed binary, `--exit-code 1`, no continue-on-error).
+      # secret-scanner-reusable's own header already claimed "Trufflehog removed
+      # as redundant"; keeping it here contradicted that across the same estate.
+      # Removing a never-failing step cannot newly-red any caller.
       - name: Check TODO/FIXME
         run: |
           echo "=== TODOs ==="
@@ -836,17 +840,27 @@ jobs:
         # advisory: formatting hygiene is reported from the reusable estate
         # bundle; repos opt into blocking formatter checks locally when ready.
         continue-on-error: true
+      # Sparse-check-out standards' scripts/ for the docs gate (a reusable
+      # workflow only auto-checks-out its own YAML, not sibling scripts).
+      - name: Check out standards for the docs gate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
       - name: Check documentation
         run: |
-          MISSING=""
-          [ ! -f "README.md" ] && [ ! -f "README.adoc" ] && MISSING="$MISSING README"
-          [ ! -f "LICENSE" ] && [ ! -f "LICENSE.txt" ] && [ ! -f "LICENSE.md" ] && MISSING="$MISSING LICENSE"
-          [ ! -f "CONTRIBUTING.md" ] && [ ! -f "CONTRIBUTING.adoc" ] && MISSING="$MISSING CONTRIBUTING"
-          if [ -n "$MISSING" ]; then
-            echo "::warning::Missing docs:$MISSING"
-          else
-            echo "✅ Core documentation present"
-          fi
+          # Split gate (standards#505): README + LICENSE block immediately —
+          # measured 0/412 callers missing either, so arming them reds nobody.
+          # CONTRIBUTING (54/412 missing) warns until the cutoff baked into the
+          # script, then blocks. See scripts/check-docs-presence.sh.
+          cp .standards-checkout/scripts/check-docs-presence.sh "$RUNNER_TEMP/"
+          rm -rf .standards-checkout
+          bash "$RUNNER_TEMP/check-docs-presence.sh" .
 
   wellknown:
     name: Well-Known (RFC 9116 + RSR)
