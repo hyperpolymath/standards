@@ -29,6 +29,22 @@ jobs:
         with:
           fetch-depth: 0  # full history so `git ls-files -s` hashes are stable
 
+      # The scorecard `--verify` step below EXECUTES every pass-row's check.
+      # Those checks shell out to real tools; ubuntu-latest ships neither
+      # ripgrep nor xmllint. Without them `release-pre-flight/v1-audit.sh`
+      # exits 2 ("v1-audit requires ripgrep") and the k9-svc MIME check exits
+      # 127 — which the verifier then reported as "claimed PASS but the pass
+      # is not real". That was a FALSE ACCUSATION: the passes were real, the
+      # checks simply never ran. A gate that cannot run its own checks must
+      # not be allowed to call the repo dishonest. See standards#381.
+      - name: Install check dependencies (ripgrep, xmllint)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ripgrep libxml2-utils
+          rg --version | head -1
+          xmllint --version 2>&1 | head -1
+
       - name: Verify registry + derived topology are current
         run: |
           if ! bash scripts/build-registry.sh --check; then

@@ -142,9 +142,64 @@ extract_checks() {
 #   * pass + no check        -> self-asserted (reported; visible debt)
 #   * fail/other + check exits 0 -> stale-fail (advisory: re-grade candidate)
 # ---------------------------------------------------------------------------
+# Tools the checks shell out to that are NOT present on a bare runner.
+#
+# Why this exists: a check whose tool is absent is indistinguishable from a
+# check that ran and failed, so the verifier accused the repo of claiming a
+# fake pass. `xmllint` missing surfaced as exit 127; ripgrep missing made
+# release-pre-flight/v1-audit.sh exit 2, so its greps matched nothing and
+# returned 1. All seven were reported as "the pass is not real" — and all
+# seven passes were in fact real. See standards#381.
+#
+# Declared explicitly rather than inferred: splitting a check string to guess
+# its commands is unreliable (a quoted regex like "a\|b\|c", or `[ $(…) -ge
+# 25 ]`, both misparse) and a mis-parse would invent failures — the very sin
+# this guard exists to prevent.
+#
+# Add a tool here only if a check genuinely needs it AND it is absent from a
+# default ubuntu-latest image. CI installs these in registry-verify.yml.
+# Measured against the current scorecards: `xmllint` is named by 4 checks and
+# `jq` by 1; `rg` is named by none but is required *transitively* — the six
+# release-pre-flight checks invoke v1-audit.sh, which hard-exits 2 without it.
+# (`python3` and `cargo` are also referenced but ship on ubuntu-latest.)
+VERIFY_OPTIONAL_TOOLS="rg xmllint jq"
+
+check_missing_tools() {
+  local chk="$1" t out=""
+  for t in $VERIFY_OPTIONAL_TOOLS; do
+    # Word-boundary containment test, no tokenising: only reports a tool that
+    # the check actually names and that is actually not installed.
+    case " $chk " in
+      *[!A-Za-z0-9_-]"$t"[!A-Za-z0-9_-]*)
+        command -v "$t" >/dev/null 2>&1 || out="$out$t " ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
 run_verify() {
-  local rc=0 grounded=0 selfasserted=0 broken=0 stale=0 f base id status chk crc
+  local rc=0 grounded=0 selfasserted=0 broken=0 stale=0 unrunnable=0
+  local f base id status chk crc miss t absent=""
   echo "== scorecard --verify: running pass-row checks =="
+
+  # ---- environment preflight -------------------------------------------
+  # Per-check tool detection cannot be complete: a check may invoke a repo
+  # script that needs a tool the check string never names. release-pre-flight
+  # checks call v1-audit.sh, which exits 2 when ripgrep is missing; its greps
+  # then match nothing and the verifier concluded SIX claimed passes were
+  # "not real". They were real. Rather than risk that class of false
+  # accusation, refuse to verify at all in an incomplete environment.
+  for t in $VERIFY_OPTIONAL_TOOLS; do
+    command -v "$t" >/dev/null 2>&1 || absent="$absent$t "
+  done
+  if [ -n "$absent" ]; then
+    echo "⛔ verify environment incomplete — missing: ${absent% }" >&2
+    echo "   Checks (and the scripts they invoke) could fail for lack of" >&2
+    echo "   tooling rather than because a claim is false, so pass-rows will" >&2
+    echo "   NOT be judged. Install the tools and re-run:" >&2
+    echo "     sudo apt-get install -y ripgrep libxml2-utils jq" >&2
+    return 1
+  fi
   shopt -s nullglob
   for f in "$SCDIR"/*.scorecard.a2ml; do
     base="$(basename "$f" .scorecard.a2ml)"
@@ -155,11 +210,26 @@ run_verify() {
     selfasserted=$((selfasserted + p_total - p_chk))
     while IFS=$'\x1f' read -r id status chk; do
       [ -z "$chk" ] && continue
+      # A check whose tooling is absent did not run, so it can neither ground
+      # nor refute the claimed status. Report it as unrunnable — still a
+      # failure (an unverifiable pass must never go green), but described
+      # accurately so the fix is "install the tool", not "the claim is a lie".
+      miss="$(check_missing_tools "$chk")"
+      if [ -n "$miss" ]; then
+        echo "  ⛔ $base/$id: check CANNOT RUN — missing tool(s): ${miss% }"
+        echo "     check: $chk"
+        unrunnable=$((unrunnable + 1)); rc=1
+        continue
+      fi
       # Checks run read-only from the repo root; they must not mutate.
       ( cd "$(git rev-parse --show-toplevel)" && bash -c "$chk" ) >/dev/null 2>&1; crc=$?
       if [ "$status" = "pass" ]; then
         if [ "$crc" -eq 0 ]; then
           grounded=$((grounded + 1))
+        elif [ "$crc" -eq 127 ]; then
+          echo "  ⛔ $base/$id: check CANNOT RUN — command not found (exit 127)"
+          echo "     check: $chk"
+          unrunnable=$((unrunnable + 1)); rc=1
         else
           echo "  ❌ $base/$id: claimed PASS but check exited $crc — the pass is not real"
           echo "     check: $chk"
@@ -174,9 +244,14 @@ run_verify() {
     done < <(extract_checks "$f")
   done
   shopt -u nullglob
-  echo "  ── verify: $grounded grounded pass · $broken broken pass · $selfasserted self-asserted pass · $stale stale-fail"
+  echo "  ── verify: $grounded grounded pass · $broken broken pass · $unrunnable unrunnable · $selfasserted self-asserted pass · $stale stale-fail"
   if [ "$broken" -gt 0 ]; then
     echo "❌ --verify FAILED: $broken claimed pass(es) whose check does not hold" >&2
+  fi
+  if [ "$unrunnable" -gt 0 ]; then
+    echo "⛔ --verify FAILED: $unrunnable check(s) could not run (missing tooling)." >&2
+    echo "   These are NOT fake passes — the checks never executed. Install the" >&2
+    echo "   listed tools and re-run. CI installs them in registry-verify.yml." >&2
   fi
   return $rc
 }
