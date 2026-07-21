@@ -53,6 +53,11 @@ automation-test:
 gates-test:
     @bash scripts/tests/wave8-gates-test.sh
 
+# standards#505 gate-promotion regression: docs + package-policy gates can fail,
+# and their grace cutoffs actually flip (tested from both sides of the date)
+governance-gates-test:
+    @bash scripts/tests/governance-gates-505-test.sh
+
 # Structural validation of the Mustfile contract (severity + run/verification per check)
 mustfile-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
     @bash scripts/check-mustfile-structure.sh "{{path}}"
