@@ -67,6 +67,9 @@ set -eo pipefail
 #                               server-side integrity check (default
 #                               hyperpolymath/standards).
 #   STALENESS_STANDARDS_BRANCH— branch a pin must be reachable from (default main).
+#   STALENESS_API_BASE        — API root for the server-side integrity check
+#                               (default https://api.github.com; set for GHES,
+#                               or to an unreachable host in tests).
 #   STALENESS_KNOWN_BAD_BEFORE— override the known-bad deny-list, as space- or
 #                               comma-separated <reusable>:<fix-sha> entries.
 #                               "-" disables it. For the hermetic fixture tests
@@ -82,6 +85,7 @@ WINDOW_DAYS="${STALENESS_WINDOW_DAYS:-14}"
 # below). Overridable so a fork can point the gate at its own standards.
 STANDARDS_NWO="${STALENESS_STANDARDS_NWO:-hyperpolymath/standards}"
 STANDARDS_BRANCH="${STALENESS_STANDARDS_BRANCH:-main}"
+STANDARDS_API="${STALENESS_API_BASE:-https://api.github.com}"
 
 # ── Known-bad pins: hard fail regardless of age ─────────────────────────────
 # A recency *window* is only a proxy for "this pin might contain a known
@@ -213,8 +217,12 @@ ensure_commit() {
 clone_is_complete() {
   [ "$HAVE_HISTORY" = true ] || return 1
   local gd
-  gd=$(git -C "$STANDARDS_DIR" rev-parse --git-dir 2>/dev/null) || return 1
-  [ -e "$STANDARDS_DIR/$gd/shallow" ] || [ -e "$gd/shallow" ] && return 1
+  # --absolute-git-dir, not --git-dir: the latter returns a path relative to the
+  # CWD, which here is the *consumer's* checkout. actions/checkout is shallow by
+  # default, so a relative ".git/shallow" test would see the consumer's marker
+  # and call every standards clone incomplete.
+  gd=$(git -C "$STANDARDS_DIR" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  [ -e "$gd/shallow" ] && return 1
   [ -n "$(git -C "$STANDARDS_DIR" config --get remote.origin.partialclonefilter 2>/dev/null)" ] && return 1
   [ "$(git -C "$STANDARDS_DIR" config --get remote.origin.promisor 2>/dev/null)" = "true" ] && return 1
   return 0
@@ -235,7 +243,7 @@ resolve_negative() {
 api_compare() {
   local pin="$1" head="${2:-$STANDARDS_BRANCH}" url body code st ahead behind
   command -v curl >/dev/null 2>&1 || return 1
-  url="https://api.github.com/repos/${STANDARDS_NWO}/compare/${pin}...${head}"
+  url="${STANDARDS_API}/repos/${STANDARDS_NWO}/compare/${pin}...${head}"
   local -a auth=()
   [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
   body=$(curl -sS --max-time 20 -w '\n%{http_code}' \
@@ -298,7 +306,13 @@ pin_is_known_bad() {
         KNOWN_BAD_FIX="$fix_full"
         return 0
       fi
-      continue
+      # Local says "not affected". A local POSITIVE is trustworthy (no false
+      # positives observed), but a local NEGATIVE here is a FALSE GREEN — the
+      # exact failure this list exists to prevent — and the same
+      # `merge-base --is-ancestor` call is measured unreliable on the partial
+      # clone CI actually uses. Trust the negative only from a complete clone;
+      # otherwise fall through and confirm with the server.
+      clone_is_complete && continue
     fi
 
     # Degraded clone: ask the server rather than skip. A check that quietly
