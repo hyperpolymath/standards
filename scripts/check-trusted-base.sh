@@ -103,6 +103,11 @@ done
 echo "$proof_files" | grep -E '\.lean$' | while read -r f; do
   [ -z "$f" ] && continue
   grep -nE '\bsorry\b|^[[:space:]]*axiom[[:space:]]' "$f" 2>/dev/null | while IFS=: read -r ln rest; do
+    # Strip string literals to avoid false positives (e.g. from keyword tables or debug strings)
+    rest_no_strings="$(echo "$rest" | sed 's/"[^"]*"//g')"
+    if ! echo "$rest_no_strings" | grep -qE '\bsorry\b|^[[:space:]]*axiom[[:space:]]'; then
+      continue
+    fi
     emit_marker "$f" "$ln" "lean-sorry-or-axiom" "$(echo "$rest" | head -c 80)"
   done
 done
