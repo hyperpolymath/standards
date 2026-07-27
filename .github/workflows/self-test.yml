@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: MPL-2.0
+# self-test — run this repo's own test suite.
+#
+# WHY: `tests/test_check_trusted_base.sh` has existed for some time and was
+# wired into NO workflow. A test that never executes is indistinguishable from
+# a test that passes — the same shape as the `continue-on-error` gitleaks step
+# and the `./src`-only rust-secrets grep. This workflow closes that gap by
+# running every `tests/*.sh`, so adding a test is enough to have it enforced.
+#
+# The suite is deliberately FAIL-CLOSED: an empty tests/ directory, a
+# non-executable test, or a missing interpreter fails the job rather than
+# reporting a vacuous pass.
+
+name: Self Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Repo self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # PyYAML is required by the secret-scanner canary, which extracts the
+      # shipping step body from the reusable rather than testing a copy.
+      - name: Install test dependencies
+        run: python3 -m pip install --user --quiet pyyaml
+
+      - name: Run tests/*.sh
+        run: |
+          set -uo pipefail
+
+          mapfile -t TESTS < <(find tests -maxdepth 1 -name '*.sh' -type f | sort)
+
+          # Fail closed. If the suite is empty the discovery is broken, and a
+          # green tick here would assert something untrue.
+          if [ ${#TESTS[@]} -eq 0 ]; then
+            echo "::error::No tests found under tests/ — discovery is broken."
+            exit 1
+          fi
+          echo "Discovered ${#TESTS[@]} test file(s)."
+
+          failed=0
+          for t in "${TESTS[@]}"; do
+            echo "::group::$t"
+            if bash "$t"; then
+              echo "PASS $t"
+            else
+              rc=$?
+              echo "::error file=$t::$t failed (exit $rc)"
+              failed=$((failed+1))
+            fi
+            echo "::endgroup::"
+          done
+
+          echo
+          if [ "$failed" -gt 0 ]; then
+            echo "::error::$failed of ${#TESTS[@]} test file(s) failed."
+            exit 1
+          fi
+          echo "All ${#TESTS[@]} test file(s) passed."
