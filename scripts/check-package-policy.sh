@@ -9,8 +9,31 @@
 # an unconditional `✅ Package policy check passed` (standards#505). It could
 # not detect a violation, and it claimed a pass over any input.
 #
-# POLICY (CLAUDE.md, "Package Management"): Guix primary (guix.scm), Nix
-# fallback (flake.nix). A repo satisfying neither is the violation.
+# POLICY — canonical source is `rhodium-standard-repositories/spec/
+# LANGUAGE-POLICY.adoc` §Package Management, NOT CLAUDE.md:
+#
+#   RULED 2026-05-18 (estate-wide): Guix primary + sealed-container escape;
+#   NO Nix mirror. One packager per repo. A `flake.nix` that only mirrors a
+#   Guix manifest is drift to remove, not a fallback. A second packager is
+#   permitted only where it is the *sole* source of a *specific named*
+#   dependency, and that dependency is documented as the reason.
+#   **Supersedes the prior "Nix fallback everywhere" rule.**
+#
+# Tiers: Guix (guix.scm/manifest.scm) is PRIMARY; a sealed container
+# (Containerfile, Podman/Svalinn-sealed) is the ESCAPE HATCH for the
+# not-in-Guix / non-free tail. Nix is NOT a tier.
+#
+# This script previously cited CLAUDE.md and printed
+# `✅ Nix package management detected (fallback)`. CLAUDE.md's packaging
+# section is STALE — it still describes Nix as a fallback, in 472 copies
+# estate-wide — and CLAUDE.md itself defers to LANGUAGE-POLICY.adoc as
+# canonical, so the .adoc wins. Blessing a flake as compliant is what let the
+# 2026-07-21 remediation sweep ship `flake.nix` to 59 repos that should have
+# received Guix or a container.
+#
+# It also had NO sealed-container detection at all, so the policy's own escape
+# hatch could not satisfy the policy — a repo doing exactly the right thing for
+# the not-in-Guix tail was reported as having no packaging.
 #
 # PREDICATE — deliberately tightened. The previous step accepted *any* `*.scm`
 # anywhere in the tree as proof of "Guix package management detected", which a
@@ -37,6 +60,8 @@
 #
 # Environment (test seams — the shipped policy is the default in each case):
 #   ENFORCE_PACKAGE_POLICY_FROM  YYYY-MM-DD; enforcement begins ON this date.
+#   ENFORCE_NIX_RETIREMENT_FROM  YYYY-MM-DD; date Nix-only stops warning and
+#                                starts failing. Owner-set: 2026-06-01.
 #   PKG_TODAY                    YYYY-MM-DD; overrides "now" so the pre-cutoff
 #                                and post-cutoff branches are both testable.
 #
@@ -91,32 +116,77 @@ find_first() {
 
 GUIX="$(find_first -name guix.scm -o -name manifest.scm -o -name channels.scm -o -name .guix-channel)"
 NIX="$(find_first -name flake.nix -o -name default.nix -o -name shell.nix)"
+# Sealed container — the policy's named escape hatch, previously undetectable.
+# `Containerfile*` and `Dockerfile*` both count: the estate standardises on
+# Podman/Containerfile, but a repo already carrying a Dockerfile is served by
+# the same escape hatch and should not be told it has no packaging.
+CONTAINER="$(find_first -name 'Containerfile*' -o -name 'Dockerfile*')"
 
 if [ -n "$GUIX" ]; then
   echo "✅ Guix package management detected (primary): ${GUIX#"$ROOT"/}"
   exit 0
 fi
 
-if [ -n "$NIX" ]; then
-  echo "✅ Nix package management detected (fallback): ${NIX#"$ROOT"/}"
-  echo "::notice::Guix is the estate primary; Nix is the accepted fallback."
+if [ -n "$CONTAINER" ]; then
+  echo "✅ Sealed-container packaging detected (escape hatch): ${CONTAINER#"$ROOT"/}"
+  echo "::notice::Guix is the estate primary; a sealed container is the" \
+       "accepted escape hatch for the not-in-Guix / non-free tail."
   exit 0
+fi
+
+# Nix-only. Under the 2026-05-18 ruling this is NOT compliance — Nix is not a
+# tier — but it is also not the same as having no packaging at all, and the
+# repos in this state are overwhelmingly there because a *sweep put them there*
+# rather than through any author's choice. So it warns until the retirement
+# date, then fails. It never prints a ✅.
+#
+# ⚠ SEQUENCING — read before changing ENFORCE_NIX_RETIREMENT_FROM.
+# Nix retirement must TRAIL per-repo Guix functionality. Campaign #102 closed
+# COMPLETED having hand-diffed 277 candidates and removed exactly ONE flake;
+# ~270 repos carry a `guix.scm` that is a non-functional scaffold stub, so for
+# them "delete the flake" means "have no working packaging". Measured over the
+# local estate checkout: 22 repos are Nix-only and would fail the moment this
+# date passes. Setting a date in the past makes that immediate, with no grace.
+if [ -n "$NIX" ]; then
+  ENFORCE_NIX_RETIREMENT_FROM="${ENFORCE_NIX_RETIREMENT_FROM:-2026-06-01}"
+  require_date ENFORCE_NIX_RETIREMENT_FROM "$ENFORCE_NIX_RETIREMENT_FROM"
+
+  if [[ "$TODAY" < "$ENFORCE_NIX_RETIREMENT_FROM" ]]; then
+    echo "::warning::Nix-only packaging (${NIX#"$ROOT"/}). Nix is NOT an estate" \
+         "tier — Guix is primary, sealed container is the escape hatch. This" \
+         "becomes a BLOCKING failure on $ENFORCE_NIX_RETIREMENT_FROM (today is $TODAY)."
+    echo "NOT YET ENFORCED: Nix-only packaging inside the retirement grace window."
+    exit 0
+  fi
+
+  echo "::error::Nix-only packaging is not compliant: ${NIX#"$ROOT"/}"
+  echo
+  echo "Estate policy (LANGUAGE-POLICY.adoc, RULED 2026-05-18) is Guix primary"
+  echo "+ sealed-container escape; NO Nix mirror. Replace the flake with:"
+  echo "  guix.scm | manifest.scm | channels.scm | .guix-channel   (primary)"
+  echo "  Containerfile                                            (escape hatch)"
+  echo
+  echo "Do NOT simply delete the flake: a repo whose guix.scm is a scaffold stub"
+  echo "has no working packaging once the flake is gone. Make the Guix side real"
+  echo "first, then retire the mirror (spec/scaffold-stub-debt.adoc, step 3)."
+  exit 1
 fi
 
 # Violation: neither packaging system is present.
 if [[ "$TODAY" < "$ENFORCE_PACKAGE_POLICY_FROM" ]]; then
-  echo "::warning::No Guix or Nix packaging found — this becomes a BLOCKING" \
-       "failure on $ENFORCE_PACKAGE_POLICY_FROM (today is $TODAY)."
+  echo "::warning::No packaging found (no Guix, no sealed container) — this" \
+       "becomes a BLOCKING failure on $ENFORCE_PACKAGE_POLICY_FROM (today is $TODAY)."
   # Never claim a pass while the policy is unmet.
   echo "NOT YET ENFORCED: package policy unmet but inside the grace window."
   exit 0
 fi
 
-echo "::error::Package policy violation: no Guix or Nix packaging found."
+echo "::error::Package policy violation: no packaging found."
 echo
-echo "Estate policy is Guix primary / Nix fallback. Add one of:"
+echo "Estate policy (LANGUAGE-POLICY.adoc, RULED 2026-05-18) is Guix primary"
+echo "+ sealed-container escape; NO Nix mirror. Add one of:"
 echo "  guix.scm | manifest.scm | channels.scm | .guix-channel   (primary)"
-echo "  flake.nix | default.nix | shell.nix                      (fallback)"
+echo "  Containerfile                                            (escape hatch)"
 echo
 echo "Files inside .git/ node_modules/ deps/ .lake/ vendor/ do not count."
 exit 1
