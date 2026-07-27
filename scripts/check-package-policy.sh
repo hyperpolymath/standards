@@ -127,11 +127,28 @@ if [ -n "$GUIX" ]; then
   exit 0
 fi
 
+# A Containerfile only counts if it BUILDS something. The estate scaffold ships
+# a template whose every install/build line is a commented `# TODO:` example —
+# measured 2026-07-27: 17 of 60 estate Containerfiles are that stub. Accepting
+# them on presence alone reproduces exactly the fault this script was written to
+# remove (standards#505 accepted any *.scm as "Guix detected"). A stub provides
+# no environment, so it is not packaging.
+#
+# The predicate is deliberately cheap and syntactic: at least one ACTIVE
+# RUN / ENTRYPOINT / CMD instruction. It cannot prove the image is useful, but
+# it does separate "someone filled this in" from "this is the untouched
+# template", which is the distinction that matters at gate time.
 if [ -n "$CONTAINER" ]; then
-  echo "✅ Sealed-container packaging detected (escape hatch): ${CONTAINER#"$ROOT"/}"
-  echo "::notice::Guix is the estate primary; a sealed container is the" \
-       "accepted escape hatch for the not-in-Guix / non-free tail."
-  exit 0
+  if grep -qE '^[[:space:]]*(RUN|ENTRYPOINT|CMD)[[:space:]]' "$CONTAINER"; then
+    echo "✅ Sealed-container packaging detected (escape hatch): ${CONTAINER#"$ROOT"/}"
+    echo "::notice::Guix is the estate primary; a sealed container is the" \
+         "accepted escape hatch for the not-in-Guix / non-free tail."
+    exit 0
+  fi
+  echo "::warning::${CONTAINER#"$ROOT"/} is the UNFILLED scaffold template —" \
+       "every install/build step is a commented '# TODO:' example, so it" \
+       "provides no environment and does not satisfy the policy."
+  CONTAINER=""
 fi
 
 # Nix-only. Under the 2026-05-18 ruling this is NOT compliance — Nix is not a
