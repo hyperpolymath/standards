@@ -169,7 +169,18 @@ jobs:
           # itself the moment a baseline lands (standards#399/#437/#446).
           if [ -f scripts/apply-baseline.sh ] && [ -f .hypatia-baseline.json ]; then
             echo "Baseline present — running BLOCKING gate (threshold: high)."
-            bash scripts/apply-baseline.sh hypatia-findings.json .hypatia-baseline.json blocking
+            # Relativize finding paths before matching (hypatia#566 stopgap):
+            # code_safety / honest_completion emit ABSOLUTE host paths in .file
+            # (Path.expand(repo)); the baseline uses repo-relative paths, so without
+            # this they never match and the gate fails on already-acknowledged
+            # findings. Mirrors governance-reusable.yml, which relativizes identically.
+            jq --arg root "$PWD" '
+              map(if (.file? // "") == $root then .file = "."
+                  elif (.file? // "") | startswith($root + "/")
+                  then .file = (.file | ltrimstr($root + "/"))
+                  else . end)
+            ' hypatia-findings.json > hypatia-findings.relativized.json
+            bash scripts/apply-baseline.sh hypatia-findings.relativized.json .hypatia-baseline.json blocking
           else
             echo "No committed baseline — gate stays advisory (see next step)."
           fi
