@@ -100,15 +100,52 @@ echo "$proof_files" | grep -E '\.v$' | while read -r f; do
 done
 
 # Lean sorry / axiom
+#
+# Matching must be COMMENT-AWARE. The previous implementation stripped only
+# "string literals" from a single line, so a docstring that merely MENTIONS
+# `sorry` -- e.g. a repo documenting that its own gate rejects smuggled
+# sorries -- was reported as a soundness-relevant escape hatch, and the repo
+# was then told to seed docs/proof-debt.md for a hatch that does not exist.
+# Lean block comments nest and span lines, so per-line string stripping cannot
+# see them. strip_lean_noncode() blanks line comments (--), nesting block
+# comments and docstrings (/- -/, /-! -/, /-- -/) and string literals, while
+# preserving line numbers so reported line numbers stay accurate.
+#
+# Failure direction is deliberate: string state is NOT carried across lines, so
+# an odd quote over-flags rather than blanking the remainder of a file. For a
+# soundness gate, over-flagging is safe and under-flagging is not.
+strip_lean_noncode() {
+  awk '
+    {
+      line = $0; out = ""; i = 1; n = length(line); instr = 0
+      while (i <= n) {
+        c = substr(line, i, 1); c2 = substr(line, i, 2)
+        if (depth > 0) {
+          if (c2 == "-/") { depth--; i += 2; continue }
+          if (c2 == "/-") { depth++; i += 2; continue }
+          i++; continue
+        }
+        if (instr) {
+          if (c == "\\") { i += 2; continue }
+          if (c == "\"") { instr = 0; i++; continue }
+          i++; continue
+        }
+        if (c2 == "/-") { depth++; i += 2; continue }
+        if (c2 == "--") { break }
+        if (c == "\"") { instr = 1; i++; continue }
+        out = out c; i++
+      }
+      print out
+    }
+  ' "$1"
+}
+
 echo "$proof_files" | grep -E '\.lean$' | while read -r f; do
   [ -z "$f" ] && continue
-  grep -nE '\bsorry\b|^[[:space:]]*axiom[[:space:]]' "$f" 2>/dev/null | while IFS=: read -r ln rest; do
-    # Strip string literals to avoid false positives (e.g. from keyword tables or debug strings)
-    rest_no_strings="$(echo "$rest" | sed 's/"[^"]*"//g')"
-    if ! echo "$rest_no_strings" | grep -qE '\bsorry\b|^[[:space:]]*axiom[[:space:]]'; then
-      continue
-    fi
-    emit_marker "$f" "$ln" "lean-sorry-or-axiom" "$(echo "$rest" | head -c 80)"
+  strip_lean_noncode "$f" 2>/dev/null | grep -nE '\bsorry\b|^[[:space:]]*axiom[[:space:]]' | while IFS=: read -r ln rest; do
+    # Report the ORIGINAL line text (the stripped form is only for matching)
+    orig="$(sed -n "${ln}p" "$f" 2>/dev/null)"
+    emit_marker "$f" "$ln" "lean-sorry-or-axiom" "$(echo "$orig" | head -c 80)"
   done
 done
 
