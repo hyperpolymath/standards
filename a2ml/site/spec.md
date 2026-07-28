@@ -2,6 +2,8 @@
 ---
 title: A2ML specification
 site: A2ML
+description: A2ML v1.1.0 normative specification — Surface Grammar + Typed Core + Profiles
+brand: A2ML
 date: 2026-06-22
 ---
 

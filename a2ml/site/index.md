@@ -2,6 +2,8 @@
 ---
 title: A2ML
 site: A2ML
+description: Attested Markup Language — a lightweight, Djot-like markup that compiles into a typed, attested core
+brand: A2ML
 date: 2026-06-22
 ---
 

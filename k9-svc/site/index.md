@@ -2,6 +2,8 @@
 ---
 title: K9-SVC
 site: K9-SVC
+description: Self-Validating Components — a Nickel-based format for configuration and contractiles with three-level trust model
+brand: K9-SVC
 date: 2026-06-22
 ---
 
