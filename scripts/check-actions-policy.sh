@@ -23,7 +23,10 @@ WF_DIR="${1:-.github/workflows}"
 
 # The canonical allowlist lives in this repo at
 # rhodium-standard-repositories/actions-allowlist/allowed-actions.json
-CANON="rhodium-standard-repositories/actions-allowlist/allowed-actions.json"
+# Resolve the canonical allowlist. $ALLOWLIST_JSON lets the caller point at a
+# copy staged outside the scanned tree — required for consumer repos, which do
+# not have rhodium-standard-repositories/ in their own checkout.
+CANON="${ALLOWLIST_JSON:-rhodium-standard-repositories/actions-allowlist/allowed-actions.json}"
 
 if [ ! -f "$CANON" ]; then
   echo "::error::Canonical allowlist not found: $CANON"
