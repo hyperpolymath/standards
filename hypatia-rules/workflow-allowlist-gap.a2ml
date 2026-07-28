@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MPL-2.0
+# HYP-S008 — Workflow Allowlist Gap
+# Fires when a `.github/workflows` file `uses:` an action or reusable-workflow
+# that the repo's Actions allowlist (allowed_actions=selected) does not permit.
+#
+# That is the condition that makes a run die at STARTUP with zero jobs and no
+# log — the opaque, un-squabble-able failure (RSR-PHILOSOPHY: reach green by
+# satisfying the gate, never admin-override). A run that fails before it starts
+# has no gate to satisfy; this rule reifies the gate so it can be satisfied.
+#
+# Root cause seen 2026-07-11: repos migrated between orgs (e.g. gossamer →
+# metadatastician) get patterns_allowed reset to [], blocking every estate
+# action/reusable at once. See rhodium-standard-repositories/actions-allowlist/.
+
+@rule(version="1.0"):
+id: HYP-S008
+name: "Workflow allowlist gap"
+description: "Detect .github/workflows `uses:` refs not covered by the canonical Actions allowlist (would startup_failure under allowed_actions=selected)"
+severity: high
+category: CiResilience
+auto_fixable: false          # setting the allowlist needs an admin token, not the workflow GITHUB_TOKEN
+source: standards/hypatia-rules
+
+@parameters:
+allowlist: rhodium-standard-repositories/actions-allowlist/allowed-actions.json
+@end
+
+@query(engine="vcl"):
+workflow_uses(scan="repo-tree", dir=".github/workflows")
+  |> where("not covered_by_allowlist(ref, ${allowlist})")
+  |> project("file, ref")
+@end
+
+@action:
+emit_signal: compliance.finding.new
+message_template: "Actions allowlist gap: {file} uses {ref} — not permitted by the repo allowlist; the run will startup_failure. Add the pattern to the allowlist, or run scripts/set-allowed-actions.sh."
+recipe: check-allowlist
+@end
+
+@recipe(id="check-allowlist"):
+description: "List the uncovered `uses:` refs — legible + satisfiable, no admin needed. The paired set-allowed-actions.sh (admin PAT) applies the fix."
+command: "bash scripts/check-allowed-actions.sh"
+auto_applicable: false
+@end
+
+@end

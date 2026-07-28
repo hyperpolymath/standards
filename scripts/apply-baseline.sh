@@ -19,9 +19,19 @@
 #   0 = all unfiltered findings have severity below blocking threshold
 #       (or advisory mode)
 #   1 = one or more unfiltered findings >= high in blocking mode
-#   2 = invalid input (missing files, malformed JSON)
+#   2 = invalid input (missing files, malformed JSON, or a baseline that
+#       violates the schema — see below)
 #
-# Dependencies: bash, jq. Optional: ajv-cli for schema validation.
+# Dependencies: bash, jq.
+#
+# Schema enforcement: the baseline is structurally validated here, in jq,
+# mirroring .machine_readable/hypatia-baseline.schema.json (required keys,
+# file XOR file_pattern, closed key set, severity enums, rule_module/type/
+# tracking_issue/expires_at shapes). This script is the single place every
+# baseline passes through (both reusable workflows call it), so validating
+# here needs no extra tooling or checkout — and a malformed baseline FAILS
+# (exit 2) rather than silently matching nothing, which is how suppression
+# bugs creep in. Keep this mirror in sync when the schema changes.
 
 set -euo pipefail
 
@@ -59,6 +69,62 @@ echo "$BASELINE_JSON" | jq -e 'type == "array"' >/dev/null || {
   echo "error: baseline JSON is not an array" >&2
   exit 2
 }
+
+# Structural validation against the baseline schema (see header).
+SCHEMA_ERRORS="$(jq -r '
+  def known: ["severity","rule_module","type","file","file_pattern",
+              "severity_override","expires_at","note","tracking_issue"];
+  def sevs: ["critical","high","medium","low","info"];
+  [ to_entries[] | .key as $i | .value as $e |
+    if ($e|type) != "object" then "entry[\($i)]: not an object"
+    else (
+      (["severity","rule_module","type"][]
+        | select(($e[.]|type) != "string")
+        | "entry[\($i)]: required key \(.) missing or not a string"),
+      (if (($e|has("file")) == ($e|has("file_pattern")))
+       then "entry[\($i)]: exactly one of file / file_pattern is required"
+       else empty end),
+      ($e | keys[]
+        | select(. as $k | known | index($k) | not)
+        | "entry[\($i)]: unknown key \(.)"),
+      (if ($e.severity|type) == "string" and ((sevs|index($e.severity))|not)
+       then "entry[\($i)]: invalid severity \($e.severity)" else empty end),
+      (if ($e.rule_module|type) == "string"
+          and (($e.rule_module|test("^[a-z][a-z0-9_]*$"))|not)
+       then "entry[\($i)]: rule_module fails pattern: \($e.rule_module)"
+       else empty end),
+      (if ($e.type|type) == "string"
+          and (($e.type|test("^([a-z][a-z0-9_]*|[A-Z]{2,3}[0-9]{3})$"))|not)
+       then "entry[\($i)]: type fails pattern: \($e.type)" else empty end),
+      (if ($e|has("file")) and ((($e.file|type) != "string") or ($e.file == ""))
+       then "entry[\($i)]: file must be a non-empty string" else empty end),
+      (if ($e|has("file_pattern"))
+          and ((($e.file_pattern|type) != "string") or ($e.file_pattern == ""))
+       then "entry[\($i)]: file_pattern must be a non-empty string"
+       else empty end),
+      (if ($e|has("severity_override"))
+          and (((sevs + ["advisory"])|index($e.severity_override))|not)
+       then "entry[\($i)]: invalid severity_override \($e.severity_override)"
+       else empty end),
+      (if ($e|has("expires_at"))
+          and ((($e.expires_at|type) != "string")
+               or (($e.expires_at|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))|not))
+       then "entry[\($i)]: expires_at must be an ISO date (YYYY-MM-DD)"
+       else empty end),
+      (if ($e|has("tracking_issue"))
+          and ((($e.tracking_issue|type) != "string")
+               or (($e.tracking_issue|test("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$"))|not))
+       then "entry[\($i)]: tracking_issue must look like owner/repo#N"
+       else empty end)
+    ) end
+  ] | .[]
+' <<<"$BASELINE_JSON")"
+
+if [[ -n "$SCHEMA_ERRORS" ]]; then
+  echo "error: baseline violates hypatia-baseline.schema.json:" >&2
+  echo "$SCHEMA_ERRORS" >&2
+  exit 2
+fi
 
 # Pre-filter baseline: drop expired entries (>=today).
 ACTIVE_BASELINE="$(jq --arg today "$TODAY" '
