@@ -1,0 +1,9 @@
+# Repository instructions
+
+This repository is the canonical general standards authority for the Hyperpolymath estate. Read `0-AI-MANIFEST.a2ml`, `README.adoc`, `constitution/README.adoc`, and `.machine_readable/REGISTRY.a2ml` in that order before changing normative material.
+
+Constitutional, normative, profile, local-policy, guidance, template, implementation, generated, and historical material are distinct authority classes. A proposal is not authorised policy until the applicable change procedure is completed. Evidence records what currently holds; it does not gain authority merely by being generated or machine-readable.
+
+Canonical sources include `constitution/`, domain standard sources, profile sources, and the registry source consumed by `scripts/build-registry.sh`. `.machine_readable/REGISTRY.a2ml` and `TOPOLOGY.md` are generated: never edit them directly. Preserve licences, coined names, MAA's independent authority, and current language/build conventions. Do not add TypeScript or Deno, weaken validation, or describe draft/tested work as proven.
+
+Run the relevant `just`/`must` targets, registry and topology generators/checks, A2ML/Nickel/K9 validation where applicable, link/canonical-name checks, and `git diff --check`. Regenerate twice and require a clean second pass for generated outputs.

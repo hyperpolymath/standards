@@ -1,32 +1,18 @@
-;;; SPDX-License-Identifier: MPL-2.0
-;;; guix.scm — Guix environment for K9 SVC development
-;;;
-;;; Usage:
-;;;   guix shell -D -f guix.scm
-;;;
+; SPDX-License-Identifier: MPL-2.0
+;; guix.scm — GNU Guix package definition for squisher-corpus
+;; Usage: guix shell -f guix.scm
 
 (use-modules (guix packages)
              (guix build-system gnu)
-             (guix licenses)
-             (gnu packages base)
-             (gnu packages crypto)
-             (gnu packages shells)
-             (gnu packages rust-apps) ; for just
-             (gnu packages node))     ; for nickel if available or used
+             (guix licenses))
 
 (package
-  (name "k9-svc")
-  (version "1.0.0")
-  (source #f) ; Development environment only
+  (name "squisher-corpus")
+  (version "0.1.0")
+  (source #f)
   (build-system gnu-build-system)
-  (native-inputs
-   (list just
-         openssl
-         nickel
-         ripgrep))
-  (synopsis "Self-Validating Components - Data-first configuration")
-  (description
-   "Development environment for K9 SVC, including Nickel for schema
-validation and OpenSSL for cryptographic signing.")
-  (home-page "https://github.com/hyperpolymath/standards/tree/main/k9-svc")
-  (license agpl3+))
+  (synopsis "squisher-corpus")
+  (description "squisher-corpus — part of the hyperpolymath ecosystem.")
+  (home-page "https://github.com/hyperpolymath/squisher-corpus")
+  (license ((@@ (guix licenses) license) "PMPL-1.0-or-later"
+             "https://github.com/hyperpolymath/palimpsest-license")))
