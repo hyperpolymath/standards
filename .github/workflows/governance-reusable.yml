@@ -58,6 +58,36 @@ jobs:
         run: |
           bash "$HOME/standards/scripts/check-workflow-staleness.sh" .
 
+  allowlist-preflight:
+    name: Allowlist Preflight
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+
+      - name: Checkout standards for the allowlist gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            rhodium-standard-repositories/actions-allowlist
+            scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Run allowlist preflight check
+        run: |
+          cp .standards-checkout/scripts/check-actions-policy.sh "$RUNNER_TEMP/"
+          rm -rf .standards-checkout
+          bash "$RUNNER_TEMP/check-actions-policy.sh" .github/workflows
+
   validate-hypatia-baseline:
     name: Validate Hypatia Baseline
     needs: workflow-staleness
