@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# axel-protocol.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "axel-protocol"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "The repository MUST publish an AXEL policy document that validates against the JSON Schema at schemas/axel-policy.schema.json."
+system = "none (no CI job validates public/.well-known/axel-policy or docs/.well-known/axel-policy against schemas/axel-policy.schema.json; ajv is only referenced from an unrunnable test)"
+status = "fail"
+effects = "Downstream consumers (clients, browser extensions, network-assisted enforcers) that trust the reference policy example have no automated guarantee it stays schema-valid as the schema evolves."
+
+[[must]]
+id = "M2"
+text = "The AXEL-STS DNS TXT record parser and the policy schema validator MUST have an automated, executable test suite that runs in CI."
+system = "none — test/axel-sts_test.affine and test/validate-policy_test.affine exist but are AffineScript; validate-policy_test.affine's own header states it 'require[s] ajv_new/ajv_compile/ajv_validate externs ... Until the deno-test harness is extended with an Ajv Node-CJS shim' the tests cannot run, and no .github/workflows/*.yml invokes `deno task test` or any AffineScript/node-cjs test runner"
+status = "fail"
+effects = "Regressions in DNS TXT parsing or schema validation logic (both core protocol behaviors that origins/clients interoperate on) can ship undetected; interop test vectors promised in the roadmap ('Phase 1: harden validator behaviour and test vectors') are not yet enforced."
+
+[[must]]
+id = "M3"
+text = "The reference Zig FFI layer MUST have integration tests that actually compile and run against the exported ABI."
+system = "none — ffi/zig/test/integration_test.zig is an unsubstituted template (contains literal `{{PROJECT}}`/`{{project}}` placeholders), so it cannot compile with `zig build test` as-is; no CI workflow invokes zig build/test"
+status = "fail"
+effects = "Downstream systems-integration consumers relying on the advertised 'Zig FFI — C-compatible systems integration layer' have no evidence the FFI boundary works or is tested at all."
+
+[[must]]
+id = "M4"
+text = "The repository MUST have a filled-in, non-boilerplate vulnerability-disclosure policy (SECURITY.md)."
+system = "manual-only"
+status = "fail"
+effects = "Security researchers and downstream adopters have no real contact path or supported-version table; SECURITY.md still contains the generic GitHub template text ('Use this section to tell people...') rather than project-specific content."
+
+[[must]]
+id = "M5"
+text = "Every source, spec, and policy file MUST carry a machine-checkable SPDX license identifier."
+system = "manual-only"
+status = "manual-only"
+effects = "Licence provenance for downstream redistributors of the spec text, schema, and reference code depends on human review; no automated SPDX scan was found in this repo's workflows."
+
+[[should]]
+id = "S1"
+text = "Configuration/state files (Nickel .k9.ncl) SHOULD be typechecked in CI before merge."
+system = "deno task k9:validate (config/ci.k9.ncl, config/metadata.k9.ncl via `nickel typecheck`) — defined in deno.json but not invoked by any .github/workflows/*.yml job, and `nickel` is not present in this environment to confirm it even runs"
+status = "fail"
+effects = "Malformed Nickel metadata/CI config could merge without detection, silently breaking downstream tooling that consumes config/metadata.k9.ncl (e.g. k9:export -> metadata.json)."
+
+[[should]]
+id = "S2"
+text = "The static site build (Casket-SSG) SHOULD be verified to build successfully before deployment."
+system = ".github/workflows/deploy-casket.yml — 'Build site with Casket-SSG' step runs `./casket-simple build content _site`; failure of this step blocks the subsequent GitHub Pages deploy"
+status = "pass"
+evidence = ".github/workflows/deploy-casket.yml lines 18-21 run casket-simple build as a required step gating actions/upload-pages-artifact and actions/deploy-pages; a build failure fails the job."
+check = "test -f axel-protocol/.github/workflows/deploy-casket.yml && grep -q 'casket-simple build' axel-protocol/.github/workflows/deploy-casket.yml"
+effects = "Downstream: the published axel-protocol.org site (policy discovery landing page, IETF draft mirrors) would fail to deploy rather than silently publishing a broken/stale site."
+
+[[should]]
+id = "S3"
+text = "Code changes SHOULD be scanned for known vulnerability patterns via static analysis (CodeQL)."
+system = ".github/workflows/codeql.yml — CodeQL Advanced workflow, 'actions' language matrix entry, runs on push/PR to main and weekly schedule"
+status = "pass"
+evidence = ".github/workflows/codeql.yml defines the 'analyze' job with matrix language 'actions' (build-mode none) running github/codeql-action/init and analyze on push, pull_request, and a weekly cron; this is a real, currently-configured GitHub Actions scan (though it only covers the 'actions' language, not the ReScript/AffineScript/Zig source)."
+check = "test -f axel-protocol/.github/workflows/codeql.yml && grep -q 'language: actions' axel-protocol/.github/workflows/codeql.yml"
+effects = "Only GitHub Actions workflow files are scanned; the actual protocol logic (ReScript/AffineScript validators, Zig FFI) is not covered by this CodeQL matrix, so vulnerabilities there would not be caught by this system."
+
+[[should]]
+id = "S4"
+text = "The project SHOULD track and report an OSSF Scorecard supply-chain security score."
+system = ".github/workflows/scorecard.yml — OSSF Scorecard action, uploads SARIF to code scanning, runs daily and on push"
+status = "pass"
+evidence = ".github/workflows/scorecard.yml runs ossf/scorecard-action@4eaacf05... on a daily cron and push to main/master, uploading results.sarif via github/codeql-action/upload-sarif."
+check = "test -f axel-protocol/.github/workflows/scorecard.yml && grep -q 'ossf/scorecard-action' axel-protocol/.github/workflows/scorecard.yml"
+effects = "Consumers evaluating supply-chain trust of this repo (branch protection, pinned actions, etc.) have an ongoing automated signal; without it they'd have to audit manually."
+
+[[should]]
+id = "S5"
+text = "Shared per-repo governance policy (licensing, workflow linting, security policy checks) SHOULD be enforced via the estate-wide governance bundle rather than duplicated ad hoc."
+system = ".github/workflows/governance.yml — calls hyperpolymath/standards/.github/workflows/governance-reusable.yml@861b5e9 (reusable workflow, pinned to a commit SHA)"
+status = "pass"
+evidence = ".github/workflows/governance.yml lines 24-26 invoke the shared reusable governance workflow on push/PR/workflow_dispatch, replacing the per-repo quality.yml/security-policy.yml/etc. scaffolding per the file's own header comment."
+check = "test -f axel-protocol/.github/workflows/governance.yml && grep -q 'governance-reusable.yml' axel-protocol/.github/workflows/governance.yml"
+effects = "If the shared governance-reusable.yml pin is stale or the reusable workflow itself has gaps, all estate repos including axel-protocol inherit the same blind spots; this repo cannot be evaluated for governance compliance independent of the shared bundle's contents."
+
+[[could]]
+id = "C1"
+text = "The protocol COULD reach IETF Internet-Draft standards-track status for its core/origin/policy specifications."
+system = "aspirational"
+status = "aspirational"
+effects = "ietf/draft-axel-core-00.md, draft-axel-origin-00.md, draft-axel-policy-00.md exist as -00 individual drafts only; no evidence of IETF working-group adoption or external standards review. This is an appropriate reach goal, not a current gap to be scored as fail."
+
+[[could]]
+id = "C2"
+text = "The reference implementation COULD provide a working privacy-preserving attestation service (zero-knowledge/selective-disclosure threshold proofs)."
+system = "aspirational"
+status = "aspirational"
+effects = "README.adoc's own Status section marks 'Reference attestation service' and 'Formal interoperability test vectors' as pending; no attestation service code exists on disk. Downstream relying parties cannot yet integrate real threshold-proof verification."
+
+[[could]]
+id = "C3"
+text = "The project COULD provide Terraform/Ansible deployment modules and managed-gateway/firewalld integration guidance as a supported deliverable."
+system = "none"
+status = "manual-only"
+effects = "firewalld-axel.xml exists as a single example config, not a maintained module; network-assisted enforcement adopters (Phase 3 roadmap item) have only an illustrative starting point, not a supported integration path."

@@ -30,8 +30,34 @@ RSR_FREEZE_DATE="2025-12-27"
 # Configuration
 # =============================================================================
 
-REPO_PATH="${1:-.}"
-OUTPUT_FORMAT="${2:-text}"
+# Argument parsing (standards#387).
+# Historically the second positional arg was read verbatim as the format, so the
+# DOCUMENTED `--format json` form silently fell through to the text default while
+# only the bare positional `text|json|html` worked. Accept both now, and reject
+# an unknown format loudly (exit 4) instead of silently defaulting.
+REPO_PATH="."
+OUTPUT_FORMAT="text"
+_repo_seen=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --format=*)
+            OUTPUT_FORMAT="${1#*=}"; shift ;;
+        --format)
+            OUTPUT_FORMAT="${2:-}"; shift 2 || { echo "error: --format needs a value" >&2; exit 4; } ;;
+        text|json|html)
+            # Backward-compatible bare positional format (e.g. Justfile passes `. text`).
+            OUTPUT_FORMAT="$1"; shift ;;
+        -*)
+            echo "error: unknown option: $1" >&2; exit 4 ;;
+        *)
+            if [[ $_repo_seen -eq 0 ]]; then REPO_PATH="$1"; _repo_seen=1; shift
+            else echo "error: unexpected argument: $1" >&2; exit 4; fi ;;
+    esac
+done
+case "$OUTPUT_FORMAT" in
+    text|json|html) ;;
+    *) echo "error: invalid --format '$OUTPUT_FORMAT' (want: text|json|html)" >&2; exit 4 ;;
+esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Compliance thresholds
@@ -226,11 +252,14 @@ audit_category_2_documentation() {
     check_file_exists "MAINTAINERS.md" "MAINTAINERS.md present"
     check_file_exists "CHANGELOG.md" "CHANGELOG.md present"
 
-    # LICENSE.txt validation
-    if [[ -f "$REPO_PATH/LICENSE.txt" ]]; then
-        check_file_contains "LICENSE.txt" "SPDX-License-Identifier" "LICENSE.txt has SPDX identifier"
-        check_file_contains "LICENSE.txt" "MIT" "LICENSE.txt includes MIT license"
-        check_file_contains "LICENSE.txt" "Palimpsest" "LICENSE.txt includes Palimpsest license"
+    # LICENSE validation — estate policy: sole-owner repos are MPL-2.0
+    # (accept `LICENSE` or `LICENSE.txt`).
+    local _license=""
+    [[ -f "$REPO_PATH/LICENSE.txt" ]] && _license="LICENSE.txt"
+    [[ -z "$_license" && -f "$REPO_PATH/LICENSE" ]] && _license="LICENSE"
+    if [[ -n "$_license" ]]; then
+        check_file_contains "$_license" "SPDX-License-Identifier" "LICENSE has SPDX identifier"
+        check_file_contains "$_license" "Mozilla Public License" "LICENSE is MPL-2.0 (estate sole-owner policy)"
     fi
 
     # README validation
@@ -243,7 +272,9 @@ audit_category_2_documentation() {
     # SECURITY.md validation
     if [[ -f "$REPO_PATH/SECURITY.md" ]]; then
         check_file_contains "SECURITY.md" "Reporting" "SECURITY.md has vulnerability reporting"
-        check_file_contains "SECURITY.md" "24 hours" "SECURITY.md has response timeline"
+        # Estate-tolerant: credit any documented response SLA phrasing, not just
+        # the literal "24 hours" (repos use "Response Timeline", "business day", etc.)
+        check_file_contains "SECURITY.md" "24 hours\\|48 hours\\|72 hours\\|business day\\|[Rr]esponse [Tt]ime\\|SLA" "SECURITY.md has response timeline"
     fi
 
     # CONTRIBUTING.md validation (TPCF)
@@ -458,14 +489,13 @@ audit_category_7_licensing() {
     # License clarity
     check_file_exists "LICENSE.txt" "LICENSE.txt present (plain text, not LICENSE.md)"
 
-    if [[ -f "$REPO_PATH/LICENSE.txt" ]]; then
-        check_file_contains "LICENSE.txt" "MIT" "MIT license included"
-        check_file_contains "LICENSE.txt" "Palimpsest" "Palimpsest license included (ethical AI)"
-    fi
-
-    # SPDX identifier in LICENSE.txt
-    if [[ -f "$REPO_PATH/LICENSE.txt" ]]; then
-        check_file_contains "LICENSE.txt" "SPDX-License-Identifier: MIT AND Palimpsest" "Correct SPDX identifier in LICENSE.txt"
+    # estate policy: sole-owner repos are MPL-2.0 (accept LICENSE or LICENSE.txt)
+    local _license=""
+    [[ -f "$REPO_PATH/LICENSE.txt" ]] && _license="LICENSE.txt"
+    [[ -z "$_license" && -f "$REPO_PATH/LICENSE" ]] && _license="LICENSE"
+    if [[ -n "$_license" ]]; then
+        check_file_contains "$_license" "Mozilla Public License" "LICENSE is MPL-2.0"
+        check_file_contains "$_license" "SPDX-License-Identifier: MPL-2.0" "Correct SPDX identifier in LICENSE (MPL-2.0)"
     fi
 
     # FUNDING.yml for funding transparency

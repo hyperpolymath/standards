@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= A2ML Record Dialect — Conformance Vectors
+:icons: font
+:toc: macro
+
+toc::[]
+
+This directory is the *normative test* for
+link:../../RECORD-DIALECT-SPEC.adoc[the A2ML Record Dialect specification]. A
+reference validator conforms to a class (R0/R1/R2, spec §1.4) if and only if it
+produces the expected verdict for every vector whose required class is at or below
+the class under test.
+
+== Layout
+
+[cols="1,3",options="header"]
+|===
+| Path | Contents
+
+| `vectors/valid/`
+| Documents that MUST parse (R0) and, where they declare a profile, MUST validate
+  (R1) against the definitions in `a2ml/profiles/`.
+
+| `vectors/invalid/`
+| Documents that MUST be rejected. Each is paired in `MANIFEST.a2ml` with the spec
+  clause it violates and the lowest class (R0/R1/R2) at which rejection is
+  REQUIRED.
+
+| `MANIFEST.a2ml`
+| The machine-readable index of every vector: expected verdict, required class,
+  and the spec section exercised. It is itself a record-dialect document, so it
+  doubles as a valid vector (the suite dogfoods the dialect).
+|===
+
+== Expected-verdict model
+
+Each vector has an `expect` of `parse`, `validate`, or `reject`:
+
+* `parse` — R0 MUST build a record tree without error. (Profile-free or
+  profile-inert.)
+* `validate` — R0 MUST parse AND R1 MUST validate against the declared profile.
+* `reject` — the validator MUST error at or below `class`; a validator at a higher
+  class MUST also reject (obligations accumulate downward, spec §1.4).
+
+A vector marked `reject` at `class = R0` is a *syntax* error every conforming
+implementation catches. A vector marked `reject` at `class = R1` is a
+*well-formedness / profile* error that a pure R0 reader is permitted to accept
+(with a warning where the spec says so).
+
+== Running the suite (once a reference validator exists)
+
+The validator is not yet wired (spec Appendix D). The intended contract, so the
+suite is runnable the moment the reader lands:
+
+[source,sh]
+----
+# For each valid vector: exit 0, tree emitted.
+# For each invalid vector: non-zero exit, error cites the manifest's clause.
+a2ml validate --dialect record --class R1 vectors/valid/<name>.a2ml     # → 0
+a2ml validate --dialect record --class R1 vectors/invalid/<name>.a2ml   # → non-0
+----
+
+The CI job that drives this MUST fail loudly on any mismatch — never the
+`|| echo SKIP` pattern. A green run of this suite is the precondition (spec §15,
+Appendix D) for moving the specification from `Draft` to `Stable`.
+
+== Adding a vector
+
+. Add the `.a2ml` file under `valid/` or `invalid/`.
+. Add a matching `[[vector]]` block to `MANIFEST.a2ml` with `name`, `expect`,
+  `class`, `spec_section`, and a one-line `note`.
+. Keep each vector minimal — it should exercise exactly one clause so a failure
+  localises to one rule.

@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# agentic-a2ml.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "agentic-a2ml"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "The repository MUST provide a normative specification document defining the AGENTIC.a2ml format."
+system = "spec/AGENTIC-FORMAT-SPEC.adoc (383 lines, present and referenced from README.adoc)"
+status = "pass"
+evidence = "/home/user/standards/agentic-a2ml/spec/AGENTIC-FORMAT-SPEC.adoc exists (383 lines) and is linked as 'the complete normative specification' from README.adoc."
+check = "cd agentic-a2ml && test -f spec/AGENTIC-FORMAT-SPEC.adoc && [ \"$(wc -l < spec/AGENTIC-FORMAT-SPEC.adoc)\" -ge 383 ] && grep -q \"AGENTIC-FORMAT-SPEC.adoc\\[spec/AGENTIC-FORMAT-SPEC.adoc\\]\" README.adoc"
+effects = "Consumers (playbook-a2ml, meta-a2ml, downstream agent tooling) rely on this document as the authoritative contract for gating-policy fields; without it, dependent repos cannot implement conformant readers."
+
+[[must]]
+id = "M2"
+text = "Example AGENTIC.a2ml files MUST validate against the published JSON Schema (spec/agentic.schema.json)."
+system = "none — no validator script or CI job invokes agentic.schema.json against examples/*.a2ml"
+status = "fail"
+effects = "examples/minimal.a2ml and examples/comprehensive.a2ml use top-level sections ([agent-permissions], [agent-constraints], [maintenance-integrity]) that are not defined anywhere in spec/agentic.schema.json's $defs, and the schema sets additionalProperties:false at the root, meaning both shipped examples would fail schema validation if it were ever run. Downstream implementers copying the examples will produce non-conformant files; any future validator would immediately break on the repo's own examples."
+
+[[must]]
+id = "M3"
+text = "The gating grammar MUST be formally defined (ABNF) and kept consistent with the JSON Schema representation."
+system = "none — no cross-check script diffs spec/agentic.abnf against spec/agentic.schema.json"
+status = "fail"
+effects = "spec/agentic.abnf (199 lines) and spec/agentic.schema.json (418 lines) can drift silently (as already evidenced by M2's section mismatch); any parser generated from one artifact may reject files valid under the other, breaking playbook-a2ml/meta-a2ml consumers that pick either as ground truth."
+
+[[must]]
+id = "M4"
+text = "Every source file MUST carry a valid SPDX-License-Identifier header consistent with the repository's licensing policy."
+system = "none — no automated SPDX header linter/CI job is configured in .gitlab-ci.yml for this repo"
+status = "manual-only"
+effects = "Licence compliance for redistribution of individual files (e.g. by downstream forks) depends on manual review; inconsistent headers already observed (README/ADRs declare CC-BY-SA-4.0, ffi/rsr-adapter.adb declares MPL-2.0 as 'automatic legal fallback until PMPL is formally recognised', and no repo-local LICENSE file exists under agentic-a2ml/ itself even though README says 'See LICENSE')."
+
+[[must]]
+id = "M5"
+text = "A reference implementation or parser for AGENTIC.a2ml MUST exist so the format is machine-actionable, not merely descriptive."
+system = "none — ffi/zig and ffi/rsr-adapter.ad[bs] are unfilled `{{PROJECT}}`/template scaffolding, not a working parser; ncl/lib files are generic Rhodium-standard templates unrelated to AGENTIC.a2ml semantics"
+status = "fail"
+effects = "The project's own STATE.a2ml (.machine_readable/6a2/STATE.a2ml) lists 'Begin reference implementation design', 'Implement basic Deno parser for AGENTIC.scm', and 'Complete validation tooling' as still-open critical-next-actions, and records completion-percentage=85 with maturity='experimental'. Any downstream repo attempting to actually gate agent actions per this spec has no runnable reference to integrate against or test conformance."
+
+[[should]]
+id = "S1"
+text = "The project SHOULD run CI that lints/tests the artifacts actually present in the repository."
+system = ".gitlab-ci.yml (trivy, gitleaks, semgrep security jobs run unconditionally; rustfmt/clippy/cargo-test/cargo-build and mix-format/credo/mix-test/mix-build jobs are gated on `exists: Cargo.toml` / `exists: mix.exs`)"
+status = "fail"
+effects = "There is no Cargo.toml or mix.exs anywhere under /home/user/standards/agentic-a2ml, so every lint/test/build stage in .gitlab-ci.yml is a no-op for this repo; only generic filesystem/secret scanners (trivy, gitleaks, semgrep) actually execute, giving false confidence that 'CI passes' when nothing spec-specific (schema validation, ABNF parsing, example conformance) is ever checked."
+
+[[should]]
+id = "S2"
+text = "The ROADMAP SHOULD reflect actual, current milestone status rather than generic boilerplate."
+system = "none — manual inspection of ROADMAP.adoc / docs/ROADMAP.adoc"
+status = "fail"
+effects = "ROADMAP.adoc still shows unchecked boilerplate checkboxes ('Core functionality', 'Basic documentation', 'CI/CD pipeline' all `[ ]`) and 'Future Directions: To be determined' despite the spec text itself being fairly developed (383-line format spec, schema, ABNF); consumers checking the roadmap for maturity signals get no real information, and it duplicates docs/ROADMAP.adoc without indication of which is authoritative."
+
+[[should]]
+id = "S3"
+text = "Companion machine-readable state files (STATE.a2ml, META.a2ml, ECOSYSTEM.a2ml) SHOULD be kept current and reflect a passing maintenance status."
+system = ".machine_readable/6a2/STATE.a2ml [maintenance-status] block"
+status = "fail"
+effects = "STATE.a2ml's own [maintenance-status] records last-result = \"unknown\" (not pass/warn/fail) and last-run-utc dated 2026-01-09, stale relative to file edits dated 2026-04-11/2026-04-12 elsewhere in the repo; downstream tooling that gates on STATE.a2ml's maintenance-status field (per the spec's own execution pipeline, step 6/7) cannot rely on it to reflect true repo health."
+
+[[should]]
+id = "S4"
+text = "Cross-language FFI bindings SHOULD be functional (compilable/testable) rather than unfilled templates."
+system = "ffi/zig/build.zig `zig build test` / `zig build test-integration` (would need the `{{project}}` placeholders resolved and src/main.zig to implement the extern functions referenced in test/integration_test.zig)"
+status = "fail"
+effects = "ffi/zig/test/integration_test.zig and ffi/zig/build.zig still contain unresolved `{{PROJECT}}`/`{{project}}` template placeholders (would not compile as-is), and ffi/rsr-adapter.ad[bs] implements an unrelated repository-customisation helper (AI_Target enum for Claude/Copilot) rather than an AGENTIC.a2ml gating adapter; no language binding for this spec is currently buildable."
+
+[[could]]
+id = "C1"
+text = "The spec COULD reach a Grade-A / externally-audited conformance level with certified third-party parser implementations across multiple languages."
+system = "none — aspirational; no external audit or certification process defined"
+status = "aspirational"
+effects = "No downstream impact today; this is a stretch goal beyond the project's current experimental maturity (per STATE.a2ml maturity=\"experimental\")."
+
+[[could]]
+id = "C2"
+text = "Contractile templates (Mustfile/Dustfile) COULD be filled in with agentic-a2ml-specific invariants and rollback handlers rather than left as generic copy-in templates."
+system = "none — contractiles/must/Mustfile and contractiles/dust/Dustfile reference generic placeholder paths (config/service.yaml, policy/policy.ncl, logs/decisions.json) that do not exist in this repo"
+status = "aspirational"
+effects = "Minor: these are explicitly documented in contractiles/README.adoc as a template set meant to be copied and customised per-repo, so their generic state is expected, but as shipped they provide zero enforceable invariant for agentic-a2ml itself."
+
+[[could]]
+id = "C3"
+text = "The project COULD provide citation/provenance tracking for design decisions (docs/CITATIONS.adoc) that is kept in sync with the spec's evolving claims."
+system = "none — manual review of docs/CITATIONS.adoc content vs spec claims"
+status = "manual-only"
+effects = "Low impact; affects academic/credibility positioning of the spec rather than functional conformance for downstream consumers."

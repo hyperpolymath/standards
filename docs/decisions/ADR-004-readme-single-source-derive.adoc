@@ -1,0 +1,247 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+// Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= ADR-004: README Single-Source Derivation — Author AsciiDoc, Derive Markdown per Declared Consumer
+:toc:
+:sectnums:
+:icons: font
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v0.1.0, 2026-07-07
+
+== Status
+
+**Accepted** — 2026-07-07. The principle was ratified 2026-07-07 with the
+condition "standards-design first"; this ADR was reviewed and accepted the
+same day, unblocking Phase B (build) and Phase C (pilot). The three
+§Open items were accepted at their proposed defaults (no owner veto):
+
+* Consumer declaration lives in a `(publishing ...)` block in descriptiles
+  `ECOSYSTEM.a2ml` (not a standalone `PUBLISHING.a2ml`).
+* Vocabulary-preservation gate threshold: **98%**.
+* Freshness mode: **fail-and-tell** (the workflow reports staleness and the
+  regeneration command; it does not self-commit).
+
+== Context
+
+The estate default is `README.adoc` (~215 repos). AsciiDoc is the
+canonical authoring format for its richer semantics (toc, includes,
+callouts, source highlighting).
+
+Exactly two repos genuinely need a *Markdown* README, for
+external-platform rendering reasons, not stylistic preference:
+
+* **boj-server** — listed on Glama, the MCP-server directory. Glama
+  renders Markdown only; an `.adoc` README displays as raw markup.
+* **hyperpolymath/hyperpolymath** — the GitHub profile repo. GitHub
+  special-cases `README.md` for profile rendering and shows a
+  persistent notice until one exists.
+
+This narrow two-repo exception lived as prose lore. On 2026-06-25 an
+agent over-generalised it into an estate-wide `README.adoc` → `README.md`
+conversion (~33 repos, identical commit message "renders on
+Glama/profile/community-health"). All were reverted on 2026-06-29 by
+restoring each repo's pre-conversion `.adoc` from origin history.
+
+Root cause: **format policy expressed as prose is executable by
+judgment, and judgment over-generalises.** The exception list also
+cannot grow safely — every new Markdown-only consumer (another
+directory, a package registry) would extend the lore and raise the
+same risk again.
+
+A related precedent: the Item-11 `.md`/`.adoc` dedupe work established
+that format conversion is only safe behind a *vocabulary-preservation
+gate* (a fail-closed check that the output retains ≥98% of the input's
+content tokens), implemented in `md2adoc.py` and backed by a static
+pandoc 3.9.
+
+== Decision (proposed)
+
+=== Principle
+
+Author every README once, in AsciiDoc. Where a repo has a
+Markdown-only consumer, CI *derives* `README.md` from `README.adoc`.
+Derived files are build artefacts: never hand-edited, never
+hand-converted, always regenerable.
+
+Uniform in authoring, flexible in publishing. The two current
+exceptions stop being exceptions and become configuration.
+
+=== Consumer declaration (descriptiles `publishing` block)
+
+A repo that needs a derived README declares it in its descriptiles —
+accepted home: a `[publishing.readme]` table in
+`.machine_readable/descriptiles/ECOSYSTEM.a2ml` (ecosystem = who
+consumes this repo, so the semantics fit).
+
+`ECOSYSTEM.a2ml` is flat-TOML in practice (see any repo's real file),
+so the block is a flat table — deliberately greppable so CI can read it
+without a TOML library:
+
+[source,toml]
+----
+[publishing.readme]
+canonical = "README.adoc"
+derive    = true
+format    = "gfm"
+path      = "README.md"
+consumer  = "glama"   # glama | github-profile | ...
+reason    = "Glama MCP directory renders Markdown only"
+----
+
+Rules:
+
+* **No declaration ⇒ no derived README, ever.** Absence is a
+  machine-readable "do not convert".
+* Every derived entry carries `consumer` and `reason` — the *why*
+  travels with the config, so a future sweep agent reads intent
+  instead of guessing it.
+* Any estate sweep touching README format MUST read this block first
+  and skip undeclared repos. This is the anti-runaway guard.
+
+=== Bootstrapping a canonical `.adoc` from an existing `README.md`
+
+The derive direction (`.adoc → .md`) is a clean one-shot. Producing the
+*initial* canonical `.adoc` from a rich existing `README.md` is a
+one-time authoring step, not part of the CI path, and has one sharp edge
+verified on boj-server's real README (264 lines, 12 badges, 15-entry TOC):
+
+**Anchor-ID convention (mandatory when the README has an intra-doc TOC).**
+GitHub Markdown auto-anchors headings as lowercase-hyphenated
+(`## Capabilities overview` → `#capabilities-overview`). Asciidoctor
+instead defaults to `_prefixed_underscored` IDs
+(`_capabilities_overview`), so a converted `link:#capabilities-overview[]`
+TOC would dead-link on GitHub *and* re-derive to a broken Markdown anchor.
+The canonical `.adoc` MUST therefore set, in its document header:
+
+[source,asciidoc]
+----
+= Project Title
+:idprefix:
+:idseparator: -
+----
+
+With those two attributes, `== Features` → id `features`,
+`== Capabilities overview` → id `capabilities-overview` — matching GitHub
+Markdown exactly. `readme-derive-reusable.yml` enforces this: if the
+canonical source contains `link:#…[]` anchors without both attributes, the
+job fails-and-tells (the vocabulary gate cannot catch this — it checks
+words, not link targets).
+
+**One-time bootstrap recipe** (verified end-to-end on boj-server —
+faithful round-trip: 11/11 TOC anchors resolve, 12/12 badges intact,
+≥98% vocab, only AsciiDoc scaffolding tokens "lost"):
+
+[source,bash]
+----
+# 1. md -> asciidoc body
+pandoc -f gfm -t asciidoc --wrap=preserve README.md -o body.adoc
+# 2. promote every heading one level (== -> =, === -> ==, …) so the top
+#    heading becomes the '= doctitle' and section nesting stays correct
+sed -E 's/^==(=*) /=\1 /' body.adoc > body2.adoc
+# 3. assemble canonical README.adoc: SPDX header + '= Title' +
+#    :idprefix:/:idseparator: -  + body2 (minus its first title line)
+# 4. sanity: render to HTML, confirm section ids match the TOC anchors
+----
+
+pandoc wraps inline code containing `_ * { +` in AsciiDoc passthroughs
+(`++_*++`, `{plus}`) — correct and harmless (renders as literal text; the
+derived `.md` comes back clean), just visible noise in the source. Accept
+it, or tidy by hand; do not "fix" it in a way that changes rendered output.
+
+=== Derivation pipeline (reusable workflow, `standards`)
+
+One reusable workflow, `readme-derive.yml`, called by opted-in repos
+(same pattern as the other `-reusable` workflows here):
+
+1. **Resolve** — `asciidoctor-reducer` flattens includes so the source
+   is self-contained.
+2. **Convert** — `asciidoctor -b docbook` → `pandoc -f docbook -t gfm`
+   (the reliable route; direct asciidoc→gfm converters lose structure).
+3. **Gate** — vocabulary-preservation check, fail-closed: the derived
+   `.md` must retain ≥98% of the `.adoc`'s lowercased ≥4-char content
+   tokens (badge/attribute syntax excluded). Same design as
+   `md2adoc.py`, inverted direction. A failing gate fails the job; it
+   cannot silently lose content.
+4. **Stamp** — prepend to the derived file:
++
+[source,markdown]
+----
+<!-- GENERATED from README.adoc — do not edit. Regenerated by
+     standards/.github/workflows/readme-derive.yml -->
+----
++
+plus the repo's SPDX header.
+5. **Freshness** — on PRs and pushes, fail if `README.md` is stale
+   relative to `README.adoc` (regenerate-and-diff). Default mode is
+   *fail-and-tell* rather than auto-commit, keeping the workflow free
+   of push credentials; an `auto_commit` input can be added later if
+   the friction warrants it (owner call).
+
+=== Guardrails
+
+* **rhodibot broadening**: where a canonical `README.adoc` exists and
+  the repo's descriptiles declare *no* Markdown consumer, an existing
+  `README.md` is deletable cruft (this auto-heals any future runaway).
+  Current rhodibot only removes <5-line stubs.
+* The two-repo exception lore in agent memory is superseded by the
+  declaration mechanism once the pilot lands.
+
+=== Rollout
+
+[cols="1,4,2"]
+|===
+|Phase |Scope |Gate
+
+|A
+|This ADR (design only, no code)
+|Owner accepts ADR
+
+|B
+|Build `readme-derive.yml` + gate script in `standards`; define the
+`publishing` block in the descriptiles docs
+|ADR accepted
+
+|C
+|Pilot: flip **boj-server** and **hyperpolymath/hyperpolymath** to
+authored `.adoc` + derived `.md` (ratified 2026-07-07 — both flip)
+|Phase B green; derived output visually verified on Glama and the
+profile page before the hand-authored `.md` is replaced
+
+|D
+|Opt-in for any future Markdown consumer; rhodibot broadening
+|Pilot proves out
+|===
+
+== Consequences
+
+* One authoring format estate-wide; no repo ever has two hand-edited
+  READMEs drifting apart.
+* Markdown consumers are served without demoting the canonical format.
+* The exception list becomes config: adding a consumer is a one-block
+  descriptiles change plus a caller workflow, not new lore.
+* Conversion runs only in deterministic CI behind a fail-closed gate —
+  no judgment calls left for an agent to over-generalise.
+* Cost: pandoc/asciidoctor in one more reusable workflow; a freshness
+  check that fails PRs which edit `README.adoc` without regenerating
+  (mitigated by fail-and-tell output including the regeneration
+  command).
+
+== Alternatives considered
+
+* **Keep hand-maintained `.md` in the exception repos** (status quo):
+  drift risk between the two files, and the lore-based rule already
+  caused one estate-wide runaway.
+* **Convert canonical format to Markdown where consumed**: rejected —
+  this is exactly the June runaway, and it demotes the authoring
+  format estate-wide to serve a per-platform rendering gap.
+* **Wait for consumers to render AsciiDoc**: GitHub already renders
+  `.adoc`; the gap is external (Glama et al.). A bug report to Glama
+  is being filed in parallel, but the estate cannot depend on
+  third-party fix timelines.
+
+== Open items (owner veto points)
+
+1. `publishing` block in `ECOSYSTEM.a2ml` vs standalone
+   `PUBLISHING.a2ml`.
+2. Gate threshold (98% proposed, matching md2adoc precedent).
+3. Freshness mode: fail-and-tell (proposed) vs auto-commit.

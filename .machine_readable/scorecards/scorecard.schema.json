@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hyperpolymath/standards/.machine_readable/scorecards/scorecard.schema.json",
+  "title": "Standards spec scorecard",
+  "description": "MUST/SHOULD/COULD + systems/compliance/effects audit for one registered spec. One scorecard per LOCAL [[spec]] in REGISTRY.a2ml, keyed by spec_id. Hand-authored source; the compliance dashboard is generated from these by scripts/build-scorecards.sh. Serialised as TOML-ish A2ML; this JSON Schema documents the logical shape and is what a validator checks the parsed form against.",
+  "type": "object",
+  "required": ["scorecard"],
+  "properties": {
+    "scorecard": {
+      "type": "object",
+      "required": ["spec_id", "version", "assessed_date", "assessor"],
+      "additionalProperties": false,
+      "properties": {
+        "spec_id": {
+          "type": "string",
+          "description": "MUST equal the id of a LOCAL [[spec]] in REGISTRY.a2ml.",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "version": { "type": "string", "description": "Scorecard schema/content version (semver)." },
+        "assessed_date": { "type": "string", "format": "date", "description": "ISO date this assessment was recorded." },
+        "assessor": { "type": "string", "description": "Who/what produced the assessment (person, team, or automation id)." }
+      }
+    },
+    "must":   { "$ref": "#/$defs/requirementList", "description": "RFC-2119 MUST requirements (load-bearing; a failing MUST is a compliance gap)." },
+    "should": { "$ref": "#/$defs/requirementList", "description": "RFC-2119 SHOULD requirements (recommended; a gap is a warning, not a failure)." },
+    "could":  { "$ref": "#/$defs/requirementList", "description": "RFC-2119 MAY/COULD requirements (optional / aspirational reach)." }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "requirementList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/requirement" }
+    },
+    "requirement": {
+      "type": "object",
+      "required": ["id", "text", "system", "status", "effects"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Stable id within the scorecard (e.g. M1, S2, C3)." },
+        "text": { "type": "string", "description": "The requirement, phrased with an RFC-2119 keyword." },
+        "system": {
+          "type": "string",
+          "description": "The mechanical check that discharges this requirement: a script path + exit criteria, a CI job name, or the literal 'none'. 'none' is legal but VISIBLE — it is the honest signal that a requirement is asserted but not mechanically enforced. This field drives the dashboard's systems-coverage %."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pass", "fail", "aspirational", "manual-only"],
+          "description": "pass = system verified it green (evidence REQUIRED). fail = a real, current gap. aspirational = an intentionally-unreachable reach target (e.g. a Grade-A gate); NEVER counted as pass. manual-only = discharged by human/governance judgement, no automatable system (e.g. licence rulings — always manual-only per the Manual-Only licence policy)."
+        },
+        "evidence": {
+          "type": "string",
+          "description": "REQUIRED when status = pass: the concrete proof (script path + exit criteria, CI job name/url, or issue url). Empty/absent evidence with status=pass is a scorecard defect the generator rejects."
+        },
+        "check": {
+          "type": "string",
+          "description": "OPTIONAL executable grounding for a pass: a shell command, run from the repo root, that exits 0 iff the requirement currently holds (e.g. 'bash scripts/spec-checks/k9-svc.sh M4' or a direct test command). Distinct from `system` (human-readable description): `check` is what `build-scorecards.sh --verify` actually RUNS. A pass row with a check is a GROUNDED pass — DYADT applied to the scorecard itself. A pass row without a check remains legal but is reported as self-asserted by --verify. Checks MUST be read-only (no mutation) and MUST NOT touch licence/SPDX content (Manual-Only policy)."
+        },
+        "effects": {
+          "type": "string",
+          "description": "What is impacted downstream (repos, specs, consumers) if this requirement is unmet — the 'effects' axis of the audit."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "pass" } } },
+          "then": { "required": ["evidence"], "properties": { "evidence": { "minLength": 1 } } }
+        }
+      ]
+    }
+  }
+}

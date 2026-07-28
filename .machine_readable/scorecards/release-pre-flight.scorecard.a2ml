@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# release-pre-flight.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "release-pre-flight"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "The gate document MUST enumerate hard gates (proof completeness, test completeness, benchmark completeness, build/execution integrity, aspect integrity, static/security audit, claim/artifact parity) that block a v1.0.0 stable claim."
+system = "/home/user/standards/release-pre-flight/V1-GATE.adoc sections 3.1-3.7"
+status = "pass"
+evidence = "V1-GATE.adoc lines 47-130 define sections 3.1 through 3.7 with concrete, checkable criteria for each hard gate."
+check = "for s in \"3.1 Proof Completeness\" \"3.2 Test Completeness\" \"3.3 Benchmark Completeness\" \"3.4 Build and Execution Integrity\" \"3.5 Aspect Integrity\" \"3.6 Static and Security Audit\" \"3.7 Claim and Artifact Parity\"; do grep -q \"=== $s\" release-pre-flight/V1-GATE.adoc || exit 1; done"
+effects = "Any repo/spec claiming v1.0.0 without meeting these criteria has no documented basis for the claim; consumers relying on the label lose the guarantee it is meant to encode."
+
+[[must]]
+id = "M2"
+text = "There MUST be an automated audit script that mechanically scans a target repo for unfinished-marker residue (TODO/FIXME/XXX/HACK/STUB/PARTIAL, template placeholders) in claimed release paths."
+system = "/home/user/standards/release-pre-flight/v1-audit.sh check_marker_scan() (MARKER_PATTERN regex via ripgrep)"
+status = "pass"
+evidence = "Running `bash release-pre-flight/v1-audit.sh .` against the monorepo root exercises check_marker_scan and correctly flags real STUB/TODO occurrences (e.g. session-management-standards/continuity/*/CHECKLIST.adoc:7 'Status: STUB', axel-protocol/config/ci.k9.ncl:38 'TODO: Add coverage')."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'BLOCKER: unfinished markers or placeholders present'"
+effects = "Without this, downstream repos could tag v1.0.0 while shipping scaffold residue; consumers of the standards repo could not trust the marker-scan portion of any v1.0.0 claim."
+
+[[must]]
+id = "M3"
+text = "The audit script MUST detect proof-debt escape hatches (believe_me, sorry, Admitted, postulate, assert_total, unsafeCoerce, Obj.magic) in proof-bearing source files."
+system = "/home/user/standards/release-pre-flight/v1-audit.sh check_proof_debt() (PROOF_DEBT_PATTERN via ripgrep)"
+status = "pass"
+evidence = "Executing the script against the repo root correctly surfaced 4 real `postulate` occurrences in lol/proofs/theories/information_theory.agda:115,121,127,132, recorded as a BLOCKER."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'BLOCKER: proof escape hatches found'"
+effects = "Repos with unresolved proof holes (e.g. lol's Agda postulates) would otherwise be able to claim a machine-checked/provable v1.0.0 status that the proof artifacts do not support."
+
+[[must]]
+id = "M4"
+text = "The audit script MUST verify that the target repo has real build, point-to-point/unit test, end-to-end test, aspect test, benchmark, and execution/smoke recipes (via Justfile or equivalent test paths), not placeholder recipes."
+system = "/home/user/standards/release-pre-flight/v1-audit.sh check_audit_surfaces()"
+status = "fail"
+effects = "check_audit_surfaces() calls `Justfile_path` (capital J) at line 271, but the function is defined as `justfile_path` (lowercase) at line 198. This is a real bash case-sensitivity bug: the call always fails with 'command not found', is swallowed by `if !`, and the script unconditionally records a false 'missing Justfile/Justfile' blocker and returns early -- even though a top-level Justfile exists in the repo root (confirmed: /home/user/standards/Justfile is present, 10380 bytes). Verified by running `bash release-pre-flight/v1-audit.sh .`, which printed 'Justfile_path: command not found' followed by 'BLOCKER: missing Justfile/Justfile'. This means the entire build/test/benchmark/aspect/execution-surface portion of the gate is non-functional for every invocation, silently short-circuiting the most substantive part of the audit."
+
+[[must]]
+id = "M5"
+text = "The audit script MUST verify the target repo has a CI workflow surface (e.g. .github/workflows or .gitlab-ci.yml) backing the release gate."
+system = "/home/user/standards/release-pre-flight/v1-audit.sh check_ci_surface()"
+status = "pass"
+evidence = "Running the script against the monorepo root printed 'PASS: CI workflow surface present', correctly detecting /home/user/standards/.github/workflows (30+ workflow files present, e.g. codeql.yml, secret-scanner.yml)."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'PASS: CI workflow surface present'"
+effects = "Without this check, a repo could claim v1.0.0 with no CI wired at all, and no automated signal would catch it."
+
+[[should]]
+id = "S1"
+text = "The v1-audit.sh script SHOULD itself be exercised by the monorepo's own CI so that regressions in the gate tooling (such as the Justfile_path typo) are caught automatically."
+system = "none"
+status = "fail"
+effects = "No workflow in /home/user/standards/.github/workflows references v1-audit.sh (confirmed via grep across .github). The M4 bug (Justfile_path typo) has shipped undetected because nothing runs or tests the audit script itself; any future edits to v1-audit.sh carry the same risk of silent breakage."
+
+[[should]]
+id = "S2"
+text = "The audit script SHOULD attempt to detect fake or placeholder test/benchmark evidence (e.g. black_box(42), 'not configured yet', copied templates) in tests/benches directories."
+system = "/home/user/standards/release-pre-flight/v1-audit.sh check_fake_evidence() (PLACEHOLDER_EVIDENCE_PATTERN)"
+status = "pass"
+evidence = "Running the script printed 'PASS: no obvious fake test or benchmark evidence found' and 'PASS: no placeholder fuzz/bench artifact files found' for the monorepo root, exercising the check_fake_evidence() function successfully (it ran without error and returned a clean result)."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'PASS: no obvious fake test or benchmark evidence found'"
+effects = "Without this, a repo could pad coverage numbers with trivial/copied scaffold tests and still pass claim review."
+
+[[should]]
+id = "S3"
+text = "The audit script SHOULD surface (not gate) explicit stable/high-assurance claims found in README/CHANGELOG/ROADMAP/docs so a human reviewer can cross-check claim-vs-artifact parity (gate 3.7)."
+system = "/home/user/standards/release-pre-flight/v1-audit.sh check_stable_claims()"
+status = "pass"
+evidence = "Running the script surfaced real matches such as axel-protocol/ROADMAP.adoc:15 'v1.0.0 - Stable Release', .machine_readable/contractiles/trust/Trustfile.a2ml:395 'ALPHA -- NOT production-ready', confirming the informational scan works end-to-end."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'INFO: stable or high-assurance claims detected'"
+effects = "Reviewers doing the manual claim-parity judgement (gate 3.7) lose their starting point for finding overclaiming text if this check silently broke."
+
+[[should]]
+id = "S4"
+text = "The audit script SHOULD cross-check any STATE.a2ml release-stage metadata against the audit's own findings so stage/maturity claims are not divorced from the actual audit outcome."
+system = "/home/user/standards/release-pre-flight/v1-audit.sh check_state_release_stage()"
+status = "pass"
+evidence = "Running the script found /home/user/standards/.machine_readable/6a2/STATE.a2ml and printed 'maturity = \"experimental\"', confirming the discovery/print logic executes correctly (though it is informational only, not a correlation/gate)."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'INFO: STATE metadata found'"
+effects = "Without even this informational cross-reference, a repo's maturity metadata could drift from what the audit actually found with no automated flag."
+
+[[could]]
+id = "C1"
+text = "The gate COULD be enforced by a dedicated reusable GitHub Actions workflow (parallel to scorecard-reusable.yml or governance-reusable.yml) that runs v1-audit.sh on any repo attempting to tag v1.0.0, blocking the tag/release on failure."
+system = "none"
+status = "aspirational"
+effects = "Until such a workflow exists, enforcement of the V1 gate depends entirely on manual invocation of v1-audit.sh by a human before tagging; nothing currently blocks a git tag or GitHub release named v1.0.0 from being pushed even if the audit would fail."
+
+[[could]]
+id = "C2"
+text = "Licence/SPDX headers on the gate's own files (V1-GATE.adoc as CC-BY-SA-4.0, v1-audit.sh as MPL-2.0) COULD be validated for correctness and consistency with the monorepo's licensing policy."
+system = "none"
+status = "manual-only"
+effects = "Incorrect or inconsistent SPDX headers on gate documents would create legal/provenance ambiguity for any downstream repo or system that vendors or references this gate's text/tooling."

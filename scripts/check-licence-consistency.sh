@@ -6,10 +6,16 @@
 #
 # Verifies that a repo's licensing story is internally consistent:
 #   (1) A LICENSE / LICENCE / COPYING file is present at repo root.
-#   (2) The LICENSE file carries an SPDX-License-Identifier header on its first
-#       few lines.
-#   (3) If a build manifest declares a licence, it matches the SPDX header.
-#   (4) The LICENSE body text classification matches the SPDX header (loose
+#   (2) The LICENSE body text classifies to a known licence template.
+#   (3) The licence identity is established by EITHER an SPDX-License-Identifier
+#       header on the LICENSE file's first few lines, OR — for a verbatim,
+#       header-less licence file — the body-text classification itself. The
+#       estate template ships LICENSE as plain, unmodified MPL-2.0 text with no
+#       SPDX header (SPDX identifiers belong in *source* files, not in the
+#       canonical upstream licence text), so a header-less verbatim MPL-2.0
+#       LICENSE is consistent — not a finding.
+#   (4) If a build manifest declares a licence, it matches that identity.
+#   (5) When an SPDX header IS present, the body text must agree with it (loose
 #       check — catches the common drift of SPDX=MPL-2.0 but body=PMPL).
 #
 # Exit codes:
@@ -20,8 +26,6 @@
 # Wired into governance-reusable.yml as the `licence-consistency` job.
 #
 # Estate policy reference: MPL-1.0 / PMPL-1.0 → MPL-2.0 migration target.
-# Self-referential class: standards itself is one of 4 repos this check
-# initially flags as inconsistent (see docs/audits/2026-05-26-estate-licence-debt.md).
 
 set -u
 
@@ -48,29 +52,90 @@ done
 if [ -z "$lic_file" ]; then
   emit ERROR "No LICENSE / LICENCE / COPYING file at repo root."
   emit ERROR "Estate default is MPL-2.0 — see docs/audits/2026-05-26-estate-licence-debt.md."
-  failed=1
   # Cannot proceed with remaining checks without a file.
-  exit "$failed"
+  exit 1
 fi
 emit OK "LICENSE file found: $lic_file"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# (2) SPDX header in LICENSE file
+# (2) Classify LICENSE body text
+#     Computed first because a verbatim, header-less licence file establishes
+#     its identity from the body alone (see (3)).
+# ─────────────────────────────────────────────────────────────────────────────
+# Use a helper because `grep -c` exits non-zero on zero-matches AND prints "0"
+# to stdout, so `|| echo 0` concatenates to "0\n0". Pipe through wc -l which
+# always returns a single integer.
+count_in()   { grep -E  "$1" "$lic_file" 2>/dev/null | wc -l; }
+count_in_i() { grep -iE "$1" "$lic_file" 2>/dev/null | wc -l; }
+has_mpl2_text=$(count_in 'Mozilla Public License Version 2\.0|Mozilla Public License, version 2\.0')
+has_pmpl_text=$(count_in_i 'PMPL-1\.0-or-later|Palimpsest License \(PMPL')
+has_apache=$(count_in 'Apache License.*Version 2\.0')
+has_mit=$(count_in 'MIT License')
+has_agpl=$(count_in 'GNU AFFERO GENERAL PUBLIC LICENSE')
+has_gpl3=$(count_in 'GNU GENERAL PUBLIC LICENSE.*Version 3')
+has_bsd3=$(count_in 'BSD.*3-Clause')
+has_proprietary=$(count_in_i 'All Rights Reserved')
+
+body_class="UNKNOWN"
+# Order matters: the legally-binding text dominates classification.
+if [ "$has_proprietary" -gt 0 ] && [ "$has_mpl2_text" -eq 0 ]; then
+  body_class="PROPRIETARY"
+elif [ "$has_mpl2_text" -gt 0 ]; then
+  # MPL-2.0 text is present in the body — this is binding even when wrapped
+  # in a Palimpsest preamble.
+  body_class="MPL-2.0"
+elif [ "$has_pmpl_text" -gt 0 ]; then
+  body_class="PMPL-1.0"
+elif [ "$has_apache" -gt 0 ]; then
+  body_class="Apache-2.0"
+elif [ "$has_mit" -gt 0 ]; then
+  body_class="MIT"
+elif [ "$has_agpl" -gt 0 ]; then
+  # AGPL before plain GPL-3.0: the AGPL body carries "GNU AFFERO GENERAL PUBLIC
+  # LICENSE". These are deliberate co-developed-project exceptions to the estate
+  # MPL-2.0 policy (e.g. the games airborne-submarine-squadron, the-nash-equilibrium)
+  # and must be recognised so their full-text LICENSE files (which GitHub then
+  # detects as AGPL, unlike an SPDX-stub) pass this check.
+  body_class="AGPL-3.0"
+elif [ "$has_gpl3" -gt 0 ]; then
+  body_class="GPL-3.0"
+elif [ "$has_bsd3" -gt 0 ]; then
+  body_class="BSD-3-Clause"
+fi
+
+# Normalize for loose, case-insensitive licence comparison.
+normalize() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/-or-later$//;s/^[[:space:]]+|[[:space:]]+$//g'
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# (3) Establish licence identity: SPDX header if present, else verbatim body.
+#     `effective_lic` is the canonical identity used by the manifest check (4).
 # ─────────────────────────────────────────────────────────────────────────────
 spdx_header=$(grep -m1 -E '^[[:space:]]*SPDX-License-Identifier:' "$lic_file" 2>/dev/null \
   | sed -E 's/^[[:space:]]*SPDX-License-Identifier:[[:space:]]*//' \
   | head -c 80 | tr -d '[:space:]')
 
-if [ -z "$spdx_header" ]; then
-  emit ERROR "LICENSE file has no 'SPDX-License-Identifier:' header on its first few lines."
-  emit ERROR "Add an SPDX header so downstream scanners (REUSE, cargo-license, etc.) can identify the licence."
-  failed=1
-else
+effective_lic=""
+if [ -n "$spdx_header" ]; then
   emit OK "SPDX header: $spdx_header"
+  effective_lic="$spdx_header"
+elif [ "$body_class" != "UNKNOWN" ]; then
+  # No SPDX header, but the body is a recognised verbatim licence. This is the
+  # estate template's canonical shape (plain MPL-2.0 text, no header) and is
+  # internally consistent — accept it and use the body classification as the
+  # licence identity for the manifest cross-check below.
+  emit OK "LICENSE has no SPDX header, but its body is verbatim $body_class text — accepted as a canonical licence file."
+  effective_lic="$body_class"
+else
+  emit ERROR "LICENSE file has no 'SPDX-License-Identifier:' header and its body matches no known licence template."
+  emit ERROR "Add an SPDX header, or use a recognised verbatim licence text, so downstream scanners (REUSE, cargo-license, etc.) can identify the licence."
+  failed=1
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# (3) Manifest declared licence
+# (4) Manifest declared licence vs the established identity
 # ─────────────────────────────────────────────────────────────────────────────
 manifest_path=""
 manifest_decl=""
@@ -120,63 +185,24 @@ elif [ -n "$manifest_decl" ]; then
   emit OK "Manifest licence ($manifest_path): $manifest_decl"
 fi
 
-# Normalize-compare SPDX header vs manifest
-normalize() {
-  echo "$1" | tr '[:upper:]' '[:lower:]' \
-    | sed -E 's/-or-later$//;s/^[[:space:]]+|[[:space:]]+$//g'
-}
-
-if [ -n "$spdx_header" ] && [ -n "$manifest_decl" ]; then
-  sh_norm=$(normalize "$spdx_header")
+if [ -n "$effective_lic" ] && [ -n "$manifest_decl" ]; then
+  el_norm=$(normalize "$effective_lic")
   mh_norm=$(normalize "$manifest_decl")
-  # mh may contain `MIT OR Apache-2.0` — accept if sh is one of them
-  if echo "$mh_norm" | grep -qE "(^|\W)$sh_norm(\W|$)"; then
-    emit OK "SPDX header matches manifest declaration."
+  # mh may contain `MIT OR Apache-2.0` — accept if the licence identity is one of them.
+  if echo "$mh_norm" | grep -qE "(^|\W)$el_norm(\W|$)"; then
+    emit OK "Licence identity matches manifest declaration."
   else
-    emit ERROR "SPDX-vs-manifest mismatch: header='$spdx_header' manifest='$manifest_decl' ($manifest_path)."
+    emit ERROR "Licence-vs-manifest mismatch: licence='$effective_lic' manifest='$manifest_decl' ($manifest_path)."
     failed=1
   fi
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# (4) Body text classification vs SPDX header
+# (5) When an SPDX header is present, the body text must agree with it.
+#     Header-less files already derived their identity from the body in (3),
+#     so there is nothing to cross-check here for them.
 # ─────────────────────────────────────────────────────────────────────────────
 if [ -n "$spdx_header" ]; then
-  # Use a helper because `grep -c` exits non-zero on zero-matches AND prints
-  # "0" to stdout, so `|| echo 0` concatenates to "0\n0". Pipe through wc -l
-  # which always returns a single integer.
-  count_in() { grep -E "$1" "$lic_file" 2>/dev/null | wc -l; }
-  count_in_i() { grep -iE "$1" "$lic_file" 2>/dev/null | wc -l; }
-  has_mpl2_text=$(count_in 'Mozilla Public License Version 2\.0|Mozilla Public License, version 2\.0')
-  has_pmpl_text=$(count_in_i 'PMPL-1\.0-or-later|Palimpsest License \(PMPL')
-  has_apache=$(count_in 'Apache License.*Version 2\.0')
-  has_mit=$(count_in 'MIT License')
-  has_gpl3=$(count_in 'GNU GENERAL PUBLIC LICENSE.*Version 3')
-  has_bsd3=$(count_in 'BSD.*3-Clause')
-  has_proprietary=$(count_in_i 'All Rights Reserved')
-
-  body_class="UNKNOWN"
-  # Order matters: the legally-binding text dominates classification.
-  if [ "$has_proprietary" -gt 0 ] && [ "$has_mpl2_text" -eq 0 ]; then
-    body_class="PROPRIETARY"
-  elif [ "$has_mpl2_text" -gt 0 ]; then
-    # MPL-2.0 text is present in the body — this is binding even when wrapped
-    # in a Palimpsest preamble.
-    body_class="MPL-2.0"
-  elif [ "$has_pmpl_text" -gt 0 ]; then
-    body_class="PMPL-1.0"
-  elif [ "$has_apache" -gt 0 ]; then
-    body_class="Apache-2.0"
-  elif [ "$has_mit" -gt 0 ]; then
-    body_class="MIT"
-  elif [ "$has_gpl3" -gt 0 ]; then
-    body_class="GPL-3.0"
-  elif [ "$has_bsd3" -gt 0 ]; then
-    body_class="BSD-3-Clause"
-  fi
-
-  # Compare. SPDX=MPL-2.0 with body=PMPL is the known estate-wide drift the
-  # 2026-05-26 audit surfaced — fail-loud here so future drift is caught.
   spdx_norm=$(normalize "$spdx_header")
   body_norm=$(echo "$body_class" | tr '[:upper:]' '[:lower:]')
 
@@ -190,9 +216,6 @@ if [ -n "$spdx_header" ]; then
     emit ERROR "SPDX header says MPL-2.0 but LICENSE body text is still PMPL-1.0-or-later."
     emit ERROR "Migrate body to canonical MPL-2.0 text (see hyperpolymath/standards docs/audits/2026-05-26-estate-licence-debt.md)."
     failed=1
-  elif echo "$body_norm" | grep -q "^${spdx_norm}\(-some\)\?$" \
-     || [ "$spdx_norm-some" = "$body_norm" ]; then
-    emit OK "LICENSE body text matches SPDX header."
   elif [ "$body_norm" = "$spdx_norm" ]; then
     emit OK "LICENSE body text matches SPDX header."
   else

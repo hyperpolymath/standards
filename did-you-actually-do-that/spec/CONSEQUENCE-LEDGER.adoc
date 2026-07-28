@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= DYADT Consequence Ledger
+:toc: preamble
+:icons: font
+
+[.lead]
+Verification without memory is theatre. The consequence ledger is the
+append-only record of every verification run and its verdicts, keyed by actor,
+so that a repeatedly-over-claiming agent accrues a falling confirmation rate that
+downstream gates can act on. This document is normative.
+
+== What it is
+
+An *append-only*, dual-signed log. Each entry records one verification run:
+which claims, which verdicts, over which work product, by which actor, attested
+by both the actor and the verifier. Entries are never edited or deleted — a
+correction is a new entry that references the prior one.
+
+Home: `.machine_readable/ledger/` in the verified repo (or a central estate
+ledger the production verifier writes to). One append-only file per period
+(e.g. `ledger-2026-07.a2ml`) keeps entries small and diff-friendly.
+
+== Entry format
+
+[source,toml]
+----
+[[entry]]
+ts = "2026-07-03T01:30:00Z"          # when the verification ran
+session = "session_0114ps6mY5jAH4Sz"
+actor = "claude-opus-4-8"            # the agent whose claims were checked
+work = "did-you-actually-do-that (Wave 4)"
+claims_file = "CLAIMS.a2ml"
+claims_sha256 = "sha256:…"          # hash of the exact claims verified
+confirmed = 6
+refuted = 0
+unverifiable = 1
+verifier = "scripts/verify-claims.sh@<commit>"
+# Dual signature: BOTH the actor and the verifier attest. Reuses the contractile
+# pledge-signing mechanism (contractiles/ TRUST/INTEND). A missing signature
+# makes the entry advisory-only (it is recorded, but MUST NOT be used to gate).
+actor_sig = "ssh-ed25519 …"
+verifier_sig = "ssh-ed25519 …"
+prior = ""                           # id/hash of a superseded entry, if a correction
+----
+
+== The confirmation rate
+
+For an actor, over a window, the *confirmation rate* is:
+
+  confirmed / (confirmed + refuted)
+
+`unverifiable` outcomes are excluded from the denominator (they are not evidence
+of either honesty or dishonesty) but MUST be reported alongside, because a spike
+in `unverifiable` is itself a signal (an agent emitting unverifiable claims to
+dodge scrutiny).
+
+A conforming ledger reader MUST be able to compute, per actor: total claims,
+confirmation rate, refutation count, and unverifiable count over a time window.
+
+== How Tier 3 MAY gate on it (composition)
+
+The contractile layer (Tier 3) MAY read the ledger at `pre_merge` and block when
+an actor's recent confirmation rate falls below a repo-declared floor, or when
+the current session produced any `refuted` claim. This is expressed as an
+ordinary contractile check:
+
+[source]
+----
+### dyadt-confirmation-floor
+- description: the acting agent's DYADT confirmation rate MUST be >= the repo floor
+- run: bash scripts/ledger-gate.sh --actor "$AGENT" --floor 0.95 --window 30d
+- severity: high
+----
+
+The floor, window, and severity are the repo's choice. DYADT defines the ledger
+and the rate; it does not mandate a specific threshold — that is governance.
+
+== Non-goals (normative)
+
+. The ledger is *not* a reputation score to shame agents. It is an evidence
+  store. Any downstream use MUST cite specific entries, never a bare number.
+. The ledger MUST NOT record secrets, tokens, or full command output — only the
+  claim identities, verdicts, hashes, and signatures. Evidence bodies live in
+  the run logs the entry references, not in the ledger.
+. Licence/SPDX verdicts are always `unverifiable` (`manual-only`) and therefore
+  never move a confirmation rate — the Manual-Only licence policy is preserved
+  end to end.
+
+== Retention
+
+Ledger files are append-only and retained indefinitely by default (they are the
+audit trail). A repo MAY define a retention/rotation policy, but MUST NOT rewrite
+history — rotation means starting a new period file, never editing an old one.

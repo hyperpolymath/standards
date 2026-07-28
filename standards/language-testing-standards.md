@@ -1,165 +1,122 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # Language Testing Standards
 
-**Version:** 1.0.0
-**Date:** 2024-04-14
-**Status:** Active
+**Version:** 2.0.0
+**Date:** 2026-07-03
+**Status:** Active (supersedes v1.0.0, 2024-04-14)
 
-This document establishes canonical testing standards for all programming languages used across our projects.
+This document establishes the estate's canonical, **conformance-graded** testing
+standards for every programming language in the CCCP language policy. Keywords
+**MUST / SHOULD / MAY** are RFC-2119.
 
-## Table of Contents
+It sits above the per-language guides: this document says *what every language's
+testing story MUST provide*; each per-language guide (built from
+`templates/language-testing-guide-TEMPLATE.md`) says *which concrete tools
+provide it*. The requirement categories align with the CRG test taxonomy in
+`testing-and-benchmarking/TESTING-TAXONOMY.adoc`, so a language's testing
+maturity maps onto its Component/Toolchain Readiness Grade.
 
-1. [Rust](#rust)
-2. [Julia](#julia)
-3. [Version Control](#version-control)
+## Conformance requirements (every approved language)
 
-## Rust
+A language's testing story is **conformant** when its per-language guide names a
+concrete, CI-runnable tool for each MUST row, and records `none` *visibly* where
+it genuinely cannot (never a silent gap).
 
-### Core Tools
+| # | Requirement | Level | CRG category |
+|---|---|---|---|
+| R1 | A **unit test** runner MUST exist and run in CI on every push/PR. | MUST | Unit tests |
+| R2 | A **formatter** MUST exist and be checkable in CI (fail on unformatted). | MUST | hygiene |
+| R3 | A **linter / static analyser** MUST exist and run in CI. | MUST | Aspect (correctness) |
+| R4 | A **coverage** tool SHOULD run in CI and report a number. | SHOULD | Unit tests |
+| R5 | A **property-based / fuzz** facility SHOULD exist for parsers and pure logic. | SHOULD | Property-based (P2P) |
+| R6 | A **benchmark** facility SHOULD exist; regressions SHOULD gate for perf-critical code. | SHOULD | Benchmarks |
+| R7 | A **security / dependency audit** MUST run for languages with a package ecosystem. | MUST | Aspect (security) |
+| R8 | **Contract / pre-post** checks MAY be expressed where the language supports them. | MAY | Contract |
+| R9 | For formally-verifiable languages, **proofs** MUST be checked in CI (no hollow proof claims). | MUST\* | proof gate |
 
-| Tool | Purpose | Integration | CI/CD Stage |
-|------|---------|-------------|-------------|
-| `rustfmt` | Code formatting | ✅ Integrated | Check |
-| `clippy` | Linting | ✅ Integrated | Check |
-| `cargo audit` | Security auditing | ✅ Integrated | Security |
-| `cargo test` | Unit testing | ✅ Integrated | Test |
-| `cargo bench` | Benchmarking | ✅ Integrated | Test |
+`MUST*` = applies only to languages whose role includes formal verification
+(Idris2, Agda, Rust/SPARK). The `spark-theatre-gate.yml` workflow already
+enforces "no hollow SPARK proof claims"; R9 generalises that stance.
 
-### Current Implementation
+**Anti-theatre rule (all requirements):** a testing job that cannot fail is not
+a test. A MUST check MUST NOT sit behind `continue-on-error` without a
+documented, blocking equivalent elsewhere. Coverage numbers MUST be *reported
+with an artifact*, never merely asserted. (See the Wave-0/1 false-green
+remediation.)
 
-**GitHub Actions:** `rust-ci.yml`
-- Format checking: `cargo fmt --all -- --check`
-- Clippy linting: `cargo clippy --all-targets --all-features -- -D warnings`
-- Security audit: `cargo audit`
-- Test coverage: `cargo tarpaulin`
+## Per-language guides (required set)
 
-**GitLab CI:** `.gitlab-ci.yml`
-- Format checking: `cargo fmt --all -- --check`
-- Clippy linting: `cargo clippy --all -- -D warnings`
-- Security audit: `cargo audit`
-- Additional security: `cargo-geiger`, `cargo-license`
+Each approved language SHOULD publish a guide from
+`templates/language-testing-guide-TEMPLATE.md`. Priority tracks estate centrality:
 
-### Best Practices
+| Language | Guide | Status |
+|---|---|---|
+| Rust/SPARK | this document §Rust + SPARK proof gate | present |
+| Julia | `julia-testing-tools-guide.md` | present (v1.0.0 — R1–R9 refresh tracked) |
+| **AffineScript** | `affinescript-testing-guide.md` | **present** — canonical SSOT migrates to `hyperpolymath/affinescript` prospectively |
+| Zig | — | charter |
+| Elixir + Gleam (BEAM) | — | charter |
+| Idris2 / Agda (proofs) | — | charter (ties to proof-debt epic #124) |
 
-1. **Format on save**: Configure editors to run `rustfmt` on file save
-2. **Warnings as errors**: Use `-D warnings` flag to treat warnings as errors
-3. **Regular audits**: Run `cargo audit` weekly minimum
-4. **Coverage targets**: Maintain >80% test coverage
+New guides MUST pass `scripts/check-language-guide.sh` (wired into `just
+validate`), which fails if a guide omits a required section.
+
+## Rust/SPARK
+
+| Requirement | Tool | CI invocation |
+|---|---|---|
+| R1 unit | `cargo test` | `cargo test --all` |
+| R2 format | `rustfmt` | `cargo fmt --all -- --check` |
+| R3 lint | `clippy` | `cargo clippy --all-targets --all-features -- -D warnings` |
+| R4 coverage | `cargo tarpaulin` / `cargo llvm-cov` | reports % in CI |
+| R5 property | `proptest` / `quickcheck` | in the test suite |
+| R6 bench | `criterion` | `cargo bench` |
+| R7 audit | `cargo audit` | weekly minimum |
+| R9 proof | Rust/SPARK | `spark-theatre-gate.yml` (no hollow proof claims) |
+
+Reusable workflow: `rust-ci-reusable.yml`. Warnings are errors (`-D warnings`);
+coverage SHOULD be ≥ 80%.
 
 ## Julia
 
-### Equivalent Tools
+Concrete tools live in `julia-testing-tools-guide.md`. Requirement mapping:
 
-| Julia Tool | Rust Equivalent | Purpose | Integration Status |
-|-----------|-----------------|---------|-------------------|
-| `JuliaFormatter.jl` | `rustfmt` | Code formatting | ❌ Not yet integrated |
-| `JET.jl` | `clippy` | Static analysis | ❌ Not yet integrated |
-| `Aqua.jl` | `cargo audit` | Package security | ❌ Not yet integrated |
-| `Pkg.test()` | `cargo test` | Unit testing | ✅ Integrated |
-| `BenchmarkTools.jl` | `cargo bench` | Benchmarking | ❌ Not yet integrated |
+| Requirement | Tool |
+|---|---|
+| R1 unit | `Pkg.test()` |
+| R2 format | `JuliaFormatter.format("."; overwrite=false)` |
+| R3 lint | `JET.test_package(".")` |
+| R4 coverage | `Coverage.jl` |
+| R6 bench | `BenchmarkTools.@benchmark` |
+| R7 audit | `Aqua.test_all(deps=true)` (ambiguities, deps-compat, project-extras) |
 
-### Recommended Julia CI/CD Integration
+> The Julia guide is v1.0.0 (2024) and predates this RFC-2119 framing; refreshing
+> it to the R1–R9 mapping (and flipping its "not yet integrated" rows) is tracked
+> estate work.
 
-```yaml
-# Julia GitHub Actions Example
-name: Julia CI
-on: [push, pull_request]
+## AffineScript
 
-jobs:
-  format:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
-      - name: Format check
-        run: |
-          julia --project=docs -e '
-            using JuliaFormatter
-            JuliaFormatter.format("."; verbose=true, overwrite=false)
-          '
-  
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
-      - name: Static analysis
-        run: |
-          julia --project=docs -e '
-            using JET
-            JET.test_package(path=".")
-          '
-  
-  security:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
-      - name: Package security audit
-        run: |
-          julia --project=docs -e '
-            using Aqua
-            Aqua.test_all(deps=true)
-          '
-  
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
-      - name: Run tests
-        run: julia --project=. -e 'using Pkg; Pkg.test()'
-```
+The estate's primary application language. See `affinescript-testing-guide.md`
+for the full guide; requirement mapping summarised there. Canonical SSOT will
+move to `hyperpolymath/affinescript` prospectively (charter) — until then this
+repo carries the guide.
 
-### Julia Best Practices
+## Version control & CI hygiene (all languages)
 
-1. **Project.toml**: Always include proper dependency specification
-2. **Test coverage**: Use `Coverage.jl` for coverage reports
-3. **Documentation**: Use `Documenter.jl` for doc generation
-4. **CI templates**: Use `julia-actions/setup-julia` GitHub action
+- All CI actions MUST be SHA-pinned (governance workflow-lint +
+  `hooks/validate-sha-pins.sh`).
+- Commit messages SHOULD follow Conventional Commits; SemVer 2.0.0 for releases.
+- Pre-commit/pre-push hooks are installed via `just hooks-install`.
 
-## Version Control
+## Resources
 
-### Git Standards
-
-- **Commit messages**: Follow [Conventional Commits](https://www.conventionalcommits.org/)
-- **Branch naming**: `feature/`, `fix/`, `docs/`, `refactor/` prefixes
-- **Pull requests**: Require approval from 2 maintainers
-- **Semantic versioning**: Follow [SemVer 2.0.0](https://semver.org/)
-
-### Git Hooks
-
-Recommended hooks for all repositories:
-
-```bash
-# pre-commit: Run formatters and linters
-# pre-push: Run tests
-# commit-msg: Validate commit message format
-```
-
-## Implementation Roadmap
-
-### Phase 1: Documentation (✅ Complete)
-- [x] Create canonical language standards document
-- [x] Document current Rust implementation
-- [x] Document recommended Julia implementation
-
-### Phase 2: Julia Integration
-- [ ] Add JuliaFormatter to JuliaPackage-Reuse-Audit.jl
-- [ ] Add JET.jl static analysis
-- [ ] Add Aqua.jl security checks
-- [ ] Update CI/CD pipelines
-
-### Phase 3: Monitoring
-- [ ] Set up regular audit scheduling
-- [ ] Create compliance dashboard
-- [ ] Establish metrics tracking
-
-## Maintenance
-
-**Review cycle**: Quarterly
-**Next review**: 2024-07-14
-**Maintainers**: @hyperpolymath/core-team
+- `testing-and-benchmarking/TESTING-TAXONOMY.adoc` — the CRG test taxonomy.
+- `templates/language-testing-guide-TEMPLATE.md` — the per-language skeleton.
+- `component-readiness-grades/` · `toolchain-readiness-grades/` — testing → grade.
 
 ## Changelog
 
-**1.0.0 (2024-04-14)**: Initial release with Rust and Julia standards
+- **2.0.0 (2026-07-03)**: RFC-2119 conformance requirements (R1–R9) mapped to the
+  CRG taxonomy; per-language guide template + required set; AffineScript added;
+  anti-theatre rule; removed the stale 2024 roadmap/duplicate snapshot.
+- **1.0.0 (2024-04-14)**: Initial release (Rust + Julia).

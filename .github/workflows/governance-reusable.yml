@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # Governance checks for hyperpolymath repositories — Reusable Workflow
 name: Governance Reusable Workflow
 
@@ -12,17 +12,19 @@ on:
         default: ubuntu-latest
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
   workflow-staleness:
     name: Check Workflow Staleness
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       has_baseline: ${{ steps.check.outputs.has_baseline }}
     steps:
       - name: Checkout caller repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check baseline existence
         id: check
@@ -43,6 +45,16 @@ jobs:
             || git clone --depth 200 https://github.com/hyperpolymath/standards.git "$HOME/standards"
 
       - name: Run staleness check
+        env:
+          # The gate confirms a pin server-side before ever accusing it of being
+          # forged, and before accepting a deny-list negative from a clone it
+          # cannot trust. Unauthenticated that is 60 requests/hour per runner IP;
+          # exhausting it makes the gate degrade to ::warning (loudly — it never
+          # silently passes, see check-workflow-staleness.sh). A token removes
+          # the cliff entirely. Note this only reaches a consumer once it re-pins
+          # past this commit: the script comes from standards HEAD, but the job
+          # definition comes from whatever SHA the consumer pins.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           bash "$HOME/standards/scripts/check-workflow-staleness.sh" .
 
@@ -51,26 +63,48 @@ jobs:
     needs: workflow-staleness
     if: needs.workflow-staleness.outputs.has_baseline == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout caller repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup Elixir for Hypatia scanner
-        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           elixir-version: '1.19.4'
           otp-version: '28.3'
 
+      - name: Resolve Hypatia HEAD commit
+        id: hypatia-rev
+        run: |
+          # Pin the cache to the *current* Hypatia main tip. Resolved before the
+          # cache step because cache restore happens before the clone, so the key
+          # cannot hash a not-yet-cloned tree — it must hash the remote ref.
+          sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
+          if [ -z "$sha" ]; then
+            echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Resolved hypatia HEAD: $sha"
+
       - name: Cache Hex/Mix and Scanner Build
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.mix
             ~/.hex
             ~/hypatia
-          key: hypatia-scanner-v2-${{ runner.os }}-build
+          # Source-pinned key: when Hypatia main advances, the SHA changes, the
+          # cache misses, and the clone + escript build below re-run instead of
+          # restoring a stale binary. The old keyless `...-build` key meant the
+          # first scanner ever cached was reused forever, so baseline validation
+          # ran against a stale ruleset. No restore-keys on purpose — a partial
+          # restore would repopulate ~/hypatia and the guards below would skip
+          # the rebuild, reintroducing the staleness.
+          key: hypatia-scanner-v3-${{ runner.os }}-${{ steps.hypatia-rev.outputs.sha }}
 
       - name: Clone Hypatia
         run: |
@@ -85,18 +119,70 @@ jobs:
             mix deps.get && mix escript.build
           fi
 
+      # A reusable workflow only auto-checks-out its own YAML, not sibling
+      # scripts. Sparse-check-out standards' scripts/ to get apply-baseline.sh,
+      # mirroring the language-policy job below. Pinned to main because
+      # github.workflow_sha resolves to the *caller* repo's SHA (which would 404).
+      - name: Check out standards for the baseline filter
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
       - name: Run Hypatia scan (Baseline validation)
+        env:
+          # Preserve the historical strictness: fail on ANY finding not
+          # acknowledged by .hypatia-baseline.json (not just >= high). Set to
+          # 'high' to only block on high/critical.
+          BLOCKING_THRESHOLD: info
         run: |
           echo "Scanning repository: ${{ github.repository }} (checking baseline)"
-          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . > hypatia-findings.json
-          
-          FINDING_COUNT=$(jq '. | length' hypatia-findings.json 2>/dev/null || echo 0)
-          
-          if [ "$FINDING_COUNT" -gt 0 ]; then
-            echo "::error::Baseline validation failed. Found $FINDING_COUNT findings not in baseline."
+          # Move the baseline filter OUT of the scanned tree, then delete the
+          # standards checkout, so `hypatia scan .` only ever sees the CALLER's
+          # own files. Without this, `.standards-checkout/` (the tooling we
+          # checked out to get apply-baseline.sh) is itself scanned, and
+          # standards' own files get reported as the caller's findings (a banned
+          # `.ts`, `shell_download` bootstrap.sh scripts, etc.).
+          cp .standards-checkout/scripts/apply-baseline.sh "$RUNNER_TEMP/apply-baseline.sh"
+          rm -rf .standards-checkout
+          # hypatia's `scan` exits non-zero whenever it finds anything — that is
+          # by design, and under `bash -e` it would abort this step at this line,
+          # before the baseline filter (the real gate) ever runs. Tolerate the
+          # scan's own exit code…
+          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . > hypatia-findings.raw.json || true
+          # …but never swallow a genuine scanner crash into a false pass: require a
+          # valid JSON array before trusting the output as "the findings".
+          if ! jq -e 'type == "array"' hypatia-findings.raw.json >/dev/null 2>&1; then
+            echo "::error::hypatia scan did not produce a valid JSON findings array (scanner error, not a baseline result)"
             exit 1
           fi
-          echo "Baseline validation successful. No new findings."
+
+          # Relativize finding paths before matching. Hypatia's honest_completion
+          # and code_safety modules emit ABSOLUTE host paths in `.file`
+          # (Path.expand(repo)), while .hypatia-baseline.json uses repo-relative
+          # paths per the schema + docs/HYPATIA-BASELINE-FORMAT.adoc. Strip the
+          # workspace prefix so baseline file/file_pattern entries can match, and
+          # map the repo root itself to "." so root-scoped findings (no_tests)
+          # match. Upstream fix tracked in hypatia#566; this is the stopgap.
+          jq --arg root "$PWD" '
+            map(if (.file? // "") == $root then .file = "."
+                elif (.file? // "") | startswith($root + "/")
+                then .file = (.file | ltrimstr($root + "/"))
+                else . end)
+          ' hypatia-findings.raw.json > hypatia-findings.json
+
+          # Filter against the per-repo baseline. apply-baseline.sh KEEPS every
+          # finding not matched by an active (non-expired) baseline entry — so a
+          # genuinely new finding still fails the gate (no silent-green) — and
+          # suppresses only exact matches. Exits non-zero iff a kept finding is at
+          # or above BLOCKING_THRESHOLD. (Validated against synthetic fixtures;
+          # see the PR description.)
+          bash "$RUNNER_TEMP/apply-baseline.sh" \
+            hypatia-findings.json .hypatia-baseline.json blocking
   language-policy:
     name: Language / package anti-pattern policy
     runs-on: ${{ inputs.runs-on }}
@@ -104,10 +190,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # Pin to the concrete event SHA (the PR merge commit on
+          # pull_request, the pushed commit on push). Do NOT use
+          # `ref: ${{ github.ref }}`: in a reusable workflow called from a
+          # pull_request, github.ref is the named merge ref
+          # `refs/pull/<n>/merge`, which actions/checkout cannot fetch
+          # ("couldn't find remote ref refs/pull/<n>/merge") — it broke 8/10
+          # governance jobs on every PR estate-wide. github.sha resolves to the
+          # same merge commit but is always fetchable.
+          ref: ${{ github.sha }}
 
       # Estate language policy bans Python with no exceptions (CLAUDE.md
       # Language Policy; SaltStack exception removed 2026-01-03). The
@@ -127,12 +221,12 @@ jobs:
       # version and the script version — acceptable since scripts here
       # are read-only governance checks.
       - name: Set up Deno
-        uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2.0.4
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.x
 
       - name: Check out standards repo for shared scripts
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
           ref: main
@@ -190,9 +284,10 @@ jobs:
       #   1. `.hypatia-baseline.json` — array of acknowledged findings,
       #      shape mirrors the Hypatia findings themselves. Schema is
       #      `.machine_readable/hypatia-baseline.schema.json` in this
-      #      repo. The validate-baseline job above schema-checks this.
-      #      Added 2026-05-25 as part of the convergence on a single
-      #      exemption mechanism.
+      #      repo, enforced structurally by apply-baseline.sh itself
+      #      (jq mirror; a malformed baseline exits 2 instead of
+      #      silently matching nothing). Added 2026-05-25 as part of
+      #      the convergence on a single exemption mechanism.
       #   2. `.hypatia-ignore` flat-file — legacy single-rule-per-line
       #      format (`cicd_rules/banned_language_file:<relpath>`).
       #      Will be retired in a follow-up PR once .hypatia-baseline.json
@@ -440,26 +535,41 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # Pin to the concrete event SHA (the PR merge commit on
+          # pull_request, the pushed commit on push). Do NOT use
+          # `ref: ${{ github.ref }}`: in a reusable workflow called from a
+          # pull_request, github.ref is the named merge ref
+          # `refs/pull/<n>/merge`, which actions/checkout cannot fetch
+          # ("couldn't find remote ref refs/pull/<n>/merge") — it broke 8/10
+          # governance jobs on every PR estate-wide. github.sha resolves to the
+          # same merge commit but is always fetchable.
+          ref: ${{ github.sha }}
+
+      # A reusable workflow only auto-checks-out its own YAML, not sibling
+      # scripts. Sparse-check-out standards' scripts/ to get
+      # check-package-policy.sh, mirroring the baseline-filter job above.
+      - name: Check out standards for the package-policy gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
       - name: Enforce Guix primary / Nix fallback
         run: |
-          HAS_GUIX=$(find . -name "*.scm" -o -name ".guix-channel" -o -name "guix.scm" 2>/dev/null | head -1)
-          HAS_NIX=$(find . -name "*.nix" 2>/dev/null | head -1)
-          NEW_LOCKS=$(git diff --name-only --diff-filter=A HEAD~1 2>/dev/null | grep -E 'package-lock\.json|yarn\.lock|Gemfile\.lock|Pipfile\.lock|poetry\.lock' || true)
-          if [ -n "$NEW_LOCKS" ]; then
-            echo "⚠️ Lock files detected. Prefer Guix manifests for reproducibility."
-          fi
-          if [ -n "$HAS_GUIX" ]; then
-            echo "✅ Guix package management detected (primary)"
-          elif [ -n "$HAS_NIX" ]; then
-            echo "✅ Nix package management detected (fallback)"
-          else
-            echo "ℹ️ Consider adding guix.scm or flake.nix for reproducible builds"
-          fi
-          echo "✅ Package policy check passed"
+          # Move the checker OUT of the scanned tree and delete the standards
+          # checkout before scanning: the gate walks the whole caller tree, so
+          # a packaging file shipped inside .standards-checkout/ would satisfy
+          # the policy on the caller's behalf (same trap as the baseline job).
+          cp .standards-checkout/scripts/check-package-policy.sh "$RUNNER_TEMP/"
+          rm -rf .standards-checkout
+          bash "$RUNNER_TEMP/check-package-policy.sh" .
 
   security-policy:
     name: Security policy checks
@@ -468,10 +578,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # Pin to the concrete event SHA (the PR merge commit on
+          # pull_request, the pushed commit on push). Do NOT use
+          # `ref: ${{ github.ref }}`: in a reusable workflow called from a
+          # pull_request, github.ref is the named merge ref
+          # `refs/pull/<n>/merge`, which actions/checkout cannot fetch
+          # ("couldn't find remote ref refs/pull/<n>/merge") — it broke 8/10
+          # governance jobs on every PR estate-wide. github.sha resolves to the
+          # same merge commit but is always fetchable.
+          ref: ${{ github.sha }}
       - name: Security checks
         run: |
           FAILED=false
@@ -699,24 +817,29 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # Pin to the concrete event SHA (the PR merge commit on
+          # pull_request, the pushed commit on push). Do NOT use
+          # `ref: ${{ github.ref }}`: in a reusable workflow called from a
+          # pull_request, github.ref is the named merge ref
+          # `refs/pull/<n>/merge`, which actions/checkout cannot fetch
+          # ("couldn't find remote ref refs/pull/<n>/merge") — it broke 8/10
+          # governance jobs on every PR estate-wide. github.sha resolves to the
+          # same merge commit but is always fetchable.
+          ref: ${{ github.sha }}
       - name: Check file permissions
         run: |
           find . -type f -perm /111 -name "*.sh" | head -10 || true
-      - name: Check for secrets
-        uses: trufflesecurity/trufflehog@d411fff7b8879a62509f3fa98c07f247ac089a51 # v3.95.5
-        with:
-          path: ./
-          base: ${{ github.event.pull_request.base.sha || github.event.before }}
-          head: ${{ github.sha }}
-        # by-design: trufflehog is a best-effort advisory scan; a scanner
-        # diff/range hiccup must not fail the whole governance gate. The
-        # blocking secret check is the inline grep in the security job.
-        # (Tooling Version Integrity Rule 4 — documented soft-gate.)
-        continue-on-error: true
+      # NOTE: the advisory trufflehog scan that used to sit here was removed
+      # (standards#505). It was `continue-on-error: true`, so it never gated,
+      # and it duplicated the estate's real secret gate — gitleaks in
+      # secret-scanner-reusable.yml, which became genuinely blocking in #500
+      # (pinned + checksummed binary, `--exit-code 1`, no continue-on-error).
+      # secret-scanner-reusable's own header already claimed "Trufflehog removed
+      # as redundant"; keeping it here contradicted that across the same estate.
+      # Removing a never-failing step cannot newly-red any caller.
       - name: Check TODO/FIXME
         run: |
           echo "=== TODOs ==="
@@ -729,17 +852,27 @@ jobs:
         # advisory: formatting hygiene is reported from the reusable estate
         # bundle; repos opt into blocking formatter checks locally when ready.
         continue-on-error: true
+      # Sparse-check-out standards' scripts/ for the docs gate (a reusable
+      # workflow only auto-checks-out its own YAML, not sibling scripts).
+      - name: Check out standards for the docs gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
       - name: Check documentation
         run: |
-          MISSING=""
-          [ ! -f "README.md" ] && [ ! -f "README.adoc" ] && MISSING="$MISSING README"
-          [ ! -f "LICENSE" ] && [ ! -f "LICENSE.txt" ] && [ ! -f "LICENSE.md" ] && MISSING="$MISSING LICENSE"
-          [ ! -f "CONTRIBUTING.md" ] && [ ! -f "CONTRIBUTING.adoc" ] && MISSING="$MISSING CONTRIBUTING"
-          if [ -n "$MISSING" ]; then
-            echo "::warning::Missing docs:$MISSING"
-          else
-            echo "✅ Core documentation present"
-          fi
+          # Split gate (standards#505): README + LICENSE block immediately —
+          # measured 0/412 callers missing either, so arming them reds nobody.
+          # CONTRIBUTING (54/412 missing) warns until the cutoff baked into the
+          # script, then blocks. See scripts/check-docs-presence.sh.
+          cp .standards-checkout/scripts/check-docs-presence.sh "$RUNNER_TEMP/"
+          rm -rf .standards-checkout
+          bash "$RUNNER_TEMP/check-docs-presence.sh" .
 
   wellknown:
     name: Well-Known (RFC 9116 + RSR)
@@ -748,10 +881,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # Pin to the concrete event SHA (the PR merge commit on
+          # pull_request, the pushed commit on push). Do NOT use
+          # `ref: ${{ github.ref }}`: in a reusable workflow called from a
+          # pull_request, github.ref is the named merge ref
+          # `refs/pull/<n>/merge`, which actions/checkout cannot fetch
+          # ("couldn't find remote ref refs/pull/<n>/merge") — it broke 8/10
+          # governance jobs on every PR estate-wide. github.sha resolves to the
+          # same merge commit but is always fetchable.
+          ref: ${{ github.sha }}
       - name: RFC 9116 security.txt validation
         run: |
           SECTXT=""
@@ -806,10 +947,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # Pin to the concrete event SHA (the PR merge commit on
+          # pull_request, the pushed commit on push). Do NOT use
+          # `ref: ${{ github.ref }}`: in a reusable workflow called from a
+          # pull_request, github.ref is the named merge ref
+          # `refs/pull/<n>/merge`, which actions/checkout cannot fetch
+          # ("couldn't find remote ref refs/pull/<n>/merge") — it broke 8/10
+          # governance jobs on every PR estate-wide. github.sha resolves to the
+          # same merge commit but is always fetchable.
+          ref: ${{ github.sha }}
       - name: Check SPDX headers + permissions
         run: |
           failed=0
@@ -850,13 +999,21 @@ jobs:
       contents: read
     steps:
       - name: Checkout caller repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # Pin to the concrete event SHA (the PR merge commit on
+          # pull_request, the pushed commit on push). Do NOT use
+          # `ref: ${{ github.ref }}`: in a reusable workflow called from a
+          # pull_request, github.ref is the named merge ref
+          # `refs/pull/<n>/merge`, which actions/checkout cannot fetch
+          # ("couldn't find remote ref refs/pull/<n>/merge") — it broke 8/10
+          # governance jobs on every PR estate-wide. github.sha resolves to the
+          # same merge commit but is always fetchable.
+          ref: ${{ github.sha }}
           path: caller
       - name: Checkout standards (for the check script)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
           ref: main
@@ -873,13 +1030,21 @@ jobs:
       contents: read
     steps:
       - name: Checkout caller repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+          # Pin to the concrete event SHA (the PR merge commit on
+          # pull_request, the pushed commit on push). Do NOT use
+          # `ref: ${{ github.ref }}`: in a reusable workflow called from a
+          # pull_request, github.ref is the named merge ref
+          # `refs/pull/<n>/merge`, which actions/checkout cannot fetch
+          # ("couldn't find remote ref refs/pull/<n>/merge") — it broke 8/10
+          # governance jobs on every PR estate-wide. github.sha resolves to the
+          # same merge commit but is always fetchable.
+          ref: ${{ github.sha }}
           path: caller
       - name: Checkout standards (for the check script)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
           ref: main

@@ -1,0 +1,102 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# component-readiness-grades.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "component-readiness-grades"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "The standard MUST define each grade (X, F, E, D, C, B, A) with its evidence requirements and promotion/demotion criteria in a versioned document, mirrored in a machine-readable form."
+system = "none (manual file inspection; no CI validates prose/A2ML consistency)"
+status = "pass"
+evidence = "component-readiness-grades/COMPONENT-READINESS-GRADES.md §4 (lines 94-479, grade defs + evidence) and §7 (lines 442-479, transitions); mirrored in component-readiness-grades/COMPONENT-READINESS-GRADES.a2ml (grades block lines 17-80, transitions block lines 82-108)."
+check = "test -f component-readiness-grades/COMPONENT-READINESS-GRADES.md && grep -q '^## 4\\. Grade Definitions' component-readiness-grades/COMPONENT-READINESS-GRADES.md && grep -q '^## 7\\.' component-readiness-grades/COMPONENT-READINESS-GRADES.md && test -f component-readiness-grades/COMPONENT-READINESS-GRADES.a2ml && grep -q '^(grades' component-readiness-grades/COMPONENT-READINESS-GRADES.a2ml && grep -q '^(transitions' component-readiness-grades/COMPONENT-READINESS-GRADES.a2ml"
+effects = "Downstream repos rely on this doc as the single normative source for grade thresholds (a2ml/READINESS.md, k9-coordination-protocol/READINESS.md both cite it directly)."
+
+[[must]]
+id = "M2"
+text = "Assessments SHALL be recorded in a durable, version-controlled location (READINESS.md or STATE equivalent), and the standard's own repository MUST dogfood this convention on itself."
+system = "Justfile `just crg-grade` / `just crg-badge` (Justfile lines 221-233) parse a root-level READINESS.md `**Current Grade:**` line"
+status = "fail"
+effects = "The standards repo has no root READINESS.md (verified: `grep -oP '(?<=\\*\\*Current Grade:\\*\\* )[A-FX]' READINESS.md` returns empty), so `just crg-grade` silently falls back to grade X for the repo that defines CRG, while SELF-ASSESSMENT.adoc (line 8) narratively claims Grade B. The spec's own mechanical grade-reader and its prose self-assessment currently disagree, which undermines trust in the badge/grade-query tooling it asks adopters to use."
+
+[[must]]
+id = "M3"
+text = "The spec's canonical registry entry (source_hash, home, canonical_doc) MUST stay in sync with the on-disk spec content."
+system = ".github/workflows/registry-verify.yml running scripts/build-registry.sh --check, gated on push/PR to main"
+status = "pass"
+evidence = ".machine_readable/REGISTRY.a2ml lines 196-202 register `component-readiness-grades` with home=component-readiness-grades/, canonical_doc=README.adoc, and a source_hash; registry-verify.yml fails the build on drift."
+check = "bash scripts/build-registry.sh --check"
+effects = "Consumers of REGISTRY.a2ml / generated TOPOLOGY.md (e.g. estate-wide spec indexing, Hypatia HYP-S006) get an accurate pointer to this spec's current content."
+
+[[must]]
+id = "M4"
+text = "Components graded D or above MUST satisfy RSR compliance (or a documented equivalent) and, for hyperpolymath repos, Immaculate Guide compliance recorded under `(immaculate-guide-compliance ...)` in STATE.a2ml (COMPONENT-READINESS-GRADES.md §4.4, §10 rules 6/6a; .a2ml conformance block lines 116-117)."
+system = "hypatia-rules/crg-overclaim-detector.a2ml (HYP-S005) is designed to scan STATE.a2ml declared grades against required evidence files, but it queries VeriSimDB octads/file-tree signals that require a live VeriSimDB instance"
+status = "fail"
+effects = "SELF-ASSESSMENT.adoc §Gaps (line 75) states \"VeriSimDB not configured—no evidence persistence\", meaning HYP-S001/HYP-S005 have no runtime octad store to query. There is no other CI job (hypatia-scan.yml calls the generic hyperpolymath/hypatia scanner, not these repo-local A2ML rule files) that actually executes this gate today, so grade-D-or-above repos can self-declare without automated cross-checking, and any consuming repo relying on this rule for its own governance would find it inert."
+
+[[must]]
+id = "M5"
+text = "Non-abstract publication claims about implementation-facing work MUST NOT be made below Grade B (COMPONENT-READINESS-GRADES.md §5.1, §10 rule 8)."
+system = "none"
+status = "manual-only"
+effects = "Whether a given paper/README/announcement counts as 'non-abstract' vs 'abstract/provisional' is an editorial judgement call; no automated linter classifies publication text against a declared grade. Editorial review remains the only enforcement, so downstream misuse (overclaiming a sub-B component as production-ready) is only caught by human reviewers or after-the-fact community feedback."
+
+[[should]]
+id = "S1"
+text = "Projects adopting CRG SHOULD include a compact or extended assessment table (READINESS.md or STATE.scm) per the templates in §8."
+system = "none (no estate-wide scan enumerates which repos have adopted a READINESS.md/STATE.scm table)"
+status = "fail"
+effects = "Across the monorepo, only 2 of the many specs/components have adopted this pattern in practice (a2ml/READINESS.md, k9-coordination-protocol/READINESS.md, both dated 2026-04-04) versus 27+ specs flagged with 'no scorecard' in COMPLIANCE-DASHBOARD.md line 58. Adoption exists but is sparse and unverified by tooling, so most components in the estate carry no discoverable CRG grade at all."
+
+[[should]]
+id = "S2"
+text = "The standard SHOULD provide machine-readable grade declaration and automated badge-generation tooling so grades can be queried and displayed without manual parsing."
+system = "Justfile targets `crg-grade` and `crg-badge` (Justfile lines 221-233), reading `**Current Grade:**` from READINESS.md"
+status = "pass"
+evidence = "Justfile lines 221-233 implement both targets with grade-to-colour mapping; logic verified directly (`grep -oP` extraction + case statement) against a2ml/READINESS.md's `**Current Grade:** B` line, which parses correctly."
+check = "grep -q '^crg-grade:' Justfile && grep -q '^crg-badge:' Justfile && grep -q 'Current Grade' Justfile"
+effects = "Repos with a conforming READINESS.md (a2ml, k9-coordination-protocol) get a working shields.io badge pipeline; repos without one (including this monorepo's own root) get no badge and silently default to grade X."
+
+[[should]]
+id = "S3"
+text = "The standard's own repository SHOULD self-assess against its own CRG criteria at least once per release cycle (§6.3)."
+system = "none (no CI schedule regenerates or dates SELF-ASSESSMENT.adoc)"
+status = "pass"
+evidence = "component-readiness-grades/SELF-ASSESSMENT.adoc exists, dated 2026-04-04, with per-grade justification (X through B, lines 18-45) and a documented gap list to A (lines 72-79)."
+check = "test -f component-readiness-grades/SELF-ASSESSMENT.adoc && grep -q 'Assessed:' component-readiness-grades/SELF-ASSESSMENT.adoc && grep -q 'Grade Justification' component-readiness-grades/SELF-ASSESSMENT.adoc"
+effects = "The document exists and is substantive, but nothing enforces its recurrence each release cycle; staleness would only be caught by a human noticing an old 'Assessed:' date, not by CI."
+
+[[should]]
+id = "S4"
+text = "Grade demotions and self-declared overclaims SHOULD be automatically detected (HYP-S001 crg-demotion-detector, HYP-S005 crg-overclaim-detector)."
+system = "hypatia-rules/crg-demotion-detector.a2ml (HYP-S001) and hypatia-rules/crg-overclaim-detector.a2ml (HYP-S005), both VCL/octad-query rules requiring a running VeriSimDB instance"
+status = "fail"
+effects = "Same root cause as M4: VeriSimDB is configured (.verisimdb/config.toml defines the crg-grade octad schema) but not deployed, so neither rule currently fires. A component that regresses from B to C, or self-declares B without evidence, would not be flagged by any running system today."
+
+[[could]]
+id = "C1"
+text = "The standard COULD integrate with K9 contract validation to automate Grade-B promotion checks (verifying 6+ diverse external targets) as sketched in the automation-hooks section."
+system = "none"
+status = "aspirational"
+effects = "COMPONENT-READINESS-GRADES.a2ml lines 139-143 describe this as a future use-case ('K9 contract validates 6+ diverse targets meet diversity-metrics before allowing promotion') with a pointer to k9-svc/README.adoc, but no such contract exists yet; promotion to B remains a manual claim."
+
+[[could]]
+id = "C2"
+text = "The standard COULD make its declared diversity metrics (language-family, runtime, org, geography, use-case counts) machine-checkable rather than merely declared thresholds."
+system = "none"
+status = "fail"
+effects = "COMPONENT-READINESS-GRADES.a2ml lines 124-137 define a `diversity-metrics` block with concrete numeric thresholds (e.g. language-family-count >=3, independent-org-count >=4), but nothing computes these values from a component's actual external-target list, so any Grade-B/A diversity claim is currently self-asserted prose, not a verified count."
+
+[[could]]
+id = "C3"
+text = "The standard COULD be extended by adopters to grade non-software artefacts (documentation, design assets) beyond its stated scope (§1)."
+system = "none"
+status = "manual-only"
+effects = "This is explicitly framed as an optional, project-by-project extension decision (README.adoc/COMPONENT-READINESS-GRADES.md §1 scope note), inherently a governance choice rather than something a script could discharge."

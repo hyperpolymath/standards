@@ -1,0 +1,151 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= DYADT Verification Protocol
+:toc: preamble
+:icons: font
+
+[.lead]
+How a claim becomes a verdict. This document is normative. The governing
+principle is _ground-truth by running the tool_: a verifier re-collects primary
+evidence and MUST NOT derive a verdict from the agent's `statement` or cited
+`evidence`.
+
+== Verdicts
+
+[cols="1,3", options="header"]
+|===
+| Verdict | Meaning
+
+| `confirmed`
+| Primary evidence, re-collected now, satisfies `expect`.
+
+| `refuted`
+| Primary evidence was collected and *contradicts* the claim (the file is
+  unchanged, the command exited non-zero, the PR is still open).
+
+| `unverifiable`
+| The verifier could not collect trustworthy primary evidence: a required field
+  is missing, the `verifier` is incompatible with the `claim_class`, the
+  evidence is stale (`not_before`), a network verifier had no credentials, or
+  the claim is licence-touching (`manual-only`). **`unverifiable` is a loud,
+  non-passing outcome.**
+|===
+
+There is no fourth verdict and no "assumed pass". Silence is not success.
+
+== The verifier taxonomy
+
+[cols="1,2,2", options="header"]
+|===
+| Verifier id | Discharges `claim_class` | Primary evidence it collects
+
+| `git-diff`
+| `file-changed`
+| `git` status of the target path vs. a base ref (created/modified/deleted),
+  or the working-tree file's content (`contains:`/`sha256:`).
+
+| `command-transcript`
+| `command-ran`, `test-passed`
+| Runs the target command in a clean shell; judges by exit code / stdout.
+
+| `ci-run`
+| `ci-green`
+| The CI provider's API — the run/job's real `conclusion`. (Network.)
+
+| `issue-state`
+| `issue-closed`
+| The forge API — the issue's real `state`. (Network.)
+
+| `pr-state`
+| `pr-merged`
+| The forge API — the PR's real `merged`/`state`. (Network.)
+
+| `claims-compose`
+| `claim-of-claims`
+| Recursively verifies a referenced `CLAIMS.a2ml`; `confirmed` iff all-confirmed.
+
+| `manual`
+| any
+| Nothing automatable — returns `unverifiable` with reason `manual-only`. Used
+  for licence/SPDX and other governance-only claims.
+|===
+
+A verifier MUST refuse (`unverifiable`, reason `incompatible-verifier`) any
+claim whose `verifier` is not paired with its `claim_class` above. This closes
+the "pick a weaker check" hole — an agent cannot claim `pr-merged` and have it
+discharged by `command-transcript`.
+
+== Adversarial stance (normative)
+
+. *Re-derive, never read back.* The verifier MUST collect evidence itself. Any
+  implementation that parses the agent's `evidence` field and returns
+  `confirmed` on that basis is non-conforming.
+. *Default-refute on ambiguity for refutable classes.* If primary evidence can
+  be collected but does not clearly satisfy `expect`, the verdict is `refuted`,
+  not `unverifiable`. `unverifiable` is reserved for "could not collect
+  trustworthy evidence at all".
+. *Fail loud, fail closed.* A conforming CI integration MUST fail the build when
+  any claim is `refuted`, and (unless explicitly opted out per run) when any
+  claim is `unverifiable`.
+. *No network fabrication.* A network verifier without credentials MUST return
+  `unverifiable` (reason `needs-network-verifier`) — it MUST NOT guess, and MUST
+  NOT fall back to reading the agent's cited evidence.
+. *Stale evidence is unverifiable.* If `not_before` is set and the primary
+  evidence predates it, the verdict is `unverifiable` (reason `stale-evidence`).
+  A verifier that does not collect evidence timestamps MUST return
+  `unverifiable` for any claim carrying `not_before` (it cannot honour the
+  guarantee) rather than verify possibly-stale evidence as fresh.
+
+== Fail-safe requirements (normative)
+
+Every place a verifier *cannot* collect trustworthy primary evidence is
+`unverifiable`, never a confident wrong verdict. A conforming verifier MUST
+return `unverifiable` (not `confirmed`/`refuted`) when:
+
+* the diff base ref is missing or does not resolve (`no-base-ref`) for a
+  `created`/`modified`/`deleted` claim;
+* a required field (`claim_class`, `target`, `expect`, `verifier`) is absent
+  (`missing-field`), or a `[[claim]]` block carries no `id` (it MUST still
+  appear in the output — no silent drop);
+* the `target` of a file verifier is an absolute path, contains `..`, or is a
+  symlink (`unsafe-path` — evidence could be redirected);
+* an `expect` predicate is empty or otherwise always-matching
+  (`empty-pattern`), or its regex is malformed (`bad-regex`);
+* a `contains:`/`sha256:` target is not a readable regular file
+  (`not-a-regular-file` / `unreadable`).
+
+And a licence/SPDX claim — detected in ANY of `claim_class`, `target`,
+`expect`, or `statement` — MUST be `unverifiable` with reason `manual-only`
+(the Manual-Only licence policy; never auto-`confirmed`).
+
+== Command execution & sandboxing (normative)
+
+The `command-transcript` verifier EXECUTES the claim's `target`. Consequences:
+
+* `stdout-contains:` MUST match the command's *stdout only*; stderr MUST be
+  captured separately so a marker printed to stderr cannot false-confirm.
+* Because the claims file is agent-authored, executing its commands is code
+  execution. A verifier running over UNTRUSTED claims MUST sandbox the command
+  (no network, constrained filesystem, resource limits). The reference verifier
+  does NOT sandbox and is for TRUSTED (repo-authored, PR-reviewed) claims only;
+  a conforming production verifier MUST document its execution boundary.
+* `claims-compose` recursion MUST be depth-bounded to defeat self- or
+  mutually-referential claim files (the reference verifier caps depth at 8).
+
+== Multi-verifier corroboration (SHOULD)
+
+For a high-stakes `claim_class` (e.g. `pr-merged`, `ci-green`), a production
+verifier SHOULD collect from more than one independent source where available
+(e.g. the forge API *and* the local git state of the merge commit) and downgrade
+to `refuted`/`unverifiable` on disagreement. The reference verifier implements
+single-source local verifiers; corroboration is a production concern tracked in
+the conformance vectors.
+
+== Output contract
+
+For each `[[claim]]` in the input, a verifier MUST emit exactly one line
+associating `id` → verdict → reason, and a summary of counts. Every claim in the
+file MUST appear (no silent drops). The reference implementation
+(`scripts/verify-claims.sh`) is the canonical output shape; production verifiers
+MAY emit richer machine formats (JSON, SARIF) but MUST preserve one-verdict-per-claim
+and the loud-exit semantics.

@@ -59,6 +59,7 @@ TOPOLOGY="TOPOLOGY.md"
 # Add a row here when a new spec lands; the hash + topology follow automatically.
 # ---------------------------------------------------------------------------
 read -r -d '' SPECS <<'TSV' || true
+estate-constitution|governance|constitution/|Hyperpolymath Estate Constitution|the highest estate-level rules, authority precedence, assurance, contribution, exceptions, and known tensions
 a2ml|foundation|a2ml/|A2ML — Attested Markup Language|the typed/verified machine-readable document format
 k9-svc|foundation|k9-svc/|K9 Self-Validating Components|self-validating components with embedded contracts + deploy logic
 contractiles|foundation|contractiles/|Contractiles (Must/Trust/Dust/Intend)|policy-enforcement primitives the K9 layer is built from
@@ -81,6 +82,7 @@ component-readiness-grades|readiness|component-readiness-grades/|CRG — Compone
 toolchain-readiness-grades|readiness|toolchain-readiness-grades/|TRG — Toolchain Readiness Grades|per-toolchain readiness profile templates
 rhodium-standard-repositories|governance|rhodium-standard-repositories/|RSR — Rhodium Standard Repositories|the repository-compliance standard every repo is graded against
 session-management-standards|governance|session-management-standards/|Session Management Standards|continuity / verify / handover protocols
+did-you-actually-do-that|governance|did-you-actually-do-that/|DYADT — Did-You-Actually-Do-That|post-action agent-claim verification (Tier 4 accountability)
 ensaid-config|governance|ensaid-config/|ENSAID Config|the ensaid configuration standard
 accessibility|governance|accessibility/|Accessibility Standard|estate accessibility requirements
 publication-pre-flight|governance|publication-pre-flight/|Publication Pre-Flight|submission gate (HOL + Zenodo checklists)

@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= RSR Actions Allowlist
+:toc: preamble
+:icons: font
+
+The canonical GitHub Actions allowlist for the estate, and the tooling that keeps
+every repo's live allowlist in sync with it.
+
+== The failure this prevents
+
+RSR repos run with `allowed_actions: selected` + `sha_pinning_required: true`
+(a security posture). Under that setting, if a workflow `uses:` an action or
+reusable-workflow that is **not on the allowlist**, GitHub kills the run at
+*startup* — **zero jobs, no log, an opaque "workflow file issue"**. You cannot
+"squabble" a run that never started: there is no gate to satisfy, no log to read.
+
+This bites hardest on **repo creation / org migration**: a migrated repo's
+`patterns_allowed` is reset (often to `[]`), so *every* estate action and
+reusable-workflow is blocked at once and the whole CI goes dark. Observed
+2026-07-11 when `gossamer` moved to the `metadatastician` org: `patterns_allowed`
+was empty → 16 of 25 `uses:` refs blocked → mass `startup_failure` across
+Governance, Secret Scanner, SPARK, Hypatia, Mirror, Android, and push-email.
+
+== Canonical source of truth
+
+`allowed-actions.json` — the estate's permitted patterns (github-owned + verified +
+an explicit `patterns_allowed` list). This is the single list every repo's
+`selected-actions` policy must be set from. Add a pattern here when the estate
+adopts a new action; the check below then enforces it everywhere.
+
+== The three tools
+
+[cols="1,2,3",options="header"]
+|===
+| Tool | File | Role
+
+| **Squabbler** (CI gate)
+| `scripts/check-allowed-actions.sh`
+| Turns the opaque `startup_failure` into a *legible, satisfiable* gate: lists exactly which `uses:` are not covered. No API, no admin — run it in a preflight job, in the governance gate, or locally. Exit 1 on any gap.
+
+| **Hypatia** (scanner)
+| `hypatia-rules/workflow-allowlist-gap.a2ml` (HYP-S008)
+| Scans the workflow tree and emits a `compliance.finding.new` for each uncovered `uses:` — so the gap is caught at scan time, before a run ever startup-fails.
+
+| **Robot-repo-automaton** (onboarding)
+| `scripts/set-allowed-actions.sh`
+| The ROOT prevention: applies the canonical allowlist. The farm/onboarding process MUST run this (with an admin PAT) whenever a repo is created or migrated, so `patterns_allowed` is never empty. It **escalates repo → org → enterprise**: a repo-level PUT that returns 409 "already set at the organization or enterprise level" falls back to the org (owner), then the enterprise — because the allowlist is often enforced one or two levels up (as it is for `metadatastician`, governed at the org level). Rhodibot (only `contents`/`pull-requests: write`) cannot set Actions policy, so it *detects + reports* via the check; the admin PAT *sets* it.
+|===
+
+An **allowlist preflight** workflow (`.github/workflows/allowlist-preflight.yml`,
+seeded from the RSR template) makes this a first-class red check: it uses only
+`actions/checkout` (github-owned, always permitted) so it can never itself
+startup-fail, and runs the check on every push/PR — turning "the whole CI went
+dark" into "one legible red check that names the offending `uses:`".
+
+== RSR requirement
+
+A conforming RSR repo MUST:
+
+. set `allowed_actions = selected` and `sha_pinning_required = true`;
+. have a `selected-actions` allowlist that is a superset of what its workflows
+  `uses:` (verify: `check-allowed-actions.sh` exits 0);
+. have that allowlist applied by the onboarding automaton, not hand-curated per repo.
+
+== Applying / fixing a repo
+
+[source,console]
+----
+# Detect gaps (safe, no admin):
+bash scripts/check-allowed-actions.sh rhodium-standard-repositories/actions-allowlist/allowed-actions.json .github/workflows
+
+# Apply the canonical allowlist (needs an admin PAT — farm admin token):
+bash scripts/set-allowed-actions.sh <owner>/<repo>
+----
+
+Or directly:
+
+[source,console]
+----
+gh api -X PUT repos/<owner>/<repo>/actions/permissions -F enabled=true -f allowed_actions=selected
+gh api -X PUT repos/<owner>/<repo>/actions/permissions/selected-actions \
+  --input rhodium-standard-repositories/actions-allowlist/allowed-actions.json
+----

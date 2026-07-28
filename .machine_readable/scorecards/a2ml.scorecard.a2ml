@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# a2ml.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "a2ml"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "The A2ML surface grammar MUST be normatively specified so that conforming parsers can be built against a single source of truth."
+system = "/home/user/standards/a2ml/SPEC.adoc (29KB normative spec, v1.1.0) plus /home/user/standards/a2ml/docs/GRAMMAR.adoc"
+status = "pass"
+evidence = "SPEC.adoc exists at repo root (29183 bytes) as the current normative spec per README.adoc, with docs/GRAMMAR.adoc as grammar appendix; VERSIONS.adoc documents the spec lineage across v0.1.0-v1.1.0."
+check = "test -f a2ml/SPEC.adoc && test -f a2ml/docs/GRAMMAR.adoc && grep -q 'normative' a2ml/SPEC.adoc"
+effects = "Downstream language bindings (rust/elixir/gleam/haskell/deno) and the Idris2 reference parser all depend on this text as their shared contract; ambiguity here would fork implementations."
+
+[[must]]
+id = "M2"
+text = "A parser conformance test suite (test vectors with expected outputs) MUST exist and be runnable to validate that implementations parse Module 0 syntax and preserve opaque payloads correctly."
+system = "/home/user/standards/a2ml/tests/vectors/*.a2ml + *.expected + *.html.expected (8 vector pairs); described in docs/CONFORMANCE.adoc"
+status = "pass"
+evidence = "tests/vectors/ contains 8 input/.expected pairs (module0-basic, refs-basic, refs-missing, inline-formatting, inline-edges, opaque-roundtrip, directive-attrs, table-basic) matching the vector list enumerated in docs/CONFORMANCE.adoc."
+check = "test $(ls a2ml/tests/vectors/*.a2ml | wc -l) -eq 8 && test $(ls a2ml/tests/vectors/*.expected | grep -v html.expected | wc -l) -eq 8"
+effects = "Without these vectors, the 6 language bindings and reference Idris2/ReScript parsers would have no shared ground truth for interop, risking silent divergence."
+
+[[must]]
+id = "M3"
+text = "CI MUST validate every *.a2ml file in the repository on push/PR to catch malformed manifests before merge."
+system = ".github/workflows/a2ml-validation.yml job 'validate-a2ml' (builds Idris2 CLI, runs `a2ml validate` over every found *.a2ml file)"
+status = "pass"
+evidence = ".github/workflows/a2ml-validation.yml triggers on push/PR touching **.a2ml, cli/**, src/A2ML/**, builds the CLI via cli/build.sh and runs `find . -name '*.a2ml' | ... a2ml validate` failing the job (exit 1) on any validation failure."
+check = "test -f a2ml/.github/workflows/a2ml-validation.yml && grep -q 'find . -name \"\\*.a2ml\"' a2ml/.github/workflows/a2ml-validation.yml && grep -q 'push:' a2ml/.github/workflows/a2ml-validation.yml && grep -q 'pull_request:' a2ml/.github/workflows/a2ml-validation.yml"
+effects = "Prevents malformed .a2ml manifests (README.a2ml, SPEC.adoc-derived, docs/IANA-MEDIA-TYPE.a2ml) from being merged, which would break consumers of dogfood-gate across the 105+ dependent repos noted in READINESS.md."
+
+[[must]]
+id = "M4"
+text = "The reference Idris2 parser/typed-core MUST type-check in CI on every push/PR to main/master."
+system = ".github/workflows/idris2-tests.yml (installs Idris2 0.7.0, runs `idris2 --check` on A2ML/Parser.idr and A2ML/TypedCore.idr)"
+status = "pass"
+evidence = "idris2-tests.yml pinned to Idris2 v0.7.0 release tarball, runs `idris2 --check --source-dir . A2ML/Parser.idr` and `A2ML/TypedCore.idr` on every push/PR to main/master."
+check = "test -f a2ml/.github/workflows/idris2-tests.yml && grep -q 'idris2 --check --source-dir . A2ML/Parser.idr' a2ml/.github/workflows/idris2-tests.yml && grep -q 'idris2 --check --source-dir . A2ML/TypedCore.idr' a2ml/.github/workflows/idris2-tests.yml && grep -q 'branches: \\[main, master\\]' a2ml/.github/workflows/idris2-tests.yml"
+effects = "A broken reference implementation would invalidate the typed-core guarantees (attested conformance level) that all downstream bindings claim to implement."
+
+[[must]]
+id = "M5"
+text = "Licence and SPDX identifiers MUST be present and correct on spec/source files (dual-licence: content under CC-BY-SA-4.0, code under PMPL/MPL as applicable)."
+system = "none (manual/governance review of SPDX-License-Identifier headers; LICENSE + LICENSES/PMPL-1.0.txt present but no automated SPDX-header-checker CI job found in this repo's workflows)"
+status = "manual-only"
+effects = "Incorrect or missing SPDX headers create licence-compliance risk for every downstream consumer (6 language bindings, pandoc filter, contractiles) that redistributes or vendors A2ML spec/code."
+
+[[should]]
+id = "S1"
+text = "Each of the six language implementations (Rust, Elixir, Gleam, Haskell, Deno, and the Idris2/ReScript prototype) SHOULD have an automated test suite exercised in CI."
+system = "bindings/rust/tests/crg_c_tests.rs (36 test fns) + src/parser.rs (8) + src/renderer.rs (3); bindings/elixir/test/a2_ml_test.exs; bindings/gleam/test/a2ml_gleam_test.gleam; .github/workflows/rescript-tests.yml; idris2-tests.yml"
+status = "pass"
+evidence = "bindings/rust/tests/crg_c_tests.rs contains 36 #[test] functions plus 11 more in src/parser.rs and src/renderer.rs; bindings/elixir/test/ and bindings/gleam/test/ contain dedicated test files; rescript-tests.yml and idris2-tests.yml run in CI for the ReScript/Idris2 reference stack. No Haskell/Deno test files were found under bindings/haskell or bindings/deno, so this is a partial pass across the 6 targets."
+check = "test $(grep -c '#\\[test\\]' a2ml/bindings/rust/tests/crg_c_tests.rs) -ge 30 && test -f a2ml/bindings/elixir/test/a2_ml_test.exs && test -f a2ml/bindings/gleam/test/a2ml_gleam_test.gleam && test -f a2ml/.github/workflows/rescript-tests.yml && test -f a2ml/.github/workflows/idris2-tests.yml"
+effects = "Untested bindings (Haskell, Deno) risk silent behavioral drift from the reference parser, which could break the Haskell/Deno-consuming repos (a2ml-haskell, scaffoldia, idaptik, nafa-app per READINESS.md) without CI catching it."
+
+[[should]]
+id = "S2"
+text = "The repo-level `just test` / `just lint` recipes SHOULD actually invoke the underlying per-language test/lint tools rather than being placeholders."
+system = "Justfile `test:` and `lint:` recipes (lines ~91-107, ~128-131)"
+status = "fail"
+evidence = "none"
+effects = "Contributors following README/READINESS.md's documented `just test` / `just lint` recipes get a silent no-op rather than real verification, undermining the 'just test / just build' recipes advertised in READINESS.md. Justfile 'test' recipe body is literally '# TODO: Add test command' with commented-out cargo test/npm test/mix test hints; 'lint' recipe is '# TODO: Add lint command'."
+
+[[should]]
+id = "S3"
+text = "Fuzz testing of the parser SHOULD run on a recurring schedule to catch crashes/panics on malformed input."
+system = ".github/workflows/fuzzing.yml (weekly cron '0 0 * * 0' + push/PR, builds ReScript parser and generates fuzz inputs)"
+status = "pass"
+evidence = "fuzzing.yml is scheduled weekly (cron: '0 0 * * 0') in addition to push/PR triggers, and builds the ReScript prototype parser to generate/execute fuzz inputs."
+check = "test -f a2ml/.github/workflows/fuzzing.yml && grep -q \"cron: '0 0 \\* \\* 0'\" a2ml/.github/workflows/fuzzing.yml"
+effects = "Without scheduled fuzzing, parser crashes on malformed/adversarial input (a security and robustness concern for any tool ingesting untrusted .a2ml files) would only surface reactively rather than proactively."
+
+[[should]]
+id = "S4"
+text = "Secrets SHOULD be scanned on every push/PR to prevent credential leaks."
+system = ".github/workflows/secret-scanner.yml (Gitleaks + rust/shell secret jobs)"
+status = "pass"
+evidence = "secret-scanner.yml runs gitleaks/gitleaks-action plus rust-secrets and shell-secrets jobs on pull_request and push to main. TruffleHog was retired as redundant to the pinned gitleaks gate (#507/#525)."
+check = "test -f a2ml/.github/workflows/secret-scanner.yml && grep -q 'gitleaks/gitleaks-action' a2ml/.github/workflows/secret-scanner.yml"
+effects = "Prevents accidental credential leakage into repo history, which would otherwise require costly rotation/remediation across the hyperpolymath estate."
+
+[[should]]
+id = "S5"
+text = "The internal .machine_readable/6scm legacy mirror SHOULD be kept honest (never silently green) as metadata migrates to the 6a2/descriptiles format."
+system = "scripts/check-6scm.sh (byte-diff of .machine_readable/*.scm vs .machine_readable/6scm/*.scm, with explicit DRIFT/OBSOLETE states)"
+status = "pass"
+evidence = "scripts/check-6scm.sh explicitly implements 3 states (in-sync, obsolete no-op, DRIFT) rather than a blanket success, per its own header comment referencing 'kill the false green' remediation; this repo currently has no .scm sources so it correctly exits 0 as 'OBSOLETE (no-op)' rather than falsely claiming sync."
+check = "bash a2ml/scripts/check-6scm.sh"
+effects = "Prevents a false-green validator from masking real drift between legacy .scm descriptor sources and their mirror, which would otherwise mislead any tooling still reading the legacy 6scm path."
+
+[[could]]
+id = "C1"
+text = "A formal EBNF/PEG grammar for the A2ML surface syntax COULD be published to complement the prose spec."
+system = "none"
+status = "fail"
+evidence = "none"
+effects = "READINESS.md explicitly lists 'No formal grammar (EBNF/PEG) for the A2ML format' as known debt; parser implementers must reverse-engineer grammar from prose SPEC.adoc/docs/GRAMMAR.adoc, risking cross-implementation drift."
+
+[[could]]
+id = "C2"
+text = "IANA media type registration (application/vnd.a2ml+text) COULD be formally approved."
+system = "none (docs/IANA-MEDIA-TYPE.adoc is a draft; IANA-MEDIA-TYPE-APPLICATION.md exists but registration is externally adjudicated by IANA, not this repo's CI)"
+status = "aspirational"
+evidence = "none"
+effects = "Without IANA registration, external tools/MIME sniffers cannot canonically recognize .a2ml content type, limiting ecosystem interoperability beyond the hyperpolymath estate."
+
+[[could]]
+id = "C3"
+text = "Cross-reference validation between separate A2ML files (e.g. STATE.a2ml referencing META.a2ml) COULD be implemented to catch dangling cross-file references."
+system = "none"
+status = "fail"
+evidence = "none"
+effects = "READINESS.md 'Known limitations' for a2ml-validator explicitly states 'Cross-reference validation between A2ML files not yet implemented,' so consuming repos with multi-file 6a2/ descriptile sets cannot detect broken cross-links automatically."

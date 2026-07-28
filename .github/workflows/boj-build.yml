@@ -13,6 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -27,7 +28,7 @@ jobs:
     # when unconfigured.
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Trigger BoJ Server (Casket/ssg-mcp)
         env:
@@ -62,19 +63,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: K9-SVC Validation
         run: |
+          set -euo pipefail
           echo "Running K9-SVC contractile validation..."
-          if [ -f .machine_readable/contractiles/must/Mustfile.a2ml ]; then
-            echo "✅ Mustfile found - running validation"
-            # Placeholder for actual K9 validation
-            echo "K9 validation would run here"
-          else
-            echo "❌ Mustfile not found"
-            exit 1
-          fi
+          # Real structural validation (no placeholder): every Mustfile check
+          # must carry a severity and a means of discharge (run or verification).
+          # A hollow check fails loudly. See scripts/check-mustfile-structure.sh
+          # (unit-tested by scripts/tests/wave0-false-green-test.sh).
+          bash scripts/check-mustfile-structure.sh
+
+      - name: Mustfile Enforcement (execute the checks)
+        run: |
+          set -euo pipefail
+          # Execute the Mustfile's `- run:` invariants — the mandatory checks
+          # that were previously declared but never run by any CI job. A failing
+          # critical/high check fails the build (fail loudly); warning-severity
+          # failures are reported but non-blocking. See scripts/run-mustfile.sh.
+          bash scripts/run-mustfile.sh
 
       - name: Contractile Check
         run: |

@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# session-management-standards.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "session-management-standards"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "Every protocol directory MUST contain all four artefacts of the Protocol File Contract: CHECKLIST.adoc, PROTOCOL.k9, STATE-template.a2ml, and EXAMPLE-FILLED-IN.adoc (README.adoc, 'Protocol File Contract')."
+system = "none — no script enforces the file contract; verified manually via `find`."
+status = "fail"
+effects = "Only continuity/planned-session-close/ has an EXAMPLE-FILLED-IN.adoc (11 of the 12 protocol directories lack one: repo-intake, checkpoint-before-major-change, emergency-termination, recovery-operation, all four handover/* protocols, and all three verify/* protocols). Downstream repos and any assistant trying to follow a worked example for these 11 protocols have nothing concrete to copy from."
+
+[[must]]
+id = "M2"
+text = "Every protocol MUST include a 'Verification' block per the format defined in SHARED-CONTINUITY-CORE.adoc ('Every protocol must include a Verification block specifying the mandatory checks required before the protocol declares success')."
+system = "none"
+status = "fail"
+effects = "The 8 stub-status protocols (repo-intake, checkpoint-before-major-change, recovery-operation, collaborative-transfer, full-transfer, human-transfer, model-transfer, maintenance-sweep, release-audit — all with 52-line CHECKLIST.adoc and 21-line PROTOCOL.k9) contain no Verification block. Consuming repos cannot mechanically confirm these protocols were executed correctly."
+
+[[must]]
+id = "M3"
+text = "Every protocol MUST capture the full 'Enriched 25-Field Continuity Core' defined in SHARED-CONTINUITY-CORE.adoc across meta-attributes, core sections, commits table, verifications table, and discipline-check audit."
+system = "none"
+status = "fail"
+effects = "Stub protocols' PROTOCOL.k9/STATE-template.a2ml (e.g. continuity/repo-intake) list only 11 abbreviated fields (goal, current_task, last_completed_action, next_intended_action, repository, branch, head_commit, files_of_interest, known_blockers, residual_risks, recommended_next_protocol) — missing protocol-version, session-id/timestamps, commits-made table, verifications-run table, decisions/deferred, and the discipline-check audit. Downstream repos relying on the '25-field' continuity guarantee get materially incomplete state for 8 of 12 protocol families."
+
+[[must]]
+id = "M4"
+text = "Every artefact in this directory (PROTOCOL.k9, STATE-template.a2ml, *.adoc) MUST carry a valid SPDX-License-Identifier header per project-wide licensing convention."
+system = "none — licence/SPDX compliance is a manual/governance judgement, not automated for this directory (no reuse-lint or SPDX CI job targets session-management-standards)."
+status = "manual-only"
+effects = "22 of 42 files (all PROTOCOL.k9 and STATE-template.a2ml files outside planned-session-close) have no SPDX header, e.g. continuity/repo-intake/PROTOCOL.k9 and handover/full-transfer/STATE-template.a2ml. Provenance/licence status for these files is ambiguous for anyone mirroring or redistributing them."
+
+[[must]]
+id = "M5"
+text = "The 'Directory Map' and 'Canonical Protocol Families' enumerated in README.adoc MUST match the actual on-disk directory/file structure."
+system = "none (no automated drift check), but verified pass by direct filesystem inspection."
+status = "pass"
+evidence = "All 12 protocol directories (verify/{maintenance-sweep,substantial-completion,release-audit}, continuity/{repo-intake,checkpoint-before-major-change,planned-session-close,emergency-termination,recovery-operation}, handover/{full-transfer,collaborative-transfer,model-transfer,human-transfer}) and all 9 templates/ files listed in the README Directory Map exist exactly as named on disk."
+check = "for d in verify/maintenance-sweep verify/substantial-completion verify/release-audit continuity/repo-intake continuity/checkpoint-before-major-change continuity/planned-session-close continuity/emergency-termination continuity/recovery-operation handover/collaborative-transfer handover/full-transfer handover/human-transfer handover/model-transfer; do test -d \"session-management-standards/$d\" || exit 1; done && for f in SESSION_STATE.adoc NEXT_STEPS.md SESSION_SUMMARY.md EMERGENCY-CHECKPOINT.md SUBSTANTIAL_COMPLETION_REPORT.md HANDOVER-REPORT.md RECOVERY-PLAN.md RELEASE_AUDIT.md MAINTENANCE_REPORT.md; do test -f \"session-management-standards/templates/$f\" || exit 1; done"
+effects = "n/a — this is currently sound, so no downstream impact."
+
+[[should]]
+id = "S1"
+text = "PROTOCOL.k9 files SHOULD conform to the repository's existing K9 configuration grammar (K9! magic number, pedigree block with name/version, security-level field) since a generic validator for that grammar exists in this monorepo."
+system = "k9-svc/actions/validate/validate-k9.sh — checks .k9 files for 'K9!' magic-number line 1, pedigree block, valid security level (kennel/yard/hunt), and SPDX header. Exists but is not wired to session-management-standards/."
+status = "fail"
+effects = "All 12 PROTOCOL.k9 files here begin with a plain '# ...' comment, not the 'K9!' magic number, and have no pedigree/security-level fields, so they would fail validate-k9.sh if it were ever run repo-wide. This is a naming collision risk: '.k9' files that don't follow the actual K9 grammar could confuse tooling or reviewers who expect the k9-svc schema."
+
+[[should]]
+id = "S2"
+text = "Retired protocol names (maintenance-check, planned-termination, handover-preparation) SHOULD NOT be referenced as live protocol names anywhere else in the monorepo, per README's 'Renamed Protocols' section."
+system = "none"
+status = "pass"
+evidence = "grep across the monorepo (*.adoc, *.md) for 'maintenance-check', 'planned-termination', 'handover-preparation' returns no hits outside this directory's own README retirement notice."
+check = "! grep -rn \"maintenance-check\\|planned-termination\\|handover-preparation\" --include=\"*.adoc\" --include=\"*.md\" . | grep -v \"^./session-management-standards/README.adoc\" | grep -q ."
+effects = "n/a — no stale cross-references found, so no downstream confusion currently."
+
+[[should]]
+id = "S3"
+text = "adoption-and-integration-guide/GUIDE.adoc SHOULD provide a concrete, runnable example of the 'thin local binding' pattern (e.g. a sample Justfile recipe or session/custom-checks.k9 snippet) so downstream repos have something to copy."
+system = "none"
+status = "fail"
+effects = "GUIDE.adoc only describes the binding pattern in prose ('Justfile aliases/recipes', 'coordination.k9 integration', 'session/custom-checks.k9') without showing any actual file content or command syntax. Downstream repo maintainers must invent the binding format from scratch, risking drift between repos' local integrations."
+
+[[should]]
+id = "S4"
+text = "Protocols whose CHECKLIST.adoc has been substantially expanded (emergency-termination at 523 lines, substantial-completion at 300 lines) SHOULD have correspondingly expanded PROTOCOL.k9/STATE-template.a2ml machine artefacts, not stub-level ones."
+system = "none"
+status = "fail"
+effects = "continuity/emergency-termination/PROTOCOL.k9 is only 21 lines and its STATE-template.a2ml only 20 lines despite the checklist being fully written out; same pattern for verify/substantial-completion (21/20 lines). Any tooling meant to machine-drive these two protocols from PROTOCOL.k9/STATE-template.a2ml would be working from stub-level data despite the checklists implying full protocol maturity — a documentation/implementation mismatch."
+
+[[could]]
+id = "C1"
+text = "The repo COULD include a real downstream binding example (e.g. an actual Justfile or session/local-hooks.sh sample) demonstrating the 'Minimal Local Binding Strategy' from GUIDE.adoc."
+system = "none"
+status = "fail"
+effects = "Repos adopting this standard have no reference implementation to validate their local bindings against, increasing onboarding friction and risk of divergent interpretations across the estate."
+
+[[could]]
+id = "C2"
+text = "templates/ COULD include at least one fully filled-in example per template (mirroring continuity/planned-session-close/EXAMPLE-FILLED-IN.adoc) rather than only blank field-attribute skeletons."
+system = "none"
+status = "fail"
+effects = "Authors filling in SESSION_STATE.adoc, HANDOVER-REPORT.md, etc. for the first time have no worked example beyond the one that exists for planned-session-close, increasing the chance of inconsistent field usage across protocol families."
+
+[[could]]
+id = "C3"
+text = "An automated CI job COULD periodically diff README.adoc's Directory Map / status claims ('Current Status' section) against the actual file contents to catch drift as protocols are expanded or renamed."
+system = "none — no such job exists in .github/workflows/."
+status = "aspirational"
+effects = "Without this, README status claims (e.g. 'Remaining protocol files are present as explicit stubs') could silently go stale as individual protocols are expanded, without any automated signal to update the README."

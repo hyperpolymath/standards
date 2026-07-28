@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# overlay-protocol.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "overlay-protocol"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "Every conformant overlay MUST declare an overlay-protocol section (base, upstream, peer-type, activation, deactivation, switchable, modifies-base, description) in its ECOSYSTEM.scm file."
+system = "overlay-protocol/scripts/check-conformance.sh (sections 1-2: locates ECOSYSTEM.scm and extracts/validates each required field via grep)"
+status = "pass"
+evidence = "scripts/check-conformance.sh lines 58-160 implement extract_field()/check_field() for base, upstream, peer-type, activation, deactivation, switchable, modifies-base, description, and exits 1 on any missing field; script passes bash -n syntax check. This validates the MUST at the mechanism level, though no repo-wide consumer currently invokes it (DECISION.adoc confirms zero consumers as of 2026-04-05)."
+check = "test -f overlay-protocol/scripts/check-conformance.sh && bash -n overlay-protocol/scripts/check-conformance.sh && for f in base upstream peer-type activation deactivation switchable modifies-base description; do grep -q \"$f\" overlay-protocol/scripts/check-conformance.sh || exit 1; done"
+effects = "Without this check, any project claiming overlay-protocol conformance could omit required declaration fields undetected by tooling; downstream consumers (echidnabot, hypatia per SPEC section 7.2) would have nothing concrete to validate against."
+
+[[must]]
+id = "M2"
+text = "The overlay MUST NOT modify any file, directory, or build artefact belonging to the base project (non-modification invariant)."
+system = "src/abi/OverlayProtocol.idr (NonModification/basePreserved proof) for the formal model; scripts/check-conformance.sh section 3 (git ls-files check against base dir) for a runtime approximation"
+status = "fail"
+effects = "The Idris2 proof (lines 89-98) only proves the invariant holds when trivially assumed reflexively (basePreserved s = BaseUnchanged Refl) — it does not derive from an actual overlay's file operations. The shell check (lines 179-198) only works when the overlay is a git repo and silently 'warn's (not fail) otherwise, and there is no invocation of check-conformance.sh anywhere in CI or against any real overlay in this repo, since no overlay implementation exists yet (per DECISION.adoc: 'no reference implementation, no tests, no consumer')."
+
+[[must]]
+id = "M3"
+text = "The overlay MUST be switchable (activate/deactivate are inverses) and activation MUST be idempotent."
+system = "src/abi/OverlayProtocol.idr (Switchable, ActivationIdempotent, DeactivationIdempotent) and ffi/zig/test/integration_test.zig scenario tests"
+status = "fail"
+effects = "The Idris2 file requires an Idris2 toolchain to typecheck (not installed in this environment; no CI job in .github/workflows references overlay-protocol or Idris2), so the proofs are unverified. ffi/zig/test/integration_test.zig exercises overlay_check_conformance with identityActivate/identityDeactivate stand-ins (lines 28-39), trivially satisfying switchability by construction rather than testing a real activate.sh; zig is not installed in this environment either, so `zig build test`/`test-integration` have not actually been run to confirm they pass."
+
+[[must]]
+id = "M4"
+text = "For o-extension peer type, an activate.sh script MUST exist, be executable, and be idempotent; deactivation MUST fully unset variables/paths it set."
+system = "scripts/check-conformance.sh section 4 (checks activate.sh exists, is +x, and exports env vars)"
+status = "manual-only"
+effects = "There is no real o-extension inside overlay-protocol/ to run the check against (the HOL-o-extension reference implementation cited in SPEC section 8.1 lives outside this spec's home directory and was not verified here). Idempotency of activate.sh cannot be mechanically verified by grep alone (the script only checks for export statements, not idempotent semantics), so full compliance ultimately requires human review of any given activate.sh."
+
+[[must]]
+id = "M5"
+text = "For aggregate-library peer type, curated operations MUST each have an interface signature, documented behavioural semantics, and executable test cases (specs/ + test/ directories)."
+system = "scripts/check-conformance.sh section 4 (aggregate-library branch: checks specs/ dir has md/yaml files and test/ or tests/ dir exists)"
+status = "fail"
+effects = "No aggregate-library instance exists inside overlay-protocol/ itself (the SPEC's cited reference implementation lives at 'developer-ecosystem/aggregate-library/', outside this spec's home directory, and was not verified here). The check only counts files by extension rather than confirming specs actually document per-operation semantics/tests, so even a passing run would be a shallow proxy, and no automated run has been performed against any real target."
+
+[[should]]
+id = "S1"
+text = "Overlays SHOULD declare awareness of protocol peers targeting the same base in a related-projects/overlay-protocol-peers section of ECOSYSTEM.scm."
+system = "none"
+status = "fail"
+effects = "check-conformance.sh does not check for the overlay-protocol-peers section at all (absent from the script); consumers cannot discover sibling overlays mechanically, only by manual reading of ECOSYSTEM.scm."
+
+[[should]]
+id = "S2"
+text = "An AI manifest (0-AI-MANIFEST.a2ml or AI.a2ml) SHOULD declare the non-modification invariant explicitly."
+system = "scripts/check-conformance.sh section 5 (searches manifest for non-modification wording via regex)"
+status = "fail"
+effects = "overlay-protocol/ itself has no 0-AI-MANIFEST.a2ml or AI.a2ml file (only .machine_readable/6a2/{META,STATE,ECOSYSTEM}.a2ml exist), so the spec's own home directory would fail this SHOULD if run against itself; downstream overlay authors following the SPEC template have no example manifest to copy from within this repo."
+
+[[should]]
+id = "S3"
+text = "The README and ROADMAP SHOULD mark overlay-protocol as SPEC-ONLY status, and TOPOLOGY/PROTOCOLS listings SHOULD include the SPEC-ONLY tag, per the recorded DECISION."
+system = "none"
+status = "fail"
+effects = "grep of /home/user/standards/README.adoc and /home/user/standards/ROADMAP.adoc for 'overlay-protocol' or 'SPEC-ONLY' returns zero matches — action item 3 of DECISION.adoc (dated 2026-04-05) was never carried out. Anyone browsing README/ROADMAP has no indication overlay-protocol is spec-only with zero implementation, risking a false impression of maturity."
+
+[[should]]
+id = "S4"
+text = "Automated CI/CD tooling (e.g., echidnabot, hypatia) SHOULD validate overlay conformance per SPEC section 7.2."
+system = "none"
+status = "fail"
+effects = "Repo root .github/workflows/ contains only affinescript-verify.yml and boj-build.yml; neither references overlay-protocol or check-conformance.sh. STATE.a2ml's own critical-next-actions list 'Integrate conformance checker into echidnabot workflow' as still outstanding, confirming this is a known, current gap."
+
+[[could]]
+id = "C1"
+text = "The protocol COULD generate C headers from the Zig FFI so non-Zig consumers can bind to overlay_check_conformance and related functions."
+system = "none"
+status = "fail"
+effects = "No .h files exist anywhere under overlay-protocol/; STATE.a2ml lists 'Generate C headers from Zig FFI for non-Zig consumers' as an outstanding critical-next-action. Non-Zig consumers currently have no C ABI header to include."
+
+[[could]]
+id = "C2"
+text = "Additional peer types (adapter, shim, lens) COULD be defined in future, each satisfying the core invariants and declaring peer-type in ECOSYSTEM.scm."
+system = "none"
+status = "aspirational"
+effects = "This is explicitly a forward-looking placeholder (SPEC section 9, 'Future Extensions'); no downstream effect until such a peer type is proposed and specified."
+
+[[could]]
+id = "C3"
+text = "The formal Idris2 ABI proofs COULD be extended to model a real activate.sh/deactivate.sh pair (rather than an abstract identity function) to give a non-trivial machine-checked proof of switchability for a concrete overlay."
+system = "none"
+status = "aspirational"
+effects = "Until this exists, the Idris2 module (src/abi/OverlayProtocol.idr) remains a type-level skeleton whose proofs are discharged by construction (e.g. basePreserved via Refl) rather than by verifying any real overlay's behaviour; this is a stretch goal beyond current spec-only status, not a near-term gap."

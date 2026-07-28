@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# k9-coordination-protocol.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "k9-coordination-protocol"
+version = "1.0.0"
+assessed_date = "2026-07-03"
+assessor = "estate-audit"
+
+[[must]]
+id = "M1"
+text = "The coordination.k9 file MUST start with the magic number 'K9!' on line 1, and the generator MUST reject files that do not."
+system = "generator/generate.js (parseK9Kennel magic-number check, line ~26) exercised by generator/generate_test.js and generator/mutation_test.js (mutant M1 'K9! magic validation' documented KILLED)"
+status = "pass"
+evidence = "generate.js:26-27 throws 'Not a valid K9 file' if lines[0] does not start with K9!; generator/mutation_test.js documents mutant M1 as KILLED when this check is removed"
+check = "grep -q 'startsWith(\"K9!\")' k9-coordination-protocol/generator/generate.js && grep -q \"M1: Remove K9! magic number validation\" k9-coordination-protocol/generator/mutation_test.js"
+effects = "Downstream: any tool or CI step that feeds a malformed file to generate.js would silently produce garbage instructions for Claude/Copilot/Cursor/etc. instead of failing fast; consumers of the spec (individual project repos) rely on this guard to avoid corrupt coordination.k9 files being processed."
+
+[[must]]
+id = "M2"
+text = "The generator MUST emit a distinct, correctly-headed instruction file for every one of the 9 documented AI tool targets (Claude, Copilot, Codex, Cursor, Windsurf, Gemini, Cline, Junie, Amazon Q)."
+system = "generator/contract_test.js (7 tests) checks output paths .claude/CLAUDE.generated.md, .github/copilot-instructions.md, AGENTS.md, .cursorrules, .windsurfrules, GEMINI.md, .clinerules, .junie/guidelines.md, .q/rules/coordination.md all render with correct per-target headers"
+status = "pass"
+evidence = "generator/contract_test.js lines 38-45, 278-307 assert existence and correct header text for all 9 target output paths listed in README.adoc's Supported Targets table"
+check = "grep -q '.claude/CLAUDE.generated.md' k9-coordination-protocol/generator/contract_test.js && grep -q '.junie/guidelines.md' k9-coordination-protocol/generator/contract_test.js && grep -q '.q/rules/coordination.md' k9-coordination-protocol/generator/contract_test.js"
+effects = "If a target's renderer breaks, that AI tool silently stops receiving coordination context in every consuming project, reintroducing the destructive-edit problem the spec exists to prevent."
+
+[[must]]
+id = "M3"
+text = "Each invariant entry in coordination.k9 MUST have id, rule, and reason fields, per the formal schema (spec/COORDINATION-K9-SPEC.adoc Validation Rule 5)."
+system = "none — the generator's parser (generate.js) does not validate presence of id/rule/reason and there is no separate schema-validator script or CI lint step for coordination.k9 files"
+status = "fail"
+effects = "A malformed coordination.k9 (missing id/rule/reason on an invariant) will still generate output files, silently dropping or mis-rendering that invariant rather than failing the build; downstream repos relying on the generator to catch schema errors get false confidence."
+
+[[must]]
+id = "M4"
+text = "The k9-init tool MUST correctly extract languages/banned/practices from existing .machine_readable/6a2 A2ML files and MUST refuse to overwrite an existing coordination.k9 unless --force is passed."
+system = "tools/k9-init/src/main.rs unit tests (cargo test): extracts_list_from_scheme, extracts_pairs_from_scheme, missing_key_returns_empty, render_includes_header_and_sections, slug_normalises"
+status = "pass"
+evidence = "Ran cargo test in tools/k9-init: 5 passed, 0 failed (extracts_list_from_scheme, extracts_pairs_from_scheme, missing_key_returns_empty, render_includes_header_and_sections, slug_normalises); overwrite guard implemented at main.rs:42-48 (checks out_path.exists() && !force)"
+check = "(cd k9-coordination-protocol/tools/k9-init && cargo test --quiet 2>&1 | grep -q '5 passed')"
+effects = "Repos migrating via k9-init would lose hand-edited coordination.k9 files, or silently mis-extract facts from A2ML, propagating wrong invariants into every generated AI-tool instruction file."
+
+[[must]]
+id = "M5"
+text = "Every source file in this spec (generator, tests, spec, README, k9-init tool) MUST carry an SPDX-License-Identifier header."
+system = "manual/licence review — no automated SPDX linter is wired for this directory specifically"
+status = "manual-only"
+effects = "Licence ambiguity in generated/redistributed artifacts if a file is later added without a header; affects downstream repos that vendor this generator (mixed MPL-2.0/PMPL/CC-BY-SA-4.0 headers observed across files, requiring human confirmation these are intentional per-file choices)."
+
+[[should]]
+id = "S1"
+text = "The generator's test suite SHOULD cover unit, smoke, property-based, mutation, fuzz, contract, regression, and compatibility categories."
+system = "generator/{generate_test.js, smoke_test.js, property_test.js, mutation_test.js, fuzz_test.js, contract_test.js, regression_test.js, compatibility_test.js} — 8 files, ~2700 lines of Deno test code"
+status = "pass"
+evidence = "8 distinct test files exist on disk matching every category claimed in READINESS.md's Test Category Matrix, with substantive assertions (verified by reading contract_test.js and generate_test.js content); Deno runtime itself is not installed in this environment so the suite could not be executed here, but the files are real and non-trivial (not stubs)"
+check = "for f in generate_test.js smoke_test.js property_test.js mutation_test.js fuzz_test.js contract_test.js regression_test.js compatibility_test.js; do test -s k9-coordination-protocol/generator/$f && grep -q 'Deno.test' k9-coordination-protocol/generator/$f || exit 1; done"
+effects = "If this suite were absent, regressions in the generator's 9 target renderers or the K9 parser would ship silently to every consuming repo's .claude/CLAUDE.md, .cursorrules, etc."
+
+[[should]]
+id = "S2"
+text = "The spec's benchmarks SHOULD be baselined so generation-latency regressions can be detected in CI."
+system = "generator/bench.js (6 benchmarks) with documented thresholds in READINESS.md, but not wired to any CI workflow in .github/workflows/"
+status = "fail"
+effects = "Latency regressions in the generator (e.g. from a future target addition) would not be caught automatically before merge; consuming repos would only notice via slower local deno run invocations."
+
+[[should]]
+id = "S3"
+text = "The spec SHOULD be wired into repository CI so tests, mutation score, and the k9-init Rust binary are checked on every push/PR (as READINESS.md's 'dogfood-gate' claim implies)."
+system = "none — searched /home/user/standards/.github/workflows (repo root) and k9-coordination-protocol/ for any workflow referencing k9-coordination, k9-init, or coordination.k9; found zero matches, and no dogfood-gate.yml file exists anywhere in the repo"
+status = "fail"
+effects = "READINESS.md's Grade-B justification claims deployment 'via dogfood-gate on 105+ repos' and CI integration with a '--fail-on-missing flag', but no such CI job exists in this repo; this is an unverifiable/undischarged claim. Any consuming repo that trusts the stated CRG grade is relying on an assertion with no reproducible mechanical check backing it in-repo."
+
+[[should]]
+id = "S4"
+text = "Generated output files SHOULD be idempotent (re-running the generator produces identical content) so they can be safely committed and diffed."
+system = "generator/property_test.js (deterministic-output assertion, 3-run identity check) and generator/regression_test.js #006 (CLAUDE.md not overwritten)"
+status = "pass"
+evidence = "property_test.js and regression_test.js (read on disk) contain explicit idempotency/determinism assertions per READINESS.md's Test Category Matrix row 9 and Regression #006; not independently executed here due to missing Deno runtime, but code is present and substantive"
+check = "grep -q 'Property: output content is deterministic' k9-coordination-protocol/generator/property_test.js && grep -q 'Regression #006' k9-coordination-protocol/generator/regression_test.js"
+effects = "Non-idempotent output would cause spurious git diffs on every regeneration across all consuming repos, polluting history and making genuine coordination.k9 changes hard to review."
+
+[[could]]
+id = "C1"
+text = "The protocol COULD extend to Phase 2 (coordination: active/completed/available work tracking) and Phase 3 (orchestration) as described in README.adoc."
+system = "none — Phase 2/3 are documented in spec/COORDINATION-K9-SPEC.adoc's optional coordination section schema but the generator does not yet render or act on agent-coordination state; this is an explicit future-phase reach goal"
+status = "aspirational"
+effects = "Multiple concurrent agents still cannot discover 'who is working on what' automatically; each project must coordinate this manually until Phase 2 tooling lands."
+
+[[could]]
+id = "C2"
+text = "batch-init.sh COULD be exercised by an automated test (e.g. against a fixture directory of fake repos) rather than relying on manual invocation."
+system = "none — tools/k9-init/batch-init.sh is a shell script with no accompanying test file"
+status = "fail"
+effects = "A regression in batch-init.sh's repo-skip logic (e.g. skip/no_6a2/migrated counters) would only surface when a human runs a real batch migration across many repos, risking partial/incorrect migrations."
+
+[[could]]
+id = "C3"
+text = "The generator's --fail-on-missing CI flag mentioned in READINESS.md's external-targets note COULD be documented and demonstrated with a real example workflow in this repo."
+system = "none — flag is referenced only in prose (READINESS.md line 181); not found in generate.js's parseArgs or any test file"
+status = "aspirational"
+effects = "Repos wanting to gate CI on coordination.k9 freshness have no concrete example to copy; the feature/flag referenced in the assessment does not appear to exist in generate.js's argument parsing."

@@ -1,0 +1,137 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= DYADT Claim Format
+:toc: preamble
+:icons: font
+
+[.lead]
+A *claim* is a typed, machine-checkable assertion that an agent did a specific
+thing. Claims are emitted as A2ML (`CLAIMS.a2ml`) and consumed by a verifier
+that re-derives the outcome from primary evidence. This document is normative;
+keywords MUST / SHOULD / MAY are RFC-2119.
+
+== File shape
+
+A `CLAIMS.a2ml` file has one `[claims]` header and one `[[claim]]` block per
+assertion. It SHOULD live at the root of the work product it describes (a repo,
+a PR worktree, a session directory).
+
+[source,toml]
+----
+[claims]
+schema = "dyadt/claim@1"
+session = "session_0114ps6mY5jAH4Sz"   # opaque session id
+actor = "claude-opus-4-8"              # the agent making the claims
+emitted_commit = "HEAD"               # git ref the claims are about (optional)
+
+[[claim]]
+id = "C1"
+claim_class = "file-changed"
+statement = "check-6scm.sh no longer passes vacuously"
+target = "a2ml/scripts/check-6scm.sh"
+expect = "modified"
+verifier = "git-diff"
+
+[[claim]]
+id = "C2"
+claim_class = "command-ran"
+statement = "the Wave-0 regression suite passes"
+target = "bash scripts/tests/wave0-false-green-test.sh"
+expect = "exit==0"
+verifier = "command-transcript"
+----
+
+== Required fields per claim
+
+[cols="1,1,3", options="header"]
+|===
+| Field | Required | Meaning
+
+| `id` | MUST | Stable id unique within the file (`C1`, `C2`, …).
+| `claim_class` | MUST | One of the claim classes below. Determines which verifier applies.
+| `statement` | MUST | Human-readable assertion (what the agent says it did). Never the sole basis for a verdict.
+| `target` | MUST | The concrete object the claim is about: a path, a command line, an issue/PR ref, a CI job — interpreted per `claim_class`.
+| `expect` | MUST | The machine-checkable expected condition (see per-class table).
+| `verifier` | MUST | The verifier that discharges this claim (see VERIFICATION-PROTOCOL). MUST be compatible with `claim_class`.
+| `evidence` | SHOULD | The agent's cited proof (a diff stat, a log excerpt, a URL). Advisory input to the verifier, never trusted as the verdict.
+| `not_before` | MAY | An ISO timestamp; the verifier MUST treat evidence older than this as `unverifiable` (stale-evidence guard).
+|===
+
+== Claim classes
+
+Each claim class fixes the *kind* of reality being asserted and the shape of
+`target` / `expect`.
+
+[cols="1,2,2,2", options="header"]
+|===
+| `claim_class` | Asserts | `target` | `expect` examples
+
+| `file-changed`
+| A file was created / modified / deleted.
+| repo-relative path
+| `created` \| `modified` \| `deleted` \| `contains:<regex>` \| `sha256:<hex>`
+
+| `test-passed`
+| A named test / suite passed.
+| test command or suite id
+| `exit==0` \| `passed>=N`
+
+| `ci-green`
+| A CI run/job concluded successfully.
+| workflow/job name or run id
+| `conclusion==success`
+
+| `issue-closed`
+| An issue reached a state.
+| `owner/repo#N`
+| `state==closed` \| `state==open`
+
+| `pr-merged`
+| A PR reached a state.
+| `owner/repo#N`
+| `merged==true` \| `state==open`
+
+| `command-ran`
+| A command was run and produced an outcome.
+| the exact command line
+| `exit==0` \| `stdout-contains:<s>`
+
+| `claim-of-claims`
+| A referenced `CLAIMS.a2ml` was itself all-`confirmed` (composition).
+| path to another CLAIMS.a2ml
+| `all-confirmed`
+|===
+
+A verifier MUST reject (`unverifiable`) a claim whose `verifier` is not listed
+as compatible with its `claim_class` in VERIFICATION-PROTOCOL — an
+agent MUST NOT be able to choose a weaker verifier than the claim class warrants.
+
+=== `contains:` regex dialect (normative)
+
+The `contains:<regex>` predicate uses **POSIX Extended Regular Expressions
+(ERE)**, matched case-sensitively against the whole file (`grep -E`). A pattern
+that contains no literal character — i.e. is trivially always-matching (`.*`,
+`.`, `^`, `$`, `.+`, and the like) — is NOT evidence and MUST be rejected as
+`unverifiable` (reason `trivial-pattern`); it would otherwise confirm any
+non-empty file. `stdout-contains:<s>` is a fixed-string (non-regex) substring
+match.
+
+== Honesty constraints (normative)
+
+. A claim's verdict MUST be derived from primary evidence re-collected by the
+  verifier, never from the `statement` or `evidence` fields the agent wrote.
+. The absence of a required field, an unknown `claim_class`, or an
+  incompatible `verifier` MUST yield `unverifiable`, which is a *loud* outcome
+  (it does not pass).
+. A claim MUST NOT be silently dropped. Every `[[claim]]` in the file MUST
+  appear in the verifier's output with exactly one verdict.
+. Licence/SPDX claims MUST NOT be auto-`confirmed`: they are `manual-only`
+  (the estate Manual-Only licence policy). A verifier encountering a
+  licence-touching claim MUST return `unverifiable` with reason `manual-only`.
+
+== Relationship to AGENTIC.a2ml
+
+`AGENTIC.a2ml` (Tier 2) records *intended* actions and their permission before
+execution. `CLAIMS.a2ml` (Tier 4) records *asserted* outcomes after execution.
+A session MAY link the two by `id` so the ledger can show intent → claim →
+verdict as one chain. DYADT does not require AGENTIC to be present.
