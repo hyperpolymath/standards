@@ -20,7 +20,7 @@ The current normative specification is **A2ML v1.1.0** — Surface Grammar + Typ
 - **Syntax modules** (opt-in)
 - **Grammar appendix**
 - **Conformance + test vectors**
-- **IANA media type draft** — `application/a2ml`
+- **IANA media type draft** — `application/vnd.a2ml`
 - **Comparison matrix**
 - **Citation guide**
 
