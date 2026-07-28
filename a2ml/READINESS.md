@@ -60,7 +60,7 @@
 - Core schema stable since v1.0
 - Referenced by 6 language implementations (Rust, Elixir, Gleam, Haskell, Deno, Julia)
 - Deployed on 105+ repos as the canonical AI manifest format
-- IANA media type submission in progress (`application/vnd.a2ml+text`)
+- IANA media type submission in progress (`application/vnd.a2ml`)
 
 **Known limitations:**
 - PLAYBOOK.a2ml schema at v0.9 (not yet stable)
