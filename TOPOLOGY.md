@@ -9,7 +9,7 @@
 > It cannot freeze: every regeneration re-reads ground truth. Do not edit by hand.
 
 - **Phase:** active  &nbsp;|&nbsp; **Maturity:** experimental  &nbsp;|&nbsp; **STATE last-updated:** 2026-06-03T00:00:00Z
-- **Registry entries:** 32 specs across 6 streams
+- **Registry entries:** 33 specs across 6 streams
 - **Front door:** human → [README.adoc](README.adoc); machine → [0-AI-MANIFEST.a2ml](0-AI-MANIFEST.a2ml)
 - **Registry:** [.machine_readable/REGISTRY.a2ml](.machine_readable/REGISTRY.a2ml) (index + source hashes) · prose: [REGISTRY.adoc](REGISTRY.adoc)
 
@@ -53,6 +53,7 @@
 
 | Spec | Home | If you want… |
 |---|---|---|
+| Hyperpolymath Estate Constitution | [`constitution/`](constitution/) | the highest estate-level rules, authority precedence, assurance, contribution, exceptions, and known tensions |
 | RSR — Rhodium Standard Repositories | [`rhodium-standard-repositories/`](rhodium-standard-repositories/) | the repository-compliance standard every repo is graded against |
 | Session Management Standards | [`session-management-standards/`](session-management-standards/) | continuity / verify / handover protocols |
 | DYADT — Did-You-Actually-Do-That | [`did-you-actually-do-that/`](did-you-actually-do-that/) | post-action agent-claim verification (Tier 4 accountability) |

@@ -1,0 +1,223 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Scaffold Lifecycle — Forge & Sustain
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:sectnums:
+
+*Status: draft* (companion to `RSR-SPEC-v2.adoc`; the decision record is
+`hyperpolymath/rsr-template-repo` ADR-0003, _Forge and Sustain lifecycle_).
+MUST NOT be cited as ratified until the owner accepts ADR-0003.
+
+== Purpose
+
+This document is the normative statement of the estate's repository
+lifecycle: how a repository is *forged* from the template system — minted,
+provisioned, configured, harnessed — and how it is *sustained* afterwards —
+corrective, adaptive, perfective, preventive — with the owning tool named for
+every stage. It exists because the machinery already exists but was
+disconnected: each stage below cites the mechanism that implements it today
+and, where the mechanism is missing, says so honestly rather than describing
+an aspiration as fact.
+
+== Roles
+
+The scaffolding stack is `standards → rsr-template-repo → scaffoldia →
+(estate repos)`, measured by hypatia and repaired by the fleet. Exactly one
+repo owns each concern; a change belongs at its owning layer (doctrine:
+solutions at source).
+
+[cols="1,2,4"]
+|===
+| Role | Owner | Owns
+
+| *Canon*
+| `hyperpolymath/standards`
+| WHAT a conforming repo is: `rsr-criteria-v2.a2ml` (the criteria SSOT),
+  `TEMPLATE-APPLICABILITY-POLICY.adoc` + `template-capability-gates.toml`
+  (the capability vocabulary and presets), this document, the reusable
+  workflows every repo calls.
+
+| *Spine*
+| `hyperpolymath/rsr-template-repo`
+| HOW a repo is born: the canonical template tree, `just init`, the
+  archetype overlays (`archetypes/`), the variant/provenance contract
+  (ADR-0002 `VARIANT.a2ml`) and its drift gate.
+
+| *Composer*
+| `hyperpolymath/scaffoldia`
+| Composition and retrofit at scale (spine@pin × archetype/pack × features ×
+  profile). Design phase; it *consumes* the spine's contracts as data and
+  MUST NOT define its own divergent contract formats.
+
+| *Oracle*
+| `hyperpolymath/hypatia` (`rsr-conformance` rule family,
+  `mix hypatia.rsr_score`)
+| MEASUREMENT: the ONE normative conformance checker (RSR-SPEC-v2 §oracle).
+  Applicable set comes from each repo's `.machine_readable/rsr-profile.a2ml`.
+
+| *Fleet*
+| `hyperpolymath/gitbot-fleet` + `reposystem` megasweep
+| SUSTAIN execution: read-only estate detectors, owner-gated `fix-*`
+  recipes, fan-out PR campaigns.
+|===
+
+== Forge — the four stages
+
+A repository is *forged* when all four stages are complete. The stages are
+ordered; each has normative exit criteria. A repo that stops after Mint — the
+historical norm — is exactly the "one-shot copy" failure named in the
+rsr-template-repo-experiment review (05-ZIGZAG §2.2).
+
+=== Mint
+
+The repository tree comes into existence from the spine plus at most one
+archetype overlay: GitHub "Use this template" or a clone, then `just init
+[archetype]`, which renders every placeholder, derives identity
+(UUIDv5 of `forge/owner/repo` — computed, never guessed), installs the
+child's own `CLADE.a2ml`, writes the child's `rsr-profile.a2ml`, and records
+provenance (see <<provenance>>).
+
+Exit criteria (MUST):
+
+* zero `{{TOKEN}}` placeholders remain (`scripts/check-no-placeholders.sh`
+  passes);
+* `CLADE.a2ml` carries the derived uuid; judgement-only fields read
+  `UNASSIGNED`, not invented values;
+* `.machine_readable/rsr-profile.a2ml` exists and declares only capabilities
+  the tree actually carries (na-honesty, RSR-SPEC-v2 §scoring);
+* the provenance record of <<provenance>> exists.
+
+=== Provision
+
+Toolchains named by the repo's capability set are installed *and executed* —
+`just build`/`just test` (or the archetype's recorded commands) run to
+completion on the minting machine or in CI. Echoed advice is not
+provisioning; a gate that exits 0 when its prover is absent is not
+provisioning (the proof-gates lesson: 54 repo roots where `just
+proof-check-*` could never fail).
+
+Exit criteria (MUST): every command recorded in the archetype's token table
+(`BUILD_CMD`, `TEST_CMD`) has been run and observed to succeed, or the
+failure is recorded in `STATE.a2ml` as a blocker — never silently skipped.
+
+=== Configure
+
+Repository identity and platform state are set *out of band*, exactly once:
+name, description, homepage, visibility via `gh repo edit`/UI; branch
+protection whose required contexts each equal an emitted job *id*; the
+probot `settings.yml` inherited from the spine manages only child-safe
+fields. This stage is out-of-band *by design*, not by omission: the `-REPO-`
+incident (2026-07-20) proved that identity keys in a probot-managed template
+file rename live repositories.
+
+Exit criteria (MUST):
+
+* `.github/settings.yml` contains no `name`, `description`, `homepage` or
+  `private` key;
+* every required status-check context equals the job id of a workflow that
+  actually reports on this repo (an unreported context deadlocks the branch);
+* visibility is a deliberate owner decision, fail-closed private by default;
+* the repo is registered in `gv-clade-index`.
+
+=== Harness
+
+The sustain machinery is attached and observed working: CI green (or every
+red accounted for), the drift gate armed against the recorded parent-pin,
+dependabot/scorecard running, and the oracle able to score the repo.
+
+Exit criteria (MUST):
+
+* `scripts/check-variant-drift.sh <parent>` runs and PASSes against the
+  provenance contract;
+* `mix hypatia.rsr_score` produces a scorecard (provisional is acceptable;
+  absent is not);
+* no gate uses `continue-on-error` or an always-zero fallback (a gate that
+  cannot fail is worse than no gate).
+
+[#provenance]
+== The provenance requirement (keystone)
+
+Every forged repository MUST record, in
+`.machine_readable/descriptiles/VARIANT.a2ml` (the ADR-0002 contract shape
+with `direction = "generated-from-core"`):
+
+* `parent` — the template repo it was minted from;
+* `parent-pin` — the template commit at mint (or `UNASSIGNED` until first
+  reconcile, never a guessed value);
+* the archetype applied, if any;
+* path lists (`added` / `removed` / `diverged`) as the repo diverges.
+
+Rationale: this is the estate's answer-file. External best practice (Copier's
+`.copier-answers.yml`, Cruft's `.cruft.json`) shows that a template without
+recorded provenance is structurally one-shot — improvements cannot be
+propagated, drift cannot be detected, and the estate's recurring manual
+standardisation campaigns are the direct symptom. A repo without a recorded
+parent-pin is *un-sustainable* in the sense of this document: Adaptive
+maintenance (below) has no defined input for it. One contract format serves
+all three populations — variant templates (`direction =
+"template-is-source"`), minted repos, and retrofitted repos (both
+`generated-from-core`) — so the drift gate is also the estate's `cruft
+check`.
+
+== Sustain — the four modes
+
+[cols="1,3,2"]
+|===
+| Mode | Definition and normative rule | Owning tool
+
+| *Corrective*
+| Restore a broken invariant: red CI, a failed gate, a hypatia finding.
+  Diagnose before acting — zero-step failures on private repos are billing,
+  not code; `startup_failure` has two known root causes (actions-policy
+  allowlist, reusable permissions). Fix at the owning layer (a template
+  defect is fixed in the spine, once, not in N children).
+| gitbot-fleet `fix-*` recipes (owner-gated); hypatia findings
+
+| *Adaptive*
+| Absorb upstream change: bump `parent-pin` after reconciling with the
+  spine, re-pin action SHAs, adopt new canon versions. The fan-out form is a
+  scheduled campaign producing one reviewable PR per repo — never an
+  unrecorded bulk mutation. Licence anything is FLAG-ONLY, never automated.
+| drift gate (detect); megasweep (fan-out, audit-first); dependabot
+
+| *Perfective*
+| Raise the tier: score with the oracle, close the gap to the next
+  threshold (Bronze 75 / Silver 90 / Gold 100), promote variant-first fixes
+  upstream (the `diverged-pending-upstream` list is a standing, exact
+  worklist), expand the declared capability set only when the module
+  actually lands.
+| `mix hypatia.rsr_score`; the spine's change-lab
+
+| *Preventive*
+| Keep gates honest before they are needed: canary-test every gate in both
+  directions (a gate is proven by making it fail), placeholder guard on
+  every push, drift-gate cron, no aspirational required contexts, probot
+  files identity-free.
+| the spine's `scripts/check-*` suite; weekly drift-gate cron
+|===
+
+== Autonomy boundaries
+
+What may run unattended versus what requires the owner:
+
+* *Unattended (read-only)*: detectors, drift checks, scoring, audits,
+  report generation. megasweep's apply-mode is deliberately unbuilt; keep it
+  that way until each mutation class is individually owner-ratified.
+* *Owner-gated (mutation)*: any fan-out PR campaign (audit first, apply on
+  approval), pin bumps that touch more than one repo, visibility or identity
+  changes, branch-protection changes.
+* *Never automated*: licence and SPDX edits (flag-only, permanent estate
+  rule), history rewrites, deletion of repos or of `-REPO-`-style artefacts
+  without the owner reading the audit first.
+
+== Conformance
+
+The lifecycle stages map onto RSR v2.0 criteria (categories: Lifecycle
+Management, CI/CD & Enforcement, Machine-Readable Substrate). The oracle
+scores the artefacts this document mandates (`rsr-profile.a2ml` presence is
+criterion 3.2.2; the provenance contract is surfaced to the composer). A
+future MINOR of `rsr-criteria-v2.a2ml` MAY add a criterion for the
+provenance record once the mechanism has shipped in the spine and been
+exercised by at least one minted repo — criteria follow proven mechanisms,
+not the reverse.

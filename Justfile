@@ -49,6 +49,15 @@ false-green-test:
 automation-test:
     @bash scripts/tests/wave1-automation-test.sh
 
+# Wave-8 gate-promotion regression: baseline gate + Mustfile PR gate can fail
+gates-test:
+    @bash scripts/tests/wave8-gates-test.sh
+
+# standards#505 gate-promotion regression: docs + package-policy gates can fail,
+# and their grace cutoffs actually flip (tested from both sides of the date)
+governance-gates-test:
+    @bash scripts/tests/governance-gates-505-test.sh
+
 # Structural validation of the Mustfile contract (severity + run/verification per check)
 mustfile-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
     @bash scripts/check-mustfile-structure.sh "{{path}}"
@@ -72,6 +81,11 @@ scorecards-check:
 # Strict: also fail if any registered local spec lacks a scorecard
 scorecards-check-strict:
     @bash scripts/build-scorecards.sh --check --strict
+
+# Ground-truth the dashboard: RUN every pass-row's executable `check`
+# (a claimed pass whose check fails is a hard error — DYADT on the scorecards)
+scorecards-verify:
+    @bash scripts/build-scorecards.sh --check --strict --verify
 
 # DYADT: verify a CLAIMS.a2ml against primary evidence (default: root CLAIMS.a2ml)
 verify-claims path="CLAIMS.a2ml":
