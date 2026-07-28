@@ -2,6 +2,8 @@
 ---
 title: K9-SVC specification
 site: K9-SVC
+description: K9-SVC v1.0.0-alpha normative specification — contractile specification with three-level trust model
+brand: K9-SVC
 date: 2026-06-22
 ---
 

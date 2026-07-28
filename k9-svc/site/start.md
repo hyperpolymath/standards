@@ -2,6 +2,8 @@
 ---
 title: Get started with K9-SVC
 site: K9-SVC
+description: Learn how to write K9-SVC components with trust levels, contracts, and signed execution
+brand: K9-SVC
 date: 2026-06-22
 ---
 

@@ -2,6 +2,8 @@
 ---
 title: Get started with A2ML
 site: A2ML
+description: Learn how to write, validate, and render A2ML documents with progressive strictness modes
+brand: A2ML
 date: 2026-06-22
 ---
 
