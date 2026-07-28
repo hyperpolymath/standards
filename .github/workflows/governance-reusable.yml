@@ -84,9 +84,18 @@ jobs:
 
       - name: Run allowlist preflight check
         run: |
-          cp .standards-checkout/scripts/check-actions-policy.sh "$RUNNER_TEMP/"
+          # check-actions-policy.sh `exec`s its SIBLING check-allowed-actions.sh
+          # via "${0%/*}/...". Copying only the first script and then deleting
+          # the checkout left that sibling missing, so the step died with exit
+          # 127 (command not found) on every run. Stage both, plus the canonical
+          # allowlist itself — consumer repos have no copy of it in their tree.
+          cp .standards-checkout/scripts/check-actions-policy.sh \
+             .standards-checkout/scripts/check-allowed-actions.sh "$RUNNER_TEMP/"
+          cp .standards-checkout/rhodium-standard-repositories/actions-allowlist/allowed-actions.json \
+             "$RUNNER_TEMP/allowed-actions.json"
           rm -rf .standards-checkout
-          bash "$RUNNER_TEMP/check-actions-policy.sh" .github/workflows
+          ALLOWLIST_JSON="$RUNNER_TEMP/allowed-actions.json" \
+            bash "$RUNNER_TEMP/check-actions-policy.sh" .github/workflows
 
   validate-hypatia-baseline:
     name: Validate Hypatia Baseline

@@ -33,7 +33,7 @@
 | `anchor-a2ml` | ❌ gap | 0/5 | 0/5 | 0/3 | 15% | – | 2026-07-03 |
 | `0-ai-gatekeeper-protocol` | ❌ gap | 3/5 | 0/4 | 0/2 | 54% | 3/3 | 2026-07-03 |
 | `k9-coordination-protocol` | ❌ gap | 3/5 | 2/4 | 0/3 | 100% | 5/5 | 2026-07-03 |
-| `avow-protocol` | ❌ gap | 1/5 | 2/4 | 0/3 | 58% | 3/3 | 2026-07-03 |
+| `avow-protocol` | ❌ gap | 0/5 | 1/4 | 0/3 | 58% | 1/1 | 2026-07-03 |
 | `axel-protocol` | ❌ gap | 0/5 | 4/5 | 0/3 | 92% | 4/4 | 2026-07-03 |
 | `overlay-protocol` | ❌ gap | 1/5 | 0/4 | 0/3 | 50% | 1/1 | 2026-07-03 |
 | `consent-aware-http` | ❌ gap | 1/5 | 1/5 | 0/3 | 69% | 2/2 | 2026-07-03 |
@@ -41,7 +41,7 @@
 | `foundations-readiness-grades` | ❌ gap | 2/5 | 1/4 | 0/2 | 72% | 3/3 | 2026-07-03 |
 | `component-readiness-grades` | ❌ gap | 2/5 | 2/4 | 0/3 | 66% | 4/4 | 2026-07-03 |
 | `toolchain-readiness-grades` | ❌ gap | 1/5 | 2/4 | 0/3 | 83% | 3/3 | 2026-07-03 |
-| `rhodium-standard-repositories` | ❌ gap | 2/3 | 1/2 | 0/1 | 50% | 3/3 | 2026-07-03 |
+| `rhodium-standard-repositories` | ❌ gap | 1/3 | 1/2 | 0/1 | 50% | 2/2 | 2026-07-03 |
 | `session-management-standards` | ❌ gap | 1/5 | 1/4 | 0/3 | 41% | 2/2 | 2026-07-03 |
 | `did-you-actually-do-that` | ✅ met | 5/5 | 2/3 | 0/2 | 90% | 7/7 | 2026-07-03 |
 | `ensaid-config` | ❌ gap | 0/5 | 0/3 | 0/3 | 90% | – | 2026-07-03 |
@@ -55,9 +55,9 @@
 
 - **Specs registered (local):** 30
 - **Specs with a scorecard:** 30 / 30
-- **MUST requirements:** 47 passing / 147 total (73 failing)
+- **MUST requirements:** 45 passing / 147 total (75 failing)
 - **Estate systems coverage:** 67% of 343 graded requirements have a mechanical check
-- **Grounded passes:** 87 / 87 (100%) pass rows carry an executable `check` run by `--verify`
+- **Grounded passes:** 84 / 84 (100%) pass rows carry an executable `check` run by `--verify`
 
 ## How this dashboard stays honest
 
