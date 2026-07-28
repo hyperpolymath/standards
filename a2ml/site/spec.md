@@ -3,6 +3,7 @@
 ---
 title: A2ML specification
 site: A2ML
+brand: A2ML
 description: The normative A2ML v1.1.0 specification — surface grammar, typed core, profiles, and conformance test vectors.
 date: 2026-06-29
 ---

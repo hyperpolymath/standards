@@ -3,6 +3,7 @@
 ---
 title: A2ML
 site: A2ML
+brand: A2ML
 description: A2ML is a lightweight, Djot-like markup that compiles into a typed, attested core, with progressive strictness from lax to fully attested.
 date: 2026-06-29
 ---

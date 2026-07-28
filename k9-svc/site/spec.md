@@ -3,6 +3,7 @@
 ---
 title: K9-SVC specification
 site: K9-SVC
+brand: K9-SVC
 description: The normative K9-SVC v1.0.0-alpha specification — the three-level trust model, media type, and conformance fixtures.
 date: 2026-06-29
 ---

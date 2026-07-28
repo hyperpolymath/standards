@@ -3,6 +3,7 @@
 ---
 title: K9-SVC
 site: K9-SVC
+brand: K9-SVC
 description: K9-SVC is a Nickel-based format for self-validating configuration and contractiles, with a three-level trust model from inert data to signed execution.
 date: 2026-06-29
 ---

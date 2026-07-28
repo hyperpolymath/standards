@@ -3,6 +3,7 @@
 ---
 title: Get started with A2ML
 site: A2ML
+brand: A2ML
 description: Write, validate and render A2ML in three steps — from a plain-text document to a portable, typed core.
 date: 2026-06-29
 ---
