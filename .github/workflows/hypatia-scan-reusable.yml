@@ -6,6 +6,7 @@ on:
   workflow_call:
 
 permissions:
+  actions: read
   contents: read
   security-events: write
 
@@ -16,7 +17,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -123,8 +124,15 @@ jobs:
 
       - name: Upload SARIF to code scanning
         if: always()
-        continue-on-error: true          # callers granting only security-events:read skip gracefully
-        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v3
+        # NOTE: this does NOT make under-permissioned callers "skip gracefully".
+        # This workflow declares `security-events: write` at the top, so a
+        # caller granting only `read` is rejected at startup and NO step of
+        # this job ever executes — `continue-on-error` cannot rescue a job
+        # that was never created. Callers MUST grant `security-events: write`.
+        # This flag only tolerates a genuine upload failure (e.g. Advanced
+        # Security disabled on a private repo) once the job is actually running.
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v3
         with:
           sarif_file: hypatia.sarif
           category: hypatia
@@ -161,7 +169,18 @@ jobs:
           # itself the moment a baseline lands (standards#399/#437/#446).
           if [ -f scripts/apply-baseline.sh ] && [ -f .hypatia-baseline.json ]; then
             echo "Baseline present — running BLOCKING gate (threshold: high)."
-            bash scripts/apply-baseline.sh hypatia-findings.json .hypatia-baseline.json blocking
+            # Relativize finding paths before matching (hypatia#566 stopgap):
+            # code_safety / honest_completion emit ABSOLUTE host paths in .file
+            # (Path.expand(repo)); the baseline uses repo-relative paths, so without
+            # this they never match and the gate fails on already-acknowledged
+            # findings. Mirrors governance-reusable.yml, which relativizes identically.
+            jq --arg root "$PWD" '
+              map(if (.file? // "") == $root then .file = "."
+                  elif (.file? // "") | startswith($root + "/")
+                  then .file = (.file | ltrimstr($root + "/"))
+                  else . end)
+            ' hypatia-findings.json > hypatia-findings.relativized.json
+            bash scripts/apply-baseline.sh hypatia-findings.relativized.json .hypatia-baseline.json blocking
           else
             echo "No committed baseline — gate stays advisory (see next step)."
           fi
