@@ -16,6 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -25,9 +26,29 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0  # full history so `git ls-files -s` hashes are stable
+
+      # The scorecard `--verify` step below EXECUTES every pass-row's check.
+      # Those checks shell out to real tools; ubuntu-latest ships neither
+      # ripgrep nor xmllint. Without them `release-pre-flight/v1-audit.sh`
+      # exits 2 ("v1-audit requires ripgrep") and the k9-svc MIME check exits
+      # 127 — which the verifier then reported as "claimed PASS but the pass
+      # is not real". That was a FALSE ACCUSATION: the passes were real, the
+      # checks simply never ran. A gate that cannot run its own checks must
+      # not be allowed to call the repo dishonest.
+      #
+      # NB this is a distinct fault from standards#381, which concerns
+      # REGISTRY.a2ml source_hash drift in the *first* step below and is
+      # not addressed here.
+      - name: Install check dependencies (ripgrep, xmllint)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ripgrep libxml2-utils
+          rg --version | head -1
+          xmllint --version 2>&1 | head -1
 
       - name: Verify registry + derived topology are current
         run: |
@@ -52,9 +73,19 @@ jobs:
             exit 1
           fi
 
-      - name: Verify compliance dashboard is current
+      - name: Mustfile enforcement (structural + execute invariants)
         run: |
-          if ! bash scripts/build-scorecards.sh --check --strict; then
+          # Wave-8 gate promotion: the Mustfile's invariants previously executed
+          # only on push-to-main (boj-build.yml). PRs now gate on them too —
+          # a change that breaks a MUST invariant fails before merge, not after.
+          bash scripts/check-mustfile-structure.sh
+          bash scripts/run-mustfile.sh
+
+      - name: Verify compliance dashboard is current (and pass-checks hold)
+        run: |
+          # --verify RUNS every pass-row's executable `check`: a claimed pass
+          # whose check does not hold fails this job (DYADT on the scorecards).
+          if ! bash scripts/build-scorecards.sh --check --strict --verify; then
             {
               echo "### Compliance dashboard drift"
               echo ""

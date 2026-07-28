@@ -15,6 +15,7 @@ text = "The coordination.k9 file MUST start with the magic number 'K9!' on line 
 system = "generator/generate.js (parseK9Kennel magic-number check, line ~26) exercised by generator/generate_test.js and generator/mutation_test.js (mutant M1 'K9! magic validation' documented KILLED)"
 status = "pass"
 evidence = "generate.js:26-27 throws 'Not a valid K9 file' if lines[0] does not start with K9!; generator/mutation_test.js documents mutant M1 as KILLED when this check is removed"
+check = "grep -q 'startsWith(\"K9!\")' k9-coordination-protocol/generator/generate.js && grep -q \"M1: Remove K9! magic number validation\" k9-coordination-protocol/generator/mutation_test.js"
 effects = "Downstream: any tool or CI step that feeds a malformed file to generate.js would silently produce garbage instructions for Claude/Copilot/Cursor/etc. instead of failing fast; consumers of the spec (individual project repos) rely on this guard to avoid corrupt coordination.k9 files being processed."
 
 [[must]]
@@ -23,6 +24,7 @@ text = "The generator MUST emit a distinct, correctly-headed instruction file fo
 system = "generator/contract_test.js (7 tests) checks output paths .claude/CLAUDE.generated.md, .github/copilot-instructions.md, AGENTS.md, .cursorrules, .windsurfrules, GEMINI.md, .clinerules, .junie/guidelines.md, .q/rules/coordination.md all render with correct per-target headers"
 status = "pass"
 evidence = "generator/contract_test.js lines 38-45, 278-307 assert existence and correct header text for all 9 target output paths listed in README.adoc's Supported Targets table"
+check = "grep -q '.claude/CLAUDE.generated.md' k9-coordination-protocol/generator/contract_test.js && grep -q '.junie/guidelines.md' k9-coordination-protocol/generator/contract_test.js && grep -q '.q/rules/coordination.md' k9-coordination-protocol/generator/contract_test.js"
 effects = "If a target's renderer breaks, that AI tool silently stops receiving coordination context in every consuming project, reintroducing the destructive-edit problem the spec exists to prevent."
 
 [[must]]
@@ -38,6 +40,7 @@ text = "The k9-init tool MUST correctly extract languages/banned/practices from 
 system = "tools/k9-init/src/main.rs unit tests (cargo test): extracts_list_from_scheme, extracts_pairs_from_scheme, missing_key_returns_empty, render_includes_header_and_sections, slug_normalises"
 status = "pass"
 evidence = "Ran cargo test in tools/k9-init: 5 passed, 0 failed (extracts_list_from_scheme, extracts_pairs_from_scheme, missing_key_returns_empty, render_includes_header_and_sections, slug_normalises); overwrite guard implemented at main.rs:42-48 (checks out_path.exists() && !force)"
+check = "(cd k9-coordination-protocol/tools/k9-init && cargo test --quiet 2>&1 | grep -q '5 passed')"
 effects = "Repos migrating via k9-init would lose hand-edited coordination.k9 files, or silently mis-extract facts from A2ML, propagating wrong invariants into every generated AI-tool instruction file."
 
 [[must]]
@@ -53,6 +56,7 @@ text = "The generator's test suite SHOULD cover unit, smoke, property-based, mut
 system = "generator/{generate_test.js, smoke_test.js, property_test.js, mutation_test.js, fuzz_test.js, contract_test.js, regression_test.js, compatibility_test.js} — 8 files, ~2700 lines of Deno test code"
 status = "pass"
 evidence = "8 distinct test files exist on disk matching every category claimed in READINESS.md's Test Category Matrix, with substantive assertions (verified by reading contract_test.js and generate_test.js content); Deno runtime itself is not installed in this environment so the suite could not be executed here, but the files are real and non-trivial (not stubs)"
+check = "for f in generate_test.js smoke_test.js property_test.js mutation_test.js fuzz_test.js contract_test.js regression_test.js compatibility_test.js; do test -s k9-coordination-protocol/generator/$f && grep -q 'Deno.test' k9-coordination-protocol/generator/$f || exit 1; done"
 effects = "If this suite were absent, regressions in the generator's 9 target renderers or the K9 parser would ship silently to every consuming repo's .claude/CLAUDE.md, .cursorrules, etc."
 
 [[should]]
@@ -75,6 +79,7 @@ text = "Generated output files SHOULD be idempotent (re-running the generator pr
 system = "generator/property_test.js (deterministic-output assertion, 3-run identity check) and generator/regression_test.js #006 (CLAUDE.md not overwritten)"
 status = "pass"
 evidence = "property_test.js and regression_test.js (read on disk) contain explicit idempotency/determinism assertions per READINESS.md's Test Category Matrix row 9 and Regression #006; not independently executed here due to missing Deno runtime, but code is present and substantive"
+check = "grep -q 'Property: output content is deterministic' k9-coordination-protocol/generator/property_test.js && grep -q 'Regression #006' k9-coordination-protocol/generator/regression_test.js"
 effects = "Non-idempotent output would cause spurious git diffs on every regeneration across all consuming repos, polluting history and making genuine coordination.k9 changes hard to review."
 
 [[could]]

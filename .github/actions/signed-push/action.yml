@@ -1,0 +1,46 @@
+name: Signed push (verified commits via GitHub App)
+description: >
+  Re-push the current branch's local commits as GitHub-"Verified" commits using a
+  GitHub App installation token and the createCommitOnBranch GraphQL mutation (via
+  Asana/push-signed-commits). This satisfies `required_signatures` branch rulesets
+  that a PAT or the default GITHUB_TOKEN cannot. Run this AFTER you have made local
+  commits in the job (checkout -> edit -> git commit -> this action).
+
+inputs:
+  app-id:
+    description: GitHub App ID (pass from a repository/organization variable or secret).
+    required: true
+  private-key:
+    description: GitHub App private key, PEM contents (pass from a secret).
+    required: true
+  branch:
+    description: Branch to push as verified (local name == remote name). Defaults to the current ref.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Mint GitHub App installation token
+      id: app-token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+
+    - name: Resolve branch name
+      id: branch
+      shell: bash
+      env:
+        BRANCH_INPUT: ${{ inputs.branch }}
+      run: echo "name=${BRANCH_INPUT:-$GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+    # createCommitOnBranch extracts authorship from the App installation credential
+    # and auto-marks the resulting commits as "Verified". A PAT would leave them
+    # Unverified — which is why this must be an App token, not GITHUB_TOKEN/PAT.
+    - name: Push local commits as Verified
+      uses: Asana/push-signed-commits@6e073ae68b04d4322be613a6cabf391acb03ca44 # v1
+      with:
+        github-token: ${{ steps.app-token.outputs.token }}
+        local_branch_name: ${{ steps.branch.outputs.name }}
+        remote_branch_name: ${{ steps.branch.outputs.name }}
