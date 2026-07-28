@@ -95,6 +95,28 @@ Look for issues labelled:
 
 ## Development Workflow
 
+### First: install the pre-commit guard
+
+```sh
+just hooks-install
+```
+
+This installs `hooks/pre-commit`, which catches the most common CI failure
+before it leaves your machine: **registry drift**. The spec registry
+(`.machine_readable/REGISTRY.a2ml`) records a content hash of every tracked
+file under a spec home, so *any* edit under one (including
+`.machine_readable/` itself) must be followed by:
+
+```sh
+just registry     # regenerates REGISTRY.a2ml + TOPOLOGY.md
+git add .machine_readable/REGISTRY.a2ml TOPOLOGY.md
+```
+
+If you skip this, the required "Registry + topology in sync" check fails —
+and because it is a required check, stale registry hashes on `main` block
+*every* open PR, not just yours (see #381). The hook fails the commit with
+the exact fix commands whenever the registry is stale.
+
 ### Branch Naming
 ```
 docs/short-description       # Documentation (P3)

@@ -145,6 +145,10 @@ minimal data) instead of `--depth 1`, with a `--depth 200` fallback.
 `scripts/tests/check-workflow-staleness-test.sh` (hermetic fixture history)
 covers fresh / ahead / in-window-by-commits / in-window-by-days /
 out-of-window / forged, plus the retired-enforcer and SARIF structural rules.
+Extended by the 2026-07-21 amendment below to 16 cases: out-of-window now
+asserts exit 0 *and* the advisory notice, plus deny-list coverage (rejected at
+any age, rejected even when in-window, the fixing commit itself not rejected,
+and entries scoped per reusable).
 `scripts/tests/propagate-workflow-pins-test.sh` covers audit/fix/idempotence
 and branch staging. End-to-end against real standards history, a
 stapeln-shaped consumer pinned 3 commits behind HEAD passes the relaxed gate
@@ -162,3 +166,80 @@ stapeln-shaped consumer pinned 3 commits behind HEAD passes the relaxed gate
   rules out mutable-tag pinning (option C).
 * `scripts/propagate-gitignore-67-68.sh` — the audit-first propagation pattern
   this helper follows.
+
+== Amendment (2026-07-21): age is advisory; defects are named
+
+The window narrowed the treadmill but did not remove it. `standards` moves
+~2.6 commits/day, so a consumer exhausts both budgets roughly a fortnight
+after any propagation.
+
+Measured on 2026-07-21: *294 of 350* consumers were red on the single pin
+`d7c22711` (2026-06-26) — every one of them green a fortnight earlier, with
+nothing changed in any consumer. `aspasia` is the clean natural experiment:
+same pin, 2026-07-09 run at 32 commits / 12d = passing notice; 2026-07-21 at
+63 commits / 24d = hard error. Keeping the fleet green under that rule means
+re-pinning ~300 repos every fortnight — of the order of 7,800 PRs/year.
+
+A gate that fails everyone on a timer is not a guard. It trains the estate to
+ignore it and it buries the findings that matter: the same run reports 148
+real `Workflow security linter` failures and 74 anti-pattern failures, all of
+which read as noise once the fleet is uniformly red.
+
+Two changes, both in `scripts/check-workflow-staleness.sh`:
+
+. *Age outside the window is now a `::notice`, not an error.* The window still
+  exists and is still reported, so `propagate-workflow-pins.sh` and the Hypatia
+  `sha_bump_propagation` rule keep their signal.
+. *A named deny-list replaces age as the hard failure* (`KNOWN_BAD_BEFORE`).
+  Each entry is `<reusable>:<fix-sha>`; a pin that is a strict ancestor of the
+  fix carries that defect and is rejected at any age. This is what the window
+  was only ever a proxy for, and it is strictly better in both directions — a
+  *recent* pin carrying the defect is now caught, and an old pin carrying none
+  is no longer punished by the calendar.
+
+The first entry is `e9c8888769a7` (#441): before it, `hypatia-scan-reusable`
+and the `validate-hypatia-baseline` job cached the built Hypatia scanner under
+a keyless key while the build steps were guarded by `if [ ! -d ]`, so the first
+scanner build ever cached was reused forever and scanner fixes never took
+effect. A pin older than this reports a *false green* — which is why it must
+be refreshed and cannot be waited out. All 294 consumers on `d7c22711` predate
+it by one day, so they remain red, now for a true and actionable reason.
+
+=== Integrity no longer rests on the runner's clone
+
+The `UNKNOWN` verdict ("may be forged") was firing on legitimate pins.
+`hyperpolymath/awesome-haskell` pins `governance-reusable@5a93d9d5` and was
+accused on four consecutive runs across 17 days, while that commit verifies as
+a true ancestor of `main` locally in both treeless and `--depth 200` clones and
+via the compare API (`behind=0, ahead=90`). The mechanism was never reproduced
+off-runner.
+
+A supply-chain accusation must not depend on the health of a clone the gate
+does not control. A hard `FORGED` verdict now requires either a *complete*
+local clone (not shallow, not partial) or confirmation from
+`GET /repos/{nwo}/compare/{pin}...{branch}`. Where neither is available the
+gate emits a `::warning` and passes: *cannot verify* is not *compromised*.
+Cost is zero API calls on the happy path — the server is consulted only when
+the gate is about to accuse. The deny-list gets the same fallback, so a
+degraded runner cannot silently skip it: "could not check" is reported as
+SKIPPED, never as passed.
+
+==== Rate limiting, and why it is not a hole
+
+The staleness job is given no token, so the compare call is unauthenticated: 60
+requests/hour per runner IP. Exhausting it makes the gate emit `::warning` and
+pass — verified by accident while testing, which is exactly the intended
+fail-open, and it is *loud*: two warnings naming the pin, never a silent pass.
+
+Three things keep this from mattering:
+
+. The common path never calls the API. A pin that is genuinely deny-listed is
+  caught by a local *positive*, which is trusted without the network — so the
+  294 `d7c22711` denials do not depend on it at all.
+. The API is consulted only when the gate is about to accuse, or when a
+  negative comes from a clone it cannot trust.
+. `governance-reusable.yml` now passes `GITHUB_TOKEN: ${{ github.token }}` to
+  the step, which removes the limit. This reaches a consumer only once it
+  re-pins past that commit — the script is read from `standards` HEAD, but the
+  job definition comes from the pinned SHA — so it lands naturally with the
+  propagation that these deny-listed pins need anyway.

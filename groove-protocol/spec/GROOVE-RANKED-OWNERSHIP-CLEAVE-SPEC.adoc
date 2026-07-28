@@ -1,0 +1,196 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Groove Ranked-Ownership Cleave Specification
+:doctype: book
+:toc: left
+:toclevels: 4
+:sectnums:
+:source-highlighter: highlight.js
+:icons: font
+
+[.text-center]
+*Internet-Draft Style Specification* +
+*Version 0.2.0-draft.1* +
+*July 2026*
+
+== Abstract
+
+A _groove_ is the estate's inter-service capability-discovery and data protocol:
+a bidirectional interface between two systems, each usable standalone but
+enhanced when co-present. This document specifies the **Ranked-Ownership
+Cleave** — the discipline by which a groove connection closes cleanly and
+*provably leaves no residue*.
+
+It covers the **B2 (live-governance / lifecycle-residue)** layer of the groove
+cleave surface only. It deliberately does not specify **A** (discovery), **B1**
+(admissibility / compatibility), **C1** (logical schema), or **C2** (framing /
+transport); those are separate documents.
+
+== Status of This Memo
+
+This document specifies an experimental protocol for the estate. It is a
+normative standard in `hyperpolymath/standards`; conformance is defined in
+<<conformance>>. Discussion and suggestions for improvement are requested.
+It supersedes the ad-hoc `docs/proofs/spec-templates/T2-high/groove-browser-harness.md`
+as the canonical statement of groove teardown discipline.
+
+== Copyright Notice
+
+Copyright (c) 2025-2026 Jonathan D.A. Jewell. Released under CC-BY-SA-4.0.
+
+== 1. Introduction
+
+Every inter-service boundary in the estate is (or may become) a groove. Because
+a groove holds resources on both sides — sockets, leases, secrets, panel
+attachments — its *teardown* is where resource-safety is won or lost. The
+Ranked-Ownership Cleave gives teardown a machine-checkable meaning: a connection
+that has been released holds **zero residue** (`⊥`), and it does so by
+construction, not by discipline.
+
+The design underwrites the estate's no-GC / no-refcount posture: if ownership is
+a well-founded relation, ownership cycles are unrepresentable, so there is
+nothing for a cycle-collector to collect.
+
+== 2. Terminology
+
+The key words *MUST*, *MUST NOT*, *SHOULD*, and *MAY* are to be interpreted as
+in BCP 14 (RFC 2119, RFC 8174).
+
+Occupancy:: A renewable-lease measure over a live connection. It decreases on
+connect and is renewed by heartbeat; it bounds "quiet squatting" (a peer holding
+a slot without traffic).
+
+Discharge:: A teardown measure. It decreases on each release step and is bounded
+below by `⊥`. `⊥` denotes **zero residue**: no stored peer identity, no held
+secret, no reachable handle.
+
+Edge classes:: The four ways one groove party may reference another:
+`owns` (linear), `borrow` (affine), `observe` (unrestricted read), `peer`
+(unrestricted, symmetric).
+
+Residue:: Any state recoverable from a slot after its connection has been
+released. The cleave is sound iff residue descends to `⊥`.
+
+== 3. The ownership graph and edge classification
+
+A groove topology is a directed graph whose nodes are connection endpoints and
+whose edges are class-tagged. Edge classes map onto binding modes:
+
+[cols="1,1,3",options="header"]
+|===
+| Edge | Binding | Meaning
+
+| `owns`    | linear `let!`   | The referent's lifetime is *subordinate*; the owner MUST release it exactly once. Only `owns` edges enter the residue proof.
+| `borrow`  | affine `let`    | A temporary, non-owning reference; MUST NOT outlive the referent; used at most once.
+| `observe` | unrestricted    | Read-only visibility; conveys no lifetime obligation.
+| `peer`    | unrestricted    | Symmetric association between equals; neither owns the other.
+|===
+
+Soundness of the whole cleave *reduces to correct classification*: if every edge
+that conveys a lifetime obligation is tagged `owns`, the measures below discharge
+all residue.
+
+== 4. Two well-founded measures
+
+Occupancy and discharge are **distinct** and both well-founded:
+
+* **Occupancy** decreases on connect and is renewed by heartbeat. A lease that
+lapses without renewal is reaped. This is the *liveness* half.
+* **Discharge** decreases on each release and is bounded below by `⊥`. This is
+the *teardown* half; `⊥` is the terminal, zero-residue state.
+
+Separating them prevents the classic error of proving termination of teardown
+while leaving a live connection able to squat indefinitely.
+
+== 5. Cycle-freedom
+
+Cycle-freedom follows from the well-foundedness of the **`owns` relation
+itself**, not from the termination measure. Because `owns` is well-founded, an
+ownership cycle (`a owns b`, `b owns a`) is unrepresentable. Consequently no
+reference-counting or tracing cycle-collector is required or admissible.
+
+== 6. Partial-order fidelity
+
+Teardown MUST honour the ownership partial order: **children before parents**
+(reverse-topological / postorder). LIFO stack discipline is only the degenerate
+case of a linear chain. For finite ownership trees the descent is witnessed by a
+Dershowitz–Manna multiset ordering, so **no ordinal is needed**.
+
+== 7. Ordinals
+
+Ordinal ranks are admitted *only* for a static-at-connect ranking over
+post-hoc-unbounded depth. Such a rank MUST be assigned at connect and MUST NOT
+increase thereafter. Ranks at or above `ε₀` are forbidden; the intended range is
+below `ω^ω` (finite-tree multisets in the common case).
+
+== 8. Joint completion and the scope boundary
+
+Teardown is a two-party act:
+
+* **Joint completion.** A clean disconnect completes only when *both* parties
+reach `⊥` and exchange acknowledgements.
+* **Scope boundary.** The cleave specifies *graceful* teardown only. On
+**rupture** (process death, connection drop, host crash, power loss) the
+**survivor owns the wipe**: the party that outlives the rupture reaps the shared
+resource; the dying party's cleanup is never depended upon. A lost acknowledgement
+resolves to rupture, never to an ambiguous half-state.
+
+[[invariants]]
+== 9. Normative invariants
+
+A conforming groove implementation MUST satisfy `RC-1`…`RC-13`. Each carries a
+*falsifier*: a concrete observation that would refute it.
+
+[cols="1,4,4",options="header"]
+|===
+| ID | Invariant (MUST) | Falsifier
+
+| RC-1  | The `owns` relation is well-founded (acyclic). | A reachable cycle `a owns b … owns a`.
+| RC-2  | Every edge is classified as exactly one of owns/borrow/observe/peer. | An edge with no class, or two classes.
+| RC-3  | An `owns` capability is consumed exactly once (linear). | An `owns` edge released zero, or two-or-more, times.
+| RC-4  | A `borrow` is used at most once and never outlives its referent. | A borrow still reachable after its referent reached `⊥`.
+| RC-5  | Discharge strictly decreases per release and is bounded below by `⊥`. | A release that does not decrease discharge, or residue `> ⊥` after full teardown.
+| RC-6  | Occupancy is a renewable lease: down-on-connect, renewed by heartbeat, reaped on lapse. Hard grooves retain peer identity for reconnect; Soft grooves do not. | A lapsed lease not reaped, or a Soft groove retaining identity after disconnect.
+| RC-7  | After a clean two-party disconnect, residue = `⊥` for both parties. | Recoverable state after a graceful disconnect.
+| RC-8  | A Soft groove's peer identity is provably *erased* (not merely deactivated) on typed disconnect. | Peer identity recoverable from a freed Soft slot.
+| RC-9  | Teardown proceeds children-before-parent (reverse-topological). | A parent released while a child it owns is still live.
+| RC-10 | Any ordinal rank is fixed at connect, never increases, and is `< ε₀`. | A rank that increases post-connect, or `≥ ε₀`.
+| RC-11 | A two-party teardown completes only on mutual `⊥` + ack. | One party at `⊥` while the other holds state, with no rupture.
+| RC-12 | No `borrow`/`observe` edge references a party that has reached `⊥` (no dangling borrow). | A live borrow to a discharged owner.
+| RC-13 | Every teardown is exactly clean-XOR-rupture; a lost ack resolves to rupture. | A teardown that is neither cleanly completed nor rupture-handled (ambiguous on lost ack).
+|===
+
+[[conformance]]
+== 10. Conformance and the vacuous-satisfaction caveat
+
+An implementation *conforms* iff it satisfies `RC-1`…`RC-13` and the `RC-N`
+table is wired into a machine checker (contractile / k9), so a regression is a
+red build.
+
+CAUTION: In the current reference implementation (`hyperpolymath/gossamer`) the
+groove layer is a **flat, target-id-indexed array with no `owns` graph**. The
+graph invariants (`RC-1`, `RC-9`, `RC-12`) are therefore satisfied *vacuously* —
+there is no ownership graph to violate. A green checker today is **not** a real
+guarantee; it becomes one when an actual `owns` graph exists. This note is
+retained deliberately so the distinction is not lost.
+
+== 11. Relationship to the reference implementation
+
+[cols="1,3",options="header"]
+|===
+| Artifact (gossamer) | Role
+
+| `src/interface/abi/ResourceCleanup.idr` | Host of the residue→0 descent proof for the plain `disconnect` (RC-5, RC-7). NOTE: *not* `GrooveTermination.idr`, which is the connect-side bounded-length proof.
+| `src/interface/abi/GrooveResidue.idr` | Proves the Soft-groove typed-wipe leaves zero residue (RC-8), constructively.
+| `src/interface/abi/GrooveLinearity.idr` | The Active→Consumed linear discipline for a connection handle (RC-3).
+|===
+
+`owns` is **linear** (`let!`), not affine — a common mis-statement. The residue
+proof consumes exactly the `owns` edges; `borrow`/`observe`/`peer` do not enter it.
+
+== 12. References
+
+* gossamer cleave-surface audit — `hyperpolymath/gossamer#82` (B-layer normative source; item 6).
+* `docs/proofs/spec-templates/T2-high/groove-browser-harness.md` (superseded harness template).
+* RFC 2119, RFC 8174 (requirement key words).
+* Dershowitz, Manna — _Proving termination with multiset orderings_ (CACM, 1979).

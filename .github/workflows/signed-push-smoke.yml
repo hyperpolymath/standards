@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: MPL-2.0
+# End-to-end check for the signed-push composite action: pushes a throwaway commit
+# via the GitHub App and asserts GitHub marks it "Verified". Manual trigger only.
+# Requires repo/org secret APP_PRIVATE_KEY and variable APP_ID (the estate App).
+name: signed-push smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Create throwaway branch + a local commit
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="ci/signed-push-smoke-${GITHUB_RUN_ID}"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          git config user.name  "estate-committer[bot]"
+          git config user.email "estate-committer[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          # Create the remote branch at the current base so createCommitOnBranch has
+          # an existing ref to commit onto, then fetch its tracking ref for the diff.
+          git push origin "$BRANCH"
+          git fetch origin "$BRANCH"
+          # Trivial change to be pushed as a Verified commit.
+          mkdir -p .ci-smoke
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .ci-smoke/last-signed-push.txt
+          git add .ci-smoke/last-signed-push.txt
+          git commit -m "test(signed-push): verified-commit smoke [run ${GITHUB_RUN_ID}]"
+
+      - name: Push the local commit as Verified (via the App)
+        uses: ./.github/actions/signed-push
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          branch: ${{ steps.prep.outputs.branch }}
+
+      - name: Assert Verified, then delete the throwaway branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.prep.outputs.branch }}
+        run: |
+          set -euo pipefail
+          SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${BRANCH}" --jq '.sha')
+          read -r VERIFIED REASON < <(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}" \
+            --jq '.commit.verification | "\(.verified) \(.reason)"')
+          echo "head ${SHA} → verified=${VERIFIED} reason=${REASON}"
+          # Always clean up the throwaway branch.
+          git push origin --delete "$BRANCH" || true
+          if [ "$VERIFIED" != "true" ]; then
+            echo "::error::signed-push produced an UNVERIFIED commit (reason=${REASON}). Check that APP_ID/APP_PRIVATE_KEY are set and the App is installed on this repo."
+            exit 1
+          fi
+          echo "✅ signed-push produced a Verified commit — Arm B1 works end-to-end."

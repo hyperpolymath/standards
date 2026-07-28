@@ -28,16 +28,31 @@ PROFILE="$REPO/.machine_readable/rsr-profile.a2ml"
 section() { awk -v s="[$1]" '$0==s{f=1;next} /^\[/{f=0} f && !/^[[:space:]]*#/ && NF' "$2"; }
 # "quoted" tokens on the line whose key is $1 (reads section body from stdin).
 quoted_on_key() { grep -E "^[[:space:]]*$1[[:space:]]*=" | grep -oE '"[^"]+"' | tr -d '"' || true; }
+# Same, but the array may span lines (`key = [` … `]`) with trailing comments —
+# the shape rsr-template-repo ships in its rsr-profile.a2ml, and one the
+# oracle's record-dialect parser accepts, so this checker must too. The gates
+# file itself stays single-line (its own header mandates that discipline).
+array_on_key() { # $1 = key; section body on stdin
+  awk -v k="$1" '
+    on        { sub(/#.*/, ""); print; if (/\]/) on=0; next }
+    $0 ~ "^[[:space:]]*"k"[[:space:]]*=" { sub(/#.*/, ""); print; if (!/\]/) on=1 }
+  ' | grep -oE '"[^"]+"' | tr -d '"' || true
+}
 
 # --- target profile ---
 # Capability declaration is primary: a profile may list `capabilities = [...]`
 # directly. `preset` is optional sugar — a named bundle expanded from the gate
 # data. A profile must provide at least one of the two.
-PBODY="$(section profile "$PROFILE")"
+# Section may be [rsr-profile] (what rsr-template-repo ships) or [profile]
+# (the original spelling here) — the normative oracle
+# (hypatia Hypatia.Rules.RsrConformance.load_capabilities/1) accepts both,
+# and this reference checker must not be stricter than the oracle.
+PBODY="$(section rsr-profile "$PROFILE")"
+[ -n "$PBODY" ] || PBODY="$(section profile "$PROFILE")"
 PRESET="$(printf '%s\n' "$PBODY" | quoted_on_key preset | sed -n 1p)"
-DIRECT="$(printf '%s\n' "$PBODY" | quoted_on_key capabilities)"
-ADD="$(printf '%s\n' "$PBODY" | quoted_on_key add)"
-REMOVE="$(printf '%s\n' "$PBODY" | quoted_on_key remove)"
+DIRECT="$(printf '%s\n' "$PBODY" | array_on_key capabilities)"
+ADD="$(printf '%s\n' "$PBODY" | array_on_key add)"
+REMOVE="$(printf '%s\n' "$PBODY" | array_on_key remove)"
 [ -n "$PRESET$DIRECT" ] || { echo "ERROR: profile declares neither 'capabilities' nor 'preset'" >&2; exit 2; }
 
 # --- preset's base capabilities, if a preset is named ---
