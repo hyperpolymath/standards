@@ -1012,6 +1012,31 @@ jobs:
             exit 1
           fi
           echo "All actions are SHA-pinned"
+      # The step above proves a pin has the right SHAPE. It cannot prove the
+      # SHA EXISTS — a fabricated 40-hex string passes it. Measured 2026-07-28:
+      # 112 of 613 unique estate pins (18%) do not resolve, in 876 committed
+      # files. An unresolvable `uses:` yields NO check run, so those repos look
+      # green while the job never ran. This step closes that gap.
+      - name: Checkout standards for the pin-existence gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+      - name: Check action pins resolve upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Copy out and delete the checkout before scanning, so the standards
+          # tree is never part of the caller's workspace (same idiom as the
+          # allowlist preflight above).
+          cp .standards-checkout/scripts/check-action-pins-resolve.sh "$RUNNER_TEMP/"
+          rm -rf .standards-checkout
+          bash "$RUNNER_TEMP/check-action-pins-resolve.sh" .
       - name: Check for duplicate workflows
         run: |
           if [ -f .github/workflows/codeql.yml ] && [ -f .github/workflows/codeql-analysis.yml ]; then
