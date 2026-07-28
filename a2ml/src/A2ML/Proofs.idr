@@ -3,6 +3,7 @@ module A2ML.Proofs
 import A2ML.TypedCore
 import Data.List
 import Data.List.Elem
+import Data.List.Quantifiers
 import Decidable.Equality
 
 %default total
@@ -186,13 +187,13 @@ verifyAttestation attested =
 
 ||| Proof that ValidatedDoc implies unique IDs
 export
-validatedHasUniqueIds : ValidatedDoc -> Unique (ids validated)
-validatedHasUniqueIds validated = validated.uniqueProof
+validatedHasUniqueIds : (v : ValidatedDoc) -> Unique (ValidatedDoc.ids v)
+validatedHasUniqueIds v = ValidatedDoc.uniqueProof v
 
 ||| Proof that ValidatedDoc implies resolved references
 export
-validatedHasResolvedRefs : ValidatedDoc -> AllIn (refs validated) (ids validated)
-validatedHasResolvedRefs validated = validated.resolvedProof
+validatedHasResolvedRefs : (v : ValidatedDoc) -> AllIn (ValidatedDoc.refs v) (ValidatedDoc.ids v)
+validatedHasResolvedRefs v = ValidatedDoc.resolvedProof v
 
 -- ============================================================================
 -- Example Usage
@@ -223,17 +224,41 @@ exampleAttestation = do
 -- Property: Uniqueness is preserved under append (if disjoint)
 -- ============================================================================
 
+-- ---------------------------------------------------------------------------
+-- Elem/append lemmas.
+--
+-- These stand in for a helper (`elemAppend`) that the proofs below referenced
+-- but which was never defined in this module or imported from base — so
+-- A2ML.Proofs did not type-check at all. Both are proved by induction on the
+-- Elem witness; neither uses `postulate` or `believe_me`.
+-- ---------------------------------------------------------------------------
+
+||| Membership in the left operand survives appending on the right.
+export
+elemAppendLeft : Elem x xs -> Elem x (xs ++ ys)
+elemAppendLeft Here = Here
+elemAppendLeft (There e) = There (elemAppendLeft e)
+
+||| Membership in a concatenation is membership in one side or the other.
+export
+elemAppendSplit : (xs : List a) -> Elem x (xs ++ ys) -> Either (Elem x xs) (Elem x ys)
+elemAppendSplit [] e = Right e
+elemAppendSplit (y :: ys') Here = Left Here
+elemAppendSplit (y :: ys') (There e) = case elemAppendSplit ys' e of
+  Left l => Left (There l)
+  Right r => Right r
+
 ||| If two lists are unique and disjoint, their concatenation is unique
 export
-uniqueAppendDisjoint : Unique xs -> Unique ys ->
+uniqueAppendDisjoint : {xs : List a} -> Unique xs -> Unique ys ->
                        (disjoint : All (\x => Not (Elem x ys)) xs) ->
                        Unique (xs ++ ys)
 uniqueAppendDisjoint UniqueNil uniqueYs disjoint = uniqueYs
 uniqueAppendDisjoint (UniqueCons notElem uniqueXs) uniqueYs (d :: ds) =
   UniqueCons (appendNotElem notElem d) (uniqueAppendDisjoint uniqueXs uniqueYs ds)
   where
-    appendNotElem : Not (Elem x xs) -> Not (Elem x ys) -> Not (Elem x (xs ++ ys))
-    appendNotElem notXs notYs elem with (elemAppend xs ys elem)
+    appendNotElem : {zs : List a} -> Not (Elem w zs) -> Not (Elem w ys) -> Not (Elem w (zs ++ ys))
+    appendNotElem notXs notYs elem with (elemAppendSplit zs elem)
       appendNotElem notXs notYs elem | Left elemXs = notXs elemXs
       appendNotElem notXs notYs elem | Right elemYs = notYs elemYs
 
@@ -247,5 +272,5 @@ resolveMonotonic : AllIn refs ids -> (moreIds : List Id) ->
                    AllIn refs (ids ++ moreIds)
 resolveMonotonic AllInNil moreIds = AllInNil
 resolveMonotonic (AllInCons elem allIn) moreIds =
-  AllInCons (elemAppend ids moreIds elem |> Left)
+  AllInCons (elemAppendLeft elem)
             (resolveMonotonic allIn moreIds)
