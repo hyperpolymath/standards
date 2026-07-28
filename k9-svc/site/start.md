@@ -3,6 +3,7 @@
 ---
 title: Get started with K9-SVC
 site: K9-SVC
+brand: K9-SVC
 description: Write, contract and sign a K9-SVC component in three steps, across all three trust levels.
 date: 2026-06-29
 ---
