@@ -12,9 +12,9 @@ assessor = "estate-audit"
 [[must]]
 id = "M1"
 text = "Each *.a2ml.template file MUST carry an SPDX-License-Identifier header."
-system = "none"
-status = "pass"
-evidence = "All 7 files in /home/user/standards/a2ml-templates/ (META.a2ml.template, AGENTIC.a2ml.template, ECOSYSTEM.a2ml.template, NEUROSYM.a2ml.template, PLAYBOOK.a2ml.template, STATE.a2ml.template, STATE.a2ml.v2.template) and both scripts carry an SPDX-License-Identifier as line 1/2 (manually verified by reading each file); however no automated check enforces this for this directory - hooks/validate-spdx.sh only scans .github/workflows/*.yml, not a2ml-templates/."
+system = "Manual license audit (Manual-Only policy: SPDX/licence rows never carry an automated check)."
+status = "manual-only"
+evidence = "Manually verified (and spot-checked via grep) that all 7 template files, the spec.adoc, and both migration scripts carry an SPDX-License-Identifier on line 1 or 2; per estate Manual-Only policy this remains a manual/licence-audit item, not an automated check."
 effects = "Downstream repos copying these templates inherit correct licensing metadata by convention, but a future edit could silently drop the header with nothing to catch it."
 
 [[must]]
@@ -41,9 +41,10 @@ effects = "Consuming repos (or the migration scripts themselves) can emit malfor
 [[must]]
 id = "M5"
 text = "The spec MUST be tracked in the estate compliance dashboard with a scorecard once templates stabilize."
-system = "COMPLIANCE-DASHBOARD.md rollup table"
-status = "fail"
-evidence = "COMPLIANCE-DASHBOARD.md line 50 lists `a2ml-templates | no scorecard | - | - | - | - | -` and line 58 includes a2ml-templates in the 27 specs still needing a scorecard (1/28 specs scored)."
+system = "COMPLIANCE-DASHBOARD.md rollup table (line 52) plus .machine_readable/scorecards/a2ml-templates.scorecard.a2ml"
+status = "pass"
+evidence = "COMPLIANCE-DASHBOARD.md line 52 lists `a2ml-templates` with real must/should/could scores (1/5, 1/3, 0/2) rather than the 'no scorecard' placeholder, and this file (.machine_readable/scorecards/a2ml-templates.scorecard.a2ml) is the tracked scorecard; rollup states 'Specs with a scorecard: 30 / 30'."
+check = "grep -n \"^| \\`a2ml-templates\\`\" COMPLIANCE-DASHBOARD.md | grep -qv \"no scorecard\" && test -f .machine_readable/scorecards/a2ml-templates.scorecard.a2ml"
 effects = "The estate-wide rollup (1/28 specs scored, 50% system coverage) cannot include this spec's real compliance state, so any regression here is invisible at the estate level until this scorecard is produced and merged."
 
 [[should]]
@@ -67,6 +68,7 @@ text = "The migration scripts SHOULD emit non-zero exit codes and clear diagnost
 system = "none"
 status = "pass"
 evidence = "state-scm-to-v2.jl documents and implements distinct exit codes (0 ok, 2 parse/usage error, 3 not a (state ...) form) per its header comment and main()/convert() logic; state-migrate-v1-to-v2.sh uses `set -eu` and exits 1 with a message when the v1 file is missing (line 16)."
+check = "cd /home/user/standards && sh a2ml-templates/state-migrate-v1-to-v2.sh /nonexistent-repo-path >/dev/null 2>&1; test $? -eq 1 && grep -q \"exit(2)\" a2ml-templates/state-scm-to-v2.jl && grep -q \"exit(3)\" a2ml-templates/state-scm-to-v2.jl"
 effects = "Callers (CI or a future k9-init tool) can branch on exit code to decide whether to retry, prompt a human, or abort; without this, migration failures could pass silently and produce corrupt STATE.a2ml files downstream."
 
 [[could]]

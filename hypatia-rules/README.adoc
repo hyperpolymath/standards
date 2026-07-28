@@ -3,9 +3,9 @@
 :status: Draft v0.2.0
 :updated: 2026-04-18
 
-Seven Hypatia rules specific to the standards-repo dogfooding loop.
-Each rule is defined in A2ML, consumes VeriSimDB octads, and emits
-Groove `compliance.finding.new` signals.
+Eight Hypatia rules specific to the standards-repo dogfooding loop.
+Each rule is defined in A2ML, consumes VeriSimDB octads or the repo file
+tree, and emits Groove `compliance.finding.new` signals.
 
 == Rules
 
@@ -18,6 +18,7 @@ Groove `compliance.finding.new` signals.
 | HYP-S005 | `crg-overclaim-detector` | Alert when a self-declared CRG grade lacks v2.0 evidence artefacts |
 | HYP-S006 | `registry-staleness` | Alert when REGISTRY.a2ml source hashes go stale or a DERIVED doc (TOPOLOGY.md) drifts |
 | HYP-S007 | `profile-drift-detector` | Flag a 6a2 file whose content drifts from its declared A2ML `@profile` |
+| HYP-S008 | `workflow-allowlist-gap` | Flag a workflow `uses:` an action/reusable not permitted by the repo Actions allowlist (would `startup_failure`) |
 
 The CRG rule pair (S001 + S005) together enforce grade-honesty: S001
 catches backwards moves, S005 catches forwards-overshoots. Both read from
@@ -38,6 +39,16 @@ file declares an `@profile(id=…)` (a2ml/SPEC.adoc Section 8), and this rule
 flags any file that no longer satisfies its declared profile definition in
 `a2ml/profiles/`. It is FLAG-ONLY (`strategy: review`, `auto_fixable: false`)
 and is purely structural — it never emits a licence/SPDX finding.
+
+HYP-S008 closes the CI-resilience loop. Under `allowed_actions: selected` a
+workflow that `uses:` an un-allowlisted action/reusable dies at *startup* with no
+job and no log — an opaque failure you cannot satisfy a gate to fix. This rule
+scans `.github/workflows/` and flags each `uses:` not covered by the canonical
+allowlist (`rhodium-standard-repositories/actions-allowlist/allowed-actions.json`)
+so the gap is a legible finding, not a dark run. It is FLAG-ONLY
+(`auto_fixable: false`) — applying the allowlist needs an admin PAT, not the
+workflow `GITHUB_TOKEN`; its recipe runs `scripts/check-allowed-actions.sh` and
+the paired `scripts/set-allowed-actions.sh` performs the admin fix.
 
 == Implementation
 
@@ -64,6 +75,7 @@ Rules read from:
 - `rsr-template-repo/docs/governance/CRG-AUDIT-TEMPLATE.adoc` (HYP-S005 reference)
 - `a2ml/profiles/REGISTRY.a2ml` + `a2ml/profiles/*/PROFILE.a2ml` and the 6a2
   files under `.machine_readable/` (HYP-S007)
+- `.github/workflows/*` and `rhodium-standard-repositories/actions-allowlist/allowed-actions.json` (HYP-S008)
 
 And emit:
 - Groove `compliance.finding.new` signals with the rule's ID

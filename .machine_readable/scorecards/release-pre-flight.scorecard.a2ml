@@ -15,6 +15,7 @@ text = "The gate document MUST enumerate hard gates (proof completeness, test co
 system = "/home/user/standards/release-pre-flight/V1-GATE.adoc sections 3.1-3.7"
 status = "pass"
 evidence = "V1-GATE.adoc lines 47-130 define sections 3.1 through 3.7 with concrete, checkable criteria for each hard gate."
+check = "for s in \"3.1 Proof Completeness\" \"3.2 Test Completeness\" \"3.3 Benchmark Completeness\" \"3.4 Build and Execution Integrity\" \"3.5 Aspect Integrity\" \"3.6 Static and Security Audit\" \"3.7 Claim and Artifact Parity\"; do grep -q \"=== $s\" release-pre-flight/V1-GATE.adoc || exit 1; done"
 effects = "Any repo/spec claiming v1.0.0 without meeting these criteria has no documented basis for the claim; consumers relying on the label lose the guarantee it is meant to encode."
 
 [[must]]
@@ -23,6 +24,7 @@ text = "There MUST be an automated audit script that mechanically scans a target
 system = "/home/user/standards/release-pre-flight/v1-audit.sh check_marker_scan() (MARKER_PATTERN regex via ripgrep)"
 status = "pass"
 evidence = "Running `bash release-pre-flight/v1-audit.sh .` against the monorepo root exercises check_marker_scan and correctly flags real STUB/TODO occurrences (e.g. session-management-standards/continuity/*/CHECKLIST.adoc:7 'Status: STUB', axel-protocol/config/ci.k9.ncl:38 'TODO: Add coverage')."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'BLOCKER: unfinished markers or placeholders present'"
 effects = "Without this, downstream repos could tag v1.0.0 while shipping scaffold residue; consumers of the standards repo could not trust the marker-scan portion of any v1.0.0 claim."
 
 [[must]]
@@ -31,6 +33,7 @@ text = "The audit script MUST detect proof-debt escape hatches (believe_me, sorr
 system = "/home/user/standards/release-pre-flight/v1-audit.sh check_proof_debt() (PROOF_DEBT_PATTERN via ripgrep)"
 status = "pass"
 evidence = "Executing the script against the repo root correctly surfaced 4 real `postulate` occurrences in lol/proofs/theories/information_theory.agda:115,121,127,132, recorded as a BLOCKER."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'BLOCKER: proof escape hatches found'"
 effects = "Repos with unresolved proof holes (e.g. lol's Agda postulates) would otherwise be able to claim a machine-checked/provable v1.0.0 status that the proof artifacts do not support."
 
 [[must]]
@@ -46,6 +49,7 @@ text = "The audit script MUST verify the target repo has a CI workflow surface (
 system = "/home/user/standards/release-pre-flight/v1-audit.sh check_ci_surface()"
 status = "pass"
 evidence = "Running the script against the monorepo root printed 'PASS: CI workflow surface present', correctly detecting /home/user/standards/.github/workflows (30+ workflow files present, e.g. codeql.yml, secret-scanner.yml)."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'PASS: CI workflow surface present'"
 effects = "Without this check, a repo could claim v1.0.0 with no CI wired at all, and no automated signal would catch it."
 
 [[should]]
@@ -61,6 +65,7 @@ text = "The audit script SHOULD attempt to detect fake or placeholder test/bench
 system = "/home/user/standards/release-pre-flight/v1-audit.sh check_fake_evidence() (PLACEHOLDER_EVIDENCE_PATTERN)"
 status = "pass"
 evidence = "Running the script printed 'PASS: no obvious fake test or benchmark evidence found' and 'PASS: no placeholder fuzz/bench artifact files found' for the monorepo root, exercising the check_fake_evidence() function successfully (it ran without error and returned a clean result)."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'PASS: no obvious fake test or benchmark evidence found'"
 effects = "Without this, a repo could pad coverage numbers with trivial/copied scaffold tests and still pass claim review."
 
 [[should]]
@@ -69,6 +74,7 @@ text = "The audit script SHOULD surface (not gate) explicit stable/high-assuranc
 system = "/home/user/standards/release-pre-flight/v1-audit.sh check_stable_claims()"
 status = "pass"
 evidence = "Running the script surfaced real matches such as axel-protocol/ROADMAP.adoc:15 'v1.0.0 - Stable Release', .machine_readable/contractiles/trust/Trustfile.a2ml:395 'ALPHA -- NOT production-ready', confirming the informational scan works end-to-end."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'INFO: stable or high-assurance claims detected'"
 effects = "Reviewers doing the manual claim-parity judgement (gate 3.7) lose their starting point for finding overclaiming text if this check silently broke."
 
 [[should]]
@@ -77,6 +83,7 @@ text = "The audit script SHOULD cross-check any STATE.a2ml release-stage metadat
 system = "/home/user/standards/release-pre-flight/v1-audit.sh check_state_release_stage()"
 status = "pass"
 evidence = "Running the script found /home/user/standards/.machine_readable/6a2/STATE.a2ml and printed 'maturity = \"experimental\"', confirming the discovery/print logic executes correctly (though it is informational only, not a correlation/gate)."
+check = "bash release-pre-flight/v1-audit.sh . 2>&1 | grep -q 'INFO: STATE metadata found'"
 effects = "Without even this informational cross-reference, a repo's maturity metadata could drift from what the audit actually found with no automated flag."
 
 [[could]]

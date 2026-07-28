@@ -71,6 +71,7 @@ has_mpl2_text=$(count_in 'Mozilla Public License Version 2\.0|Mozilla Public Lic
 has_pmpl_text=$(count_in_i 'PMPL-1\.0-or-later|Palimpsest License \(PMPL')
 has_apache=$(count_in 'Apache License.*Version 2\.0')
 has_mit=$(count_in 'MIT License')
+has_agpl=$(count_in 'GNU AFFERO GENERAL PUBLIC LICENSE')
 has_gpl3=$(count_in 'GNU GENERAL PUBLIC LICENSE.*Version 3')
 has_bsd3=$(count_in 'BSD.*3-Clause')
 has_proprietary=$(count_in_i 'All Rights Reserved')
@@ -89,6 +90,13 @@ elif [ "$has_apache" -gt 0 ]; then
   body_class="Apache-2.0"
 elif [ "$has_mit" -gt 0 ]; then
   body_class="MIT"
+elif [ "$has_agpl" -gt 0 ]; then
+  # AGPL before plain GPL-3.0: the AGPL body carries "GNU AFFERO GENERAL PUBLIC
+  # LICENSE". These are deliberate co-developed-project exceptions to the estate
+  # MPL-2.0 policy (e.g. the games airborne-submarine-squadron, the-nash-equilibrium)
+  # and must be recognised so their full-text LICENSE files (which GitHub then
+  # detects as AGPL, unlike an SPDX-stub) pass this check.
+  body_class="AGPL-3.0"
 elif [ "$has_gpl3" -gt 0 ]; then
   body_class="GPL-3.0"
 elif [ "$has_bsd3" -gt 0 ]; then

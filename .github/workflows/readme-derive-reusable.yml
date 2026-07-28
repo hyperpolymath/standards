@@ -30,6 +30,7 @@ on:
         default: main
 
 permissions:
+  actions: read
   contents: read
 
 # Read-only check workflow — safe to cancel superseded runs.
@@ -44,7 +45,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout caller repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       - name: Read publishing declaration
         id: decl
@@ -110,11 +111,22 @@ jobs:
 
       - name: Install toolchain
         if: steps.decl.outputs.derive == 'true'
+        env:
+          # Pinned so derivation is REPRODUCIBLE: the same versions used to
+          # generate the committed README.md must run in CI, or the freshness
+          # check would flag cosmetic toolchain-drift diffs as staleness. Bump
+          # deliberately (and regenerate every derived README) — never float.
+          PANDOC_VERSION: "3.10"
+          ASCIIDOCTOR_VERSION: "2.0.26"
+          ASCIIDOCTOR_REDUCER_VERSION: "1.1.1"
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq pandoc
-          # asciidoctor + include-reducer from rubygems (ubuntu ships ruby)
-          sudo gem install --no-document asciidoctor asciidoctor-reducer
+          set -euo pipefail
+          curl -fsSL -o /tmp/pandoc.deb \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          sudo dpkg -i /tmp/pandoc.deb
+          sudo gem install --no-document \
+            asciidoctor -v "$ASCIIDOCTOR_VERSION" \
+            asciidoctor-reducer -v "$ASCIIDOCTOR_REDUCER_VERSION"
           pandoc --version | head -1
           asciidoctor --version | head -1
 
@@ -125,6 +137,31 @@ jobs:
           git clone --depth 1 --branch "${{ inputs.standards-ref }}" \
             https://github.com/hyperpolymath/standards.git "$RUNNER_TEMP/standards"
           chmod +x "$RUNNER_TEMP/standards/.github/scripts/readme-vocab-gate.sh"
+
+      - name: Anchor-ID convention guard
+        if: steps.decl.outputs.derive == 'true'
+        env:
+          CANONICAL: ${{ steps.decl.outputs.canonical }}
+        run: |
+          set -euo pipefail
+          # A canonical .adoc with intra-document anchor links (link:#foo[] or
+          # <<foo>> written as #foo) only renders a working TOC on GitHub and
+          # re-derives to matching Markdown anchors when it opts out of
+          # Asciidoctor's default '_prefixed_underscored' section IDs. So if the
+          # source uses #anchors, it MUST set :idprefix: (empty) and
+          # :idseparator: -  — otherwise every TOC link silently dead-links
+          # (a failure the vocabulary gate cannot see, since it checks words not
+          # link targets). See ADR-004 "Bootstrapping a canonical .adoc".
+          if grep -qE 'link:#[a-z0-9-]+\[' "$CANONICAL"; then
+            if ! grep -qE '^:idprefix:[[:space:]]*$' "$CANONICAL" \
+               || ! grep -qE '^:idseparator:[[:space:]]+-[[:space:]]*$' "$CANONICAL"; then
+              echo "::error::$CANONICAL has intra-doc anchor links (link:#…) but does not set ':idprefix:' (empty) and ':idseparator: -' in its header. Without them Asciidoctor generates '_underscored' section IDs and every #anchor TOC link dead-links on GitHub and in the derived README.md. Add both attributes to the document header (see ADR-004)."
+              exit 1
+            fi
+            echo "✓ anchor-ID convention satisfied (idprefix/idseparator set)"
+          else
+            echo "✓ no intra-doc anchors — convention not required"
+          fi
 
       - name: Derive Markdown from AsciiDoc
         if: steps.decl.outputs.derive == 'true'
@@ -165,13 +202,21 @@ jobs:
           CANONICAL: ${{ steps.decl.outputs.canonical }}
         run: |
           set -euo pipefail
+          # Normalise before comparing: drop the banner comment lines, trim
+          # trailing whitespace, and squeeze blank-line runs. The toolchain is
+          # version-pinned so output is reproducible; this normalisation is a
+          # belt-and-braces layer that keeps a harmless whitespace nudge from
+          # being reported as staleness, while any real prose/structure/anchor
+          # change still shows.
+          norm() { grep -vE '^<!-- (SPDX-License-Identifier|GENERATED)' "$1" \
+                   | sed 's/[[:space:]]*$//' | cat -s; }
           if [ ! -f "$DERIVED_PATH" ]; then
             echo "::error::Declared derived README '$DERIVED_PATH' is missing. Regenerate and commit it."
             SHOW_CMD=1
-          elif ! diff -q "$RUNNER_TEMP/derived.md" "$DERIVED_PATH" >/dev/null; then
+          elif ! diff -q <(norm "$RUNNER_TEMP/derived.md") <(norm "$DERIVED_PATH") >/dev/null; then
             echo "::error::'$DERIVED_PATH' is STALE relative to '$CANONICAL'. Regenerate and commit it."
-            echo "----- diff (committed vs regenerated) -----"
-            diff "$DERIVED_PATH" "$RUNNER_TEMP/derived.md" || true
+            echo "----- diff (committed vs regenerated, normalised) -----"
+            diff <(norm "$DERIVED_PATH") <(norm "$RUNNER_TEMP/derived.md") || true
             SHOW_CMD=1
           else
             echo "✓ $DERIVED_PATH is up to date with $CANONICAL"

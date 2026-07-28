@@ -15,6 +15,7 @@ text = "Each of the seven documented rules (HYP-S001..HYP-S007) MUST exist as an
 system = "none (no automated parser runs against these files in this repo's CI; a2ml/.github/workflows/a2ml-validation.yml exists but lives under a2ml/.github/workflows/ — a nested path GitHub Actions does not register — so it never fires for pushes/PRs to the standards repo root)"
 status = "pass"
 evidence = "All seven files present and manually verified to contain matching @rule blocks: crg-demotion-detector.a2ml (HYP-S001), k9-orphan-detector.a2ml (HYP-S002), proof-freshness.a2ml (HYP-S003), rsr-self-compliance.a2ml (HYP-S004), crg-overclaim-detector.a2ml (HYP-S005), registry-staleness.a2ml (HYP-S006), profile-drift-detector.a2ml (HYP-S007) — read directly from /home/user/standards/hypatia-rules/*.a2ml on 2026-07-03."
+check = "grep -q 'id: HYP-S001' hypatia-rules/crg-demotion-detector.a2ml && grep -q 'id: HYP-S002' hypatia-rules/k9-orphan-detector.a2ml && grep -q 'id: HYP-S003' hypatia-rules/proof-freshness.a2ml && grep -q 'id: HYP-S004' hypatia-rules/rsr-self-compliance.a2ml && grep -q 'id: HYP-S005' hypatia-rules/crg-overclaim-detector.a2ml && grep -q 'id: HYP-S006' hypatia-rules/registry-staleness.a2ml && grep -q 'id: HYP-S007' hypatia-rules/profile-drift-detector.a2ml"
 effects = "If a file goes missing or the id/name drifts from README.adoc, any downstream Hypatia deployment loading rules by path (per the [[rules]] config snippet in README.adoc) silently fails to activate that rule, and the standards estate loses coverage for that compliance signal (e.g. CRG grade-honesty, registry drift) without any repo-side alarm."
 
 [[must]]
@@ -23,6 +24,7 @@ text = "HYP-S006 (registry-staleness) and its companion recipe/router logic MUST
 system = "scripts/build-registry.sh --check (invoked via `just registry-check`, and as the HARD GATE dependency of `just validate` in the repo Justfile) — the in-repo half of the drift check that HYP-S006 describes as its 'estate-side mirror'"
 status = "pass"
 evidence = "scripts/build-registry.sh and .github/workflows/registry-verify.yml both exist at repo root; Justfile lines 16-25 and 76-81 wire `registry` / `registry-check` / `validate` to this exact script and flag, confirming the in-repo half of the mirrored check that registry-staleness.a2ml's header text describes actually exists (verified via `ls`/`grep` on 2026-07-03). This passes only for the claim that the referenced local-repo mechanism exists, not for whether HYP-S006 itself has ever executed against VeriSimDB."
+check = "test -f scripts/build-registry.sh && test -f .github/workflows/registry-verify.yml && grep -q 'registry-check' Justfile && grep -q 'build-registry.sh --check' Justfile"
 effects = "If build-registry.sh or registry-verify.yml were removed or diverged, HYP-S006's description of itself as an 'estate-side mirror' of an in-repo gate would become false, and REGISTRY.a2ml/TOPOLOGY.md staleness would go undetected both locally and estate-wide."
 
 [[must]]
@@ -52,6 +54,7 @@ text = "HYP-S003 (proof-freshness) SHOULD only trigger its auto-applicable `echi
 system = ".github/workflows/echidna-verify.yml (existence check only — no test invokes the recipe end-to-end from this repo)"
 status = "pass"
 evidence = ".github/workflows/echidna-verify.yml exists at repo root (confirmed via `ls .github/workflows/`), so the recipe references a real workflow file; whether it accepts a `target` input field matching the recipe's `--field target={file_path}` was not independently verified against the workflow's `on.workflow_dispatch.inputs` schema."
+check = "test -f .github/workflows/echidna-verify.yml"
 effects = "If echidna-verify.yml's workflow_dispatch inputs do not include a `target` field, HYP-S003's auto-fix would fail at dispatch time, leaving stale-proof findings unresolved despite being marked auto_fixable: true."
 
 [[should]]
@@ -64,8 +67,10 @@ effects = "Without any automated smoke-test of the activation path, a path typo 
 [[could]]
 id = "C1"
 text = "hypatia-rules COULD have its own scorecards/*.scorecard.a2ml entry feeding COMPLIANCE-DASHBOARD.md, matching the estate's stated goal of moving every registered spec from '⚠️ no scorecard' to a scored entry."
-system = "scripts/build-scorecards.sh + `just scorecards-check` (the mechanism exists for other specs, generating COMPLIANCE-DASHBOARD.md rows from scorecards/*.scorecard.a2ml)"
-status = "fail"
+system = "scripts/build-scorecards.sh (invoked via `just scorecards`) generates COMPLIANCE-DASHBOARD.md rows from .machine_readable/scorecards/*.scorecard.a2ml; this scorecard file feeds that generator directly."
+status = "pass"
+evidence = "hypatia-rules.scorecard.a2ml now exists at .machine_readable/scorecards/ and COMPLIANCE-DASHBOARD.md contains a real scored row for it ('| `hypatia-rules` | ❌ gap | 2/4 | 1/3 | 0/3 | 100% | 0/3 | 2026-07-03 |'), not a '⚠️ no scorecard' placeholder; the dashboard's own rollup now reads 'Specs with a scorecard: 30 / 30' with no remaining 'no scorecard' references. Verified via grep on 2026-07-17."
+check = "test -f .machine_readable/scorecards/hypatia-rules.scorecard.a2ml && grep -qE \"^\\| \\`hypatia-rules\\` \\|\" COMPLIANCE-DASHBOARD.md"
 effects = "COMPLIANCE-DASHBOARD.md explicitly lists hypatia-rules among the 27 (of 28) specs still needing a scorecard (line 58); its dashboard row reads '⚠️ no scorecard' with all dash placeholders (line 49), so estate rollup metrics (2/28 specs with scorecards after this one is added) undercount actual compliance posture."
 
 [[could]]

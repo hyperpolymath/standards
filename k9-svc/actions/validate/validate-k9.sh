@@ -4,12 +4,36 @@
 #
 # validate-k9.sh — K9 configuration file validation script
 #
-# Scans for .k9 and .k9.ncl files and validates:
-#   1. K9! magic number on line 1
-#   2. Pedigree block presence with required fields (name, version)
+# K9 files come in two dialects, validated differently (standards#434):
+#
+#   Plain dialect (.k9) — text/YAML-ish documents. The `K9!` magic line is
+#   the format marker and MUST be the first non-empty line. Fields use
+#   `key: value` form.
+#
+#   Nickel dialect (.k9.ncl) — Nickel source. A bare `K9!` line is a Nickel
+#   syntax error, so the format marker is carried differently: a
+#   `magic_number = "K9!"` field, a literal `K9!` preamble line (template
+#   files that are preprocessed before evaluation), or by construction —
+#   the file imports/merges a K9 pedigree schema (`K9Pedigree`,
+#   `pedigree_schema`, or an `import ".…k9.ncl"` of a base template that
+#   itself carries the magic). Library/contractile modules are that last
+#   class and are first-class citizens, not violations.
+#
+# Checks:
+#   1. Format marker (dialect-appropriate, see above)
+#   2. Pedigree presence with required fields (name; version as warning)
 #   3. Security level is one of: kennel, yard, hunt (case-insensitive)
 #   4. Hunt-level files must have a signature or signature_required field
 #   5. SPDX-License-Identifier header presence
+#
+# This is a LEXICAL linter (grep-grade), not a Nickel evaluator. Field
+# checks are file-scope presence checks on purpose: Nickel lets authors
+# factor the pedigree through `let` bindings and `&` merges, which no
+# line-oriented block tracker can follow. (A previous version tracked
+# brace depth to scope checks to the pedigree block; it missed every
+# `let component_pedigree = {…}` factoring and miscounted its own opening
+# brace. Do not reintroduce block scoping here — deep validation belongs
+# to the Nickel contracts themselves.)
 #
 # Environment variables:
 #   INPUT_PATH   — Directory to scan (default: .)
@@ -27,6 +51,11 @@ set -euo pipefail
 
 SCAN_PATH="${INPUT_PATH:-.}"
 STRICT="${INPUT_STRICT:-false}"
+
+# Outside GitHub Actions GITHUB_OUTPUT is unset; under `set -u` an unset
+# expansion inside a redirection aborts the whole script (the `|| true`
+# cannot catch an expansion error). Default to /dev/null for local runs.
+GITHUB_OUTPUT="${GITHUB_OUTPUT:-/dev/null}"
 
 # Counters
 FILES_SCANNED=0
@@ -66,19 +95,25 @@ report_issue() {
 # ---------------------------------------------------------------------------
 # Helper: normalise a security level string
 # ---------------------------------------------------------------------------
-# Strips quotes, leading/trailing whitespace, Nickel enum tick prefix
+# Strips quotes, leading/trailing whitespace, Nickel enum tick prefix.
+# Handles both separators: `leash = 'Hunt` (Nickel) and `leash: hunt` (plain).
 normalise_level() {
     local raw="$1"
     # Remove surrounding quotes, tick prefix ('Kennel -> Kennel), whitespace
-    raw="${raw#*=}"              # Remove everything before =
+    if [[ "$raw" == *"="* ]]; then
+        raw="${raw#*=}"          # Remove everything before =
+    else
+        raw="${raw#*:}"          # Plain dialect: remove everything before :
+    fi
     raw="${raw//\"/}"            # Remove double quotes
     raw="${raw//\'/}"            # Remove single quotes (Nickel tick)
     raw="${raw//,/}"             # Remove trailing commas
-    raw="${raw## }"              # Trim leading space
-    raw="${raw%% }"              # Trim trailing space
     raw="${raw%%#*}"             # Remove inline comments
-    raw="${raw## }"              # Trim again
-    raw="${raw%% }"
+    # Trim ALL leading/trailing whitespace (a single-space `%% ` pattern
+    # strips only one char and let `'Kennel  # comment` survive as
+    # "kennel " — an invalid-level false positive)
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
     echo "${raw,,}"             # Lowercase
 }
 
@@ -89,7 +124,13 @@ validate_k9() {
     local file="$1"
     FILES_SCANNED=$((FILES_SCANNED + 1))
 
-    # --- Check 1: K9! magic number on first non-empty line ---
+    # Dialect: .k9.ncl is Nickel source; bare .k9 is the plain dialect.
+    local dialect="plain"
+    if [[ "$file" == *.k9.ncl ]]; then
+        dialect="ncl"
+    fi
+
+    # --- Check 1: format marker (dialect-appropriate) ---
     local first_content_line=""
     local first_content_line_num=0
     local line_num=0
@@ -105,9 +146,28 @@ validate_k9() {
         break
     done < "$file"
 
-    if [[ "$first_content_line" != "K9!" ]]; then
-        report_issue "error" "$file" "$first_content_line_num" \
-            "Missing K9! magic number. First non-empty line must be exactly 'K9!'"
+    if [[ "$dialect" == "plain" ]]; then
+        if [[ "$first_content_line" != "K9!" ]]; then
+            report_issue "error" "$file" "$first_content_line_num" \
+                "Missing K9! magic number. First non-empty line must be exactly 'K9!'"
+        fi
+    else
+        # Nickel dialect: a bare K9! line is a Nickel syntax error, so the
+        # marker may instead be a magic_number field or arrive by construction
+        # through a pedigree-schema import/merge (library modules, #434).
+        local has_marker=false
+        if [[ "$first_content_line" == "K9!" ]]; then
+            has_marker=true
+        elif grep -Eq '^[[:space:]]*magic_number[[:space:]]*=[[:space:]]*"K9!"' "$file"; then
+            has_marker=true
+        elif grep -Eq '(K9Pedigree|pedigree_schema)[[:space:]]*&|&[[:space:]]*(.*\.)?(K9Pedigree|pedigree_schema)|import[[:space:]]*"[^"]*\.k9\.ncl"' "$file"; then
+            has_marker=true
+        fi
+
+        if [[ "$has_marker" == "false" ]]; then
+            report_issue "error" "$file" "$first_content_line_num" \
+                "Missing K9 format marker. A .k9.ncl file needs a magic_number = \"K9!\" field, a K9! preamble line, or a K9 pedigree schema import/merge"
+        fi
     fi
 
     # --- Check 2: SPDX header ---
@@ -129,7 +189,11 @@ validate_k9() {
             "Missing SPDX-License-Identifier in first 10 lines"
     fi
 
-    # --- Check 3: Pedigree block with required fields ---
+    # --- Check 3: Pedigree presence with required fields ---
+    # File-scope scans by design (see header): Nickel factoring means the
+    # pedigree may be `pedigree = {…}`, a let-bound `let component_pedigree
+    # = {…}`, a schema merge `X.pedigree_schema & {…}` / `X.K9Pedigree &
+    # {…}`, or — plain dialect — a `metadata:`/`pedigree:` YAML block.
     local has_pedigree=false
     local has_pedigree_name=false
     local has_pedigree_version=false
@@ -137,70 +201,49 @@ validate_k9() {
     local security_level_value=""
     local security_level_line=0
     local has_signature_field=false
-    local in_pedigree=false
-    local pedigree_depth=0
 
     line_num=0
     while IFS= read -r line; do
         line_num=$((line_num + 1))
 
-        # Detect pedigree block start
-        if [[ "$line" =~ ^[[:space:]]*pedigree[[:space:]]*= ]]; then
+        # Pedigree construct, Nickel forms: direct, let-bound, schema merge
+        if [[ "$line" =~ ^[[:space:]]*(let[[:space:]]+)?[A-Za-z_]*pedigree[[:space:]]*= ]] \
+           || [[ "$line" =~ (K9Pedigree|pedigree_schema)[[:space:]]*\& ]] \
+           || [[ "$line" =~ \&[[:space:]]*([A-Za-z_][A-Za-z0-9_]*\.)?(K9Pedigree|pedigree_schema) ]]; then
             has_pedigree=true
-            in_pedigree=true
-            pedigree_depth=0
-            continue
         fi
 
-        if [[ "$in_pedigree" == "true" ]]; then
-            # Track brace depth to know when pedigree block ends
-            local opens closes
-            opens="${line//[^\{]/}"
-            closes="${line//[^\}]/}"
-            pedigree_depth=$(( pedigree_depth + ${#opens} - ${#closes} ))
-
-            if [[ $pedigree_depth -le 0 && "$has_pedigree" == "true" ]]; then
-                # Check this final line too before leaving
-                :
-            fi
-
-            # Check for name field within pedigree.metadata or pedigree directly
-            if [[ "$line" =~ ^[[:space:]]+name[[:space:]]*= ]]; then
-                has_pedigree_name=true
-            fi
-
-            # Check for version field
-            if [[ "$line" =~ ^[[:space:]]+(version|schema_version)[[:space:]]*= ]]; then
-                has_pedigree_version=true
-            fi
-
-            # Check for security level (leash field)
-            if [[ "$line" =~ ^[[:space:]]+(leash|security_level)[[:space:]]*= ]]; then
-                has_security_level=true
-                security_level_value="$(normalise_level "$line")"
-                security_level_line=$line_num
-            fi
-
-            # Check for signature fields
-            if [[ "$line" =~ ^[[:space:]]+(signature|signature_required)[[:space:]]*= ]]; then
-                has_signature_field=true
-            fi
-
-            # End of pedigree block
-            if [[ $pedigree_depth -le 0 && "$has_pedigree" == "true" && "$line" == *"}"* ]]; then
-                in_pedigree=false
-            fi
+        # Pedigree construct, plain dialect: top-level metadata:/pedigree: block
+        if [[ "$dialect" == "plain" ]] \
+           && [[ "$line" =~ ^(metadata|pedigree):[[:space:]]*$ ]]; then
+            has_pedigree=true
         fi
 
-        # Also check for signature fields outside pedigree (top-level)
-        if [[ "$line" =~ ^[[:space:]]*(signature)[[:space:]]*= ]]; then
+        # Required fields, either separator (= Nickel, : plain)
+        if [[ "$line" =~ ^[[:space:]]*name[[:space:]]*[=:] ]]; then
+            has_pedigree_name=true
+        fi
+
+        if [[ "$line" =~ ^[[:space:]]*(version|schema_version)[[:space:]]*[=:] ]]; then
+            has_pedigree_version=true
+        fi
+
+        # Security level (leash field)
+        if [[ "$line" =~ ^[[:space:]]*(leash|security_level)[[:space:]]*[=:] ]]; then
+            has_security_level=true
+            security_level_value="$(normalise_level "$line")"
+            security_level_line=$line_num
+        fi
+
+        # Signature fields
+        if [[ "$line" =~ ^[[:space:]]*(signature|signature_required)[[:space:]]*[=:] ]]; then
             has_signature_field=true
         fi
     done < "$file"
 
     if [[ "$has_pedigree" == "false" ]]; then
         report_issue "error" "$file" 1 \
-            "Missing pedigree block. K9 files must contain a 'pedigree = { ... }' section"
+            "Missing pedigree. K9 files need a pedigree section: 'pedigree = { ... }', a pedigree-schema merge, or (plain dialect) a 'metadata:' block"
     else
         if [[ "$has_pedigree_name" == "false" ]]; then
             report_issue "error" "$file" 1 \
@@ -214,7 +257,14 @@ validate_k9() {
     fi
 
     # --- Check 4: Security level validation ---
-    if [[ "$has_security_level" == "true" ]]; then
+    if [[ "$has_security_level" == "true" && "$security_level_value" =~ ^\{\{.*\}\}$ ]]; then
+        # Scaffold file: the level is a template placeholder to be filled at
+        # instantiation time. Note it, but a template cannot validate as
+        # concrete and flagging it every run just trains people to ignore
+        # the gate.
+        annotate "notice" "$file" "$security_level_line" \
+            "Security level is a template placeholder (${security_level_value}); skipping level validation"
+    elif [[ "$has_security_level" == "true" ]]; then
         local level_valid=false
         for valid in $VALID_LEVELS; do
             if [[ "$security_level_value" == "$valid" ]]; then
