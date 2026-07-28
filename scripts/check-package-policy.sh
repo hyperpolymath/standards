@@ -183,9 +183,15 @@ if [ -n "$NIX" ]; then
   echo "  guix.scm | manifest.scm | channels.scm | .guix-channel   (primary)"
   echo "  Containerfile                                            (escape hatch)"
   echo
-  echo "Do NOT simply delete the flake: a repo whose guix.scm is a scaffold stub"
+  echo "HARDENED 2026-07-28 (owner ruling): Nix is REMOVED from the estate, not"
+  echo "tolerated. Retire the flake opportunistically whenever you touch a repo."
+  echo
+  echo "But removal is not the whole job: a repo whose guix.scm is a scaffold stub"
   echo "has no working packaging once the flake is gone. Make the Guix side real"
-  echo "first, then retire the mirror (spec/scaffold-stub-debt.adoc, step 3)."
+  echo "(or fill the Containerfile, which is Podman-verifiable where Guix is not"
+  echo "installable) IN THE SAME CHANGE as retiring the mirror. Do not leave the"
+  echo "repo unpackaged, and do not allowlist the flake instead"
+  echo "(spec/scaffold-stub-debt.adoc, step 3)."
   exit 1
 fi
 
