@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: MPL-2.0
+# Allowlist Preflight — surfaces an Actions-allowlist gap as an ORDINARY red
+# check instead of an opaque, estate-wide `startup_failure` blackout.
+#
+# Under `allowed_actions: selected`, a workflow that `uses:` an un-allowlisted
+# action/reusable dies at STARTUP with no job and no log. This job uses ONLY
+# actions/checkout (github-owned, always permitted), so it can NEVER itself
+# startup-fail — it is the canary that stays runnable and reports which OTHER
+# workflows would die, and why. Ship it in every RSR repo (seeded from this
+# template) so a future org migration shows a legible red check, not a blackout.
+
+name: Allowlist Preflight
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: allowlist-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  allowlist:
+    name: Actions allowlist coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Every workflow `uses:` must be on the canonical allowlist
+        run: |
+          # Fetch the estate detector; it fetches the canonical allowlist itself.
+          curl -fsSL https://raw.githubusercontent.com/hyperpolymath/standards/main/scripts/check-allowed-actions.sh -o "${RUNNER_TEMP}/check-allowed-actions.sh"
+          bash "${RUNNER_TEMP}/check-allowed-actions.sh"
