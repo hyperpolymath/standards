@@ -65,7 +65,7 @@ You are building **a comprehensive framework for emotionally safe, technically e
    - `scorecard.yml` - OSSF Scorecard security scoring
    - `security-policy.yml` - Security checks (MD5/SHA1, HTTP URLs, hardcoded secrets)
    - `language-policy.yml` - Enforce RSR language policy
-   - `npm-bun-blocker.yml` - Block npm/bun artifacts
+   - `runtime-policy.yml` - Block npm/bun artifacts
    - `guix-nix-policy.yml` - Enforce Guix/Nix package management
    - `wellknown-enforcement.yml` - RFC 9116 and RSR .well-known validation
    - `quality.yml` - Code quality checks (TruffleHog, EditorConfig)
