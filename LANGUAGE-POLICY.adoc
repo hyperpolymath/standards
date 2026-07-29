@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Hyperpolymath Language and Packaging Policy
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toc-placement: preamble
+
+Canonical language, runtime and packaging policy for all hyperpolymath and
+metadatastician repositories. All contributors and AI agents must follow this
+document.
+
+NOTE: This document is *cited by executable gates*, not merely by prose.
+`scripts/check-package-policy.sh` names it as its authority in three places,
+including a runtime error message. Until 2026-07-29 that citation pointed at a
+file that did not exist — a gate telling readers to consult a missing document.
+Changing a rule here changes what CI enforces; do not edit casually.
+
+== 1. JavaScript / TypeScript runtimes and package managers
+
+Ordered preference. Reach for the first one that can do the job.
+
+[cols="1,3,6",options="header"]
+|===
+| Rank | Tool | When
+
+| 1 | *Bun*
+| Default for all new work. Native TypeScript execution, no build step,
+  built-in test runner and bundler.
+
+| 2 | *Deno*
+| Second position. Existing Deno projects are *grandfathered* and need not
+  migrate; prefer it over pnpm/npm when Bun genuinely cannot be used.
+
+| 3 | *pnpm*
+| Third. Only where an upstream toolchain requires a node_modules layout.
+
+| 4 | *npm*
+| Last resort. Permitted, never preferred. Reaching for npm should be a
+  deliberate, noted decision — not a default.
+|===
+
+=== 1.1 What this replaced
+
+Before 2026-07-29 the estate enforced the *inverse* of this policy through
+copied shell conditionals rather than a document. `npm-bun-blocker.yml` — present
+in 55 repositories — failed any build where `bun.lockb` existed, with the message
+"npm/bun artifacts detected. Use Deno instead."
+
+That gate blocked what is now the first-choice runtime and mandated the
+second-choice one. **The ordering above supersedes it.**
+
+=== 1.2 TypeScript
+
+TypeScript is *permitted under Bun*, which executes `.ts` directly. The former
+"use ReScript instead" rule is *retired*: ReScript is itself no longer used in
+this estate, so the gate enforcing it referred to a dead alternative.
+
+CAUTION: `ts-blocker.yml` (also 55 repositories) purported to enforce that
+retired rule and was structurally incapable of failing — it diffed against
+`HEAD~1` on a depth-1 checkout, where that ref does not exist, and swallowed the
+error. Measured: *20 of 20 runs green; it has never once fired.* A gate that
+cannot fail is worse than no gate, because it is read as evidence.
+
+== 2. Package management
+
+RULED 2026-05-18. Two tiers, in order:
+
+Primary:: *GNU Guix* — `guix.scm` and/or `manifest.scm`.
+Escape hatch:: *Sealed container* — a `Containerfile` with real build steps
+(`RUN`/`ENTRYPOINT`/`CMD`). An unfilled scaffold template does not count.
+
+=== 2.1 Nix is retired
+
+Nix was retired estate-wide on *2026-06-01*. It is not a tier and not a
+fallback. A `flake.nix` that merely mirrors a Guix manifest is drift to remove.
+
+WARNING: Do *not* mass-delete `flake.nix`. Campaign #102 hand-diffed 277
+candidates and removed exactly *one*. Fan-out REMOVE verdicts have a measured
+~100% over-call rate here. Removal is a per-repo judgement, not a sweep.
+
+=== 2.2 Identity and licence in `guix.scm`
+
+A `guix.scm` must name *its own project*. Measured 2026-07-29 across 418 repos:
+45 declared `(name "squisher-corpus")` and 64 asserted a PMPL licence while their
+own SPDX header said `MPL-2.0` — one package definition copied estate-wide,
+carrying another project's identity and licence. Both are now corrected.
+
+Use Guix's built-in licence bindings (`mpl2.0`) rather than hand-rolled licence
+records. See link:LICENCE-POLICY.adoc[LICENCE-POLICY.adoc] for which licence
+applies to which repository.
+
+== 3. Banned languages
+
+Not permitted for new work anywhere in the estate:
+
+* Python — no exceptions
+* V-lang, ATS2, ReScript
+* Go, Java/Kotlin, Swift
+* Makefiles (use `just`)
+
+CAUTION: Bans must be enforced by gates that can actually fail. Several
+"blocker" workflows in this estate have been structurally incapable of failing —
+see §1.2. When adding a gate, verify it *both* ways: that it passes on clean
+input *and* fails on a deliberately planted violation.
+
+== 4. Amending this document
+
+This file is the authority cited by `scripts/check-package-policy.sh`. If you
+change a rule here, check whether a gate needs to change with it — and whether
+a gate exists at all. A policy no gate enforces is documentation; a gate citing
+no policy is folklore.
