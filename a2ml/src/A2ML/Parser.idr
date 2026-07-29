@@ -62,11 +62,25 @@ Monad Parser where
 -- Basic Parsers
 -- ============================================================================
 
+||| Bounds-checked character lookup.
+|||
+||| `strIndex : String -> Int -> Char` is PARTIAL and returns a bare `Char` — it
+||| cannot represent "past the end of the string". The original code pattern-
+||| matched its result as `Just c` / `Nothing`, which is why `peek`, `char` and
+||| everything built on them failed to unify `Char` against `Maybe ?_`.
+|||
+||| This is total, and works in Nat directly (ParserState.position is a Nat), so
+||| no cast is needed either.
+charAt : String -> Nat -> Maybe Char
+charAt s i = case drop i (unpack s) of
+               (c :: _) => Just c
+               []       => Nothing
+
 ||| Peek at the next character without consuming
 export
 peek : Parser (Maybe Char)
 peek = MkParser $ \s =>
-  case strIndex s.input (cast s.position) of
+  case charAt s.input s.position of
     Just c => Success (Just c) s
     Nothing => Success Nothing s
 
@@ -74,7 +88,7 @@ peek = MkParser $ \s =>
 export
 char : Parser (Maybe Char)
 char = MkParser $ \s =>
-  case strIndex s.input (cast s.position) of
+  case charAt s.input s.position of
     Just c =>
       let newPos = s.position + 1
           newLine = if c == '\n' then s.line + 1 else s.line
