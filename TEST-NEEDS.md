@@ -1,5 +1,8 @@
 # TEST-NEEDS: standards
 
+## CRG Grade: B/A (Targeting)
+To achieve CRG Grades B and above, projects MUST implement **Zigzag Testing** for their critical paths, following the [ZIGZAG-TESTING.md](./ZIGZAG-TESTING.md) methodology.
+
 ## CRG Grade: C — ACHIEVED 2026-04-04
 
 All CRG C categories are present and passing. See breakdown below.
