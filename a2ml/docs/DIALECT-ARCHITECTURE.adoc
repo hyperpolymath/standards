@@ -1,0 +1,307 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= A2ML dialect architecture — canonical core, generated surfaces
+:toc: left
+:icons: font
+:sectnums:
+:status: PROPOSAL
+:date: 2026-08-03
+
+[abstract]
+== Abstract
+
+A2ML has one canonical form and three surface dialects. The canonical form is
+already normative and already exists; the surfaces are not all specified, and the
+IANA registration describes only one of them. This document states the
+architecture explicitly, identifies the single missing piece, and sets out the
+sequence to an honest submission.
+
+It also covers K9, which has the same shape and an independent blocker of its own.
+
+[IMPORTANT]
+====
+**Nothing here proposes a new design.** The architecture below is what the estate
+already does. The problem is that `SPEC.adoc` does not say so, so two of the three
+surfaces exist only by imitation and the media-type registration cannot describe
+its own corpus.
+====
+
+== 1. The organising principle
+
+A2ML is *not* a markup format with variants. It is a **typed core with surface
+projections**:
+
+....
+   surface dialects                canonical form
+   ────────────────                ──────────────
+   markup    (@directive)  ─┐
+   record    ([section])   ─┼──▶   Idris2 typed core   ──▶  proofs, attestation
+   manifest  (--- YAML)    ─┘      a2ml/src/A2ML/
+....
+
+`SPEC.adoc` §3.1 already states this and already makes the core authoritative:
+
+[quote, 'a2ml/SPEC.adoc §3.1 "Core Types (Idris2)"']
+____
+The normative Idris2 model lives in `src/A2ML/`. The shape below is informative;
+the source files are authoritative.
+____
+
+Eleven Idris2 modules implement it — `Surface.idr`, `Parser.idr`, `Translator.idr`,
+`Converters.idr`, `Profiles.idr`, `BaseVocab.idr`, `Proofs.idr` and their tests.
+The presence of `Surface.idr` *and* `Translator.idr` *and* `Converters.idr` is
+itself the evidence: the design has always assumed more than one surface mapping
+onto one core.
+
+**Consequence.** A surface dialect is legitimate exactly when it has a defined
+translation into the core. It does not need its own semantics, only its own
+grammar and mapping. That is why adding YAML- or TOML-shaped surfaces is cheap
+and safe, and why leaving one *unspecified* is not.
+
+== 2. The three surfaces, measured
+
+Census of all **1,543** `.a2ml` files in `standards`, classified by first
+non-comment, non-blank line (2026-08-03):
+
+[cols="1,3,1,2"]
+|===
+| Dialect | Surface | Files | Specified by
+
+| `manifest`
+| `---` frontmatter, `key: value` (YAML-family)
+| **913**
+| **nothing**
+
+| `record`
+| `[section]` / `[[array]]`, `key = value` (TOML-family)
+| 376
+| `a2ml/RECORD-DIALECT-SPEC.adoc`
+
+| `markup`
+| `@directive:` … `@end`, `#` headings, lists
+| 139
+| `a2ml/SPEC.adoc` §2
+
+| *(unclassified)*
+| see §2.2
+| 115
+| —
+|===
+
+`grep -niE 'frontmatter\|yaml'` across *both* specs returns **zero** hits, and
+`SPEC.adoc` §2 contains no key-value or mapping production at all — only Heading,
+DirectiveBlock, InlineDirective, List, CodeBlock and Paragraph.
+
+So the largest surface in the corpus — **59%**, more than twice the next — is
+described by no document.
+
+[NOTE]
+====
+An earlier census using a different classifier reported 906 / 456 / 154. The
+totals agree (1,543) and the ordering is unchanged; the per-dialect figures shift
+because that pass did not separate the unclassified group below. Either way the
+conclusion is the same and the manifest dialect is the largest by a wide margin.
+====
+
+`RECORD-DIALECT-SPEC.adoc` was written to fix precisely this for the record
+dialect. Its own abstract concedes that *"435 files across the estate conform to a
+grammar that existed only by imitation."* The manifest dialect is the same
+condition, unfixed and twice the size.
+
+=== 2.1 A fourth, unwritten surface
+
+115 files match none of the three. Of those, **27 open with `;` or `;;`** —
+Scheme/Lisp comment syntax. There is a small s-expression-shaped population in
+the corpus, counted by neither written spec.
+
+The remainder are prose (`**THIS…`, `This…`), stray HTML comments, a bare
+`version` line, and files whose only content is an SPDX header — i.e. files that
+are arguably not A2ML documents at all and should be triaged separately.
+
+The s-expression group matters for the design: it is evidence that surfaces
+accrete whether or not the spec permits them. A family type with a `dialect=`
+parameter accommodates that; a single type with a single grammar cannot.
+
+=== 2.2 The toolchain already works around it
+
+`a2ml/actions/validate/validate-a2ml.sh` special-cases `AI-MANIFEST*.a2ml` and `AI.a2ml` as "markdown
+prose" and skips identity checks on them. That exemption is correct as a stopgap
+and **must not be read as acceptance**: it is the validator declining to check
+913 files because there is no grammar to check them against.
+
+== 3. Why this blocks IANA
+
+The current registration (`a2ml/docs/iana/application-vnd.a2ml-registration.txt`,
+Revision 2, 2026-04-03) registers:
+
+[cols="1,3"]
+|===
+| Type | `application/vnd.a2ml`
+| Required parameters | None
+| Optional parameters | `charset` only
+|===
+
+One type, no dialect discrimination. Registering it as it stands would point IANA
+at a published specification that does not describe 59% of its own corpus, and
+would give a recipient no way to know which grammar a given document follows.
+
+**Hold the submission until §4 is done.** The application is otherwise complete
+and owner-submittable.
+
+== 4. The fix
+
+`RECORD-DIALECT-SPEC.adoc` §14 already proposes the right mechanism, and
+explicitly declines to impose it alone:
+
+[quote, 'a2ml/RECORD-DIALECT-SPEC.adoc §14']
+____
+This specification does *not* unilaterally resolve that inconsistency. It records
+only the requirement that, once the family type is registered, the record dialect
+be distinguishable from the markup dialect — RECOMMENDED via a `dialect=record`
+parameter on the family media type rather than a separate type, since both
+dialects share one core model.
+____
+
+That section also records a problem this document must not gloss: **three
+inconsistent media-type forms** are already written down across the repository —
+`application/vnd.a2ml+text`, `text/a2ml`, and `application/vnd.{format}+a2ml` —
+none of which matches the `application/vnd.a2ml` in the registration text. Those
+must be reconciled to the family type in the same pass, or the spec corpus will
+contradict the submission.
+
+Stated in full:
+
+=== 4.1 One family type, one parameter
+
+....
+application/vnd.a2ml; dialect=markup
+application/vnd.a2ml; dialect=record
+application/vnd.a2ml; dialect=manifest
+....
+
+Not three types. A2ML is one format with one core; the dialect names which
+surface grammar a given document uses to reach it.
+
+*Default.* `dialect=markup` when the parameter is absent, matching both the
+historical surface and `SPEC.adoc` §2.
+
+*Precedent.* K9 already registers an optional parameter this way —
+`security-level` with a default of `kennel`, declared advisory with the
+authoritative value inside the document. `dialect=` should follow the same
+pattern: advisory on the wire, authoritative from the document's own shape.
+
+=== 4.2 Write the manifest-dialect spec
+
+The one genuinely missing artefact. It needs:
+
+* the frontmatter delimiter rules (`---` open/close, position relative to an SPDX
+  comment header);
+* the key-value grammar and permitted scalar types;
+* nesting, sequences, and the subset of YAML deliberately *excluded* — anchors,
+  aliases, tags and multi-document streams should be out, since none appears in
+  the corpus and each is a known parser-differential risk;
+* the mapping into the Idris2 core, which is what makes it A2ML rather than YAML.
+
+Either a sibling `MANIFEST-DIALECT-SPEC.adoc` or a new section of the record spec.
+A sibling is preferable: the two grammars share nothing, and the record spec's
+abstract is already specific to its own surface.
+
+=== 4.3 Make SPEC.adoc the family root
+
+`SPEC.adoc` currently never uses the word "dialect" and does not acknowledge that
+surfaces 2 and 3 exist. It should:
+
+. name the Idris2 core as the canonical form and the surfaces as projections;
+. name all three dialects and link their specs;
+. define the `dialect=` parameter and its default;
+. state the rule from §1 — a surface is legitimate iff it defines a translation
+  into the core.
+
+That last point is what makes future surfaces (TOML-shaped, or a genuinely
+s-expression one) additive rather than fragmenting.
+
+=== 4.4 Then submit
+
+Update the registration with the family type plus `dialect=`, and submit.
+
+== 5. On generated surfaces
+
+The natural reading of §1 is that surfaces can be *generated* from the core rather
+than hand-written, and that is worth stating as intent:
+
+* A document's authoritative content is its core representation.
+* Any surface is a projection of it, chosen for the objective at hand — record
+  form where typing and diffability matter, manifest form where tooling expects
+  frontmatter, markup form for prose.
+* Round-tripping is therefore a property to be *proved*, not assumed.
+  `a2ml/src/A2ML/Proofs.idr` is where that obligation belongs, and
+  `Converters.idr` is where the projections live.
+
+This is the strongest argument for fixing the manifest dialect rather than
+tolerating it: a surface with no grammar cannot be a projection of anything,
+because there is nothing to prove the projection against.
+
+[NOTE]
+====
+`scm2a2ml` is *not* part of this picture, despite the name suggesting a fourth
+surface. It converts **legacy Scheme `.scm` metadata files into A2ML** — a
+one-way migration away from a superseded format, not an A2ML dialect. Nothing
+should be built on the assumption that `.scm` is an A2ML surface.
+====
+
+== 6. K9 — same shape, and a blocker of its own
+
+A2ML and K9 are siblings: A2ML attests documents, K9 attests components, and the
+estate uses them together. K9's structure mirrors §1 — a Nickel-typed contract
+core with `.k9` / `.k9.ncl` surfaces.
+
+Two things need settling before K9 submits, and one is independent of A2ML:
+
+=== 6.1 The spec and the application disagree on the media type
+
+[cols="2,3"]
+|===
+| `k9-svc/IANA-MEDIA-TYPE-APPLICATION.md`
+| "This revision registers **`application/vnd.k9`** without a structured syntax suffix"
+
+| `k9-svc/SPEC.adoc` line 34
+| `Standard ID \| application/vnd.k9+nickel`
+|===
+
+One drops `+nickel`; the other still declares it. Whichever is right, both must
+say the same thing before submission. **This is a live contradiction in the
+current `main`, not a design question.**
+
+Note also that the `K9!` magic line on line 1 is not valid Nickel, so a `.k9.ncl`
+file is not parseable by a stock Nickel toolchain — which is an argument for
+`application/vnd.k9` without the suffix, since `+nickel` implies exactly that
+parseability.
+
+=== 6.2 Coordinate the parameter design
+
+If A2ML adopts `dialect=` and K9 keeps `security-level=`, the two registrations
+should be written to the same pattern — optional, defaulted, advisory-on-the-wire,
+authoritative-in-document — so the pair reads as one family of decisions rather
+than two unrelated ones.
+
+== 7. Sequence
+
+. Write `MANIFEST-DIALECT-SPEC.adoc` (§4.2). *The only substantial new writing.*
+. Promote `SPEC.adoc` to family root (§4.3).
+. Add `dialect=` to the A2ML registration (§4.1).
+. Resolve the K9 spec/application contradiction (§6.1).
+. Align the two parameter designs (§6.2).
+. Submit both.
+
+Steps 1–3 are A2ML-only and independent of 4–5.
+
+== 8. What this document does not do
+
+It does not write the manifest grammar. That requires deciding which YAML subset
+is in scope, and the corpus should be surveyed for the constructs actually used
+before the grammar is fixed — writing a permissive spec first and discovering the
+corpus needs less is easier than the reverse.
+
+It also does not change any file the estate validates against. It is a design
+record, so that the next person to pick this up starts from the architecture
+rather than rediscovering it from 1,543 files.
