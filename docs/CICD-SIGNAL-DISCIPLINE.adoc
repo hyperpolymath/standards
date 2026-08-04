@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= CI/CD Signal Discipline
+:toc: macro
+:toclevels: 2
+
+toc::[]
+
+== What this is
+
+A standard for keeping continuous-integration signal *meaningful* — and for
+detecting the moment it stops being meaningful, which is the part everyone
+misses.
+
+It was written after a full census of a 424-repository estate found 6,416
+workflows producing a median of 32 status checks per repository, of which a
+mean of *1.2* actually blocked a merge. The checks were not broken. They were
+*disconnected*: they ran, they passed or failed, and nothing depended on the
+answer.
+
+It is written to be useful outside the estate that produced it. The numbers are
+a case study; the failure modes and the drift signals are general.
+
+== The failure this prevents
+
+CI decay is not usually a story of tests breaking. It is a story of signal
+losing meaning by degrees, through four mechanisms that reinforce each other.
+
+=== 1. Disconnection
+
+Checks accumulate. Requirements do not. Eventually a pull request shows thirty
+signals of which one or two gate anything, so a red mark usually means nothing.
+Contributors learn — correctly — to ignore red. From then on the board is
+decoration, and a genuine failure is invisible in the noise.
+
+*Measured:* 294 of 424 repositories had no required check at all.
+
+=== 2. Phantom requirements
+
+A branch rule requires a context string that nothing emits. The check can never
+report, so the pull request can never satisfy it, so it blocks indefinitely.
+
+The usual causes are all migrations that were half-completed:
+
+* a tool moved from a default to an advanced configuration, changing the
+  context name from `CodeQL` to `analyze (rust, none)`, without the rule being
+  updated;
+* a reusable workflow's caller renamed its job, changing the context from
+  `governance / Validate baseline` to `scan / Validate baseline`;
+* a check was deleted but its requirement was not.
+
+*Measured:* 185 phantom (repository, context) pairs across 99 repositories; 88
+of them the single string `CodeQL`.
+
+=== 3. Normalised bypass
+
+Phantom requirements block merges for days. The only escape is an administrator
+override. Once override is routine it stops signalling "something is unusual
+here" and becomes the standard way to merge — at which point genuine failures
+ride through beside the phantoms and nobody can tell the difference.
+
+*This is the mechanism by which estates silently accumulate breakage.* The
+override is a rational response to a broken gate; the damage is that it is
+indiscriminate.
+
+=== 4. Fake gates
+
+A check that cannot fail is not a check. They arrive innocently: a step that
+swallows its exit code, a scanner that skips when its toolchain is absent, a
+notifier filed among the tests. They are worse than no check, because they
+report green and are counted as coverage.
+
+*Detection:* a workflow with a substantial run history and *zero lifetime
+failures* is a candidate. Confirm before acting — some are legitimately
+incapable of failing by design, and belong in a different tier rather than the
+bin.
+
+== The four tiers
+
+Every check declares its consequence *in its own name*, so the board is
+self-explaining without opening a settings page.
+
+[cols="1,2,2,1",options="header"]
+|===
+| Prefix | Measures | Runs | Blocks a merge?
+
+| `🔴 GATE:`
+| the change
+| every pull request
+| *Always*
+
+| `🟡 CHECK:`
+| the change
+| every pull request
+| No — red is a question, not a stop
+
+| `⚪ ADVISORY:`
+| the change
+| every pull request
+| No — trend information
+
+| `📅 PERIODIC:`
+| *the repository*
+| *on a schedule against the default branch*
+| N/A — never appears on a pull request
+|===
+
+*Emoji and word together, deliberately redundant.* The word survives shell
+quoting, `grep`, ASCII tooling and mangled fonts, and is what a rule string can
+safely be matched on; the colour is what the eye finds in a list of thirty. The
+redundancy also guards a specific trap: several visually similar emoji exist
+(🔴 🟥 ⭕), so a hand-copied rule differing by an invisible variant would create a
+phantom requirement that is extremely hard to see.
+
+=== The fourth tier is the one people miss
+
+Repository-level measurements — supply-chain scores, SBOM generation, staleness
+checks, mirror pushes, notifications — measure *the repository*, not *the
+change*. Running them on every pull request is a category error. They cannot
+meaningfully pass or fail a diff, they inflate the signal count, and they train
+people to ignore the board.
+
+Move them to a schedule against the default branch, reporting to one dashboard
+or digest. One weekly posture report is better information than the same check
+appearing green on two hundred pull requests.
+
+== Invariants
+
+These must always hold. They are machine-checkable, and checking them is what
+prevents the whole standard decaying into a naming convention nobody follows.
+
+. *Every `🔴 GATE:` context is required by branch protection.*
+. *No `🟡 CHECK:`, `⚪ ADVISORY:` or `📅 PERIODIC:` context is required.*
+. *Every required context has reported at least once on the default branch
+  within the last N days* (N = 30 is a reasonable default). A requirement that
+  nothing satisfies is a phantom, whatever its name.
+. *No `📅 PERIODIC:` workflow triggers on `pull_request`.*
+. *Every gate has failed at least once in its lifetime, or carries an explicit
+  `cannot-fail-by-design` annotation naming why.*
+
+Invariant 5 is the anti-fake-gate rule. The annotation matters: some checks
+genuinely cannot fail (an opt-in notifier that no-ops without its secret), and
+the correct response is to declare that, not to pretend it is a test.
+
+== Drift signals
+
+Drift is normal. Undetected drift is the problem. Track these; each has a
+natural threshold and an obvious response.
+
+[cols="2,1,2",options="header"]
+|===
+| Signal | Healthy | Response when it moves
+
+| *Phantom requirement count* (required, never reported)
+| 0
+| Fix the requirement to the emitted string, or remove it. Never leave one.
+
+| *Gate ratio* (required contexts ÷ reported contexts)
+| roughly 1:5 to 1:10
+| Far lower means the board is decorative; far higher means merges are
+  probably blocking.
+
+| *Administrator-override merge rate*
+| near zero
+| *The best leading indicator there is.* Humans reach for the override before
+  anyone files a bug. A rising rate means a gate has become unsatisfiable.
+
+| *Distinct names per concept* (e.g. how many spellings of the security scan)
+| 1
+| Naming drift. Cheap to fix early; it is what makes rules unmaintainable by
+  hand later.
+
+| *Repositories reporting zero contexts*
+| 0
+| CI is dead there — usually a platform-level failure rather than a repository
+  one, so check for a common cause before fixing individually.
+
+| *Workflows with high run counts and zero lifetime failures*
+| declared
+| Either a fake gate, or a mis-tiered periodic/side-effect. Classify, then act.
+|===
+
+The override rate deserves emphasis. Every other signal requires someone to go
+looking. The override rate shows up in ordinary work: when people start
+force-merging routinely, the gates have already failed and nobody has said so.
+
+== Maintenance
+
+*Run the census on a schedule, not once.* A one-off audit is archaeology and is
+stale within a week. Scheduled, it becomes an instrument: it reports the drift
+signals above and names the repositories responsible.
+
+A census needs only three facts per repository, all from the platform API:
+
+. every workflow, its state, and its lifetime run and failure counts;
+. every context *required* by branch protection or rulesets;
+. every context that *actually reported* on the default branch's most recent
+  commit.
+
+Everything in this document is derived from the difference between (2) and (3),
+and from (1).
+
+Store the raw output as newline-delimited JSON: one record per repository, so a
+long run is resumable and any later question is a query rather than a re-scan.
+
+== Changing a check safely
+
+Renaming a check changes its context string, which instantly makes any rule
+requiring the old name a phantom. The sequence is therefore always:
+
+. *Add* the new context alongside the old, and let it report at least once.
+. *Require both* old and new.
+. *Drop* the old requirement.
+. *Remove* the old context.
+
+Never rename and re-require in one step. The window between them is exactly the
+outage this standard exists to prevent.
+
+For a *requirement-only* correction — where the correct context is already
+green and only the rule names the wrong string — the change is one-sided and
+safe immediately, because there is no window in which nothing reports.
+
+== Method notes
+
+Two lessons from performing this audit, both about evidence rather than CI.
+They generalise to any large-scale automated investigation.
+
+=== Never report a proxy as a finding
+
+An early conclusion — "340 workflows have never parsed" — was inferred from the
+platform API returning a file path where a workflow name was expected. The
+inference was plausible and *false*: spot-checking three of them found all three
+parsed correctly, were active, and had 519, 899 and 352 successful runs
+respectively. Acting on the finding would have deleted hundreds of working
+workflows.
+
+State the proxy explicitly, and spot-check it against ground truth before any
+number derived from it is reported — let alone acted upon.
+
+=== Distinguish "absent" from "unreadable"
+
+The same audit recorded "no applications installed" for all 424 repositories.
+The truth was that the permission to read that endpoint was missing and the
+script recorded an empty list on error. A script that conflates *could not
+read* with *nothing there* produces confident, wrong answers.
+
+Both errors have the same shape: a measurement that cannot distinguish two
+states was treated as if it could.
+
+== Applying this to an existing estate
+
+Order matters. Each step is safe alone and each makes the next cheaper.
+
+. *Census first.* Do not change anything until the difference between required
+  and reported is known.
+. *Fix phantom requirements.* One-sided, immediately safe, and it ends the
+  bypass habit — the single highest-value action available.
+. *Move repository-level checks to `📅 PERIODIC:`.* Large reduction in per-pull
+  -request noise, no renames required.
+. *Declare the tiers as data* — in each repository's manifest — before touching
+  a workflow name. Target state as data first, edits second.
+. *Add the invariant lint in report-only mode.* Its first output is the gap
+  list, which is also the work plan.
+. *Rename to tiered names*, one concept at a time, following the safe sequence.
+. *Classify and remove fake gates.* Deleting a check that cannot fail is
+  strictly better than repairing it.
