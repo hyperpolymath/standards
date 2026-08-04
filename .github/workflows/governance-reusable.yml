@@ -1012,16 +1012,38 @@ jobs:
           [ $failed -eq 1 ] && { echo "Add SPDX header + permissions:"; exit 1; }
           echo "All workflows have SPDX headers + permissions"
       - name: Check SHA-pinned actions
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          unpinned=$(grep -rnE "^[[:space:]]+uses:" .github/workflows/ | \
-            grep -v "@[a-f0-9]\{40\}" | \
-            grep -v "uses: \./\|uses: docker://\|uses: actions/github-script\|uses: hyperpolymath/standards/" || true)
-          if [ -n "$unpinned" ]; then
-            echo "ERROR: Found unpinned actions:"
-            echo "$unpinned"
-            exit 1
+          if [ -f .github/workflows/actions.lock ]; then
+            # Lockfile repos: pin authority is actions.lock (the runner
+            # enforces it), so tag-style refs are legitimate. Verify every
+            # action ref has a lockfile entry instead of grepping for SHAs.
+            gh extension install github/gh-actions-lock
+            gh actions-lock --verify-local
+            # Cross-repo reusable calls stay outside lockfile scope and must
+            # remain SHA-pinned inline (standards' own calls exempted, as in
+            # the grep below).
+            unpinned=$(grep -rnE "^[[:space:]]+uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[^@]+@" .github/workflows/ | \
+              grep -v "@[a-f0-9]\{40\}" | \
+              grep -v "uses: hyperpolymath/standards/" || true)
+            if [ -n "$unpinned" ]; then
+              echo "ERROR: reusable workflow calls not SHA-pinned:"
+              echo "$unpinned"
+              exit 1
+            fi
+            echo "Lockfile coverage verified; reusable calls SHA-pinned"
+          else
+            unpinned=$(grep -rnE "^[[:space:]]+uses:" .github/workflows/ | \
+              grep -v "@[a-f0-9]\{40\}" | \
+              grep -v "uses: \./\|uses: docker://\|uses: actions/github-script\|uses: hyperpolymath/standards/" || true)
+            if [ -n "$unpinned" ]; then
+              echo "ERROR: Found unpinned actions:"
+              echo "$unpinned"
+              exit 1
+            fi
+            echo "All actions are SHA-pinned"
           fi
-          echo "All actions are SHA-pinned"
       # The step above proves a pin has the right SHAPE. It cannot prove the
       # SHA EXISTS — a fabricated 40-hex string passes it. Measured 2026-07-28:
       # 112 of 613 unique estate pins (18%) do not resolve, in 876 committed
