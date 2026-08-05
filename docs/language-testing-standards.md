@@ -76,6 +76,57 @@ whose wrongness has evaporated.
 | R10.3 | A gate MUST NOT be promoted to blocking until a canonical-wrongness fixture demonstrates it can fail. Reviewers MUST be shown the command and its failing output, not an assurance. | MUST |
 | R10.4 | Where an error taxonomy exists, each class SHOULD have a canonical exemplar, so coverage is a join between two lists rather than a judgement. | SHOULD |
 | R10.5 | A check that genuinely cannot fail MUST be annotated `cannot-fail-by-design` with the reason, and MUST NOT be counted as a test. | MUST |
+| R10.6 | The suite MUST also assert that **valid** input is *accepted*. A fixture whose wrongness has evaporated passes silently forever; a canary suite that always fires proves nothing. | MUST |
+| R10.7 | A canonical-wrongness fixture SHOULD be **constructed at runtime**, not committed as a literal, wherever the literal would be indistinguishable from a real defect to other scanners in the repository. | SHOULD |
+| R10.8 | Where the check under test is a script, the fixture MUST exercise **that script**, not a reimplementation of its logic. | MUST |
+
+### Three ways this goes wrong in practice
+
+Each was found by writing the fixtures for gates already labelled blocking,
+2026-08-05 (`haec`, `trope-checker`, `trope-particularity-workbench`).
+
+**The fixture stops being wrong (R10.2 + R10.6).** A plaintext-HTTP canary used
+`http://data.example.net/` and did not fire — the detector excludes anything
+containing `example`. *The fixture was not actually wrong*, so the canary was
+green while proving nothing. This is the failure mode R10 exists to catch, and
+it is invisible in the surface text: nothing distinguishes a fixture that is
+correctly rejected from one that no longer qualifies. **Only the paired
+acceptance assertion of R10.6 makes the difference observable.**
+
+**The fixture is too wrong to live in the repository (R10.7).** A canary
+planting a literal 32-character fake API key in a committed file turned the
+repository's *real* secret-scanning gate red — correctly. A canonical-wrongness
+fixture is wrong on purpose, so **every other scanner reads it as a genuine
+defect**, and the result is a real gate failing on a non-problem, which trains
+people to ignore it. Build the offending string at runtime instead. The suite
+then guards itself: if the construction were ever wrong, the detection assertion
+would stop firing.
+
+**The fixture tests a copy of the check (R10.8).** A canary that re-encodes a
+gate's logic proves only that the canary agrees with itself, and drifts the
+moment the gate changes. Where the gate is a script, run the script against a
+doctored tree; where the gate is inline in CI, **extract it to a script first**.
+Extraction is not incidental tidying — doing it to `.well-known` validation
+exposed a live defect the run history could not have shown: an unparseable
+`Expires:` value skipped the entire expiry check and passed, because the checks
+sat inside `if date -d "$EXPIRES"; then …` with no `else`.
+
+### Counting failures is not evidence — and the obvious count is wrong
+
+R10.3 exists because "this gate has never failed" is ambiguous between *clean
+code* and *cannot fail*. Resist resolving that ambiguity by looking harder at
+the run history: on GitHub Actions the obvious query is actively misleading.
+
+**`/runs?status=failure` does not include `startup_failure`.** A workflow that
+has never once parsed reports **zero failures** and is indistinguishable from a
+gate that always passes. Measured 2026-08-05: one repository's quality gate
+showed "102 runs, zero failures" while **86 of its last 100 runs never
+executed**, going back two months. The same blind spot exists in
+`gh pr checks`, which shows no row at all for a parse-rejected workflow.
+
+Group `.conclusion` over `/runs?per_page=100` instead. But the deeper point is
+that no amount of counting substitutes for the fixture: **run history can only
+ever tell you a gate has not failed yet.**
 
 ### "Canonical", precisely
 
