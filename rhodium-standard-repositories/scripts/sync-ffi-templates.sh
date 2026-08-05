@@ -47,7 +47,7 @@ sync_repo() {
     if [ -f "$repo_path/ffi/zig/src/main.zig" ]; then
         echo "  Updating Zig FFI..."
         sed -e "s/{{project}}/$project_snake/g" \
-            -e "s/{{PROJECT}}/$project_screaming/g" \
+            -e "s/STANDARDS/$project_screaming/g" \
             "$ZIG_TEMPLATE" > "$repo_path/ffi/zig/src/main.zig"
     fi
 
@@ -55,7 +55,7 @@ sync_repo() {
     if [ -f "$repo_path/src/abi/Foreign.idr" ]; then
         echo "  Updating Idris2 ABI..."
         sed -e "s/{{project}}/$project_snake/g" \
-            -e "s/{{PROJECT}}/$project_screaming/g" \
+            -e "s/STANDARDS/$project_screaming/g" \
             -e "s/{{Project}}/$project_pascal/g" \
             "$IDR_TEMPLATE" > "$repo_path/src/abi/Foreign.idr"
     fi

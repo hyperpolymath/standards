@@ -140,7 +140,7 @@ validate_a2ml() {
         if [[ "$line" =~ ^[[:space:]]*(version|schema_version)[[:space:]]*[=:] ]]; then
             has_version=true
         fi
-        # Template placeholder marker ({{PROJECT_NAME}}, {{VERSION}}, …)
+        # Template placeholder marker (Hyperpolymath Standards, {{VERSION}}, …)
         if [[ "$line" == *"{{"*"}}"* ]]; then
             has_placeholders=true
         fi

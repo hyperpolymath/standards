@@ -19,8 +19,8 @@ Each section tracks a dogfooding dimension. Status key:
 
 | Fix | Scope | Commit Status |
 |-----|-------|--------------|
-| `{{OWNER}}` placeholder → `hyperpolymath` | 221 workflow files across 93 repos | PUSHED ✓ |
-| `{{CURRENT_YEAR}}` / `{{AUTHOR}}` / `{{AUTHOR_EMAIL}}` | 70 workflow files | PUSHED ✓ |
+| `hyperpolymath` placeholder → `hyperpolymath` | 221 workflow files across 93 repos | PUSHED ✓ |
+| `2026` / `Jonathan D.A. Jewell` / `j.d.a.jewell@open.ac.uk` | 70 workflow files | PUSHED ✓ |
 | gitbot-fleet Groove port 7500→8080 | `dashboard/src/groove.rs` | PUSHED ✓ |
 | dogfood-gate.yml deployed | ~260 repos | PUSHED ✓ |
 | rust-ci.yml deployed | 58 Rust repos | PUSHED ✓ |
@@ -73,7 +73,7 @@ Each section tracks a dogfooding dimension. Status key:
 
 | Status | Count | Notes |
 |--------|-------|-------|
-| WIRED (clone URL resolved) | ~200 repos | Was silently skipping due to `{{OWNER}}`; FIXED 2026-04-04 |
+| WIRED (clone URL resolved) | ~200 repos | Was silently skipping due to `hyperpolymath`; FIXED 2026-04-04 |
 | hypatia-scan.yml present | ~786 workflow paths | Includes monorepo sub-projects |
 | Missing entirely | ~80 repos | Need hypatia-scan.yml from RSR template |
 
@@ -81,7 +81,7 @@ Each section tracks a dogfooding dimension. Status key:
 
 | Status | Count | Notes |
 |--------|-------|-------|
-| WIRED (via static-analysis-gate) | ~71 repos | Was silently skipping due to `{{OWNER}}`; FIXED 2026-04-04 |
+| WIRED (via static-analysis-gate) | ~71 repos | Was silently skipping due to `hyperpolymath`; FIXED 2026-04-04 |
 | Missing entirely | ~210 repos | Need static-analysis-gate.yml from RSR template |
 
 ### dogfood-gate.yml (format compliance)
@@ -360,7 +360,7 @@ No iser is invoked in any other repo's CI, build scripts, or config files. All 2
 
 ## 7. Lessons Learned (2026-04-04)
 
-1. **Template deployment without `just init` is the #1 dogfooding blocker.** 93 repos had `{{OWNER}}` placeholders that silently disabled Hypatia and panic-attack. The tools were "deployed" but never running. **Root cause**: repos were cloned from rsr-template-repo without running the init recipe.
+1. **Template deployment without `just init` is the #1 dogfooding blocker.** 93 repos had `hyperpolymath` placeholders that silently disabled Hypatia and panic-attack. The tools were "deployed" but never running. **Root cause**: repos were cloned from rsr-template-repo without running the init recipe.
 
 2. **Silent failure is worse than loud failure.** The `continue-on-error: true` + graceful-skip pattern means broken tools don't surface. The dogfood-gate now makes warnings visible in PR summaries.
 
@@ -392,7 +392,7 @@ No iser is invoked in any other repo's CI, build scripts, or config files. All 2
 
 - [x] Verify dogfood-gate.yml runs on 3 sample repos → **~260 repos pushed, CI running estate-wide**
 - [x] Fix k9iser.toml source paths → **manifest-relative paths fixed at source in k9iser**
-- [x] Deploy hypatia-scan.yml to ~80 repos → **deployed + {{OWNER}} fixed**
+- [x] Deploy hypatia-scan.yml to ~80 repos → **deployed + hyperpolymath fixed**
 - [x] Deploy static-analysis-gate.yml → **RSR template fixed**
 - [x] Create .pre-commit-config.yaml → **deployed to ~150 repos**
 - [x] Add HYP-DOG rules to Hypatia → **DOG-001..010 in hypatia/lib/rules/dogfooding.ex**

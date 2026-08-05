@@ -117,8 +117,8 @@ match_is_marker_support_line() {
     local text="$1"
 
     [[ "$text" == *'MARKER_PATTERN='* ]] && return 0
-    [[ "$text" == *'reject_patterns = ['*'{{PROJECT}}'* ]] && return 0
-    [[ "$text" == *'description = "No {{PROJECT}}/ {{PLACEHOLDER}} tokens remain'* ]] && return 0
+    [[ "$text" == *'reject_patterns = ['*'STANDARDS'* ]] && return 0
+    [[ "$text" == *'description = "No STANDARDS/ {{PLACEHOLDER}} tokens remain'* ]] && return 0
     [[ "$text" == *'todo|fixme|hack|xxx|stub|partial'* ]] && return 0
 
     return 1

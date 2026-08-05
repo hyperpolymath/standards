@@ -50,4 +50,4 @@
 
 Template ABI removed -- was creating false impression of formal verification.
 The removed files (Types.idr, Layout.idr, Foreign.idr) contained only RSR template
-scaffolding with unresolved {{PROJECT}}/{{AUTHOR}} placeholders and no domain-specific proofs.
+scaffolding with unresolved STANDARDS/Jonathan D.A. Jewell placeholders and no domain-specific proofs.
