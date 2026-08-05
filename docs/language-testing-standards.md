@@ -44,6 +44,70 @@ documented, blocking equivalent elsewhere. Coverage numbers MUST be *reported
 with an artifact*, never merely asserted. (See the Wave-0/1 false-green
 remediation.)
 
+## R10 — Canonical wrongness (how a check is *demonstrated* to be able to fail)
+
+The anti-theatre rule states the requirement. This is the method.
+
+**A test has two components, with opposite correctness criteria:**
+
+| Component | Must be | Failure is |
+|---|---|---|
+| **The harness** — setup, invocation, assertion machinery | *perfectly good* | **loud** — a broken harness turns the test red |
+| **The canonical wrongness** — the fixture the check must reject | *reliably wrong* | **silent** — a fixture that stops being wrong turns the test **green** |
+
+For the wrongness component **the pass condition is inverted**: the test passes
+when the bad thing is *correctly rejected*. Green means "the detector caught
+it".
+
+**That asymmetry is the whole point.** If a harness breaks you see red. If a
+fixture quietly becomes valid — a schema loosened, an escape sequence
+normalised, a dependency updated — the negative test passes for the wrong
+reason, forever, reporting success. Detector and fixture drift into mutual
+agreement and are wrong together while the suite stays green. This is the
+anti-theatre failure one level down: not a gate that cannot fail, but a test
+whose wrongness has evaporated.
+
+### Requirements
+
+| # | Requirement | Level |
+|---|---|---|
+| R10.1 | Every MUST-level check SHOULD own at least one **canonical-wrongness fixture** — an input it is required to reject. | SHOULD |
+| R10.2 | The suite MUST assert that each such fixture is **rejected**, not merely that valid input is accepted. | MUST |
+| R10.3 | A gate MUST NOT be promoted to blocking until a canonical-wrongness fixture demonstrates it can fail. Reviewers MUST be shown the command and its failing output, not an assurance. | MUST |
+| R10.4 | Where an error taxonomy exists, each class SHOULD have a canonical exemplar, so coverage is a join between two lists rather than a judgement. | SHOULD |
+| R10.5 | A check that genuinely cannot fail MUST be annotated `cannot-fail-by-design` with the reason, and MUST NOT be counted as a test. | MUST |
+
+### "Canonical", precisely
+
+Not merely *a* wrong input — *the representative instance of its error class*.
+That is what makes coverage measurable: for each class in the taxonomy, is
+there an exemplar, and does the detector reject it? Where a declarative error
+registry exists (e.g. `robot-repo-automaton`'s `ERROR-CATALOG.scm`), **every
+entry owes a canonical-wrongness fixture**.
+
+### Prior art in this estate — the pattern under three different names
+
+* **IDApTIK** — `config-scenario-check` asserts *every* `bad_*.ncl` is rejected.
+  Canonical wrongness with an inverted pass condition, already gating.
+* **sim-insolvency** — the hidden-truth gate's canary points its runtime channel
+  at a deliberately non-runnable binary and asserts the gate fails. It was added
+  after that channel was found passing *vacuously* when the artifact was broken.
+* **groove** — the Bebop conformance check feeds a tampered `LeaveReason` byte
+  and asserts rejection, after the enum walker was found bounds-checking one
+  byte and never validating against the registry.
+* **`spark-theatre-gate.yml`** — "no hollow SPARK proof claims" (see R9) is the
+  same instinct applied to proofs.
+
+The pattern is proven in four places under four vocabularies. R10 names it once
+so it can be required rather than rediscovered.
+
+### Reference implementation
+
+`proven-tests-and-benches` is the estate's reference implementation of R10 and
+the source its Tier 1 / Tier 2 / Tier 3 classification is grounded in: a test is
+*Actually-Proven* when both components are demonstrated — harness correct **and**
+wrongness verifiably rejected.
+
 ## Per-language guides (required set)
 
 Each approved language SHOULD publish a guide from
@@ -111,6 +175,10 @@ repo carries the guide.
 ## Resources
 
 - `testing-and-benchmarking/TESTING-TAXONOMY.adoc` — the CRG test taxonomy.
+- `docs/CICD-SIGNAL-DISCIPLINE.adoc` — the same anti-theatre principle applied
+  to CI gates: four tiers, machine-checkable invariants, and drift signals. Its
+  "every gate must have failed at least once, or be annotated
+  `cannot-fail-by-design`" invariant is R10.3/R10.5 at the pipeline level.
 - `templates/language-testing-guide-TEMPLATE.md` — the per-language skeleton.
 - `component-readiness-grades/` · `toolchain-readiness-grades/` — testing → grade.
 
