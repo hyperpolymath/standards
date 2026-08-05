@@ -261,6 +261,76 @@ Order matters. Each step is safe alone and each makes the next cheaper.
   a workflow name. Target state as data first, edits second.
 . *Add the invariant lint in report-only mode.* Its first output is the gap
   list, which is also the work plan.
++
+NOTE: The lint now exists — `scripts/check-gate-tiers.sh`, report-only by
+default, `--strict` to exit non-zero. Its first run, 2026-08-05, is recorded
+below and is bleaker than expected.
+
+=== Measured: how much of a pull request's CI ignores the pull request
+
+Taken from a real pull request on `trope-particularity-workbench`,
+2026-08-05, by reading each triggered workflow for a `paths:` or
+`paths-ignore:` filter.
+
+*14 of the 16 checks run against the whole repository regardless of what
+changed.* Only two are change-scoped: the workflow linter and trope
+conformance.
+
+Some of that is correct — a build and a test suite should run on any change.
+But at least seven are measuring *the repository*, not the diff:
+
+* `🟡 Check: OpenSSF best-practices`
+* `🟡 Check: RSR self-use (dogfooding)`
+* `🟡 Check: Estate rules`
+* `🟡 Check: Governance metadata`
+* `🔴 Gate: Guix-only package policy`
+* `🔴 Gate: Security policy present`
+* `Runtime Policy`
+
+Each of those asks whether a file exists, or whether configuration is
+well-formed. **Neither answer can change because of a pull request that does
+not touch those files** — so running them per-pull-request buys nothing and
+costs a line on the board every time.
+
+That is the `📅 PERIODIC:` case in one measurement: not "these checks are
+unimportant" but "these checks answer a question the pull request did not
+ask". Moved to a schedule against the default branch they answer it once a
+day, feed one dashboard, and stop diluting the checks that *did* read the
+diff.
+
+The dilution is the real cost. A reviewer scanning sixteen lines to find the
+two that examined their change will eventually stop scanning — which is how a
+genuinely failing gate ends up ignored.
+
+=== First run of the invariant lint — 2026-08-05
+
+Two numbers, and they belong together.
+
+*The taxonomy is adopted in 3 repositories out of 424*: `haec`,
+`trope-checker`, `trope-particularity-workbench`.
+
+*Across those three, 21 of 21 `🔴 Gate:` checks are NOT required.*
+
+[source]
+----
+gate-tier invariant: 21 discrepancies
+  all GATE_NOT_REQUIRED — every red gate in the estate is decorative
+----
+
+So the tier work has so far changed what checks are *called* and nothing about
+what they *do*. That is not an argument against the taxonomy; it is the
+argument for the lint. A naming convention with no invariant behind it drifts
+back to whatever it was, and — worse — reads as progress while drifting.
+
+It also sharpens the ordering above. Renaming further repositories before this
+gap closes would multiply decorative labels. *Wire the existing red gates
+first, then adopt the names more widely.*
+
+The lint is deliberately advisory about matching. A workflow's check contexts
+are its *job* names, not the workflow name, so exact matching would report
+confident nonsense wherever the two differ. It substring-matches and says so,
+because a lint that overstates its certainty is the same failure as a gate that
+overstates its coverage.
 . *Rename to tiered names*, one concept at a time, following the safe sequence.
 . *Classify and remove fake gates.* Deleting a check that cannot fail is
   strictly better than repairing it.
