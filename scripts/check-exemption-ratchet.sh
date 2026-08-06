@@ -61,6 +61,12 @@ if [ -z "$BASE_REF" ]; then
 fi
 
 fail=0
+
+# Entry counting for TOML ledgers lives in a sibling script — see
+# count-ledger-entries.py for why it is not inlined. The workflow stages both
+# files together. Overridable for testing; unset is a hard error at use, never
+# a silent zero.
+COUNTER="${COUNTER:-$(dirname "$0")/count-ledger-entries.py}"
 note() { printf '  %s\n' "$*"; }
 
 # Count entries in a ledger at a given ref. Counting is per-format, because
@@ -73,6 +79,13 @@ count_at() {
   case "$path" in
     *.json)
       printf '%s' "$blob" | jq 'if type=="array" then length else 0 end' 2>/dev/null || echo 0 ;;
+    *.toml)
+      # ⚠ ENTRY counting, not line counting — see count-ledger-entries.py for
+      # why, and for why it is a separate file rather than an inline
+      # `python3 -c`. There is deliberately no `|| echo 0`: a counter that
+      # cannot run must FAIL the check, because a count of 0 is
+      # indistinguishable from an empty ledger, and empty is what passes.
+      printf '%s' "$blob" | python3 "${COUNTER:?COUNTER must point at count-ledger-entries.py}" ;;
     *)
       # Comments and blank lines are not exemptions.
       #
@@ -90,11 +103,24 @@ count_at() {
   esac
 }
 
-# Does the pull request explicitly declare that a ledger must grow?
-EXCEPTION=0
-if git log --format=%B "${BASE_REF}..HEAD" 2>/dev/null | grep -qiE '^Ratchet-exception:[[:space:]]*\S'; then
-  EXCEPTION=1
-fi
+# Does the pull request declare that a SPECIFIC ledger must grow?
+#
+# ⚠ The declaration names its ledger. A single bare `Ratchet-exception:` used
+# to license growth in ALL FOUR ledgers at once — so a PR that legitimately
+# needed to add one gitleaks path also silently gained permission to grow the
+# Hypatia baseline, the migration ledger and the root allowlist. The whole
+# point is that each addition is seen; a blanket permit defeats it.
+#
+# Accepted forms:
+#     Ratchet-exception: <ledger path> — <why>
+#     Ratchet-exception(<ledger path>): <why>
+# A declaration naming no known ledger is rejected rather than treated as
+# blanket permission, because "unparseable" must never mean "allowed".
+declared_for() {
+  local ledger="$1" msgs
+  msgs="$(git log --format=%B "${BASE_REF}..HEAD" 2>/dev/null || true)"
+  printf '%s' "$msgs" | grep -iE '^Ratchet-exception' | grep -qF "$ledger"
+}
 
 LEDGERS=(
   ".hypatia-baseline.json"
@@ -109,7 +135,7 @@ for path in "${LEDGERS[@]}"; do
   after="$(count_at "HEAD" "$path")"
   [ "$before" = "0" ] && [ "$after" = "0" ] && continue
   if [ "$after" -gt "$before" ]; then
-    if [ "$EXCEPTION" = "1" ]; then
+    if declared_for "$path"; then
       note "OK (declared)  ${path}: ${before} -> ${after}  [Ratchet-exception present]"
     else
       note "GREW           ${path}: ${before} -> ${after}"

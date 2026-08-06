@@ -39,7 +39,7 @@ expect 1 "silent growth fails"
 
 git commit -q --amend -m "grow
 
-Ratchet-exception: vendored upstream corpus"
+Ratchet-exception: .hypatia-baseline.json — vendored upstream corpus"
 expect 0 "declared growth passes"
 
 python3 - <<'PY'
@@ -49,7 +49,7 @@ json.dump(d,open('.hypatia-baseline.json','w'))
 PY
 git commit -aqm "anonymous
 
-Ratchet-exception: declared"
+Ratchet-exception: .hypatia-baseline.json — declared"
 expect 1 "anonymous entry fails even when growth is declared"
 
 git checkout -q "$BASE" -- .hypatia-baseline.json
@@ -75,6 +75,22 @@ expect 0 "comments-only ledger passes (grep no-match must not abort)"
 : > .hypatia-ignore
 git commit -aqm "empty ledger"
 expect 0 "completely empty ledger passes"
+
+# ⚠ A declaration naming ONE ledger must not license growth in the others. A
+# bare exception previously permitted all four at once, so a PR that
+# legitimately added a gitleaks path silently gained permission to grow the
+# Hypatia baseline too.
+git checkout -q "$BASE" -- .hypatia-baseline.json .hypatia-ignore
+printf 'cicd_rules/banned_language_file:src/A.res\ncicd_rules/banned_language_file:src/B.res\n' > .hypatia-ignore
+git commit -aqm "grow the migration ledger
+
+Ratchet-exception: .hypatia-baseline.json — wrong ledger named"
+expect 1 "exception naming a DIFFERENT ledger does not license this one"
+
+git commit -q --amend -m "grow the migration ledger
+
+Ratchet-exception: .hypatia-ignore — correct ledger named"
+expect 0 "exception naming THIS ledger licenses it"
 
 echo
 echo "  ${pass} passed, ${fail} failed"
