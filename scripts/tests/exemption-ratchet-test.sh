@@ -62,6 +62,20 @@ git checkout -q "$BASE" -- .hypatia-ignore
 git commit -aqm "paid down"
 expect 0 "shrinking passes"
 
+# ⚠ A ledger emptied of entries but still carrying its explanatory header is
+# the state a repository reaches when it has finished paying its debt down —
+# the SUCCESS case. grep exits 1 on no match, and under `set -euo pipefail`
+# that killed the script mid-report with exit 1, i.e. "ratchet FAILED", for a
+# repository that had done exactly the right thing. The original test suite
+# missed it because every case it exercised left at least one live entry.
+printf '# ledger header, no entries left\n# all debt paid down\n' > .hypatia-ignore
+git commit -aqm "comments-only ledger"
+expect 0 "comments-only ledger passes (grep no-match must not abort)"
+
+: > .hypatia-ignore
+git commit -aqm "empty ledger"
+expect 0 "completely empty ledger passes"
+
 echo
 echo "  ${pass} passed, ${fail} failed"
 [ "$fail" = "0" ]

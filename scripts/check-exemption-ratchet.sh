@@ -74,8 +74,19 @@ count_at() {
     *.json)
       printf '%s' "$blob" | jq 'if type=="array" then length else 0 end' 2>/dev/null || echo 0 ;;
     *)
-      # comments and blank lines are not exemptions
-      printf '%s' "$blob" | grep -vE '^\s*(#|$)' | wc -l | tr -d ' ' ;;
+      # Comments and blank lines are not exemptions.
+      #
+      # ⚠ `|| true` is LOAD-BEARING. grep exits 1 when nothing matches, which is
+      # exactly what a comments-only ledger produces — a perfectly legitimate
+      # state, and the one a repository reaches when it finishes paying its debt
+      # down. Under `set -euo pipefail` that exit propagated and killed the
+      # script mid-report: it printed the first ledger's line, then exited 1
+      # with no verdict at all. Exit 1 means "ratchet FAILED", so a repo that
+      # had cleared its ledger would be reported as violating the ratchet, with
+      # no reason given and nothing to fix. Caught by gitar-bot review, and it
+      # is the same failure class this check exists to prevent: a gate that
+      # fails for a reason unrelated to what it measures.
+      printf '%s' "$blob" | { grep -vEc '^\s*(#|$)' || true; } | tr -d ' \n' ;;
   esac
 }
 
