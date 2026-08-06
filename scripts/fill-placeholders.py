@@ -36,6 +36,28 @@ import os
 import re
 import sys
 
+# A value can be correct AND wrong depending on the slot it lands in. These
+# patterns mark lines where the text must be a machine-safe identifier or URL
+# component — a Guix channel/package name, a BibTeX cite key, a URL path, a
+# container tag. Substituting a human display name here produced, verbatim:
+#
+#     (name 'BoJ Server Mk2)
+#     url "https://github.com/x/BoJ Server Mk2"
+#     @software{BoJ Server Mk2_2026,
+#
+# all of which are syntactically invalid, and one repository managed
+# `Octad-Recover (working title — see naming section below)` in the same slots.
+SLUG_CONTEXT = re.compile(
+    r"\(name\s+['\"]"          # Guix / Scheme  (name 'foo)
+    r"|@[a-z]+\{"               # BibTeX entry key
+    r"|https?://"               # any URL
+    r"|-t\s+\S*$"               # container tag position
+    r"|^\s*(name|package|slug|id)\s*[:=]",   # manifest identifier fields
+    re.I | re.M)
+
+# A value safe to drop into an identifier or URL component.
+SLUG_SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
 # `just` uses these natively in recipe bodies; they are not template tokens.
 FOREIGN_TOKENS = {"ARGS", "invocation_directory", "justfile", "os", "arch"}
 
@@ -59,13 +81,30 @@ def _lhs_spans(line, token):
     return spans
 
 
-def substitute_line(line, mapping):
-    """Replace tokens in one line, leaving substitution LHS occurrences alone."""
+def substitute_line(line, mapping, refusals=None):
+    """Replace tokens in one line, leaving substitution LHS occurrences alone.
+
+    Refuses to place a value that is not slug-safe into an identifier or URL
+    slot, and records the refusal instead. Emitting invalid syntax silently is
+    worse than leaving the token visible: an unfilled `{{PROJECT_NAME}}` is
+    obviously unfinished, whereas `(name \'BoJ Server Mk2)` looks plausible and
+    fails later, somewhere else.
+    """
+    slug_slot = bool(SLUG_CONTEXT.search(line))
     for token, value in mapping.items():
         if token in FOREIGN_TOKENS:
             continue
         needle = "{{" + token + "}}"
         if needle not in line:
+            continue
+        if slug_slot and not SLUG_SAFE.match(value):
+            # Prefer an explicit slug if the caller supplied one.
+            slug = mapping.get("PROJECT_SLUG") or mapping.get("REPO_SLUG")
+            if slug and SLUG_SAFE.match(slug):
+                line = line.replace(needle, slug)
+                continue
+            if refusals is not None:
+                refusals.append((token, value, line.strip()[:90]))
             continue
         protected = _lhs_spans(line, token)
         if not protected:
@@ -93,7 +132,7 @@ def should_skip(path):
 
 
 def run(root, mapping, apply):
-    changed, skipped, protected_hits = [], [], 0
+    changed, skipped, protected_hits, refusals = [], [], 0, []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules")]
         for fn in filenames:
@@ -112,7 +151,7 @@ def run(root, mapping, apply):
             lines = src.splitlines(True)
             new = []
             for l in lines:
-                nl = substitute_line(l, mapping)
+                nl = substitute_line(l, mapping, refusals)
                 if nl == l and any("{{" + t + "}}" in l for t in mapping):
                     protected_hits += 1
                 new.append(nl)
@@ -121,7 +160,7 @@ def run(root, mapping, apply):
                 changed.append(rel)
                 if apply:
                     open(p, "w", encoding="utf-8").write(out)
-    return changed, skipped, protected_hits
+    return changed, skipped, protected_hits, refusals
 
 
 def main():
@@ -131,7 +170,7 @@ def main():
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args()
     mapping = json.load(open(a.map))
-    changed, skipped, prot = run(a.root, mapping, a.apply)
+    changed, skipped, prot, refusals = run(a.root, mapping, a.apply)
     print(f"  {'changed' if a.apply else 'would change'}: {len(changed)} file(s)")
     for c in changed[:20]:
         print(f"    {c}")
@@ -139,6 +178,14 @@ def main():
     for s, why in skipped[:10]:
         print(f"    {s}  — {why}")
     print(f"  occurrences left in place (substitution LHS): {prot}")
+    if refusals:
+        print(f"  REFUSED — value not slug-safe for an identifier/URL slot: {len(refusals)}")
+        for tok, val, ctx in refusals[:10]:
+            print(f"    {{{{{tok}}}}} = {val!r}")
+            print(f"      in: {ctx}")
+        print("    Supply PROJECT_SLUG (or REPO_SLUG) in the map so these slots")
+        print("    get a machine-safe value; the display name stays in prose.")
+        return 1
     return 0
 
 

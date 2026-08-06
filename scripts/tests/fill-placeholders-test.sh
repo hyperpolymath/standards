@@ -48,5 +48,34 @@ ck "template source keeps its tokens" \
 ck "just's own {{ARGS}} never touched" \
    'grep -qc "{{ARGS}}" Justfile'
 
+# --- slug slots: a value can be correct AND wrong depending on where it lands.
+# These reproduce findings from boj-server-mk2, project-ovine and squeakwell,
+# where the human display name was rendered into Guix channel names, BibTeX
+# cite keys and URLs — all syntactically invalid.
+W2="$(mktemp -d)"; cd "$W2"
+printf '{"PROJECT_NAME":"BoJ Server Mk2"}\n' > map.json
+printf "(name '{{PROJECT_NAME}})\nurl \"https://github.com/x/{{PROJECT_NAME}}\"\n@software{{{PROJECT_NAME}}_2026,\n" > guix.scm
+printf 'The {{PROJECT_NAME}} project builds things.\n' > README.md
+python3 "$S" . --map map.json --apply >/dev/null 2>&1 || true
+
+ck "display name REFUSED in a Guix (name ...) slot" \
+   'grep -q "{{PROJECT_NAME}}" guix.scm'
+ck "display name still substituted in ordinary prose" \
+   'grep -q "The BoJ Server Mk2 project" README.md'
+
+printf '{"PROJECT_NAME":"BoJ Server Mk2","PROJECT_SLUG":"boj-server-mk2"}\n' > map.json
+printf "(name '{{PROJECT_NAME}})\nurl \"https://github.com/x/{{PROJECT_NAME}}\"\n" > guix.scm
+python3 "$S" . --map map.json --apply >/dev/null 2>&1
+
+ck "with PROJECT_SLUG supplied, slug slots get the SLUG" \
+   'grep -q "(name .boj-server-mk2)" guix.scm'
+ck "and the URL gets the slug too" \
+   'grep -q "github.com/x/boj-server-mk2" guix.scm'
+
+# just's own interpolations must never be touched, mapped or not
+printf 'build -t {{project}}:latest\nrun *{{ARGS}}:\n' > Justfile
+python3 "$S" . --map map.json --apply >/dev/null 2>&1
+ck "just {{project}} interpolation survives" 'grep -q "{{project}}:latest" Justfile'
+
 echo; echo "  ${pass} passed, ${fail} failed"
 [ "$fail" = "0" ]
