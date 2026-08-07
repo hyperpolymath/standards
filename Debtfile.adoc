@@ -1,0 +1,211 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Debtfile — estate CI/CD debt register
+:toc: macro
+:toclevels: 2
+:sectanchors:
+
+Things *found and measured but not fixed*, carried between sessions.
+
+This is the human-readable companion to
+`.machine_readable/agent_instructions/debt.a2ml`. Every item below states what
+was measured, when, and *what decision it is waiting on* — because most of what
+remains is not blocked on effort, it is blocked on a ruling.
+
+NOTE: An item is removed when it is fixed, not when it is worked on. A number
+here without a date and a method is not evidence.
+
+toc::[]
+
+== How to read the numbers
+
+All figures are from a full sweep of both accounts on *2026-08-07*: 287 open
+pull requests, 171 repositories with open PRs, 91 repositories holding the
+alert-blocked PRs.
+
+[cols="4,1,6"]
+|===
+|Population |Count |Nature
+
+|PRs already mergeable-ish (CLEAN / UNSTABLE / BEHIND) |95 |need merging, not fixing
+|PRs failing a genuinely *required* check |39 |24 of them one check
+|PRs BLOCKED with *no* failing required check |147 |held by code-scanning alerts
+|Blocking-level alerts behind those |1,777 |1,200 Hypatia · 545 Scorecard · 23 Semgrep · 9 CodeQL
+|===
+
+WARNING: Failing is not blocking. 192 repositories have *zero* required checks,
+so a wall of red ticks may gate nothing while a repository with two green ticks
+is immovable. `mergeStateStatus` is the only authority.
+
+== D-1 — Scorecard alerts are orphaned and cannot be closed [DECISION NEEDED]
+
+*Measured 2026-08-07. 545 alerts, 106 repositories gate on them.*
+
+`scorecard-reusable.yml` runs with `results_format: json` and
+`publish_results: true`. It uploads an artifact and publishes to the OpenSSF
+API. *There is no `upload-sarif` step anywhere*, so code scanning never receives
+a fresh Scorecard run. The alerts in the security tab are frozen at whenever
+they were last written.
+
+.Staleness, 25-repo sample of 143 alerts
+[cols="6,2"]
+|===
+|Last updated |Alerts
+
+|within the last 31 days |7
+|2026-04-05 |24
+|2026-05-17 |10
+|2025-12-18 |8
+|===
+
+Proven end-to-end: minting `actions.lock` in `airborne-submarine-squadron` and
+re-running Scorecard left `PinnedDependenciesID` at *5 → 5* and blocking alerts
+at *22 → 22*. The alert's `updated_at` never moved from `2026-05-17`. The fix
+was real; the alert was simply never re-evaluated.
+
+IMPORTANT: `code_scanning` names Scorecard as a blocking tool on 106 of 171
+repositories. Merges are gated on evidence up to eight months old that *no code
+change can refresh*.
+
+.Options
+[cols="1,5,3"]
+|===
+|# |Action |Consequence
+
+|1 |Make the reusable emit and upload SARIF |Alerts go live and close honestly — but `Pinned-Dependencies` does not model `actions.lock`, so it keeps firing on every lockfile repo, and a live Scorecard may report *more* than the frozen set
+|2 |Drop Scorecard from the `code_scanning` rule |Score still published; stops gating merges on a tool that never reports
+|3 |Dismiss the 545 frozen alerts |Reversible and immediate; they return if (1) is done without (2)
+|===
+
+*Recommended: (2) + (3).* Revisit (1) only if `Pinned-Dependencies` is
+separately suppressed on lockfile repositories.
+
+*Waiting on:* owner ruling. A bulk dismissal attempt was refused by the
+permission classifier, correctly.
+
+== D-2 — 15 repositories are judged by a pre-fix ruleset [DECISION NEEDED]
+
+They pin the reusables to `@81dbf2dd854b1444fd6236fa2352474383b2c2b9`:
+
+[source,yaml]
+----
+uses: hyperpolymath/standards/.github/workflows/governance-reusable.yml@81dbf2dd…
+uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@81dbf2dd…
+----
+
+That commit predates the lockfile-aware branch of the SHA-pin check, so those
+repositories always take the no-lockfile branch and report `ERROR: Found
+unpinned actions:` *on repositories that have a complete, verified
+`actions.lock`*.
+
+CAUTION: A caller pinned to an old reusable *cannot be reached by any fix made
+in the reusable* — including every correction shipped in #597. Repointing is the
+only route, and it is unavoidable rather than merely tidy.
+
+The estate convention is `@main` for own-org reusables, so consumers pick up
+changes without a fan-out SHA-bump per repository; hypatia's
+`SecurityErrors.@pin_exempt` records that rationale for exactly this path.
+
+*Trade-off to accept knowingly:* a caller on `@main` runs whatever lands on
+`standards/main` the instant it merges, with no per-repo pin. The only gate is
+the standards PR itself.
+
+*Waiting on:* owner approval. The bulk repoint was refused by the permission
+classifier as a supply-chain change, correctly.
+
+== D-3 — 1,629 genuine unacknowledged findings
+
+Real engineering work, not gate plumbing. These *should* block.
+
+[cols="2,7"]
+|===
+|Count |Rule
+
+|276 |`hypatia/cicd_rules/banned_language_file`
+|142 |`hypatia/code_safety/zig_ptr_cast`
+|127 |`hypatia/migration_rules/deprecated_api`
+|105 |`PinnedDependenciesID` (repos with no lockfile — genuine)
+|104 |`hypatia/code_scanning_alerts/CSA003`
+|96 |`TokenPermissionsID`
+|76 |`hypatia/security_errors/secret_detected`
+|70 |`hypatia/workflow_audit/secret_action_without_presence_gate`
+|===
+
+WARNING: Do not sweep these. Every family examined so far has contained false
+positives better fixed in the *rule* than in the code — WF017 flagged the only
+valid secret gate; `shell_download_then_run` flagged printed advice;
+`ncl_http_url` flagged XML namespace identifiers. Sample the failure text of
+each family before writing any fix.
+
+== D-4 — 85 of 91 repositories have no Hypatia baseline
+
+Only *6 of 91* carry `.hypatia-baseline.json`. Since #597 the system is
+coherent — acknowledged findings stop blocking, unacknowledged ones block — but
+most repositories have never had the means to acknowledge anything.
+
+CAUTION: Minting baselines wholesale would acknowledge debt rather than fix it,
+which is the wrong direction. This item is recorded so the asymmetry is visible,
+*not* as a task to sweep.
+
+== D-5 — four test suites fail, and had never run before
+
+`self-test.yml` discovered only `tests/*.sh` until #588, so sixteen suites under
+`scripts/tests/` had never been executed by anything. Discovery now covers both
+roots and runs on `pull_request`.
+
+Failing locally at time of writing:
+
+* `scripts/tests/governance-gates-505-test.sh` — prints PASS lines, exits non-zero later in the file
+* `scripts/tests/wave0-false-green-test.sh` — same shape
+* `scripts/tests/wave3-scorecards-test.sh` — real assertions: `--verify failed on holding checks`, `grounded count missing`
+* `scripts/tests/wave5-language-guides-test.sh` — 5 passed, 2 failed
+
+NOTE: They pass in CI, so the local failures are environmental. Deliberately
+*not* quarantined — a red suite naming its failures is an accurate report.
+
+== D-6 — Deno CI still gates although Deno is retired
+
+`deno / Deno CI` fails on standards PRs and the estate has moved to Bun.
+`governance-reusable.yml` still runs `deno run … check-ts-allowlist.deno.js`.
+Not required anywhere, so it is noise rather than a blocker — but it is noise on
+every pull request.
+
+== D-7 — repositories skipped by guards, awaiting a human
+
+[cols="4,6"]
+|===
+|Repository |Why it was left alone
+
+|`hyperpolymath-sovereign-registry` |duplicate SPDX identifiers in a workflow — the sweep refused to guess which is authoritative
+|`phronesis` |same
+|`typefix-zero` |same
+|`awesome-idris2` |one workflow has *no* identifier and the repo's others are split MPL-2.0 / PMPL-1.0-or-later, so no unanimous licence to inherit
+|`social-media-tools` |push failed during the sweep; never opened a PR
+|`lcb-website` |no workflow files at all — a different fault wearing the `lint-workflows` name
+|===
+
+== D-8 — 58 CI-hygiene pull requests open
+
+Each mints `.github/workflows/actions.lock` and moves each workflow's *own* SPDX
+identifier to line 1. Licences preserved, never imposed — the first repository
+swept turned out to be AGPL-3.0-or-later, and a default would have mis-declared
+13 files.
+
+These are a genuine supply-chain improvement and they fix the governance linter.
+
+IMPORTANT: They will *not* move a single Scorecard alert — see D-1. Merging them
+is worth doing on its own merits, not as an alert remedy.
+
+== Closed this session, for the record
+
+* *Baseline ⊥ code-scanning double jeopardy* — the SARIF is now filtered through
+  the baseline before upload (#597). standards went `46 → 0` SARIF results and
+  *48 open Hypatia alerts → 0*.
+* *SPDX check fought `gh actions-lock`* — it tested line 1, while the tool
+  inserts its managed-by comment there on every mint. Now reads the header
+  block, as REUSE specifies. Validated against 984 real workflow files.
+* *Pin check named the wrong thing* — three failure modes shared one sentence.
+* *Exemption ratchet counted nothing* — `count-ledger-entries.py` returned *0
+  for a ledger holding 16 entries* (a `]` inside a regex ended its match), so the
+  ratchet compared 0 against 0. Ported to awk with a test named for the bug.
+* *Hypatia `unpinned_action` vs lockfiles* — 203 findings → 0 on hypatia.
