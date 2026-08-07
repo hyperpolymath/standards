@@ -30,6 +30,18 @@ struct K9Backend {
     /// LSP client handle for sending notifications (diagnostics, etc.).
     client: Client,
     /// In-memory store of open document contents, keyed by URI string.
+    // ⚠ Locked with `unwrap_or_else(|e| e.into_inner())`, never `unwrap()`.
+    //
+    // `Mutex::lock` fails only when the mutex is POISONED — i.e. some other
+    // request handler panicked while holding it. Unwrapping there converts one
+    // panicked request into a permanently dead language server: every
+    // subsequent request panics on the same poisoned lock, and the editor
+    // loses completions, hover and diagnostics for the rest of the session.
+    //
+    // Recovering the guard is right for THIS data specifically: it is a cache
+    // of document text keyed by URI. The worst a panic mid-update can leave is
+    // one stale or partial entry, which the next didChange overwrites wholesale.
+    // There is no invariant across entries to violate.
     documents: Mutex<HashMap<String, String>>,
 }
 
@@ -80,7 +92,7 @@ impl LanguageServer for K9Backend {
         let text = params.text_document.text.clone();
 
         {
-            let mut docs = self.documents.lock().unwrap();
+            let mut docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
             docs.insert(uri.clone(), text.clone());
         }
 
@@ -97,7 +109,7 @@ impl LanguageServer for K9Backend {
         if let Some(change) = params.content_changes.into_iter().last() {
             let text = change.text.clone();
             {
-                let mut docs = self.documents.lock().unwrap();
+                let mut docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
                 docs.insert(uri, text.clone());
             }
 
@@ -110,7 +122,7 @@ impl LanguageServer for K9Backend {
 
     /// Called when a document is closed — removes it from the in-memory store.
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let mut docs = self.documents.lock().unwrap();
+        let mut docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
         docs.remove(&params.text_document.uri.to_string());
     }
 
@@ -120,7 +132,7 @@ impl LanguageServer for K9Backend {
         let uri = params.text_document_position.text_document.uri.to_string();
         let position = params.text_document_position.position;
 
-        let docs = self.documents.lock().unwrap();
+        let docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
         let text = match docs.get(&uri) {
             Some(t) => t.clone(),
             None => return Ok(None),
@@ -140,7 +152,7 @@ impl LanguageServer for K9Backend {
             .to_string();
         let position = params.text_document_position_params.position;
 
-        let docs = self.documents.lock().unwrap();
+        let docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
         let text = match docs.get(&uri) {
             Some(t) => t.clone(),
             None => return Ok(None),

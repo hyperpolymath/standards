@@ -41,7 +41,50 @@ useDefault = true
 [allowlist]
 description = "Estate baseline: dependency metadata, anchored placeholder shapes, published test vectors"
 
+# ⚠ KNOWN LIMIT OF THE `regexes` SECTION BELOW — READ BEFORE ADDING ONE.
+#
+# gitleaks 8.18.4 matches these allowlist regexes against the finding's MATCH
+# (the whole matched span, including surrounding context), NOT against the
+# extracted secret. Setting `regexTarget` does not change this — measured with
+# all three documented values, "secret", "match" and unset, on an EXACT-value
+# entry:
+#
+#     regexTarget unset / "secret" / "match", regex matching the SECRET
+#         -> NOT suppressed
+#     regexTarget "match",                    regex matching the MATCH
+#         -> suppressed
+#
+# CONSEQUENCE. An anchored `^value$` entry only works for rules whose match
+# IS the secret — `aws-access-token` and the other prefix rules. For
+# `generic-api-key`, whose match spans the surrounding assignment (the key
+# name, the separator and the quotes) and not just the value, an anchored
+# entry is silently INERT: it neither errors nor warns, it simply never fires.
+# `generic-api-key` is the estate's single largest source of false positives
+# (62 of the 140 measured on 2026-08-06), so this is exactly the rule the
+# regexes are most wanted for.
+#
+# So: for a `generic-api-key` false positive, prefer a PATH entry in the
+# owning repository's own `.gitleaks.toml`, where the exemption is local and
+# its justification sits beside the code. Do not add an anchored value regex
+# here and assume it took effect — verify it, the failure is silent.
+
 paths = [
+  # The estate baseline ITSELF, staged into the workspace root by
+  # secret-scanner-reusable.yml so that a repo-local `.gitleaks.toml` can
+  # `[extend] path = ".gitleaks-estate.toml"` and inherit everything here.
+  #
+  # Without this entry the file detonates on itself: its anchored example
+  # regexes (RFC 8032 vectors, masked-token shapes) are credential-SHAPED by
+  # construction, so `generic-api-key` fires on the config and EVERY repo using
+  # it goes red. Measured, not theoretical — same failure class as the
+  # self-detonating template block that tripped the mint e2e guard.
+  '''(^|/)\.gitleaks-estate\.toml$''',
+
+  # Vendored package-manager bundles. Yarn's "zero-install" workflow commits a
+  # published, checksum-pinned release binary; the high-entropy runs inside it
+  # are minified third-party code, not estate source, and cannot be edited
+  # meaningfully. Same category as a lockfile.
+  '''(^|/)\.yarn/releases/''',
   # Lockfiles: the "secrets" are SHA-256 *integrity hashes* of public registry
   # modules. A lockfile has no legitimate reason to contain a credential.
   '''(^|/)deno\.lock$''',
