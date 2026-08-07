@@ -1226,3 +1226,53 @@ jobs:
           rm -rf .standards-checkout
           bash "$RUNNER_TEMP/check-exemption-ratchet.sh" \
             "${{ github.event.pull_request.base.sha }}"
+
+  debt-ratchet:
+    name: Debt ratchet
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    # Sibling to exemption-ratchet, and pull-request-only for the same reason:
+    # the check compares ceilings against a BASE. The two govern different
+    # populations — the exemption ratchet watches debt you have EXCUSED, this
+    # one watches debt you have MEASURED.
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          # Full history: the ratchet reads the Debtfile at the base ref and
+          # scans commit messages between base and HEAD for a declared
+          # exception. A shallow clone has neither.
+          fetch-depth: 0
+
+      - name: Check out standards repo for shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Debt ratchet
+        run: |
+          set -euo pipefail
+          # Stage the scripts OUT of the scanned tree and delete the checkout,
+          # so the ratchet only ever reads the CALLER's Debtfile — standards
+          # has one of its own and it is not this repository's.
+          cp .standards-checkout/scripts/check-debt-ratchet.sh \
+             .standards-checkout/scripts/check-debtfile-structure.sh "$RUNNER_TEMP/"
+          rm -rf .standards-checkout
+
+          # A repo with no Debtfile is not in violation — adoption is opt-in.
+          # But a repo that HAS one must have a well-formed one, or the ratchet
+          # would be comparing ceilings it could not parse.
+          if [ -f .machine_readable/Debtfile.a2ml ]; then
+            bash "$RUNNER_TEMP/check-debtfile-structure.sh"
+          fi
+          bash "$RUNNER_TEMP/check-debt-ratchet.sh" \
+            "${{ github.event.pull_request.base.sha }}"

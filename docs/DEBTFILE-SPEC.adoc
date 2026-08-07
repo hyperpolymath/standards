@@ -1,0 +1,311 @@
+// SPDX-License-Identifier: MPL-2.0
+= Debtfile Specification
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v1.0.0, 2026-08-07
+:toc:
+:toclevels: 3
+
+== Why this exists
+
+A GitHub issue is a *boolean*: open or closed. A great deal of what this estate
+tracks in issues is an *integer* that changes every week.
+
+An audit of the estate's 697 open issues on 2026-08-07 found the consequences:
+
+[cols="3,2,2,3"]
+|===
+|Issue |Claimed |Measured 2026-08-07 |
+
+|`standards#309` |~45 banned `.py` files |*176* |wrong by ~4×, unchallenged for ten weeks
+|`standards#308` |~12,000 PMPL headers |*4,968* |59% paid down, unrecorded
+|`reposystem#138` |Nix in 63 repos |*67* |grew, unnoticed
+|===
+
+The purest form was `.git-private-farm`, where a bot minted the same
+measurement as a *new issue* on every run — `rustsec: 138 advisories`, then
+`136`, then `139`, then `156`, `156`, `155` — six issues, plus three more for
+mirror drift. Nine issues that should have been two entries with a time series.
+
+A Debtfile holds the integer, so the issue tracker can go back to holding
+booleans.
+
+== Relationship to the Mustfile
+
+[cols="1,2,2"]
+|===
+| |`Mustfile.a2ml` |`Debtfile.a2ml`
+
+|Asserts |a boolean |a monotone-decreasing integer
+|Means |"this invariant holds" |"this much shortfall is tolerated"
+|On breach |the build fails |the ratchet fails
+|Leaves the file when |never — invariants are permanent |the count reaches zero
+|===
+
+The two are deliberately parallel. `Debtfile.a2ml` uses the same `### <id>`
+block shape as `Mustfile.a2ml`, so the parsers agree and a reader who knows one
+knows the other.
+
+== Why it is not a contractile
+
+The name fits the contractile convention exactly — `Mustfile.a2ml`,
+`Trustfile.a2ml`, `Bustfile.a2ml`, `Dustfile.a2ml`, `Intentfile.a2ml`. The
+placement does not, for four reasons established 2026-08-07:
+
+. *The contractile CLI does not exist.* `reposystem/contractiles/cli/` — named
+  by both `must.ncl` and `CONTRACTILE-SPEC.adoc` — is an empty directory. Five
+  of the six verbs have no runner at all.
+. *Only `must` executes*, and it does so via hand-written bash
+  (`check-mustfile-structure.sh`, `run-mustfile.sh`) that bypasses the missing
+  CLI. That is the pattern this specification copies.
+. *`EXEMPTION-MECHANISMS.adoc` rejects declarations with no reader.* Its
+  anti-patterns section refuses `.hypatia-ignore` because it is "never read by
+  anything". A seventh contractile verb would be exactly that.
+. *No existing verb fits.* `bust` is fault-injection and recovery drills;
+  `dust` is exnovation candidates; `intend` is roadmap intents. Debt straddles
+  `dust` and `intend` and is neither.
+
+If the contractile CLI is ever built, `Debtfile.a2ml` can be absorbed as the
+`debt` verb without a rename.
+
+== What it replaces
+
+This is not a sixth mechanism. It is the normalisation of two the estate
+already invented, plus the retirement of a bot behaviour.
+
+[cols="2,1,2"]
+|===
+|Convention |Reach |Fate
+
+|`debt.a2ml` — `[[debt.should]]` / `[[debt.could]]`, ADR-002
+|4 repos
+|migrated in
+
+|Exemption Layer 4b — a Markdown table inside `.claude/CLAUDE.md`, rows
+`\| <glob> \| <count> \| <rationale> \| <unblock-condition> \|`, matched by regex
+|19 repos
+|migrated in
+
+|Bot-minted measurement issues
+|`.git-private-farm` and others
+|replaced
+|===
+
+== File format
+
+Location: `.machine_readable/Debtfile.a2ml`, one per repository.
+
+[source]
+----
+### <entry-id>
+- description: <what this debt is, in one line>
+- probe: <shell command printing a single non-negative integer>
+- count: <last measured value — MACHINE-WRITTEN>
+- ceiling: <maximum tolerated — MACHINE-WRITTEN downward only>
+- severity: critical | high | medium | low
+- policy: remediable | flag-only
+- tri: eliminate | substitute | control      (optional, Safety Triangle)
+- tracking: <owner/repo#N>                   (optional)
+- accepted-until: YYYY-MM-DD
+----
+
+`## <Section>` headings group entries and are otherwise ignored.
+
+=== Fields
+
+`probe`:: A shell command emitting one non-negative integer on stdout. This is
+the field that makes the entry a claim rather than folklore. See
+<<probe-discipline>>.
+
+`count`:: The last measured value. Written by `run-debtfile.sh --write`. Hand-
+editing this to make a gate pass is the one thing the mechanism exists to
+prevent.
+
+`ceiling`:: The maximum tolerated. The runner lowers it automatically when debt
+is paid down; nothing raises it except a human with a declaration.
+
+`policy`:: `remediable` — automation may open PRs against this. `flag-only` —
+*measure and report only, never act*. Licensing debt is always `flag-only`,
+per the standing owner directive in `.claude/CLAUDE.md`: licence changes are
+manual, per-file and owner-only, and every prior bulk sweep scrambled
+identifiers or reverted owner decisions.
+
+`accepted-until`:: An expiry. Once passed, the entry fails the runner even while
+holding under its ceiling. Debt without an expiry is debt nobody revisits — the
+697-issue pile is what that looks like.
+
+[[probe-discipline]]
+== Probe discipline
+
+=== No fallback
+
+A probe that fails to run, exits non-zero, or prints anything but an integer is
+a *hard failure*. There is deliberately no `|| echo 0`.
+
+A counter that returns 0 on error is indistinguishable from zero debt, and zero
+is the state that passes. Every gate in this estate that ever lied did it this
+way — the `just proof-check` recipe exiting 0 with no prover installed, the
+linter that never parsed its input, the ledger counter whose `grep -c` returned
+1 on an all-comments file and killed its own script mid-report.
+
+=== Shell and awk, not Python or a JS runtime
+
+Python is banned estate-wide. The JS runtime has already moved once
+(Deno to Bun). Probes and runners are POSIX-ish shell.
+
+=== A naive probe manufactures debt
+
+Three candidate probes were written and rejected during this specification's own
+authoring, each of which reported debt that did not exist:
+
+[cols="2,3"]
+|===
+|Probe |What it actually matched
+
+|`uses:` lines without a 40-character SHA
+|Usage examples inside `#` comments in `codeql-reusable.yml`
+
+|Scripts containing `python3`
+|A comment in `check-exemption-ratchet.sh` explaining why it does *not* use python3
+
+|Scripts with no matching `scripts/tests/<name>-test.sh`
+|The test files themselves, plus scripts whose test uses a shortened name
+|===
+
+Two of the three matched *comments*. This is the same failure class as the
+Hypatia `unwrap` rule matching comments and the GitHub-Actions log grep matching
+the echoed `run:` source.
+
+Rules that follow:
+
+* Prefer `git ls-files` (structural) over `git grep` (textual) wherever the
+  question can be asked structurally.
+* A probe must respect the carve-outs the corresponding policy already grants.
+  `standards` has four `.ts` files and *zero* TypeScript debt, because all four
+  are in documented exemption classes.
+* Validate a new probe against a hand-checked number before committing it.
+
+=== The register must not count itself
+
+A textual probe will match the Debtfile entry that describes it, and the
+specification that documents it. Both files necessarily contain the very string
+being searched for.
+
+This was not hypothetical: the first live run of this Debtfile reported
+`todo-fixme-markers` at 278 against a ceiling of 277, and
+`pmpl-licence-headers` at 590 against 589. Both breaches were caused by the act
+of writing the entries down. Writing a `## Banned languages` heading into a
+register is not a banned language.
+
+Every textual probe therefore excludes the register and its spec:
+
+[source]
+----
+- probe: git grep -l 'PMPL-1\.0' -- . \
+         ':(exclude).machine_readable/Debtfile.a2ml' \
+         ':(exclude)docs/DEBTFILE-SPEC.adoc' | wc -l
+----
+
+=== Probes measure tracked files
+
+`git ls-files` and `git grep` read the index, not the working tree. A probe
+therefore measures what is committed or staged. This is the correct behaviour
+for a PR gate, but it means a brand-new untracked file is invisible until added.
+
+== The runner
+
+`scripts/run-debtfile.sh [--write] [path]`
+
+[cols="2,3"]
+|===
+|Condition |Result
+
+|`measured > ceiling` |❌ BREACH — exit 1
+|`measured < ceiling` |✅ PAID — with `--write`, the ceiling follows it down
+|`measured == 0` |🎉 RESOLVED
+|`measured == ceiling` |· HOLDING
+|probe fails / non-integer |💥 PROBEFAIL — exit 1
+|`accepted-until` passed |⏰ EXPIRED — exit 1
+|===
+
+`--write` never raises a ceiling. Raising one is a deliberate act that must go
+through the ratchet's declaration.
+
+== The ratchet
+
+`scripts/check-debt-ratchet.sh <base-ref> [path]`
+
+Sibling to `check-exemption-ratchet.sh`. The two govern different populations:
+
+* *exemption ratchet* — debt you have **excused** (baseline, ignores,
+  allowlists). "Did you quietly excuse more?"
+* *debt ratchet* — debt you have **measured** (`Debtfile.a2ml`). "Did the
+  number go up?"
+
+Three rules:
+
+. *No silent raise.* A ceiling may fall freely; raising one needs a declaration.
+. *No silent deletion.* An entry leaves by reaching zero, not by being deleted.
+  Deletion is how measured debt becomes invisible debt — the exact analogue of
+  the `**` wildcard the exemption ratchet rejects in the migration ledger.
+. *Adding an entry is free.* Recording new debt is the behaviour to encourage;
+  it needs no ceremony.
+
+=== Declaration
+
+[source]
+----
+Debt-exception: <entry id> — <why>
+Debt-exception(<entry id>): <why>
+----
+
+A declaration naming no known entry is *rejected*, not treated as blanket
+permission, because "unparseable" must never mean "allowed". This is the bug the
+exemption ratchet shipped with and had to fix: one bare `Ratchet-exception:`
+licensed growth in all four ledgers at once.
+
+A declaration is scoped to the *pull request*, not to a commit — the ratchet
+scans every commit message in `base..HEAD`.
+
+== CI wiring
+
+Job `debt-ratchet` in `.github/workflows/governance-reusable.yml`, so every
+caller repository picks it up on its next run with no per-repo PR.
+
+Pull-request-only, for the same reason as the exemption ratchet: the check needs
+a base to compare against.
+
+Tier *🟡 CHECK* per `docs/CICD-SIGNAL-DISCIPLINE.adoc` — it MUST NOT be a
+required status check. Promotion to 🔴 GATE is deliberate and comes only after
+the measure cycle has run cleanly for two consecutive weeks.
+
+A repository with no `Debtfile.a2ml` is not in violation; adoption is opt-in.
+A repository that has one must have a well-formed one.
+
+== Recipes
+
+[source]
+----
+just debtfile-check       # structural validation
+just debt-measure         # re-measure, read-only
+just debt-ratchet-down    # re-measure and write back (lowers ceilings only)
+----
+
+== Tests
+
+Three suites under `scripts/tests/`, discovered automatically by
+`.github/workflows/self-test.yml`:
+
+* `debtfile-structure-test.sh` — 14 cases
+* `run-debtfile-test.sh` — 16 cases
+* `debt-ratchet-test.sh` — 12 cases
+
+Every suite exists to prove its gate *can fail*. This estate's recurring defect
+is the gate that cannot. Each was mutation-tested during authoring: flipping a
+single expectation must turn the suite red.
+
+== See also
+
+* `docs/EXEMPTION-MECHANISMS.adoc` — the four exemption ledgers and their ratchet
+* `docs/CONTRACTILE-SPEC.adoc` — the contractile convention this borrows its shape from
+* `docs/CICD-SIGNAL-DISCIPLINE.adoc` — the four gate tiers
+* `scripts/count-ledger-entries.sh` — the no-fallback rule, stated for ledgers
