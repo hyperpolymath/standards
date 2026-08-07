@@ -450,7 +450,12 @@ fn is_thematic_break(line: &str) -> bool {
     if trimmed.len() < 3 {
         return false;
     }
-    let first = trimmed.chars().next().unwrap();
+    // let-else rather than unwrap: the `len() < 3` guard above makes this
+    // infallible today, but the guard and the unwrap are separate statements
+    // and nothing keeps them in step if either is edited.
+    let Some(first) = trimmed.chars().next() else {
+        return false;
+    };
     (first == '-' || first == '*' || first == '_') && trimmed.chars().all(|c| c == first)
 }
 
