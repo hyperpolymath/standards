@@ -8,6 +8,7 @@
 //
 // Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
+use std::sync::LazyLock;
 use regex::Regex;
 use tower_lsp::lsp_types::*;
 
@@ -290,11 +291,28 @@ pub fn provide_hover(text: &str, position: Position) -> Option<Hover> {
 
 // ── Sub-providers ────────────────────────────────────────────────────
 
+// Literal patterns, compiled once.
+//
+// These were `Regex::new(<literal>).unwrap()` inside the functions below,
+// which recompiled the pattern on every hover request and panicked the LSP
+// task if the literal were ever malformed. Hoisting to a `LazyLock` compiles
+// each pattern once, and `expect` states the invariant being relied on: the
+// pattern is a compile-time constant, so a failure here is a programming
+// error, not a runtime condition.
+static DIRECTIVE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"@([A-Za-z][A-Za-z0-9_-]*)").expect("DIRECTIVE_RE is a valid literal pattern")
+});
+
+static SECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\[([A-Za-z][A-Za-z0-9_-]*)\]\s*$")
+        .expect("SECTION_RE is a valid literal pattern")
+});
+
 /// Check whether the cursor is on an `@directive` name and return its docs.
 fn directive_hover(line: &str, position: Position) -> Option<Hover> {
     // Match `@name` anywhere on the line.  We check whether the cursor column
     // falls within the match span.
-    let re = Regex::new(r"@([A-Za-z][A-Za-z0-9_-]*)").unwrap();
+    let re = &*DIRECTIVE_RE;
     let col = position.character as usize;
 
     for mat in re.find_iter(line) {
@@ -322,11 +340,13 @@ fn directive_hover(line: &str, position: Position) -> Option<Hover> {
 
 /// Check whether the cursor is on a `[section]` header and return its docs.
 fn section_hover(line: &str, position: Position) -> Option<Hover> {
-    let re = Regex::new(r"^\[([A-Za-z][A-Za-z0-9_-]*)\]\s*$").unwrap();
+    let re = &*SECTION_RE;
     let trimmed = line.trim();
 
     if let Some(caps) = re.captures(trimmed) {
-        let name = caps.get(1).unwrap().as_str();
+        // `?`, not unwrap: a panicking hover handler takes the editor's
+        // language features down for the rest of the session.
+        let name = caps.get(1)?.as_str();
 
         if let Some(doc) = SECTION_DOCS.iter().find(|s| s.name == name) {
             return Some(Hover {
