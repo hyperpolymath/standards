@@ -70,7 +70,7 @@ rm -rf node_modules
 Confirm these entries are present (RSR canonical template propagates them — see `docs/JS-RUNTIME-POLICY.adoc §Canonical .gitignore Entries`):
 
 ```
-# npm-avoidant (standards#67): estate JS-runtime policy is Deno>Bun>pnpm>npm.
+# npm-avoidant (standards#67): estate JS-runtime policy is Bun>Deno>pnpm>npm.
 package-lock.json
 **/package-lock.json
 node_modules/

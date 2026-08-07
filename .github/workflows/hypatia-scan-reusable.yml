@@ -123,6 +123,69 @@ jobs:
           echo "| Medium   | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
           echo "| **Total**| $FINDING_COUNT |" >> $GITHUB_STEP_SUMMARY
 
+      - name: Relativize finding paths
+        if: always()
+        run: |
+          # Hoisted out of the gate step so the SARIF filter and the gate share
+          # ONE definition of a finding's path. code_safety / honest_completion
+          # emit ABSOLUTE host paths in .file (Path.expand(repo)) while the
+          # baseline uses repo-relative paths; without this they never match
+          # (hypatia#566 stopgap).
+          if [ -f hypatia-findings.json ]; then
+            jq --arg root "$PWD" '
+              map(if (.file? // "") == $root then .file = "."
+                  elif (.file? // "") | startswith($root + "/")
+                  then .file = (.file | ltrimstr($root + "/"))
+                  else . end)
+            ' hypatia-findings.json > hypatia-findings.relativized.json
+          fi
+
+      - name: Check out standards for the SARIF baseline filter
+        id: fetch_filter
+        # ⚠ continue-on-error is on the CHECKOUT, never on the check. If the
+        # fetch fails the next step still runs and says so; putting the flag on
+        # the filter itself would produce exactly the fake gate this estate
+        # keeps finding. Pinned to main because github.workflow_sha resolves to
+        # the CALLER's SHA, which would 404 here.
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Filter SARIF through the baseline before upload
+        if: always()
+        run: |
+          # ⚠ WITHOUT THIS, ACKNOWLEDGING A FINDING DOES NOT UNBLOCK ANYTHING.
+          # A finding travelled two paths that never met: the gate filtered
+          # findings.json through the baseline, while the SARIF went to code
+          # scanning UNFILTERED. The `code_scanning` ruleset rule blocks on
+          # those alerts and has no knowledge of the baseline, so a pull
+          # request stayed BLOCKED with every required check green and nothing
+          # to point at.
+          #
+          # Measured 2026-08-07: 147 open pull requests across 91 repositories
+          # were held this way by 1,777 alerts, ZERO of which were introduced
+          # by the pull request they blocked.
+          #
+          # The filter FAILS OPEN in every error path — an unfiltered upload is
+          # a safe failure, a silently over-filtered one hides real alerts.
+          if [ -f .standards-checkout/scripts/filter-sarif-by-baseline.sh ]; then
+            FILTER=.standards-checkout/scripts/filter-sarif-by-baseline.sh
+          elif [ -f scripts/filter-sarif-by-baseline.sh ]; then
+            FILTER=scripts/filter-sarif-by-baseline.sh
+          else
+            echo "  filter script unavailable — SARIF uploaded unfiltered"; exit 0
+          fi
+          # Use the CALLER's apply-baseline.sh — the same copy the gate runs,
+          # so the SARIF and the gate cannot disagree about what is acknowledged.
+          APPLY_BASELINE=scripts/apply-baseline.sh \
+            bash "$FILTER" hypatia.sarif hypatia-findings.relativized.json .hypatia-baseline.json
+
       - name: Upload SARIF to code scanning
         if: always()
         # NOTE: this does NOT make under-permissioned callers "skip gracefully".
@@ -170,17 +233,10 @@ jobs:
           # itself the moment a baseline lands (standards#399/#437/#446).
           if [ -f scripts/apply-baseline.sh ] && [ -f .hypatia-baseline.json ]; then
             echo "Baseline present — running BLOCKING gate (threshold: high)."
-            # Relativize finding paths before matching (hypatia#566 stopgap):
-            # code_safety / honest_completion emit ABSOLUTE host paths in .file
-            # (Path.expand(repo)); the baseline uses repo-relative paths, so without
-            # this they never match and the gate fails on already-acknowledged
-            # findings. Mirrors governance-reusable.yml, which relativizes identically.
-            jq --arg root "$PWD" '
-              map(if (.file? // "") == $root then .file = "."
-                  elif (.file? // "") | startswith($root + "/")
-                  then .file = (.file | ltrimstr($root + "/"))
-                  else . end)
-            ' hypatia-findings.json > hypatia-findings.relativized.json
+            # Paths were relativized in an earlier step so the SARIF filter and
+            # this gate agree on what a finding's path is. Two definitions of
+            # "the same finding" is how the baseline came to mean one thing to
+            # the gate and nothing to the security tab.
             bash scripts/apply-baseline.sh hypatia-findings.relativized.json .hypatia-baseline.json blocking
           else
             echo "No committed baseline — gate stays advisory (see next step)."
