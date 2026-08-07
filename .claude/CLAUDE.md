@@ -8,7 +8,7 @@
 > agpl-3.0-or-later is for those shared with my son, and leave other
 > people's forked stuff alone … only palimpsest license for obvious
 > reasons should be talking about palipsest and palimpsest plasma, and
-> consent-aware-http, but in that case prospectively"
+> metadatastician/consent-aware-web, but in that case prospectively"
 
 ### Five-way classification (mutually exclusive, exhaustive)
 
@@ -18,7 +18,7 @@
 | **2. The 007 repo** | All Rights Reserved (ARR) | `hyperpolymath/007` specifically. Out-of-scope for any normalisation, scanning, or labelling. Surface to owner only. |
 | **3. Shared with son (Joshua)** | `AGPL-3.0-or-later` | Repos with son as co-author/maintainer. Examples: `idaptik`, `paint-type`. Permanent. |
 | **4. Third-party / forks** | DO NOT TOUCH | Whatever upstream chose. Never sweep, never normalise. Flag as out-of-scope if it surfaces in an audit. |
-| **5. Palimpsest carve-out (extremely narrow)** | `PMPL-1.0-or-later` | EXACTLY three repos: `palimpsest-license` + `palimpsest-plasma` + `consent-aware-http`. The first two retroactively; `consent-aware-http` **prospectively only** (don't flip existing content). NOWHERE ELSE. |
+| **5. Palimpsest carve-out (extremely narrow)** | `PMPL-1.0-or-later` | EXACTLY three repos: `palimpsest-license` + `palimpsest-plasma` + `metadatastician/consent-aware-web`. The first two retroactively; `metadatastician/consent-aware-web` **prospectively only** (don't flip existing content). NOWHERE ELSE. |
 
 ### Hard rules for agents
 

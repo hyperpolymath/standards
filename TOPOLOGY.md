@@ -47,7 +47,7 @@
 | AVOW Protocol | [`avow-protocol/`](avow-protocol/) | consent-attested messaging / origin attribution |
 | AXEL Protocol | [`axel-protocol/`](axel-protocol/) | age-gating + explicit-content enforcement |
 | Overlay Protocol | [`overlay-protocol/`](overlay-protocol/) | layered overlay composition spec |
-| Consent-Aware HTTP | [`consent-aware-http/`](consent-aware-http/) | consent headers / AI-usage boundaries for HTTP |
+| Consent-Aware Web (AIBDP + HTTP 430) | [`metadatastician/consent-aware-web`](https://github.com/metadatastician/consent-aware-web/blob/main/README.adoc) `@ v0.2.0` ⇗ | consent headers / AI-usage boundaries for HTTP; extracted from this repo 2026-08-07 |
 
 ### Governance — RSR, gates, session standards
 
