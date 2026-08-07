@@ -15,8 +15,33 @@
 //  9. Hunt without allow_subprocess=true     → warning  (K9-D009)
 // 10. Deprecated Kennel YAML syntax          → info     (K9-D010)
 
+use std::sync::LazyLock;
 use regex::Regex;
 use tower_lsp::lsp_types::*;
+
+// Literal patterns, compiled once.
+//
+// These were `Regex::new(<literal>).unwrap()` inside the functions below.
+// An LSP recompiles those on EVERY request — every keystroke — and `unwrap`
+// panics the handler task if a literal is ever malformed. `LazyLock` compiles
+// each pattern once, and `expect` states the invariant: the pattern is a
+// compile-time constant, so a failure is a programming error, not a runtime
+// condition.
+static TRUST_LEVEL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"trust_level\s*=\s*'(\w+)").expect("TRUST_LEVEL_RE is a valid literal pattern"));
+
+static ENUM_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[\|\s*((?:'[A-Za-z]+\s*,?\s*)*)\|]").expect("ENUM_RE is a valid literal pattern"));
+
+static VARIANT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\|\s+([a-zA-Z_]\w*)").expect("VARIANT_RE is a valid literal pattern"));
+
+static RECIPE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(install|validate|deploy|migrate|rollback)\s*=\s*"([^"]*)""#).expect("RECIPE_RE is a valid literal pattern"));
+
+static YAML_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*([a-z_]+)\s*:\s+\S").expect("YAML_RE is a valid literal pattern"));
+
 
 /// Source identifier attached to all K9 diagnostics.
 const SOURCE: &str = "k9-lsp";
@@ -96,13 +121,16 @@ fn check_spdx_header(_text: &str, lines: &[&str], diags: &mut Vec<Diagnostic>) {
 /// Security levels must be one of 'Kennel, 'Yard, or 'Hunt.
 /// Flags any trust_level assignment using an unrecognised value.
 fn check_invalid_security_level(text: &str, lines: &[&str], diags: &mut Vec<Diagnostic>) {
-    let re = Regex::new(r"trust_level\s*=\s*'(\w+)").unwrap();
+    let re = &*TRUST_LEVEL_RE;
     for (i, line) in lines.iter().enumerate() {
         if let Some(caps) = re.captures(line) {
-            let level = caps.get(1).unwrap().as_str();
+            // One binding, not three lookups; `continue` rather than unwrap so a
+            // malformed line costs one diagnostic instead of the whole document.
+            let Some(m1) = caps.get(1) else { continue; };
+            let level = m1.as_str();
             if !matches!(level, "Kennel" | "Yard" | "Hunt") {
-                let start = caps.get(1).unwrap().start() as u32;
-                let end = caps.get(1).unwrap().end() as u32;
+                let start = m1.start() as u32;
+                let end = m1.end() as u32;
                 diags.push(Diagnostic {
                     range: Range::new(
                         Position::new(i as u32, start),
@@ -121,7 +149,7 @@ fn check_invalid_security_level(text: &str, lines: &[&str], diags: &mut Vec<Diag
         }
     }
     // Also check the enum-style definition for invalid variants.
-    let enum_re = Regex::new(r"\[\|\s*((?:'[A-Za-z]+\s*,?\s*)*)\|]").unwrap();
+    let enum_re = &*ENUM_RE;
     // This intentionally does not flag the SecurityLevel type definition itself,
     // only trust_level assignments.
     let _ = (text, enum_re); // suppress unused warning; reserved for future expansion
@@ -288,8 +316,7 @@ fn check_invalid_contract_annotations(_text: &str, lines: &[&str], diags: &mut V
         "default", "optional", "force", "priority", "doc",
     ];
 
-    let re = Regex::new(r"\|\s+([a-zA-Z_]\w*)").unwrap();
-
+    let re = &*VARIANT_RE;
     for (i, line) in lines.iter().enumerate() {
         // Skip comment lines.
         if line.trim().starts_with('#') {
@@ -301,14 +328,17 @@ fn check_invalid_contract_annotations(_text: &str, lines: &[&str], diags: &mut V
         }
 
         for caps in re.captures_iter(line) {
-            let type_name = caps.get(1).unwrap().as_str();
+            // One binding, not three lookups; `continue` rather than unwrap so a
+            // malformed line costs one diagnostic instead of the whole document.
+            let Some(m1) = caps.get(1) else { continue; };
+            let type_name = m1.as_str();
             // Valid if it starts with uppercase (user-defined type) or is a known name.
-            let is_valid = type_name.chars().next().map_or(false, |c| c.is_uppercase())
+            let is_valid = type_name.chars().next().is_some_and(|c| c.is_uppercase())
                 || known_types.contains(&type_name);
 
             if !is_valid {
-                let start = caps.get(1).unwrap().start() as u32;
-                let end = caps.get(1).unwrap().end() as u32;
+                let start = m1.start() as u32;
+                let end = m1.end() as u32;
                 diags.push(Diagnostic {
                     range: Range::new(
                         Position::new(i as u32, start),
@@ -337,7 +367,7 @@ fn check_invalid_contract_annotations(_text: &str, lines: &[&str], diags: &mut V
 /// standard K9 tools (just, nickel, podman, echo, etc.). Flags references
 /// to non-standard executables as informational.
 fn check_nonstandard_recipe_tools(_text: &str, lines: &[&str], diags: &mut Vec<Diagnostic>) {
-    let recipe_re = Regex::new(r#"(install|validate|deploy|migrate|rollback)\s*=\s*"([^"]*)""#).unwrap();
+    let recipe_re = &*RECIPE_RE;
     let standard_tools = [
         "just", "nickel", "podman", "echo", "sh", "bash", "curl", "wget",
         "tar", "cp", "mv", "rm", "mkdir", "chmod", "chown", "cat", "grep",
@@ -346,15 +376,18 @@ fn check_nonstandard_recipe_tools(_text: &str, lines: &[&str], diags: &mut Vec<D
 
     for (i, line) in lines.iter().enumerate() {
         if let Some(caps) = recipe_re.captures(line) {
-            let command_str = caps.get(2).unwrap().as_str();
+            // One binding, not three lookups; `continue` rather than unwrap so a
+            // malformed line costs one diagnostic instead of the whole document.
+            let Some(m2) = caps.get(2) else { continue; };
+            let command_str = m2.as_str();
             // Extract the first word (the tool being invoked).
             let first_word = command_str.split_whitespace().next().unwrap_or("");
             // Strip any leading path.
             let tool = first_word.rsplit('/').next().unwrap_or(first_word);
 
             if !tool.is_empty() && !standard_tools.contains(&tool) {
-                let start = caps.get(2).unwrap().start() as u32;
-                let end = caps.get(2).unwrap().end() as u32;
+                let start = m2.start() as u32;
+                let end = m2.end() as u32;
                 diags.push(Diagnostic {
                     range: Range::new(
                         Position::new(i as u32, start),
@@ -424,8 +457,7 @@ fn check_deprecated_kennel_yaml(_text: &str, lines: &[&str], diags: &mut Vec<Dia
     // Match lines that look like YAML key-value pairs (word: value)
     // but are NOT inside strings and NOT comment lines and NOT Nickel
     // record type annotations.
-    let yaml_re = Regex::new(r"^\s*([a-z_]+)\s*:\s+\S").unwrap();
-
+    let yaml_re = &*YAML_RE;
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         // Skip comments, empty lines, and AsciiDoc-style headers.
