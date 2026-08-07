@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell
+= ADR-005: Extract Consent-Aware HTTP to its own repository
+:toc: preamble
+
+[cols="1,4"]
+|===
+| Status | Accepted
+| Date | 2026-08-07
+| Supersedes | the in-tree `consent-aware-http/` spec entry
+|===
+
+== Context
+
+`consent-aware-http/` held a 107-file IETF-track specification suite: two
+Internet-Drafts (HTTP 430 Consent Required, and AIBDP), a JSON Schema, ~80 KB of
+documentation, AffineScript sources and JavaScript reference implementations. It
+was a project living inside a repository that is not its home.
+
+Three things made this more than a directory move.
+
+*It was rated 1 of 5 MUSTs* by this repository's own scorecard (assessed
+2026-07-03) while shipping an `RSR-COMPLIANCE.md` claiming "RSR Gold, 100%
+compliant" — asserting PASS for `LICENSE.txt`, `MAINTAINERS.md`, `CHANGELOG.md`,
+`flake.nix` and a whole `.well-known/` tree, none of which existed.
+
+*There were two divergent copies and a phantom submodule.*
+`rhodium-standard-repositories/.gitmodules` declared
+`satellites/consent-aware-http` as a submodule of
+`git@github.com:hyperpolymath/consent-aware-http.git` — a repository that has
+never existed. The path was materialised as 81 ordinary tracked files, 26 behind
+the live copy.
+
+*The flagship draft existed twice with different normative text.* Verified: the
+root copy was byte-identical to the satellite copy — the retired shared ancestor
+— while the `drafts/` copy was the later edit and the only valid RFC-XML v3. The
+two disagreed on `category`: `std` versus `info`.
+
+== Decision
+
+Extract to *`metadatastician/consent-aware-web`*. Remove both copies from this
+repository and retire the phantom submodule declaration.
+
+The registry entry moves from the in-tree spec table to the *external* spec
+table in `scripts/build-registry.sh`, so this repository holds a verified
+pointer rather than a copy — the pattern already used for the AffineScript
+specs. `REGISTRY.a2ml` and `TOPOLOGY.md` regenerate from that table and were not
+hand-edited.
+
+=== Why `consent-aware-web` and not `consent-aware-http`
+
+Owner ruling. The suite's own README frames a six-layer architecture — only two
+layers of which are drafted — and the broader name reflects the intent. The new
+repository states explicitly which four layers are *not* drafted, so the wider
+name does not become a wider claim.
+
+=== The specification's own defects were fixed, not carried
+
+`draft-jewell-aibdp-00.xml` was RFC-XML v2 throughout while declaring
+`version="3"`, with `<list>` elements as siblings of `<t>` — invalid in v2 as
+well, so the file validated under no schema at all. Migrated mechanically and
+verified lossless. The duplicate 430 draft was retired and `category="std"`
+restored. `.well-known/aibdp.json` was authored so the suite genuinely dogfoods
+its own protocol, and is validated in CI.
+
+== Consequences
+
+* The scorecard moved with the specification. M2, M3, M4, M5, S3 and C1 are all
+  closeable in the new repository and were not closeable here.
+* `COMPLIANCE-DASHBOARD.md` regenerates without the row. Both it and the
+  registry are derived; `build-registry.sh --check` confirms no drift.
+* Licence references in `LICENCE-POLICY.adoc`, `PALIMPSEST.adoc`, `README.adoc`,
+  `.claude/CLAUDE.md` and `.machine_readable/licensing-policy.toml` are
+  statements about a *repository*, not a directory. They remain correct and now
+  name the new location. The PMPL carve-out and the IETF-mandated MIT carve-out
+  both still apply.
+* Seven dangling relative links under `docs/UX-standards/` and
+  `docs/wikis/developers/` were repointed off-tree.
+
+=== Salvaged
+
+The satellite copy carried a 418-line `GOVERNANCE.adoc` — Tri-Perimeter
+Contribution Framework, decision authority, funding model, IETF coordination —
+that existed nowhere else. The live copy's `docs/governance.md` is an unrelated
+essay on consent in institutions; the two share a name and nothing else. It was
+copied into the new repository before deletion. This is the failure mode
+`AGENTS.md` warns about: cold is not disposable.
+
+=== Open
+
+The two drafts name different author organisations (`NUJ Ethics Council` versus
+`National Union of Journalists`). Normatively visible in a published
+Internet-Draft; recorded as a blocker in the new repository's `STATE.a2ml`, not
+resolved here.

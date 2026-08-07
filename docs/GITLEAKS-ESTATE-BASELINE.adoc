@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Gitleaks: the estate baseline, and how a repo extends it
+:toc:
+:sectnums:
+
+== The problem this solves
+
+Every repository in the estate needs the same handful of gitleaks suppressions —
+lockfile integrity hashes, published RFC test vectors, OpenPGP fingerprints,
+documented placeholder shapes. Before this mechanism existed there were only two
+ways to get them, and both were bad:
+
+* **Copy the baseline into each repo.** The copies drift. A fix to one is a fix
+  to none of the others.
+* **Put everything in one shared file.** Then a suppression that is only correct
+  for a single repository blinds all 400+ of them.
+
+The second failure is the dangerous one. A gitleaks allowlist is a *blind spot*
+by construction: the wider its reach, the more it can hide.
+
+== The split
+
+[cols="1,3"]
+|===
+| `config/gitleaks/estate-baseline.toml`
+| **The shared baseline.** Entries here are true for every repository. Adding one
+  blinds the whole estate — treat additions accordingly.
+
+| A repo's own `+.gitleaks.toml+`
+| **Repo-local suppressions.** Entries live beside the code they describe and
+  blind exactly one repository.
+|===
+
+== How a repository opts in
+
+Write this in the repository's own `.gitleaks.toml`:
+
+[source,toml]
+----
+[extend]
+path = ".gitleaks-estate.toml"
+
+[allowlist]
+description = "Entries true for THIS repo only"
+paths = [
+  '''^spec/vectors/''',
+]
+----
+
+`.github/workflows/secret-scanner-reusable.yml` stages the baseline into the
+workspace root as `.gitleaks-estate.toml` before the scan runs — but **only when
+the repo's config actually references it**. A repo that does not extend it never
+gains an unreferenced file inside its own scanned tree.
+
+Repos that do nothing keep working exactly as before.
+
+== Two things that will bite you
+
+=== `[extend] path` resolves against the working directory
+
+Not against the directory containing the config file. Verified empirically: the
+same relative path resolves when gitleaks is invoked from the repository root
+and fails when invoked from a subdirectory. The scan runs from the workspace
+root, which is why the baseline is staged there.
+
+=== A config file is still a file, and gets scanned
+
+While the baseline lived at a repository root as `.gitleaks.toml`, gitleaks
+excluded it automatically as its own config. Moved to
+`config/gitleaks/estate-baseline.toml` it became an ordinary file, and its
+documented placeholder shapes immediately tripped `generic-api-key` — a finding
+that appeared purely because the file was renamed.
+
+Both the canonical path and the staged `.gitleaks-estate.toml` are therefore in
+the baseline's own `paths` allowlist. If you move this file again, move those
+entries with it.
+
+== Versioning
+
+The baseline is fetched at `+${{ github.job_workflow_sha }}+` — the commit of the
+reusable workflow itself. A caller pinned to an old SHA gets that SHA's baseline,
+not a moving target. The workflow and the baseline it stages can never disagree.
+
+== Failure mode is loud
+
+If a repo's config references `.gitleaks-estate.toml` and the baseline cannot be
+fetched, the job **fails**. It does not scan with a silently reduced config: a
+scan that quietly loses its allowlist produces a wall of false positives, and the
+usual response to that is to disable the gate.
+
+== Adding to the baseline
+
+Ask one question first: *is this entry true for every repository in the estate?*
+If not, it belongs in the repo's own config.
+
+Then follow the rules already written into the baseline file:
+
+* Anchor every `regexes` entry `+^...$+` to the whole value. An unanchored entry
+  is a substring match — `+(?i)test|example+` allowlists the real AWS key
+  `+wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY+` because "EXAMPLE" appears inside it.
+* Restrict `paths` to formats that cannot hold a live credential. Wanting to
+  allowlist any other path wholesale is a signal that the secret should be
+  removed from the tree instead.
+* **Canary-test before committing.** Plant a realistic secret in the path or
+  shape you are allowlisting and confirm it is *still* detected. This is the only
+  check that distinguishes a narrow allowlist from a blinded scanner.
+* Never write a literal example token into the baseline, even in a comment — it
+  makes the file itself trip the estate's secret detectors.
