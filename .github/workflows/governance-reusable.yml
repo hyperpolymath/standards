@@ -1003,8 +1003,15 @@ jobs:
           repository: hyperpolymath/standards
           ref: main
           path: .standards-dupkey
-          sparse-checkout: scripts/check-workflow-duplicate-keys.py
+          sparse-checkout: scripts/check-workflow-duplicate-keys.sh
           sparse-checkout-cone-mode: false
+        # ⚠ Not fatal if the file is absent. This checkout is pinned to
+        # standards@main, so during a rename of the script the fetch finds
+        # nothing — the new name does not exist on main until the renaming pull
+        # request merges. Without this, the RENAME ITSELF fails the linter, on
+        # the one pull request that cannot possibly be at fault. See the
+        # fallback in the next step.
+        continue-on-error: true
 
       - name: Duplicate YAML keys in workflows
         run: |
@@ -1015,9 +1022,25 @@ jobs:
           # other lint passes. Measured 2026-08-05: nine workflows in hypatia
           # were dead this way, including a CodeQL workflow with zero
           # successful runs in its entire lifetime.
-          cp .standards-dupkey/scripts/check-workflow-duplicate-keys.py "$RUNNER_TEMP/"
+          set -euo pipefail
+          SCRIPT=".standards-dupkey/scripts/check-workflow-duplicate-keys.sh"
+          # Self-hosting fallback: when THIS repository is standards, its own
+          # working tree already holds the script, and during a rename that copy
+          # is the only correct one — the pinned main checkout still has the old
+          # name. Preferring the fetched copy keeps every other caller on the
+          # canonical version.
+          if [ ! -f "$SCRIPT" ] && [ -f scripts/check-workflow-duplicate-keys.sh ]; then
+            SCRIPT="scripts/check-workflow-duplicate-keys.sh"
+            echo "Using this repository's own copy (standards self-lint)."
+          fi
+          if [ ! -f "$SCRIPT" ]; then
+            echo "::error::duplicate-key checker not found — neither fetched from" \
+                 "standards@main nor present locally."
+            exit 1
+          fi
+          cp "$SCRIPT" "$RUNNER_TEMP/dupkeys.sh"
           rm -rf .standards-dupkey
-          python3 "$RUNNER_TEMP/check-workflow-duplicate-keys.py" .github/workflows
+          bash "$RUNNER_TEMP/dupkeys.sh" .github/workflows
 
       - name: Check SPDX headers + permissions
         run: |
