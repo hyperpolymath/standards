@@ -1261,11 +1261,29 @@ jobs:
       - name: Debt ratchet
         run: |
           set -euo pipefail
+          # Which copy of the scripts do we run?
+          #
+          # ⚠ BOOTSTRAP TRAP. A gate that fetches its own script from `main`
+          #   cannot run on the pull request that INTRODUCES that script — the
+          #   sparse checkout of main has no such file and the `cp` fails. This
+          #   job failed exactly that way on the PR that added it, and the same
+          #   shape has bitten hypatia's self-gating before.
+          #
+          #   So when the repository under test IS standards, run the scripts
+          #   from the PR's own tree. The guard is on the repository name and
+          #   not on file existence: a consumer repo that happened to contain a
+          #   file at scripts/check-debt-ratchet.sh must NOT be able to
+          #   substitute its own gate.
+          if [ "${{ github.repository }}" = "hyperpolymath/standards" ]; then
+            cp scripts/check-debt-ratchet.sh \
+               scripts/check-debtfile-structure.sh "$RUNNER_TEMP/"
+          else
+            cp .standards-checkout/scripts/check-debt-ratchet.sh \
+               .standards-checkout/scripts/check-debtfile-structure.sh "$RUNNER_TEMP/"
+          fi
           # Stage the scripts OUT of the scanned tree and delete the checkout,
           # so the ratchet only ever reads the CALLER's Debtfile — standards
           # has one of its own and it is not this repository's.
-          cp .standards-checkout/scripts/check-debt-ratchet.sh \
-             .standards-checkout/scripts/check-debtfile-structure.sh "$RUNNER_TEMP/"
           rm -rf .standards-checkout
 
           # A repo with no Debtfile is not in violation — adoption is opt-in.
