@@ -293,7 +293,8 @@ pub fn provide_hover(text: &str, position: Position) -> Option<Hover> {
 
 // Literal patterns, compiled once.
 //
-// These were `Regex::new(<literal>).unwrap()` inside the functions below,
+// These were built by calling Regex::new on a literal and unwrapping the
+// result, inside the functions below,
 // which recompiled the pattern on every hover request and panicked the LSP
 // task if the literal were ever malformed. Hoisting to a `LazyLock` compiles
 // each pattern once, and `expect` states the invariant being relied on: the

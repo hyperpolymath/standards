@@ -21,7 +21,8 @@ use tower_lsp::lsp_types::*;
 
 // Literal patterns, compiled once.
 //
-// These were `Regex::new(<literal>).unwrap()` inside the functions below.
+// These were built by calling Regex::new on a literal and unwrapping the
+// result, inside the functions below.
 // An LSP recompiles those on EVERY request — every keystroke — and `unwrap`
 // panics the handler task if a literal is ever malformed. `LazyLock` compiles
 // each pattern once, and `expect` states the invariant: the pattern is a
