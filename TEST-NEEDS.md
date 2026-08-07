@@ -1,5 +1,8 @@
 # TEST-NEEDS: standards
 
+## CRG Grade: B/A (Targeting)
+To achieve CRG Grades B and above, projects MUST implement **Zigzag Testing** for their critical paths, following the [ZIGZAG-TESTING.md](./ZIGZAG-TESTING.md) methodology.
+
 ## CRG Grade: C — ACHIEVED 2026-04-04
 
 All CRG C categories are present and passing. See breakdown below.
@@ -205,7 +208,6 @@ CRG C integration tests (`tests/crg_c_tests.rs`):
 #### Missing Sub-projects (358 source files with ~0 tests)
 - [ ] `avow-protocol` — no tests (ReScript source exists)
 - [ ] `contractiles` — no tests
-- [ ] `consent-aware-http` — no tests
 - [ ] `lol` — no tests
 - [ ] `overlay-protocol` — no tests
 - [ ] `k9-svc` — no tests (mirrors a2ml structure, same test pattern applies)
