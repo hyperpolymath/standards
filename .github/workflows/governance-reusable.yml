@@ -1047,8 +1047,22 @@ jobs:
           failed=0
           for file in .github/workflows/*.yml .github/workflows/*.yaml; do
             [ -f "$file" ] || continue
-            if ! head -1 "$file" | grep -q "^# SPDX-License-Identifier:"; then
-              echo "ERROR: $file missing SPDX header"; failed=1
+            # ⚠ SCAN THE HEADER BLOCK, NOT LINE 1. REUSE places the identifier
+            # anywhere in a file's leading comment block, and `gh actions-lock`
+            # INSERTS `# This workflow is managed by gh actions-lock.` at line 1
+            # whenever it mints a lockfile — so a line-1 test fights the estate's
+            # own tool and re-fails every time a lockfile is refreshed.
+            #
+            # Measured 2026-08-07: it reported 27 hypatia workflows and 13 more
+            # elsewhere as missing a header they all had, and "fixing" that by
+            # prepending a default MIS-LICENSED three files (PMPL-1.0-or-later
+            # shadowed by MPL-2.0) before it was caught.
+            #
+            # The leading run of comment lines is read, tolerating a YAML
+            # document marker. A licence declared there is declared.
+            if ! awk '/^---[[:space:]]*$/ { next } /^#/ { print; next } { exit }' "$file" \
+                 | grep -q "^# SPDX-License-Identifier:"; then
+              echo "ERROR: $file has no SPDX-License-Identifier in its header comment block"; failed=1
             fi
             if ! grep -q "^permissions:" "$file"; then
               echo "ERROR: $file missing top-level 'permissions:' declaration"; failed=1
@@ -1083,7 +1097,11 @@ jobs:
               grep -v "@[a-f0-9]\{40\}" | \
               grep -v "uses: \./\|uses: docker://\|uses: actions/github-script\|uses: hyperpolymath/standards/" || true)
             if [ -n "$unpinned" ]; then
-              echo "ERROR: Found unpinned actions:"
+              echo "ERROR: no .github/workflows/actions.lock in THIS TREE, and these refs are not SHA-pinned."
+            echo "  Prefer \`gh actions-lock\` — it also locks the transitive dependencies"
+            echo "  of composite actions, which an inline SHA cannot express."
+            echo "  Do NOT do both: gh actions-lock refuses a ref no tag or branch contains,"
+            echo "  so inline pinning REMOVES actions from the lockfile."
               echo "$unpinned"
               exit 1
             fi
