@@ -63,10 +63,10 @@ fi
 fail=0
 
 # Entry counting for TOML ledgers lives in a sibling script — see
-# count-ledger-entries.py for why it is not inlined. The workflow stages both
+# count-ledger-entries.sh for why it is not inlined. The workflow stages both
 # files together. Overridable for testing; unset is a hard error at use, never
 # a silent zero.
-COUNTER="${COUNTER:-$(dirname "$0")/count-ledger-entries.py}"
+COUNTER="${COUNTER:-$(dirname "$0")/count-ledger-entries.sh}"
 note() { printf '  %s\n' "$*"; }
 
 # Count entries in a ledger at a given ref. Counting is per-format, because
@@ -80,12 +80,12 @@ count_at() {
     *.json)
       printf '%s' "$blob" | jq 'if type=="array" then length else 0 end' 2>/dev/null || echo 0 ;;
     *.toml)
-      # ⚠ ENTRY counting, not line counting — see count-ledger-entries.py for
+      # ⚠ ENTRY counting, not line counting — see count-ledger-entries.sh for
       # why, and for why it is a separate file rather than an inline
       # `python3 -c`. There is deliberately no `|| echo 0`: a counter that
       # cannot run must FAIL the check, because a count of 0 is
       # indistinguishable from an empty ledger, and empty is what passes.
-      printf '%s' "$blob" | python3 "${COUNTER:?COUNTER must point at count-ledger-entries.py}" ;;
+      printf '%s' "$blob" | "${COUNTER:?COUNTER must point at count-ledger-entries.sh}" ;;
     *)
       # Comments and blank lines are not exemptions.
       #

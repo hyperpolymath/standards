@@ -29,11 +29,10 @@ expect() { # expect <wanted-exit> <label>
 
 expect 0 "unchanged ledgers pass"
 
-python3 - <<'PY'
-import json; d=json.load(open('.hypatia-baseline.json'))
-d.append({"severity":"low","rule_module":"m","type":"t2","file":"b.rs","note":"ok"})
-json.dump(d,open('.hypatia-baseline.json','w'))
-PY
+# jq, not an interpreter: estate policy bans Python, and the JS runtime has
+# already moved once. jq is what the rest of the estate's CI already uses.
+jq '. + [{"severity":"low","rule_module":"m","type":"t2","file":"b.rs","note":"ok"}]' \
+   .hypatia-baseline.json > .baseline.tmp && mv .baseline.tmp .hypatia-baseline.json
 git commit -aqm "grow"
 expect 1 "silent growth fails"
 
@@ -42,11 +41,8 @@ git commit -q --amend -m "grow
 Ratchet-exception: .hypatia-baseline.json — vendored upstream corpus"
 expect 0 "declared growth passes"
 
-python3 - <<'PY'
-import json; d=json.load(open('.hypatia-baseline.json'))
-d.append({"severity":"low","rule_module":"m","type":"t3","file":"c.rs"})
-json.dump(d,open('.hypatia-baseline.json','w'))
-PY
+jq '. + [{"severity":"low","rule_module":"m","type":"t3","file":"c.rs"}]' \
+   .hypatia-baseline.json > .baseline.tmp && mv .baseline.tmp .hypatia-baseline.json
 git commit -aqm "anonymous
 
 Ratchet-exception: .hypatia-baseline.json — declared"
