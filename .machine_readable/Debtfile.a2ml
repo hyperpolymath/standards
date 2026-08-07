@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: MPL-2.0
+# Debtfile — measured, tolerated shortfalls for this repository.
+# Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# A Mustfile asserts a BOOLEAN: the invariant holds, or the build fails.
+# A Debtfile asserts a MONOTONE-DECREASING INTEGER: this much debt is
+# tolerated, and it may never grow without saying so out loud.
+#
+# Run with:    just debt-measure     (scripts/run-debtfile.sh)
+# Ratchet:     scripts/check-debt-ratchet.sh <base-ref>   [CI, on pull_request]
+# Structure:   scripts/check-debtfile-structure.sh
+# Spec:        docs/DEBTFILE-SPEC.adoc
+#
+# `count` and `ceiling` are MACHINE-WRITTEN by the weekly measure run.
+# Do not hand-edit them to make a gate pass; that is the one thing this
+# file exists to prevent.
+
+@abstract:
+Measured technical debt for the hyperpolymath `standards` canon. Every entry
+carries a probe that returns an integer, so the claim can be re-checked
+instead of believed. Entries leave this file by reaching zero, not by being
+forgotten.
+@end
+
+## Documentation
+
+### docs-md-not-adoc
+- description: Docs under docs/ still in Markdown; estate policy is AsciiDoc (.adoc) except the four GitHub-required .md files
+- probe: git ls-files 'docs/**/*.md' 'docs/*.md' | grep -vEi '(SECURITY|CONTRIBUTING|CODE_OF_CONDUCT|CHANGELOG)\.md$' | wc -l
+- count: 309
+- ceiling: 309
+- severity: low
+- policy: remediable
+- tri: substitute
+- accepted-until: 2027-02-01
+
+## Test coverage of the gates
+
+### gate-scripts-without-tests
+- description: Scripts under scripts/ with no matching scripts/tests/<name>-test.sh — a gate with no test has never been shown able to fail
+- probe: n=0; for f in $(git ls-files 'scripts/*.sh'); do b=$(basename "$f" .sh); case "$b" in *-test) continue;; esac; if [ ! -f "scripts/tests/${b}-test.sh" ] && [ ! -f "scripts/tests/${b#check-}-test.sh" ] && [ ! -f "scripts/tests/${b#run-}-test.sh" ]; then n=$((n+1)); fi; done; echo "$n"
+- count: 31
+- ceiling: 31
+- severity: high
+- policy: remediable
+- tri: eliminate
+- accepted-until: 2026-12-01
+
+## Hygiene
+
+### shell-scripts-missing-spdx
+- description: Shell scripts under scripts/ without an SPDX-License-Identifier in the first three lines
+- probe: n=0; for f in $(git ls-files 'scripts/*.sh'); do head -3 "$f" | grep -q 'SPDX-License-Identifier' || n=$((n+1)); done; echo "$n"
+- count: 2
+- ceiling: 2
+- severity: medium
+- policy: remediable
+- tri: eliminate
+- accepted-until: 2026-10-01
+
+### todo-fixme-markers
+- description: Files carrying a TODO or FIXME marker. Advisory — a marker is a note to self, not a defect
+- probe: git grep -I -l -E '\b(TODO|FIXME)\b' -- . ':(exclude).machine_readable/Debtfile.a2ml' ':(exclude)docs/DEBTFILE-SPEC.adoc' | wc -l
+- count: 276
+- ceiling: 276
+- severity: low
+- policy: remediable
+- tri: control
+- accepted-until: 2027-06-01
+
+## Licensing — FLAG ONLY
+
+### pmpl-licence-headers
+- description: Files whose SPDX identifier IS PMPL-1.0. Correct for palimpsest-license, palimpsest-plasma and consent-aware-http; wrong elsewhere — but which is which is an owner ruling, never an automated sweep
+# ⚠ MATCH THE DECLARATION, NOT THE STRING. The first version of this probe was
+# `git grep -l 'PMPL-1\.0'`, which counted every file that MENTIONS the licence
+# — policy documents, manifests listing licences, citations, and other debt
+# registers discussing this very debt. It reported 587 where the true figure is
+# 7: an 84x over-count. Estate-wide the same error inflates 1,768 to 4,952, and
+# it is the number standards#308 has been quoting.
+- probe: git grep -l -E '^[^a-zA-Z0-9]*SPDX-License-Identifier:.*PMPL-1\.0' -- . | wc -l
+- count: 7
+- ceiling: 7
+- severity: medium
+- policy: flag-only
+- tri: control
+- tracking: hyperpolymath/standards#308
+- accepted-until: 2027-01-01
+
+### deno-residue
+- description: Deno residue in this repository after the Bun ruling. `governance-reusable.yml` still runs `denoland/setup-deno`, which INSTALLS DENO ON EVERY ESTATE REPO ON EVERY RUN; `deno-ci{,-reusable}.yml` still ship the failing `deno / Deno CI`; `scripts/check-ts-allowlist.deno.js` is a worked Deno example in scripts/; and `docs/migrations/npm-to-deno-template/` is a live recipe pointing repos AT the retired runtime. Owner ruled Deno REMOVED and Bun permanent (said three times, reaffirmed 2026-08-07). Must reach 0. Excludes */bindings/deno/, which is interop for OTHER people's Deno code and a separate question.
+- probe: git grep -lE "denoland/setup-deno|deno run|deno test|deno fmt|deno lint" -- ".github/workflows/*.yml" "scripts/*" | wc -l
+- count: 4
+- ceiling: 4
+- severity: medium
+- policy: remediable
+- tri: substitute
+- accepted-until: 2026-11-01
+
+### deno-artefacts
+- description: Files that exist only to serve Deno — the deno-ci workflow pair, the compiled check-ts-allowlist.deno.js, and the npm-to-deno migration template. Deleting these is the completion of the Bun migration, not a precondition of it. Excludes */bindings/deno/.
+- probe: git ls-files ".github/workflows/deno*" "scripts/*deno*" "docs/migrations/npm-to-deno-template/*" | wc -l
+- count: 6
+- ceiling: 6
+- severity: medium
+- policy: remediable
+- tri: substitute
+- accepted-until: 2026-11-01

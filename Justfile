@@ -66,6 +66,19 @@ mustfile-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
 must-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
     @bash scripts/run-mustfile.sh "{{path}}"
 
+# Structural validation of the Debtfile (probe + ceiling + policy + expiry per entry)
+debtfile-check path=".machine_readable/Debtfile.a2ml":
+    @bash scripts/check-debtfile-structure.sh "{{path}}"
+
+# Re-measure every Debtfile probe and compare against its ceiling (read-only)
+debt-measure path=".machine_readable/Debtfile.a2ml":
+    @bash scripts/run-debtfile.sh "{{path}}"
+
+# Re-measure and WRITE BACK: updates count, lowers ceilings that were paid down.
+# Never raises a ceiling — that needs a Debt-exception in the commit message.
+debt-ratchet-down path=".machine_readable/Debtfile.a2ml":
+    @bash scripts/run-debtfile.sh --write "{{path}}"
+
 # Install this repo's git hooks into .git/hooks/ (pre-commit guards)
 hooks-install:
     @bash hooks/install.sh

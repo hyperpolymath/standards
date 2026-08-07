@@ -6,9 +6,19 @@
 # Then hands off to `just setup` for project-specific configuration.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/hyperpolymath/standards/main/setup.sh | sh
+#   # Download, READ IT, then run — this script installs software and uses sudo.
+#   curl -fsSL -o setup.sh \
+#     https://raw.githubusercontent.com/hyperpolymath/standards/main/setup.sh
+#   less setup.sh && sh setup.sh
+#
 #   # or after cloning:
 #   ./setup.sh
+#
+# ⚠ The previous instruction here was `curl … | sh`. A setup script that goes
+# to the trouble of pinning and checksum-verifying every tool it installs
+# should not ask to be installed by piping an unverified download into a
+# shell — the reader has no opportunity to see what they are about to run,
+# and a truncated or substituted response executes just the same.
 #
 # Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
 
@@ -135,13 +145,79 @@ install_just() {
         return 0
     fi
 
+# install_just_verified — fetch a PINNED just release and verify it before use.
+#
+# Replaces two `curl https://just.systems/install.sh | bash` calls. Piping a
+# remote script into a shell executes whatever the server returns, with no
+# opportunity to check it; `set -euo pipefail` does not help, because a
+# truncated or substituted body still reaches bash intact.
+#
+# A pinned RELEASE BINARY rather than a pinned installer script: the installer
+# is a moving target, so pinning its checksum would break the moment upstream
+# edited it, and the usual response to that breakage is to delete the check.
+#
+# ⚠ PLATFORM RESOLVED, NOT ASSUMED — this script supports macOS and Windows
+# package managers too, so a hardcoded x86-64 Linux target would download the
+# wrong binary on Apple Silicon and every ARM machine. An unrecognised platform
+# returns failure and the caller falls back to the package manager; a
+# plausible-looking artefact for the wrong target fails later and further away.
+#
+# Digests computed from the artifacts on 2026-08-07. casey/just publishes none
+# for these assets, so this is trust-on-first-use: it does not prove they were
+# authentic then, but any later substitution now fails loudly.
+JUST_VERSION="1.58.0"
+
+just_target() {
+    case "$(uname -s 2>/dev/null):$(uname -m 2>/dev/null)" in
+        Linux:x86_64|Linux:amd64)    echo "x86_64-unknown-linux-musl" ;;
+        Linux:aarch64|Linux:arm64)   echo "aarch64-unknown-linux-musl" ;;
+        Darwin:x86_64)               echo "x86_64-apple-darwin" ;;
+        Darwin:arm64|Darwin:aarch64) echo "aarch64-apple-darwin" ;;
+        *)                           echo "" ;;
+    esac
+}
+
+just_sha256() {
+    case "$1" in
+        x86_64-unknown-linux-musl)  echo "4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d" ;;
+        aarch64-unknown-linux-musl) echo "748237128c4c40cbdabc65e841d05ceba13cc23a91eaba395495894c1d9764df" ;;
+        x86_64-apple-darwin)        echo "9a09cfef66aaa79da58203970103a0684307716caaabd3e9844cacc4dc0f4023" ;;
+        aarch64-apple-darwin)       echo "50ae3e996c974a0bf32ea7d10f495070df33f1b43e0616b2769e3d4821ed8f48" ;;
+        *)                          echo "" ;;
+    esac
+}
+
+install_just_verified() {
+    local target want tmp url
+    target="$(just_target)"
+    [ -z "$target" ] && {
+        echo "just: no verified build for $(uname -s)/$(uname -m); use your package manager" >&2
+        return 1
+    }
+    want="$(just_sha256 "$target")"
+    [ -z "$want" ] && { echo "just: no pinned digest for $target" >&2; return 1; }
+    tmp="$(mktemp -d)"
+    url="https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${target}.tar.gz"
+    curl -fsSL --proto '=https' --tlsv1.2 -o "$tmp/just.tar.gz" "$url" || { rm -rf "$tmp"; return 1; }
+    if ! printf '%s  %s\n' "$want" "$tmp/just.tar.gz" | sha256sum -c - >/dev/null 2>&1; then
+        echo "just: CHECKSUM MISMATCH for $url" >&2
+        echo "  expected $want" >&2
+        echo "  actual   $(sha256sum "$tmp/just.tar.gz" | cut -d" " -f1)" >&2
+        rm -rf "$tmp"
+        return 1
+    fi
+    tar -xzf "$tmp/just.tar.gz" -C "$tmp" just
+    sudo install -m 0755 "$tmp/just" /usr/local/bin/just
+    rm -rf "$tmp"
+}
+
     info "Installing just (task runner)..."
 
     case "$PKG_MGR" in
         dnf)        sudo dnf install -y just ;;
         apt)        sudo apt-get install -y just 2>/dev/null || {
                         # just not in older apt repos — use installer
-                        curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+                        install_just_verified
                     } ;;
         pacman)     sudo pacman -S --noconfirm just ;;
         apk)        sudo apk add just ;;
@@ -153,7 +229,7 @@ install_just() {
         nix)        nix-env -iA nixpkgs.just ;;
         *)
             info "Using just installer script..."
-            curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+            install_just_verified
             ;;
     esac
 

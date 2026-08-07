@@ -8,7 +8,7 @@
 > agpl-3.0-or-later is for those shared with my son, and leave other
 > people's forked stuff alone … only palimpsest license for obvious
 > reasons should be talking about palipsest and palimpsest plasma, and
-> consent-aware-http, but in that case prospectively"
+> metadatastician/consent-aware-web, but in that case prospectively"
 
 ### Five-way classification (mutually exclusive, exhaustive)
 
@@ -18,7 +18,7 @@
 | **2. The 007 repo** | All Rights Reserved (ARR) | `hyperpolymath/007` specifically. Out-of-scope for any normalisation, scanning, or labelling. Surface to owner only. |
 | **3. Shared with son (Joshua)** | `AGPL-3.0-or-later` | Repos with son as co-author/maintainer. Examples: `idaptik`, `paint-type`. Permanent. |
 | **4. Third-party / forks** | DO NOT TOUCH | Whatever upstream chose. Never sweep, never normalise. Flag as out-of-scope if it surfaces in an audit. |
-| **5. Palimpsest carve-out (extremely narrow)** | `PMPL-1.0-or-later` | EXACTLY three repos: `palimpsest-license` + `palimpsest-plasma` + `consent-aware-http`. The first two retroactively; `consent-aware-http` **prospectively only** (don't flip existing content). NOWHERE ELSE. |
+| **5. Palimpsest carve-out (extremely narrow)** | `PMPL-1.0-or-later` | EXACTLY three repos: `palimpsest-license` + `palimpsest-plasma` + `metadatastician/consent-aware-web`. The first two retroactively; `metadatastician/consent-aware-web` **prospectively only** (don't flip existing content). NOWHERE ELSE. |
 
 ### Hard rules for agents
 
@@ -85,7 +85,8 @@ for the canonical statement.
 | Language/Tool | Use Case | Notes |
 |---------------|----------|-------|
 | **AffineScript** | Primary application code | Compiles to typed-wasm; affine/linear types. Replaces ReScript across the estate (RS/TS/JS → AffineScript → typed-wasm). |
-| **Deno** | Runtime & package management | Replaces Node/npm/bun |
+| **Bun** | JS/TS runtime & package management (tier 1) | Default for all new work. Executes `.ts` directly, no build step. Uses an npm-compatible `package.json` plus `bun.lock` — both are expected, not anti-patterns. |
+| **Deno** | JS/TS runtime (tier 2) | Grandfathered. Existing Deno projects need not migrate; prefer over pnpm/npm where Bun cannot be used. |
 | **Rust/SPARK** | Performance-critical, systems, WASM, CLI tools, safety-critical | "Rust" always means "Rust/SPARK" per terminology note above. Preferred over Ada where reachable. |
 | **Zig** | **APIs, FFIs, gateways, client SDKs (estate default 2026-05-28)**, memory-safe systems where Rust/SPARK is overkill | Zig is the estate-wide default for all API/FFI/gateway/client-SDK work unless explicitly special-cased; Idris2 owns ABIs. Completed V-lang→Zig migration 2026-05-28. |
 | **Idris2** | Formal verification (primary, ABI-style proofs) | ATS2 rejected. Proven-library status in `proven` repo. |
@@ -97,12 +98,25 @@ for the canonical statement.
 | **Elixir** | Backend services, distributed systems | BEAM, Phoenix, OTP |
 | **Haskell** | Type-heavy tools, registry validation | Scaffoldia CLI |
 | **Bash/POSIX Shell** | Scripts, automation | Keep minimal |
-| **JavaScript** | Only where AffineScript cannot | MCP protocol glue, Deno APIs (transitional; prefer .affine where possible) |
+| **JavaScript** | Only where AffineScript cannot | MCP protocol glue, runtime APIs (transitional; prefer .affine where possible) |
 | **Nickel** | Configuration language | For complex configs |
 | **A2ML** | State/meta files | STATE.a2ml, META.a2ml, etc. (TOML-like format) |
 | **Julia** | Batch scripts, data processing | Per RSR |
 | **OCaml** | AffineScript compiler | Language-specific |
 | **Ada** (legacy) | Safety-critical systems where Rust/SPARK is not yet reachable | Rust/SPARK is absorbing most Ada work over time. Do not start new pure-Ada projects unless Rust/SPARK cannot reach. |
+
+> **Corrected 2026-08-07.** This section previously listed **Bun** as banned
+> with **Deno** as its replacement, and described Deno as "replaces Node/npm/bun".
+> That inverted `LANGUAGE-POLICY.adoc` §1, which has ruled Bun > Deno > pnpm > npm
+> since 2026-07-29. Because this file is what agents read first, the recorded
+> ruling and agent behaviour had diverged: agents were being instructed to migrate
+> *away* from the estate's first-choice runtime.
+>
+> **Still unresolved, deliberately left alone:** the table below bans TypeScript in
+> favour of AffineScript, while `LANGUAGE-POLICY.adoc` §1.2 states "TypeScript is
+> *permitted under Bun*". Those two cannot both be right. The AffineScript
+> direction is a substantive architectural position rather than an oversight, so
+> it is flagged here for an owner ruling instead of being changed.
 
 ### BANNED - Do Not Use
 
@@ -110,10 +124,9 @@ for the canonical statement.
 |--------|-------------|-------|
 | TypeScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
 | **ReScript** | AffineScript | Banned in new code as of 2026-04-30. Existing `.res` files migrate to `.affine` directly (do not pass through ReScript). |
-| Node.js | Deno | |
-| npm | Deno | |
-| Bun | Deno | |
-| pnpm/yarn | Deno | |
+| Node.js | Bun | Bun is Node-compatible; run the code, drop the runtime. |
+| npm | Bun | npm is tier 4 — *permitted, never preferred*, not banned. `package-lock.json` must still not be tracked (standards#67). |
+| yarn | Bun | yarn is not in the tier list at all. |
 | Go | Rust/SPARK | |
 | **Python** | AffineScript/Rust/SPARK/Julia | Fully banned, no exceptions (SaltStack exception removed 2026-01-03) |
 | Java/Kotlin | Rust/SPARK, Tauri, Dioxus | |
