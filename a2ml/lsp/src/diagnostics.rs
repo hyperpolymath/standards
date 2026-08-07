@@ -17,8 +17,37 @@
 //
 // Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
+use std::sync::LazyLock;
 use regex::Regex;
 use tower_lsp::lsp_types::*;
+
+// Literal patterns, compiled once.
+//
+// These were built by calling Regex::new on a literal and unwrapping the
+// result, inside the functions below.
+// An LSP recompiles those on EVERY request — every keystroke, for
+// completions and diagnostics — and `unwrap` panics the handler task if a
+// literal is ever malformed. `LazyLock` compiles each pattern once, and
+// `expect` states the invariant: the pattern is a compile-time constant, so
+// a failure is a programming error rather than a runtime condition.
+static OPEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^@([A-Za-z][A-Za-z0-9_-]*)(?:\([^)]*\))?:\s*$").expect("OPEN_RE is a valid literal pattern"));
+
+static CLOSE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^@end\s*$").expect("CLOSE_RE is a valid literal pattern"));
+
+static ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"id\s*=\s*"([^"]+)""#).expect("ID_RE is a valid literal pattern"));
+
+static REF_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"@ref\(([^)]+)\)").expect("REF_RE is a valid literal pattern"));
+
+static HEADING_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(#{1,5})\s+(.+)$").expect("HEADING_RE is a valid literal pattern"));
+
+static SECTION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\[([A-Za-z][A-Za-z0-9_-]*)\]\s*$").expect("SECTION_RE is a valid literal pattern"));
+
 
 // ── Known values ─────────────────────────────────────────────────────
 
@@ -99,9 +128,8 @@ fn check_unclosed_directives(text: &str) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     // Regex for `@name:` or `@name(…):` at the start of a line.
-    let open_re = Regex::new(r"^@([A-Za-z][A-Za-z0-9_-]*)(?:\([^)]*\))?:\s*$").unwrap();
-    let close_re = Regex::new(r"^@end\s*$").unwrap();
-
+    let open_re = &*OPEN_RE;
+    let close_re = &*CLOSE_RE;
     /// A directive that we opened but haven't yet closed.
     struct OpenDirective {
         name: String,
@@ -114,7 +142,9 @@ fn check_unclosed_directives(text: &str) -> Vec<Diagnostic> {
         let trimmed = line.trim();
 
         if let Some(caps) = open_re.captures(trimmed) {
-            let name = caps.get(1).unwrap().as_str().to_string();
+            let Some(name) = caps.get(1).map(|m| m.as_str().to_string()) else {
+                continue;
+            };
             stack.push(OpenDirective {
                 name,
                 line: line_idx as u32,
@@ -165,19 +195,24 @@ fn check_invalid_refs(text: &str) -> Vec<Diagnostic> {
     //   - Directive attributes: id="some-id"
     //   - Heading-derived slugs are out of scope for now; we only check explicit
     //     `id=` attributes and opaque(id="…") forms.
-    let id_re = Regex::new(r#"id\s*=\s*"([^"]+)""#).unwrap();
+    let id_re = &*ID_RE;
     let declared_ids: Vec<String> = id_re
         .captures_iter(text)
-        .map(|cap| cap.get(1).unwrap().as_str().to_string())
+        // filter_map, not map: a capture that did not participate is skipped
+        // rather than panicking the diagnostics pass.
+        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
         .collect();
 
     // Find all @ref(…) invocations.
-    let ref_re = Regex::new(r"@ref\(([^)]+)\)").unwrap();
+    let ref_re = &*REF_RE;
     for (line_idx, line) in text.lines().enumerate() {
         for cap in ref_re.captures_iter(line) {
-            let target = cap.get(1).unwrap().as_str();
-            let start_col = cap.get(0).unwrap().start() as u32;
-            let end_col = cap.get(0).unwrap().end() as u32;
+            let (Some(t), Some(whole)) = (cap.get(1), cap.get(0)) else {
+                continue;
+            };
+            let target = t.as_str();
+            let start_col = whole.start() as u32;
+            let end_col = whole.end() as u32;
 
             if !declared_ids.iter().any(|id| id == target) {
                 diags.push(Diagnostic {
@@ -278,12 +313,14 @@ fn check_duplicate_sections(text: &str) -> Vec<Diagnostic> {
 
     let mut seen: Vec<SeenHeading> = Vec::new();
 
-    let heading_re = Regex::new(r"^(#{1,5})\s+(.+)$").unwrap();
-
+    let heading_re = &*HEADING_RE;
     for (line_idx, line) in text.lines().enumerate() {
         if let Some(caps) = heading_re.captures(line) {
-            let level = caps.get(1).unwrap().as_str();
-            let title = caps.get(2).unwrap().as_str().trim();
+            let (Some(lvl), Some(ttl)) = (caps.get(1), caps.get(2)) else {
+                continue;
+            };
+            let level = lvl.as_str();
+            let title = ttl.as_str().trim();
             let key = format!("{}:{}", level.len(), title);
 
             if let Some(prev) = seen.iter().find(|s| s.text == key) {
@@ -319,8 +356,7 @@ fn check_malformed_kv_lines(text: &str) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut in_section = false;
 
-    let section_re = Regex::new(r"^\[([A-Za-z][A-Za-z0-9_-]*)\]\s*$").unwrap();
-
+    let section_re = &*SECTION_RE;
     for (line_idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
 
@@ -387,12 +423,16 @@ fn check_malformed_kv_lines(text: &str) -> Vec<Diagnostic> {
 /// known list.  This helps authors discover typos early.
 fn check_toml_sections(text: &str) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-    let section_re = Regex::new(r"^\[([A-Za-z][A-Za-z0-9_-]*)\]\s*$").unwrap();
-
+    let section_re = &*SECTION_RE;
     for (line_idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
         if let Some(caps) = section_re.captures(trimmed) {
-            let name = caps.get(1).unwrap().as_str();
+            // `continue`, not unwrap: a panic aborts diagnostics for the
+            // whole document, so one odd line would blank the editor's problem
+            // list instead of producing one fewer entry.
+            let Some(name) = caps.get(1).map(|m| m.as_str()) else {
+                continue;
+            };
             if !KNOWN_SECTIONS.contains(&name) {
                 diags.push(Diagnostic {
                     range: line_range(line_idx as u32, line),

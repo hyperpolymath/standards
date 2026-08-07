@@ -41,7 +41,7 @@ in A2ML format (migrated from Guile Scheme on 2026-04-12):
 | TypeScript | ReScript |
 | Node.js | Deno |
 | npm | Deno |
-| Bun | Deno |
+| ~~Bun~~ | — | Bun is TIER 1 as of LANGUAGE-POLICY.adoc §1 (2026-07-29). This row is retired. |
 | pnpm/yarn | Deno |
 | Go | Rust |
 | Python | Julia/Rust/AffineScript |

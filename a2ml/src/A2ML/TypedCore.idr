@@ -63,28 +63,55 @@ data RefTarget
 
 -- Executable checks (v0.2)
 
-partial
-collectIds : Doc -> List Id
-collectIds (MkDoc blocks) = concatMap collectBlock blocks
-  where
-    collectBlock : Block -> List Id
-    collectBlock (Section s) = s.id :: collectIds (MkDoc s.body)
-    collectBlock (Figure f) = [f.id]
-    collectBlock (Table t) = [t.id]
-    collectBlock (Opaque p) = maybe [] (\rid => [rid]) p.id
-    collectBlock _ = []
+-- These were `partial` and private. They are structurally terminating — a
+-- section body is a sub-term — but the old shape re-wrapped it as
+-- `MkDoc s.body`, and the termination checker cannot see through the
+-- constructor. Recursing on `List Block` directly makes the decrease visible,
+-- so both are now total; both are exported because Parser and Tests use them.
 
-partial
-collectRefs : Doc -> List Id
-collectRefs (MkDoc blocks) = concatMap collectBlock blocks
-  where
-    collectBlock : Block -> List Id
-    collectBlock (Section s) = collectRefs (MkDoc s.body)
-    collectBlock (Figure f) = maybe [] (\rid => [rid]) f.ref
-    collectBlock _ = []
+mutual
+  export
+  collectIds : Doc -> List Id
+  collectIds (MkDoc blocks) = collectIdsBlocks blocks
+
+  export
+  collectIdsBlocks : List Block -> List Id
+  collectIdsBlocks [] = []
+  collectIdsBlocks (b :: bs) = collectIdsBlock b ++ collectIdsBlocks bs
+
+  export
+  collectIdsBlock : Block -> List Id
+  collectIdsBlock (Section (MkSec sid _ body)) = sid :: collectIdsBlocks body
+  collectIdsBlock (Figure f) = [f.id]
+  collectIdsBlock (Table t) = [t.id]
+  collectIdsBlock (Opaque p) = maybe [] (\rid => [rid]) p.id
+  collectIdsBlock _ = []
+
+mutual
+  export
+  collectRefs : Doc -> List Id
+  collectRefs (MkDoc blocks) = collectRefsBlocks blocks
+
+  export
+  collectRefsBlocks : List Block -> List Id
+  collectRefsBlocks [] = []
+  collectRefsBlocks (b :: bs) = collectRefsBlock b ++ collectRefsBlocks bs
+
+  export
+  collectRefsBlock : Block -> List Id
+  collectRefsBlock (Section (MkSec _ _ body)) = collectRefsBlocks body
+  collectRefsBlock (Figure f) = maybe [] (\rid => [rid]) f.ref
+  collectRefsBlock _ = []
 
 idEq : Id -> Id -> Bool
 idEq (MkId a) (MkId b) = a == b
+
+||| Id equality is exactly equality of the underlying string, so this instance
+||| inherits reflexivity/symmetry/transitivity from String. Needed by the test
+||| suite (and any consumer comparing `List Id`).
+public export
+Eq Id where
+  (==) = idEq
 
 contains : Id -> List Id -> Bool
 contains _ [] = False

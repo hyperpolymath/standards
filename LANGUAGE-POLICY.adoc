@@ -77,6 +77,35 @@ WARNING: Do *not* mass-delete `flake.nix`. Campaign #102 hand-diffed 277
 candidates and removed exactly *one*. Fan-out REMOVE verdicts have a measured
 ~100% over-call rate here. Removal is a per-repo judgement, not a sweep.
 
+HARDENED 2026-07-28 (owner ruling): Nix flakes are to be *thrown out* of the
+estate, not merely tolerated where they linger. Reconcile that with the warning
+above as follows: removal remains a **per-repo judgement made while you are
+already working in that repo** — opportunistic, never a fan-out sweep.
+
+When you do retire a flake, remove the *references* as well as the file.
+Measured on `trope-checker` (PR #47), one `flake.nix` had ten satellites, and
+leaving any of them behind keeps Nix alive in the toolchain:
+
+* `.envrc` — a direnv `use flake` block
+* `Justfile` (and `.machine_readable/contractiles/Justfile`) — a `nix-shell` recipe
+* `build/setup.sh` — `nix` in package-manager detection and the install switch
+* `install-tools.sh` — a `flake.nix`-detecting branch, often ahead of Guix
+* `.github/dependabot.yml` — a `nix` `package-ecosystem` entry
+* `.gitignore` / `.gitattributes` — `flake.lock` and `*.nix` rules
+* `compliance/reuse/dep5` — `flake.lock` in the lockfile glob
+* docs and `PLAYBOOK.a2ml` prose
+
+CAUTION: `dependabot.yml` rejects the *whole file* on one malformed entry —
+re-parse it after removing the `nix` ecosystem. And do not "tidy" a root
+`.githooks/` away while you are there: it is usually load-bearing (CI runs
+validators directly from it); allowlist it in `root-allow.txt` instead.
+
+Retiring the mirror does not finish the job. A repo whose `guix.scm` is a
+scaffold stub — empty `inputs`, `TODO` markers, or a `{{PROJECT_NAME}}`
+placeholder — has *no working packaging* once the flake is gone. Make the Guix
+side real, or fill the sealed container, *in the same change*. Do not allowlist
+the flake instead.
+
 === 2.2 Identity and licence in `guix.scm`
 
 A `guix.scm` must name *its own project*. Measured 2026-07-29 across 418 repos:

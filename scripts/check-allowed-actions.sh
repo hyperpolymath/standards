@@ -37,7 +37,8 @@ def owner_repo(u):
     return '/'.join(parts[:2]), parts[0]
 
 def covered(u):
-    if u.startswith('./') or u.startswith('docker://'):
+    # $/ is gh actions-lock's inherently-pinned same-repo form (like ./)
+    if u.startswith('./') or u.startswith('$/') or u.startswith('docker://'):
         return True
     orp, owner = owner_repo(u)
     if owner in gh_owned:                       # github-owned (actions/*, github/*)

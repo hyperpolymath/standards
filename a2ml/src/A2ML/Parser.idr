@@ -7,6 +7,27 @@ import Data.List
 
 %default total
 
+-- ---------------------------------------------------------------------------
+-- Totality helpers.
+--
+-- `Data.String.strIndex` is NON-COVERING in Idris2 0.7.0 (it is a partial
+-- primitive), so it can never appear in a function under `%default total`.
+-- peek/char previously called it AND pattern-matched its `Char` result as if
+-- it were `Maybe Char`, which is where the unification errors came from.
+--
+-- `strIndexSafe` is total and obviously correct. It is O(n) per index, so
+-- parsing is O(n^2); acceptable for a normative reference model where
+-- correctness dominates. If that ever matters, carry `List Char` in
+-- ParserState instead of (String, position).
+-- ---------------------------------------------------------------------------
+
+||| Safe, total character indexing.
+public export
+strIndexSafe : String -> Nat -> Maybe Char
+strIndexSafe str n = case drop n (unpack str) of
+  (c :: _) => Just c
+  []       => Nothing
+
 -- ============================================================================
 -- Parser Types
 -- ============================================================================
@@ -66,15 +87,32 @@ Monad Parser where
 export
 peek : Parser (Maybe Char)
 peek = MkParser $ \s =>
-  case strIndex s.input (cast s.position) of
+  case strIndexSafe s.input s.position of
     Just c => Success (Just c) s
     Nothing => Success Nothing s
+
+||| An upper bound on the input still to be consumed. Every consuming loop
+||| below recurses structurally on this, which is what makes them total.
+public export
+remaining : ParserState -> Nat
+remaining s = minus (length s.input) s.position
+
+||| First-success choice. Defined as a plain function rather than an
+||| `Alternative` implementation to avoid the Lazy-argument subtleties of the
+||| Prelude interface; the previous code declared `<|>` inside a `where` block,
+||| where it did not resolve at all.
+public export
+orElse : Parser a -> Parser a -> Parser a
+orElse (MkParser p1) (MkParser p2) = MkParser $ \s =>
+  case p1 s of
+    Success x s' => Success x s'
+    Failure _ _  => p2 s
 
 ||| Consume one character
 export
 char : Parser (Maybe Char)
 char = MkParser $ \s =>
-  case strIndex s.input (cast s.position) of
+  case strIndexSafe s.input s.position of
     Just c =>
       let newPos = s.position + 1
           newLine = if c == '\n' then s.line + 1 else s.line
@@ -89,20 +127,24 @@ charIs expected = do
   mc <- peek
   case mc of
     Just c => if c == expected
-              then do char; pure True
+              then do ignore char; pure True
               else pure False
     Nothing => pure False
 
 ||| Skip whitespace
 export
 skipWhitespace : Parser ()
-skipWhitespace = do
-  mc <- peek
-  case mc of
-    Just c => if isSpace c
-              then do char; skipWhitespace
-              else pure ()
-    Nothing => pure ()
+skipWhitespace = MkParser $ \s => runParser (go (remaining s)) s
+  where
+    go : Nat -> Parser ()
+    go Z = pure ()
+    go (S fuel) = do
+      mc <- peek
+      case mc of
+        Just c => if isSpace c
+                  then do ignore char; go fuel
+                  else pure ()
+        Nothing => pure ()
 
 ||| Parse until end of line
 export
@@ -115,18 +157,22 @@ parseUntilEOL = MkParser $ \s =>
 ||| Parse a heading (# Title)
 export
 parseHeading : Parser (Nat, String)
-parseHeading = do
-  level <- countHashes 0
-  skipWhitespace
-  title <- parseUntilEOL
-  pure (level, title)
+parseHeading = MkParser $ \s => runParser (body (remaining s)) s
   where
-    countHashes : Nat -> Parser Nat
-    countHashes acc = do
+    countHashes : Nat -> Nat -> Parser Nat
+    countHashes Z acc = pure acc
+    countHashes (S fuel) acc = do
       isHash <- charIs '#'
       if isHash
-        then countHashes (acc + 1)
+        then countHashes fuel (acc + 1)
         else pure acc
+
+    body : Nat -> Parser (Nat, String)
+    body fuel = do
+      level <- countHashes fuel 0
+      skipWhitespace
+      title <- parseUntilEOL
+      pure (level, title)
 
 ||| Parse an ID directive (@id:value)
 export
@@ -156,37 +202,32 @@ export
 parseParagraph : Parser Block
 parseParagraph = do
   line <- parseUntilEOL
-  char  -- consume newline
+  ignore char  -- consume newline
   pure (Para line)
 
 ||| Parse a bullet list item
 export
 parseBullet : Parser (List String)
-parseBullet = parseBullets []
+parseBullet = MkParser $ \s => runParser (parseBullets (remaining s) []) s
   where
-    parseBullets : List String -> Parser (List String)
-    parseBullets acc = do
-      isBullet <- charIs '-' <|> charIs '*'
+    parseBullets : Nat -> List String -> Parser (List String)
+    parseBullets Z acc = pure acc
+    parseBullets (S fuel) acc = do
+      isBullet <- orElse (charIs '-') (charIs '*')
       if isBullet
         then do
           skipWhitespace
           item <- parseUntilEOL
-          char  -- consume newline
-          parseBullets (acc ++ [item])
+          ignore char  -- consume newline
+          parseBullets fuel (acc ++ [item])
         else pure acc
-
-    (<|>) : Parser a -> Parser a -> Parser a
-    (<|>) (MkParser p1) (MkParser p2) = MkParser $ \s =>
-      case p1 s of
-        Success x s' => Success x s'
-        Failure _ _ => p2 s
 
 ||| Parse a section block
 export
 parseSection : Parser Block
 parseSection = do
   (level, title) <- parseHeading
-  char  -- consume newline
+  ignore char  -- consume newline
   -- TODO: parse body recursively
   let body = []
   pure (Section (MkSec (MkId (pack (replicate level '#'))) title body))
@@ -204,7 +245,7 @@ parseBlock = do
       pure (Just sec)
     Just '@' => do
       (name, value) <- parseDirective
-      char  -- consume newline
+      ignore char  -- consume newline
       -- Handle different directive types
       pure Nothing  -- TODO: map directives to blocks
     Just '-' => do
@@ -223,11 +264,12 @@ parseBlock = do
 
 ||| Parse multiple blocks into a document
 export
-parseBlocks : List Block -> Parser Doc
-parseBlocks acc = do
+parseBlocks : Nat -> List Block -> Parser Doc
+parseBlocks Z acc = pure (MkDoc acc)
+parseBlocks (S fuel) acc = do
   mb <- parseBlock
   case mb of
-    Just b => parseBlocks (acc ++ [b])
+    Just b => parseBlocks fuel (acc ++ [b])
     Nothing => pure (MkDoc acc)
 
 ||| Parse a complete A2ML document
@@ -235,7 +277,7 @@ export
 parseDocument : String -> ParseResult Doc
 parseDocument input =
   let initialState = MkParserState input 0 1 0
-  in runParser (parseBlocks []) initialState
+  in runParser (parseBlocks (remaining initialState) []) initialState
 
 -- ============================================================================
 -- Validation After Parsing
@@ -257,29 +299,36 @@ parseAndValidate input =
 -- Pretty Printer (for testing)
 -- ============================================================================
 
-||| Pretty print a document (inverse of parser)
-export
-prettyPrint : Doc -> String
-prettyPrint (MkDoc blocks) = concatMap prettyBlock blocks
-  where
-    prettyBlock : Block -> String
-    prettyBlock (Section s) =
-      replicate (length s.id.raw) '#' ++ " " ++ s.title ++ "\n" ++
-      prettyPrint (MkDoc s.body) ++ "\n"
-    prettyBlock (Para text) = text ++ "\n\n"
-    prettyBlock (Bullet items) =
+-- Recursing on `List Block` directly (rather than re-wrapping as
+-- `MkDoc s.body` and calling prettyPrint) and pattern-matching `MkSec` is what
+-- lets the termination checker see section bodies as structural sub-terms: a
+-- record *projection* is not treated as structural descent, a constructor
+-- pattern is.
+mutual
+  export
+  prettyBlocks : List Block -> String
+  prettyBlocks [] = ""
+  prettyBlocks (b :: bs) = prettyBlock b ++ prettyBlocks bs
+
+  export
+  prettyBlock : Block -> String
+  prettyBlock (Section (MkSec sid title body)) =
+      replicate (length sid.raw) '#' ++ " " ++ title ++ "\n" ++
+      prettyBlocks body ++ "\n"
+  prettyBlock (Para text) = text ++ "\n\n"
+  prettyBlock (Bullet items) =
       concatMap (\item => "- " ++ item ++ "\n") items ++ "\n"
-    prettyBlock (Figure f) =
+  prettyBlock (Figure f) =
       "@figure:" ++ f.id.raw ++ "\n" ++
       f.caption ++ "\n@end\n\n"
-    prettyBlock (Table t) =
+  prettyBlock (Table t) =
       "@table:" ++ t.id.raw ++ "\n" ++
       t.caption ++ "\n@end\n\n"
-    prettyBlock (Refs refs) =
+  prettyBlock (Refs refs) =
       "@refs:\n" ++
       concatMap (\r => "[" ++ r.label ++ "]\n") refs ++
       "@end\n\n"
-    prettyBlock (Opaque p) =
+  prettyBlock (Opaque p) =
       "@opaque" ++
       (case p.id of
         Just id => ":" ++ id.raw
@@ -288,6 +337,11 @@ prettyPrint (MkDoc blocks) = concatMap prettyBlock blocks
         Just lang => " lang=" ++ lang
         Nothing => "") ++
       "\n" ++ p.bytes ++ "\n@end\n\n"
+
+||| Pretty print a document (inverse of parser).
+export
+prettyPrint : Doc -> String
+prettyPrint (MkDoc blocks) = prettyBlocks blocks
 
 -- ============================================================================
 -- Example Usage

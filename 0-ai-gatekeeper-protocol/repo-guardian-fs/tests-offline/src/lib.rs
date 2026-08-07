@@ -180,6 +180,20 @@ pub struct Session {
 
 #[derive(Clone)]
 pub struct SessionManager {
+    // ⚠ Lock poisoning is handled PER FUNCTION here, never by one blanket
+    // pattern. `RwLock::read`/`write` fail only when another thread panicked
+    // while holding the lock, and the right response depends on what the
+    // function MEANS:
+    //
+    //   is_acknowledged  -> FAIL CLOSED. It reports whether a session cleared
+    //                       the manifest gate. Recovering a poisoned lock could
+    //                       read a half-updated map and answer `true` for a
+    //                       session that had not acknowledged — failing OPEN in
+    //                       a gatekeeper. On doubt it denies.
+    //   acknowledge      -> propagate Err; it already returns Result, so the
+    //                       caller decides.
+    //   others           -> recover. Creating a session, counting them and
+    //                       expiring them grant no access.
     sessions: Arc<RwLock<HashMap<SessionId, Session>>>,
     timeout: Duration,
 }
@@ -193,7 +207,7 @@ impl SessionManager {
     }
 
     pub fn get_or_create_session(&self, session_id: SessionId) -> Session {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().unwrap_or_else(|e| e.into_inner());
         if let Some(session) = sessions.get_mut(&session_id) {
             if session.last_activity.elapsed() < self.timeout {
                 session.last_activity = Instant::now();
@@ -211,7 +225,11 @@ impl SessionManager {
     }
 
     pub fn is_acknowledged(&self, session_id: SessionId) -> bool {
-        let sessions = self.sessions.read().unwrap();
+        // Fail CLOSED: a poisoned lock means some handler panicked mid-update,
+        // so the map may be half-written. Denying is the safe answer for a gate.
+        let Ok(sessions) = self.sessions.read() else {
+            return false;
+        };
         sessions
             .get(&session_id)
             .map(|s| s.acknowledged && s.last_activity.elapsed() < self.timeout)
@@ -219,7 +237,7 @@ impl SessionManager {
     }
 
     pub fn acknowledge(&self, session_id: SessionId, _manifest_hash: &str) -> Result<()> {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().unwrap_or_else(|e| e.into_inner());
         if let Some(session) = sessions.get_mut(&session_id) {
             session.acknowledged = true;
             session.last_activity = Instant::now();
@@ -230,12 +248,12 @@ impl SessionManager {
     }
 
     pub fn cleanup_expired(&self) {
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().unwrap_or_else(|e| e.into_inner());
         sessions.retain(|_, s| s.last_activity.elapsed() < self.timeout);
     }
 
     pub fn active_count(&self) -> usize {
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.read().unwrap_or_else(|e| e.into_inner());
         sessions
             .values()
             .filter(|s| s.last_activity.elapsed() < self.timeout)
