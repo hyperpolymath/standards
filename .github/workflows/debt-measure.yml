@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: MPL-2.0
+name: "📅 Debt measure"
+
+# Re-measure every Debtfile probe and record the result as ONE pull request.
+#
+# This workflow exists to replace a specific bad habit. In `.git-private-farm`,
+# a bot minted the same measurement as a NEW ISSUE on every run:
+#
+#     #104  rustsec: 138 open advisories (34 high/critical)
+#     #105  rustsec: 136 open advisories (34 high/critical)
+#     #107  rustsec: 139 open advisories (34 high/critical)
+#     #117  rustsec: 156 open advisories (54 high/critical)
+#     #119  rustsec: 156 open advisories (54 high/critical)
+#     #120  rustsec: 155 open advisories (53 high/critical)
+#
+# Six issues carrying one number. This workflow opens at most one PR and
+# NEVER opens an issue. That is the whole point; do not add issue creation.
+#
+# 📅 PERIODIC per docs/CICD-SIGNAL-DISCIPLINE.adoc — MUST NOT be a required
+# status check.
+
+on:
+  schedule:
+    # Mondays 06:17 UTC. Off the hour on purpose: the estate's crons cluster on
+    # :00 and saturate the Actions queue.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: debt-measure-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    name: Measure and record
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Re-measure the Debtfile
+        id: measure
+        run: |
+          set -uo pipefail
+          if [ ! -f .machine_readable/Debtfile.a2ml ]; then
+            echo "No Debtfile — nothing to measure."
+            echo "changed=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # --write updates `count` and lowers any `ceiling` that has been paid
+          # down. It NEVER raises one. If debt grew past its ceiling the run
+          # exits 1 and the resulting file has count > ceiling — which the
+          # structure check rejects, so the PR opens RED. That is deliberate:
+          # growth is a human decision (pay it down, or raise the ceiling with a
+          # `Debt-exception:` trailer), never something a cron decides.
+          rc=0
+          bash scripts/run-debtfile.sh --write | tee "$RUNNER_TEMP/report.txt" || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+
+          if git diff --quiet -- .machine_readable/Debtfile.a2ml; then
+            echo "No change in measured debt."
+            echo "changed=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open (or update) the single recording PR
+        if: steps.measure.outputs.changed == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BRANCH="chore/debt-measure"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B "$BRANCH"
+          git add .machine_readable/Debtfile.a2ml
+          # One -m per paragraph. A multi-line quoted string here would put its
+          # continuation lines at column 1, which ends the YAML block scalar and
+          # leaves the workflow unparseable — the estate already has a large
+          # population of workflows broken exactly this way.
+          git commit -m "chore(debt): re-measure Debtfile probes" \
+                     -m "Machine-written by .github/workflows/debt-measure.yml. Counts follow the probes; ceilings only ever fall. A ceiling that needs to RISE is not done here — raise it in a human PR with a Debt-exception: trailer."
+          git push -f origin "$BRANCH"
+
+          BODY="$(printf 'Automated re-measurement of `.machine_readable/Debtfile.a2ml`.\n\n```\n%s\n```\n\nCeilings only fall here. If an entry breached its ceiling this PR is red on\npurpose — pay the debt down, or raise the ceiling in a human commit carrying\na `Debt-exception:` trailer naming the entry.\n\nSee `docs/DEBTFILE-SPEC.adoc`.\n' "$(cat "$RUNNER_TEMP/report.txt")")"
+
+          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+            gh pr edit "$BRANCH" --body "$BODY"
+          else
+            gh pr create --head "$BRANCH" --base "${{ github.ref_name }}" \
+              --title "chore(debt): re-measure Debtfile probes" --body "$BODY"
+          fi
+
+      - name: Surface a breach without minting an issue
+        if: steps.measure.outputs.rc != '0'
+        run: |
+          echo "::error::Debtfile run reported a breach, a broken probe, or an expired acceptance."
+          echo "See the PR opened by this run. No issue has been created, by design."
+          exit 1
