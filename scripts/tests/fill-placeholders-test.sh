@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
 #
-# Proves fill-placeholders.py does NOT reproduce the damage it replaces.
+# Proves fill-placeholders.sh does NOT reproduce the damage it replaces.
 #
 # Case 1 is the important one: it is the exact corruption found across 90
 # repositories — the left-hand side of a `sed` substitution being filled in,
 # which permanently breaks the script's ability to apply templates.
 set -euo pipefail
-S="$(cd "$(dirname "$0")/.." && pwd)/fill-placeholders.py"
+S="$(cd "$(dirname "$0")/.." && pwd)/fill-placeholders.sh"
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 cd "$W"
 printf '{"PROJECT_NAME":"Conative Gating","DATE":"2026-08-05","DEPS":"zig"}\n' > map.json
@@ -24,7 +24,7 @@ printf 'Outstanding tokens:\n- {{PROJECT_NAME}}\n' > REQUIRES_INITIALISATION.md
 printf 'name = "{{PROJECT_NAME}}"\n' > templates/x.template
 printf 'run *{{ARGS}}:\n    echo {{ARGS}}\n' > Justfile
 
-python3 "$S" . --map map.json --apply >/dev/null
+"$S" . --map map.json --apply >/dev/null
 
 pass=0; fail=0
 ck(){ if eval "$2"; then pass=$((pass+1)); echo "  ok    $1"; else fail=$((fail+1)); echo "  FAIL  $1"; fi; }
@@ -56,7 +56,7 @@ W2="$(mktemp -d)"; cd "$W2"
 printf '{"PROJECT_NAME":"BoJ Server Mk2"}\n' > map.json
 printf "(name '{{PROJECT_NAME}})\nurl \"https://github.com/x/{{PROJECT_NAME}}\"\n@software{{{PROJECT_NAME}}_2026,\n" > guix.scm
 printf 'The {{PROJECT_NAME}} project builds things.\n' > README.md
-python3 "$S" . --map map.json --apply >/dev/null 2>&1 || true
+"$S" . --map map.json --apply >/dev/null 2>&1 || true
 
 ck "display name REFUSED in a Guix (name ...) slot" \
    'grep -q "{{PROJECT_NAME}}" guix.scm'
@@ -65,7 +65,7 @@ ck "display name still substituted in ordinary prose" \
 
 printf '{"PROJECT_NAME":"BoJ Server Mk2","PROJECT_SLUG":"boj-server-mk2"}\n' > map.json
 printf "(name '{{PROJECT_NAME}})\nurl \"https://github.com/x/{{PROJECT_NAME}}\"\n" > guix.scm
-python3 "$S" . --map map.json --apply >/dev/null 2>&1
+"$S" . --map map.json --apply >/dev/null 2>&1
 
 ck "with PROJECT_SLUG supplied, slug slots get the SLUG" \
    'grep -q "(name .boj-server-mk2)" guix.scm'
@@ -74,7 +74,7 @@ ck "and the URL gets the slug too" \
 
 # just's own interpolations must never be touched, mapped or not
 printf 'build -t {{project}}:latest\nrun *{{ARGS}}:\n' > Justfile
-python3 "$S" . --map map.json --apply >/dev/null 2>&1
+"$S" . --map map.json --apply >/dev/null 2>&1
 ck "just {{project}} interpolation survives" 'grep -q "{{project}}:latest" Justfile'
 
 echo; echo "  ${pass} passed, ${fail} failed"
