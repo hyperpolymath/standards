@@ -193,10 +193,11 @@ jobs:
           # by design, and under `bash -e` it would abort this step at this line,
           # before the baseline filter (the real gate) ever runs. Tolerate the
           # scan's own exit code…
-          # Run scan with explicit output capture. Use a subshell to ensure
-          # the redirect works even with exec in hypatia-cli.sh. Force sync
-          # to ensure output is flushed before the subshell exits.
-          (HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero; sync) > hypatia-findings.raw.json 2> hypatia-scan.err || echo '[]' > hypatia-findings.raw.json
+          # Run scan and capture output to a temporary file, then move it to
+          # the final location. This avoids any issues with exec and redirects.
+          tmpfile=$(mktemp)
+          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero > "$tmpfile" 2> hypatia-scan.err
+          mv "$tmpfile" hypatia-findings.raw.json || echo '[]' > hypatia-findings.raw.json
           # Ensure the output file exists and is non-empty. If the scan produced
           # no output (empty file), use an empty array.
           if [ ! -s hypatia-findings.raw.json ]; then
