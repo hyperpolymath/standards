@@ -3,6 +3,7 @@ module A2ML.Tests
 import A2ML.TypedCore
 import A2ML.Proofs
 import A2ML.Parser
+import Decidable.Equality
 
 %default total
 

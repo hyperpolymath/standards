@@ -75,7 +75,6 @@ k9-coordination-protocol|protocol|k9-coordination-protocol/|K9 Coordination Prot
 avow-protocol|protocol|avow-protocol/|AVOW Protocol|consent-attested messaging / origin attribution
 axel-protocol|protocol|axel-protocol/|AXEL Protocol|age-gating + explicit-content enforcement
 overlay-protocol|protocol|overlay-protocol/|Overlay Protocol|layered overlay composition spec
-consent-aware-http|protocol|consent-aware-http/|Consent-Aware HTTP|consent headers / AI-usage boundaries for HTTP
 adoption-readiness-grades|readiness|adoption-readiness-grades/|ARG — Adoption Readiness Grades|per-language adoption-maturity profile templates
 foundations-readiness-grades|readiness|foundations-readiness-grades/|FRG — Foundations Readiness Grades|per-language foundational-maturity profile templates
 component-readiness-grades|readiness|component-readiness-grades/|CRG — Component Readiness Grades|the X..A grading system for components
@@ -113,6 +112,7 @@ read -r -d '' EXTERNAL_SPECS <<'TSV' || true
 affine-spec|language|language-coupled|hyperpolymath/affinescript|https://github.com/hyperpolymath/affinescript/blob/main/spec/affine.adoc|v2.0.0||PENDING-FIRST-SYNC|application/vnd.affinescript.affine|affinescript:affine@2|AffineScript .affine (faces / source documents)|faces, canonical-lowering invariant, canonical islands, idiom packs, mimicry bindings, project face policy
 affex-manifest|language|language-coupled|hyperpolymath/affinescript|https://github.com/hyperpolymath/affinescript/blob/main/spec/affex.adoc|v2.0.0|2|PENDING-FIRST-SYNC|application/vnd.affinescript.affex|affinescript:affex@2|AffineScript .affex (face-interop manifest)|derived regenerable manifest; declaration heads not full bodies; format_version bumps independently
 affmap-provenance|language|language-coupled|hyperpolymath/affinescript|https://github.com/hyperpolymath/affinescript/blob/main/spec/affmap.adoc|v2.0.0||PENDING-FIRST-SYNC|application/vnd.affinescript.affmap|affinescript:affmap@2|AffineScript .affmap (provenance)|provenance format; own pointer for independent staleness tracking
+consent-aware-web|protocol|service-coupled|metadatastician/consent-aware-web|https://github.com/metadatastician/consent-aware-web/blob/main/README.adoc|v0.2.0||PENDING-FIRST-SYNC|application/aibdp+json|ietf:aibdp@0.2|Consent-Aware Web (AIBDP + HTTP 430)|consent headers / AI-usage boundaries for HTTP; extracted from this repo 2026-08-07
 TSV
 
 # Pick the canonical human doc for a home: README.adoc > README.md > first *.adoc spec.

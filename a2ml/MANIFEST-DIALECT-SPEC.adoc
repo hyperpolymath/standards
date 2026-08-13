@@ -1,0 +1,340 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= A2ML Manifest Dialect Specification
+:version: 0.1.0
+:date: 2026-08-03
+:status: Draft
+:era: v1
+:toc: left
+:toclevels: 3
+:icons: font
+:sectnums:
+
+[abstract]
+== Abstract
+
+This document specifies the *manifest dialect* of A2ML: the `---`-delimited
+frontmatter surface used by `0-AI-MANIFEST.a2ml` and its siblings. At 894
+well-formed files it is the largest A2ML surface in the estate, and until now it
+was described by no specification at all — `SPEC.adoc` §2 has no key-value
+production, and neither it nor `RECORD-DIALECT-SPEC.adoc` mentions frontmatter.
+
+Like `RECORD-DIALECT-SPEC.adoc`, this is a specification of a *deployed* surface.
+It was written from a census of every `.a2ml` file in `standards`, and it
+describes what is there. Where the corpus is silent, this document says so rather
+than inventing a rule.
+
+== 1. Status and scope
+
+*Status: Draft.* Not ratified and not yet wired into CI. It has, however, been
+exercised by a reference validator against the full corpus:
+
+[source,console]
+----
+$ bash a2ml/actions/validate/validate-manifest-dialect.sh
+  well-formed frontmatter files : 894
+  CONFORM to the spec as written: 894  (100%)
+  rejected                      : 0
+----
+
+The validator is a real gate, not a formality — injecting an excluded construct
+(a YAML anchor) into one file gives 893/894 and exit 1.
+
+It MUST NOT be cited as a ratified standard until it is owner-ratified and wired
+into CI (§9).
+
+This dialect is one of several surfaces over the shared A2ML typed core. The core
+is normative and lives in `a2ml/src/A2ML/`; see `docs/DIALECT-ARCHITECTURE.adoc`
+for the family design and `SPEC.adoc` §3 for the core itself. A surface is
+legitimate only if it defines a translation into that core (§7).
+
+== 2. Census — what this specifies
+
+All 1,543 `.a2ml` files in `standards`, 2026-08-03:
+
+[cols="2,1,4"]
+|===
+| Shape | Files | Note
+
+| Frontmatter, `---` opened and closed
+| **894**
+| Specified by this document
+
+| `---` opened, never closed
+| 19
+| *Not* this dialect — see §8
+
+| Other dialects (record, markup) and unclassified
+| 630
+| `RECORD-DIALECT-SPEC.adoc`, `SPEC.adoc` §2
+|===
+
+Within the 894 well-formed blocks: **2,706** key-value lines, **29** distinct
+keys, and a value vocabulary of five kinds.
+
+== 3. Document structure
+
+....
+a2ml-manifest  ::=  header-comments  open-delim  frontmatter  close-delim  body
+open-delim     ::=  "---" LF
+close-delim    ::=  "---" LF
+....
+
+`header-comments`:: Zero or more lines that are blank or begin with `#` or `//`.
+In 904 of 913 observed files this is exactly one line — the SPDX identifier.
+
+`open-delim`:: A line whose entire trimmed content is `---`. It MUST be the first
+non-comment, non-blank line. **A document whose first non-comment line is not
+`---` is not this dialect.**
+
+`frontmatter`:: The subject of §4. MAY be empty.
+
+`close-delim`:: The next line whose entire trimmed content is `---`.
+**REQUIRED.** See §8 for why this is stated so strongly.
+
+`body`:: Everything after `close-delim`. Not specified here; it is prose or
+markup-dialect content, and every one of the 894 observed files has a non-empty
+body (median 3 lines).
+
+== 4. Frontmatter grammar
+
+....
+frontmatter  ::=  ( entry | seq-item | comment | blank )*
+entry        ::=  indent key ":" SP value LF
+           |  indent key ":" SP block-intro LF block-body
+indent       ::=  ( SP SP )*                    ; 0, 2 or 4 spaces observed
+key          ::=  ALPHA-or-"_" ( ALNUM | "_" | "." | "-" )*
+value        ::=  dq-string | integer | nested | flow-seq | bare-scalar
+seq-item     ::=  indent "-" SP any* LF
+block-intro  ::=  ( "|" | ">" ) ( "-" | "+" )?
+block-body   ::=  ( block-line )*
+block-line   ::=  <any line indented MORE than its introducing entry, verbatim>
+comment      ::=  indent "#" any* LF
+....
+
+`block-body` is **opaque**. Its lines are not parsed as entries, comments or
+delimiters; they are content. This matters — the only corpus use of a block
+scalar is a PEM-armoured signature:
+
+[source,yaml]
+----
+signature: |
+      -----BEGIN HYBRID SIGNATURE-----
+      BASE64_Ed448+Dilithium5_SIGNATURE_OF_THIS_FILE
+      -----END HYBRID SIGNATURE-----
+----
+
+A grammar that admits `|` but not its continuation lines would reject exactly the
+construct A2ML exists to carry. A `#` inside a block body is signature data, not
+a comment, and a line beginning `---` inside one does **not** close the
+frontmatter.
+
+Indentation is **spaces only**. Tabs MUST NOT be used; none appears in the corpus.
+
+Observed indent widths: `0` (2,684 lines), `4` (15), `2` (7). Nesting is
+therefore rare — 22 of 2,706 entries — but real, and a conforming parser MUST
+support it.
+
+=== 4.1 Values
+
+[cols="2,1,4"]
+|===
+| Kind | Count | Form
+
+| `dq-string`
+| 1,799
+| `"` … `"`. Double quotes only.
+
+| `integer`
+| 880
+| Optional `-`, then digits.
+
+| `nested`
+| 19
+| Empty after the colon; the following more-indented lines are a nested mapping.
+
+| `bare-scalar`
+| 6
+| Unquoted, no leading/trailing space, terminated by end of line.
+
+| `flow-seq`
+| 2
+| `[` item ( `,` item )* `]`
+|===
+
+A conforming *producer* SHOULD emit `dq-string` for all string values. Bare
+scalars are permitted for compatibility with the six existing occurrences and are
+NOT RECOMMENDED for new documents: they are the construct most likely to be
+misread as a boolean, null or number.
+
+Sequences may also appear in block form (`- item` on its own line); 29 such lines
+were observed.
+
+=== 4.2 Excluded YAML constructs
+
+This dialect is *not* YAML. The following are **NOT PERMITTED**, and none occurs
+anywhere in the corpus:
+
+[cols="2,1,4"]
+|===
+| Construct | Occurrences | Rationale for exclusion
+
+| Anchors `&name`
+| **0**
+| Aliasing makes a document's meaning non-local, which defeats attestation over a
+  canonical hash form.
+
+| Aliases `*name`
+| **0**
+| As above; also the basis of billion-laughs style expansion attacks.
+
+| Tags `!` / `!!`
+| **0**
+| Type coercion by tag lets the same bytes mean different things to different
+  parsers.
+
+| Flow mappings `{…}`
+| **0**
+| No occurrences; excluding it removes a whole nesting path from the grammar.
+
+| Single-quoted strings
+| **0**
+| Two string forms with different escaping rules is a parser-differential risk for
+  no expressive gain.
+
+| Multi-document streams `---` … `---` …
+| **0**
+| The second `---` is the close delimiter. See §8.
+
+| Block scalars `\|` `>`
+| 2
+| Permitted but NOT RECOMMENDED — see below.
+|===
+
+Block scalars appear twice. They are permitted for those two files rather than
+retroactively invalidating them, but new documents SHOULD use a quoted string.
+Their chomping and folding rules are the single largest source of disagreement
+between YAML implementations.
+
+[NOTE]
+====
+Excluding anchors, aliases and tags is not a restriction — it is a description.
+They are absent from all 894 files. Writing them out of the grammar costs nothing
+and removes the three constructs most often implicated in YAML parser
+differentials.
+====
+
+== 5. Key vocabulary
+
+29 distinct keys across the corpus. The ten most frequent:
+
+`id` · `level` · `parent` · `version` · `context` · `algorithm` · `value` ·
+`integrity` · `meta` · `generated`
+
+This document does **not** fix the vocabulary. Key semantics belong to the base
+record vocabulary and the profile mechanism in `SPEC.adoc`; this dialect
+specifies only the *surface* in which keys are written. A future profile MAY
+constrain which keys are required.
+
+== 6. Conformance
+
+A document conforms to the manifest dialect at level *R1* when:
+
+. its first non-comment, non-blank line is `---`;
+. a matching `---` close delimiter exists;
+. every non-blank, non-comment line between them parses as `entry`;
+. no excluded construct from §4.2 appears;
+. indentation is spaces only, in multiples of two.
+
+A validator MUST reject a document failing 1–5 rather than skipping it. This
+matters: `a2ml/actions/validate/validate-a2ml.sh` currently *exempts*
+`AI-MANIFEST*.a2ml` and `AI.a2ml` from identity checks, treating them as
+"markdown prose". That exemption existed because there was no grammar to check
+against. **With this document, the exemption should be removed** — see §9.
+
+== 7. Translation into the core
+
+The mapping into `a2ml/src/A2ML/`:
+
+[cols="2,3"]
+|===
+| Manifest surface | Core
+
+| Frontmatter block | The document's metadata mapping
+| `entry` with `dq-string` / `bare-scalar` | `String` value
+| `entry` with `integer` | Numeric value
+| `entry` with `nested` | Sub-mapping
+| `entry` with sequence | List value
+| Body after the close delimiter | Markup-dialect block content, per `SPEC.adoc` §2
+|===
+
+This is the part that makes the dialect A2ML rather than "YAML in a file with an
+unusual extension". `Translator.idr` and `Converters.idr` are where it belongs;
+neither currently implements it, which is tracked in §9.
+
+Round-tripping — surface → core → surface — is a property to be *proved*, not
+assumed. `Proofs.idr` is the place for that obligation.
+
+== 8. The 19 unterminated files are NOT this dialect
+
+Nineteen files open with `---` after their comment header and never close it. A
+naive classifier reads them as malformed manifests. They are not:
+
+[source]
+----
+# SPDX-License-Identifier: MPL-2.0
+# must.manifest.a2ml — Trident coherence manifest for the must verb.
+
+---
+trident_version = "1.0.0"      <-- equals, not colon: record dialect
+verb = "must"
+
+## Files (three; exactly)      <-- markup heading
+----
+
+Of the 19: **7** use `key = value` (record dialect), **12** use `## heading`
+(markup dialect). The `---` is a *horizontal rule*, not a frontmatter delimiter.
+
+**This is a genuine ambiguity in the family and this specification resolves it
+one way only:** in the manifest dialect, a `---` as the first non-comment line
+opens frontmatter. A document that uses `---` as a rule MUST NOT also place it
+first, or it is indistinguishable from a manifest whose close delimiter is
+missing.
+
+Two consequences:
+
+* A manifest parser fed one of these 19 files would consume the entire file as
+  frontmatter and fail. That is correct behaviour under this spec.
+* The 19 files should be corrected — either by removing the leading `---` or by
+  moving it below their first content line. They are recorded here so the fix is
+  a known task rather than a surprise.
+
+The wider point for `SPEC.adoc` as family root: **`---` is currently ambiguous
+across dialects**, and the family spec should say which dialect claims it in
+first position.
+
+== 9. Open items before ratification
+
+. *Reference validator.* ✅ Done — `a2ml/actions/validate/validate-manifest-dialect.sh`,
+  894/894 conforming. It found one spec bug during drafting: the grammar admitted
+  the block-scalar introducer `|` but not its continuation lines, so it rejected a
+  PEM-armoured signature — the very construct A2ML exists to carry. Fixed in §4.
+  *Still to do:* wire it into CI.
+. *Remove the blanket exemption.* `validate-a2ml.sh` skips identity checks on
+  `AI-MANIFEST*.a2ml`. Once the validator above exists, the exemption should go.
+. *Implement the translation.* §7 in `Translator.idr` / `Converters.idr`, with a
+  round-trip proof obligation in `Proofs.idr`.
+. *Fix the 19.* §8.
+. *Register the dialect.* Add `dialect=manifest` to the family media type — see
+  `docs/DIALECT-ARCHITECTURE.adoc` §4 and `RECORD-DIALECT-SPEC.adoc` §14.
+
+== 10. Versioning
+
+Versioned with SemVer, independently of `SPEC.adoc` and
+`RECORD-DIALECT-SPEC.adoc`, but within the same era (`v1`) and over the same core.
+
+A change that would reject a currently-conforming corpus document is a MAJOR bump
+and requires a migration note and a deprecation window. Permitting a construct
+currently excluded by §4.2 is a MINOR bump — but the burden is on the proposer to
+show the construct is needed, since each one re-opens a parser-differential
+surface that is presently closed.

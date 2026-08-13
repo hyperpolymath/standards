@@ -208,7 +208,6 @@ CRG C integration tests (`tests/crg_c_tests.rs`):
 #### Missing Sub-projects (358 source files with ~0 tests)
 - [ ] `avow-protocol` — no tests (ReScript source exists)
 - [ ] `contractiles` — no tests
-- [ ] `consent-aware-http` — no tests
 - [ ] `lol` — no tests
 - [ ] `overlay-protocol` — no tests
 - [ ] `k9-svc` — no tests (mirrors a2ml structure, same test pattern applies)

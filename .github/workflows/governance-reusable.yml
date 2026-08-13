@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
+# This workflow is managed by gh actions-lock.
 # Governance checks for hyperpolymath repositories — Reusable Workflow
 name: Governance Reusable Workflow
 
@@ -471,44 +472,57 @@ jobs:
           enforce "V-lang manifests (v.mod / vpkg.json)" "V-lang is banned since 2026-04-10 — migrate to Zig" "$VMOD_FILES"
           enforce "ATS2 files (.dats / .sats / .hats)" "use Idris2 or Rust/SPARK instead" "$ATS2_FILES"
 
-      - name: Check for npm/bun artifacts
+      - name: Check for npm/yarn artifacts
         # standards#67 — npm-avoidant: package-lock.json must never be tracked
         # estate-wide. Check recursively (not just root) to catch monorepo
-        # sub-packages. See docs/JS-RUNTIME-POLICY.adoc.
+        # sub-packages. See LANGUAGE-POLICY.adoc §1 and docs/JS-RUNTIME-POLICY.adoc.
+        #
+        # 2026-08-07: this step previously failed any repository carrying
+        # bun.lockb ("Use Deno instead") and any package.json declaring runtime
+        # dependencies. LANGUAGE-POLICY.adoc §1 has made Bun the tier-1 runtime
+        # since 2026-07-29, and Bun's model IS an npm-compatible package.json
+        # plus bun.lock — so this gate made adopting the estate's first-choice
+        # runtime impossible, not merely awkward. It blocked what the policy
+        # mandates. Bun artifacts are now accepted; npm and yarn are unchanged.
         run: |
           LOCK_FILES=$(git ls-files 'package-lock.json' '**/package-lock.json' 2>/dev/null || true)
-          BUN_FILES=$(find . -name "bun.lockb" -not -path "./.git/*" 2>/dev/null || true)
           YARN_FILES=$(find . -name "yarn.lock" -not -path "./.git/*" 2>/dev/null || true)
           NPMRC_FILES=$(find . -name ".npmrc" -not -path "./.git/*" 2>/dev/null || true)
+          BUN_LOCK=$(find . \( -name "bun.lock" -o -name "bun.lockb" \) -not -path "./.git/*" 2>/dev/null || true)
           FAILED=""
           if [ -n "$LOCK_FILES" ]; then
-            echo "❌ Tracked package-lock.json detected (standards#67 — npm-avoidant):"
+            echo "❌ Tracked package-lock.json detected (standards#67 — npm-avoidant)."
+            echo "   npm is tier 4: permitted, never preferred. Prefer Bun (tier 1)."
             printf '%s\n' "$LOCK_FILES"
             FAILED=1
           fi
-          if [ -n "$BUN_FILES" ]; then
-            echo "❌ bun.lockb detected. Use Deno instead."
-            printf '%s\n' "$BUN_FILES"
-            FAILED=1
-          fi
           if [ -n "$YARN_FILES" ]; then
-            echo "❌ yarn.lock detected. Use Deno instead."
+            echo "❌ yarn.lock detected. yarn is not in the estate tier list."
+            echo "   Use Bun (tier 1), or Deno / pnpm / npm in that order."
             printf '%s\n' "$YARN_FILES"
             FAILED=1
           fi
           if [ -n "$NPMRC_FILES" ]; then
-            echo "❌ .npmrc detected. Use Deno deno.json for JS config."
+            echo "❌ .npmrc detected. Configure the runtime you actually use —"
+            echo "   bunfig.toml for Bun, deno.json for Deno."
             printf '%s\n' "$NPMRC_FILES"
             FAILED=1
           fi
-          # Root package.json with runtime "dependencies" — moved here from
-          # the now-deleted language-policy.yml. devDependencies-only is
-          # tolerated for transitional tooling (e.g., a legacy bundler
-          # invoked from Justfile), but a `"dependencies"` field
-          # indicates Node.js runtime use, which Deno replaces.
+          if [ -n "$BUN_LOCK" ]; then
+            echo "✅ Bun lockfile present — tier 1 (LANGUAGE-POLICY.adoc §1)."
+          fi
+          # Root package.json with runtime "dependencies". Bun consumes
+          # package.json by design, so this is only an anti-pattern when the
+          # repository is NOT using Bun; otherwise it is the tier-1 runtime
+          # working exactly as intended.
           if [ -f package.json ] && grep -q '"dependencies"[[:space:]]*:[[:space:]]*{[^}]' package.json; then
-            echo "❌ package.json with runtime \"dependencies\" detected. Use deno.json imports instead."
-            FAILED=1
+            if [ -n "$BUN_LOCK" ]; then
+              echo "✅ package.json runtime dependencies accompanied by a Bun lockfile — tier 1, fine."
+            else
+              echo "❌ package.json with runtime \"dependencies\" and no Bun lockfile."
+              echo "   Adopt Bun (tier 1) or declare imports in deno.json (tier 2)."
+              FAILED=1
+            fi
           fi
           if [ -n "$FAILED" ]; then
             echo "See hyperpolymath/standards docs/JS-RUNTIME-POLICY.adoc for remediation."
@@ -870,7 +884,7 @@ jobs:
           ref: ${{ github.sha }}
       - name: Check file permissions
         run: |
-          find . -type f -perm /111 -name "*.sh" | head -10
+          find . -type f -perm /111 -name "*.sh" | head -20
         continue-on-error: true
         # advisory: informational only; repos can opt into blocking locally
       - name: Check TODO/FIXME
@@ -881,7 +895,7 @@ jobs:
         # advisory: informational only; repos can opt into blocking locally
       - name: Check for large files
         run: |
-          find . -type f -size +1M -not -path "./.git/*" | head -10
+          find . -type f -size +1M -not -path "./.git/*" | head -20
         continue-on-error: true
         # advisory: informational only; repos can opt into blocking locally
       - name: EditorConfig check
@@ -944,7 +958,7 @@ jobs:
             echo "::error::Missing Expires field"
             exit 1
           fi
-          EXPIRES=$(grep "^Expires:" "$SECTXT" | cut -d: -f2- | tr -d ' ' | head -1)
+          EXPIRES=$(grep "^Expires:" "$SECTXT" | cut -d: -f2- | tr -d ' ' | head -2)
           if date -d "$EXPIRES" > /dev/null 2>&1; then
             DAYS=$(( ($(date -d "$EXPIRES" +%s) - $(date +%s)) / 86400 ))
             if [ $DAYS -lt 0 ]; then
@@ -996,13 +1010,72 @@ jobs:
           # governance jobs on every PR estate-wide. github.sha resolves to the
           # same merge commit but is always fetchable.
           ref: ${{ github.sha }}
+      - name: Checkout standards for the duplicate-key check
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-dupkey
+          sparse-checkout: scripts/check-workflow-duplicate-keys.sh
+          sparse-checkout-cone-mode: false
+        # ⚠ Not fatal if the file is absent. This checkout is pinned to
+        # standards@main, so during a rename of the script the fetch finds
+        # nothing — the new name does not exist on main until the renaming pull
+        # request merges. Without this, the RENAME ITSELF fails the linter, on
+        # the one pull request that cannot possibly be at fault. See the
+        # fallback in the next step.
+        continue-on-error: true
+
+      - name: Duplicate YAML keys in workflows
+        run: |
+          # GitHub Actions REJECTS a workflow with duplicate keys: the run is
+          # `failure` with no jobs, no log and no check run. Nothing else here
+          # can see it, because yaml.safe_load silently keeps the LAST
+          # duplicate and reports success — so the file "parses" and every
+          # other lint passes. Measured 2026-08-05: nine workflows in hypatia
+          # were dead this way, including a CodeQL workflow with zero
+          # successful runs in its entire lifetime.
+          set -euo pipefail
+          SCRIPT=".standards-dupkey/scripts/check-workflow-duplicate-keys.sh"
+          # Self-hosting fallback: when THIS repository is standards, its own
+          # working tree already holds the script, and during a rename that copy
+          # is the only correct one — the pinned main checkout still has the old
+          # name. Preferring the fetched copy keeps every other caller on the
+          # canonical version.
+          if [ ! -f "$SCRIPT" ] && [ -f scripts/check-workflow-duplicate-keys.sh ]; then
+            SCRIPT="scripts/check-workflow-duplicate-keys.sh"
+            echo "Using this repository's own copy (standards self-lint)."
+          fi
+          if [ ! -f "$SCRIPT" ]; then
+            echo "::error::duplicate-key checker not found — neither fetched from" \
+                 "standards@main nor present locally."
+            exit 1
+          fi
+          cp "$SCRIPT" "$RUNNER_TEMP/dupkeys.sh"
+          rm -rf .standards-dupkey
+          bash "$RUNNER_TEMP/dupkeys.sh" .github/workflows
+
       - name: Check SPDX headers + permissions
         run: |
           failed=0
           for file in .github/workflows/*.yml .github/workflows/*.yaml; do
             [ -f "$file" ] || continue
-            if ! head -1 "$file" | grep -q "^# SPDX-License-Identifier:"; then
-              echo "ERROR: $file missing SPDX header"; failed=1
+            # ⚠ SCAN THE HEADER BLOCK, NOT LINE 1. REUSE places the identifier
+            # anywhere in a file's leading comment block, and `gh actions-lock`
+            # INSERTS `# This workflow is managed by gh actions-lock.` at line 1
+            # whenever it mints a lockfile — so a line-1 test fights the estate's
+            # own tool and re-fails every time a lockfile is refreshed.
+            #
+            # Measured 2026-08-07: it reported 27 hypatia workflows and 13 more
+            # elsewhere as missing a header they all had, and "fixing" that by
+            # prepending a default MIS-LICENSED three files (PMPL-1.0-or-later
+            # shadowed by MPL-2.0) before it was caught.
+            #
+            # The leading run of comment lines is read, tolerating a YAML
+            # document marker. A licence declared there is declared.
+            if ! awk '/^---[[:space:]]*$/ { next } /^#/ { print; next } { exit }' "$file" \
+                 | grep -q "^# SPDX-License-Identifier:"; then
+              echo "ERROR: $file has no SPDX-License-Identifier in its header comment block"; failed=1
             fi
             if ! grep -q "^permissions:" "$file"; then
               echo "ERROR: $file missing top-level 'permissions:' declaration"; failed=1
@@ -1011,16 +1084,42 @@ jobs:
           [ $failed -eq 1 ] && { echo "Add SPDX header + permissions:"; exit 1; }
           echo "All workflows have SPDX headers + permissions"
       - name: Check SHA-pinned actions
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          unpinned=$(grep -rnE "^[[:space:]]+uses:" .github/workflows/ | \
-            grep -v "@[a-f0-9]\{40\}" | \
-            grep -v "uses: \./\|uses: docker://\|uses: actions/github-script\|uses: hyperpolymath/standards/" || true)
-          if [ -n "$unpinned" ]; then
-            echo "ERROR: Found unpinned actions:"
-            echo "$unpinned"
-            exit 1
+          if [ -f .github/workflows/actions.lock ]; then
+            # Lockfile repos: pin authority is actions.lock (the runner
+            # enforces it), so tag-style refs are legitimate. Verify every
+            # action ref has a lockfile entry instead of grepping for SHAs.
+            gh extension install github/gh-actions-lock
+            gh actions-lock --verify-local
+            # Cross-repo reusable calls stay outside lockfile scope and must
+            # remain SHA-pinned inline (standards' own calls exempted, as in
+            # the grep below).
+            unpinned=$(grep -rnE "^[[:space:]]+uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[^@]+@" .github/workflows/ | \
+              grep -v "@[a-f0-9]\{40\}" | \
+              grep -v "uses: hyperpolymath/standards/" || true)
+            if [ -n "$unpinned" ]; then
+              echo "ERROR: reusable workflow calls not SHA-pinned:"
+              echo "$unpinned"
+              exit 1
+            fi
+            echo "Lockfile coverage verified; reusable calls SHA-pinned"
+          else
+            unpinned=$(grep -rnE "^[[:space:]]+uses:" .github/workflows/ | \
+              grep -v "@[a-f0-9]\{40\}" | \
+              grep -v "uses: \./\|uses: docker://\|uses: actions/github-script\|uses: hyperpolymath/standards/" || true)
+            if [ -n "$unpinned" ]; then
+              echo "ERROR: no .github/workflows/actions.lock in THIS TREE, and these refs are not SHA-pinned."
+            echo "  Prefer \`gh actions-lock\` — it also locks the transitive dependencies"
+            echo "  of composite actions, which an inline SHA cannot express."
+            echo "  Do NOT do both: gh actions-lock refuses a ref no tag or branch contains,"
+            echo "  so inline pinning REMOVES actions from the lockfile."
+              echo "$unpinned"
+              exit 1
+            fi
+            echo "All actions are SHA-pinned"
           fi
-          echo "All actions are SHA-pinned"
       # The step above proves a pin has the right SHAPE. It cannot prove the
       # SHA EXISTS — a fabricated 40-hex string passes it. Measured 2026-07-28:
       # 112 of 613 unique estate pins (18%) do not resolve, in 876 committed
@@ -1114,3 +1213,115 @@ jobs:
       - name: Run licence-consistency check on caller repo
         run: |
           bash standards/scripts/check-licence-consistency.sh caller
+
+  exemption-ratchet:
+    name: Exemption ratchet
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    # Only meaningful on a pull request: the check compares the ledgers against
+    # a BASE. On push there is nothing to compare to, and a push-time run would
+    # either be vacuous or compare against an arbitrary predecessor.
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          # Full history: the ratchet reads the ledgers at the base ref and
+          # scans commit messages between base and HEAD for a declared
+          # exception. A shallow clone has neither.
+          fetch-depth: 0
+
+      - name: Check out standards repo for shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Exemption ratchet
+        run: |
+          set -euo pipefail
+          # Stage the script OUT of the scanned tree and delete the checkout,
+          # so the ratchet only ever reads the CALLER's ledgers — standards has
+          # ledgers of its own and they are not this repository's.
+          # Both files: the ratchet calls count-ledger-entries.sh as a sibling,
+          # and it has no fallback if the counter is missing — deliberately.
+          cp .standards-checkout/scripts/check-exemption-ratchet.sh \
+             .standards-checkout/scripts/count-ledger-entries.sh "$RUNNER_TEMP/"
+          rm -rf .standards-checkout
+          bash "$RUNNER_TEMP/check-exemption-ratchet.sh" \
+            "${{ github.event.pull_request.base.sha }}"
+
+  debt-ratchet:
+    name: Debt ratchet
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    # Sibling to exemption-ratchet, and pull-request-only for the same reason:
+    # the check compares ceilings against a BASE. The two govern different
+    # populations — the exemption ratchet watches debt you have EXCUSED, this
+    # one watches debt you have MEASURED.
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          # Full history: the ratchet reads the Debtfile at the base ref and
+          # scans commit messages between base and HEAD for a declared
+          # exception. A shallow clone has neither.
+          fetch-depth: 0
+
+      - name: Check out standards repo for shared scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Debt ratchet
+        run: |
+          set -euo pipefail
+          # Which copy of the scripts do we run?
+          #
+          # ⚠ BOOTSTRAP TRAP. A gate that fetches its own script from `main`
+          #   cannot run on the pull request that INTRODUCES that script — the
+          #   sparse checkout of main has no such file and the `cp` fails. This
+          #   job failed exactly that way on the PR that added it, and the same
+          #   shape has bitten hypatia's self-gating before.
+          #
+          #   So when the repository under test IS standards, run the scripts
+          #   from the PR's own tree. The guard is on the repository name and
+          #   not on file existence: a consumer repo that happened to contain a
+          #   file at scripts/check-debt-ratchet.sh must NOT be able to
+          #   substitute its own gate.
+          if [ "${{ github.repository }}" = "hyperpolymath/standards" ]; then
+            cp scripts/check-debt-ratchet.sh \
+               scripts/check-debtfile-structure.sh "$RUNNER_TEMP/"
+          else
+            cp .standards-checkout/scripts/check-debt-ratchet.sh \
+               .standards-checkout/scripts/check-debtfile-structure.sh "$RUNNER_TEMP/"
+          fi
+          # Stage the scripts OUT of the scanned tree and delete the checkout,
+          # so the ratchet only ever reads the CALLER's Debtfile — standards
+          # has one of its own and it is not this repository's.
+          rm -rf .standards-checkout
+
+          # A repo with no Debtfile is not in violation — adoption is opt-in.
+          # But a repo that HAS one must have a well-formed one, or the ratchet
+          # would be comparing ceilings it could not parse.
+          if [ -f .machine_readable/Debtfile.a2ml ]; then
+            bash "$RUNNER_TEMP/check-debtfile-structure.sh"
+          fi
+          bash "$RUNNER_TEMP/check-debt-ratchet.sh" \
+            "${{ github.event.pull_request.base.sha }}"

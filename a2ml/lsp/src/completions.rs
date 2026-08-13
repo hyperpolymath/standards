@@ -10,8 +10,28 @@
 //
 // Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 
+use std::sync::LazyLock;
 use regex::Regex;
 use tower_lsp::lsp_types::*;
+
+// Literal patterns, compiled once.
+//
+// These were built by calling Regex::new on a literal and unwrapping the
+// result, inside the functions below.
+// An LSP recompiles those on EVERY request — every keystroke, for
+// completions and diagnostics — and `unwrap` panics the handler task if a
+// literal is ever malformed. `LazyLock` compiles each pattern once, and
+// `expect` states the invariant: the pattern is a compile-time constant, so
+// a failure is a programming error rather than a runtime condition.
+static REF_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"@ref\(([^)]*)$").expect("REF_RE is a valid literal pattern"));
+
+static ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"id\s*=\s*"([^"]+)""#).expect("ID_RE is a valid literal pattern"));
+
+static SECTION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\[([A-Za-z][A-Za-z0-9_-]*)\]\s*$").expect("SECTION_RE is a valid literal pattern"));
+
 
 // ── Directive catalogue ──────────────────────────────────────────────
 
@@ -182,9 +202,11 @@ pub fn provide_completions(text: &str, position: Position) -> Vec<CompletionItem
 
     // 4. Inside `@ref(` → ID completions.
     if prefix.contains("@ref(") {
-        let ref_re = Regex::new(r"@ref\(([^)]*)$").unwrap();
+        let ref_re = &*REF_RE;
         if let Some(caps) = ref_re.captures(prefix) {
-            let partial = caps.get(1).unwrap().as_str();
+            let Some(partial) = caps.get(1).map(|m| m.as_str()) else {
+                return Vec::new();
+            };
             return ref_target_completions(text, partial);
         }
     }
@@ -249,11 +271,12 @@ fn key_completions(section_name: &str, partial: &str) -> Vec<CompletionItem> {
 
 /// `@ref()` target completions from IDs declared in the document.
 fn ref_target_completions(text: &str, partial: &str) -> Vec<CompletionItem> {
-    let id_re = Regex::new(r#"id\s*=\s*"([^"]+)""#).unwrap();
-
+    let id_re = &*ID_RE;
     id_re
         .captures_iter(text)
-        .map(|cap| cap.get(1).unwrap().as_str().to_string())
+        // filter_map, not map: a capture that did not participate is skipped
+        // rather than panicking the completion handler.
+        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
         .filter(|id| id.starts_with(partial))
         .map(|id| CompletionItem {
             label: id.clone(),
@@ -272,8 +295,7 @@ fn ref_target_completions(text: &str, partial: &str) -> Vec<CompletionItem> {
 ///
 /// Returns `None` if the cursor is not inside a section block.
 fn find_enclosing_section(lines: &[&str], line_idx: usize) -> Option<String> {
-    let section_re = Regex::new(r"^\[([A-Za-z][A-Za-z0-9_-]*)\]\s*$").unwrap();
-
+    let section_re = &*SECTION_RE;
     for i in (0..line_idx).rev() {
         let trimmed = lines[i].trim();
 
@@ -283,7 +305,7 @@ fn find_enclosing_section(lines: &[&str], line_idx: usize) -> Option<String> {
         }
 
         if let Some(caps) = section_re.captures(trimmed) {
-            return Some(caps.get(1).unwrap().as_str().to_string());
+            return caps.get(1).map(|m| m.as_str().to_string());
         }
     }
 
