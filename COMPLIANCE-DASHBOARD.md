@@ -36,7 +36,6 @@
 | `avow-protocol` | ❌ gap | 0/5 | 1/4 | 0/3 | 58% | 1/1 | 2026-07-03 |
 | `axel-protocol` | ❌ gap | 0/5 | 4/5 | 0/3 | 92% | 4/4 | 2026-07-03 |
 | `overlay-protocol` | ❌ gap | 1/5 | 0/4 | 0/3 | 50% | 1/1 | 2026-07-03 |
-| `consent-aware-http` | ❌ gap | 1/5 | 1/5 | 0/3 | 69% | 2/2 | 2026-07-03 |
 | `adoption-readiness-grades` | ❌ gap | 1/5 | 1/4 | 0/4 | 84% | 2/2 | 2026-07-03 |
 | `foundations-readiness-grades` | ❌ gap | 2/5 | 1/4 | 0/2 | 72% | 3/3 | 2026-07-03 |
 | `component-readiness-grades` | ❌ gap | 2/5 | 2/4 | 0/3 | 66% | 4/4 | 2026-07-03 |
@@ -53,11 +52,11 @@
 
 ## Estate rollup
 
-- **Specs registered (local):** 30
-- **Specs with a scorecard:** 30 / 30
-- **MUST requirements:** 45 passing / 147 total (75 failing)
-- **Estate systems coverage:** 67% of 343 graded requirements have a mechanical check
-- **Grounded passes:** 84 / 84 (100%) pass rows carry an executable `check` run by `--verify`
+- **Specs registered (local):** 29
+- **Specs with a scorecard:** 29 / 29
+- **MUST requirements:** 44 passing / 142 total (71 failing)
+- **Estate systems coverage:** 67% of 330 graded requirements have a mechanical check
+- **Grounded passes:** 82 / 82 (100%) pass rows carry an executable `check` run by `--verify`
 
 ## How this dashboard stays honest
 

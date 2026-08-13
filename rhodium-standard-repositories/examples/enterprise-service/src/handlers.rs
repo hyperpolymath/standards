@@ -15,7 +15,16 @@ use tracing::{info, warn};
 
 /// List all users
 pub async fn list_users(State(state): State<Arc<AppState>>) -> Json<Vec<User>> {
-    let users = state.users.read().unwrap();
+    // ⚠ This handler's signature has NO error channel — `Json<Vec<User>>`
+    // cannot express a 500 — so unlike its siblings it recovers rather than
+    // propagating, and logs at warn so the poisoning is not silent. Widening
+    // the return type to Result<_, AppError> would let it answer honestly and
+    // is the better fix; it is an API change and is left for the caller of
+    // this example to decide.
+    let users = state.users.read().unwrap_or_else(|e| {
+        warn!("user store lock poisoned; serving possibly-stale list");
+        e.into_inner()
+    });
     let user_list: Vec<User> = users.values().cloned().collect();
     info!("Listed {} users", user_list.len());
     Json(user_list)
@@ -26,7 +35,13 @@ pub async fn get_user(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<User>, AppError> {
-    let users = state.users.read().unwrap();
+    // A poisoned lock means another handler panicked mid-update, so the map
+    // may be half-written. Serving from it would return data the service
+    // cannot vouch for; 500 is the honest answer.
+    let users = state.users.read().map_err(|_| {
+        warn!("user store lock poisoned");
+        AppError::Internal
+    })?;
 
     users
         .get(&id)
@@ -51,7 +66,10 @@ pub async fn create_user(
         return Err(AppError::InvalidInput("Invalid email address".to_string()));
     }
 
-    let mut users = state.users.write().unwrap();
+    let mut users = state.users.write().map_err(|_| {
+        warn!("user store lock poisoned");
+        AppError::Internal
+    })?;
     let id = (users.len() + 1).to_string();
 
     let user = User {
@@ -71,7 +89,10 @@ pub async fn delete_user(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    let mut users = state.users.write().unwrap();
+    let mut users = state.users.write().map_err(|_| {
+        warn!("user store lock poisoned");
+        AppError::Internal
+    })?;
 
     users
         .remove(&id)

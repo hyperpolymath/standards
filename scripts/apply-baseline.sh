@@ -93,8 +93,20 @@ SCHEMA_ERRORS="$(jq -r '
           and (($e.rule_module|test("^[a-z][a-z0-9_]*$"))|not)
        then "entry[\($i)]: rule_module fails pattern: \($e.rule_module)"
        else empty end),
+      # `type` accepts three shapes, and the third is not cosmetic:
+      #   snake_case          — the Hypatia rule modules (unsafe_block, ...)
+      #   SD007-style codes   — structural_drift
+      #   CamelCase           — SCORECARD PROBE NAMES (DependencyPinning,
+      #                         BranchProtection, ...). Hypatia emits these
+      #                         verbatim from Scorecard, and without this
+      #                         alternative NO SCORECARD FINDING COULD BE
+      #                         BASELINED BY ANY REPOSITORY — the validator
+      #                         rejected the whole file with exit 2, which
+      #                         reads as "your baseline is malformed" rather
+      #                         than "this finding is unrepresentable".
+      #                         Found 2026-08-06 in metadatastician/stapeln.
       (if ($e.type|type) == "string"
-          and (($e.type|test("^([a-z][a-z0-9_]*|[A-Z]{2,3}[0-9]{3})$"))|not)
+          and (($e.type|test("^([a-z][a-z0-9_]*|[A-Z]{2,3}[0-9]{3}|[A-Z][A-Za-z0-9]+)$"))|not)
        then "entry[\($i)]: type fails pattern: \($e.type)" else empty end),
       (if ($e|has("file")) and ((($e.file|type) != "string") or ($e.file == ""))
        then "entry[\($i)]: file must be a non-empty string" else empty end),
