@@ -195,11 +195,16 @@ jobs:
           # scan's own exit code…
           # Run scan with fallback: if the scan command fails entirely, use an
           # empty array to avoid a hard gate failure on a scanner crash.
-          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero > hypatia-findings.raw.json || echo '[]' > hypatia-findings.raw.json
+          # Capture stderr to a separate file for debugging; the JSON goes to stdout.
+          HYPATIA_FORMAT=json "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero > hypatia-findings.raw.json 2> hypatia-scan.err || echo '[]' > hypatia-findings.raw.json
           # Ensure the output file exists and is non-empty. If the scan produced
           # no output (empty file), use an empty array.
           if [ ! -s hypatia-findings.raw.json ]; then
             echo "::error::hypatia scan produced empty output (scanner error)"
+            if [ -s hypatia-scan.err ]; then
+              echo "Scanner stderr:"
+              cat hypatia-scan.err
+            fi
             echo '[]' > hypatia-findings.raw.json
           fi
 
