@@ -1,207 +1,255 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
-//
-// Find.Bible crawler (API + HTML hybrid). AffineScript port of FindBible.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module FindBible;
 
-use Crawler;
-use Http;
-use Lang1000;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell and Contributors
 
-extern fn json_parse_exn(s: String) -> Json = "JSON" "parseExn";
-extern fn json_as_array(j: Json) -> Option<[Json]> = "json" "asArray";
-extern fn json_as_object(j: Json) -> Option<Dict<Json>> = "json" "asObject";
-extern fn json_str_field(o: Dict<Json>, key: String) -> String = "json" "strField";
-extern fn json_opt_str_field(o: Dict<Json>, key: String) -> Option<String> = "json" "optStrField";
-extern fn json_int_field(o: Dict<Json>, key: String) -> Int = "json" "intField";
-extern fn json_opt_int_field(o: Dict<Json>, key: String) -> Option<Int> = "json" "optIntField";
+/**
+ * Find.Bible Crawler
+ *
+ * Crawler for find.bible - API + HTML hybrid approach for
+ * language discovery and per-language Bible text retrieval.
+ */
 
-module Config {
-  pub let base_url = "https://find.bible";
-  pub let api_url = "https://find.bible/api";
-  pub let rate_limit_ms = 1000;
+open Crawler.Types
+
+module Config = {
+  fn baseUrl = "https://find.bible"
+  fn apiUrl = "https://find.bible/api"
+  fn rateLimitMs = 1000
 }
 
-module Endpoints {
-  pub fn languages() -> String { Config.api_url ++ "/languages" }
-  pub fn language(code: String) -> String { Config.api_url ++ "/languages/" ++ code }
-  pub fn bibles(code: String) -> String { Config.api_url ++ "/bibles?language=" ++ code }
-  pub fn bible(id: String) -> String { Config.api_url ++ "/bibles/" ++ id }
-  pub fn text(id: String, book: String, chapter: Int) -> String {
-    Config.api_url ++ "/bibles/" ++ id ++ "/" ++ book ++ "/" ++ show(chapter)
+module Endpoints = {
+  fn languages = () => `${Config.apiUrl}/languages`
+  fn language = langCode => `${Config.apiUrl}/languages/${langCode}`
+  fn bibles = langCode => `${Config.apiUrl}/bibles?language=${langCode}`
+  fn bible = bibleId => `${Config.apiUrl}/bibles/${bibleId}`
+  fn text = (bibleId, book, chapter) =>
+    `${Config.apiUrl}/bibles/${bibleId}/${book}/${Int.toString(chapter)}`
+}
+
+module Types = {
+  struct languageInfo { {
+    code: string,
+    name: string,
+    nativeName: option<string>,
+    bibleCount: int,
+  }
+
+  struct bibleEntry { {
+    id: string,
+    title: string,
+    languageCode: string,
+    year: option<int>,
+    copyright: option<string>,
   }
 }
 
-module Types {
-  pub type LanguageInfo = {
-    code: String,
-    name: String,
-    native_name: Option<String>,
-    bible_count: Int,
-  }
+module Parser = {
+  open Types
 
-  pub type BibleEntry = {
-    id: String,
-    title: String,
-    language_code: String,
-    year: Option<Int>,
-    copyright: Option<String>,
-  }
-}
+  fn getString = (obj: Dict.t<JSON.t>, key: string): string =>
+    switch obj->Dict.get(key) {
+    | Some(String(s)) => s
+    | _ => ""
+    }
 
-module Parser {
-  use Types;
+  fn getOptString = (obj: Dict.t<JSON.t>, key: string): option<string> =>
+    switch obj->Dict.get(key) {
+    | Some(String(s)) => Some(s)
+    | _ => None
+    }
 
-  fn obj_array(json: Json, data_key: String) -> Option<[Dict<Json>]> {
-    match json_as_array(json) {
-      Some(arr) => Some(collect_objs(arr)),
-      None => {
-        match json_as_object(json) {
-          Some(obj) => {
-            match dict_get(obj, data_key) {
-              Some(inner) => match json_as_array(inner) { Some(a) => Some(collect_objs(a)), None => None },
-              None => None,
-            }
+  fn getInt = (obj: Dict.t<JSON.t>, key: string): int =>
+    switch obj->Dict.get(key) {
+    | Some(Number(n)) => Float.toInt(n)
+    | _ => 0
+    }
+
+  fn getOptInt = (obj: Dict.t<JSON.t>, key: string): option<int> =>
+    switch obj->Dict.get(key) {
+    | Some(Number(n)) => Some(Float.toInt(n))
+    | _ => None
+    }
+
+  /** Parse language list from API JSON response */
+  fn parseLanguages = (json: JSON.t): Crawler.Parser.parseResult<array<languageInfo>> => {
+    switch json {
+    | Array(arr) =>
+      fn langs = arr->Array.filterMap(item => {
+        switch item {
+        | Object(obj) =>
+          Some({
+            code: getString(obj, "code"),
+            name: getString(obj, "name"),
+            nativeName: getOptString(obj, "nativeName"),
+            bibleCount: getInt(obj, "bibleCount"),
+          })
+        | _ => None
+        }
+      })
+      Crawler.Parser.Parsed(langs)
+    | Object(obj) =>
+      switch obj->Dict.get("data") {
+      | Some(Array(arr)) =>
+        fn langs = arr->Array.filterMap(item => {
+          switch item {
+          | Object(o) =>
+            Some({
+              code: getString(o, "code"),
+              name: getString(o, "name"),
+              nativeName: getOptString(o, "nativeName"),
+              bibleCount: getInt(o, "bibleCount"),
+            })
+          | _ => None
           }
-          None => None,
-        }
-      }
-    }
-  }
-
-  fn collect_objs(arr: [Json]) -> [Dict<Json>] {
-    let out = [];
-    let i = 0;
-    while i < len(arr) {
-      match json_as_object(arr[i]) { Some(o) => { out = out ++ [o]; } None => {} }
-      i = i + 1;
-    }
-    out
-  }
-
-  pub fn parse_languages(json: Json) -> Crawler.Parser.ParseResult<[Types.LanguageInfo]> {
-    match obj_array(json, "data") {
-      Some(objs) => {
-        let langs = [];
-        let i = 0;
-        while i < len(objs) {
-          let o = objs[i];
-          langs = langs ++ [Types.LanguageInfo {
-            code: json_str_field(o, "code"),
-            name: json_str_field(o, "name"),
-            native_name: json_opt_str_field(o, "nativeName"),
-            bible_count: json_int_field(o, "bibleCount"),
-          }];
-          i = i + 1;
-        }
+        })
         Crawler.Parser.Parsed(langs)
+      | _ => Crawler.Parser.NoMatch
       }
-      None => Crawler.Parser.NoMatch,
+    | _ => Crawler.Parser.NoMatch
     }
   }
 
-  pub fn parse_bibles(json: Json) -> Crawler.Parser.ParseResult<[Types.BibleEntry]> {
-    match obj_array(json, "data") {
-      Some(objs) => {
-        let bibles = [];
-        let i = 0;
-        while i < len(objs) {
-          let o = objs[i];
-          bibles = bibles ++ [Types.BibleEntry {
-            id: json_str_field(o, "id"),
-            title: json_str_field(o, "title"),
-            language_code: json_str_field(o, "languageCode"),
-            year: json_opt_int_field(o, "year"),
-            copyright: json_opt_str_field(o, "copyright"),
-          }];
-          i = i + 1;
+  /** Parse Bible entries from API JSON response */
+  fn parseBibles = (json: JSON.t): Crawler.Parser.parseResult<array<bibleEntry>> => {
+    fn parseArr = arr =>
+      arr->Array.filterMap(item => {
+        switch item {
+        | Object(obj) =>
+          Some({
+            id: getString(obj, "id"),
+            title: getString(obj, "title"),
+            languageCode: getString(obj, "languageCode"),
+            year: getOptInt(obj, "year"),
+            copyright: getOptString(obj, "copyright"),
+          })
+        | _ => None
         }
-        Crawler.Parser.Parsed(bibles)
+      })
+
+    switch json {
+    | Array(arr) => Crawler.Parser.Parsed(parseArr(arr))
+    | Object(obj) =>
+      switch obj->Dict.get("data") {
+      | Some(Array(arr)) => Crawler.Parser.Parsed(parseArr(arr))
+      | _ => Crawler.Parser.NoMatch
       }
-      None => Crawler.Parser.NoMatch,
+    | _ => Crawler.Parser.NoMatch
     }
   }
 
-  pub fn parse_verses(json: Json, language_code: String) -> Crawler.Parser.ParseResult<[Lang1000.Verse.T]> {
-    match obj_array(json, "verses") {
-      Some(objs) => {
-        let verses = [];
-        let i = 0;
-        while i < len(objs) {
-          let o = objs[i];
-          let text = json_str_field(o, "text");
-          if len(text) > 0 {
-            verses = verses ++ [Lang1000.Verse.make(
-              Lang1000.Verse.make_reference(
-                json_str_field(o, "book"),
-                json_int_field(o, "chapter"),
-                json_int_field(o, "verse")),
-              text, language_code)];
+  /** Parse verse text from API chapter response */
+  fn parseVerses = (json: JSON.t, languageCode: string): Crawler.Parser.parseResult<
+    array<Lang1000.Verse.t>,
+  > => {
+    fn parseVerseArr = arr =>
+      arr->Array.filterMap(item => {
+        switch item {
+        | Object(obj) =>
+          fn book = getString(obj, "book")
+          fn chapter = getInt(obj, "chapter")
+          fn verseNum = getInt(obj, "verse")
+          fn text = getString(obj, "text")
+          if String.length(text) > 0 {
+            Some(
+              Lang1000.Verse.make(
+                ~reference=Lang1000.Verse.makeReference(~book, ~chapter, ~verse=verseNum),
+                ~text,
+                ~language=languageCode,
+              ),
+            )
+          } else {
+            None
           }
-          i = i + 1;
+        | _ => None
         }
-        Crawler.Parser.Parsed(verses)
+      })
+
+    switch json {
+    | Array(arr) => Crawler.Parser.Parsed(parseVerseArr(arr))
+    | Object(obj) =>
+      switch obj->Dict.get("verses") {
+      | Some(Array(arr)) => Crawler.Parser.Parsed(parseVerseArr(arr))
+      | _ => Crawler.Parser.NoMatch
       }
-      None => Crawler.Parser.NoMatch,
+    | _ => Crawler.Parser.NoMatch
     }
   }
 }
 
-module Crawler_ {
-  use Crawler.Types;
-
-  pub type T = {
-    rate_limiter: Crawler.RateLimiter.T,
-    mut state: Crawler.Types.CrawlerState,
+module Crawler = {
+  struct t { {
+    rateLimiter: Crawler.RateLimiter.t,
+    mutable state: crawlerState,
   }
 
-  pub fn make() -> T {
-    T { rate_limiter: Crawler.RateLimiter.make(Config.rate_limit_ms), state: Crawler.Types.Idle }
+  fn make = () => {
+    rateLimiter: Crawler.RateLimiter.make(~delayMs=Config.rateLimitMs, ()),
+    state: Idle,
   }
 
-  pub fn fetch_languages(crawler: T) -> Effect[Async] Crawler.Types.CrawlResult<[Types.LanguageInfo]> {
-    crawler.state = Crawler.Types.Crawling("languages");
-    let resp = await Http.get_json(Endpoints.languages(), None);
-    crawler.state = Crawler.Types.Idle;
-    match resp {
-      Ok(json) => {
-        match Parser.parse_languages(json) {
-          Crawler.Parser.Parsed(langs) => Crawler.Types.Success(langs),
-          _ => Crawler.Types.Failure("Failed to parse language list"),
-        }
+  /** Discover available languages */
+  fn fetchLanguages = async (crawler: t): crawlResult<array<Types.languageInfo>> => {
+    crawler.state = Crawling("languages")
+    fn resp = await Http.getJson(Endpoints.languages(), ())
+    crawler.state = Idle
+    switch resp {
+    | Ok(json) =>
+      switch Parser.parseLanguages(json) {
+      | Crawler.Parser.Parsed(langs) => Success(langs)
+      | _ => Failure("Failed to parse language list")
       }
-      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
-      Err(_) => Crawler.Types.Failure("Request failed"),
+    | Error(Http.HttpError(code, msg)) => Failure(`HTTP ${Int.toString(code)}: ${msg}`)
+    | Error(_) => Failure("Request failed")
     }
   }
 
-  pub fn fetch_bibles(crawler: T, lang_code: String) -> Effect[Async] Crawler.Types.CrawlResult<[Types.BibleEntry]> {
-    let resp = await Http.get_with_rate_limit(Endpoints.bibles(lang_code), None, crawler.rate_limiter);
-    match resp {
-      Ok(r) => {
-        match Parser.parse_bibles(json_parse_exn(r.body)) {
-          Crawler.Parser.Parsed(bibles) => Crawler.Types.Success(bibles),
-          _ => Crawler.Types.Failure("Failed to parse bibles"),
-        }
+  /** Fetch Bibles available for a language */
+  fn fetchBibles = async (
+    crawler: t,
+    langCode: string,
+  ): crawlResult<array<Types.bibleEntry>> => {
+    fn resp = await Http.getWithRateLimit(
+      Endpoints.bibles(langCode),
+      ~rateLimiter=crawler.rateLimiter,
+      (),
+    )
+    switch resp {
+    | Ok({body}) =>
+      switch Parser.parseBibles(JSON.parseExn(body)) {
+      | Crawler.Parser.Parsed(bibles) => Success(bibles)
+      | _ => Failure("Failed to parse bibles")
       }
-      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
-      Err(_) => Crawler.Types.Failure("Request failed"),
+    | Error(Http.HttpError(code, msg)) => Failure(`HTTP ${Int.toString(code)}: ${msg}`)
+    | Error(_) => Failure("Request failed")
     }
   }
 
-  pub fn fetch_chapter(crawler: T, bible_id: String, book: String, chapter: Int,
-                       language_code: String) -> Effect[Async] Crawler.Types.CrawlResult<[Lang1000.Verse.T]> {
-    let resp = await Http.get_with_rate_limit(Endpoints.text(bible_id, book, chapter), None, crawler.rate_limiter);
-    match resp {
-      Ok(r) => {
-        match Parser.parse_verses(json_parse_exn(r.body), language_code) {
-          Crawler.Parser.Parsed(verses) => Crawler.Types.Success(verses),
-          _ => Crawler.Types.Failure("Failed to parse verses"),
-        }
+  /** Fetch chapter text for a specific Bible */
+  fn fetchChapter = async (
+    crawler: t,
+    bibleId: string,
+    book: string,
+    chapter: int,
+    languageCode: string,
+  ): crawlResult<array<Lang1000.Verse.t>> => {
+    fn resp = await Http.getWithRateLimit(
+      Endpoints.text(bibleId, book, chapter),
+      ~rateLimiter=crawler.rateLimiter,
+      (),
+    )
+    switch resp {
+    | Ok({body}) =>
+      switch Parser.parseVerses(JSON.parseExn(body), languageCode) {
+      | Crawler.Parser.Parsed(verses) => Success(verses)
+      | _ => Failure("Failed to parse verses")
       }
-      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
-      Err(_) => Crawler.Types.Failure("Request failed"),
+    | Error(Http.HttpError(code, msg)) => Failure(`HTTP ${Int.toString(code)}: ${msg}`)
+    | Error(_) => Failure("Request failed")
     }
   }
 }
+

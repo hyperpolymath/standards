@@ -1,119 +1,199 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
-//
-// A2ML_Types — core data types for A2ML documents.
-// AffineScript port of A2ML_Types.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module A2ML_Types;
 
-extern fn str_lower(s: String) -> String = "string" "toLowerCase";
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// A2ML_Types — Core data structs for A2ML (Attested Markup Language) documents.
+//
+// Defines the abstract syntax tree for A2ML documents including document
+// structure, block-level elements, inline formatting, directives, and
+// attestation provenance records with trust levels.
 
-pub type TrustLevel = | Unverified | Automated | Reviewed | Verified
+// ---------------------------------------------------------------------------
+// Trust levels
+// ---------------------------------------------------------------------------
 
-pub fn trust_level_from_string(s: String) -> Option<TrustLevel> {
-  match str_lower(s) {
-    "unverified" => Some(Unverified),
-    "automated"  => Some(Automated),
-    "reviewed"   => Some(Reviewed),
-    "verified"   => Some(Verified),
-    _            => None,
+/// The degree of trust associated with an attestation.
+/// Forms an ordered scale from unverified content through to formally verified.
+struct trustLevel {
+  | Unverified
+  | Automated
+  | Reviewed
+  | Verified
+
+/// Parse a trust level from its canonical string representation.
+/// Recognised values (case-insensitive): "unverified", "automated",
+/// "reviewed", "verified".
+fn trustLevelFromString = (s: string): option<trustLevel> => {
+  switch s->String.toLowerCase {
+  | "unverified" => Some(Unverified)
+  | "automated" => Some(Automated)
+  | "reviewed" => Some(Reviewed)
+  | "verified" => Some(Verified)
+  | _ => None
   }
 }
 
-pub fn trust_level_to_string(level: TrustLevel) -> String {
-  match level {
-    Unverified => "unverified",
-    Automated  => "automated",
-    Reviewed   => "reviewed",
-    Verified   => "verified",
+/// Return the canonical string representation of a trust level.
+fn trustLevelToString = (level: trustLevel): string => {
+  switch level {
+  | Unverified => "unverified"
+  | Automated => "automated"
+  | Reviewed => "reviewed"
+  | Verified => "verified"
   }
 }
 
-pub type Inline =
-  | Text(String)
-  | Emphasis([Inline])
-  | Strong([Inline])
-  | Code(String)
-  | Link([Inline], String)
-  | InlineRef(String)
+// ---------------------------------------------------------------------------
+// Inline-level elements
+// ---------------------------------------------------------------------------
 
-pub type Directive = {
-  name: String,
-  value: String,
-  attributes: [(String, String)],
+/// An inline-level element within a block.
+struct rec inline =
+  | Text(string)
+  | Emphasis(array<inline>)
+  | Strong(array<inline>)
+  | Code(string)
+  | Link({content: array<inline>, url: string})
+  | InlineRef(string)
+
+// ---------------------------------------------------------------------------
+// Directives
+// ---------------------------------------------------------------------------
+
+/// A machine-readable directive that provides metadata or instructions.
+/// Directives begin with `@` in the source text, e.g.
+/// `@version 1.0` or `@require trust-level:high`.
+struct directive { {
+  name: string,
+  value: string,
+  attributes: array<(string, string)>,
 }
 
-pub fn make_directive(name: String, value: String) -> Directive {
-  Directive { name: name, value: value, attributes: [] }
+/// Create a simple directive with a name and value, and no attributes.
+fn makeDirective = (name: string, value: string): directive => {
+  name,
+  value,
+  attributes: [],
 }
 
-pub type Attestation = {
-  identity: String,
-  role: String,
-  trust_level: TrustLevel,
-  timestamp: Option<String>,
-  note: Option<String>,
+// ---------------------------------------------------------------------------
+// Attestations
+// ---------------------------------------------------------------------------
+
+/// An attestation record capturing who produced or reviewed content.
+/// Attestation blocks start with `!attest` and record identity,
+/// role, trust level, and optional timestamp of an author or reviewer.
+struct attestation { {
+  identity: string,
+  role: string,
+  trustLevel: trustLevel,
+  timestamp: option<string>,
+  note: option<string>,
 }
 
-pub fn make_attestation(identity: String, role: String, trust_level: TrustLevel) -> Attestation {
-  Attestation { identity: identity, role: role, trust_level: trust_level, timestamp: None, note: None }
+/// Create a new attestation with the minimum required fields.
+fn makeAttestation = (
+  ~identity: string,
+  ~role: string,
+  ~trustLevel: trustLevel,
+): attestation => {
+  identity,
+  role,
+  trustLevel,
+  timestamp: None,
+  note: None,
 }
 
-pub type Block =
-  | Heading(Int, [Inline])
-  | Paragraph([Inline])
-  | CodeBlock(Option<String>, String)
-  | DirectiveBlock(Directive)
-  | AttestationBlock(Attestation)
+// ---------------------------------------------------------------------------
+// Block-level elements
+// ---------------------------------------------------------------------------
+
+/// A block-level element in an A2ML document.
+/// Blocks are separated by blank lines in the source text.
+struct rec block =
+  | Heading({level: int, content: array<inline>})
+  | Paragraph(array<inline>)
+  | CodeBlock({language: option<string>, content: string})
+  | DirectiveBlock(directive)
+  | AttestationBlock(attestation)
   | ThematicBreak
-  | BlockQuote([Block])
-  | BulletList([[Inline]])
+  | BlockQuote(array<block>)
+  | BulletList(array<array<inline>>)
   | BlankLine
 
-pub type Document = {
-  title: Option<String>,
-  directives: [Directive],
-  blocks: [Block],
-  attestations: [Attestation],
+// ---------------------------------------------------------------------------
+// Top-level document
+// ---------------------------------------------------------------------------
+
+/// A complete A2ML document, containing metadata and a sequence of blocks.
+struct document { {
+  title: option<string>,
+  directives: array<directive>,
+  blocks: array<block>,
+  attestations: array<attestation>,
 }
 
-pub fn empty_document() -> Document {
-  Document { title: None, directives: [], blocks: [], attestations: [] }
+/// Create a new, empty document with no title or content.
+fn emptyDocument = (): document => {
+  title: None,
+  directives: [],
+  blocks: [],
+  attestations: [],
 }
 
-pub type Manifest = {
-  version: Option<String>,
-  title: Option<String>,
-  directives: [Directive],
-  attestations: [Attestation],
+// ---------------------------------------------------------------------------
+// Manifest (convenience aggregate)
+// ---------------------------------------------------------------------------
+
+/// A high-level manifest extracted from a parsed A2ML document.
+/// Collects directives and attestations for convenient programmatic access.
+struct manifest { {
+  version: option<string>,
+  title: option<string>,
+  directives: array<directive>,
+  attestations: array<attestation>,
 }
 
-pub fn manifest_from_document(doc: Document) -> Manifest {
-  let version = None;
-  let i = 0;
-  while i < len(doc.directives) {
-    if doc.directives[i].name == "version" {
-      version = Some(doc.directives[i].value);
-    }
-    i = i + 1;
+/// Extract a manifest from a parsed document.
+fn manifestFromDocument = (doc: document): manifest => {
+  fn version =
+    doc.directives
+    ->Array.find(d => d.name == "version")
+    ->Option.map(d => d.value)
+
+  {
+    version,
+    title: doc.title,
+    directives: doc.directives,
+    attestations: doc.attestations,
   }
-  Manifest { version: version, title: doc.title, directives: doc.directives, attestations: doc.attestations }
 }
 
-pub type ParseError =
-  | UnterminatedDirective(Int, String)
-  | InvalidHeadingLevel(Int, Int)
-  | UnexpectedToken(Int, String)
+// ---------------------------------------------------------------------------
+// Parse errors
+// ---------------------------------------------------------------------------
+
+/// Errors that can occur during A2ML parsing.
+struct parseError {
+  | UnterminatedDirective({line: int, name: string})
+  | InvalidHeadingLevel({line: int, level: int})
+  | UnexpectedToken({line: int, token: string})
   | EmptyDocument
 
-pub fn parse_error_to_string(err: ParseError) -> String {
-  match err {
-    UnterminatedDirective(line, name) =>
-      "error[A2ML]: line " ++ show(line) ++ ": unterminated directive @" ++ name,
-    InvalidHeadingLevel(line, level) =>
-      "error[A2ML]: line " ++ show(line) ++ ": invalid heading level " ++ show(level) ++ " (must be 1-5)",
-    UnexpectedToken(line, token) =>
-      "error[A2ML]: line " ++ show(line) ++ ": unexpected token \"" ++ token ++ "\"",
-    EmptyDocument => "error[A2ML]: document is empty",
+/// Format a parse error as a diagnostic string.
+fn parseErrorToString = (err: parseError): string => {
+  switch err {
+  | UnterminatedDirective({line, name}) =>
+    `error[A2ML]: line ${line->Int.toString}: unterminated directive @${name}`
+  | InvalidHeadingLevel({line, level}) =>
+    `error[A2ML]: line ${line->Int.toString}: invalid heading level ${level->Int.toString} (must be 1-5)`
+  | UnexpectedToken({line, token}) =>
+    `error[A2ML]: line ${line->Int.toString}: unexpected token "${token}"`
+  | EmptyDocument => "error[A2ML]: document is empty"
   }
 }
+

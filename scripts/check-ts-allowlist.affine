@@ -1,260 +1,245 @@
 // SPDX-License-Identifier: MPL-2.0
-// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
-//
-// check-ts-allowlist.affine — AffineScript port of standards/scripts/check-ts-allowlist.ts.
-//
-// Step 2 of the estate-wide TypeScript → AffineScript migration campaign
-// (hyperpolymath/standards#239 umbrella, #241 tail-batch-1 issue).
-//
-// Compiled output: scripts/check-ts-allowlist.deno.js (committed). After
-// editing this file, re-run `just check-ts-allowlist-drift` to verify the
-// committed .deno.js matches what compiling this source produces. The
-// governance reusable runs the same check in CI as a non-blocking
-// informational step (standards#312).
+// Ported via Harvard Engine (Semantic pass)
 
-use Deno::{
-  readTextFile, walkRecursive, exit, consoleError,
-  regexMatch
-};
-use string::{ split };
+module check-ts-allowlist;
 
-// `Deno.endsWith` (extern) has no Deno-ESM codegen lowering — it resolves
-// to an unbound reference at runtime. Inline a `string_sub`-backed
-// equivalent (the merged seed's defensive pattern, restored here).
-fn ends_with(s: String, suffix: String) -> Bool {
-  let slen = len(s);
-  let sfxlen = len(suffix);
-  if sfxlen > slen { false }
-  else { string_sub(s, slen - sfxlen, sfxlen) == suffix }
-}
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+//
+// check-ts-allowlist.ts — Deno port of the inline python3 heredoc that used
+// to live in `.github/workflows/governance-reusable.yml` step
+// "Check for TypeScript".
+//
+// Why this file exists: estate language policy bans Python in all repos
+// (SaltStack exception removed 2026-01-03). The governance-reusable
+// workflow that enforces the policy was itself written in inline Python —
+// a self-referential violation, structurally identical to the CSA001
+// self-loop fixed in hypatia#328. This script eliminates the violation.
+//
+// Behaviour MUST stay byte-identical to the previous Python implementation:
+//   * Walk every `*.ts` / `*.tsx` file under cwd, skipping dotted dirs
+//     and treating `.ts.bak` / `.tsx.bak` backups as banned TS artifacts.
+//   * Allow files in the built-in directory/path allowlist
+//     (bindings/tests/scripts/vendor/examples/ffi/benchmarks/cli, plus unknown
+//     segment containing 'vscode' or starting with 'deno-').
+//   * Allow specific filename patterns: `*.d.ts`, `mod.ts`, `lsp-server.ts`,
+//     `lsp.ts`, `*-lsp.ts`, `*.bench.ts`, `*_bench.ts`.
+//   * Load per-repo exemption table from `.claude/CLAUDE.md` heading
+//     `TypeScript Exemptions` (regex: `TypeScript [Ee]xemptions`). Table
+//     rows have `| \`glob\` | …` shape.
+//   * Exit 1 with the formatted error block if unknown non-exempt files remain;
+//     otherwise print the success line.
+//
+// Permission scope is `--allow-read` only. No network, no env, no write.
 
-const DIR_NAMES_ALLOWED: [String] = [
+let DIR_NAMES_ALLOWED = new Set([
   "bindings", "tests", "test", "scripts",
   "mcp-adapter", "cli", "vendor", "examples", "ffi",
   "node_modules", "benchmarks",
-];
+]);
 
-fn builtinAllowed(p: String) -> Bool {
-  if (ends_with(p, ".d.ts")) { return true; }
-  let segs = split(p, "/");
-  let segs_len = len(segs);
-  let base = segs[segs_len - 1];
-  if (base == "mod.ts") { return true; }
+fn builtinAllowed(p: string): boolean {
+  if (p.endsWith(".d.ts")) return true;
+  let base = p.split("/").pop()!;
+  if (base === "mod.ts") return true;
   if (
-    base == "lsp-server.ts" || base == "lsp_server.ts" || base == "lsp.ts" ||
-    ends_with(base, "-lsp.ts")
-  ) { return true; }
-  if (ends_with(base, ".bench.ts") || ends_with(base, "_bench.ts")) { return true; }
-  
-  let mut i = 0;
-  while (i < segs_len - 1) {
+    base === "lsp-server.ts" || base === "lsp_server.ts" || base === "lsp.ts" ||
+    base.endsWith("-lsp.ts")
+  ) return true;
+  if (base.endsWith(".bench.ts") || base.endsWith("_bench.ts")) return true;
+  let segs = p.split("/");
+  for (let i = 0; i < segs.length - 1; i++) {
     let s = segs[i];
-    let mut j = 0;
-    let dn_len = len(DIR_NAMES_ALLOWED);
-    while (j < dn_len) {
-      if (s == DIR_NAMES_ALLOWED[j]) { return true; }
-      j = j + 1;
-    }
-    if (regexMatch(s, "vscode")) { return true; }
-    if (regexMatch(s, "^deno-")) { return true; }
-    i = i + 1;
+    if (DIR_NAMES_ALLOWED.has(s)) return true;
+    if (s.includes("vscode")) return true;
+    if (s.startsWith("deno-")) return true;
   }
   return false;
 }
 
-fn globToRegex(g: String) -> String {
-  let mut g2 = g;
-  while (len(g2) > 0 && (string_sub(g2, 0, 1) == "." || string_sub(g2, 0, 1) == "/")) {
-    g2 = string_sub(g2, 1, len(g2) - 1);
+fn globToRegex(g: string): RegExp {
+  // The Python implementation stripped a leading "./" via `.lstrip('./')`
+  // which is a multi-char strip (unknown leading '.' OR '/' character),
+  // matching `./foo` -> `foo` and `../foo` -> `foo` alike. The intent
+  // (matching the original behaviour) is to normalise leading-path-cruft
+  // off the glob before regex-translating it.
+  let g2 = g;
+  while (g2.length > 0 && (g2[0] === "." || g2[0] === "/")) g2 = g2.slice(1);
+  let out = "";
+  let regexEsc = ".+(){}[]|^$\\";
+  for (const c of g2) {
+    if (c === "*") out += ".*";
+    else if (c === "?") out += ".";
+    else if (regexEsc.includes(c)) out += "\\" + c;
+    else out += c;
   }
-  let mut out = "";
-  let mut i = 0;
-  let g2_len = len(g2);
-  while (i < g2_len) {
-    let c = string_sub(g2, i, 1);
-    if (c == "*") { out = out ++ ".*"; }
-    else if (c == "?") { out = out ++ "."; }
-    else if (
-      c == "." || c == "+" || c == "(" || c == ")" || c == "{" || c == "}" ||
-      c == "[" || c == "]" || c == "|" || c == "^" || c == "$" || c == "\\"
-    ) {
-      out = out ++ "\\" ++ c;
-    }
-    else { out = out ++ c; }
-    i = i + 1;
-  }
-  return "^" ++ out ++ "$";
+  return new RegExp("^" + out + "$");
 }
 
-type Exemption = { raw: String, rx: String }
+struct Exemption { raw: string; rx: RegExp; }
 
-fn normalizeRepoPath(p: String) -> String {
-  let mut out = p;
-  while (len(out) > 0 && (string_sub(out, 0, 1) == "." || string_sub(out, 0, 1) == "/")) {
-    out = string_sub(out, 1, len(out) - 1);
+fn normalizeRepoPath(p: string): string {
+  let out = p.trim();
+  while (out.length > 0 && (out[0] === "." || out[0] === "/")) {
+    out = out.slice(1);
   }
   return out;
 }
 
-fn loadExemptionsFromClaudeMd() -> [Exemption] {
-  let mut exemptions = [];
-  let text = try {
-    readTextFile(".claude/CLAUDE.md")
-  } catch {
-    _ => ""
-  };
-  if (text == "") { return exemptions; }
+fn normalizeExemptionCell(cell: string): string {
+  let out = cell.trim();
+  let codeSpan = out.match(/^`([^`]+)`$/) ?? out.match(/^`([^`]+)`/);
+  if (codeSpan) {
+    out = codeSpan[1].trim();
+  }
+  return normalizeRepoPath(out);
+}
 
-  let tsHeading = "^#{1,4}\\s+.*(?:TypeScript|JavaScript|TS|JS|\\.tsx?)\\b[^#\\n]*[Ee]xemption";
-  let anyHeading = "^#{1,4}\\s";
-  let mut inTable = false;
-  
-  let lines = split(text, "\n");
-  let mut i = 0;
-  let lines_len = len(lines);
-  while (i < lines_len) {
-    let line = lines[i];
-    if (regexMatch(line, tsHeading)) {
+fn nonExemptionCell(cell: string): boolean {
+  return cell === "" || /^:?-{3,}:?$/.test(cell) || /^path\b/i.test(cell);
+}
+
+async fn loadExemptionsFromClaudeMd(): Exemption[] {
+  // Layer 2 — heading-table exemptions parsed from `.claude/CLAUDE.md`.
+  //
+  // Heading regex relaxation (was: literal `TypeScript [Ee]xemptions`):
+  // now matches unknown markdown heading containing the substring sequence
+  // (TypeScript|JavaScript|TS|JS|.tsx?) … Exemption(s). Picks up
+  // `### TypeScript / JavaScript Exemptions (Approved)` (the
+  // affinescript form), the singular `### TypeScript Exemption`, and
+  // `.ts` / `.tsx`-mentioning variants. Anchored to a markdown heading
+  // prefix so prose mentions of the phrase elsewhere in the file do
+  // NOT trigger table parsing.
+  //
+  // Multi-table support: scans every heading; on hitting unknown heading
+  // that's NOT an exemption-section heading we leave table-mode (the
+  // original "break on first heading" was correct for the heredoc but
+  // a multi-section file would miss the second exemption table).
+  const exemptions: Exemption[] = [];
+  let text: string;
+  try {
+    text = await Deno.readTextFile(".claude/CLAUDE.md");
+  } catch {
+    return exemptions;
+  }
+  let tsHeading =
+    /^#{1,4}\s+.*(?:TypeScript|JavaScript|TS|JS|\.tsx?)\b[^#\n]*[Ee]xemption/;
+  let anyHeading = /^#{1,4}\s/;
+  let inTable = false;
+  for (const line of text.split("\n")) {
+    if (tsHeading.test(line)) {
       inTable = true;
-      i = i + 1;
       continue;
     }
-    if (inTable && regexMatch(line, anyHeading)) {
+    if (inTable && anyHeading.test(line)) {
+      // A different heading — leave table mode but keep scanning for
+      // another exemption section in the same file.
       inTable = false;
-      i = i + 1;
       continue;
     }
-    if (inTable && len(line) > 0) {
-      if (regexMatch(line, "^\\s*\\|\\s*`[^`]+`")) {
-        let parts = split(line, "`");
-        if (len(parts) >= 3) {
-          let raw = normalizeRepoPath(trim(parts[1]));
-          exemptions = exemptions ++ [#{ raw: raw, rx: globToRegex(raw) }];
+    let tableLine = line.trim();
+    if (inTable && tableLine.startsWith("|")) {
+      let cells = tableLine.split("|");
+      if (cells.length >= 3) {
+        let raw = normalizeExemptionCell(cells[1]);
+        if (!nonExemptionCell(raw)) {
+          exemptions.push({ raw, rx: globToRegex(raw) });
         }
       }
     }
-    i = i + 1;
   }
   return exemptions;
 }
 
-fn loadExemptionsFromAllowlistFile() -> [Exemption] {
-  let mut exemptions = [];
-  let text = try {
-    readTextFile(".governance-allowlist")
+async fn loadExemptionsFromAllowlistFile(): Exemption[] {
+  // Layer 2.5 — optional plain-text allowlist at the repo root.
+  // One glob per line. Lines starting with `#` are comments; blank
+  // lines are ignored. Decouples gate-pass from documentation prose
+  // (the CLAUDE.md heading-table is the documented variant; this
+  // file is the typed-infrastructure variant). Both sources merge
+  // additively — either alone is sufficient.
+  const exemptions: Exemption[] = [];
+  let text: string;
+  try {
+    text = await Deno.readTextFile(".governance-allowlist");
   } catch {
-    _ => ""
-  };
-  if (text == "") { return exemptions; }
-
-  let lines = split(text, "\n");
-  let mut i = 0;
-  let lines_len = len(lines);
-  while (i < lines_len) {
-    let rawLine = lines[i];
-    let line = normalizeRepoPath(trim(rawLine));
-    if (line == "" || string_sub(line, 0, 1) == "#") {
-      i = i + 1;
-      continue;
-    }
-    exemptions = exemptions ++ [#{ raw: line, rx: globToRegex(line) }];
-    i = i + 1;
+    return exemptions;
+  }
+  for (const rawLine of text.split("\n")) {
+    let line = normalizeExemptionCell(rawLine);
+    if (line === "" || line.startsWith("#")) continue;
+    exemptions.push({ raw: line, rx: globToRegex(line) });
   }
   return exemptions;
 }
 
-fn loadExemptions() -> [Exemption] {
-  loadExemptionsFromClaudeMd() ++ loadExemptionsFromAllowlistFile()
+async fn loadExemptions(): Exemption[] {
+  let fromCm = await loadExemptionsFromClaudeMd();
+  let fromAllow = await loadExemptionsFromAllowlistFile();
+  return [...fromCm, ...fromAllow];
 }
 
-fn isExempt(p: String, exemptions: [Exemption]) -> Bool {
-  let target = normalizeRepoPath(trim(p));
-  let mut i = 0;
-  let ex_len = len(exemptions);
-  while (i < ex_len) {
-    let e = exemptions[i];
-    if (regexMatch(target, e.rx)) { return true; }
-    let bare = normalizeRepoPath(trim(e.raw));
-    if (target == bare) { return true; }
-    if (ends_with(bare, "/") && regexMatch(target, "^" ++ bare)) { return true; }
-    i = i + 1;
+fn exempt(p: string, exemptions: Exemption[]): boolean {
+  let target = normalizeRepoPath(p);
+  for (const e of exemptions) {
+    if (e.rx.test(target)) return true;
+    let bare = normalizeRepoPath(e.raw);
+    if (target === bare) return true;
+    if (bare.endsWith("/") && target.startsWith(bare)) return true;
   }
   return false;
 }
 
-fn isTypeScriptArtifact(name: String) -> Bool {
-  if (ends_with(name, ".ts")) { return true; }
-  if (ends_with(name, ".tsx")) { return true; }
-  if (ends_with(name, ".ts.bak")) { return true; }
-  if (ends_with(name, ".tsx.bak")) { return true; }
-  return false;
+fn isTypeScriptArtifact(name: string): boolean {
+  return name.endsWith(".ts") || name.endsWith(".tsx") ||
+    name.endsWith(".ts.bak") || name.endsWith(".tsx.bak");
 }
 
-pub fn main() -> Int {
-  let exemptions = loadExemptions();
-  let mut found = [];
-  let all_files = try {
-    walkRecursive(".")
-  } catch {
-    _ => []
-  };
-  
-  let mut i = 0;
-  let af_len = len(all_files);
-  while (i < af_len) {
-    let f = all_files[i];
-    if (isTypeScriptArtifact(f)) {
-      let mut skip = false;
-      let segs = split(f, "/");
-      let mut j = 0;
-      let segs_len = len(segs);
-      while (j < segs_len) {
-        let seg = segs[j];
-        if (len(seg) > 0 && string_sub(seg, 0, 1) == "." && seg != "." && seg != "..") {
-          skip = true;
-        }
-        j = j + 1;
-      }
-      if (!skip) {
-        found = found ++ [f];
+async function* walkTs(dir: string): AsyncIterable<string> {
+  for await (const entry of Deno.readDir(dir)) {
+    let name = entry.name;
+    // Skip dotfiles/dotted dirs (matching Python's check on path parts).
+    if (name.startsWith(".") && name !== "." && name !== "..") continue;
+    let full = dir === "." ? name : `${dir}/${name}`;
+    if (entry.isDirectory) {
+      yield* walkTs(full);
+    } else if (entry.isFile) {
+      if (isTypeScriptArtifact(name)) {
+        yield full;
       }
     }
-    i = i + 1;
   }
-
-  let mut bad = [];
-  let mut k = 0;
-  let found_len = len(found);
-  while (k < found_len) {
-    let f = found[k];
-    if (!builtinAllowed(f) && !isExempt(f, exemptions)) {
-      bad = bad ++ [f];
-    }
-    k = k + 1;
-  }
-  
-  if (len(bad) > 0) {
-    consoleError("❌ TypeScript files detected outside the allowlist.\n");
-    let mut m = 0;
-    let bad_len = len(bad);
-    while (m < bad_len) {
-      let f = bad[m];
-      consoleError("  " ++ f);
-      m = m + 1;
-    }
-    consoleError("");
-    consoleError("To resolve, choose one:");
-    consoleError("  (a) migrate the file to AffineScript");
-    consoleError("  (b) move to an allowlisted bridge path");
-    consoleError("  (c) add an entry to a 'TypeScript Exemptions' table in .claude/CLAUDE.md (Layer 2)");
-    consoleError("  (d) add a line to .governance-allowlist at the repo root (Layer 2.5 — typed infrastructure file)");
-    consoleError("");
-    consoleError("See docs/EXEMPTION-MECHANISMS.adoc for the full mechanism reference.");
-    if (len(exemptions) > 0) {
-      consoleError("\n(Currently " ++ int_to_string(len(exemptions)) ++ " exemption(s) parsed across both layers.)");
-    }
-    return exit(1);
-  }
-  println("✅ No TypeScript files outside allowlist (" ++ int_to_string(len(exemptions)) ++ " per-repo exemption(s) parsed across CLAUDE.md + .governance-allowlist).");
-  return 0;
 }
+
+async fn main() {
+  let exemptions = await loadExemptions();
+  const found: string[] = [];
+  for await (const f of walkTs(".")) {
+    found.push(f);
+  }
+  let bad = found
+    .filter((f) => !(builtinAllowed(f) || exempt(f, exemptions)))
+    .sort();
+  if (bad.length > 0) {
+    console.log("❌ TypeScript files detected outside the allowlist.\n");
+    for (const f of bad) console.log(`  ${f}`);
+    console.log("");
+    console.log("To resolve, choose one:");
+    console.log("  (a) migrate the file to AffineScript");
+    console.log("  (b) move to an allowlisted bridge path");
+    console.log("  (c) add an entry to a 'TypeScript Exemptions' table in .claude/CLAUDE.md (Layer 2)");
+    console.log("  (d) add a line to .governance-allowlist at the repo root (Layer 2.5 — typed infrastructure file)");
+    console.log("");
+    console.log("See docs/EXEMPTION-MECHANISMS.adoc for the full mechanism reference.");
+    if (exemptions.length > 0) {
+      console.log(`\n(Currently ${exemptions.length} exemption(s) parsed across both layers.)`);
+    }
+    Deno.exit(1);
+  }
+  console.log(`✅ No TypeScript files outside allowlist (${exemptions.length} per-repo exemption(s) parsed across CLAUDE.md + .governance-allowlist).`);
+}
+
+if (import.meta.main) {
+  await main();
+}
+

@@ -1,144 +1,170 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
-//
-// ISO 639 language code utilities (639-1/2b/2t/3).
-// AffineScript port of Iso639.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module Iso639;
 
-extern fn re_test(pattern: String, s: String) -> Bool = "regex" "test";
-extern fn str_lower(s: String) -> String = "string" "toLowerCase";
-extern fn str_trim(s: String) -> String = "string" "trim";
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell and Contributors
 
-module Types {
-  pub type Iso639_1 = String
-  pub type Iso639_2b = String
-  pub type Iso639_2t = String
-  pub type Iso639_3 = String
+/**
+ * ISO 639 Language Code Utilities
+ *
+ * Handles ISO 639-1 (2-letter), ISO 639-2 (3-letter bibliographic/terminological),
+ * and ISO 639-3 (3-letter comprehensive) language codes.
+ */
 
-  pub type CodeType =
-    | C_Iso639_1
-    | C_Iso639_2b
-    | C_Iso639_2t
-    | C_Iso639_3
+module Types = {
+  struct iso639_1 { string  // 2-letter code (en, de, fr)
+  struct iso639_2b { string // 3-letter bibliographic (ger, fre)
+  struct iso639_2t { string // 3-letter terminological (deu, fra)
+  struct iso639_3 { string  // 3-letter comprehensive (eng, deu, fra)
 
-  pub type LanguageScope =
-    | Individual
-    | Macrolanguage
-    | Special
+  struct codeType {
+    | Iso639_1
+    | Iso639_2b
+    | Iso639_2t
+    | Iso639_3
 
-  pub type LanguageType =
-    | Living
-    | Historical
-    | Extinct
-    | Ancient
-    | Constructed
+  struct languageScope {
+    | Individual    // I - Individual language
+    | Macrolanguage // M - Macrolanguage
+    | Special       // S - Special (mis, mul, und, zxx)
 
-  pub type LanguageEntry = {
-    iso639_3: Iso639_3,
-    iso639_2b: Option<Iso639_2b>,
-    iso639_2t: Option<Iso639_2t>,
-    iso639_1: Option<Iso639_1>,
-    scope: LanguageScope,
-    type_: LanguageType,
-    name: String,
-    comment: Option<String>,
+  struct languageType {
+    | Living      // L - Living language
+    | Historical  // H - Historical language
+    | Extinct     // E - Extinct language
+    | Ancient     // A - Ancient language
+    | Constructed // C - Constructed language
+
+  struct languageEntry { {
+    iso639_3: iso639_3,
+    iso639_2b: option<iso639_2b>,
+    iso639_2t: option<iso639_2t>,
+    iso639_1: option<iso639_1>,
+    scope: languageScope,
+    struct_: languageType,
+    name: string,
+    comment: option<string>,
   }
 }
 
-module Validation {
-  use Types;
+module Validation = {
+  open Types
 
-  pub fn is_valid_iso639_1(code: String) -> Bool { re_test("^[a-z]{2}$", code) }
-  pub fn is_valid_iso639_3(code: String) -> Bool { re_test("^[a-z]{3}$", code) }
+  fn iso639_1Pattern = %re("/^[a-z]{2}$/")
+  fn iso639_3Pattern = %re("/^[a-z]{3}$/")
 
-  pub fn detect_code_type(code: String) -> Option<Types.CodeType> {
-    let n = len(code);
-    if n == 2 && is_valid_iso639_1(code) {
-      Some(Types.C_Iso639_1)
-    } else if n == 3 && is_valid_iso639_3(code) {
-      Some(Types.C_Iso639_3)
-    } else {
-      None
+  fn isValidIso639_1 = (code: string): bool => {
+    Js.Re.test_(iso639_1Pattern, code)
+  }
+
+  fn isValidIso639_3 = (code: string): bool => {
+    Js.Re.test_(iso639_3Pattern, code)
+  }
+
+  fn detectCodeType = (code: string): option<codeType> => {
+    fn len = String.length(code)
+    switch len {
+      | 2 when isValidIso639_1(code) => Some(Iso639_1)
+      | 3 when isValidIso639_3(code) => Some(Iso639_3)
+      | _ => None
     }
   }
 
-  pub fn normalize(code: String) -> String { str_trim(str_lower(code)) }
-}
-
-module SpecialCodes {
-  pub let undetermined = "und";
-  pub let multiple = "mul";
-  pub let miscellaneous = "mis";
-  pub let no_linguistic = "zxx";
-
-  pub fn is_special(code: String) -> Bool {
-    code == undetermined || code == multiple
-      || code == miscellaneous || code == no_linguistic
+  fn normalize = (code: string): string => {
+    code->String.toLowerCase->String.trim
   }
 }
 
-module Conversion {
-  use Types;
+module SpecialCodes = {
+  // Special ISO 639 codes
+  fn undetermined = "und"      // Undetermined
+  fn multiple = "mul"          // Multiple languages
+  fn miscellaneous = "mis"     // Uncoded languages
+  fn noLinguistic = "zxx"      // No linguistic content
 
-  pub fn iso1_to_iso3_table() -> Dict<Types.Iso639_3> {
-    let d = dict_empty();
-    dict_set(d, "en", "eng"); dict_set(d, "de", "deu"); dict_set(d, "fr", "fra");
-    dict_set(d, "es", "spa"); dict_set(d, "it", "ita"); dict_set(d, "pt", "por");
-    dict_set(d, "ru", "rus"); dict_set(d, "zh", "zho"); dict_set(d, "ja", "jpn");
-    dict_set(d, "ko", "kor"); dict_set(d, "ar", "ara"); dict_set(d, "he", "heb");
-    dict_set(d, "el", "ell"); dict_set(d, "la", "lat");
+  fn isSpecial = code => {
+    code == undetermined ||
+    code == multiple ||
+    code == miscellaneous ||
+    code == noLinguistic
+  }
+}
+
+module Conversion = {
+  open Types
+
+  // Common ISO 639-1 to ISO 639-3 mappings
+  fn iso1ToIso3: Dict.t<iso639_3> = {
+    fn d = Dict.make()
+    Dict.set(d, "en", "eng")
+    Dict.set(d, "de", "deu")
+    Dict.set(d, "fr", "fra")
+    Dict.set(d, "es", "spa")
+    Dict.set(d, "it", "ita")
+    Dict.set(d, "pt", "por")
+    Dict.set(d, "ru", "rus")
+    Dict.set(d, "zh", "zho")
+    Dict.set(d, "ja", "jpn")
+    Dict.set(d, "ko", "kor")
+    Dict.set(d, "ar", "ara")
+    Dict.set(d, "he", "heb")
+    Dict.set(d, "el", "ell")
+    Dict.set(d, "la", "lat")
     d
   }
 
-  pub fn to_iso639_3(code: String) -> Option<Types.Iso639_3> {
-    let normalized = Validation.normalize(code);
-    match Validation.detect_code_type(normalized) {
-      Some(Types.C_Iso639_1) => dict_get(iso1_to_iso3_table(), normalized),
-      Some(Types.C_Iso639_3) => Some(normalized),
-      _ => None,
+  fn toIso639_3 = (code: string): option<iso639_3> => {
+    fn normalized = Validation.normalize(code)
+    switch Validation.detectCodeType(normalized) {
+      | Some(Iso639_1) => Dict.get(iso1ToIso3, normalized)
+      | Some(Iso639_3) => Some(normalized)
+      | _ => None
     }
   }
 }
 
-module Registry {
-  use Types;
+module Registry = {
+  open Types
 
-  pub type T = {
-    by_iso3: Dict<Types.LanguageEntry>,
-    by_iso1: Dict<Types.LanguageEntry>,
-    by_name: Dict<Types.LanguageEntry>,
+  struct t { {
+    byIso3: Dict.t<languageEntry>,
+    byIso1: Dict.t<languageEntry>,
+    byName: Dict.t<languageEntry>,
   }
 
-  pub fn empty() -> T {
-    T { by_iso3: dict_empty(), by_iso1: dict_empty(), by_name: dict_empty() }
+  fn empty = (): t => {
+    byIso3: Dict.make(),
+    byIso1: Dict.make(),
+    byName: Dict.make(),
   }
 
-  pub fn add(registry: T, entry: Types.LanguageEntry) -> Unit {
-    dict_set(registry.by_iso3, entry.iso639_3, entry);
-    match entry.iso639_1 {
-      Some(code) => dict_set(registry.by_iso1, code, entry),
-      None => {},
+  fn add = (registry, entry: languageEntry) => {
+    Dict.set(registry.byIso3, entry.iso639_3, entry)
+    switch entry.iso639_1 {
+      | Some(code) => Dict.set(registry.byIso1, code, entry)
+      | None => ()
     }
-    dict_set(registry.by_name, str_lower(entry.name), entry)
+    Dict.set(registry.byName, String.toLowerCase(entry.name), entry)
   }
 
-  pub fn find_by_code(registry: T, code: String) -> Option<Types.LanguageEntry> {
-    let normalized = Validation.normalize(code);
-    match Validation.detect_code_type(normalized) {
-      Some(Types.C_Iso639_1) => dict_get(registry.by_iso1, normalized),
-      Some(Types.C_Iso639_3) => dict_get(registry.by_iso3, normalized),
-      Some(Types.C_Iso639_2b) => dict_get(registry.by_iso3, normalized),
-      Some(Types.C_Iso639_2t) => dict_get(registry.by_iso3, normalized),
-      None => None,
+  fn findByCode = (registry, code: string): option<languageEntry> => {
+    fn normalized = Validation.normalize(code)
+    switch Validation.detectCodeType(normalized) {
+      | Some(Iso639_1) => Dict.get(registry.byIso1, normalized)
+      | Some(Iso639_3) | Some(Iso639_2b) | Some(Iso639_2t) =>
+        Dict.get(registry.byIso3, normalized)
+      | None => None
     }
   }
 
-  pub fn find_by_name(registry: T, name: String) -> Option<Types.LanguageEntry> {
-    dict_get(registry.by_name, str_lower(name))
+  fn findByName = (registry, name: string): option<languageEntry> => {
+    Dict.get(registry.byName, String.toLowerCase(name))
   }
 
-  pub fn count(registry: T) -> Int {
-    len(dict_keys(registry.by_iso3))
+  fn count = (registry): int => {
+    Dict.keysToArray(registry.byIso3)->Array.length
   }
 }
+

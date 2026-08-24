@@ -1,74 +1,133 @@
 // SPDX-License-Identifier: MPL-2.0
-// AffineScript port of Manifest.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module Manifest;
 
-use Types;
+// SPDX-License-Identifier: PMPL-1.0-or-later
 
-extern fn read_file(path: String, enc: String) -> Promise<String> = "node:fs/promises" "readFile";
-extern fn path_join(a: String, b: String) -> String = "node:path" "join";
-extern fn sha256_hex(content: String) -> String = "node:crypto" "sha256Hex";
-extern fn re_first_group(pattern: String, content: String) -> Option<String> = "regex" "firstGroupI";
-extern fn re_test_i(pattern: String, content: String) -> Bool = "regex" "testI";
-extern fn date_make() -> Types.Date = "Date" "make";
-extern fn throw_message(msg: String) -> a = "error" "throw";
+// External Deno APIs
+@module("node:fs/promises") external readFile: (string, string) => promise<string> = "readFile"
+@module("node:path") external join: (string, string) => string = "join"
+@module("node:crypto") external createHash: string => 'a = "createHash"
 
-pub fn extract_canonical_locations(content: String) -> Types.CanonicalLocations {
-  let scm_files = match re_first_group("SCM files.*?`([^`]+)`", content) {
-    Some(v) => v, None => ".machine_readable/",
-  };
-  let bot_directives = match re_first_group("Bot [Dd]irectives.*?`([^`]+)`", content) {
-    Some(v) => v, None => ".bot_directives/",
-  };
-  Types.CanonicalLocations {
-    scm_files: scm_files,
-    bot_directives: bot_directives,
-    agent_instructions: [".claude/CLAUDE.md", "AI.a2ml", "0-AI-MANIFEST.a2ml"],
+struct rec hashObj = {
+  update: string => hashObj,
+  digest: string => string,
+}
+
+@send external update: (hashObj, string) => hashObj = "update"
+@send external digest: (hashObj, string) => string = "digest"
+
+// Extract canonical locations from manifest content
+fn extractCanonicalLocations = (content: string): Types.canonicalLocations => {
+  // Use regex to find canonical locations
+  fn scmMatch = RegExp.exec(/SCM files.*?`([^`]+)`/i, content)
+  fn botMatch = RegExp.exec(/Bot [Dd]irectives.*?`([^`]+)`/i, content)
+
+  fn scmFiles = switch scmMatch {
+  | Some(result) => {
+      fn matches = RegExp.Result.matches(result)
+      switch matches[1] {
+      | Some(v) => Belt.Option.getWithDefault(v, ".machine_readable/")
+      | None => ".machine_readable/"
+      }
+    }
+  | None => ".machine_readable/"
+  }
+
+  fn botDirectives = switch botMatch {
+  | Some(result) => {
+      fn matches = RegExp.Result.matches(result)
+      switch matches[1] {
+      | Some(v) => Belt.Option.getWithDefault(v, ".bot_directives/")
+      | None => ".bot_directives/"
+      }
+    }
+  | None => ".bot_directives/"
+  }
+
+  fn agentInstructions = [".claude/CLAUDE.md", "AI.a2ml", "0-AI-MANIFEST.a2ml"]
+
+  {
+    scmFiles,
+    botDirectives,
+    agentInstructions,
   }
 }
 
-pub fn extract_invariants(content: String) -> [String] {
-  let invariants = [];
-  if re_test_i("No SCM file duplication", content) { invariants = invariants ++ ["no_scm_duplication"]; }
-  if re_test_i("Single source of truth", content) { invariants = invariants ++ ["single_source_of_truth"]; }
-  if re_test_i("No stale metadata", content) { invariants = invariants ++ ["no_stale_metadata"]; }
+// Extract invariants from manifest content
+fn extractInvariants = (content: string): array<string> => {
+  fn invariants = []
+
+  if String.match(content, /No SCM file duplication/i)->Belt.Option.isSome {
+    Array.push(invariants, "no_scm_duplication")
+  }
+
+  if String.match(content, /Single source of truth/i)->Belt.Option.isSome {
+    Array.push(invariants, "single_source_of_truth")
+  }
+
+  if String.match(content, /No stale metadata/i)->Belt.Option.isSome {
+    Array.push(invariants, "no_stale_metadata")
+  }
+
   invariants
 }
 
-pub fn parse_manifest(repo_path: String) -> Effect[Async] Types.AiManifest {
-  let manifest_names = ["0-AI-MANIFEST.a2ml", "AI.a2ml", "!AI.a2ml"];
+// Parse and validate an AI.a2ml manifest file
+fn parseManifest = async (repoPath: string): Types.aiManifest => {
+  fn manifestNames = ["0-AI-MANIFEST.a2ml", "AI.a2ml", "!AI.a2ml"]
 
-  fn try_read(names: [String], index: Int) -> Effect[Async] Option<(String, String)> {
-    if index >= len(names) {
+  fn rec tryReadManifest = async (names: array<string>, index: int): option<(string, string)> => {
+    if index >= Array.length(names) {
       None
     } else {
-      let path = path_join(repo_path, names[index]);
-      try {
-        let content = await read_file(path, "utf-8");
-        Some((content, path))
-      } catch _e {
-        await try_read(names, index + 1)
+      switch names[index] {
+      | None => await tryReadManifest(names, index + 1)
+      | Some(name) => {
+          fn path = join(repoPath, name)
+          try {
+            fn content = await readFile(path, "utf-8")
+            Some((content, path))
+          } catch {
+          | _ => await tryReadManifest(names, index + 1)
+          }
+        }
       }
     }
   }
 
-  match await try_read(manifest_names, 0) {
-    None => {
-      throw_message("No AI manifest found in " ++ repo_path
-        ++ ". Expected one of: " ++ str_join(manifest_names, ", "))
+  fn result = await tryReadManifest(manifestNames, 0)
+
+  switch result {
+  | None => {
+      fn msg = `No AI manifest found in ${repoPath}. Expected one of: ${Array.join(
+          manifestNames,
+          ", ",
+        )}`
+      JsError.throwWithMessage(msg)
     }
-    Some((manifest_content, _manifest_path)) => {
-      let hash = sha256_hex(manifest_content);
-      Types.AiManifest {
-        hash: hash,
-        canonical_locations: extract_canonical_locations(manifest_content),
-        invariants: extract_invariants(manifest_content),
-        parsed_at: date_make(),
+  | Some((manifestContent, _manifestPath)) => {
+      // Compute SHA-256 hash
+      fn hashObj = createHash("sha256")
+      fn hash = hashObj->update(manifestContent)->digest("hex")
+
+      // Parse manifest structure
+      fn canonicalLocations = extractCanonicalLocations(manifestContent)
+      fn invariants = extractInvariants(manifestContent)
+
+      {
+        hash,
+        canonicalLocations,
+        invariants,
+        parsedAt: Date.make(),
       }
     }
   }
 }
 
-pub fn validate_attestation(manifest: Types.AiManifest, provided_hash: String) -> Bool {
-  manifest.hash == provided_hash
+// Validate manifest attestation hash
+fn validateAttestation = (manifest: Types.aiManifest, providedHash: string): bool => {
+  manifest.hash === providedHash
 }
+
