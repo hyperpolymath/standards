@@ -7,9 +7,6 @@
 # enforcing: import? fails at parse time before any recipe can guard it.
 # See TOOLING-VERSION-INTEGRITY-POLICY.adoc (root cause: burble#39).
 
-# Default recipe
-import? "contractile.just"
-
 default:
     @just --list
 
@@ -176,6 +173,10 @@ test:
 test-runner-test:
     @bash scripts/tests/run-required-test-suite-test.sh
 
+# standards#496 regression: archived artefacts stay out of live spec homes.
+session-detritus-test:
+    @bash scripts/tests/wave9-session-detritus-test.sh
+
 # Format sub-project code
 fmt:
     @echo "=== Standards Monorepo Format ==="
@@ -218,8 +219,8 @@ doctor:
     @command -v git >/dev/null 2>&1 && echo "  [OK] git" || echo "  [FAIL] git not found"
     @echo "Checking for hardcoded paths..."
     @grep -rn '$HOME\|$ECLIPSE_DIR' --include='*.rs' --include='*.ex' --include='*.res' --include='*.gleam' --include='*.sh' . 2>/dev/null | head -5 || echo "  [OK] No hardcoded paths"
-    @echo "Checking optional imports (import? does not fail when absent — report it)..."
-    @test -f contractile.just && echo "  [OK] contractile.just present (import resolved)" || echo "  [INFO] contractile.just absent — its recipes are unavailable (needs the external 'contractile' generator)"
+    @echo "Checking canonical contractiles source..."
+    @test -f .machine_readable/contractiles/dust/Dustfile.a2ml && echo "  [OK] canonical Dustfile present" || echo "  [FAIL] canonical Dustfile missing"
     @echo "Checking git hooks are installed..."
     @test -f "$(git rev-parse --git-dir)/hooks/pre-commit" && echo "  [OK] pre-commit hook installed" || echo "  [INFO] pre-commit hook not installed — run 'just hooks-install'"
     @echo "Diagnostics complete."

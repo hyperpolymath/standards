@@ -3,13 +3,14 @@
 #
 # check-language-guide.sh — structural lint for per-language testing guides.
 #
-# Every guide built from templates/language-testing-guide-TEMPLATE.adoc MUST carry
+# Every guide built from toolchain-readiness-grades/testing/language-testing-guide-TEMPLATE.adoc
+# MUST carry
 # the required sections and the R1–R9 requirement-mapping table. A guide that
 # silently omits a section (e.g. "Known gaps") is a false-completeness hole —
 # this fails loudly instead.
 #
 # Usage: check-language-guide.sh [guide.adoc ...]
-#   With no args, checks every docs/*-testing-guide.adoc.
+#   With no args, checks every guide in toolchain-readiness-grades/testing/.
 # Exit: 0 all valid · 1 a guide is missing a required section
 
 set -uo pipefail
@@ -42,11 +43,11 @@ check_one() { # file
 if [ "$#" -gt 0 ]; then
   files=("$@")
 else
-  mapfile -t files < <(find "$ROOT/docs" -maxdepth 1 -type f \( -name '*-testing-guide.adoc' -o -name '*-testing-guide.md' \) -print 2>/dev/null | LC_ALL=C sort)
+  mapfile -t files < <(find "$ROOT/toolchain-readiness-grades/testing" -maxdepth 1 -type f -name '*-testing-guide.adoc' -print 2>/dev/null | LC_ALL=C sort)
 fi
 
 if [ "${#files[@]}" -eq 0 ]; then
-  echo "no language testing guides found (docs/*-testing-guide.{adoc,md})"; exit 0
+  echo "no language testing guides found (toolchain-readiness-grades/testing/*-testing-guide.adoc)"; exit 0
 fi
 
 rc=0
