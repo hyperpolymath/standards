@@ -112,23 +112,27 @@ jensen-shannon p q =
 -- Classified as justified postulates, not proof debt.
 
 -- Entropy is non-negative (H ≥ 0 follows from -p·log(p) ≥ 0 for 0 ≤ p ≤ 1)
+-- AXIOM: justified theorem over IEEE-754 Float; proof requires a real-analysis model.
 postulate
   entropy-nonnegative : ∀ {n} (d : Distribution n) → entropy d ≥ 0.0
     where
       _≥_ : Float → Float → Set
 
 -- KL-divergence is non-negative (Gibbs' inequality / log-sum inequality)
+-- AXIOM: justified Gibbs inequality over Float; proof requires a real-analysis model.
 postulate
   kl-nonnegative : ∀ {n} (p q : Distribution n) → kl-divergence p q ≥ 0.0
     where
       _≥_ : Float → Float → Set
 
 -- Jensen-Shannon is symmetric (follows from symmetry of KL terms in the midpoint construction)
+-- AXIOM: justified by the symmetric midpoint construction and paired KL terms.
 postulate
   js-symmetric : ∀ {n} (p q : Distribution n) →
     jensen-shannon p q ≡ jensen-shannon q p
 
 -- Jensen-Shannon is bounded [0, 1] (Lin 1991; upper bound via Jensen's inequality)
+-- AXIOM: justified Lin bound over Float; proof requires a real-analysis model.
 postulate
   js-bounded : ∀ {n} (p q : Distribution n) →
     0.0 ≤ jensen-shannon p q × jensen-shannon p q ≤ 1.0
