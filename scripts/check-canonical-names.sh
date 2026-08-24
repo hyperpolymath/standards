@@ -16,7 +16,7 @@
 # Exit: 0 no new deprecated tokens · 1 a deprecated token was added · 2 usage
 
 set -uo pipefail
-cd "$(git rev-parse --show-toplevel)"
+cd "$(git rev-parse --show-toplevel)" || exit
 
 BASE="${1:-}"
 if [ -z "$BASE" ]; then
@@ -31,7 +31,7 @@ declare -A REPL=( ["6a2"]="descriptiles" ["agent_instructions"]="bot_directives"
 is_excluded() {
   case "$1" in
     CANONICAL-NAMES.adoc|scripts/check-canonical-names.sh|scripts/tests/*|\
-    *MIGRATION*|*migration*|*CHANGELOG*|*/6a2/*|.machine_readable/6a2/*) return 0 ;;
+    *MIGRATION*|*migration*|*CHANGELOG*|*/6a2/*) return 0 ;;
   esac
   return 1
 }
@@ -47,6 +47,13 @@ while IFS= read -r line; do
     "+"*)
       is_excluded "$current_file" && continue
       body="${line#+}"
+      # Hypatia baselines identify findings by their literal on-disk path. This
+      # narrow matcher records an existing legacy path; it does not name a new
+      # product, interface, or source location.
+      if [ "$current_file" = ".hypatia-baseline.json" ] &&
+         printf '%s' "$body" | grep -Fq '"file_pattern": ".machine_readable/6a2/*.a2ml"'; then
+        continue
+      fi
       # Skip a line that is DESCRIBING the deprecation rather than using the old
       # name — it also mentions the canonical replacement or the mandate itself
       # (e.g. tooling comments, this guard's own wiring, docs about the rename).

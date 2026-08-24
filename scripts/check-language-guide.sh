@@ -9,7 +9,7 @@
 # this fails loudly instead.
 #
 # Usage: check-language-guide.sh [guide.md ...]
-#   With no args, checks every standards/*-testing-guide.md.
+#   With no args, checks every docs/*-testing-guide.md.
 # Exit: 0 all valid · 1 a guide is missing a required section
 
 set -uo pipefail
@@ -42,11 +42,11 @@ check_one() { # file
 if [ "$#" -gt 0 ]; then
   files=("$@")
 else
-  mapfile -t files < <(ls "$ROOT"/standards/*-testing-guide.md 2>/dev/null)
+  mapfile -t files < <(find "$ROOT/docs" -maxdepth 1 -type f -name '*-testing-guide.md' -print 2>/dev/null | LC_ALL=C sort)
 fi
 
 if [ "${#files[@]}" -eq 0 ]; then
-  echo "no language testing guides found (standards/*-testing-guide.md)"; exit 0
+  echo "no language testing guides found (docs/*-testing-guide.md)"; exit 0
 fi
 
 rc=0

@@ -28,9 +28,17 @@
 // Permission scope is `--allow-read` only. No network, no env, no write.
 
 const DIR_NAMES_ALLOWED = new Set([
-  "bindings", "tests", "test", "scripts",
-  "mcp-adapter", "cli", "vendor", "examples", "ffi",
-  "node_modules", "benchmarks",
+  "bindings",
+  "tests",
+  "test",
+  "scripts",
+  "mcp-adapter",
+  "cli",
+  "vendor",
+  "examples",
+  "ffi",
+  "node_modules",
+  "benchmarks",
 ]);
 
 function builtinAllowed(p: string): boolean {
@@ -71,7 +79,10 @@ function globToRegex(g: string): RegExp {
   return new RegExp("^" + out + "$");
 }
 
-interface Exemption { raw: string; rx: RegExp; }
+interface Exemption {
+  raw: string;
+  rx: RegExp;
+}
 
 function normalizeRepoPath(p: string): string {
   let out = p.trim();
@@ -222,16 +233,26 @@ async function main() {
     console.log("To resolve, choose one:");
     console.log("  (a) migrate the file to AffineScript");
     console.log("  (b) move to an allowlisted bridge path");
-    console.log("  (c) add an entry to a 'TypeScript Exemptions' table in .claude/CLAUDE.md (Layer 2)");
-    console.log("  (d) add a line to .governance-allowlist at the repo root (Layer 2.5 — typed infrastructure file)");
+    console.log(
+      "  (c) add an entry to a 'TypeScript Exemptions' table in .claude/CLAUDE.md (Layer 2)",
+    );
+    console.log(
+      "  (d) add a line to .governance-allowlist at the repo root (Layer 2.5 — typed infrastructure file)",
+    );
     console.log("");
-    console.log("See docs/EXEMPTION-MECHANISMS.adoc for the full mechanism reference.");
+    console.log(
+      "See docs/EXEMPTION-MECHANISMS.adoc for the full mechanism reference.",
+    );
     if (exemptions.length > 0) {
-      console.log(`\n(Currently ${exemptions.length} exemption(s) parsed across both layers.)`);
+      console.log(
+        `\n(Currently ${exemptions.length} exemption(s) parsed across both layers.)`,
+      );
     }
     Deno.exit(1);
   }
-  console.log(`✅ No TypeScript files outside allowlist (${exemptions.length} per-repo exemption(s) parsed across CLAUDE.md + .governance-allowlist).`);
+  console.log(
+    `✅ No TypeScript files outside allowlist (${exemptions.length} per-repo exemption(s) parsed across CLAUDE.md + .governance-allowlist).`,
+  );
 }
 
 if (import.meta.main) {

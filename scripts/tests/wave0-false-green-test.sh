@@ -12,7 +12,7 @@ set -uo pipefail
 #   * a2ml/scripts/check-6scm.sh          (obsolete no-op / orphan drift / out-of-sync)
 #   * scripts/check-mustfile-structure.sh (valid Mustfile / hollow check)
 #   * rhodium-standard-repositories/rsr-audit.sh (bad format exits 4 / --format json works)
-#   * audit-contractiles.sh               (loud error on zero repos)
+#   * audit-contractiles.sh               (retired; Hypatia owns this audit)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
@@ -71,21 +71,11 @@ esac
 bash "$RSR" . text >/dev/null 2>&1; rc=$?
 if [ "$rc" -ge 0 ] && [ "$rc" -le 3 ]; then ok "bare positional 'text' returns a grade code ($rc)"; else bad "bare positional 'text' returned $rc"; fi
 
-echo "== audit-contractiles.sh =="
-AC="$ROOT/audit-contractiles.sh"
-# Runs against an explicit repo path with no hardcoded owner (/var/mnt/...) paths.
-# Capture the output first (avoid pipefail masking the script's own exit code).
-ac_out="$(bash "$AC" "$ROOT" 2>&1 || true)"
-case "$ac_out" in
-  *"Contractile System Audit"*) ok "runs against an explicit repo path (no hardcoded owner paths)" ;;
-  *) bad "did not run against explicit repo path" ;;
-esac
-# No hardcoded owner path is USED (a quoted absolute /var/mnt/... array element);
-# a prose mention in a comment is fine, an actual code path is not.
-if grep -qE '^[[:space:]]*"/var/mnt/' "$AC"; then
-  bad "hardcoded owner path still used in code"
+echo "== retired audit-contractiles.sh =="
+if [ -e "$ROOT/audit-contractiles.sh" ]; then
+  bad "retired personal-machine validator was reintroduced"
 else
-  ok "no hardcoded owner path used in code"
+  ok "retired personal-machine validator remains absent"
 fi
 
 echo

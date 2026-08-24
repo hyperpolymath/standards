@@ -7,12 +7,24 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHK="$ROOT/scripts/check-canonical-names.sh"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0
 ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; fail=$((fail + 1)); }
 
-cd "$ROOT"
+# Exercise the guard in a private repository so unrelated changes in the caller's
+# worktree cannot turn the clean-name case into a false failure.
+mkdir -p "$TMP/repo/scripts"
+cp "$CHK" "$TMP/repo/scripts/check-canonical-names.sh"
+cd "$TMP/repo" || exit
+git init -q
+git config user.name "Standards regression test"
+git config user.email "standards-regression@example.invalid"
+git add scripts/check-canonical-names.sh
+git commit -qm "baseline"
+CHK="$TMP/repo/scripts/check-canonical-names.sh"
 
 echo "== guard blocks a newly-added deprecated token =="
 f="wave6_guard_probe.txt"

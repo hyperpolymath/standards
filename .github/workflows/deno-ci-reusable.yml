@@ -104,8 +104,16 @@ jobs:
         if: steps.detect.outputs.has_targets == 'true' || steps.detect.outputs.has_config == 'true'
         run: deno fmt --check
 
-      - name: Deno test
-        if: steps.detect.outputs.has_tests == 'true'
+      - name: Deno test (configured package)
+        # A config may intentionally own no tests yet. --permit-no-files keeps
+        # that honest scope green without discovering tests in nested products.
+        # Avoid requesting a coverage report for an explicitly empty scope:
+        # Deno prints "Error generating coverage report" even though it exits 0.
+        if: steps.detect.outputs.has_config == 'true'
+        run: deno test --allow-all --permit-no-files
+
+      - name: Deno test (configless fallback)
+        if: steps.detect.outputs.has_config == 'false' && steps.detect.outputs.has_tests == 'true'
         run: deno test --allow-all --coverage=coverage
 
       - name: Deno type check
@@ -113,7 +121,13 @@ jobs:
         # Soft-pass: `deno check` exits non-zero on unresolved imports we
         # don't yet require contributors to vendor. We surface output for
         # diagnostics but don't fail the gate.
-        run: deno check . || echo "::warning::deno check reported issues (non-blocking)."
+        run: |
+          if [ "${{ steps.detect.outputs.has_config }}" = "true" ] \
+             && deno task 2>/dev/null | grep -q '^ci:check'; then
+            deno task ci:check
+          else
+            deno check . || echo "::warning::deno check reported issues (non-blocking)."
+          fi
 
       - name: Summary
         run: |
