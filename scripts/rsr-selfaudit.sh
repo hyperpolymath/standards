@@ -11,13 +11,23 @@
 # `rsr-audit.sh … || true` swallowed exactly that. Here a grade is reported and
 # returns 0; only a genuine audit error returns non-zero.
 #
-# Usage: rsr-selfaudit.sh [repo-path]   (default: .)
+# Usage: rsr-selfaudit.sh [repo-path] [owner/repo]
+# Set RSR_REPOSITORY instead of the second argument to include the live
+# Actions-permissions requirement in the audit.
 
 set -uo pipefail
 
 REPO="${1:-.}"
+LIVE_REPOSITORY="${2:-${RSR_REPOSITORY:-}}"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AUDIT="$SELF_DIR/../rhodium-standard-repositories/rsr-audit.sh"
+
+if [ -n "$LIVE_REPOSITORY" ]; then
+  bash "$SELF_DIR/check-actions-policy.sh" "$LIVE_REPOSITORY" || {
+    echo "  -> RSR self-audit: live Actions policy is non-compliant" >&2
+    exit 1
+  }
+fi
 
 bash "$AUDIT" "$REPO" text
 rc=$?
