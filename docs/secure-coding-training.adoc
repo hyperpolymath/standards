@@ -1,0 +1,493 @@
+== Secure Coding and Static Analysis Training
+
+*Version:* 1.0.0 *Date:* 2024-04-14 *Audience:* Developers, Code
+Reviewers, DevOps Engineers
+
+=== Table of Contents
+
+[arabic]
+. link:#introduction[Introduction]
+. link:#rust-secure-coding-practices[Rust Secure Coding Practices]
+. link:#julia-secure-coding-practices[Julia Secure Coding Practices]
+. link:#cicd-pipeline-training[CI/CD Pipeline Training]
+. link:#static-analysis-deep-dive[Static Analysis Deep Dive]
+. link:#hands-on-exercises[Hands-on Exercises]
+. link:#resources[Resources]
+
+=== Introduction
+
+==== Training Objectives
+
+By the end of this training, you will: - Understand secure coding
+principles for Rust and Julia - Know how to use static analysis tools
+effectively - Be able to interpret and fix analysis findings -
+Understand CI/CD pipeline security integration - Know how to set up and
+maintain security tooling
+
+==== Prerequisites
+
+* Basic knowledge of Rust or Julia
+* Familiarity with Git and CI/CD concepts
+* Development environment set up
+
+=== Rust Secure Coding Practices
+
+==== Rust Security Model
+
+Rust’s security model is based on: 1. *Memory safety*: Ownership,
+borrowing, lifetimes 2. *Type safety*: Strong static typing 3.
+*Zero-cost abstractions*: Safety without performance overhead 4.
+*Explicit unsafe*: Clear boundaries for unsafe code
+
+==== Common Rust Vulnerabilities
+
+[cols=",,",options="header",]
+|===
+|Vulnerability |Prevention |Detection Tool
+|Use-after-free |Ownership system |Clippy, Miri
+|Buffer overflows |Bounds checking |Clippy, Miri
+|Data races |Send/Sync traits |Clippy
+|Integer overflows |Checked arithmetic |Clippy
+|Unsafe code issues |Minimize unsafe blocks |cargo-geiger
+|===
+
+==== Rust Toolchain Setup
+
+[source,bash]
+----
+# Install Rust toolchain with security tools
+rustup toolchain install stable
+rustup component add rustfmt clippy rust-analysis
+
+# Install security tools
+cargo install cargo-audit cargo-geiger cargo-license cargo-outdated
+----
+
+==== Rust Security Tools Guide
+
+===== 1. Clippy (Linting)
+
+*Purpose:* Catch common mistakes and suspicious patterns
+
+*Key lints for security:* - `+clippy::integer_arithmetic+` - Integer
+overflow checks - `+clippy::unwrap_used+` - Panic prevention -
+`+clippy::indexing_slicing+` - Bounds checking -
+`+clippy::float_arithmetic+` - Floating point issues
+
+*Usage:*
+
+[source,bash]
+----
+# Run clippy with security-focused lints
+cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic
+
+# Fix specific issues
+cargo clippy --fix --allow-dirty --allow-staged
+----
+
+===== 2. Rustfmt (Formatting)
+
+*Purpose:* Consistent code style reduces review burden
+
+*Security benefits:* - Consistent error handling patterns - Clear unsafe
+code boundaries - Readable security-critical code
+
+*Usage:*
+
+[source,bash]
+----
+# Check formatting
+cargo fmt --all -- --check
+
+# Apply formatting
+cargo fmt --all
+----
+
+===== 3. Cargo Audit (Security Auditing)
+
+*Purpose:* Dependency vulnerability scanning
+
+*Usage:*
+
+[source,bash]
+----
+# Install
+cargo install cargo-audit
+
+# Run audit
+cargo audit
+
+# Update advisory database
+cargo audit fetch
+
+# Check for outdated dependencies
+cargo outdated
+----
+
+*Interpreting results:* - *High severity*: Immediate action required -
+*Medium severity*: Schedule fix in next release - *Low severity*:
+Document and monitor
+
+===== 4. Cargo Geiger (Unsafe Code Analysis)
+
+*Purpose:* Detect and quantify unsafe code usage
+
+*Usage:*
+
+[source,bash]
+----
+cargo install cargo-geiger
+cargo geiger
+----
+
+*Safe code guidelines:* - Minimize `+unsafe+` blocks - Isolate unsafe
+code in separate modules - Document safety invariants - Use safe
+abstractions
+
+==== Rust Secure Coding Checklist
+
+[source,markdown]
+----
+- [ ] Use `?` operator instead of `unwrap()`/`expect()`
+- [ ] Validate all external inputs
+- [ ] Use checked arithmetic (`checked_add`, `saturating_sub`, etc.)
+- [ ] Implement proper error handling
+- [ ] Minimize `unsafe` code blocks
+- [ ] Use `#[deny(unsafe_code)]` where possible
+- [ ] Document safety invariants for unsafe code
+- [ ] Run `cargo clippy -- -D warnings` before commit
+- [ ] Run `cargo audit` weekly
+- [ ] Keep dependencies updated
+----
+
+=== Julia Secure Coding Practices
+
+==== Julia Security Model
+
+Julia’s security focuses on: 1. *Type stability*: Predictable
+performance and behavior 2. *Memory safety*: Garbage collection and
+bounds checking 3. *Package isolation*: Environment system 4. *Code
+evaluation safety*: Sandboxing capabilities
+
+==== Common Julia Vulnerabilities
+
+[cols=",,",options="header",]
+|===
+|Vulnerability |Prevention |Detection Tool
+|Type instability |Type annotations |JET.jl
+|Injection attacks |Input validation |Aqua.jl
+|Dependency issues |Package pinning |Aqua.jl
+|Code evaluation risks |Avoid `+eval+`, `+include+` |Static analysis
+|Race conditions |Proper synchronization |ThreadSanitizer
+|===
+
+==== Julia Toolchain Setup
+
+[source,julia]
+----
+# Set up Julia environment
+using Pkg
+Pkg.add([
+    "JuliaFormatter",
+    "JET", 
+    "Aqua",
+    "BenchmarkTools",
+    "Coverage"
+])
+----
+
+==== Julia Security Tools Guide
+
+===== 1. JuliaFormatter.jl
+
+*Purpose:* Consistent code style
+
+*Usage:*
+
+[source,julia]
+----
+using JuliaFormatter
+# Check formatting
+format("."; overwrite=false)
+# Apply formatting  
+format(".")
+----
+
+*CI Integration:*
+
+[source,yaml]
+----
+- name: Julia format check
+  run: julia -e 'using JuliaFormatter; format("."; overwrite=false)'
+----
+
+===== 2. JET.jl (Static Analysis)
+
+*Purpose:* Type inference and error detection
+
+*Key checks:* - Type stability analysis - Method ambiguity detection -
+Unreachable code detection - Potential runtime errors
+
+*Usage:*
+
+[source,julia]
+----
+using JET
+# Basic analysis
+report_package(".")
+# Comprehensive testing
+JET.test_package(path=".")
+----
+
+*Interpreting JET reports:* - *Type instability*: Add type annotations -
+*Method ambiguities*: Resolve with more specific methods - *Unreachable
+code*: Remove dead code - *Potential errors*: Add validation checks
+
+===== 3. Aqua.jl (Package Quality)
+
+*Purpose:* Package health and security checking
+
+*Key tests:* - *Ambiguity detection*: Method conflicts - *Dependency
+compatibility*: Version conflicts - *Project extras*: Proper package
+structure - *Stale dependencies*: Outdated packages
+
+*Usage:*
+
+[source,julia]
+----
+using Aqua
+# Run all tests
+Aqua.test_all(MyPackage)
+# Test specific aspects
+Aqua.test_ambiguities(MyPackage)
+Aqua.test_deps_compat(MyPackage)
+----
+
+*CI Integration:*
+
+[source,yaml]
+----
+- name: Julia package audit
+  run: julia -e 'using Aqua; Aqua.test_all(deps=true)'
+----
+
+==== Julia Secure Coding Checklist
+
+[source,markdown]
+----
+- [ ] Use type annotations for public functions
+- [ ] Validate all external inputs
+- [ ] Avoid `eval` and `include` with untrusted input
+- [ ] Use proper error handling (`try-catch`)
+- [ ] Pin dependency versions in `Project.toml`
+- [ ] Run `JuliaFormatter.format(".")` before commit
+- [ ] Run `JET.test_package(".")` in CI
+- [ ] Run `Aqua.test_all()` weekly
+- [ ] Document all exported functions
+- [ ] Maintain >80% test coverage
+----
+
+=== CI/CD Pipeline Training
+
+==== Understanding Our CI/CD Setup
+
+===== Rust Project Pipeline
+
+*Stages:* 1. *Check*: Format and lint verification 2. *Build*:
+Compilation and artifact creation 3. *Test*: Unit and integration tests
+4. *Security*: Vulnerability scanning 5. *Deploy*: Documentation and
+release
+
+*Key Files:* - `+.github/workflows/rust-ci.yml+` (GitHub Actions) -
+`+.gitlab-ci.yml+` (GitLab CI)
+
+===== Julia Project Pipeline
+
+*Current Setup:* - Basic testing via `+Pkg.test()+` - Quality checks in
+`+quality.yml+`
+
+*Recommended Enhancement:*
+
+[source,yaml]
+----
+# Add to .github/workflows/quality.yml
+jobs:
+  julia-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+      - name: Install security tools
+        run: julia -e 'using Pkg; Pkg.add(["JuliaFormatter", "JET", "Aqua"])'
+      - name: Format check
+        run: julia -e 'using JuliaFormatter; format("."; overwrite=false)'
+      - name: Static analysis
+        run: julia -e 'using JET; JET.test_package(".")'
+      - name: Package audit
+        run: julia -e 'using Aqua; Aqua.test_all()'
+----
+
+==== CI/CD Best Practices
+
+[arabic]
+. *Security Stage Isolation*: Run security checks in dedicated stage
+. *Allow Failure*: Use `+continue-on-error+` for non-blocking checks
+. *Artifact Preservation*: Save security reports as artifacts
+. *Regular Scheduling*: Run audits on schedule, not just on push
+. *Dependency Updates*: Automate dependency update PRs
+
+==== Pipeline Maintenance
+
+*Monthly Tasks:* - Review and update dependency versions - Check for new
+tool versions - Review security findings - Update advisory databases
+
+*Quarterly Tasks:* - Review pipeline performance - Update base
+images/containers - Audit pipeline permissions - Review tool
+effectiveness
+
+=== Static Analysis Deep Dive
+
+==== Understanding Static Analysis
+
+*Types of Analysis:* 1. *Lexical analysis*: Token patterns 2. *Syntax
+analysis*: AST patterns +
+3. *Semantic analysis*: Type and flow analysis 4. *Data-flow analysis*:
+Variable tracking 5. *Control-flow analysis*: Execution paths
+
+==== Common False Positives
+
+*Rust Clippy:* - `+clippy::needless_pass_by_value+` - Sometimes
+intentional - `+clippy::module_name_repetitions+` - Can be idiomatic -
+`+clippy::too_many_arguments+` - Context-dependent
+
+*Julia JET:* - Type instability in generic code - False positives in
+macro-generated code - Overly conservative ambiguity detection
+
+==== Handling Analysis Results
+
+*Triage Process:* 1. *Reproduce*: Verify the issue exists 2. *Assess*:
+Determine severity and impact 3. *Prioritize*: High/medium/low priority
+4. *Fix*: Implement correction 5. *Verify*: Confirm fix resolves issue
+6. *Document*: Add suppression if appropriate
+
+*Suppression Methods:*
+
+*Rust (Clippy):*
+
+[source,rust]
+----
+#[allow(clippy::lint_name)]
+fn my_function() {}
+----
+
+*Julia (JET):*
+
+[source,julia]
+----
+# JET.jl doesn't have suppression, document in code comments
+# JET-ISSUE: Type instability intentional for performance
+function my_func()
+    # ...
+end
+----
+
+=== Hands-on Exercises
+
+==== Exercise 1: Rust Security Audit
+
+*Objective:* Run and interpret security tools on a Rust project
+
+*Steps:* 1. Clone the asdf-acceleration-middleware repository 2. Run
+`+cargo clippy --all-targets --all-features -- -D warnings+` 3. Run
+`+cargo audit+` 4. Run `+cargo geiger+` 5. Document findings and create
+fix plan
+
+*Questions:* - What clippy lints were triggered? - Were any security
+advisories found? - What unsafe code was detected? - How would you
+prioritize the fixes?
+
+==== Exercise 2: Julia Security Setup
+
+*Objective:* Add security tools to a Julia project
+
+*Steps:* 1. Navigate to JuliaPackage-Reuse-Audit.jl 2. Add
+JuliaFormatter, JET, and Aqua to the environment 3. Run each tool and
+document results 4. Create a CI/CD pipeline enhancement PR
+
+*Questions:* - What formatting issues were found? - What type
+instabilities did JET detect? - What package issues did Aqua find? - How
+would you integrate these into CI?
+
+==== Exercise 3: CI/CD Pipeline Enhancement
+
+*Objective:* Enhance existing CI/CD with additional security checks
+
+*Steps:* 1. Review current `+.github/workflows/quality.yml+` 2. Add
+Julia security jobs (format, lint, audit) 3. Add artifact preservation
+for reports 4. Set up scheduled security runs 5. Create PR with
+improvements
+
+*Questions:* - What security gaps exist in current pipeline? - How would
+you structure the new jobs? - What artifacts should be preserved? - What
+schedule would you use for security runs?
+
+=== Resources
+
+==== Rust Resources
+
+* https://rust-secure-code.github.io/[Rust Security Book]
+* https://doc.rust-lang.org/clippy/[Clippy Documentation]
+* https://github.com/RustSec/rustsec[Cargo Audit]
+* https://rustsec.org/[RustSec Advisory Database]
+* https://rust-lang.github.io/unsafe-code-guidelines/[Unsafe Code
+Guidelines]
+
+==== Julia Resources
+
+* https://docs.julialang.org/[Julia Documentation]
+* https://github.com/domluna/JuliaFormatter.jl[JuliaFormatter.jl]
+* https://github.com/aviatesk/JET.jl[JET.jl]
+* https://github.com/JuliaTesting/Aqua.jl[Aqua.jl]
+* https://pkgdocs.julialang.org/[Julia Package Development]
+
+==== General Resources
+
+* https://owasp.org/www-project-top-ten/[OWASP Top Ten]
+* https://cwe.mitre.org/top25/[CWE Top 25]
+* https://www.sans.org/blog/secure-coding/[SANS Secure Coding]
+* https://securitylab.github.com/[GitHub Security Lab]
+
+=== Assessment
+
+*Knowledge Check:* 1. What are the 3 main Rust security tools and their
+purposes? 2. What Julia tools correspond to Clippy, Rustfmt, and Cargo
+Audit? 3. What CI/CD stages should security checks run in? 4. How often
+should security audits be performed? 5. What’s the process for handling
+false positives?
+
+*Practical Evaluation:* - Set up security tools in a personal project -
+Run full security analysis - Create CI/CD pipeline with security checks
+- Document findings and improvements
+
+=== Certification
+
+*Completion Requirements:* - Complete all hands-on exercises - Pass
+knowledge assessment - Implement security tools in one project -
+Contribute to security documentation
+
+*Certification Levels:* - *Level 1*: Tool usage and basic analysis -
+*Level 2*: CI/CD integration and automation - *Level 3*: Advanced
+analysis and mentorship
+
+=== Maintainers
+
+*Content Owners:* - Rust: @hyperpolymath/rust-team - Julia:
+@hyperpolymath/julia-team - CI/CD: @hyperpolymath/devops-team
+
+*Review Cycle:* Quarterly *Next Review:* 2024-07-14 *Feedback:* Submit
+issues to standards repository
+
+=== Changelog
+
+*1.0.0 (2024-04-14)*: Initial training materials with Rust and Julia
+coverage

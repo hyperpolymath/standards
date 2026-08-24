@@ -1,136 +1,200 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
-//
-// PNG Scriptures crawler. AffineScript port of PngScriptures.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module PngScriptures;
 
-use Crawler;
-use Http;
-use Lang1000;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell and Contributors
 
-extern fn str_split(s: String, sep: String) -> [String] = "string" "split";
-extern fn str_trim(s: String) -> String = "string" "trim";
-extern fn str_starts_with(s: String, p: String) -> Bool = "string" "startsWith";
-extern fn str_slice_to_end(s: String, start: Int) -> String = "string" "sliceToEnd";
-extern fn str_slice(s: String, start: Int, end: Int) -> String = "string" "slice";
-extern fn str_index_of(s: String, needle: String) -> Int = "string" "indexOf";
-extern fn str_replace_regex(s: String, pattern: String, repl: String) -> String = "string" "replaceRegExp";
-extern fn str_to_int(s: String) -> Option<Int> = "string" "toInt";
+/**
+ * PNG Scriptures Crawler
+ *
+ * Crawler for pngscriptures.org - Papua New Guinea Bible translations
+ * in numerous Papuan and Austronesian languages.
+ * Downloads ZIP archives and parses USFM/HTML content.
+ */
 
-module Config {
-  pub let base_url = "https://pngscriptures.org";
-  pub let download_url = "https://pngscriptures.org/download";
-  pub let rate_limit_ms = 2000;
+open Crawler.Types
 
-  pub type Format = | Zip | Pdf | Epub | Html
+module Config = {
+  fn baseUrl = "https://pngscriptures.org"
+  fn downloadUrl = "https://pngscriptures.org/download"
+  fn rateLimitMs = 2000
 
-  pub fn format_to_string(f: Format) -> String {
-    match f { Zip => "zip", Pdf => "pdf", Epub => "epub", Html => "html" }
+  struct format {
+    | Zip
+    | Pdf
+    | Epub
+    | Html
+
+  fn formatToString = format =>
+    switch format {
+    | Zip => "zip"
+    | Pdf => "pdf"
+    | Epub => "epub"
+    | Html => "html"
+    }
+}
+
+module Endpoints = {
+  fn languages = () => `${Config.baseUrl}/languages`
+  fn language = langCode => `${Config.baseUrl}/lng/${langCode}`
+  fn download = (langCode, format) =>
+    `${Config.downloadUrl}/${langCode}/${Config.formatToString(format)}`
+}
+
+module Types = {
+  struct pngLanguage { {
+    code: string,
+    name: string,
+    alternateName: option<string>,
+    region: string,
+    population: option<int>,
+    hasNewTestament: bool,
+    hasOldTestament: bool,
+  }
+
+  struct downloadInfo { {
+    language: pngLanguage,
+    format: Config.format,
+    sizeBytes: option<int>,
+    lastUpdated: option<string>,
   }
 }
 
-module Endpoints {
-  pub fn languages() -> String { Config.base_url ++ "/languages" }
-  pub fn language(code: String) -> String { Config.base_url ++ "/lng/" ++ code }
-  pub fn download(code: String, format: Config.Format) -> String {
-    Config.download_url ++ "/" ++ code ++ "/" ++ Config.format_to_string(format)
-  }
-}
+module Parser = {
+  open Types
 
-module Types {
-  pub type PngLanguage = {
-    code: String,
-    name: String,
-    alternate_name: Option<String>,
-    region: String,
-    population: Option<Int>,
-    has_new_testament: Bool,
-    has_old_testament: Bool,
-  }
-
-  pub type DownloadInfo = {
-    language: PngLanguage,
-    format: Config.Format,
-    size_bytes: Option<Int>,
-    last_updated: Option<String>,
-  }
-}
-
-module Parser {
-  use Types;
-
-  pub fn parse_language_list(html: String) -> Crawler.Parser.ParseResult<[Types.PngLanguage]> {
-    let languages = [];
-    let segs = str_split(html, "href=\"/lng/");
-    let i = 1;
-    while i < len(segs) {
-      let q = str_index_of(segs[i], "\"");
-      if q > 0 {
-        let code = str_slice(segs[i], 0, q);
-        if len(code) == 3 {
-          languages = languages ++ [Types.PngLanguage {
-            code: code, name: code, alternate_name: None,
-            region: "Papua New Guinea", population: None,
-            has_new_testament: true, has_old_testament: false,
-          }];
+  /** Parse language listing from HTML page using regex extraction */
+  fn parseLanguageList = (html: string): Crawler.Parser.parseResult<array<pngLanguage>> => {
+    // Extract language entries from the listing page
+    fn langRegex = %re(
+      "/href=\"\/lng\/([a-z]{3})\"[^>]*>([^<]+)<.*?(?:region:\s*([^<,]+))?/gs"
+    )
+    fn languages = []
+    fn _ = html->String.replaceRegExp(langRegex, (match_, _offset, _str) => {
+      // Simplified extraction - real implementation would be more robust
+      fn parts = match_->String.split("\"")
+      if Array.length(parts) >= 2 {
+        fn code = Array.getUnsafe(parts, 1)->String.replaceRegExp(%re("/.*\//"), "")
+        if String.length(code) == 3 {
+          ignore(
+            Array.concat(
+              languages,
+              [
+                {
+                  code,
+                  name: code,
+                  alternateName: None,
+                  region: "Papua New Guinea",
+                  population: None,
+                  hasNewTestament: true,
+                  hasOldTestament: false,
+                },
+              ],
+            ),
+          )
         }
       }
-      i = i + 1;
-    }
-    if len(languages) > 0 {
+      match_
+    })
+
+    if Array.length(languages) > 0 {
       Crawler.Parser.Parsed(languages)
     } else {
       Crawler.Parser.NoMatch
     }
   }
 
-  pub fn parse_usfm(usfm: String, language_code: String) -> [Lang1000.Verse.T] {
-    let verses = [];
-    let current_book = "";
-    let current_chapter = 0;
-    let lines = str_split(usfm, "\n");
-    let i = 0;
-    while i < len(lines) {
-      let trimmed = str_trim(lines[i]);
-      if str_starts_with(trimmed, "\\id ") {
-        current_book = str_split(str_slice_to_end(trimmed, 4), " ")[0];
+  /** Parse USFM (Unified Standard Format Markers) text into verses */
+  fn parseUsfm = (usfm: string, languageCode: string): array<Lang1000.Verse.t> => {
+    fn verses: ref<array<Lang1000.Verse.t>> = ref([])
+    fn currentBook = ref("")
+    fn currentChapter = ref(0)
+
+    fn lines = usfm->String.split("\n")
+    lines->Array.forEach(line => {
+      fn trimmed = String.trim(line)
+      // Book marker: \id GEN
+      if String.startsWith(trimmed, "\\id ") {
+        currentBook := String.sliceToEnd(trimmed, ~start=4)->String.split(" ")->Array.getUnsafe(0)
       }
-      if str_starts_with(trimmed, "\\c ") {
-        current_chapter = match str_to_int(str_trim(str_slice_to_end(trimmed, 3))) { Some(n) => n, None => 0 };
+      // Chapter marker: \c 1
+      if String.startsWith(trimmed, "\\c ") {
+        currentChapter :=
+          String.sliceToEnd(trimmed, ~start=3)
+          ->String.trim
+          ->Int.fromString
+          ->Option.getOr(0)
       }
-      if str_starts_with(trimmed, "\\v ") {
-        let rest = str_slice_to_end(trimmed, 3);
-        let space_idx = str_index_of(rest, " ");
-        if space_idx > 0 {
-          let verse_num = match str_to_int(str_slice(rest, 0, space_idx)) { Some(n) => n, None => 0 };
-          let text = str_trim(str_replace_regex(str_slice_to_end(rest, space_idx + 1), "\\\\[a-z]+\\s?", ""));
-          if verse_num > 0 && len(text) > 0 {
-            verses = verses ++ [Lang1000.Verse.make(
-              Lang1000.Verse.make_reference(current_book, current_chapter, verse_num),
-              text, language_code)];
+      // Verse marker: \v 1 In the beginning...
+      if String.startsWith(trimmed, "\\v ") {
+        fn rest = String.sliceToEnd(trimmed, ~start=3)
+        fn spaceIdx = String.indexOf(rest, " ")
+        if spaceIdx > 0 {
+          fn verseNum = String.slice(rest, ~start=0, ~end=spaceIdx)->Int.fromString->Option.getOr(0)
+          fn text =
+            String.sliceToEnd(rest, ~start=spaceIdx + 1)
+            ->String.replaceRegExp(%re("/\\\\[a-z]+\s?/g"), "")
+            ->String.trim
+          if verseNum > 0 && String.length(text) > 0 {
+            verses :=
+              Array.concat(
+                verses.contents,
+                [
+                  Lang1000.Verse.make(
+                    ~reference=Lang1000.Verse.makeReference(
+                      ~book=currentBook.contents,
+                      ~chapter=currentChapter.contents,
+                      ~verse=verseNum,
+                    ),
+                    ~text,
+                    ~language=languageCode,
+                  ),
+                ],
+              )
           }
         }
       }
-      i = i + 1;
-    }
-    verses
+    })
+
+    verses.contents
   }
 
-  pub fn parse_html_book(html: String, language_code: String) -> Crawler.Parser.ParseResult<[Lang1000.Verse.T]> {
-    let verses = [];
-    let blocks = str_split(html, "class=\"verse\"");
-    let i = 1;
-    while i < len(blocks) {
-      let cleaned = str_trim(str_replace_regex(blocks[i], "<[^>]+>", ""));
-      if len(cleaned) > 0 {
-        verses = verses ++ [Lang1000.Verse.make(
-          Lang1000.Verse.make_reference("UNK", 1, len(verses) + 1),
-          cleaned, language_code)];
+  /** Parse individual book HTML file extracting verse text */
+  fn parseHtmlBook = (html: string, languageCode: string): Crawler.Parser.parseResult<
+    array<Lang1000.Verse.t>,
+  > => {
+    // Extract verse text from HTML structure
+    fn verseRegex = %re("/class=\"verse\"[^>]*data-verse=\"(\d+)\"[^>]*>(.*?)<\/[^>]+>/gs")
+    fn verses = []
+    fn _ = html->String.replaceRegExp(verseRegex, (match_, _offset, _str) => {
+      fn cleaned =
+        match_
+        ->String.replaceRegExp(%re("/<[^>]+>/g"), "")
+        ->String.trim
+      if String.length(cleaned) > 0 {
+        ignore(
+          Array.concat(
+            verses,
+            [
+              Lang1000.Verse.make(
+                ~reference=Lang1000.Verse.makeReference(
+                  ~book="UNK",
+                  ~chapter=1,
+                  ~verse=Array.length(verses) + 1,
+                ),
+                ~text=cleaned,
+                ~language=languageCode,
+              ),
+            ],
+          ),
+        )
       }
-      i = i + 1;
-    }
-    if len(verses) > 0 {
+      match_
+    })
+
+    if Array.length(verses) > 0 {
       Crawler.Parser.Parsed(verses)
     } else {
       Crawler.Parser.NoMatch
@@ -138,63 +202,76 @@ module Parser {
   }
 }
 
-module Crawler_ {
-  use Crawler.Types;
-
-  pub type T = {
-    rate_limiter: Crawler.RateLimiter.T,
-    mut state: Crawler.Types.CrawlerState,
-    download_dir: String,
+module Crawler = {
+  struct t { {
+    rateLimiter: Crawler.RateLimiter.t,
+    mutable state: crawlerState,
+    downloadDir: string,
   }
 
-  pub fn make(download_dir: String) -> T {
-    T {
-      rate_limiter: Crawler.RateLimiter.make(Config.rate_limit_ms),
-      state: Crawler.Types.Idle,
-      download_dir: download_dir,
+  fn make = (~downloadDir="./downloads/png", ()) => {
+    rateLimiter: Crawler.RateLimiter.make(~delayMs=Config.rateLimitMs, ()),
+    state: Idle,
+    downloadDir,
+  }
+
+  fn fetchLanguages = async (crawler: t): crawlResult<array<Types.pngLanguage>> => {
+    crawler.state = Crawling("languages")
+    fn resp = await Http.getWithRateLimit(
+      Endpoints.languages(),
+      ~rateLimiter=crawler.rateLimiter,
+      (),
+    )
+    crawler.state = Idle
+    switch resp {
+    | Ok({body}) =>
+      switch Parser.parseLanguageList(body) {
+      | Crawler.Parser.Parsed(langs) => Success(langs)
+      | _ => Failure("Failed to parse language list")
+      }
+    | Error(Http.HttpError(code, msg)) => Failure(`HTTP ${Int.toString(code)}: ${msg}`)
+    | Error(_) => Failure("Request failed")
     }
   }
 
-  pub fn fetch_languages(crawler: T) -> Effect[Async] Crawler.Types.CrawlResult<[Types.PngLanguage]> {
-    crawler.state = Crawler.Types.Crawling("languages");
-    let resp = await Http.get_with_rate_limit(Endpoints.languages(), None, crawler.rate_limiter);
-    crawler.state = Crawler.Types.Idle;
-    match resp {
-      Ok(r) => {
-        match Parser.parse_language_list(r.body) {
-          Crawler.Parser.Parsed(langs) => Crawler.Types.Success(langs),
-          _ => Crawler.Types.Failure("Failed to parse language list"),
-        }
-      }
-      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
-      Err(_) => Crawler.Types.Failure("Request failed"),
+  fn downloadTranslation = async (
+    crawler: t,
+    langCode: string,
+    format: Config.format,
+  ): crawlResult<string> => {
+    fn resp = await Http.getWithRateLimit(
+      Endpoints.download(langCode, format),
+      ~rateLimiter=crawler.rateLimiter,
+      (),
+    )
+    switch resp {
+    | Ok({body}) =>
+      fn path = `${crawler.downloadDir}/${langCode}.${Config.formatToString(format)}`
+      Success(path ++ " (" ++ Int.toString(String.length(body)) ++ " bytes)")
+    | Error(Http.HttpError(code, msg)) => Failure(`HTTP ${Int.toString(code)}: ${msg}`)
+    | Error(_) => Failure("Download failed")
     }
   }
 
-  pub fn download_translation(crawler: T, lang_code: String,
-                              format: Config.Format) -> Effect[Async] Crawler.Types.CrawlResult<String> {
-    let resp = await Http.get_with_rate_limit(Endpoints.download(lang_code, format), None, crawler.rate_limiter);
-    match resp {
-      Ok(r) => {
-        let path = crawler.download_dir ++ "/" ++ lang_code ++ "." ++ Config.format_to_string(format);
-        Crawler.Types.Success(path ++ " (" ++ show(len(r.body)) ++ " bytes)")
+  fn fetchAndParse = async (
+    crawler: t,
+    langCode: string,
+  ): crawlResult<array<Lang1000.Verse.t>> => {
+    // Fetch HTML version for parsing
+    fn resp = await Http.getWithRateLimit(
+      Endpoints.language(langCode),
+      ~rateLimiter=crawler.rateLimiter,
+      (),
+    )
+    switch resp {
+    | Ok({body}) =>
+      switch Parser.parseHtmlBook(body, langCode) {
+      | Crawler.Parser.Parsed(verses) => Success(verses)
+      | _ => Failure("No verses extracted from HTML")
       }
-      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
-      Err(_) => Crawler.Types.Failure("Download failed"),
-    }
-  }
-
-  pub fn fetch_and_parse(crawler: T, lang_code: String) -> Effect[Async] Crawler.Types.CrawlResult<[Lang1000.Verse.T]> {
-    let resp = await Http.get_with_rate_limit(Endpoints.language(lang_code), None, crawler.rate_limiter);
-    match resp {
-      Ok(r) => {
-        match Parser.parse_html_book(r.body, lang_code) {
-          Crawler.Parser.Parsed(verses) => Crawler.Types.Success(verses),
-          _ => Crawler.Types.Failure("No verses extracted from HTML"),
-        }
-      }
-      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
-      Err(_) => Crawler.Types.Failure("Request failed"),
+    | Error(Http.HttpError(code, msg)) => Failure(`HTTP ${Int.toString(code)}: ${msg}`)
+    | Error(_) => Failure("Request failed")
     }
   }
 }
+

@@ -1,264 +1,378 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
-//
-// K9_Parser — parser for K9 self-validating component specifications.
-// AffineScript port of K9_Parser.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module K9_Parser;
 
-use K9_Types;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// K9_Parser — Parser for K9 self-validating component specifications.
+//
+// Parses the YAML-like .k9 format into the structd AST defined in K9_Types.
+// The parser is line-oriented and extracts:
+//   - Magic number (K9!)
+//   - Pedigree metadata (name, version, description, author, license)
+//   - Security level (Kennel/Yard/Hunt) with permission flags
+//   - Target platform constraints
+//   - Recipes and validation blocks
+//   - Tags
 
-extern fn str_trim(s: String) -> String = "string" "trim";
-extern fn str_lower(s: String) -> String = "string" "toLowerCase";
-extern fn str_index_of(s: String, needle: String) -> Int = "string" "indexOf";
-extern fn str_slice(s: String, start: Int, end: Int) -> String = "string" "slice";
-extern fn str_slice_to_end(s: String, start: Int) -> String = "string" "sliceToEnd";
-extern fn str_starts_with(s: String, p: String) -> Bool = "string" "startsWith";
-extern fn str_split(s: String, sep: String) -> [String] = "string" "split";
-extern fn read_file_sync(path: String, enc: String) -> String = "node:fs" "readFileSync";
+open K9_Types
 
-pub fn parse_key_value(line: String) -> Option<(String, String)> {
-  let trimmed = str_trim(line);
-  let colon_idx = str_index_of(trimmed, ":");
-  if colon_idx >= 0 {
-    let key = str_trim(str_slice(trimmed, 0, colon_idx));
-    let value = str_trim(str_slice_to_end(trimmed, colon_idx + 1));
+// ---------------------------------------------------------------------------
+// Parsing helpers
+// ---------------------------------------------------------------------------
+
+/// Extract a key-value pair from a "  key: value" line.
+/// Returns None if the line does not match the expected format.
+fn parseKeyValue = (line: string): option<(string, string)> => {
+  fn trimmed = line->String.trim
+  fn colonIdx = trimmed->String.indexOf(":")
+  if colonIdx >= 0 {
+    fn key = trimmed->String.slice(~start=0, ~end=colonIdx)->String.trim
+    fn value = trimmed->String.sliceToEnd(~start=colonIdx + 1)->String.trim
     Some((key, value))
   } else {
     None
   }
 }
 
-pub fn parse_bool(s: String) -> Bool {
-  str_lower(str_trim(s)) == "true"
+/// Parse a boolean from a string ("true"/"false").
+fn parseBool = (s: string): bool => {
+  s->String.trim->String.toLowerCase == "true"
 }
 
-pub type ParserState = {
-  mut line_index: Int,
-  lines: [String],
+/// Internal state for the line-oriented K9 parser.
+struct parserState { {
+  mutable lineIndex: int,
+  lines: array<string>,
 }
 
-pub fn skip_blanks_and_separators(state: ParserState) -> Unit {
-  let done = false;
-  while state.line_index < len(state.lines) && !done {
-    let line = str_trim(state.lines[state.line_index]);
-    if len(line) == 0 || line == "---" {
-      state.line_index = state.line_index + 1;
+/// Advance past blank lines and separator lines (---).
+fn skipBlanksAndSeparators = (state: parserState): unit => {
+  fn done = ref(false)
+  while state.lineIndex < state.lines->Array.length && !done.contents {
+    fn line = state.lines->Array.getUnsafe(state.lineIndex)->String.trim
+    if line->String.length == 0 || line == "---" {
+      state.lineIndex = state.lineIndex + 1
     } else {
-      done = true;
+      done := true
     }
   }
 }
 
-pub fn is_section_header(line: String, section: String) -> Bool {
-  str_trim(line) == section ++ ":"
+/// Check if the current line matches a section header (e.g., "metadata:").
+fn isSectionHeader = (line: string, section: string): bool => {
+  line->String.trim == section ++ ":"
 }
 
-pub fn parse_pedigree_section(state: ParserState) -> K9_Types.Pedigree {
-  state.line_index = state.line_index + 1;
-  let name = ""; let version = ""; let description = "";
-  let author = None; let license = None; let done = false;
-  while state.line_index < len(state.lines) && !done {
-    let line = state.lines[state.line_index];
-    let trimmed = str_trim(line);
-    if str_starts_with(line, "  ") && len(trimmed) > 0 {
-      match parse_key_value(trimmed) {
-        Some(("name", v))        => { name = v; }
-        Some(("version", v))     => { version = v; }
-        Some(("description", v)) => { description = v; }
-        Some(("author", v))      => { author = Some(v); }
-        Some(("license", v))     => { license = Some(v); }
-        _                        => {}
+// ---------------------------------------------------------------------------
+// Section parsers
+// ---------------------------------------------------------------------------
+
+/// Parse the metadata/pedigree section.
+/// Reads indented key-value pairs until a non-indented line or new section.
+fn parsePedigreeSection = (state: parserState): pedigree => {
+  // Skip the "metadata:" header line
+  state.lineIndex = state.lineIndex + 1
+
+  fn name = ref("")
+  fn version = ref("")
+  fn description = ref("")
+  fn author = ref(None)
+  fn license = ref(None)
+  fn done = ref(false)
+
+  while state.lineIndex < state.lines->Array.length && !done.contents {
+    fn line = state.lines->Array.getUnsafe(state.lineIndex)
+    fn trimmed = line->String.trim
+    // Indented lines belong to this section
+    if line->String.startsWith("  ") && trimmed->String.length > 0 {
+      switch parseKeyValue(trimmed) {
+      | Some(("name", v)) => name := v
+      | Some(("version", v)) => version := v
+      | Some(("description", v)) => description := v
+      | Some(("author", v)) => author := Some(v)
+      | Some(("license", v)) => license := Some(v)
+      | _ => () // Ignore unknown fields
       }
-      state.line_index = state.line_index + 1;
+      state.lineIndex = state.lineIndex + 1
     } else {
-      done = true;
+      done := true
     }
   }
-  K9_Types.Pedigree { name: name, version: version, description: description, author: author, license: license }
+
+  {
+    name: name.contents,
+    version: version.contents,
+    description: description.contents,
+    author: author.contents,
+    license: license.contents,
+  }
 }
 
-pub fn parse_security_section(state: ParserState) -> K9_Types.SecurityPolicy {
-  state.line_index = state.line_index + 1;
-  let level = K9_Types.Kennel;
-  let allow_network = false; let allow_fs_write = false; let allow_subprocess = false;
-  let done = false;
-  while state.line_index < len(state.lines) && !done {
-    let line = state.lines[state.line_index];
-    let trimmed = str_trim(line);
-    if str_starts_with(line, "  ") && len(trimmed) > 0 {
-      match parse_key_value(trimmed) {
-        Some(("trust_level", v)) => {
-          match K9_Types.security_level_from_string(v) { Some(lvl) => { level = lvl; } None => {} }
+/// Parse the security section.
+fn parseSecuritySection = (state: parserState): securityPolicy => {
+  // Skip the "security:" header line
+  state.lineIndex = state.lineIndex + 1
+
+  fn level = ref(Kennel)
+  fn allowNetwork = ref(false)
+  fn allowFsWrite = ref(false)
+  fn allowSubprocess = ref(false)
+  fn done = ref(false)
+
+  while state.lineIndex < state.lines->Array.length && !done.contents {
+    fn line = state.lines->Array.getUnsafe(state.lineIndex)
+    fn trimmed = line->String.trim
+    if line->String.startsWith("  ") && trimmed->String.length > 0 {
+      switch parseKeyValue(trimmed) {
+      | Some(("trust_level", v)) =>
+        switch securityLevelFromString(v) {
+        | Some(lvl) => level := lvl
+        | None => () // Keep default
         }
-        Some(("allow_network", v))          => { allow_network = parse_bool(v); }
-        Some(("allow_filesystem_write", v)) => { allow_fs_write = parse_bool(v); }
-        Some(("allow_subprocess", v))       => { allow_subprocess = parse_bool(v); }
-        _                                   => {}
+      | Some(("allow_network", v)) => allowNetwork := parseBool(v)
+      | Some(("allow_filesystem_write", v)) => allowFsWrite := parseBool(v)
+      | Some(("allow_subprocess", v)) => allowSubprocess := parseBool(v)
+      | _ => ()
       }
-      state.line_index = state.line_index + 1;
+      state.lineIndex = state.lineIndex + 1
     } else {
-      done = true;
+      done := true
     }
   }
-  K9_Types.SecurityPolicy { level: level, allow_network: allow_network, allow_fs_write: allow_fs_write, allow_subprocess: allow_subprocess }
+
+  {
+    level: level.contents,
+    allowNetwork: allowNetwork.contents,
+    allowFsWrite: allowFsWrite.contents,
+    allowSubprocess: allowSubprocess.contents,
+  }
 }
 
-pub fn parse_target_section(state: ParserState) -> K9_Types.Target {
-  state.line_index = state.line_index + 1;
-  let os = None; let is_edge = false; let requires_podman = false; let memory = None;
-  let done = false;
-  while state.line_index < len(state.lines) && !done {
-    let line = state.lines[state.line_index];
-    let trimmed = str_trim(line);
-    if str_starts_with(line, "  ") && len(trimmed) > 0 {
-      match parse_key_value(trimmed) {
-        Some(("os", v))              => { os = Some(v); }
-        Some(("is_edge", v))         => { is_edge = parse_bool(v); }
-        Some(("requires_podman", v)) => { requires_podman = parse_bool(v); }
-        Some(("memory", v))          => { memory = Some(v); }
-        _                            => {}
+/// Parse the target section.
+fn parseTargetSection = (state: parserState): target => {
+  // Skip the "target:" header line
+  state.lineIndex = state.lineIndex + 1
+
+  fn os = ref(None)
+  fn isEdge = ref(false)
+  fn requiresPodman = ref(false)
+  fn memory = ref(None)
+  fn done = ref(false)
+
+  while state.lineIndex < state.lines->Array.length && !done.contents {
+    fn line = state.lines->Array.getUnsafe(state.lineIndex)
+    fn trimmed = line->String.trim
+    if line->String.startsWith("  ") && trimmed->String.length > 0 {
+      switch parseKeyValue(trimmed) {
+      | Some(("os", v)) => os := Some(v)
+      | Some(("is_edge", v)) => isEdge := parseBool(v)
+      | Some(("requires_podman", v)) => requiresPodman := parseBool(v)
+      | Some(("memory", v)) => memory := Some(v)
+      | _ => ()
       }
-      state.line_index = state.line_index + 1;
+      state.lineIndex = state.lineIndex + 1
     } else {
-      done = true;
+      done := true
     }
   }
-  K9_Types.Target { os: os, is_edge: is_edge, requires_podman: requires_podman, memory: memory }
+
+  {
+    os: os.contents,
+    isEdge: isEdge.contents,
+    requiresPodman: requiresPodman.contents,
+    memory: memory.contents,
+  }
 }
 
-pub fn parse_recipes_section(state: ParserState) -> K9_Types.Recipes {
-  state.line_index = state.line_index + 1;
-  let install = None; let validate = None; let deploy = None; let migrate = None;
-  let custom = []; let done = false;
-  while state.line_index < len(state.lines) && !done {
-    let line = state.lines[state.line_index];
-    let trimmed = str_trim(line);
-    if str_starts_with(line, "  ") && len(trimmed) > 0 {
-      match parse_key_value(trimmed) {
-        Some(("install", v))  => { install = Some(v); }
-        Some(("validate", v)) => { validate = Some(v); }
-        Some(("deploy", v))   => { deploy = Some(v); }
-        Some(("migrate", v))  => { migrate = Some(v); }
-        Some((k, v))          => { custom = custom ++ [(k, v)]; }
-        None                  => {}
+/// Parse the recipes section.
+fn parseRecipesSection = (state: parserState): recipes => {
+  // Skip the "recipes:" header line
+  state.lineIndex = state.lineIndex + 1
+
+  fn install = ref(None)
+  fn validate = ref(None)
+  fn deploy = ref(None)
+  fn migrate = ref(None)
+  fn custom = []
+  fn done = ref(false)
+
+  while state.lineIndex < state.lines->Array.length && !done.contents {
+    fn line = state.lines->Array.getUnsafe(state.lineIndex)
+    fn trimmed = line->String.trim
+    if line->String.startsWith("  ") && trimmed->String.length > 0 {
+      switch parseKeyValue(trimmed) {
+      | Some(("install", v)) => install := Some(v)
+      | Some(("validate", v)) => validate := Some(v)
+      | Some(("deploy", v)) => deploy := Some(v)
+      | Some(("migrate", v)) => migrate := Some(v)
+      | Some((k, v)) => custom->Array.push((k, v))->ignore
+      | None => ()
       }
-      state.line_index = state.line_index + 1;
+      state.lineIndex = state.lineIndex + 1
     } else {
-      done = true;
+      done := true
     }
   }
-  K9_Types.Recipes { install: install, validate: validate, deploy: deploy, migrate: migrate, custom: custom }
+
+  {
+    install: install.contents,
+    validate: validate.contents,
+    deploy: deploy.contents,
+    migrate: migrate.contents,
+    custom,
+  }
 }
 
-pub fn parse_validation_section(state: ParserState) -> K9_Types.Validation {
-  state.line_index = state.line_index + 1;
-  let checksum = ""; let pedigree_version = ""; let hunt_authorized = false;
-  let done = false;
-  while state.line_index < len(state.lines) && !done {
-    let line = state.lines[state.line_index];
-    let trimmed = str_trim(line);
-    if str_starts_with(line, "  ") && len(trimmed) > 0 {
-      match parse_key_value(trimmed) {
-        Some(("checksum", v))         => { checksum = v; }
-        Some(("pedigree_version", v)) => { pedigree_version = v; }
-        Some(("hunt_authorized", v))  => { hunt_authorized = parse_bool(v); }
-        _                             => {}
+/// Parse the validation section.
+fn parseValidationSection = (state: parserState): validation => {
+  // Skip the "validation:" header line
+  state.lineIndex = state.lineIndex + 1
+
+  fn checksum = ref("")
+  fn pedigreeVersion = ref("")
+  fn huntAuthorized = ref(false)
+  fn done = ref(false)
+
+  while state.lineIndex < state.lines->Array.length && !done.contents {
+    fn line = state.lines->Array.getUnsafe(state.lineIndex)
+    fn trimmed = line->String.trim
+    if line->String.startsWith("  ") && trimmed->String.length > 0 {
+      switch parseKeyValue(trimmed) {
+      | Some(("checksum", v)) => checksum := v
+      | Some(("pedigree_version", v)) => pedigreeVersion := v
+      | Some(("hunt_authorized", v)) => huntAuthorized := parseBool(v)
+      | _ => ()
       }
-      state.line_index = state.line_index + 1;
+      state.lineIndex = state.lineIndex + 1
     } else {
-      done = true;
+      done := true
     }
   }
-  K9_Types.Validation { checksum: checksum, pedigree_version: pedigree_version, hunt_authorized: hunt_authorized }
+
+  {
+    checksum: checksum.contents,
+    pedigreeVersion: pedigreeVersion.contents,
+    huntAuthorized: huntAuthorized.contents,
+  }
 }
 
-pub fn parse_tags_section(state: ParserState) -> [String] {
-  state.line_index = state.line_index + 1;
-  let tags = []; let done = false;
-  while state.line_index < len(state.lines) && !done {
-    let line = state.lines[state.line_index];
-    let trimmed = str_trim(line);
-    if str_starts_with(trimmed, "- ") {
-      tags = tags ++ [str_trim(str_slice_to_end(trimmed, 2))];
-      state.line_index = state.line_index + 1;
-    } else if str_starts_with(line, "  ") && len(trimmed) > 0 {
-      tags = tags ++ [trimmed];
-      state.line_index = state.line_index + 1;
+/// Parse the tags section.
+fn parseTagsSection = (state: parserState): array<string> => {
+  // Skip the "tags:" header line
+  state.lineIndex = state.lineIndex + 1
+
+  fn tags = []
+  fn done = ref(false)
+
+  while state.lineIndex < state.lines->Array.length && !done.contents {
+    fn line = state.lines->Array.getUnsafe(state.lineIndex)
+    fn trimmed = line->String.trim
+    if trimmed->String.startsWith("- ") {
+      fn tag = trimmed->String.sliceToEnd(~start=2)->String.trim
+      tags->Array.push(tag)->ignore
+      state.lineIndex = state.lineIndex + 1
+    } else if line->String.startsWith("  ") && trimmed->String.length > 0 {
+      // Also handle indented non-dash entries
+      tags->Array.push(trimmed)->ignore
+      state.lineIndex = state.lineIndex + 1
     } else {
-      done = true;
+      done := true
     }
   }
+
   tags
 }
 
-pub fn parse_k9(input: String) -> Result<K9_Types.Component, K9_Types.ParseError> {
-  let trimmed = str_trim(input);
-  if len(trimmed) == 0 {
-    Err(K9_Types.EmptyDocument)
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Parse a K9 component specification from a string.
+///
+/// The input must start with the K9! magic number.
+/// Returns either a parseError or the parsed component.
+///
+/// ### Example
+/// ```
+/// fn result = parseK9("K9!\n---\nmetadata:\n  name: hello-k9\n  ...")
+/// ```
+fn parseK9 = (input: string): result<component, parseError> => {
+  fn trimmed = input->String.trim
+  if trimmed->String.length == 0 {
+    Error(EmptyDocument)
   } else {
-    let lines = str_split(input, "\n");
-    let state = ParserState { line_index: 0, lines: lines };
+    fn lines = input->String.split("\n")
+    fn state: parserState = {lineIndex: 0, lines}
 
-    skip_blanks_and_separators(state);
-    if state.line_index >= len(lines) {
-      Err(K9_Types.EmptyDocument)
+    // Check for K9! magic number
+    skipBlanksAndSeparators(state)
+    if state.lineIndex >= lines->Array.length {
+      Error(EmptyDocument)
     } else {
-      let first_line = str_trim(lines[state.line_index]);
-      if first_line != "K9!" {
-        Err(K9_Types.MissingMagicNumber)
+      fn firstLine = lines->Array.getUnsafe(state.lineIndex)->String.trim
+      if firstLine != "K9!" {
+        Error(MissingMagicNumber)
       } else {
-        state.line_index = state.line_index + 1;
-        skip_blanks_and_separators(state);
+        state.lineIndex = state.lineIndex + 1
+        skipBlanksAndSeparators(state)
 
-        let pedigree = K9_Types.make_pedigree("", "", "");
-        let security = K9_Types.default_security_policy(K9_Types.Kennel);
-        let target = None;
-        let recipes = None;
-        let validation = None;
-        let tags = [];
-        let content = [];
+        // Parse sections in order
+        fn pedigreeRef = ref(makePedigree(~name="", ~version="", ~description=""))
+        fn securityRef = ref(defaultSecurityPolicy(Kennel))
+        fn targetRef = ref(None)
+        fn recipesRef = ref(None)
+        fn validationRef = ref(None)
+        fn tagsRef = ref([])
+        fn contentRef = ref([])
 
-        while state.line_index < len(lines) {
-          let line = str_trim(lines[state.line_index]);
-          if len(line) == 0 || line == "---" {
-            state.line_index = state.line_index + 1;
-          } else if is_section_header(line, "metadata") {
-            pedigree = parse_pedigree_section(state);
-          } else if is_section_header(line, "security") {
-            security = parse_security_section(state);
-          } else if is_section_header(line, "target") {
-            target = Some(parse_target_section(state));
-          } else if is_section_header(line, "recipes") {
-            recipes = Some(parse_recipes_section(state));
-          } else if is_section_header(line, "validation") {
-            validation = Some(parse_validation_section(state));
-          } else if is_section_header(line, "tags") {
-            tags = parse_tags_section(state);
+        while state.lineIndex < lines->Array.length {
+          fn line = lines->Array.getUnsafe(state.lineIndex)->String.trim
+
+          if line->String.length == 0 || line == "---" {
+            state.lineIndex = state.lineIndex + 1
+          } else if isSectionHeader(line, "metadata") {
+            pedigreeRef := parsePedigreeSection(state)
+          } else if isSectionHeader(line, "security") {
+            securityRef := parseSecuritySection(state)
+          } else if isSectionHeader(line, "target") {
+            targetRef := Some(parseTargetSection(state))
+          } else if isSectionHeader(line, "recipes") {
+            recipesRef := Some(parseRecipesSection(state))
+          } else if isSectionHeader(line, "validation") {
+            validationRef := Some(parseValidationSection(state))
+          } else if isSectionHeader(line, "tags") {
+            tagsRef := parseTagsSection(state)
           } else {
-            match parse_key_value(line) {
-              Some((k, v)) => { content = content ++ [(k, v)]; }
-              None => {}
+            // Unknown key-value pair at root level — store as content
+            switch parseKeyValue(line) {
+            | Some((k, v)) =>
+              contentRef.contents->Array.push((k, v))->ignore
+            | None => ()
             }
-            state.line_index = state.line_index + 1;
+            state.lineIndex = state.lineIndex + 1
           }
         }
 
-        if len(pedigree.name) == 0 {
-          Err(K9_Types.MissingPedigree("name"))
-        } else if len(pedigree.version) == 0 {
-          Err(K9_Types.MissingPedigree("version"))
-        } else if len(pedigree.description) == 0 {
-          Err(K9_Types.MissingPedigree("description"))
+        // Validate required pedigree fields
+        fn ped = pedigreeRef.contents
+        if ped.name->String.length == 0 {
+          Error(MissingPedigree("name"))
+        } else if ped.version->String.length == 0 {
+          Error(MissingPedigree("version"))
+        } else if ped.description->String.length == 0 {
+          Error(MissingPedigree("description"))
         } else {
-          Ok(K9_Types.Component {
-            pedigree: pedigree,
-            security: security,
-            target: target,
-            recipes: recipes,
-            validation: validation,
-            content: content,
-            tags: tags,
+          Ok({
+            pedigree: ped,
+            security: securityRef.contents,
+            target: targetRef.contents,
+            recipes: recipesRef.contents,
+            validation: validationRef.contents,
+            content: contentRef.contents,
+            tags: tagsRef.contents,
           })
         }
       }
@@ -266,12 +380,32 @@ pub fn parse_k9(input: String) -> Result<K9_Types.Component, K9_Types.ParseError
   }
 }
 
-pub fn parse_k9_file(path: String) -> Result<K9_Types.Component, K9_Types.ParseError> {
-  parse_k9(read_file_sync(path, "utf-8"))
+/// Parse a K9 component specification from a file path.
+/// Uses Node.js fs.readFileSync for Deno compatibility.
+@module("node:fs")
+external readFileSync: (string, string) => string = "readFileSync"
+
+fn parseK9File = (path: string): result<component, parseError> => {
+  fn content = readFileSync(path, "utf-8")
+  parseK9(content)
 }
 
-pub type K9Format = | K9Yaml | K9Nickel
+// ---------------------------------------------------------------------------
+// Format detection
+// ---------------------------------------------------------------------------
 
-pub fn detect_format(input: String) -> K9Format {
-  if str_starts_with(str_trim(input), "K9!") { K9Yaml } else { K9Nickel }
+/// K9 file format variants.
+struct k9Format {
+  | K9Yaml
+  | K9Nickel
+
+/// Detect whether a K9 file is YAML-like (.k9) or Nickel (.k9.ncl).
+fn detectFormat = (input: string): k9Format => {
+  fn trimmed = input->String.trim
+  if trimmed->String.startsWith("K9!") {
+    K9Yaml
+  } else {
+    K9Nickel
+  }
 }
+

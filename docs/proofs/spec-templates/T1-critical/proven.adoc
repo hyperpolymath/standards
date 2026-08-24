@@ -1,0 +1,244 @@
+== Proof Spec: proven
+
+*Repo Path*: `+/var/mnt/eclipse/repos/proven+` *Tier*: T1 — Critical
+(foundational library — other repos depend on this) *Total Theorems*: 8
+*Primary Prover(s)*: Idris2 (all) *Existing Proof Coverage*: 745 .idr
+files across 79 Safe* modules (THIS IS THE LIBRARY) *Dependencies*: None
+— this is the base
+
+=== Status Tracker
+
+[cols=",,,,",options="header",]
+|===
+|# |Theorem |Prover |Status |Verified
+|1 |PR1 All Safe* modules total |I2 |[ ] Pending |—
+|2 |PR2 Zero dangerous patterns in library |I2 |[ ] Pending |—
+|3 |PR3 SafeCrypto constant-time equality |I2 |[ ] Pending |—
+|4 |PR4 SafeSQL injection freedom |I2 |[ ] Pending |—
+|5 |PR5 SafeString buffer safety |I2 |[ ] Pending |—
+|6 |PR6 SafePassword hash strength |I2 |[ ] Pending |—
+|7 |PR7 SafeJWT signature verification |I2 |[ ] Pending |—
+|8 |PR8 FFI result type preservation |I2 |[ ] Pending |—
+|===
+
+=== Context
+
+proven is the *Idris2 verified foundations library* providing
+mathematically proven safe operations for 120+ language binding targets.
+Core claim: cannot crash by construction. 79 Safe* modules cover crypto,
+SQL, string, password, JWT, Docker, etc.
+
+==== Key files
+
+* `+src/Proven/Core.idr+` (217 LOC) — base safety invariants
+* `+src/Proven/FFI/SafeCrypto.idr+` (272 LOC) — constant-time ops,
+hashes
+* `+src/Proven/FFI/SafeSQL.idr+` (195 LOC) — parameterised queries
+* `+src/Proven/FFI/SafeString.idr+` (217 LOC) — buffer-safe strings
+* `+src/Proven/FFI/SafePassword.idr+` — argon2, bcrypt wrappers
+* `+src/Proven/FFI/SafeJWT.idr+` — token validation
+
+==== Critical invariants
+
+[arabic]
+. All FFI exports use `+%default total+`
+. Constant-time comparisons for security-sensitive data
+. All 79 Safe* modules preserve safety across language boundaries
+. No native-language reimplementation (everything calls Idris2 core)
+
+=== Theorems to Prove
+
+==== PR1: All Safe* modules are total
+
+*Target file*: `+verification/proofs/idris2/Totality.idr+` *Priority*:
+P0
+
+*Statement*: > Every exported function in every Safe* module is marked
+`+total+` and accepted by Idris2’s totality checker. No partial
+functions in the public API.
+
+*Verification approach*:
+
+[source,bash]
+----
+# Run totality check across all modules
+for f in src/Proven/FFI/Safe*.idr; do
+  idris2 --check "$f" || echo "FAIL: $f"
+done
+# Count total vs partial
+grep -r "partial\|assert_total\|%default partial" src/Proven/FFI/Safe*.idr
+# Expected: 0 matches
+----
+
+*Obligations*: - [ ] Run totality checker on all 79 Safe* modules - [ ]
+Zero `+partial+` annotations - [ ] Zero `+assert_total+` usage - [ ]
+Zero `+%default partial+` pragmas
+
+'''''
+
+==== PR2: Zero dangerous patterns in library
+
+*Target file*: `+verification/proofs/idris2/NoDangerous.idr+`
+*Priority*: P0
+
+*Statement*: > No `+believe_me+`, `+assert_total+`, `+postulate+`,
+`+%default partial+` anywhere in src/.
+
+*Verification approach*:
+
+[source,bash]
+----
+grep -rE "believe_me|assert_total|postulate" src/
+# Expected: 0 matches (or all matches in comments/strings only)
+----
+
+*Obligations*: - [ ] Automated scan returns zero results - [ ] Document
+any unavoidable exceptions (there should be none)
+
+'''''
+
+==== PR3: SafeCrypto constant-time equality
+
+*Target file*: `+verification/proofs/idris2/CryptoConstTime.idr+`
+*Source being verified*: `+src/Proven/FFI/SafeCrypto.idr+` *Prover*:
+Idris2 *Priority*: P0
+
+*Statement*: > `+safeEquals a b+` takes the same number of steps
+regardless of where `+a+` and `+b+` differ. No short-circuit evaluation.
+
+*Formal signature*:
+
+[source,idris]
+----
+||| Constant-time byte comparison.
+public export
+safeEquals : (a : List Bits8) -> (b : List Bits8) -> Bool
+
+||| THEOREM: Step count depends only on length, not contents.
+||| (This is proven by bounding the recursive structure.)
+export
+safeEqualsSteps : (a, b : List Bits8) ->
+  length a = length b ->
+  stepCount (safeEquals a b) = length a
+----
+
+*Obligations*: - [ ] Model step count as recursion depth - [ ] Prove
+depth = length (no early termination)
+
+'''''
+
+==== PR4: SafeSQL injection freedom
+
+*Target file*: `+verification/proofs/idris2/SQLInjection.idr+` *Source
+being verified*: `+src/Proven/FFI/SafeSQL.idr+` *Prover*: Idris2
+*Priority*: P0
+
+*Statement*: > Every SQL query is either a literal or a parameterised
+query. User input cannot become part of the query string without going
+through parameter binding.
+
+*Formal signature*:
+
+[source,idris]
+----
+data SQLFragment = Literal String | Param Nat
+
+||| A SQL query is a list of fragments with separate parameter values.
+record SafeQuery where
+  constructor MkSafeQuery
+  fragments : List SQLFragment
+  params : List SQLValue
+
+||| THEOREM: No SafeQuery can contain user-provided strings as fragments.
+export
+fragmentsAreLiterals : (q : SafeQuery) ->
+  (f : SQLFragment) -> Elem f q.fragments ->
+  (ls : String ** f = Literal ls)
+----
+
+*Obligations*: - [ ] Define SafeQuery with parameter separation - [ ]
+Prove query structure cannot embed raw user input
+
+'''''
+
+==== PR5: SafeString buffer safety
+
+*Target file*: `+verification/proofs/idris2/StringBuffer.idr+` *Source
+being verified*: `+src/Proven/FFI/SafeString.idr+` *Prover*: Idris2
+*Priority*: P0
+
+*Statement*: > All string operations check bounds. No operation can
+read/write past allocated buffer.
+
+*Obligations*: - [ ] Model strings as (Vect n Char) with length index -
+[ ] Prove all ops preserve length ≤ capacity
+
+'''''
+
+==== PR6: SafePassword hash strength
+
+*Target file*: `+verification/proofs/idris2/PasswordHash.idr+` *Source
+being verified*: `+src/Proven/FFI/SafePassword.idr+` *Prover*: Idris2
+*Priority*: P1
+
+*Statement*: > Password hashing always uses argon2id with minimum
+recommended parameters (memory ≥ 64MB, iterations ≥ 3, parallelism ≥ 4).
+
+*Obligations*: - [ ] Define HashParams record with bounds - [ ] Prove
+all hash calls use parameters meeting minimums
+
+'''''
+
+==== PR7: SafeJWT signature verification
+
+*Target file*: `+verification/proofs/idris2/JWTVerify.idr+` *Source
+being verified*: `+src/Proven/FFI/SafeJWT.idr+` *Prover*: Idris2
+*Priority*: P1
+
+*Statement*: > No JWT can be accepted without signature verification.
+`+verify+` is always called before `+decode+`.
+
+*Obligations*: - [ ] Model JWT lifecycle states - [ ] Prove Verified
+state reachable only via verify - [ ] Prove decode requires Verified
+state
+
+'''''
+
+==== PR8: FFI result type preservation
+
+*Target file*: `+verification/proofs/idris2/FFIResultPreserv.idr+`
+*Prover*: Idris2 *Priority*: P1
+
+*Statement*: > FFI calls preserve types across language boundaries. An
+Idris2 `+Int+` remains `+Int+` when called from Rust, ReScript, Python,
+etc.
+
+*Obligations*: - [ ] Define language-target type mapping - [ ] Prove
+mapping is injective per language
+
+'''''
+
+=== Verification Commands
+
+[source,bash]
+----
+cd /var/mnt/eclipse/repos/proven
+
+# Totality check all modules
+for f in src/Proven/FFI/Safe*.idr; do idris2 --check "$f"; done
+
+# Dangerous pattern scan
+grep -rE "believe_me|assert_total|postulate" src/ || echo "CLEAN"
+
+# Proof check
+just proof-check-idris2
+just proof-scan-dangerous
+----
+
+=== Handoff Checklist
+
+* [ ] All 8 theorems discharged
+* [ ] Zero dangerous patterns
+* [ ] All 79 Safe* modules compile with %default total
+* [ ] Commit:
+`+proof: complete proven library verification (8/8 theorems)+`

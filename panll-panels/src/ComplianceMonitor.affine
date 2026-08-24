@@ -1,129 +1,98 @@
 // SPDX-License-Identifier: MPL-2.0
-// Compliance Monitor panel. AffineScript port of ComplianceMonitor.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module ComplianceMonitor;
 
-use VcldbClient;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Compliance Monitor panel — Hypatia findings heatmap + trend.
 
-extern type ReactNode;
-extern fn react_use_reducer(reduce: fn(State, Action) -> State, initial: State) -> (State, fn(Action) -> Unit) = "react" "useReducer";
-extern fn react_use_effect0(body: fn() -> Option<fn() -> Unit>) -> Unit = "react" "useEffect0";
-extern fn react_string(s: String) -> ReactNode = "react" "string";
-extern fn react_int(n: Int) -> ReactNode = "react" "int";
-extern fn react_array(xs: [ReactNode]) -> ReactNode = "react" "array";
-extern fn react_null() -> ReactNode = "react" "null";
-extern fn h(tag: String, props: Json, children: [ReactNode]) -> ReactNode = "react" "h";
-extern fn set_interval(cb: fn() -> Unit, ms: Int) -> Int = "global" "setInterval";
-extern fn clear_interval(id: Int) -> Unit = "global" "clearInterval";
-extern fn json_decode_string(j: Json) -> Option<String> = "json" "decodeString";
-extern fn json_decode_number(j: Json) -> Option<Float> = "json" "decodeNumber";
-
-pub type Finding = {
-  repo: String,
-  severity: String,
-  count: Int,
+struct finding { {
+  repo: string,
+  severity: string,
+  count: int,
 }
 
-pub type State = {
-  loading: Bool,
-  findings: [Finding],
-  error: Option<String>,
+struct state { {
+  loading: bool,
+  findings: array<finding>,
+  error: option<string>,
 }
 
-pub type Action =
+struct action {
   | LoadStarted
-  | FindingsLoaded([Finding])
-  | LoadFailed(String)
+  | FindingsLoaded(array<finding>)
+  | LoadFailed(string)
 
-pub let initial = State { loading: false, findings: [], error: None };
+fn initial: state = {loading: false, findings: [], error: None}
 
-pub fn reduce(state: State, action: Action) -> State {
-  match action {
-    LoadStarted          => State { ...state, loading: true, error: None },
-    FindingsLoaded(rows) => State { ...state, loading: false, findings: rows },
-    LoadFailed(msg)      => State { ...state, loading: false, error: Some(msg) },
+fn reduce = (state: state, action: action): state =>
+  switch action {
+  | LoadStarted => {...state, loading: true, error: None}
+  | FindingsLoaded(rows) => {...state, loading: false, findings: rows}
+  | LoadFailed(msg) => {...state, loading: false, error: Some(msg)}
+  }
+
+fn refresh = async (dispatch: action => unit) => {
+  dispatch(LoadStarted)
+  switch await VcldbClient.openFindings() {
+  | Ok(result) =>
+    fn findings = result.rows->Belt.Array.map(row => {
+      fn repo = row["semantic"]->Js.Dict.get("repo")
+        ->Belt.Option.flatMap(Js.Json.decodeString)
+        ->Belt.Option.getWithDefault("?")
+      fn sev = row["semantic"]->Js.Dict.get("severity")
+        ->Belt.Option.flatMap(Js.Json.decodeString)
+        ->Belt.Option.getWithDefault("?")
+      fn count = row["semantic"]->Js.Dict.get("count")
+        ->Belt.Option.flatMap(Js.Json.decodeNumber)
+        ->Belt.Option.mapWithDefault(0, f => f->Belt.Float.toInt)
+      {repo, severity: sev, count}
+    })
+    dispatch(FindingsLoaded(findings))
+  | Error(msg) => dispatch(LoadFailed(msg))
   }
 }
 
-fn pick_str(sem: Dict<Json>, key: String) -> String {
-  match dict_get(sem, key) {
-    Some(j) => match json_decode_string(j) { Some(s) => s, None => "?" },
-    None => "?",
+fn severityColour = (sev: string): string =>
+  switch sev {
+  | "critical" => "#d00"
+  | "high" => "#f60"
+  | "medium" => "#fc0"
+  | "low" => "#6c0"
+  | _ => "#ccc"
   }
+
+@react.component
+fn make = () => {
+  fn (state, dispatch) = React.useReducer(reduce, initial)
+
+  React.useEffect0(() => {
+    refresh(dispatch)->ignore
+    fn id = Js.Global.setInterval(() => refresh(dispatch)->ignore, 30000)
+    Some(() => Js.Global.clearInterval(id))
+  })
+
+  <div className="panel panel-compliance-monitor">
+    <h2> {React.string("Compliance Monitor")} </h2>
+    {switch state.error {
+    | Some(msg) => <div className="error"> {React.string(msg)} </div>
+    | None => React.null
+    }}
+    {state.loading
+      ? <div className="spinner"> {React.string("Loading...")} </div>
+      : <div className="heatmap">
+          {state.findings
+          ->Belt.Array.map(f =>
+            <div
+              key={f.repo ++ "-" ++ f.severity}
+              className="cell"
+              style={ReactDOM.Style.make(~backgroundColor=severityColour(f.severity), ())}>
+              <div className="cell-repo"> {React.string(f.repo)} </div>
+              <div className="cell-count"> {React.int(f.count)} </div>
+            </div>
+          )
+          ->React.array}
+        </div>}
+  </div>
 }
 
-pub fn refresh(dispatch: fn(Action) -> Unit) -> Effect[Async] Unit {
-  dispatch(LoadStarted);
-  match await VcldbClient.open_findings() {
-    Ok(result) => {
-      let findings = [];
-      let i = 0;
-      while i < len(result.rows) {
-        let sem = result.rows[i].semantic;
-        let count = match dict_get(sem, "count") {
-          Some(j) => match json_decode_number(j) { Some(f) => float_to_int(f), None => 0 },
-          None => 0,
-        };
-        findings = findings ++ [Finding {
-          repo: pick_str(sem, "repo"),
-          severity: pick_str(sem, "severity"),
-          count: count,
-        }];
-        i = i + 1;
-      }
-      dispatch(FindingsLoaded(findings))
-    }
-    Err(msg) => dispatch(LoadFailed(msg)),
-  }
-}
-
-pub fn severity_colour(sev: String) -> String {
-  match sev {
-    "critical" => "#d00",
-    "high"     => "#f60",
-    "medium"   => "#fc0",
-    "low"      => "#6c0",
-    _          => "#ccc",
-  }
-}
-
-pub fn make() -> ReactNode {
-  let (state, dispatch) = react_use_reducer(reduce, initial);
-
-  react_use_effect0(fn() {
-    refresh(dispatch);
-    let id = set_interval(fn() { refresh(dispatch); }, 30000);
-    Some(fn() { clear_interval(id); })
-  });
-
-  let error_node = match state.error {
-    Some(msg) => h("div", json_object([("className", json_string("error"))]), [react_string(msg)]),
-    None => react_null(),
-  };
-
-  let body = if state.loading {
-    h("div", json_object([("className", json_string("spinner"))]), [react_string("Loading...")])
-  } else {
-    let cells = [];
-    let i = 0;
-    while i < len(state.findings) {
-      let f = state.findings[i];
-      cells = cells ++ [h("div", json_object([
-        ("key", json_string(f.repo ++ "-" ++ f.severity)),
-        ("className", json_string("cell")),
-        ("style", json_object([("backgroundColor", json_string(severity_colour(f.severity)))])),
-      ]), [
-        h("div", json_object([("className", json_string("cell-repo"))]), [react_string(f.repo)]),
-        h("div", json_object([("className", json_string("cell-count"))]), [react_int(f.count)]),
-      ])];
-      i = i + 1;
-    }
-    h("div", json_object([("className", json_string("heatmap"))]), [react_array(cells)])
-  };
-
-  h("div", json_object([("className", json_string("panel panel-compliance-monitor"))]), [
-    h("h2", json_object([]), [react_string("Compliance Monitor")]),
-    error_node,
-    body,
-  ])
-}

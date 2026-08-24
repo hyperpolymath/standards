@@ -1,0 +1,213 @@
+== Briefing Haiku (4.5 and later)
+
+Haiku is the cheapest, fastest tier. Its role in the estate is *bulk
+mechanical work whose output can be mechanically verified*. Haiku cost
+is roughly 1/15 of Opus per token, so delegating a large-context sweep
+to Haiku and having Opus read only the distilled result is typically
+*5–10× cheaper end-to-end* than letting Opus do the sweep directly.
+
+The catch: Haiku confabulates summaries. Any task that requires Haiku to
+characterise, synthesise, or judge is at high risk of being wrong in a
+way that looks plausible. Brief Haiku so that its output is a table of
+raw observations, not a verdict.
+
+=== Fits
+
+* Markdown reformatting from a drafted source (not original prose)
+* Running existing scripts/tools and tabulating their output
+* Per-file data _transformation_ requiring per-file reasoning (not just
+pattern match) — e.g. "`read each README and extract the first paragraph
++ primary-language tag`"
+
+=== Does NOT fit (empirically, 2026-04-17 trial)
+
+The following task shapes look like good Haiku fits but are not — do
+them yourself with Bash or Grep:
+
+* *File-presence checks across the estate* ("`which repos have X? which
+lack Y?`"). A Bash loop is 1–2 orders of magnitude faster, correct by
+construction, and zero tokens. Haiku observed confabulating an aggregate
+summary ("`vast majority have EXPLAINME`") that was off by 40 percentage
+points.
+* *Pattern greps across the estate for a fixed literal or simple regex*
+(`+believe_me+`, `+postulate+`, `+uses:+`, SPDX headers). A few parallel
+Grep calls from the supervisor cover the same ground. Haiku observed
+missing 54+ `+believe_me+` occurrences it should have found, and listing
+rows from paths its own Scan notes claimed to have excluded.
+* *Checklist verification ("`does repo Y contain Z`")* — same reason.
+
+The failure pattern is: Haiku’s glob/type filters are unreliable, and
+its aggregation step invents plausible-looking summaries that contradict
+the underlying data. Both failure modes require verification, and
+verification is itself the full Grep/Bash work, defeating the cost
+saving.
+
+=== Does not fit
+
+* Proof work (Idris2, Agda, Lean, Coq, TLA+, L4, Iz, F*)
+* Compiler / type-system / grammar decisions
+* Novel architectural choices or refactors with semantic depth
+* Prose review, paper review, or writing original narrative
+* Security judgement calls on dual-use tools
+* Any task where "`is this a drift case?`" requires reading context
+Haiku hasn’t been given
+* Fuzzy tasks that require mid-flight replanning
+
+=== Cost model
+
+Per-call spend splits between supervisor (Opus/Sonnet) and Haiku roughly
+as:
+
+* Supervisor: prompt (~500–2000 tokens) + returned report (~500–3000
+tokens)
+* Haiku: prompt + all tool results + intermediate reasoning + final
+report
+
+The supervisor does not see Haiku’s intermediate tool outputs, which is
+the point: the bulky context stays in the cheap tier.
+
+Not cheaper when:
+
+* The task is under ~5 file reads (overhead dominates)
+* You would need to intervene every few steps (chat loop wrecks the
+arithmetic)
+* Haiku’s output is unreliable enough that you re-do the work (now paid
+twice)
+
+=== Prompt scaffold
+
+[source,markdown]
+----
+You are doing a **read-only audit** across <scope> at <path>. **Do not modify
+any files. Use only Glob, Grep, Read.**
+
+# Critical output rule
+
+Your job is to produce **raw per-file findings**. Do NOT summarise, aggregate,
+or characterise the data. Do NOT say things like "homogeneous", "stable",
+"acceptable", "no critical drift". Just list findings. The supervising agent
+will aggregate.
+
+If you are tempted to write a paragraph of prose characterising the estate,
+delete it. Every row in your output must be a concrete observation tied to a
+specific file path.
+
+# Scope exclusions (mandatory)
+
+Skip any path containing any of these segments:
+- .git/
+- node_modules/
+- target/
+- vendor/
+- zig-cache/ / zig-out/ / .lake/
+- _exploratory/
+- hyperpolymath-archive/
+- <task-specific archived repo names, e.g. boj-cartridges/polystack/>
+- <task-specific fixture/sample paths, e.g. .../linguist/samples/>
+
+# Task
+
+<One-paragraph statement of what to find. Include regexes, canonical values
+tables, or literal strings to match. No ambiguity about what counts as a hit.>
+
+# Output format — strict
+
+Return raw rows in the following exact markdown table schema:
+
+| file (relative to <path>) | <field 1> | <field 2> | ... |
+
+- One row per observation. No deduplication unless I say so.
+- If a file in scope has nothing to report, skip it (do not add an "OK" row).
+- If a file cannot be read, add a row: `ERROR: <reason>` for that file.
+- Hard cap: first N rows. If more, end with `M more rows truncated`.
+- If a category has zero files in scope: `(no files in scope)` under that heading.
+
+End with a `## Scan notes` section containing ONLY:
+- Total file counts per category
+- Paths you hit read errors on
+- Any exclusion you applied beyond the mandatory list
+
+# Hard rules
+
+- Read-only. No Edit, Write, Bash-that-mutates.
+- No find, cat, git. Glob + Grep + Read only.
+- **No synthesis, no summaries, no characterisations.** Raw per-file rows.
+- Do not write "no drift detected", "acceptable", "estate-wide", "excellent
+  consistency", "no fragmentation". Just list data.
+- Do not propose fixes. Do not edit. Report only.
+- Cap total output at ~1200 lines. If a category would exceed its share of
+  that budget, truncate within it and say so.
+----
+
+=== Hard rules to include verbatim
+
+Every Haiku brief must include these, because Haiku cannot read memory,
+global CLAUDE.md, or prior conversation:
+
+[arabic]
+. *Read-only.* No Edit, Write, or state-mutating Bash.
+. *Tooling restriction.* "`Use only Glob, Grep, Read.`" (Block `+find+`,
+`+cat+`, shell loops.) Haiku tends to reach for Bash when it should use
+structured tools.
+. *Raw rows, no synthesis.* Named anti-patterns: "`homogeneous`",
+"`acceptable`", "`no drift detected`". Listing them explicitly
+suppresses the reflex.
+. *Explicit exclusion list.* Archived repos (e.g. `+polystack+`),
+monorepo sub-paths that shouldn’t be treated as separate repos,
+vendor/build trees, fixture/sample trees. Haiku has no access to the
+estate’s archived-repos memory.
+. *Output schema.* Exact column headers. Haiku will otherwise invent its
+own shape for each category.
+. *Truncation protocol.* Hard cap + "`N more rows truncated`" footer,
+not prose like "`many more observed`".
+. *`+SAFE TO CLOSE+` / session-close markers* are not required from
+Haiku — those are for Opus/Claude sessions.
+
+=== Trust level & verification
+
+*Default trust: low.* Spot-check before acting.
+
+Before using Haiku’s output:
+
+* Verify at least one finding per category by running the equivalent
+Grep or Read yourself.
+* If Haiku produced a prose summary ("`X is homogeneous / stable /
+acceptable`") despite the brief telling it not to, assume that summary
+is wrong and discard it. Use only the raw rows.
+* If row counts per category look suspiciously round or suspiciously
+low, verify the totals with an independent count.
+
+Empirically observed failure modes:
+
+* *Summary confabulation.* Haiku aggregated 14 Zig min-version values as
+"`all 0.15.2`" when the raw data contained five distinct versions.
+Mitigation: ask for raw rows only; aggregate yourself.
+* *Sampling without saying so.* Haiku will quietly "`sample`" 6 of 130
+files and present them as the data. Mitigation: insist on one row per
+file, or ask for explicit `+N of M scanned+` counts in Scan notes.
+* *Prose truncation of a table.* Haiku will write "`150+ more findings
+detected`" rather than filling the table to its cap. Mitigation: make
+the cap high enough that truncation is rare, and require the literal
+footer `+M more rows truncated+`.
+
+=== Anti-patterns in briefing
+
+* Asking "`is there drift?`" — that is a judgement. Ask "`list every
+distinct value observed`".
+* Leaving exclusions implicit — Haiku does not know that `+polystack+`
+is archived.
+* Asking for fixes — Haiku will attempt them, unevenly. Split report and
+fix into separate sessions.
+* Asking Haiku to decide which files are "`relevant`" — specify the
+glob.
+
+=== Parallelism
+
+Hard cap in this estate: *3 parallel subagents*, *2 parallel Bash*. If
+the scope is large, prefer one wide Haiku pass over three narrow ones —
+the token-overhead of three briefs plus three summary reports usually
+exceeds the wall-clock savings.
+
+=== License
+
+PMPL-1.0-or-later (MPL-2.0 automatic legal fallback).

@@ -1,139 +1,118 @@
 // SPDX-License-Identifier: MPL-2.0
-// Proof Verification Hub panel. AffineScript port of ProofHub.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module ProofHub;
 
-use VcldbClient;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Proof Verification Hub panel — proof table with trust level & staleness.
 
-extern type ReactNode;
-extern fn react_use_reducer(reduce: fn(State, Action) -> State, initial: State) -> (State, fn(Action) -> Unit) = "react" "useReducer";
-extern fn react_use_effect0(body: fn() -> Option<fn() -> Unit>) -> Unit = "react" "useEffect0";
-extern fn react_string(s: String) -> ReactNode = "react" "string";
-extern fn react_array(xs: [ReactNode]) -> ReactNode = "react" "array";
-extern fn react_null() -> ReactNode = "react" "null";
-extern fn h(tag: String, props: Json, children: [ReactNode]) -> ReactNode = "react" "h";
-extern fn set_interval(cb: fn() -> Unit, ms: Int) -> Int = "global" "setInterval";
-extern fn clear_interval(id: Int) -> Unit = "global" "clearInterval";
-extern fn json_decode_string(j: Json) -> Option<String> = "json" "decodeString";
-
-pub type Proof = {
-  file: String,
-  prover: String,
-  theorem_name: String,
-  trust_level: String,
-  verified_at: String,
+struct proof { {
+  file: string,
+  prover: string,
+  theoremName: string,
+  trustLevel: string,
+  verifiedAt: string,
 }
 
-pub type State = {
-  loading: Bool,
-  proofs: [Proof],
-  error: Option<String>,
+struct state { {
+  loading: bool,
+  proofs: array<proof>,
+  error: option<string>,
 }
 
-pub type Action =
+struct action {
   | LoadStarted
-  | ProofsLoaded([Proof])
-  | LoadFailed(String)
+  | ProofsLoaded(array<proof>)
+  | LoadFailed(string)
 
-pub let initial = State { loading: false, proofs: [], error: None };
+fn initial: state = {loading: false, proofs: [], error: None}
 
-pub fn reduce(state: State, action: Action) -> State {
-  match action {
-    LoadStarted        => State { ...state, loading: true, error: None },
-    ProofsLoaded(rows) => State { ...state, loading: false, proofs: rows },
-    LoadFailed(msg)    => State { ...state, loading: false, error: Some(msg) },
+fn reduce = (state: state, action: action): state =>
+  switch action {
+  | LoadStarted => {...state, loading: true, error: None}
+  | ProofsLoaded(rows) => {...state, loading: false, proofs: rows}
+  | LoadFailed(msg) => {...state, loading: false, error: Some(msg)}
   }
-}
 
-fn pick(semantic: Dict<Json>, key: String, fallback: String) -> String {
-  match dict_get(semantic, key) {
-    Some(j) => match json_decode_string(j) { Some(s) => s, None => fallback },
-    None => fallback,
-  }
-}
+fn pick = (semantic: Js.Dict.t<Js.Json.t>, key: string, fallback: string): string =>
+  semantic
+  ->Js.Dict.get(key)
+  ->Belt.Option.flatMap(Js.Json.decodeString)
+  ->Belt.Option.getWithDefault(fallback)
 
-pub fn refresh(dispatch: fn(Action) -> Unit) -> Effect[Async] Unit {
-  dispatch(LoadStarted);
-  match await VcldbClient.current_proofs() {
-    Ok(result) => {
-      let proofs = [];
-      let i = 0;
-      while i < len(result.rows) {
-        let row = result.rows[i];
-        proofs = proofs ++ [Proof {
-          file: pick(row.semantic, "file", "?"),
-          prover: pick(row.semantic, "prover", "?"),
-          theorem_name: pick(row.semantic, "theorem_name", "?"),
-          trust_level: pick(row.semantic, "trust_level", "unreviewed"),
-          verified_at: pick(row.temporal, "verified_at", "never"),
-        }];
-        i = i + 1;
+fn refresh = async (dispatch: action => unit) => {
+  dispatch(LoadStarted)
+  switch await VcldbClient.currentProofs() {
+  | Ok(result) =>
+    fn proofs = result.rows->Belt.Array.map(row => {
+      fn s = row["semantic"]
+      fn t = row["temporal"]
+      {
+        file: pick(s, "file", "?"),
+        prover: pick(s, "prover", "?"),
+        theoremName: pick(s, "theorem_name", "?"),
+        trustLevel: pick(s, "trust_level", "unreviewed"),
+        verifiedAt: pick(t, "verified_at", "never"),
       }
-      dispatch(ProofsLoaded(proofs))
-    }
-    Err(msg) => dispatch(LoadFailed(msg)),
+    })
+    dispatch(ProofsLoaded(proofs))
+  | Error(msg) => dispatch(LoadFailed(msg))
   }
 }
 
-pub fn trust_badge(level: String) -> String {
-  match level {
-    "proven"    => "✓ proven",
-    "tested"    => "● tested",
-    "reviewed"  => "◉ reviewed",
-    "postulate" => "▲ postulate",
-    "axiom"     => "★ axiom",
-    "admitted"  => "✗ admitted",
-    _           => "? " ++ level,
+fn trustBadge = (level: string): string =>
+  switch level {
+  | "proven" => "✓ proven"
+  | "tested" => "● tested"
+  | "reviewed" => "◉ reviewed"
+  | "postulate" => "▲ postulate"
+  | "axiom" => "★ axiom"
+  | "admitted" => "✗ admitted"
+  | _ => "? " ++ level
   }
+
+@react.component
+fn make = () => {
+  fn (state, dispatch) = React.useReducer(reduce, initial)
+
+  React.useEffect0(() => {
+    refresh(dispatch)->ignore
+    fn id = Js.Global.setInterval(() => refresh(dispatch)->ignore, 120000)
+    Some(() => Js.Global.clearInterval(id))
+  })
+
+  <div className="panel panel-proof-hub">
+    <h2> {React.string("Proof Verification Hub")} </h2>
+    {switch state.error {
+    | Some(msg) => <div className="error"> {React.string(msg)} </div>
+    | None => React.null
+    }}
+    {state.loading
+      ? <div className="spinner"> {React.string("Loading...")} </div>
+      : <table className="proof-table">
+          <thead>
+            <tr>
+              <th> {React.string("File")} </th>
+              <th> {React.string("Prover")} </th>
+              <th> {React.string("Theorem")} </th>
+              <th> {React.string("Trust")} </th>
+              <th> {React.string("Verified")} </th>
+            </tr>
+          </thead>
+          <tbody>
+            {state.proofs
+            ->Belt.Array.mapWithIndex((i, p) =>
+              <tr key={Belt.Int.toString(i)}>
+                <td> {React.string(p.file)} </td>
+                <td> {React.string(p.prover)} </td>
+                <td> {React.string(p.theoremName)} </td>
+                <td> {React.string(trustBadge(p.trustLevel))} </td>
+                <td> {React.string(p.verifiedAt)} </td>
+              </tr>
+            )
+            ->React.array}
+          </tbody>
+        </table>}
+  </div>
 }
 
-pub fn make() -> ReactNode {
-  let (state, dispatch) = react_use_reducer(reduce, initial);
-
-  react_use_effect0(fn() {
-    refresh(dispatch);
-    let id = set_interval(fn() { refresh(dispatch); }, 120000);
-    Some(fn() { clear_interval(id); })
-  });
-
-  let error_node = match state.error {
-    Some(msg) => h("div", json_object([("className", json_string("error"))]), [react_string(msg)]),
-    None => react_null(),
-  };
-
-  let body = if state.loading {
-    h("div", json_object([("className", json_string("spinner"))]), [react_string("Loading...")])
-  } else {
-    let rows = [];
-    let i = 0;
-    while i < len(state.proofs) {
-      let p = state.proofs[i];
-      rows = rows ++ [h("tr", json_object([("key", json_string(show(i)))]), [
-        h("td", json_object([]), [react_string(p.file)]),
-        h("td", json_object([]), [react_string(p.prover)]),
-        h("td", json_object([]), [react_string(p.theorem_name)]),
-        h("td", json_object([]), [react_string(trust_badge(p.trust_level))]),
-        h("td", json_object([]), [react_string(p.verified_at)]),
-      ])];
-      i = i + 1;
-    }
-    h("table", json_object([("className", json_string("proof-table"))]), [
-      h("thead", json_object([]), [
-        h("tr", json_object([]), [
-          h("th", json_object([]), [react_string("File")]),
-          h("th", json_object([]), [react_string("Prover")]),
-          h("th", json_object([]), [react_string("Theorem")]),
-          h("th", json_object([]), [react_string("Trust")]),
-          h("th", json_object([]), [react_string("Verified")]),
-        ]),
-      ]),
-      h("tbody", json_object([]), [react_array(rows)]),
-    ])
-  };
-
-  h("div", json_object([("className", json_string("panel panel-proof-hub"))]), [
-    h("h2", json_object([]), [react_string("Proof Verification Hub")]),
-    error_node,
-    body,
-  ])
-}

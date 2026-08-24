@@ -1,127 +1,133 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
-//
-// A2ML_Renderer — render A2ML AST back to A2ML surface syntax.
-// AffineScript port of A2ML_Renderer.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module A2ML_Renderer;
 
-use A2ML_Types;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// A2ML_Renderer — Render A2ML AST back to A2ML surface syntax.
+//
+// Converts the structd AST from A2ML_Types into A2ML text format,
+// preserving structure and formatting conventions. Produces output
+// compatible with the A2ML parser for round-trip fidelity.
 
-extern fn str_includes(s: String, needle: String) -> Bool = "string" "includes";
+open A2ML_Types
 
-pub fn render_inline(inl: A2ML_Types.Inline) -> String {
-  match inl {
-    Text(t)             => t,
-    Emphasis(children)  => "*" ++ render_inlines(children) ++ "*",
-    Strong(children)    => "**" ++ render_inlines(children) ++ "**",
-    Code(c)             => "`" ++ c ++ "`",
-    Link(content, url)  => "[" ++ render_inlines(content) ++ "](" ++ url ++ ")",
-    InlineRef(ref_id)   => "@ref(" ++ ref_id ++ ")",
+// ---------------------------------------------------------------------------
+// Inline rendering
+// ---------------------------------------------------------------------------
+
+/// Render a single inline element to A2ML text.
+fn rec renderInline = (inl: inline): string => {
+  switch inl {
+  | Text(t) => t
+  | Emphasis(children) => "*" ++ renderInlines(children) ++ "*"
+  | Strong(children) => "**" ++ renderInlines(children) ++ "**"
+  | Code(c) => "`" ++ c ++ "`"
+  | Link({content, url}) => "[" ++ renderInlines(content) ++ "](" ++ url ++ ")"
+  | InlineRef(refId) => "@ref(" ++ refId ++ ")"
   }
 }
 
-pub fn render_inlines(inlines: [A2ML_Types.Inline]) -> String {
-  let out = "";
-  let i = 0;
-  while i < len(inlines) {
-    out = out ++ render_inline(inlines[i]);
-    i = i + 1;
-  }
-  out
+/// Render a list of inline elements to text.
+and renderInlines = (inlines: array<inline>): string => {
+  inlines->Array.map(renderInline)->Array.join("")
 }
 
-pub fn render_directive(dir: A2ML_Types.Directive) -> String {
-  let attr_str = if len(dir.attributes) > 0 {
-    let pairs = [];
-    let i = 0;
-    while i < len(dir.attributes) {
-      let (k, v) = dir.attributes[i];
-      pairs = pairs ++ [k ++ "=" ++ v];
-      i = i + 1;
-    }
-    let joined = "";
-    let j = 0;
-    while j < len(pairs) {
-      joined = if j == 0 { pairs[j] } else { joined ++ ", " ++ pairs[j] };
-      j = j + 1;
-    }
-    "(" ++ joined ++ ")"
+// ---------------------------------------------------------------------------
+// Directive rendering
+// ---------------------------------------------------------------------------
+
+/// Render a directive to A2ML surface syntax.
+/// Single-line directives use `@name: value` format.
+/// Multi-line directives use `@name:\n...\n@end` format.
+fn renderDirective = (dir: directive): string => {
+  fn attrStr = if dir.attributes->Array.length > 0 {
+    fn pairs =
+      dir.attributes
+      ->Array.map(((k, v)) => k ++ "=" ++ v)
+      ->Array.join(", ")
+    "(" ++ pairs ++ ")"
   } else {
     ""
-  };
+  }
 
-  if str_includes(dir.value, "\n") {
-    "@" ++ dir.name ++ attr_str ++ ":\n" ++ dir.value ++ "\n@end"
+  fn hasNewlines = dir.value->String.includes("\n")
+  if hasNewlines {
+    "@" ++ dir.name ++ attrStr ++ ":\n" ++ dir.value ++ "\n@end"
   } else {
-    "@" ++ dir.name ++ attr_str ++ ": " ++ dir.value
+    "@" ++ dir.name ++ attrStr ++ ": " ++ dir.value
   }
 }
 
-pub fn render_attestation(att: A2ML_Types.Attestation) -> String {
-  let lines = [
+// ---------------------------------------------------------------------------
+// Attestation rendering
+// ---------------------------------------------------------------------------
+
+/// Render an attestation block to A2ML surface syntax.
+fn renderAttestation = (att: attestation): string => {
+  fn lines = [
     "!attest",
     "identity: " ++ att.identity,
     "role: " ++ att.role,
-    "trust-level: " ++ A2ML_Types.trust_level_to_string(att.trust_level),
-  ];
-  match att.timestamp { Some(ts) => { lines = lines ++ ["timestamp: " ++ ts]; } None => {} }
-  match att.note { Some(n) => { lines = lines ++ ["note: " ++ n]; } None => {} }
-  lines = lines ++ ["!end"];
-  let out = "";
-  let i = 0;
-  while i < len(lines) {
-    out = if i == 0 { lines[i] } else { out ++ "\n" ++ lines[i] };
-    i = i + 1;
+    "trust-level: " ++ trustLevelToString(att.trustLevel),
+  ]
+
+  switch att.timestamp {
+  | Some(ts) => lines->Array.push("timestamp: " ++ ts)->ignore
+  | None => ()
   }
-  out
+
+  switch att.note {
+  | Some(n) => lines->Array.push("note: " ++ n)->ignore
+  | None => ()
+  }
+
+  lines->Array.push("!end")->ignore
+  lines->Array.join("\n")
 }
 
-pub fn render_block(blk: A2ML_Types.Block) -> String {
-  match blk {
-    Heading(level, content) => {
-      let hashes = "";
-      let i = 0;
-      while i < level { hashes = hashes ++ "#"; i = i + 1; }
-      hashes ++ " " ++ render_inlines(content)
+// ---------------------------------------------------------------------------
+// Block rendering
+// ---------------------------------------------------------------------------
+
+/// Render a single block to A2ML text.
+fn rec renderBlock = (blk: block): string => {
+  switch blk {
+  | Heading({level, content}) =>
+    fn hashes = Array.make(~length=level, "#")->Array.join("")
+    hashes ++ " " ++ renderInlines(content)
+  | Paragraph(inlines) => renderInlines(inlines)
+  | CodeBlock({language, content}) =>
+    fn langTag = switch language {
+    | Some(l) => l
+    | None => ""
     }
-    Paragraph(inlines) => render_inlines(inlines),
-    CodeBlock(language, content) => {
-      let lang_tag = match language { Some(l) => l, None => "" };
-      "```" ++ lang_tag ++ "\n" ++ content ++ "\n```"
-    }
-    DirectiveBlock(dir)   => render_directive(dir),
-    AttestationBlock(att) => render_attestation(att),
-    ThematicBreak         => "---",
-    BlockQuote(blocks) => {
-      let parts = [];
-      let i = 0;
-      while i < len(blocks) { parts = parts ++ ["> " ++ render_block(blocks[i])]; i = i + 1; }
-      let out = "";
-      let j = 0;
-      while j < len(parts) { out = if j == 0 { parts[j] } else { out ++ "\n" ++ parts[j] }; j = j + 1; }
-      out
-    }
-    BulletList(items) => {
-      let parts = [];
-      let i = 0;
-      while i < len(items) { parts = parts ++ ["- " ++ render_inlines(items[i])]; i = i + 1; }
-      let out = "";
-      let j = 0;
-      while j < len(parts) { out = if j == 0 { parts[j] } else { out ++ "\n" ++ parts[j] }; j = j + 1; }
-      out
-    }
-    BlankLine => "",
+    "```" ++ langTag ++ "\n" ++ content ++ "\n```"
+  | DirectiveBlock(dir) => renderDirective(dir)
+  | AttestationBlock(att) => renderAttestation(att)
+  | ThematicBreak => "---"
+  | BlockQuote(blocks) =>
+    blocks->Array.map(b => "> " ++ renderBlock(b))->Array.join("\n")
+  | BulletList(items) =>
+    items->Array.map(inlines => "- " ++ renderInlines(inlines))->Array.join("\n")
+  | BlankLine => ""
   }
 }
 
-pub fn render_a2ml(doc: A2ML_Types.Document) -> String {
-  let out = "";
-  let i = 0;
-  while i < len(doc.blocks) {
-    let rendered = render_block(doc.blocks[i]);
-    out = if i == 0 { rendered } else { out ++ "\n" ++ rendered };
-    i = i + 1;
-  }
-  out ++ "\n"
+// ---------------------------------------------------------------------------
+// Document rendering
+// ---------------------------------------------------------------------------
+
+/// Render a complete A2ML document to text.
+///
+/// ### Example
+/// ```
+/// fn doc = { title: Some("Hello"), directives: [], blocks: [...], attestations: [] }
+/// fn text = renderA2ML(doc)
+/// ```
+fn renderA2ML = (doc: document): string => {
+  doc.blocks->Array.map(renderBlock)->Array.join("\n") ++ "\n"
 }
+
