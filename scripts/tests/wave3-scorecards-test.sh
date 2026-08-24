@@ -59,14 +59,14 @@ rm -f "$SCDIR/zzz-orphan.scorecard.a2ml"
 echo "== determinism + drift =="
 # regenerate twice -> identical
 bash "$GEN" >/dev/null 2>&1
-h1="$(sha256sum "$ROOT/COMPLIANCE-DASHBOARD.md" | cut -d' ' -f1)"
+h1="$(sha256sum "$ROOT/COMPLIANCE-DASHBOARD.adoc" | cut -d' ' -f1)"
 bash "$GEN" >/dev/null 2>&1
-h2="$(sha256sum "$ROOT/COMPLIANCE-DASHBOARD.md" | cut -d' ' -f1)"
+h2="$(sha256sum "$ROOT/COMPLIANCE-DASHBOARD.adoc" | cut -d' ' -f1)"
 [ "$h1" = "$h2" ] && ok "regeneration is deterministic" || bad "regeneration not deterministic"
 # --check green when in sync
 bash "$GEN" --check >/dev/null 2>&1 && ok "--check passes when in sync" || bad "--check failed when in sync"
 # --check red when dashboard mutated
-printf '\n<!-- drift -->\n' >> "$ROOT/COMPLIANCE-DASHBOARD.md"
+printf '\n// drift\n' >> "$ROOT/COMPLIANCE-DASHBOARD.adoc"
 if bash "$GEN" --check >/dev/null 2>&1; then bad "--check missed injected drift"; else ok "--check detects injected drift"; fi
 bash "$GEN" >/dev/null 2>&1  # restore
 

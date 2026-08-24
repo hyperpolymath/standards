@@ -8,7 +8,7 @@
 # This is the generator behind two artefacts that MUST NOT be hand-edited:
 #   * .machine_readable/REGISTRY.a2ml  — the machine index of every spec,
 #       its canonical home, and a content-addressed `source_hash`.
-#   * TOPOLOGY.md                      — the human-readable map, derived
+#   * TOPOLOGY.adoc                    — the human-readable map, derived
 #       from the registry + STATE.a2ml so it can never freeze again.
 #
 # The registry indexes two kinds of spec:
@@ -47,7 +47,7 @@ MODE="write"
 [ "${1:-}" = "--check" ] && MODE="check"
 
 REGISTRY=".machine_readable/REGISTRY.a2ml"
-TOPOLOGY="TOPOLOGY.md"
+TOPOLOGY="TOPOLOGY.adoc"
 # Intentionally NO generation timestamp: a volatile date would make every
 # regeneration differ and defeat `--check`. The content (hashes + STATE) is the
 # only source of truth, so the output is a pure function of the committed tree.
@@ -233,7 +233,7 @@ ENTRY
 }
 
 # ---------------------------------------------------------------------------
-# Emit TOPOLOGY.md (DERIVED from the registry + STATE.a2ml)
+# Emit TOPOLOGY.adoc (DERIVED from the registry + STATE.a2ml)
 # ---------------------------------------------------------------------------
 state_field() {
   # crude TOML-ish field reader for STATE.a2ml
@@ -248,22 +248,24 @@ emit_topology() {
   phase="$(state_field phase)"; maturity="$(state_field maturity)"
   updated="$(state_field last-updated)"
   cat <<HEADER
-<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-<!-- TOPOLOGY.md — DERIVED architecture map (generated from REGISTRY.a2ml + STATE.a2ml) -->
-<!-- GENERATED FILE — DO NOT EDIT BY HAND. Run: just topology (scripts/build-registry.sh) -->
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// TOPOLOGY.adoc — DERIVED architecture map (generated from REGISTRY.a2ml + STATE.a2ml)
+// GENERATED FILE — DO NOT EDIT BY HAND. Run: just topology (scripts/build-registry.sh)
 
-# Hyperpolymath Standards — Topology (derived)
+= Hyperpolymath Standards — Topology (derived)
 
-> This file is **generated** from \`.machine_readable/REGISTRY.a2ml\` and
-> \`.machine_readable/6a2/STATE.a2ml\` by \`scripts/build-registry.sh\`.
-> It cannot freeze: every regeneration re-reads ground truth. Do not edit by hand.
+____
+This file is *generated* from \`+.machine_readable/REGISTRY.a2ml+\` and
+the canonical \`+STATE.a2ml+\` by \`+scripts/build-registry.sh+\`.
+It cannot freeze: every regeneration re-reads ground truth. Do not edit by hand.
+____
 
-- **Phase:** ${phase:-unknown}  &nbsp;|&nbsp; **Maturity:** ${maturity:-unknown}  &nbsp;|&nbsp; **STATE last-updated:** ${updated:-unknown}
-- **Registry entries:** ${ENTRY_COUNT} specs across 6 streams
-- **Front door:** human → [README.adoc](README.adoc); machine → [0-AI-MANIFEST.a2ml](0-AI-MANIFEST.a2ml)
-- **Registry:** [.machine_readable/REGISTRY.a2ml](.machine_readable/REGISTRY.a2ml) (index + source hashes) · prose: [REGISTRY.adoc](REGISTRY.adoc)
+* *Phase:* ${phase:-unknown} | *Maturity:* ${maturity:-unknown} | *STATE last-updated:* ${updated:-unknown}
+* *Registry entries:* ${ENTRY_COUNT} specs across 6 streams
+* *Front door:* human → link:README.adoc[README.adoc]; machine → link:0-AI-MANIFEST.a2ml[0-AI-MANIFEST.a2ml]
+* *Registry:* link:.machine_readable/REGISTRY.a2ml[.machine_readable/REGISTRY.a2ml] (index + source hashes) · prose: link:REGISTRY.adoc[REGISTRY.adoc]
 
-## Specs by stream
+== Specs by stream
 
 HEADER
 
@@ -279,37 +281,37 @@ HEADER
     esac
     # print the section if EITHER local or external specs populate this stream
     if grep -q "|${s}|" <<< "$SPECS" || grep -q "|${s}|" <<< "$EXTERNAL_SPECS"; then
-      printf '### %s\n\n' "$label"
-      printf '| Spec | Home | If you want… |\n|---|---|---|\n'
+      printf '=== %s\n\n' "$label"
+      printf '[cols="34%%,33%%,33%%",options="header"]\n|===\n| Spec | Home | If you want…\n'
       while IFS='|' read -r id stream home name route; do
         [ -z "$id" ] && continue
         [ "$stream" = "$s" ] || continue
         [ -d "$home" ] || continue
-        printf '| %s | [`%s`](%s) | %s |\n' "$name" "$home" "$home" "$route"
+        printf '| %s | link:%s[`+%s+`] | %s\n' "$name" "$home" "$home" "$route"
       done <<< "$SPECS"
       # external pointers in this stream (SSOT lives in another repo)
       while IFS='|' read -r id stream spec_kind owning_repo canonical_url version_pin format_version source_hash media_type lineage name route; do
         [ -z "$id" ] && continue
         [ "$stream" = "$s" ] || continue
-        printf '| %s | [`%s`](%s) `@ %s` ⇗ | %s |\n' "$name" "$owning_repo" "$canonical_url" "$version_pin" "$route"
+        printf '| %s | %s[`+%s+`] `+@ %s+` ⇗ | %s\n' "$name" "$canonical_url" "$owning_repo" "$version_pin" "$route"
       done <<< "$EXTERNAL_SPECS"
-      printf '\n'
+      printf '|===\n\n'
     fi
   done
 
   cat <<'FOOTER'
-## How this map stays honest
+== How this map stays honest
 
-```
-file tree + STATE.a2ml ──► scripts/build-registry.sh ──► REGISTRY.a2ml ──► TOPOLOGY.md
+....
+file tree + STATE.a2ml ──► scripts/build-registry.sh ──► REGISTRY.a2ml ──► TOPOLOGY.adoc
                                       ▲                        │
                                       │                        ▼
                           just registry / CI            HYP-S006 (registry-staleness)
                           (registry-verify.yml)         emits doc.drift on hash mismatch
-```
+....
 
-Regenerate after any spec change: `just registry` (writes REGISTRY.a2ml + TOPOLOGY.md).
-CI (`registry-verify.yml`) runs `--check` and fails the build if either is stale.
+Regenerate after any spec change: `+just registry+` (writes REGISTRY.a2ml + TOPOLOGY.adoc).
+CI (`+registry-verify.yml+`) runs `+--check+` and fails the build if either is stale.
 FOOTER
 }
 

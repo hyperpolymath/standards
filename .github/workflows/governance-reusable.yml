@@ -1085,25 +1085,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ -f .github/workflows/actions.lock ]; then
-            # Lockfile repos: pin authority is actions.lock (the runner
-            # enforces it), so tag-style refs are legitimate. Verify every
-            # action ref has a lockfile entry instead of grepping for SHAs.
+            # The lockfile records transitive dependency evidence, while direct
+            # workflow references remain visibly SHA-pinned. Keep both layers:
+            # external analysers and GitHub's sha_pinning_required setting do
+            # not infer direct pins from actions.lock.
             gh extension install github/gh-actions-lock
-            gh actions-lock --verify-local
-            # Cross-repo reusable calls stay outside lockfile scope and must
-            # remain SHA-pinned inline (standards' own calls exempted, as in
-            # the grep below).
-            unpinned=$(grep -rnE "^[[:space:]]+uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[^@]+@" .github/workflows/ | \
+            bash scripts/update-actions-lock.sh --verify-local
+            unpinned=$(grep -rnE --include='*.yml' --include='*.yaml' \
+              "^[[:space:]]+uses:" .github/workflows/ | \
               grep -v "@[a-f0-9]\{40\}" | \
-              grep -v "uses: hyperpolymath/standards/" || true)
+              grep -v "uses: \./\|uses: docker://\|uses: hyperpolymath/standards/" || true)
             if [ -n "$unpinned" ]; then
-              echo "ERROR: reusable workflow calls not SHA-pinned:"
+              echo "ERROR: direct workflow references not SHA-pinned:"
               echo "$unpinned"
               exit 1
             fi
-            echo "Lockfile coverage verified; reusable calls SHA-pinned"
+            echo "Lockfile coverage verified; direct references SHA-pinned"
           else
-            unpinned=$(grep -rnE "^[[:space:]]+uses:" .github/workflows/ | \
+            unpinned=$(grep -rnE --include='*.yml' --include='*.yaml' \
+              "^[[:space:]]+uses:" .github/workflows/ | \
               grep -v "@[a-f0-9]\{40\}" | \
               grep -v "uses: \./\|uses: docker://\|uses: actions/github-script\|uses: hyperpolymath/standards/" || true)
             if [ -n "$unpinned" ]; then

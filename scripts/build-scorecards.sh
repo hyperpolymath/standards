@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
-# build-scorecards.sh — regenerate COMPLIANCE-DASHBOARD.md from the per-spec
+# build-scorecards.sh — regenerate COMPLIANCE-DASHBOARD.adoc from the per-spec
 # scorecards under .machine_readable/scorecards/.
 #
 # This mirrors scripts/build-registry.sh exactly in spirit:
 #   * The SCORECARDS are the hand-authored source of truth (one per LOCAL spec
 #     in REGISTRY.a2ml, keyed by spec_id, validated by scorecard.schema.json).
-#   * COMPLIANCE-DASHBOARD.md is DERIVED and MUST NOT be hand-edited.
+#   * COMPLIANCE-DASHBOARD.adoc is DERIVED and MUST NOT be hand-edited.
 #   * Deterministic + idempotent (no timestamps in generated output — the
 #     assessed_date lives in each source scorecard). Run twice → identical.
 #   * Honest. A `pass` requires evidence; an `aspirational` requirement is NEVER
@@ -22,7 +22,7 @@
 #   * every scorecard MUST key to a registered spec (orphan → hard error).
 #
 # Usage:
-#   bash scripts/build-scorecards.sh            # write COMPLIANCE-DASHBOARD.md
+#   bash scripts/build-scorecards.sh            # write COMPLIANCE-DASHBOARD.adoc
 #   bash scripts/build-scorecards.sh --check    # verify in sync; non-zero on drift
 #   bash scripts/build-scorecards.sh --strict   # also fail if any spec lacks a scorecard
 #   bash scripts/build-scorecards.sh --verify   # RUN every pass-row's `check`;
@@ -44,7 +44,7 @@ done
 
 REGISTRY=".machine_readable/REGISTRY.a2ml"
 SCDIR=".machine_readable/scorecards"
-DASHBOARD="COMPLIANCE-DASHBOARD.md"
+DASHBOARD="COMPLIANCE-DASHBOARD.adoc"
 SCHEMA="$SCDIR/scorecard.schema.json"
 
 [ -f "$REGISTRY" ] || { echo "error: $REGISTRY not found (run: just registry)" >&2; exit 2; }
@@ -273,30 +273,32 @@ emit_dashboard() {
   local g_must=0 g_must_pass=0 g_must_fail=0 g_reqs=0 g_reqs_sys=0
 
   cat <<'HEADER'
-<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-<!-- COMPLIANCE-DASHBOARD.md — DERIVED from .machine_readable/scorecards/*.scorecard.a2ml -->
-<!-- GENERATED FILE — DO NOT EDIT BY HAND. Run: just scorecards (scripts/build-scorecards.sh) -->
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// COMPLIANCE-DASHBOARD.adoc — DERIVED from .machine_readable/scorecards/*.scorecard.a2ml
+// GENERATED FILE — DO NOT EDIT BY HAND. Run: just scorecards (scripts/build-scorecards.sh)
 
-# Standards Compliance Dashboard (derived)
+= Standards Compliance Dashboard (derived)
 
-> Generated from `.machine_readable/scorecards/<spec-id>.scorecard.a2ml` by
-> `scripts/build-scorecards.sh`. One scorecard per LOCAL spec in
-> `.machine_readable/REGISTRY.a2ml`. Do not edit by hand — edit the scorecards.
->
-> **How to read this.** Each spec is audited as MUST / SHOULD / COULD
-> requirements. **MUST-status** is the compliance verdict: ✅ met (every MUST
-> passes or is manual-only) or ❌ gap (some MUST fails). **Systems coverage**
-> is the share of requirements with a real mechanical check (`system` ≠ `none`)
-> — the honest measure of *enforcement vs. assertion*. **Aspirational**
-> requirements (intentionally-unreachable reach targets) are never counted as
-> passing.
+____
+Generated from `+.machine_readable/scorecards/<spec-id>.scorecard.a2ml+` by
+`+scripts/build-scorecards.sh+`. One scorecard per LOCAL spec in
+`+.machine_readable/REGISTRY.a2ml+`. Do not edit by hand — edit the scorecards.
+
+*How to read this.* Each spec is audited as MUST / SHOULD / COULD
+requirements. *MUST-status* is the compliance verdict: ✅ met (every MUST
+passes or is manual-only) or ❌ gap (some MUST fails). *Systems coverage*
+is the share of requirements with a real mechanical check (`+system+` ≠ `+none+`)
+— the honest measure of _enforcement vs. assertion_. *Aspirational*
+requirements (intentionally-unreachable reach targets) are never counted as
+passing.
+____
 
 HEADER
 
   # Per-spec table
-  printf '## Per-spec scorecards\n\n'
-  printf '| Spec | MUST status | MUST (pass/total) | SHOULD (pass/total) | COULD (pass/total) | Systems coverage | Grounded passes | Assessed |\n'
-  printf '|---|---|---|---|---|---|---|---|\n'
+  printf '== Per-spec scorecards\n\n'
+  printf '[cols="16%%,12%%,12%%,12%%,12%%,12%%,12%%,12%%",options="header"]\n|===\n'
+  printf '| Spec | MUST status | MUST (pass/total) | SHOULD (pass/total) | COULD (pass/total) | Systems coverage | Grounded passes | Assessed\n'
 
   local g_pass=0 g_pass_chk=0
   local missing=()
@@ -306,7 +308,7 @@ HEADER
     local file="$SCDIR/$id.scorecard.a2ml"
     if [ ! -f "$file" ]; then
       missing+=("$id")
-      printf '| `%s` | ⚠️ no scorecard | – | – | – | – | – | – |\n' "$id"
+      printf '| `+%s+` | ⚠️ no scorecard | – | – | – | – | – | –\n' "$id"
       continue
     fi
     scored_specs=$((scored_specs + 1))
@@ -334,7 +336,7 @@ HEADER
     [ "$p_all" -gt 0 ] && grounded="${p_chk}/${p_all}"
     local assessed; assessed="$(sc_field "$file" assessed_date)"
 
-    printf '| `%s` | %s | %d/%d | %d/%d | %d/%d | %s | %s | %s |\n' \
+    printf '| `+%s+` | %s | %d/%d | %d/%d | %d/%d | %s | %s | %s\n' \
       "$id" "$verdict" "$m_p" "$m_t" "$s_p" "$s_t" "$c_p" "$c_t" "$cov" "$grounded" "${assessed:-–}"
 
     g_must=$((g_must + m_t)); g_must_pass=$((g_must_pass + m_p)); g_must_fail=$((g_must_fail + m_f))
@@ -347,36 +349,36 @@ HEADER
   [ "$g_reqs" -gt 0 ] && est_cov="$(awk "BEGIN{printf \"%d%%\", ($g_reqs_sys/$g_reqs)*100}")"
   local est_grounded="n/a"
   [ "$g_pass" -gt 0 ] && est_grounded="$(awk "BEGIN{printf \"%d%%\", ($g_pass_chk/$g_pass)*100}")"
-  printf '\n## Estate rollup\n\n'
-  printf -- '- **Specs registered (local):** %d\n' "$total_specs"
-  printf -- '- **Specs with a scorecard:** %d / %d\n' "$scored_specs" "$total_specs"
-  printf -- '- **MUST requirements:** %d passing / %d total (%d failing)\n' "$g_must_pass" "$g_must" "$g_must_fail"
-  printf -- '- **Estate systems coverage:** %s of %d graded requirements have a mechanical check\n' "$est_cov" "$g_reqs"
-  printf -- '- **Grounded passes:** %d / %d (%s) pass rows carry an executable `check` run by `--verify`\n' "$g_pass_chk" "$g_pass" "$est_grounded"
+  printf '|===\n\n== Estate rollup\n\n'
+  printf -- '* *Specs registered (local):* %d\n' "$total_specs"
+  printf -- '* *Specs with a scorecard:* %d / %d\n' "$scored_specs" "$total_specs"
+  printf -- '* *MUST requirements:* %d passing / %d total (%d failing)\n' "$g_must_pass" "$g_must" "$g_must_fail"
+  printf -- '* *Estate systems coverage:* %s of %d graded requirements have a mechanical check\n' "$est_cov" "$g_reqs"
+  printf -- '* *Grounded passes:* %d / %d (%s) pass rows carry an executable `+check+` run by `+--verify+`\n' "$g_pass_chk" "$g_pass" "$est_grounded"
   if [ "${#missing[@]}" -gt 0 ]; then
-    printf -- '- **Specs still needing a scorecard (%d):** %s\n' "${#missing[@]}" "$(printf '`%s` ' "${missing[@]}")"
+    printf -- '* *Specs still needing a scorecard (%d):* %s\n' "${#missing[@]}" "$(printf '`+%s+` ' "${missing[@]}")"
   fi
 
   cat <<'FOOTER'
 
-## How this dashboard stays honest
+== How this dashboard stays honest
 
-```
-scorecards/*.scorecard.a2ml ──► scripts/build-scorecards.sh ──► COMPLIANCE-DASHBOARD.md
+....
+scorecards/*.scorecard.a2ml ──► scripts/build-scorecards.sh ──► COMPLIANCE-DASHBOARD.adoc
         (hand-authored)                      │
    validated vs scorecard.schema.json        ▼
                                     just scorecards-check (CI)
-```
+....
 
-- A `pass` requires cited `evidence`; the generator rejects a pass without it.
-- `aspirational` requirements never count as passing (no intuition-plucked
+* A `+pass+` requires cited `+evidence+`; the generator rejects a pass without it.
+* `+aspirational+` requirements never count as passing (no intuition-plucked
   Grade-A gate can inflate a score — standards#446).
-- `system = "none"` is legal but visible, and lowers systems coverage.
-- A pass MAY carry an executable `check`; `--verify` RUNS every such check and
-  **fails loudly if a claimed pass does not hold right now** (DYADT applied to
+* `+system = "none"+` is legal but visible, and lowers systems coverage.
+* A pass MAY carry an executable `+check+`; `+--verify+` RUNS every such check and
+  *fails loudly if a claimed pass does not hold right now* (DYADT applied to
   the scorecards themselves). Passes without a check are reported as
   self-asserted — visible debt, tracked by the Grounded column.
-- Regenerate after editing any scorecard: `just scorecards`.
+* Regenerate after editing any scorecard: `+just scorecards+`.
 FOOTER
 }
 

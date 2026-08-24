@@ -17,10 +17,10 @@ default:
 registry:
     @bash scripts/build-registry.sh
 
-# Alias: same generator also (re)writes TOPOLOGY.md
+# Alias: same generator also (re)writes TOPOLOGY.adoc
 topology: registry
 
-# Fail if REGISTRY.a2ml or TOPOLOGY.md has drifted from the file tree
+# Fail if REGISTRY.a2ml or TOPOLOGY.adoc has drifted from the file tree
 registry-check:
     @bash scripts/build-registry.sh --check
 
@@ -87,7 +87,7 @@ hooks-install:
 scorecards:
     @bash scripts/build-scorecards.sh
 
-# Fail if COMPLIANCE-DASHBOARD.md has drifted from the scorecards
+# Fail if COMPLIANCE-DASHBOARD.adoc has drifted from the scorecards
 scorecards-check:
     @bash scripts/build-scorecards.sh --check
 

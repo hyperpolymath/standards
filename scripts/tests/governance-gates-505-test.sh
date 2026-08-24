@@ -110,8 +110,13 @@ assert "manifest.scm passes" 0 "Guix package management detected" \
   env PKG_TODAY="$AFTER" "$PKG" "$r"
 
 r=$(mkrepo pkg-nix flake.nix)
-assert "flake.nix passes as fallback" 0 "Nix package management detected" \
+assert "Nix-only packaging BLOCKS after retirement" 1 "Nix-only packaging is not compliant" \
   env PKG_TODAY="$AFTER" "$PKG" "$r"
+
+# Preserve the historical grace seam without reviving the retired policy: a
+# pre-retirement Nix-only repo warns and makes no pass claim.
+assert "Nix-only packaging warns before retirement" 0 "NOT YET ENFORCED" \
+  env PKG_TODAY="2026-05-31" "$PKG" "$r"
 
 # Same repo, both sides of the cutoff — the self-flipping proof.
 r=$(mkrepo pkg-none README.adoc)

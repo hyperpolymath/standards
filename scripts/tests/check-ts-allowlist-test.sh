@@ -2,17 +2,18 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 #
-# Regression test for scripts/check-ts-allowlist.{ts,deno.js}. Each case
-# constructs a fresh fixture tree under a tmpdir, runs each script target with
-# `--allow-read`, and asserts exit code + key output substrings. Mirrors the
-# behaviour the previous inline-python step was relied on for, so a future
-# maintenance change cannot silently regress estate-wide policy.
+# Regression test for the compiled scripts/check-ts-allowlist.deno.js artifact.
+# The canonical source is check-ts-allowlist.affine, which is covered by the
+# separate source/compile drift check. Each case constructs a fresh fixture tree
+# under a tmpdir, runs the executable artifact with `--allow-read`, and asserts
+# exit code + key output substrings. Mirrors the behaviour the previous inline-
+# Python step was relied on for, so a future change cannot silently regress
+# estate-wide policy.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_TARGETS=(
-  "$SCRIPT_DIR/../check-ts-allowlist.ts"
   "$SCRIPT_DIR/../check-ts-allowlist.deno.js"
 )
 
