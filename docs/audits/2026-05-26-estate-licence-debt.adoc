@@ -1,0 +1,149 @@
+== Estate Licence-Debt Audit — 2026-05-26
+
+*Scanner:* automated SPDX-header + manifest-license + body-text
+triangulation across 278 git repos. *Date:* 2026-05-26.
+
+*What was checked per repo:* - Presence of
+`+LICENSE+`/`+LICENSE.md+`/`+LICENSE.txt+`/`+LICENCE+`/`+COPYING+` at
+repo root. - SPDX-License-Identifier header line at top of LICENSE file.
+- License declared in build manifest (`+Cargo.toml+`, `+package.json+`,
+`+pyproject.toml+`, `+mix.exs+`, `+Project.toml+`, `+*.ipkg+`,
+`+*.cabal+`). - License body text classification (MPL-2.0,
+PMPL-1.0-or-later, proprietary, MIT, Apache-2.0, …). - REUSE compliance
+(presence of `+LICENSES/+` directory).
+
+=== Severity distribution
+
+[width="100%",cols="34%,33%,33%",options="header",]
+|===
+|Severity |Count |Meaning
+|CRITICAL |10 |no LICENSE file at repo root
+
+|HIGH-policy |1 |proprietary text but estate policy is MPL-2.0
+
+|HIGH-mismatch |4 |SPDX header says MPL-2.0 but body still says
+PMPL-1.0-or-later
+
+|ok (per scan) |262 |passed all triangulation checks
+|===
+
+=== CRITICAL — no LICENSE file (10 repos)
+
+These repos contain code but no top-level licence file. Under copyright
+defaults this means _no permission granted to anyone_ — including
+downstream consumers. Either add a LICENSE or, if private-by-design, add
+an explicit proprietary marker.
+
+* *`+achievements-lab+`* — no-LICENSE-file
+* *`+ai-cli-lab+`* — no-LICENSE-file
+* *`+claude-memory+`* — no-LICENSE-file
+* *`+dotfiles+`* — no-LICENSE-file
+* *`+ephapax-wiki+`* — no-LICENSE-file
+* *`+HOL+`* — no-LICENSE-file
+* *`+humor-ecosystem+`* — no-LICENSE-file
+* *`+invariant-path+`* — no-LICENSE-file
+* *`+multiterm+`* — no-LICENSE-file
+* *`+repos-monorepo+`* — no-LICENSE-file
+
+Special cases: - *`+HOL+`* is a vendor mirror of HOL-Light; treat as
+third-party (add a NOTICE pointing upstream rather than a new LICENSE).
+- *`+dotfiles+`* likely intentional ("`not for redistribution`") but
+should still have a one-line LICENSE saying so. - *`+ephapax-wiki+`* is
+the companion wiki to `+ephapax+`; should inherit `+ephapax+`’s license.
+- *`+repos-monorepo+`* is a monorepo of mirrors — needs a top-level
+LICENSES/ tree mapping per-subdir provenance.
+
+=== HIGH-policy — proprietary text contradicts manifest/estate policy
+
+* *`+007+`* — LICENSE file says "`All Rights Reserved`" (proprietary)
+but `+Cargo.toml+` declares `+MPL-2.0+`. Per estate language policy
+(memory: `+feedback_estate_lang_policy_2026_05_25+`) the estate is
+MPL-2.0 unless 007 is meant to be intentionally proprietary. Either:
+** flip LICENSE to MPL-2.0 (and add SPDX header), or
+** flip Cargo.toml `+license+` to `+LicenseRef-proprietary+` to match.
+
+=== HIGH-mismatch — SPDX header vs body text inconsistency (4 repos)
+
+These repos have an SPDX-License-Identifier line saying `+MPL-2.0+` at
+the top of the LICENSE file but the licence body explains it as
+"`Palimpsest License (PMPL-1.0-or-later)`". A reader can’t tell which is
+binding.
+
+* *`+developer-ecosystem+`* — spdx=MPL-2.0, body=PMPL-1.0-or-later
+* *`+ephapax+`* — spdx=MPL-2.0, manifest=PMPL-1.0-or-later,
+body=PMPL-1.0-or-later (triple-mismatch)
+* *`+paint-type+`* — spdx=MPL-2.0, body=PMPL-1.0-or-later
+* *`+standards+`* — spdx=MPL-2.0, body=PMPL-1.0-or-later ⚠️ _the
+canonical repo has the inconsistency it forbids_
+
+Per the estate policy "`MPL-1.0/PMPL-1.0 → MPL-2.0`" (memory:
+`+feedback_estate_lang_policy_2026_05_25+`), the correct fix is to
+*align the body text to MPL-2.0* (not flip the SPDX header to PMPL). The
+"`Palimpsest`" branding can survive as a NOTICE/preamble — but the
+licence text body must be Mozilla’s stock MPL-2.0 to keep SPDX scanners
+honest.
+
+=== PMPL-1.0 holdouts (13 repos)
+
+Repos where the LICENSE file body is still entirely PMPL-1.0-or-later
+(no SPDX MPL-2.0 promotion yet):
+
+* `+claude-integrations+`
+* `+developer-ecosystem+`
+* `+ephapax+`
+* `+gitbot-fleet+`
+* `+hyperpolymath-archive+`
+* `+nafa-app+`
+* `+paint-type+`
+* `+palimpsest-license+`
+* `+palimpsest-plasma+`
+* `+panll+`
+* `+pimcore-fortress+`
+* `+rattlescript+`
+* `+reposystem+`
+* `+standards+`
+* `+stapeln+`
+* `+tree-navigator+`
+* `+ubicity+`
+* `+verisimiser+`
+* `+vscode-k9+`
+* `+zerotier-k8s-link+`
+
+Per the estate policy these should all be migrated to MPL-2.0. The 4
+HIGH-mismatch repos above have the _header_ migrated but not the _body_
+— they are halfway through the migration. The other PMPL holdouts
+haven’t started.
+
+=== Manifest sanity
+
+Spot-checks show many manifests declare `+MPL-2.0+` while the LICENSE
+body is something else (typically PMPL). This means downstream consumers
+running `+cargo-license+`, `+npm license-checker+`, or REUSE-tool will
+see MPL-2.0 and act accordingly — masking real licence-text differences.
+
+=== Recommended estate-wide action
+
+[arabic]
+. Add a new `+scripts/check-licence-consistency.sh+` to the standards
+repo and invoke from `+governance-reusable.yml+`. It should fail CI
+when:
+* LICENSE file missing
+* SPDX header missing
+* SPDX header doesn’t match manifest declared licence
+* Body text doesn’t match SPDX header (regex on identifying phrases)
+. Migrate the 13 PMPL holdouts to MPL-2.0 body text (one PR per repo).
+. Resolve the 1 HIGH-policy case (007) by decision: estate-default
+MPL-2.0 or explicit proprietary marker.
+
+=== Coverage caveat
+
+The body-text classifier is heuristic. The 262 "`ok`" repos may contain
+edge cases (e.g. dual-license under MIT-OR-Apache-2.0 with subtle text
+variants) that this scan didn’t surface. The follow-up CI check (item 1
+above) is the real fix.
+
+'''''
+
+🤖 Generated by Claude Code estate-wide licence-debt scan (2026-05-26).
+Companion docs: `+2026-05-26-estate-proof-debt.md+`,
+`+2026-05-26-estate-documentation-debt.md+`.
