@@ -1,144 +1,136 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
-# check-implementation-inside-canon.sh — Implementation-inside-Canon Detector
+# check-implementation-inside-canon.sh — executable reference for HYP-S009.
 #
-# Part of Issue #498: After-eviction hygiene.
+# A directory is canonical only when .machine_readable/REGISTRY.a2ml names it
+# as a local spec home. Local entries omit `kind`; external pointers explicitly
+# set `kind = "external"`. Only tracked files are inspected, matching what a
+# clean CI checkout and a pull-request scanner can observe.
 #
-# This script detects when implementation files (Cargo.toml, deno.json,
-# Containerfile, CNAME, Justfile, etc.) appear in directories that should
-# contain only canonical spec content. This prevents the "implementation
-# creep" problem where product code gradually re-enters the canon repo.
-#
-# Usage: check-implementation-inside-canon.sh [DIRECTORY]
-#   DIRECTORY defaults to current directory
-#
-# Exit codes:
-#   0 = no implementation files found in canon directories
-#   1 = implementation files detected
-#   2 = error
-#
-# Implementation files that trigger detection:
-#   - Cargo.toml (Rust package manifest)
-#   - deno.json (Deno configuration)
-#   - Containerfile (container image build)
-#   - Dockerfile (container image build - legacy)
-#   - CNAME (GitHub Pages custom domain)
-#   - Justfile (just build system)
-#   - Makefile (legacy build system)
-#   - package.json (Node.js - banned but still detected)
-#   - go.mod (Go module - banned but still detected)
-#   - *.sh (shell scripts in spec directories)
-#   - *.rs, *.py, *.ts (source code files in spec directories)
-#
-# Canon directories (should NOT contain implementation files):
-#   - Any directory containing SPEC.adoc, REGISTRY.a2ml, or *.a2ml files
-#   - docs/
-#   - standards/ (if it exists)
-#   - Any directory under .machine_readable/
-#
+# Usage: check-implementation-inside-canon.sh [REPOSITORY]
+# Exit 0: no findings; 1: implementation manifests found; 2: bad input/schema.
+
 set -euo pipefail
 
-TARGET_DIR="${1:-.}"
+repo=${1:-.}
+registry="$repo/.machine_readable/REGISTRY.a2ml"
 
-# Implementation file patterns
-IMPLEMENTATION_PATTERNS=(
-  "Cargo.toml"
-  "deno.json"
-  "Containerfile"
-  "Dockerfile"
-  "CNAME"
-  "Justfile"
-  "Makefile"
-  "package.json"
-  "go.mod"
-  "*.sh"
-  "*.rs"
-  "*.py"
-  "*.ts"
-)
+if ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "implementation-inside-canon: not a git repository: $repo" >&2
+  exit 2
+fi
 
-# Canon directory indicators (if these exist, the dir is canon and shouldn't have impl files)
-CANON_INDICATORS=(
-  "SPEC.adoc"
-  "REGISTRY.a2ml"
-  "*.a2ml"
-)
+if [ ! -f "$registry" ]; then
+  echo "implementation-inside-canon: missing registry: $registry" >&2
+  exit 2
+fi
 
-# Directories that are always canon
-CANON_DIRS=(
-  "docs"
-  ".machine_readable"
-)
-
-errors=0
-warnings=0
-
-# Function to check if a directory is a canon directory
-is_canon_dir() {
-  local dir="$1"
-  
-  # Check if it's in the explicit canon dirs list
-  for canon_dir in "${CANON_DIRS[@]}"; do
-    if [[ "$dir" == "$canon_dir" || "$dir" == "$canon_dir/"* ]]; then
+is_product_manifest() {
+  case "$1" in
+    Cargo.toml|deno.json|package.json|Containerfile|compose.yaml|CNAME|ads.txt)
       return 0
-    fi
-  done
-  
-  # Check for canon indicators
-  for pattern in "${CANON_INDICATORS[@]}"; do
-    if find "$dir" -maxdepth 2 -name "$pattern" -not -path "*/.git/*" | grep -q .; then
-      return 0
-    fi
-  done
-  
-  return 1
-}
-
-# Function to check for implementation files in a directory
-check_dir() {
-  local dir="$1"
-  
-  # Skip if not a canon directory
-  if ! is_canon_dir "$dir"; then
-    return 0
-  fi
-  
-  # Check for implementation files
-  for pattern in "${IMPLEMENTATION_PATTERNS[@]}"; do
-    local files
-    files=$(find "$dir" -maxdepth 2 -name "$pattern" -not -path "*/.git/*" 2>/dev/null)
-    if [ -n "$files" ]; then
-      echo "::error file=$dir::Implementation file detected in canon directory: $files"
-      echo "  Canon directories should contain only spec, policy, and template files."
-      echo "  Implementation files belong in separate repos per Issue #479."
+      ;;
+    *)
       return 1
-    fi
-  done
-  
-  return 0
+      ;;
+  esac
 }
 
-# Main check
-echo "Checking for implementation files in canon directories..."
+is_template_or_fixture() {
+  case "/$1/" in
+    */examples/*|*/templates/*|*/test/fixtures/*|*/tests/fixtures/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
-# Check the target directory
-if ! check_dir "$TARGET_DIR"; then
-  errors=$((errors + 1))
-fi
+guix_is_non_stub() {
+  # A comment/whitespace-only guix.scm is a documented placeholder, not a
+  # build surface. Any executable Scheme form makes it a product manifest.
+  awk '
+    /^[[:space:]]*($|;)/ { next }
+    { substantive = 1 }
+    END { exit(substantive ? 0 : 1) }
+  ' "$1"
+}
 
-# Check all subdirectories
-while IFS= read -r -d '' dir; do
-  if ! check_dir "$dir"; then
-    errors=$((errors + 1))
-  fi
-done < <(find "$TARGET_DIR" -mindepth 1 -maxdepth 2 -type d -not -path "*/.git/*" -print0)
+findings=0
 
-if [ $errors -gt 0 ]; then
-  echo ""
-  echo "❌ Found $errors canon directories with implementation files."
-  echo "  See Issue #479 for the carve-out campaign."
+while IFS=$'\t' read -r spec_id home; do
+  [ -n "$home" ] || continue
+
+  case "/$home/" in
+    //*|*/../*|*/./*)
+      echo "implementation-inside-canon: unsafe registry home for $spec_id: $home" >&2
+      exit 2
+      ;;
+  esac
+
+  while IFS= read -r -d '' tracked; do
+    base=${tracked##*/}
+    report=false
+
+    if is_template_or_fixture "$tracked"; then
+      continue
+    fi
+
+    if is_product_manifest "$base"; then
+      report=true
+    elif [ "$base" = guix.scm ] && guix_is_non_stub "$repo/$tracked"; then
+      report=true
+    fi
+
+    if [ "$report" = true ]; then
+      printf 'HYP-S009\t%s\t%s\n' "$spec_id" "$tracked"
+      findings=$((findings + 1))
+    fi
+  done < <(git -C "$repo" ls-files -z -- "$home")
+done < <(
+  awk '
+    function unquote(value) {
+      sub(/^[[:space:]]*"/, "", value)
+      sub(/"[[:space:]]*$/, "", value)
+      return value
+    }
+    function emit() {
+      if (in_spec && id != "" && home != "" && tolower(kind) != "external") {
+        print id "\t" home
+      }
+    }
+    /^\[\[spec\]\][[:space:]]*$/ {
+      emit()
+      in_spec = 1
+      id = home = kind = ""
+      next
+    }
+    in_spec && /^[[:space:]]*id[[:space:]]*=/ {
+      value = $0
+      sub(/^[^=]*=[[:space:]]*/, "", value)
+      id = unquote(value)
+      next
+    }
+    in_spec && /^[[:space:]]*home[[:space:]]*=/ {
+      value = $0
+      sub(/^[^=]*=[[:space:]]*/, "", value)
+      home = unquote(value)
+      next
+    }
+    in_spec && /^[[:space:]]*kind[[:space:]]*=/ {
+      value = $0
+      sub(/^[^=]*=[[:space:]]*/, "", value)
+      kind = unquote(value)
+      next
+    }
+    END { emit() }
+  ' "$registry"
+)
+
+if [ "$findings" -gt 0 ]; then
+  echo "implementation-inside-canon: $findings tracked product/build manifest(s) in local canonical homes" >&2
   exit 1
-else
-  echo "✅ No implementation files found in canon directories."
-  exit 0
 fi
+
+echo "implementation-inside-canon: clean"

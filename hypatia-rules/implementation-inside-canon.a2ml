@@ -1,0 +1,110 @@
+# SPDX-License-Identifier: MPL-2.0
+# HYP-S009 — Implementation Inside Canon
+#
+# A REGISTRY.a2ml entry whose home is LOCAL declares that the directory is the
+# in-repository source of truth for a standard. Product/build manifests below
+# that home are therefore architectural drift: an implementation has started
+# growing inside the canon again. This is the recurrence guard for the
+# standards carve-out campaign (#479 / #498).
+#
+# This rule deliberately does NOT infer canon from "contains an .a2ml file" or
+# from a broad directory name such as docs/. Those heuristics made the earlier
+# shell prototype flag legitimate examples, migrations, and documentation
+# tooling. REGISTRY.a2ml is the authoritative boundary.
+
+@rule(version="1.0"):
+id: HYP-S009
+name: "Implementation inside canon"
+description: "Flag product/build manifests below a local (non-external) REGISTRY.a2ml spec home"
+severity: medium
+category: StandardsCompliance
+auto_fixable: false
+source: standards/hypatia-rules
+@end
+
+@parameters:
+registry: .machine_readable/REGISTRY.a2ml
+implementation_basenames:
+  - Cargo.toml
+  - deno.json
+  - package.json
+  - Containerfile
+  - compose.yaml
+  - CNAME
+  - ads.txt
+conditional_basenames:
+  - guix.scm
+path_exemptions:
+  - "**/examples/**"
+  - "**/templates/**"
+  - "**/test/fixtures/**"
+  - "**/tests/fixtures/**"
+@end
+
+@scanner(type="file-tree"):
+find:
+  - glob: ".machine_readable/REGISTRY.a2ml"
+  - glob: "**/Cargo.toml"
+  - glob: "**/deno.json"
+  - glob: "**/package.json"
+  - glob: "**/Containerfile"
+  - glob: "**/compose.yaml"
+  - glob: "**/guix.scm"
+  - glob: "**/CNAME"
+  - glob: "**/ads.txt"
+@end
+
+@logic(engine="built-in"):
+steps:
+  - parse_registry: ".machine_readable/REGISTRY.a2ml"
+    extract:
+      - key: "id"
+        as: spec_id
+      - key: "home"
+        as: home
+      - key: "kind"
+        as: kind
+  # Local entries omit `kind`; external pointers explicitly use
+  # `kind = external`. This matches the registry generator contract.
+  - for_each_spec where "kind != external":
+      require: "home is a normalized repository-relative directory"
+      reject_if: "home is absolute or contains a '..' path component"
+      scan_descendants: home
+      emit_if: "path not in path_exemptions && basename in implementation_basenames"
+        finding_kind: implementation-inside-canon
+      emit_if: "path not in path_exemptions && basename == guix.scm && file is not a documented non-building stub"
+        finding_kind: implementation-inside-canon
+  - deduplicate_by: "spec_id, normalized_path"
+@end
+
+@router:
+default_strategy: review
+# Moving an implementation changes repository ownership/topology and may cross
+# licence boundaries. It is never safe for a scanner to perform that move.
+strategy_caps:
+  - when: "finding_kind == implementation-inside-canon"
+    cap: review
+    reason: "Carve-out requires history, ownership, licence, and destination-repo review"
+@end
+
+@action:
+emit_signal: compliance.finding.new
+message_template: >-
+  Implementation manifest {normalized_path} is inside LOCAL canonical spec
+  home '{home}' ({spec_id}). Move the product/build surface to its owning repo
+  and leave only normative spec, policy, registry, or template-as-spec content.
+recipe: review-canon-carve-out
+halt_on_violation: false
+dedupe_window_days: 7
+@end
+
+@recipe(id="review-canon-carve-out"):
+description: "Produce an audit-only carve-out report; never move or delete files automatically"
+command: "bash scripts/check-implementation-inside-canon.sh ."
+auto_applicable: false
+@end
+
+@sibling_rules:
+- HYP-S006 registry-staleness       — verifies registry pointers and derived docs
+- HYP-S008 workflow-allowlist-gap   — reifies zero-job Actions failures
+@end
