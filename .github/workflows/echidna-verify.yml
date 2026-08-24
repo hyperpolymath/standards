@@ -18,12 +18,14 @@ on:
     paths:
       - 'lol/proofs/**'
       - 'a2ml/src/**/*.idr'
+      - 'a2ml/a2ml-core.ipkg'
       - 'avow-protocol/avow-lib/src/abi/*.idr'
       - '.github/workflows/echidna-verify.yml'
   pull_request:
     paths:
       - 'lol/proofs/**'
       - 'a2ml/src/**/*.idr'
+      - 'a2ml/a2ml-core.ipkg'
       - 'avow-protocol/avow-lib/src/abi/*.idr'
   schedule:
     # Weekly re-verification to catch stale-proof drift
@@ -135,14 +137,16 @@ jobs:
           pack install-app idris2
           idris2 --version
 
-      - name: Type-check A2ML core (Proofs + v1.1 profiles/base-vocab)
+      - name: Type-check normative A2ML core
         run: |
+          set -euo pipefail
           export PATH="$HOME/.pack/bin:$PATH"
           cd a2ml
-          idris2 --check src/A2ML/Proofs.idr 2>&1 | tee ../idris2-a2ml.log
-          # v1.1 additive core: checking Profiles.idr transitively type-checks
-          # BaseVocab.idr and TypedCore.idr (its imports).
-          idris2 --check src/A2ML/Profiles.idr 2>&1 | tee -a ../idris2-a2ml.log
+          # Use the package target: per-file `--check` can exit successfully
+          # when an imported module is missing and therefore is not a real
+          # gate for the authoritative module set (standards#556).
+          idris2 --version | tee ../idris2-a2ml.log
+          idris2 --typecheck a2ml-core.ipkg 2>&1 | tee -a ../idris2-a2ml.log
 
       - name: Upload log
         if: always()
