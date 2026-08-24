@@ -237,7 +237,7 @@ ENTRY
 # ---------------------------------------------------------------------------
 state_field() {
   # crude TOML-ish field reader for STATE.a2ml
-  local key="$1" file=".machine_readable/6a2/STATE.a2ml"
+  local key="$1" file=".machine_readable/descriptiles/STATE.a2ml"
   # take RHS of `key = value`, drop trailing inline `# comment`, trim, unquote
   grep -E "^${key}[[:space:]]*=" "$file" 2>/dev/null | head -1 \
     | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*#.*$//; s/[[:space:]]+$//; s/^"//; s/"$//'

@@ -37,6 +37,15 @@ git add "$f" 2>/dev/null
 if bash "$CHK" HEAD >/dev/null 2>&1; then bad "new 'agent_instructions' not blocked"; else ok "new 'agent_instructions' blocked"; fi
 git reset -q "$f" 2>/dev/null; rm -f "$f"
 
+echo "== guard blocks a newly-added deprecated directory =="
+legacy_dir=".machine_readable/6a2"
+mkdir -p "$legacy_dir"
+printf '[metadata]\nstatus = "probe"\n' > "$legacy_dir/STATE.a2ml"
+git add "$legacy_dir/STATE.a2ml" 2>/dev/null
+if bash "$CHK" HEAD >/dev/null 2>&1; then bad "new deprecated directory not blocked"; else ok "new deprecated directory blocked"; fi
+git reset -q "$legacy_dir/STATE.a2ml" 2>/dev/null
+rm -rf "$legacy_dir"
+
 echo "== guard passes with no offending additions =="
 printf 'a perfectly canonical descriptiles + bot_directives line\n' > "$f"
 git add "$f" 2>/dev/null

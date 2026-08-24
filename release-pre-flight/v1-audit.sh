@@ -353,7 +353,7 @@ check_stable_claims() {
 check_state_release_stage() {
     log_section "Release Stage Metadata"
     local state_paths=(
-        "$TARGET/.machine_readable/6a2/STATE.a2ml"
+        "$TARGET/.machine_readable/descriptiles/STATE.a2ml"
         "$TARGET/.machine_readable/STATE.a2ml"
         "$TARGET/STATE.a2ml"
     )

@@ -23,7 +23,7 @@ K9_INIT="$(dirname "$0")/target/release/k9-init"
 echo "Scanning $ROOT for repos..."
 migrated=0
 skipped=0
-no_6a2=0
+no_descriptiles=0
 
 for repo in "$ROOT"/*/; do
     [ -d "$repo" ] || continue
@@ -35,8 +35,8 @@ for repo in "$ROOT"/*/; do
         skipped=$((skipped + 1))
         continue
     fi
-    if [ ! -d "$repo/.machine_readable/6a2" ]; then
-        no_6a2=$((no_6a2 + 1))
+    if [ ! -d "$repo/.machine_readable/descriptiles" ]; then
+        no_descriptiles=$((no_descriptiles + 1))
         continue
     fi
     if [ $DRY_RUN -eq 1 ]; then
@@ -52,5 +52,5 @@ echo ""
 echo "Summary:"
 echo "  migrated:     $migrated"
 echo "  already had:  $skipped"
-echo "  no 6a2 dir:   $no_6a2"
+echo "  no descriptile dir: $no_descriptiles"
 [ $DRY_RUN -eq 1 ] && echo "(dry-run — no files written)"

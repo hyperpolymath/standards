@@ -203,7 +203,7 @@ checkProfile pd f =
 ||| Collect the TOP-LEVEL Section titles of a document. Total by construction:
 ||| it recurses only on the block-list tail and never descends through section
 ||| bodies, so it introduces no escape hatch (cf. TypedCore.collectIds, which is
-||| `partial`). Flat record dialects — the entire 6a2 family — have only
+||| `partial`). Flat record dialects — the entire descriptiles family — have only
 ||| top-level sections, so this is exact for them. Nested-section extraction for
 ||| general markup is the translator's responsibility: the translator supplies
 ||| `DocFacts` directly, so conformance never relies on this helper recursing.
