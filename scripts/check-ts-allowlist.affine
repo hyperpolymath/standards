@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
-// Ported via Harvard Engine mechanical processor
+// Ported via Harvard Engine (Semantic pass)
 
 module check-ts-allowlist;
 
-// TODO: Complete semantic implementation
-
-/* === ORIGINAL TYPESCRIPT CONTEXT ===
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 //
@@ -23,36 +20,36 @@ module check-ts-allowlist;
 //   * Walk every `*.ts` / `*.tsx` file under cwd, skipping dotted dirs
 //     and treating `.ts.bak` / `.tsx.bak` backups as banned TS artifacts.
 //   * Allow files in the built-in directory/path allowlist
-//     (bindings/tests/scripts/vendor/examples/ffi/benchmarks/cli, plus any
+//     (bindings/tests/scripts/vendor/examples/ffi/benchmarks/cli, plus unknown
 //     segment containing 'vscode' or starting with 'deno-').
 //   * Allow specific filename patterns: `*.d.ts`, `mod.ts`, `lsp-server.ts`,
 //     `lsp.ts`, `*-lsp.ts`, `*.bench.ts`, `*_bench.ts`.
 //   * Load per-repo exemption table from `.claude/CLAUDE.md` heading
 //     `TypeScript Exemptions` (regex: `TypeScript [Ee]xemptions`). Table
 //     rows have `| \`glob\` | …` shape.
-//   * Exit 1 with the formatted error block if any non-exempt files remain;
+//   * Exit 1 with the formatted error block if unknown non-exempt files remain;
 //     otherwise print the success line.
 //
 // Permission scope is `--allow-read` only. No network, no env, no write.
 
-const DIR_NAMES_ALLOWED = new Set([
+let DIR_NAMES_ALLOWED = new Set([
   "bindings", "tests", "test", "scripts",
   "mcp-adapter", "cli", "vendor", "examples", "ffi",
   "node_modules", "benchmarks",
 ]);
 
-function builtinAllowed(p: string): boolean {
+fn builtinAllowed(p: string): boolean {
   if (p.endsWith(".d.ts")) return true;
-  const base = p.split("/").pop()!;
+  let base = p.split("/").pop()!;
   if (base === "mod.ts") return true;
   if (
     base === "lsp-server.ts" || base === "lsp_server.ts" || base === "lsp.ts" ||
     base.endsWith("-lsp.ts")
   ) return true;
   if (base.endsWith(".bench.ts") || base.endsWith("_bench.ts")) return true;
-  const segs = p.split("/");
+  let segs = p.split("/");
   for (let i = 0; i < segs.length - 1; i++) {
-    const s = segs[i];
+    let s = segs[i];
     if (DIR_NAMES_ALLOWED.has(s)) return true;
     if (s.includes("vscode")) return true;
     if (s.startsWith("deno-")) return true;
@@ -60,16 +57,16 @@ function builtinAllowed(p: string): boolean {
   return false;
 }
 
-function globToRegex(g: string): RegExp {
+fn globToRegex(g: string): RegExp {
   // The Python implementation stripped a leading "./" via `.lstrip('./')`
-  // which is a multi-char strip (any leading '.' OR '/' character),
+  // which is a multi-char strip (unknown leading '.' OR '/' character),
   // matching `./foo` -> `foo` and `../foo` -> `foo` alike. The intent
   // (matching the original behaviour) is to normalise leading-path-cruft
   // off the glob before regex-translating it.
   let g2 = g;
   while (g2.length > 0 && (g2[0] === "." || g2[0] === "/")) g2 = g2.slice(1);
   let out = "";
-  const regexEsc = ".+(){}[]|^$\\";
+  let regexEsc = ".+(){}[]|^$\\";
   for (const c of g2) {
     if (c === "*") out += ".*";
     else if (c === "?") out += ".";
@@ -79,9 +76,9 @@ function globToRegex(g: string): RegExp {
   return new RegExp("^" + out + "$");
 }
 
-interface Exemption { raw: string; rx: RegExp; }
+struct Exemption { raw: string; rx: RegExp; }
 
-function normalizeRepoPath(p: string): string {
+fn normalizeRepoPath(p: string): string {
   let out = p.trim();
   while (out.length > 0 && (out[0] === "." || out[0] === "/")) {
     out = out.slice(1);
@@ -89,24 +86,24 @@ function normalizeRepoPath(p: string): string {
   return out;
 }
 
-function normalizeExemptionCell(cell: string): string {
+fn normalizeExemptionCell(cell: string): string {
   let out = cell.trim();
-  const codeSpan = out.match(/^`([^`]+)`$/) ?? out.match(/^`([^`]+)`/);
+  let codeSpan = out.match(/^`([^`]+)`$/) ?? out.match(/^`([^`]+)`/);
   if (codeSpan) {
     out = codeSpan[1].trim();
   }
   return normalizeRepoPath(out);
 }
 
-function nonExemptionCell(cell: string): boolean {
+fn nonExemptionCell(cell: string): boolean {
   return cell === "" || /^:?-{3,}:?$/.test(cell) || /^path\b/i.test(cell);
 }
 
-async function loadExemptionsFromClaudeMd(): Promise<Exemption[]> {
+async fn loadExemptionsFromClaudeMd(): Exemption[] {
   // Layer 2 — heading-table exemptions parsed from `.claude/CLAUDE.md`.
   //
   // Heading regex relaxation (was: literal `TypeScript [Ee]xemptions`):
-  // now matches any markdown heading containing the substring sequence
+  // now matches unknown markdown heading containing the substring sequence
   // (TypeScript|JavaScript|TS|JS|.tsx?) … Exemption(s). Picks up
   // `### TypeScript / JavaScript Exemptions (Approved)` (the
   // affinescript form), the singular `### TypeScript Exemption`, and
@@ -114,7 +111,7 @@ async function loadExemptionsFromClaudeMd(): Promise<Exemption[]> {
   // prefix so prose mentions of the phrase elsewhere in the file do
   // NOT trigger table parsing.
   //
-  // Multi-table support: scans every heading; on hitting any heading
+  // Multi-table support: scans every heading; on hitting unknown heading
   // that's NOT an exemption-section heading we leave table-mode (the
   // original "break on first heading" was correct for the heredoc but
   // a multi-section file would miss the second exemption table).
@@ -125,9 +122,9 @@ async function loadExemptionsFromClaudeMd(): Promise<Exemption[]> {
   } catch {
     return exemptions;
   }
-  const tsHeading =
+  let tsHeading =
     /^#{1,4}\s+.*(?:TypeScript|JavaScript|TS|JS|\.tsx?)\b[^#\n]*[Ee]xemption/;
-  const anyHeading = /^#{1,4}\s/;
+  let anyHeading = /^#{1,4}\s/;
   let inTable = false;
   for (const line of text.split("\n")) {
     if (tsHeading.test(line)) {
@@ -140,11 +137,11 @@ async function loadExemptionsFromClaudeMd(): Promise<Exemption[]> {
       inTable = false;
       continue;
     }
-    const tableLine = line.trim();
+    let tableLine = line.trim();
     if (inTable && tableLine.startsWith("|")) {
-      const cells = tableLine.split("|");
+      let cells = tableLine.split("|");
       if (cells.length >= 3) {
-        const raw = normalizeExemptionCell(cells[1]);
+        let raw = normalizeExemptionCell(cells[1]);
         if (!nonExemptionCell(raw)) {
           exemptions.push({ raw, rx: globToRegex(raw) });
         }
@@ -154,7 +151,7 @@ async function loadExemptionsFromClaudeMd(): Promise<Exemption[]> {
   return exemptions;
 }
 
-async function loadExemptionsFromAllowlistFile(): Promise<Exemption[]> {
+async fn loadExemptionsFromAllowlistFile(): Exemption[] {
   // Layer 2.5 — optional plain-text allowlist at the repo root.
   // One glob per line. Lines starting with `#` are comments; blank
   // lines are ignored. Decouples gate-pass from documentation prose
@@ -169,41 +166,41 @@ async function loadExemptionsFromAllowlistFile(): Promise<Exemption[]> {
     return exemptions;
   }
   for (const rawLine of text.split("\n")) {
-    const line = normalizeExemptionCell(rawLine);
+    let line = normalizeExemptionCell(rawLine);
     if (line === "" || line.startsWith("#")) continue;
     exemptions.push({ raw: line, rx: globToRegex(line) });
   }
   return exemptions;
 }
 
-async function loadExemptions(): Promise<Exemption[]> {
-  const fromCm = await loadExemptionsFromClaudeMd();
-  const fromAllow = await loadExemptionsFromAllowlistFile();
+async fn loadExemptions(): Exemption[] {
+  let fromCm = await loadExemptionsFromClaudeMd();
+  let fromAllow = await loadExemptionsFromAllowlistFile();
   return [...fromCm, ...fromAllow];
 }
 
-function exempt(p: string, exemptions: Exemption[]): boolean {
-  const target = normalizeRepoPath(p);
+fn exempt(p: string, exemptions: Exemption[]): boolean {
+  let target = normalizeRepoPath(p);
   for (const e of exemptions) {
     if (e.rx.test(target)) return true;
-    const bare = normalizeRepoPath(e.raw);
+    let bare = normalizeRepoPath(e.raw);
     if (target === bare) return true;
     if (bare.endsWith("/") && target.startsWith(bare)) return true;
   }
   return false;
 }
 
-function isTypeScriptArtifact(name: string): boolean {
+fn isTypeScriptArtifact(name: string): boolean {
   return name.endsWith(".ts") || name.endsWith(".tsx") ||
     name.endsWith(".ts.bak") || name.endsWith(".tsx.bak");
 }
 
 async function* walkTs(dir: string): AsyncIterable<string> {
   for await (const entry of Deno.readDir(dir)) {
-    const name = entry.name;
+    let name = entry.name;
     // Skip dotfiles/dotted dirs (matching Python's check on path parts).
     if (name.startsWith(".") && name !== "." && name !== "..") continue;
-    const full = dir === "." ? name : `${dir}/${name}`;
+    let full = dir === "." ? name : `${dir}/${name}`;
     if (entry.isDirectory) {
       yield* walkTs(full);
     } else if (entry.isFile) {
@@ -214,13 +211,13 @@ async function* walkTs(dir: string): AsyncIterable<string> {
   }
 }
 
-async function main() {
-  const exemptions = await loadExemptions();
+async fn main() {
+  let exemptions = await loadExemptions();
   const found: string[] = [];
   for await (const f of walkTs(".")) {
     found.push(f);
   }
-  const bad = found
+  let bad = found
     .filter((f) => !(builtinAllowed(f) || exempt(f, exemptions)))
     .sort();
   if (bad.length > 0) {
@@ -246,4 +243,3 @@ if (import.meta.main) {
   await main();
 }
 
-==================================== */
