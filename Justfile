@@ -167,24 +167,14 @@ build:
 
 # Run all sub-project test suites
 test:
-    @echo "=== Standards Monorepo Test Runner ==="
-    @echo ""
-    @echo "[1/5] groove-protocol/reference/ipv6t (Zig — 10 tests)"
-    @cd groove-protocol/reference/ipv6t && zig build test 2>&1 || echo "  SKIP: zig not available"
-    @echo ""
-    @echo "[2/5] 0-ai-gatekeeper-protocol/mcp-repo-guardian (Deno — 36 tests)"
-    @cd 0-ai-gatekeeper-protocol/mcp-repo-guardian && deno task test 2>&1 || echo "  SKIP: deno not available or tests failed"
-    @echo ""
-    @echo "[3/5] axel-protocol (Deno — 14 tests)"
-    @cd axel-protocol && deno task test 2>&1 || echo "  SKIP: deno not available or tests failed"
-    @echo ""
-    @echo "[4/5] a2ml/bindings/rust (Rust — 47 tests)"
-    @cd a2ml/bindings/rust && cargo test 2>&1 || echo "  SKIP: cargo not available or tests failed"
-    @echo ""
-    @echo "[5/5] k9-svc/bindings/rust (Rust — 45 tests)"
-    @cd k9-svc/bindings/rust && cargo test 2>&1 || echo "  SKIP: cargo not available or tests failed"
-    @echo ""
-    @echo "=== Test run complete ==="
+    @bash scripts/run-required-test-suite.sh "MCP repo guardian (Deno — 36 tests)" "0-ai-gatekeeper-protocol/mcp-repo-guardian" deno test --allow-read test/manifest_test.js
+    @bash scripts/run-required-test-suite.sh "Repo guardian offline core (Rust — 29 tests)" "0-ai-gatekeeper-protocol/repo-guardian-fs/tests-offline" cargo test
+    @bash scripts/run-required-test-suite.sh "A2ML Rust binding (47 tests + 3 doctests)" "a2ml/bindings/rust" cargo test
+    @bash scripts/run-required-test-suite.sh "K9 Rust binding (42 tests + 3 doctests)" "k9-svc/bindings/rust" cargo test
+
+# Regression test: test aggregation fails for missing prerequisites and test failures.
+test-runner-test:
+    @bash scripts/tests/run-required-test-suite-test.sh
 
 # Format sub-project code
 fmt:
