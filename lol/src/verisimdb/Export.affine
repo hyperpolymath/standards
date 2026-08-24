@@ -1,96 +1,87 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
-//
-// VeriSimDB JSON export. AffineScript port of Export.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module Export;
 
-use VeriSimDB;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell and Contributors
 
-extern fn str_replace_all(s: String, from: String, to: String) -> String = "string" "replaceAll";
-extern fn write_text_file(path: String, contents: String) -> Promise<Unit> = "Deno" "writeTextFile";
+/**
+ * VeriSimDB JSON Export
+ *
+ * Serializes corpus scan results to verisimdb-data compatible JSON
+ * format for ingestion into the VeriSimDB pipeline.
+ */
 
-module Json {
-  pub fn escape_string(s: String) -> String {
-    let a = str_replace_all(s, "\\", "\\\\");
-    let b = str_replace_all(a, "\"", "\\\"");
-    let c = str_replace_all(b, "\n", "\\n");
-    let d = str_replace_all(c, "\r", "\\r");
-    str_replace_all(d, "\t", "\\t")
+open VeriSimDB
+
+module Json = {
+  /** Escape a string for JSON output */
+  fn escapeString = (s: string): string => {
+    s
+    ->String.replaceAll("\\", "\\\\")
+    ->String.replaceAll("\"", "\\\"")
+    ->String.replaceAll("\n", "\\n")
+    ->String.replaceAll("\r", "\\r")
+    ->String.replaceAll("\t", "\\t")
   }
 
-  pub fn str(s: String) -> String { "\"" ++ escape_string(s) ++ "\"" }
-  pub fn int(n: Int) -> String { show(n) }
-  pub fn opt_str(o: Option<String>) -> String {
-    match o { Some(s) => str(s), None => "null" }
-  }
+  fn str = (s: string): string => `"${escapeString(s)}"`
+  fn int = (n: int): string => Int.toString(n)
+  fn optStr = (o: option<string>): string =>
+    switch o {
+    | Some(s) => str(s)
+    | None => "null"
+    }
 }
 
-pub fn weak_point_to_json(wp: VeriSimDB.WeakPoint) -> String {
-  "{"
-    ++ "\"category\": " ++ Json.str(VeriSimDB.Category.to_string(wp.category)) ++ ", "
-    ++ "\"severity\": " ++ Json.str(VeriSimDB.Severity.to_string(wp.severity)) ++ ", "
-    ++ "\"location\": " ++ Json.str(wp.location) ++ ", "
-    ++ "\"description\": " ++ Json.str(wp.description) ++ ", "
-    ++ "\"context\": " ++ Json.opt_str(wp.context) ++ ", "
-    ++ "\"language\": " ++ Json.opt_str(wp.language) ++ ", "
-    ++ "\"source\": " ++ Json.opt_str(wp.source)
-    ++ "}"
+fn weakPointToJson = (wp: weakPoint): string => {
+  fn fields = [
+    `"category": ${Json.str(Category.toString(wp.category))}`,
+    `"severity": ${Json.str(Severity.toString(wp.severity))}`,
+    `"location": ${Json.str(wp.location)}`,
+    `"description": ${Json.str(wp.description)}`,
+    `"context": ${Json.optStr(wp.context)}`,
+    `"language": ${Json.optStr(wp.language)}`,
+    `"source": ${Json.optStr(wp.source)}`,
+  ]
+  `{${fields->Array.join(", ")}}`
 }
 
-pub fn file_stat_to_json(fs: VeriSimDB.FileStatistic) -> String {
-  "{\"file\": " ++ Json.str(fs.file)
-    ++ ", \"total_lines\": " ++ Json.int(fs.total_lines)
-    ++ ", \"weak_points\": " ++ Json.int(fs.weak_points)
-    ++ ", \"unsafe_blocks\": " ++ Json.int(fs.unsafe_blocks) ++ "}"
+fn fileStatToJson = (fs: fileStatistic): string => {
+  `{"file": ${Json.str(fs.file)}, "total_lines": ${Json.int(fs.total_lines)}, "weak_points": ${Json.int(fs.weak_points)}, "unsafe_blocks": ${Json.int(fs.unsafe_blocks)}}`
 }
 
-fn join_with(parts: [String], sep: String) -> String {
-  let out = "";
-  let i = 0;
-  while i < len(parts) {
-    out = if i == 0 { parts[i] } else { out ++ sep ++ parts[i] };
-    i = i + 1;
-  }
-  out
+fn statisticsToJson = (stats: corpusStatistics): string => {
+  fn filesJson = stats.files->Array.map(fileStatToJson)->Array.join(", ")
+  `{"total_files": ${Json.int(stats.total_files)}, "total_lines": ${Json.int(stats.total_lines)}, "total_weak_points": ${Json.int(stats.total_weak_points)}, "total_unsafe_blocks": ${Json.int(stats.total_unsafe_blocks)}, "files": [${filesJson}]}`
 }
 
-pub fn statistics_to_json(stats: VeriSimDB.CorpusStatistics) -> String {
-  let files_parts = [];
-  let i = 0;
-  while i < len(stats.files) {
-    files_parts = files_parts ++ [file_stat_to_json(stats.files[i])];
-    i = i + 1;
-  }
-  let files_json = join_with(files_parts, ", ");
-  "{\"total_files\": " ++ Json.int(stats.total_files)
-    ++ ", \"total_lines\": " ++ Json.int(stats.total_lines)
-    ++ ", \"total_weak_points\": " ++ Json.int(stats.total_weak_points)
-    ++ ", \"total_unsafe_blocks\": " ++ Json.int(stats.total_unsafe_blocks)
-    ++ ", \"files\": [" ++ files_json ++ "]}"
+/** Convert a scan result to verisimdb-data compatible JSON string */
+fn toJson = (result: scanResult): string => {
+  fn wpJson = result.weak_points->Array.map(weakPointToJson)->Array.join(",\n    ")
+  fn statsJson = statisticsToJson(result.statistics)
+
+  `{
+  "repo": ${Json.str(result.repo)},
+  "version": ${Json.str(result.version)},
+  "timestamp": ${Json.str(result.timestamp)},
+  "scanner": ${Json.str(result.scanner)},
+  "scanner_version": ${Json.str(result.scanner_version)},
+  "weak_points": [
+    ${wpJson}
+  ],
+  "statistics": ${statsJson}
+}`
 }
 
-pub fn to_json(result: VeriSimDB.ScanResult) -> String {
-  let wp_parts = [];
-  let i = 0;
-  while i < len(result.weak_points) {
-    wp_parts = wp_parts ++ [weak_point_to_json(result.weak_points[i])];
-    i = i + 1;
-  }
-  let wp_json = join_with(wp_parts, ",\n    ");
-  let stats_json = statistics_to_json(result.statistics);
+/** Deno.writeTextFile binding */
+@val @scope("Deno")
+external writeTextFile: (string, string) => promise<unit> = "writeTextFile"
 
-  "{\n"
-    ++ "  \"repo\": " ++ Json.str(result.repo) ++ ",\n"
-    ++ "  \"version\": " ++ Json.str(result.version) ++ ",\n"
-    ++ "  \"timestamp\": " ++ Json.str(result.timestamp) ++ ",\n"
-    ++ "  \"scanner\": " ++ Json.str(result.scanner) ++ ",\n"
-    ++ "  \"scanner_version\": " ++ Json.str(result.scanner_version) ++ ",\n"
-    ++ "  \"weak_points\": [\n    " ++ wp_json ++ "\n  ],\n"
-    ++ "  \"statistics\": " ++ stats_json ++ "\n"
-    ++ "}"
+/** Write scan result JSON to a file */
+fn writeToFile = async (result: scanResult, path: string): unit => {
+  fn json = toJson(result)
+  await writeTextFile(path, json)
 }
 
-pub fn write_to_file(result: VeriSimDB.ScanResult, path: String) -> Effect[Async] Unit {
-  await write_text_file(path, to_json(result))
-}

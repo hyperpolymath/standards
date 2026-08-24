@@ -1,108 +1,171 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
-//
-// K9_Renderer — render K9 AST back to K9 surface syntax.
-// AffineScript port of K9_Renderer.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module K9_Renderer;
 
-use K9_Types;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// K9_Renderer — Render K9 AST back to K9 surface syntax.
+//
+// Converts the structd AST from K9_Types into the YAML-like .k9 format,
+// including the K9! magic number, pedigree, security, target, recipes,
+// validation, and tags sections.
 
-pub fn render_bool(b: Bool) -> String { if b { "true" } else { "false" } }
+open K9_Types
 
-pub fn render_optional(key: String, value: Option<String>) -> [String] {
-  match value { Some(v) => [key ++ ": " ++ v], None => [] }
-}
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-pub fn render_pedigree_section(ped: K9_Types.Pedigree) -> [String] {
-  ["metadata:",
-   "  name: " ++ ped.name,
-   "  version: " ++ ped.version,
-   "  description: " ++ ped.description]
-  ++ render_optional("  author", ped.author)
-  ++ render_optional("  license", ped.license)
-}
-
-pub fn render_security_section(sec: K9_Types.SecurityPolicy) -> [String] {
-  ["",
-   "security:",
-   "  trust_level: " ++ K9_Types.security_level_to_string(sec.level),
-   "  allow_network: " ++ render_bool(sec.allow_network),
-   "  allow_filesystem_write: " ++ render_bool(sec.allow_fs_write),
-   "  allow_subprocess: " ++ render_bool(sec.allow_subprocess)]
-}
-
-pub fn render_target_section(tgt: Option<K9_Types.Target>) -> [String] {
-  match tgt {
-    None => [],
-    Some(t) =>
-      ["", "target:"] ++ render_optional("  os", t.os)
-      ++ ["  is_edge: " ++ render_bool(t.is_edge),
-          "  requires_podman: " ++ render_bool(t.requires_podman)]
-      ++ render_optional("  memory", t.memory),
+/// Render a boolean as lowercase text ("true"/"false").
+fn renderBool = (b: bool): string => {
+  if b {
+    "true"
+  } else {
+    "false"
   }
 }
 
-pub fn render_recipes_section(rec_: Option<K9_Types.Recipes>) -> [String] {
-  match rec_ {
-    None => [],
-    Some(r) => {
-      let standard = render_optional("  install", r.install)
-        ++ render_optional("  validate", r.validate)
-        ++ render_optional("  deploy", r.deploy)
-        ++ render_optional("  migrate", r.migrate);
-      let custom_lines = [];
-      let i = 0;
-      while i < len(r.custom) {
-        let (k, v) = r.custom[i];
-        custom_lines = custom_lines ++ ["  " ++ k ++ ": " ++ v];
-        i = i + 1;
-      }
-      ["", "recipes:"] ++ standard ++ custom_lines
-    }
+/// Render an optional field. Returns an array containing one line if
+/// the value is Some, or an empty array if None.
+fn renderOptional = (key: string, value: option<string>): array<string> => {
+  switch value {
+  | Some(v) => [key ++ ": " ++ v]
+  | None => []
   }
 }
 
-pub fn render_validation_section(val_: Option<K9_Types.Validation>) -> [String] {
-  match val_ {
-    None => [],
-    Some(v) => ["",
-                "validation:",
-                "  checksum: " ++ v.checksum,
-                "  pedigree_version: " ++ v.pedigree_version,
-                "  hunt_authorized: " ++ render_bool(v.hunt_authorized)],
+// ---------------------------------------------------------------------------
+// Section renderers
+// ---------------------------------------------------------------------------
+
+/// Render the pedigree/metadata section.
+fn renderPedigreeSection = (ped: pedigree): array<string> => {
+  Array.concat(
+    [
+      "metadata:",
+      "  name: " ++ ped.name,
+      "  version: " ++ ped.version,
+      "  description: " ++ ped.description,
+    ],
+    Array.concat(
+      renderOptional("  author", ped.author),
+      renderOptional("  license", ped.license),
+    ),
+  )
+}
+
+/// Render the security section.
+fn renderSecuritySection = (sec: securityPolicy): array<string> => {
+  [
+    "",
+    "security:",
+    "  trust_level: " ++ securityLevelToString(sec.level),
+    "  allow_network: " ++ renderBool(sec.allowNetwork),
+    "  allow_filesystem_write: " ++ renderBool(sec.allowFsWrite),
+    "  allow_subprocess: " ++ renderBool(sec.allowSubprocess),
+  ]
+}
+
+/// Render the target section if present.
+fn renderTargetSection = (tgt: option<target>): array<string> => {
+  switch tgt {
+  | None => []
+  | Some(t) =>
+    Array.concat(
+      Array.concat(["", "target:"], renderOptional("  os", t.os)),
+      Array.concat(
+        [
+          "  is_edge: " ++ renderBool(t.isEdge),
+          "  requires_podman: " ++ renderBool(t.requiresPodman),
+        ],
+        renderOptional("  memory", t.memory),
+      ),
+    )
   }
 }
 
-pub fn render_tags_section(tags: [String]) -> [String] {
-  if len(tags) == 0 {
+/// Render the recipes section if present.
+fn renderRecipesSection = (rec_: option<recipes>): array<string> => {
+  switch rec_ {
+  | None => []
+  | Some(r) =>
+    fn lines = ["", "recipes:"]
+    fn standard = Array.concat(
+      Array.concat(
+        renderOptional("  install", r.install),
+        renderOptional("  validate", r.validate),
+      ),
+      Array.concat(
+        renderOptional("  deploy", r.deploy),
+        renderOptional("  migrate", r.migrate),
+      ),
+    )
+    fn customLines = r.custom->Array.map(((k, v)) => "  " ++ k ++ ": " ++ v)
+    Array.concat(lines, Array.concat(standard, customLines))
+  }
+}
+
+/// Render the validation section if present.
+fn renderValidationSection = (val_: option<validation>): array<string> => {
+  switch val_ {
+  | None => []
+  | Some(v) => [
+      "",
+      "validation:",
+      "  checksum: " ++ v.checksum,
+      "  pedigree_version: " ++ v.pedigreeVersion,
+      "  hunt_authorized: " ++ renderBool(v.huntAuthorized),
+    ]
+  }
+}
+
+/// Render the tags section if non-empty.
+fn renderTagsSection = (tags: array<string>): array<string> => {
+  if tags->Array.length == 0 {
     []
   } else {
-    let items = [];
-    let i = 0;
-    while i < len(tags) { items = items ++ ["  - " ++ tags[i]]; i = i + 1; }
-    ["", "tags:"] ++ items
+    fn header = ["", "tags:"]
+    fn items = tags->Array.map(t => "  - " ++ t)
+    Array.concat(header, items)
   }
 }
 
-pub fn render_k9(c: K9_Types.Component) -> String {
-  let lines = ["K9!", "---"]
-    ++ render_pedigree_section(c.pedigree)
-    ++ render_security_section(c.security)
-    ++ render_target_section(c.target)
-    ++ render_recipes_section(c.recipes)
-    ++ render_validation_section(c.validation)
-    ++ render_tags_section(c.tags);
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
-  let out = "";
-  let i = 0;
-  while i < len(lines) {
-    out = if i == 0 { lines[i] } else { out ++ "\n" ++ lines[i] };
-    i = i + 1;
-  }
-  out ++ "\n"
+/// Render a complete K9 component to the .k9 YAML-like format.
+///
+/// ### Example
+/// ```
+/// fn text = renderK9(component)
+/// // "K9!\n---\nmetadata:\n  name: hello-k9\n  ..."
+/// ```
+fn renderK9 = (c: component): string => {
+  fn lines = Array.concat(
+    ["K9!", "---"],
+    Array.concat(
+      renderPedigreeSection(c.pedigree),
+      Array.concat(
+        renderSecuritySection(c.security),
+        Array.concat(
+          renderTargetSection(c.target),
+          Array.concat(
+            renderRecipesSection(c.recipes),
+            Array.concat(renderValidationSection(c.validation), renderTagsSection(c.tags)),
+          ),
+        ),
+      ),
+    ),
+  )
+
+  // Filter out empty strings that would create unwanted blank lines at the end
+  fn filtered = lines->Array.filter(l => l->String.length > 0 || l == "")
+  filtered->Array.join("\n") ++ "\n"
 }
 
-pub fn render_security_level(level: K9_Types.SecurityLevel) -> String {
-  K9_Types.security_level_to_string(level)
-}
+/// Render a security level to its canonical text representation.
+fn renderSecurityLevel = securityLevelToString
+

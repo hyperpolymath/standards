@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
-//
-// Statistical utilities: KL-divergence, entropy, clustering metrics.
-// AffineScript port of Statistics.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module Statistics;
 
-extern fn math_sqrt(x: Float) -> Float = "Math" "sqrt";
-extern fn math_log2(x: Float) -> Float = "Math" "log2";
-extern fn float_nan() -> Float = "Float" "nan";
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell and Contributors
 
-module Types {
-  pub type Distribution = [Float]
-  pub type Matrix = [[Float]]
+/**
+ * Statistical Utilities
+ *
+ * Mathematical and statistical functions for corpus analysis,
+ * including KL-divergence, entropy, and clustering metrics.
+ */
 
-  pub type DistanceMetric =
+module Types = {
+  struct distribution { array<float>
+  struct matrix { array<array<float>>
+
+  struct distanceMetric {
     | Euclidean
     | Cosine
     | KLDivergence
@@ -22,246 +25,228 @@ module Types {
     | Jaccard
 }
 
-module Basic {
-  pub fn sum(arr: [Float]) -> Float {
-    let acc = 0.0;
-    let i = 0;
-    while i < len(arr) { acc = acc +. arr[i]; i = i + 1; }
-    acc
+module Basic = {
+  fn sum = (arr: array<float>): float => {
+    arr->Array.reduce(0.0, (acc, x) => acc +. x)
   }
 
-  pub fn mean(arr: [Float]) -> Float {
-    if len(arr) == 0 { 0.0 } else { sum(arr) /. int_to_float(len(arr)) }
-  }
-
-  pub fn variance(arr: [Float]) -> Float {
-    if len(arr) == 0 {
+  fn mean = (arr: array<float>): float => {
+    fn len = Array.length(arr)
+    if len == 0 {
       0.0
     } else {
-      let m = mean(arr);
-      let acc = 0.0;
-      let i = 0;
-      while i < len(arr) {
-        let diff = arr[i] -. m;
-        acc = acc +. diff *. diff;
-        i = i + 1;
+      sum(arr) /. Float.fromInt(len)
+    }
+  }
+
+  fn variance = (arr: array<float>): float => {
+    fn len = Array.length(arr)
+    if len == 0 {
+      0.0
+    } else {
+      fn m = mean(arr)
+      fn squaredDiffs = arr->Array.map(x => {
+        fn diff = x -. m
+        diff *. diff
+      })
+      sum(squaredDiffs) /. Float.fromInt(len)
+    }
+  }
+
+  fn standardDeviation = (arr: array<float>): float => {
+    Math.sqrt(variance(arr))
+  }
+
+  fn min = (arr: array<float>): option<float> => {
+    arr->Array.reduce(None, (acc, x) => {
+      switch acc {
+        | None => Some(x)
+        | Some(m) => Some(x < m ? x : m)
       }
-      acc /. int_to_float(len(arr))
-    }
+    })
   }
 
-  pub fn standard_deviation(arr: [Float]) -> Float { math_sqrt(variance(arr)) }
-
-  pub fn min(arr: [Float]) -> Option<Float> {
-    let acc = None;
-    let i = 0;
-    while i < len(arr) {
-      let x = arr[i];
-      acc = match acc { None => Some(x), Some(m) => Some(if x < m { x } else { m }) };
-      i = i + 1;
-    }
-    acc
-  }
-
-  pub fn max(arr: [Float]) -> Option<Float> {
-    let acc = None;
-    let i = 0;
-    while i < len(arr) {
-      let x = arr[i];
-      acc = match acc { None => Some(x), Some(m) => Some(if x > m { x } else { m }) };
-      i = i + 1;
-    }
-    acc
+  fn max = (arr: array<float>): option<float> => {
+    arr->Array.reduce(None, (acc, x) => {
+      switch acc {
+        | None => Some(x)
+        | Some(m) => Some(x > m ? x : m)
+      }
+    })
   }
 }
 
-module Information {
-  pub let epsilon = 0.0000000001;  // 1e-10
+module Information = {
+  fn epsilon = 1e-10
 
   // Shannon entropy: H(X) = -Σ p(x) log p(x)
-  pub fn entropy(dist: [Float]) -> Float {
-    let acc = 0.0;
-    let i = 0;
-    while i < len(dist) {
-      let p = dist[i];
-      if p > epsilon { acc = acc -. p *. math_log2(p); }
-      i = i + 1;
-    }
-    acc
+  fn entropy = (dist: array<float>): float => {
+    dist->Array.reduce(0.0, (acc, p) => {
+      if p > epsilon {
+        acc -. p *. Math.log2(p)
+      } else {
+        acc
+      }
+    })
   }
 
   // KL-Divergence: D_KL(P||Q) = Σ P(i) log(P(i)/Q(i))
-  pub fn kl_divergence(p: [Float], q: [Float]) -> Float {
-    if len(p) != len(q) {
-      float_nan()
+  fn klDivergence = (p: array<float>, q: array<float>): float => {
+    if Array.length(p) != Array.length(q) {
+      Float.Constants.nan
     } else {
-      let result = 0.0;
-      let i = 0;
-      while i < len(p) {
-        let pi = p[i];
-        let qi = q[i];
-        if pi > epsilon && qi > epsilon { result = result +. pi *. math_log2(pi /. qi); }
-        i = i + 1;
+      fn result = ref(0.0)
+      for i in 0 to Array.length(p) - 1 {
+        fn pi = Array.getUnsafe(p, i)
+        fn qi = Array.getUnsafe(q, i)
+        if pi > epsilon && qi > epsilon {
+          result := result.contents +. pi *. Math.log2(pi /. qi)
+        }
       }
-      result
+      result.contents
     }
   }
 
-  pub fn symmetric_kl(p: [Float], q: [Float]) -> Float {
-    (kl_divergence(p, q) +. kl_divergence(q, p)) /. 2.0
+  // Symmetric KL-Divergence: (D_KL(P||Q) + D_KL(Q||P)) / 2
+  fn symmetricKL = (p: array<float>, q: array<float>): float => {
+    (klDivergence(p, q) +. klDivergence(q, p)) /. 2.0
   }
 
-  // JSD(P||Q) = (D_KL(P||M) + D_KL(Q||M)) / 2 where M = (P + Q) / 2
-  pub fn jensen_shannon(p: [Float], q: [Float]) -> Float {
-    if len(p) != len(q) {
-      float_nan()
+  // Jensen-Shannon Divergence: JSD(P||Q) = (D_KL(P||M) + D_KL(Q||M)) / 2
+  // where M = (P + Q) / 2
+  fn jensenShannon = (p: array<float>, q: array<float>): float => {
+    if Array.length(p) != Array.length(q) {
+      Float.Constants.nan
     } else {
-      let m = [];
-      let i = 0;
-      while i < len(p) {
-        m = m ++ [(p[i] +. q[i]) /. 2.0];
-        i = i + 1;
-      }
-      (kl_divergence(p, m) +. kl_divergence(q, m)) /. 2.0
+      fn m = p->Array.mapWithIndex((pi, i) => {
+        fn qi = Array.getUnsafe(q, i)
+        (pi +. qi) /. 2.0
+      })
+      (klDivergence(p, m) +. klDivergence(q, m)) /. 2.0
     }
   }
 }
 
-module Distance {
-  use Types;
+module Distance = {
+  open Types
 
-  pub fn euclidean(a: [Float], b: [Float]) -> Float {
-    if len(a) != len(b) {
-      float_nan()
+  fn euclidean = (a: array<float>, b: array<float>): float => {
+    if Array.length(a) != Array.length(b) {
+      Float.Constants.nan
     } else {
-      let sum_sq = 0.0;
-      let i = 0;
-      while i < len(a) {
-        let diff = a[i] -. b[i];
-        sum_sq = sum_sq +. diff *. diff;
-        i = i + 1;
+      fn sumSq = ref(0.0)
+      for i in 0 to Array.length(a) - 1 {
+        fn diff = Array.getUnsafe(a, i) -. Array.getUnsafe(b, i)
+        sumSq := sumSq.contents +. diff *. diff
       }
-      math_sqrt(sum_sq)
+      Math.sqrt(sumSq.contents)
     }
   }
 
-  pub fn cosine(a: [Float], b: [Float]) -> Float {
-    if len(a) != len(b) {
-      float_nan()
+  fn cosine = (a: array<float>, b: array<float>): float => {
+    if Array.length(a) != Array.length(b) {
+      Float.Constants.nan
     } else {
-      let dot = 0.0;
-      let norm_a = 0.0;
-      let norm_b = 0.0;
-      let i = 0;
-      while i < len(a) {
-        let ai = a[i];
-        let bi = b[i];
-        dot = dot +. ai *. bi;
-        norm_a = norm_a +. ai *. ai;
-        norm_b = norm_b +. bi *. bi;
-        i = i + 1;
+      fn dot = ref(0.0)
+      fn normA = ref(0.0)
+      fn normB = ref(0.0)
+      for i in 0 to Array.length(a) - 1 {
+        fn ai = Array.getUnsafe(a, i)
+        fn bi = Array.getUnsafe(b, i)
+        dot := dot.contents +. ai *. bi
+        normA := normA.contents +. ai *. ai
+        normB := normB.contents +. bi *. bi
       }
-      let denom = math_sqrt(norm_a) *. math_sqrt(norm_b);
-      if denom > 0.0 { 1.0 -. dot /. denom } else { 0.0 }
+      fn denom = Math.sqrt(normA.contents) *. Math.sqrt(normB.contents)
+      if denom > 0.0 {
+        1.0 -. dot.contents /. denom  // Convert similarity to distance
+      } else {
+        0.0
+      }
     }
   }
 
-  pub fn jaccard(a: [Float], b: [Float]) -> Float {
-    let intersection = 0;
-    let union = 0;
-    let i = 0;
-    while i < len(a) {
-      let ai = a[i] > 0.0;
-      let bi = b[i] > 0.0;
-      if ai && bi { intersection = intersection + 1; }
-      if ai || bi { union = union + 1; }
-      i = i + 1;
+  fn jaccard = (a: array<float>, b: array<float>): float => {
+    // Treating as binary vectors (presence/absence)
+    fn intersection = ref(0)
+    fn union = ref(0)
+    for i in 0 to Array.length(a) - 1 {
+      fn ai = Array.getUnsafe(a, i) > 0.0
+      fn bi = Array.getUnsafe(b, i) > 0.0
+      if ai && bi { intersection := intersection.contents + 1 }
+      if ai || bi { union := union.contents + 1 }
     }
-    if union == 0 {
+    if union.contents == 0 {
       0.0
     } else {
-      1.0 -. int_to_float(intersection) /. int_to_float(union)
+      1.0 -. Float.fromInt(intersection.contents) /. Float.fromInt(union.contents)
     }
   }
 
-  pub fn compute(metric: Types.DistanceMetric, a: [Float], b: [Float]) -> Float {
-    match metric {
-      Euclidean     => euclidean(a, b),
-      Cosine        => cosine(a, b),
-      KLDivergence  => Information.symmetric_kl(a, b),
-      JensenShannon => Information.jensen_shannon(a, b),
-      Jaccard       => jaccard(a, b),
+  fn compute = (metric: distanceMetric, a: array<float>, b: array<float>): float => {
+    switch metric {
+      | Euclidean => euclidean(a, b)
+      | Cosine => cosine(a, b)
+      | KLDivergence => Information.symmetricKL(a, b)
+      | JensenShannon => Information.jensenShannon(a, b)
+      | Jaccard => jaccard(a, b)
     }
   }
 }
 
-module Matrix {
-  use Types;
+module Matrix = {
+  open Types
 
-  pub fn distance_matrix(vectors: [[Float]], metric: Types.DistanceMetric) -> Types.Matrix {
-    let n = len(vectors);
-    let result = [];
-    let i = 0;
-    while i < n {
-      let row = array_fill(n, 0.0);
-      let j = 0;
-      while j < n {
+  fn distanceMatrix = (vectors: array<array<float>>, metric: distanceMetric): matrix => {
+    fn n = Array.length(vectors)
+    fn result = Array.make(~length=n, [])
+    for i in 0 to n - 1 {
+      fn row = Array.make(~length=n, 0.0)
+      for j in 0 to n - 1 {
         if i == j {
-          row[j] = 0.0;
+          Array.setUnsafe(row, j, 0.0)
         } else if j < i {
-          row[j] = result[j][i];  // symmetry
+          // Use symmetry
+          Array.setUnsafe(row, j, Array.getUnsafe(Array.getUnsafe(result, j), i))
         } else {
-          row[j] = Distance.compute(metric, vectors[i], vectors[j]);
+          fn vi = Array.getUnsafe(vectors, i)
+          fn vj = Array.getUnsafe(vectors, j)
+          Array.setUnsafe(row, j, Distance.compute(metric, vi, vj))
         }
-        j = j + 1;
       }
-      result = result ++ [row];
-      i = i + 1;
+      Array.setUnsafe(result, i, row)
     }
     result
   }
 }
 
-module Normalization {
-  pub fn normalize(arr: [Float]) -> [Float] {
-    let total = Basic.sum(arr);
+module Normalization = {
+  fn normalize = (arr: array<float>): array<float> => {
+    fn total = Basic.sum(arr)
     if total > 0.0 {
-      let out = [];
-      let i = 0;
-      while i < len(arr) { out = out ++ [arr[i] /. total]; i = i + 1; }
-      out
+      arr->Array.map(x => x /. total)
     } else {
       arr
     }
   }
 
-  pub fn min_max_normalize(arr: [Float]) -> [Float] {
-    match (Basic.min(arr), Basic.max(arr)) {
-      (Some(min_val), Some(max_val)) => {
-        if max_val > min_val {
-          let range = max_val -. min_val;
-          let out = [];
-          let i = 0;
-          while i < len(arr) { out = out ++ [(arr[i] -. min_val) /. range]; i = i + 1; }
-          out
-        } else {
-          arr
-        }
-      }
-      _ => arr,
+  fn minMaxNormalize = (arr: array<float>): array<float> => {
+    switch (Basic.min(arr), Basic.max(arr)) {
+      | (Some(minVal), Some(maxVal)) when maxVal > minVal =>
+        fn range = maxVal -. minVal
+        arr->Array.map(x => (x -. minVal) /. range)
+      | _ => arr
     }
   }
 
-  pub fn z_score_normalize(arr: [Float]) -> [Float] {
-    let m = Basic.mean(arr);
-    let sd = Basic.standard_deviation(arr);
+  fn zScoreNormalize = (arr: array<float>): array<float> => {
+    fn m = Basic.mean(arr)
+    fn sd = Basic.standardDeviation(arr)
     if sd > 0.0 {
-      let out = [];
-      let i = 0;
-      while i < len(arr) { out = out ++ [(arr[i] -. m) /. sd]; i = i + 1; }
-      out
+      arr->Array.map(x => (x -. m) /. sd)
     } else {
       arr
     }
   }
 }
+

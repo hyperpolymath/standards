@@ -1,130 +1,96 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-//
-// AXEL Protocol - DNS TXT Record Parser (Strict).
-// AffineScript port of AxelSts.res.
+// Ported via Harvard Engine (Semantic pass)
+
+module AxelSts;
+
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// AXEL Protocol - DNS TXT Record Parser (Strict)
 //
 // Parses AXEL DNS TXT record payloads (RDATA only, not full RR lines).
 // Fails closed on missing required fields. Does NOT default v=AXEL1.
 
-module AxelSts;
-
-// __ Types _________________________________________________________________
-
-pub type ParseError =
+struct parseError {
   | MissingVersion
-  | InvalidVersion(String)
+  | InvalidVersion(string)
   | MissingId
   | EmptyId
-  | MalformedRecord(String)
+  | MalformedRecord(string)
 
-pub type AxelRecord = {
-  version: String,
-  id: String,
+struct axelRecord { {
+  version: string,
+  id: string,
 }
 
-pub type ParseResult =
-  | ParseOk(AxelRecord)
-  | ParseErr(ParseError)
+struct parseResult { result<axelRecord, parseError>
 
-// __ Helpers _______________________________________________________________
+// String utilities via external bindings
+@send external trim: (string) => string = "trim"
+@send external split: (string, string) => array<string> = "split"
+@send external startsWith: (string, string) => bool = "startsWith"
+@get external length: string => int = "length"
+@send external slice: (array<string>, int) => array<string> = "slice"
+@send external joinArray: (array<string>, string) => string = "join"
 
-fn str_split_on(s: String, delim: String) -> [String] {
-  let slen = len(s);
-  let dlen = len(delim);
-  let result = [];
-  let start = 0;
-  let i = 0;
-  while i <= slen - dlen {
-    if string_sub(s, i, dlen) == delim {
-      result = result ++ [string_sub(s, start, i - start)];
-      start = i + dlen;
-      i = i + dlen;
-    } else {
-      i = i + 1;
-    }
-  }
-  result ++ [string_sub(s, start, slen - start)]
-}
+fn getArrayLength: array<string> => int = %raw(`function(arr) { return arr.length }`)
+fn getArrayItem: (array<string>, int) => string = %raw(`function(arr, i) { return arr[i] }`)
 
-fn str_join(parts: [String], sep: String) -> String {
-  if len(parts) == 0 { return ""; }
-  let result = parts[0];
-  let i = 1;
-  while i < len(parts) {
-    result = result ++ sep ++ parts[i];
-    i = i + 1;
-  }
-  result
-}
-
-fn parse_kv(segment: String) -> Option<(String, String)> {
-  let trimmed = trim(segment);
-  let parts = str_split_on(trimmed, "=");
-  if len(parts) < 2 {
+// Parse a single key=value pair from a TXT record segment
+fn parseKeyValue = (segment: string): option<(string, string)> => {
+  fn trimmed = segment->trim
+  fn parts = trimmed->split("=")
+  fn len = getArrayLength(parts)
+  if len < 2 {
     None
   } else {
-    let key = trim(parts[0]);
-    let vp = [];
-    let j = 1;
-    while j < len(parts) {
-      vp = vp ++ [parts[j]];
-      j = j + 1;
-    }
-    let value = trim(str_join(vp, "="));
+    fn key = getArrayItem(parts, 0)->trim
+    fn value = parts->slice(1)->joinArray("=")->trim
     Some((key, value))
   }
 }
 
-// __ Parser ________________________________________________________________
+// Parse a TXT record payload string into an AXEL record
+fn parse = (payload: string): parseResult => {
+  fn trimmed = payload->trim
 
-pub fn parse(payload: String) -> ParseResult {
-  let trimmed = trim(payload);
-  if len(trimmed) == 0 {
-    return ParseErr(MalformedRecord("empty payload"));
-  }
+  if trimmed->length == 0 {
+    Error(MalformedRecord("empty payload"))
+  } else {
+    fn segments = trimmed->split(";")
+    fn version = ref(None)
+    fn id = ref(None)
 
-  let segments = str_split_on(trimmed, ";");
-  let version = None;
-  let id = None;
-  let i = 0;
-  while i < len(segments) {
-    match parse_kv(segments[i]) {
-      Some(("v", v))  => { version = Some(v); }
-      Some(("id", d)) => { id = Some(d); }
-      _               => {}
-    }
-    i = i + 1;
-  }
-
-  match version {
-    None => ParseErr(MissingVersion()),
-    Some(v) => {
-      if v != "AXEL1" {
-        ParseErr(InvalidVersion(v))
-      } else {
-        match id {
-          None => ParseErr(MissingId()),
-          Some(d) => {
-            let trimmed_id = trim(d);
-            if len(trimmed_id) == 0 {
-              ParseErr(EmptyId())
-            } else {
-              ParseOk(AxelRecord { version: v, id: trimmed_id })
-            }
-          }
-        }
+    fn segmentCount = getArrayLength(segments)
+    for i in 0 to segmentCount - 1 {
+      fn segment = getArrayItem(segments, i)
+      switch parseKeyValue(segment) {
+      | Some(("v", value)) => version := Some(value)
+      | Some(("id", value)) => id := Some(value)
+      | _ => ()
       }
     }
+
+    switch (version.contents, id.contents) {
+    | (None, _) => Error(MissingVersion)
+    | (Some(v), _) if v != "AXEL1" => Error(InvalidVersion(v))
+    | (Some(_), None) => Error(MissingId)
+    | (Some(_), Some(idVal)) if idVal->trim->length == 0 => Error(EmptyId)
+    | (Some(v), Some(idVal)) =>
+      Ok({
+        version: v,
+        id: idVal->trim,
+      })
+    }
   }
 }
 
-pub fn error_to_string(err: ParseError) -> String {
-  match err {
-    MissingVersion     => "Missing required field: v (version)",
-    InvalidVersion(v)  => "Invalid version: '" ++ v ++ "' (expected 'AXEL1')",
-    MissingId          => "Missing required field: id",
-    EmptyId            => "Empty id field (must be non-empty)",
-    MalformedRecord(m) => "Malformed record: " ++ m,
+// Convert parse error to human-readable string
+fn errorToString = (err: parseError): string => {
+  switch err {
+  | MissingVersion => "Missing required field: v (version)"
+  | InvalidVersion(v) => "Invalid version: '" ++ v ++ "' (expected 'AXEL1')"
+  | MissingId => "Missing required field: id"
+  | EmptyId => "Empty id field (must be non-empty)"
+  | MalformedRecord(msg) => "Malformed record: " ++ msg
   }
 }
+

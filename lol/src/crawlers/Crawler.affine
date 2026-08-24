@@ -1,145 +1,146 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
-//
-// Base crawler module. AffineScript port of Crawler.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module Crawler;
 
-extern fn date_now() -> Float = "Date" "now";
-extern fn math_pow(base: Float, exp: Float) -> Float = "Math" "pow";
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell and Contributors
 
-module Types {
-  pub type HttpMethod = | GET | POST | HEAD
+/**
+ * Base Crawler Module
+ *
+ * Provides the foundational structs and functions for web crawling
+ * Bible corpus sources.
+ */
 
-  pub type RequestConfig = {
-    url: String,
-    method: HttpMethod,
-    headers: Dict<String>,
-    timeout: Int,
-    retries: Int,
+module Types = {
+  struct httpMethod { GET | POST | HEAD
+
+  struct requestConfig { {
+    url: string,
+    method: httpMethod,
+    headers: Dict.t<string>,
+    timeout: int,
+    retries: int,
   }
 
-  pub type ResponseStatus =
-    | Ok(Int)
-    | NetworkError(String)
+  struct responseStatus {
+    | Ok(int)
+    | NetworkError(string)
     | Timeout
     | RateLimited
     | NotFound
 
-  pub type Response = {
-    status: ResponseStatus,
-    headers: Dict<String>,
-    body: Option<String>,
+  struct response { {
+    status: responseStatus,
+    headers: Dict.t<string>,
+    body: option<string>,
   }
 
-  pub type CrawlResult<a> =
-    | Success(a)
-    | Failure(String)
+  struct crawlResult<'a> =
+    | Success('a)
+    | Failure(string)
     | Pending
 
-  pub type CrawlerState =
+  struct crawlerState {
     | Idle
-    | Crawling(String)
+    | Crawling(string)
     | Paused
     | Stopped
-    | StateError(String)
+    | Error(string)
 }
 
-module Config {
-  pub let default_timeout = 30000;
-  pub let default_retries = 3;
-  pub let default_user_agent = "1000Langs/0.1.0 (Parallel Corpus Crawler; +https://github.com/Hyperpolymath/1000Langs)";
-  pub let default_rate_limit_ms = 1000;
+module Config = {
+  fn defaultTimeout = 30000
+  fn defaultRetries = 3
+  fn defaultUserAgent = "1000Langs/0.1.0 (Parallel Corpus Crawler; +https://github.com/Hyperpolymath/1000Langs)"
+  fn defaultRateLimitMs = 1000
 
-  pub fn make_default_headers() -> Dict<String> {
-    let headers = dict_empty();
-    dict_set(headers, "User-Agent", default_user_agent);
-    dict_set(headers, "Accept", "text/html,application/xhtml+xml,application/xml");
-    dict_set(headers, "Accept-Language", "en-US,en;q=0.9");
+  fn makeDefaultHeaders = () => {
+    fn headers = Dict.make()
+    Dict.set(headers, "User-Agent", defaultUserAgent)
+    Dict.set(headers, "Accept", "text/html,application/xhtml+xml,application/xml")
+    Dict.set(headers, "Accept-Language", "en-US,en;q=0.9")
     headers
   }
 }
 
-module Request {
-  use Types;
+module Request = {
+  open Types
 
-  pub fn make(url: String, method: Types.HttpMethod, headers: Option<Dict<String>>,
-              timeout: Option<Int>, retries: Option<Int>) -> Types.RequestConfig {
-    Types.RequestConfig {
-      url: url,
-      method: method,
-      headers: match headers { Some(h) => h, None => Config.make_default_headers() },
-      timeout: match timeout { Some(t) => t, None => Config.default_timeout },
-      retries: match retries { Some(r) => r, None => Config.default_retries },
-    }
+  fn make = (~url, ~method=GET, ~headers=?, ~timeout=?, ~retries=?, ()) => {
+    url,
+    method,
+    headers: headers->Option.getOr(Config.makeDefaultHeaders()),
+    timeout: timeout->Option.getOr(Config.defaultTimeout),
+    retries: retries->Option.getOr(Config.defaultRetries),
   }
 
-  pub fn with_header(config: Types.RequestConfig, key: String, value: String) -> Types.RequestConfig {
-    dict_set(config.headers, key, value);
+  fn withHeader = (config, key, value) => {
+    Dict.set(config.headers, key, value)
     config
   }
 
-  pub fn method_to_string(m: Types.HttpMethod) -> String {
-    match m { GET => "GET", POST => "POST", HEAD => "HEAD" }
+  fn methodToString = method => switch method {
+    | GET => "GET"
+    | POST => "POST"
+    | HEAD => "HEAD"
   }
 }
 
-module RateLimiter {
-  pub type T = {
-    mut last_request: Float,
-    delay_ms: Int,
+module RateLimiter = {
+  struct t { {
+    mutable lastRequest: float,
+    delayMs: int,
   }
 
-  pub fn make(delay_ms: Int) -> T {
-    T { last_request: 0.0, delay_ms: delay_ms }
+  fn make = (~delayMs=Config.defaultRateLimitMs, ()) => {
+    lastRequest: 0.0,
+    delayMs,
   }
 
-  pub fn can_proceed(limiter: T) -> Bool {
-    let elapsed = date_now() -. limiter.last_request;
-    elapsed >= int_to_float(limiter.delay_ms)
+  fn canProceed = limiter => {
+    fn now = Date.now()
+    fn elapsed = now -. limiter.lastRequest
+    elapsed >= Float.fromInt(limiter.delayMs)
   }
 
-  pub fn record_request(limiter: T) -> Unit {
-    limiter.last_request = date_now()
-  }
-}
-
-module RetryPolicy {
-  pub type T =
-    | Constant(Int)
-    | Linear(Int)
-    | Exponential(Int, Float)
-
-  pub fn calculate_delay(strategy: T, attempt: Int) -> Int {
-    match strategy {
-      Constant(ms)            => ms,
-      Linear(base)            => base * attempt,
-      Exponential(base, factor) =>
-        float_to_int(int_to_float(base) *. math_pow(factor, int_to_float(attempt - 1))),
-    }
-  }
-
-  pub fn should_retry(attempt: Int, max_retries: Int) -> Bool {
-    attempt < max_retries
+  fn recordRequest = limiter => {
+    limiter.lastRequest = Date.now()
   }
 }
 
-module Parser {
-  pub type Selector =
-    | Css(String)
-    | XPath(String)
-    | Regex(String)
+module RetryPolicy = {
+  struct backoffStrategy {
+    | Constant(int)
+    | Linear(int)
+    | Exponential(int, float)
 
-  pub type ParseResult<a> =
-    | Parsed(a)
-    | ParseError(String)
+  fn calculateDelay = (strategy, attempt) => switch strategy {
+    | Constant(ms) => ms
+    | Linear(base) => base * attempt
+    | Exponential(base, factor) =>
+        Float.toInt(Float.fromInt(base) *. Math.pow(factor, ~exp=Float.fromInt(attempt - 1)))
+  }
+
+  fn shouldRetry = (attempt, maxRetries) => attempt < maxRetries
+}
+
+module Parser = {
+  struct selector {
+    | Css(string)
+    | XPath(string)
+    | Regex(string)
+
+  struct parseResult<'a> =
+    | Parsed('a)
+    | ParseError(string)
     | NoMatch
 
-  pub fn selector_to_string(s: Selector) -> String {
-    match s {
-      Css(x)   => "css:" ++ x,
-      XPath(x) => "xpath:" ++ x,
-      Regex(x) => "regex:" ++ x,
-    }
+  fn selectorToString = selector => switch selector {
+    | Css(s) => `css:${s}`
+    | XPath(s) => `xpath:${s}`
+    | Regex(s) => `regex:${s}`
   }
 }
+

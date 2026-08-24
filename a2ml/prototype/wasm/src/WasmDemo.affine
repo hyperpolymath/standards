@@ -1,33 +1,33 @@
 // SPDX-License-Identifier: MPL-2.0
-//
-// A2ML WASM prototype. AffineScript port of WasmDemo.res.
-// Minimal demo intended for local testing only.
+// Ported via Harvard Engine (Semantic pass)
 
 module WasmDemo;
 
-extern type WasmInstance;
-extern fn compile_to_wasm(wat: String, out: String) -> Promise<Bool> = "wasm" "compileToWasm";
-extern fn load_module(path: String) -> Promise<WasmInstance> = "wasm" "loadModule";
-extern fn wasm_add(instance: WasmInstance, a: Int, b: Int) -> Int = "wasm" "exportsAdd";
-extern fn console_log(s: String) -> Unit = "console" "log";
-extern fn int_to_string(n: Int) -> String = "global" "String";
+// SPDX-License-Identifier: PMPL-1.0-or-later
 
-pub fn build_wasm() -> Effect[Async] Unit {
-  let ok = await compile_to_wasm("fixtures/add.wat", "build/add.wasm");
+// A2ML WASM protostruct using rescript-wasm-runtime.
+// This is a minimal demo intended for local testing only.
+
+// Assumes rescript-wasm-runtime is available locally.
+// You can add it to a workspace or compile this in a repo where
+// rescript-wasm-runtime's compiled JS is on the module path.
+
+fn buildWasm = async () => {
+  fn ok = await Wasm.compileToWasm("fixtures/add.wat", "build/add.wasm", ())
   if !ok {
-    console_log("WASM compile failed")
+    Js.log("WASM compile failed")
   }
 }
 
-pub fn run_wasm() -> Effect[Async] Unit {
-  let instance = await load_module("build/add.wasm");
-  let result = wasm_add(instance, 2, 3);
-  console_log("add(2,3) = " ++ int_to_string(result))
+fn runWasm = async () => {
+  fn instance = await Wasm.loadModule("build/add.wasm", ())
+  fn exports: Js.t<{. add: (int, int) => int}> = %raw(`instance.exports`)
+  fn result = exports##add(2, 3)
+  Js.log(`add(2,3) = ${Int.toString(result)}`)
 }
 
-pub fn main() -> Effect[Async] Unit {
-  build_wasm();
-  run_wasm()
+fn _ = {
+  fn _ = buildWasm()
+  fn _ = runWasm()
 }
 
-main()

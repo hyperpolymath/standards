@@ -1,131 +1,149 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
-//
-// HTTP fetch module: Deno fetch() with rate limiting, retry logic and
-// error handling for crawler use. AffineScript port of Http.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module Http;
 
-use Crawler;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell and Contributors
 
-module Fetch {
-  extern type Response;
-  extern fn fetch(url: String, init: Json) -> Promise<Response> = "global" "fetch";
-  extern fn fetch_simple(url: String) -> Promise<Response> = "global" "fetch";
-  extern fn status(r: Response) -> Int = "fetch" "status";
-  extern fn ok(r: Response) -> Bool = "fetch" "ok";
-  extern fn status_text(r: Response) -> String = "fetch" "statusText";
-  extern fn text(r: Response) -> Promise<String> = "fetch" "text";
-  extern fn json(r: Response) -> Promise<Json> = "fetch" "json";
-  extern fn get_header(r: Response, name: String) -> Option<String> = "fetch" "headers.get";
+/**
+ * HTTP Fetch Module
+ *
+ * ReScript bindings to Deno's native fetch() API with rate limiting,
+ * retry logic, and error handling for crawler use.
+ */
+
+/** Deno/Web fetch API bindings */
+module Fetch = {
+  struct response
+
+  @val external fetch: (string, {..}) => promise<response> = "fetch"
+  @val external fetchSimple: string => promise<response> = "fetch"
+
+  @get external status: response => int = "status"
+  @get external ok: response => bool = "ok"
+  @get external statusText: response => string = "statusText"
+  @send external text: response => promise<string> = "text"
+  @send external json: response => promise<JSON.t> = "json"
+  @send external getHeader: (response, string) => option<string> = "headers.get"
 }
 
-extern fn json_parse_exn(s: String) -> Json = "JSON" "parseExn";
-extern fn json_encode_object(d: Dict<Json>) -> Json = "JSON" "encodeObject";
-extern fn json_encode_string(s: String) -> Json = "JSON" "encodeString";
-extern fn set_timeout(cb: fn() -> Unit, ms: Int) -> Int = "global" "setTimeout";
-extern fn sleep_ms(ms: Int) -> Promise<Unit> = "global" "sleep";
-
-pub type HttpError =
-  | NetworkError(String)
-  | HttpError(Int, String)
+struct httpError {
+  | NetworkError(string)
+  | HttpError(int, string)
   | TimeoutError
-  | ParseError(String)
+  | ParseError(string)
 
-pub type HttpResponse = {
-  status: Int,
-  body: String,
-  headers: Dict<String>,
+struct httpResponse { {
+  status: int,
+  body: string,
+  headers: Dict.t<string>,
 }
 
-// Perform a GET request with optional headers.
-pub fn get(url: String, headers: Option<Dict<String>>) -> Effect[Async] Result<HttpResponse, HttpError> {
+/** Perform a GET request with optional headers */
+fn get = async (url: string, ~headers: option<Dict.t<string>>=?, ()): result<
+  httpResponse,
+  httpError,
+> => {
   try {
-    let resp = match headers {
-      Some(h) => {
-        let header_dict = dict_empty();
-        let pairs = dict_entries(h);
-        let i = 0;
-        while i < len(pairs) {
-          let (k, v) = pairs[i];
-          dict_set(header_dict, k, json_encode_string(v));
-          i = i + 1;
-        }
-        await Fetch.fetch(url, json_object([
-          ("method", json_string("GET")),
-          ("headers", json_encode_object(header_dict)),
-        ]))
-      }
-      None => await Fetch.fetch_simple(url),
-    };
+    fn resp = switch headers {
+    | Some(h) =>
+      fn headerDict = Dict.make()
+      h->Dict.toArray->Array.forEach(((k, v)) => {
+        headerDict->Dict.set(k, JSON.Encode.string(v))
+      })
+      await Fetch.fetch(
+        url,
+        {"method": "GET", "headers": JSON.Encode.object(headerDict)},
+      )
+    | None => await Fetch.fetchSimple(url)
+    }
 
-    let body = await Fetch.text(resp);
-    let status = Fetch.status(resp);
+    fn body = await Fetch.text(resp)
+    fn status = Fetch.status(resp)
 
     if Fetch.ok(resp) {
-      Ok(HttpResponse { status: status, body: body, headers: dict_empty() })
+      Ok({status, body, headers: Dict.make()})
     } else if status == 429 {
-      Err(HttpError(429, "Rate limited"))
+      Error(HttpError(429, "Rate limited"))
     } else if status == 404 {
-      Err(HttpError(404, "Not found"))
+      Error(HttpError(404, "Not found"))
     } else {
-      Err(HttpError(status, Fetch.status_text(resp)))
+      Error(HttpError(status, Fetch.statusText(resp)))
     }
-  } catch e {
-    Err(NetworkError(exn_message_or(e, "Unknown error")))
+  } catch {
+  | exn =>
+    fn msg = switch exn {
+    | Exn.Error(e) => Exn.message(e)->Option.getOr("Unknown error")
+    | _ => "Unknown error"
+    }
+    Error(NetworkError(msg))
   }
 }
 
-// Perform a GET request and parse the response as JSON.
-pub fn get_json(url: String, headers: Option<Dict<String>>) -> Effect[Async] Result<Json, HttpError> {
-  match await get(url, headers) {
-    Ok(r) => {
-      try {
-        Ok(json_parse_exn(r.body))
-      } catch _e {
-        Err(ParseError("Invalid JSON response"))
-      }
+/** Perform a GET request and parse response as JSON */
+fn getJson = async (url: string, ~headers: option<Dict.t<string>>=?, ()): result<
+  JSON.t,
+  httpError,
+> => {
+  fn resp = await get(url, ~headers?, ())
+  switch resp {
+  | Ok({body}) =>
+    try {
+      Ok(JSON.parseExn(body))
+    } catch {
+    | _ => Error(ParseError("Invalid JSON response"))
     }
-    Err(e) => Err(e),
+  | Error(e) => Error(e)
   }
 }
 
-// Perform a GET request with rate limiter integration.
-pub fn get_with_rate_limit(url: String, headers: Option<Dict<String>>,
-                           rate_limiter: Crawler.RateLimiter.T) -> Effect[Async] Result<HttpResponse, HttpError> {
-  fn wait_for_limit() -> Effect[Async] Unit {
-    if Crawler.RateLimiter.can_proceed(rate_limiter) {
-      Crawler.RateLimiter.record_request(rate_limiter)
+/** Perform a GET request with rate limiter integration */
+fn getWithRateLimit = async (
+  url: string,
+  ~headers: option<Dict.t<string>>=?,
+  ~rateLimiter: Crawler.RateLimiter.t,
+  (),
+): result<httpResponse, httpError> => {
+  // Wait until rate limit allows
+  fn rec waitForLimit = async () => {
+    if Crawler.RateLimiter.canProceed(rateLimiter) {
+      Crawler.RateLimiter.recordRequest(rateLimiter)
     } else {
-      await sleep_ms(rate_limiter.delay_ms);
-      await wait_for_limit()
+      await Promise.make((resolve, _) => {
+        fn _ = setTimeout(() => resolve(.), rateLimiter.delayMs)
+      })
+      await waitForLimit()
     }
   }
-  await wait_for_limit();
-  await get(url, headers)
+  await waitForLimit()
+  await get(url, ~headers?, ())
 }
 
-// Perform a GET request with retry logic.
-pub fn get_with_retry(url: String, headers: Option<Dict<String>>,
-                       max_retries: Int, backoff: Crawler.RetryPolicy.T) -> Effect[Async] Result<HttpResponse, HttpError> {
-  fn attempt(n: Int) -> Effect[Async] Result<HttpResponse, HttpError> {
-    let resp = await get(url, headers);
-    match resp {
-      Ok(_) => resp,
-      Err(HttpError(429, _)) => {
-        if n < max_retries {
-          await sleep_ms(Crawler.RetryPolicy.calculate_delay(backoff, n + 1));
-          await attempt(n + 1)
-        } else { resp }
-      }
-      Err(NetworkError(_)) => {
-        if n < max_retries {
-          await sleep_ms(Crawler.RetryPolicy.calculate_delay(backoff, n + 1));
-          await attempt(n + 1)
-        } else { resp }
-      }
-      Err(_) => resp,
+/** Perform a GET request with retry logic */
+fn getWithRetry = async (
+  url: string,
+  ~headers: option<Dict.t<string>>=?,
+  ~maxRetries=3,
+  ~backoff=Crawler.RetryPolicy.Exponential(1000, 2.0),
+  (),
+): result<httpResponse, httpError> => {
+  fn rec attempt = async (n: int) => {
+    fn resp = await get(url, ~headers?, ())
+    switch resp {
+    | Ok(_) => resp
+    | Error(HttpError(429, _)) | Error(NetworkError(_)) if n < maxRetries =>
+      fn delay = Crawler.RetryPolicy.calculateDelay(backoff, n + 1)
+      await Promise.make((resolve, _) => {
+        fn _ = setTimeout(() => resolve(.), delay)
+      })
+      await attempt(n + 1)
+    | Error(_) => resp
     }
   }
   await attempt(0)
 }
+
+/** Deno setTimeout binding */
+@val external setTimeout: (unit => unit, int) => int = "setTimeout"
+

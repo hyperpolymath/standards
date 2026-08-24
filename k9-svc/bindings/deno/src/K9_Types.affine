@@ -1,135 +1,224 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
-//
-// K9_Types — core data types for K9 (self-validating components).
-// AffineScript port of K9_Types.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module K9_Types;
 
-extern fn str_trim(s: String) -> String = "string" "trim";
-extern fn str_lower(s: String) -> String = "string" "toLowerCase";
-extern fn str_starts_with(s: String, p: String) -> Bool = "string" "startsWith";
-extern fn str_slice_to_end(s: String, start: Int) -> String = "string" "sliceToEnd";
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath)
+//
+// K9_Types — Core data structs for K9 (Self-Validating Components).
+//
+// Defines the abstract syntax tree for K9 component specifications,
+// including pedigree metadata, security levels (Kennel/Yard/Hunt),
+// target platform constraints, lifecycle recipes, validation blocks,
+// and contract clauses.
 
-pub type SecurityLevel = | Kennel | Yard | Hunt
+// ---------------------------------------------------------------------------
+// Security levels
+// ---------------------------------------------------------------------------
 
-pub fn security_level_from_string(s: String) -> Option<SecurityLevel> {
-  let normalized = str_lower(str_trim(s));
-  let cleaned = if str_starts_with(normalized, "'") {
-    str_slice_to_end(normalized, 1)
+/// K9 security levels forming a trust hierarchy.
+///
+/// - Kennel: Pure data, no execution, safe anywhere.
+/// - Yard:   Controlled execution, limited permissions.
+/// - Hunt:   Full execution with explicit authorisation required.
+struct securityLevel {
+  | Kennel
+  | Yard
+  | Hunt
+
+/// Parse a security level from its canonical string representation.
+/// Recognised values (case-insensitive): "kennel", "yard", "hunt".
+/// Also accepts tick-prefixed forms: "'Kennel", "'Yard", "'Hunt".
+fn securityLevelFromString = (s: string): option<securityLevel> => {
+  fn normalized = s->String.trim->String.toLowerCase
+  // Strip leading tick if present (e.g., "'kennel" -> "kennel")
+  fn cleaned = if normalized->String.startsWith("'") {
+    normalized->String.sliceToEnd(~start=1)
   } else {
     normalized
-  };
-  match cleaned {
-    "kennel" => Some(Kennel),
-    "yard"   => Some(Yard),
-    "hunt"   => Some(Hunt),
-    _        => None,
+  }
+  switch cleaned {
+  | "kennel" => Some(Kennel)
+  | "yard" => Some(Yard)
+  | "hunt" => Some(Hunt)
+  | _ => None
   }
 }
 
-pub fn security_level_to_string(level: SecurityLevel) -> String {
-  match level { Kennel => "'Kennel", Yard => "'Yard", Hunt => "'Hunt" }
-}
-
-pub type Pedigree = {
-  name: String,
-  version: String,
-  description: String,
-  author: Option<String>,
-  license: Option<String>,
-}
-
-pub fn make_pedigree(name: String, version: String, description: String) -> Pedigree {
-  Pedigree { name: name, version: version, description: description, author: None, license: None }
-}
-
-pub type SecurityPolicy = {
-  level: SecurityLevel,
-  allow_network: Bool,
-  allow_fs_write: Bool,
-  allow_subprocess: Bool,
-}
-
-pub fn default_security_policy(level: SecurityLevel) -> SecurityPolicy {
-  match level {
-    Kennel => SecurityPolicy { level: level, allow_network: false, allow_fs_write: false, allow_subprocess: false },
-    Yard   => SecurityPolicy { level: level, allow_network: true,  allow_fs_write: false, allow_subprocess: false },
-    Hunt   => SecurityPolicy { level: level, allow_network: true,  allow_fs_write: true,  allow_subprocess: true },
+/// Return the canonical string representation of a security level.
+/// Uses the tick-prefixed form matching the K9 spec (e.g., "'Kennel").
+fn securityLevelToString = (level: securityLevel): string => {
+  switch level {
+  | Kennel => "'Kennel"
+  | Yard => "'Yard"
+  | Hunt => "'Hunt"
   }
 }
 
-pub type Target = {
-  os: Option<String>,
-  is_edge: Bool,
-  requires_podman: Bool,
-  memory: Option<String>,
+// ---------------------------------------------------------------------------
+// Pedigree metadata
+// ---------------------------------------------------------------------------
+
+/// Pedigree: identity and provenance metadata for a K9 component.
+struct pedigree { {
+  name: string,
+  version: string,
+  description: string,
+  author: option<string>,
+  license: option<string>,
 }
 
-pub type Recipes = {
-  install: Option<String>,
-  validate: Option<String>,
-  deploy: Option<String>,
-  migrate: Option<String>,
-  custom: [(String, String)],
+/// Create a pedigree with the minimum required fields.
+fn makePedigree = (
+  ~name: string,
+  ~version: string,
+  ~description: string,
+): pedigree => {
+  name,
+  version,
+  description,
+  author: None,
+  license: None,
 }
 
-pub fn empty_recipes() -> Recipes {
-  Recipes { install: None, validate: None, deploy: None, migrate: None, custom: [] }
+// ---------------------------------------------------------------------------
+// Security policy
+// ---------------------------------------------------------------------------
+
+/// Security policy combining the level with specific permission flags.
+struct securityPolicy { {
+  level: securityLevel,
+  allowNetwork: bool,
+  allowFsWrite: bool,
+  allowSubprocess: bool,
 }
 
-pub type Validation = {
-  checksum: String,
-  pedigree_version: String,
-  hunt_authorized: Bool,
-}
-
-pub type ContractClause = {
-  clause_type: String,
-  predicate: String,
-  verified: Bool,
-}
-
-pub type Contract = {
-  name: String,
-  clauses: [ContractClause],
-}
-
-pub type Component = {
-  pedigree: Pedigree,
-  security: SecurityPolicy,
-  target: Option<Target>,
-  recipes: Option<Recipes>,
-  validation: Option<Validation>,
-  content: [(String, String)],
-  tags: [String],
-}
-
-pub fn make_component(pedigree: Pedigree, security_level: SecurityLevel) -> Component {
-  Component {
-    pedigree: pedigree,
-    security: default_security_policy(security_level),
-    target: None,
-    recipes: None,
-    validation: None,
-    content: [],
-    tags: [],
+/// Create a default security policy for the given level.
+/// Kennel: all permissions denied.
+/// Yard: network allowed, filesystem write and subprocess denied.
+/// Hunt: all permissions allowed.
+fn defaultSecurityPolicy = (level: securityLevel): securityPolicy => {
+  switch level {
+  | Kennel => {level, allowNetwork: false, allowFsWrite: false, allowSubprocess: false}
+  | Yard => {level, allowNetwork: true, allowFsWrite: false, allowSubprocess: false}
+  | Hunt => {level, allowNetwork: true, allowFsWrite: true, allowSubprocess: true}
   }
 }
 
-pub type ParseError =
+// ---------------------------------------------------------------------------
+// Target platform
+// ---------------------------------------------------------------------------
+
+/// Target platform constraints for a K9 component.
+struct target { {
+  os: option<string>,
+  isEdge: bool,
+  requiresPodman: bool,
+  memory: option<string>,
+}
+
+// ---------------------------------------------------------------------------
+// Recipes
+// ---------------------------------------------------------------------------
+
+/// Collection of standard lifecycle recipes for a K9 component.
+struct recipes { {
+  install: option<string>,
+  validate: option<string>,
+  deploy: option<string>,
+  migrate: option<string>,
+  custom: array<(string, string)>,
+}
+
+/// Create an empty recipes collection.
+fn emptyRecipes = (): recipes => {
+  install: None,
+  validate: None,
+  deploy: None,
+  migrate: None,
+  custom: [],
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+/// Self-validation block for a K9 component.
+struct validation { {
+  checksum: string,
+  pedigreeVersion: string,
+  huntAuthorized: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Contract
+// ---------------------------------------------------------------------------
+
+/// A single clause within a K9 contract.
+struct contractClause { {
+  clauseType: string,
+  predicate: string,
+  verified: bool,
+}
+
+/// A contract attached to a K9 component (from the contractile system).
+struct contract { {
+  name: string,
+  clauses: array<contractClause>,
+}
+
+// ---------------------------------------------------------------------------
+// Component (top-level AST node)
+// ---------------------------------------------------------------------------
+
+/// A K9 self-validating component. This is the top-level AST node
+/// representing a complete .k9 specification file.
+struct component { {
+  pedigree: pedigree,
+  security: securityPolicy,
+  target: option<target>,
+  recipes: option<recipes>,
+  validation: option<validation>,
+  content: array<(string, string)>,
+  tags: array<string>,
+}
+
+/// Create a minimal component with the given pedigree and security level.
+fn makeComponent = (
+  ~pedigree: pedigree,
+  ~securityLevel: securityLevel,
+): component => {
+  pedigree,
+  security: defaultSecurityPolicy(securityLevel),
+  target: None,
+  recipes: None,
+  validation: None,
+  content: [],
+  tags: [],
+}
+
+// ---------------------------------------------------------------------------
+// Parse errors
+// ---------------------------------------------------------------------------
+
+/// Errors that can occur during K9 parsing.
+struct parseError {
   | MissingMagicNumber
-  | MissingPedigree(String)
-  | InvalidSecurityLevel(String)
-  | UnexpectedToken(Int, String)
+  | MissingPedigree(string)
+  | InvalidSecurityLevel(string)
+  | UnexpectedToken({line: int, token: string})
   | EmptyDocument
 
-pub fn parse_error_to_string(err: ParseError) -> String {
-  match err {
-    MissingMagicNumber       => "error[K9]: missing K9! magic number at start of file",
-    MissingPedigree(field)   => "error[K9]: missing required pedigree field \"" ++ field ++ "\"",
-    InvalidSecurityLevel(lv) => "error[K9]: invalid security level \"" ++ lv ++ "\"",
-    UnexpectedToken(line, t) => "error[K9]: line " ++ show(line) ++ ": unexpected token \"" ++ t ++ "\"",
-    EmptyDocument            => "error[K9]: document is empty",
+/// Format a parse error as a diagnostic string.
+fn parseErrorToString = (err: parseError): string => {
+  switch err {
+  | MissingMagicNumber => "error[K9]: missing K9! magic number at start of file"
+  | MissingPedigree(field) => `error[K9]: missing required pedigree field "${field}"`
+  | InvalidSecurityLevel(level) => `error[K9]: invalid security level "${level}"`
+  | UnexpectedToken({line, token}) =>
+    `error[K9]: line ${line->Int.toString}: unexpected token "${token}"`
+  | EmptyDocument => "error[K9]: document is empty"
   }
 }
+
