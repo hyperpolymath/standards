@@ -9,8 +9,10 @@ every repo's live allowlist in sync with it.
 
 == The failure this prevents
 
-RSR repos run with `allowed_actions: selected` + `sha_pinning_required: true`
-(a security posture). Under that setting, if a workflow `uses:` an action or
+RSR repos default to `allowed_actions: all` + `sha_pinning_required: true`.
+The mandatory SHA setting keeps action references immutable while avoiding an
+empty-list outage by construction. Designated release/signing repositories use
+the stricter `selected` posture. Under that posture, if a workflow `uses:` an action or
 reusable-workflow that is **not on the allowlist**, GitHub kills the run at
 *startup* — **zero jobs, no log, an opaque "workflow file issue"**. You cannot
 "squabble" a run that never started: there is no gate to satisfy, no log to read.
@@ -29,7 +31,7 @@ an explicit `patterns_allowed` list). This is the single list every repo's
 `selected-actions` policy must be set from. Add a pattern here when the estate
 adopts a new action; the check below then enforces it everywhere.
 
-== The three tools
+== The policy tools
 
 [cols="1,2,3",options="header"]
 |===
@@ -39,17 +41,23 @@ adopts a new action; the check below then enforces it everywhere.
 | `scripts/check-allowed-actions.sh`
 | Turns the opaque `startup_failure` into a *legible, satisfiable* gate: lists exactly which `uses:` are not covered. No API, no admin — run it in a preflight job, in the governance gate, or locally. Exit 1 on any gap.
 
+| **Live-policy gate**
+| `scripts/check-actions-policy.sh`
+| Reads the repository's actual Actions settings. It blocks disabled Actions, SHA pinning being off, an empty selected allowlist, or a selected list that is not a superset of the canonical policy.
+
 | **Hypatia** (scanner)
 | `hypatia-rules/workflow-allowlist-gap.a2ml` (HYP-S008)
 | Scans the workflow tree and emits a `compliance.finding.new` for each uncovered `uses:` — so the gap is caught at scan time, before a run ever startup-fails.
 
 | **Robot-repo-automaton** (onboarding)
 | `scripts/set-allowed-actions.sh`
-| The ROOT prevention: applies the canonical allowlist. The farm/onboarding process MUST run this (with an admin PAT) whenever a repo is created or migrated, so `patterns_allowed` is never empty. It **escalates repo → org → enterprise**: a repo-level PUT that returns 409 "already set at the organization or enterprise level" falls back to the org (owner), then the enterprise — because the allowlist is often enforced one or two levels up (as it is for `metadatastician`, governed at the org level). Rhodibot (only `contents`/`pull-requests: write`) cannot set Actions policy, so it *detects + reports* via the check; the admin PAT *sets* it.
+| The ROOT prevention: applies `allowed_actions=all` plus mandatory SHA pinning by default, or the canonical selected list when `ACTIONS_POSTURE=selected`. Every PUT is followed by a GET verification that refuses success if GitHub reset SHA pinning. It **escalates repo → org → enterprise** when policy is governed higher up.
 |===
 
-An **allowlist preflight** workflow (`.github/workflows/allowlist-preflight.yml`,
-seeded from the RSR template) makes this a first-class red check: it uses only
+The reusable **allowlist preflight** workflow
+(`.github/workflows/allowlist-preflight-reusable.yml`) makes this a first-class
+red check: callers pass `secrets: inherit` (or explicitly map
+`HYPATIA_SCAN_PAT`) so the live check has Administration-read access. It uses only
 `actions/checkout` (github-owned, always permitted) so it can never itself
 startup-fail, and runs the check on every push/PR — turning "the whole CI went
 dark" into "one legible red check that names the offending `uses:`".
@@ -58,10 +66,11 @@ dark" into "one legible red check that names the offending `uses:`".
 
 A conforming RSR repo MUST:
 
-. set `allowed_actions = selected` and `sha_pinning_required = true`;
-. have a `selected-actions` allowlist that is a superset of what its workflows
-  `uses:` (verify: `check-allowed-actions.sh` exits 0);
-. have that allowlist applied by the onboarding automaton, not hand-curated per repo.
+. set `allowed_actions = all` and `sha_pinning_required = true`, or use the
+  designated high-sensitivity `selected` posture;
+. when selected, have a live allowlist that is a superset of the canonical list;
+. pass both `check-allowed-actions.sh` (tree) and `check-actions-policy.sh` (live);
+. have the policy applied by the onboarding automaton, not hand-curated per repo.
 
 == Applying / fixing a repo
 
@@ -70,15 +79,18 @@ A conforming RSR repo MUST:
 # Detect gaps (safe, no admin):
 bash scripts/check-allowed-actions.sh rhodium-standard-repositories/actions-allowlist/allowed-actions.json .github/workflows
 
-# Apply the canonical allowlist (needs an admin PAT — farm admin token):
+# Apply the default all + SHA-pinning policy (needs an admin PAT):
 bash scripts/set-allowed-actions.sh <owner>/<repo>
+
+# Designated high-sensitivity repository:
+ACTIONS_POSTURE=selected bash scripts/set-allowed-actions.sh <owner>/<repo>
 ----
 
 Or directly:
 
 [source,console]
 ----
-gh api -X PUT repos/<owner>/<repo>/actions/permissions -F enabled=true -f allowed_actions=selected
-gh api -X PUT repos/<owner>/<repo>/actions/permissions/selected-actions \
-  --input rhodium-standard-repositories/actions-allowlist/allowed-actions.json
+gh api -X PUT repos/<owner>/<repo>/actions/permissions \
+  -F enabled=true -f allowed_actions=all -F sha_pinning_required=true
+gh api repos/<owner>/<repo>/actions/permissions
 ----

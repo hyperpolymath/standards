@@ -11,6 +11,10 @@ on:
         type: string
         required: false
         default: ubuntu-latest
+    secrets:
+      HYPATIA_SCAN_PAT:
+        description: Fine-grained token with repository Administration read access
+        required: false
 
 permissions:
   actions: read
@@ -83,20 +87,33 @@ jobs:
             scripts
           sparse-checkout-cone-mode: false
 
-      - name: Run allowlist preflight check
+      - name: Run tree allowlist preflight check
         run: |
-          # check-actions-policy.sh `exec`s its SIBLING check-allowed-actions.sh
-          # via "${0%/*}/...". Copying only the first script and then deleting
-          # the checkout left that sibling missing, so the step died with exit
-          # 127 (command not found) on every run. Stage both, plus the canonical
-          # allowlist itself — consumer repos have no copy of it in their tree.
-          cp .standards-checkout/scripts/check-actions-policy.sh \
-             .standards-checkout/scripts/check-allowed-actions.sh "$RUNNER_TEMP/"
-          cp .standards-checkout/rhodium-standard-repositories/actions-allowlist/allowed-actions.json \
-             "$RUNNER_TEMP/allowed-actions.json"
+          # Bootstrap rule: standards must test the scripts from its PR tree;
+          # consumers use the canonical copies checked out from standards.
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
+            cp scripts/check-actions-policy.sh scripts/check-allowed-actions.sh "$RUNNER_TEMP/"
+            cp rhodium-standard-repositories/actions-allowlist/allowed-actions.json \
+               "$RUNNER_TEMP/allowed-actions.json"
+          else
+            cp .standards-checkout/scripts/check-actions-policy.sh \
+               .standards-checkout/scripts/check-allowed-actions.sh "$RUNNER_TEMP/"
+            cp .standards-checkout/rhodium-standard-repositories/actions-allowlist/allowed-actions.json \
+               "$RUNNER_TEMP/allowed-actions.json"
+          fi
+          bash "$RUNNER_TEMP/check-allowed-actions.sh" \
+            "$RUNNER_TEMP/allowed-actions.json" .github/workflows
+
+      - name: Check live Actions policy
+        env:
+          # GitHub's job token cannot read this Administration endpoint. Keep
+          # this dependency explicit: missing/expired credentials must make the
+          # live control red rather than silently reducing it to a tree check.
+          GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
+        run: |
           rm -rf .standards-checkout
-          ALLOWLIST_JSON="$RUNNER_TEMP/allowed-actions.json" \
-            bash "$RUNNER_TEMP/check-actions-policy.sh" .github/workflows
+          bash "$RUNNER_TEMP/check-actions-policy.sh" \
+            "$GITHUB_REPOSITORY" "$RUNNER_TEMP/allowed-actions.json"
 
   validate-hypatia-baseline:
     name: Validate Hypatia Baseline

@@ -1,0 +1,64 @@
+# This workflow is managed by gh actions-lock.
+# SPDX-License-Identifier: MPL-2.0
+# Reusable fail-closed Actions policy preflight (standards#486).
+name: Actions Policy Preflight Reusable
+
+on:
+  workflow_call:
+    secrets:
+      HYPATIA_SCAN_PAT:
+        description: Fine-grained token with repository Administration read access
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Actions policy (tree + live)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+
+      - name: Checkout policy source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          path: .standards-checkout
+          sparse-checkout: |
+            rhodium-standard-repositories/actions-allowlist
+            scripts/check-actions-policy.sh
+            scripts/check-allowed-actions.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Stage policy tools outside the scanned tree
+        run: |
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
+            cp scripts/check-actions-policy.sh scripts/check-allowed-actions.sh "$RUNNER_TEMP/"
+            cp rhodium-standard-repositories/actions-allowlist/allowed-actions.json \
+               "$RUNNER_TEMP/allowed-actions.json"
+          else
+            cp .standards-checkout/scripts/check-actions-policy.sh \
+               .standards-checkout/scripts/check-allowed-actions.sh "$RUNNER_TEMP/"
+            cp .standards-checkout/rhodium-standard-repositories/actions-allowlist/allowed-actions.json \
+               "$RUNNER_TEMP/allowed-actions.json"
+          fi
+          rm -rf .standards-checkout
+
+      - name: Check workflow references against canonical allowlist
+        run: |
+          bash "$RUNNER_TEMP/check-allowed-actions.sh" \
+            "$RUNNER_TEMP/allowed-actions.json" .github/workflows
+
+      - name: Check live repository policy
+        env:
+          GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT || github.token }}
+        run: |
+          bash "$RUNNER_TEMP/check-actions-policy.sh" \
+            "$GITHUB_REPOSITORY" "$RUNNER_TEMP/allowed-actions.json"

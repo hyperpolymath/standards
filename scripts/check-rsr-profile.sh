@@ -12,13 +12,16 @@
 #   VESTIGIAL — present but the repo does not declare the gating capability.
 #   MISSING   — the capability is declared but the module is absent.
 #
-# Usage: check-rsr-profile.sh [REPO_DIR]   (default: current directory)
+# Usage: check-rsr-profile.sh [REPO_DIR] [owner/repo]
+# Set RSR_REPOSITORY instead of the second argument to enforce the live
+# Actions policy alongside the local capability profile.
 # Exit:  0 OK | 1 violations | 2 setup error
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATES="${RSR_GATES:-$SCRIPT_DIR/../.machine_readable/template-capability-gates.toml}"
 REPO="${1:-.}"
+LIVE_REPOSITORY="${2:-${RSR_REPOSITORY:-}}"
 PROFILE="$REPO/.machine_readable/rsr-profile.a2ml"
 
 [ -f "$GATES" ] || { echo "ERROR: gates file not found: $GATES" >&2; exit 2; }
@@ -74,14 +77,14 @@ present() {
   local key="$1"
   case "$key" in
     */) [ -d "$REPO/${key%/}" ] ;;
-    *'*'*) ( shopt -s globstar nullglob; local m=("$REPO"/$key); [ ${#m[@]} -gt 0 ] ) ;;
+    *'*'*) ( shopt -s globstar nullglob; compgen -G "$REPO/$key" >/dev/null ) ;;
     *) [ -e "$REPO/$key" ] ;;
   esac
 }
 
 echo "repo:    $REPO"
 echo "profile: ${PRESET:+preset=$PRESET }${DIRECT:+direct-capabilities}"
-echo "effective capabilities: $(printf '%s ' $EFFECTIVE)"
+echo "effective capabilities: $(printf '%s\n' "$EFFECTIVE" | paste -sd ' ' -)"
 echo
 
 fail=0
@@ -107,5 +110,10 @@ Fix one of:
   * add the missing module.
 MSG
   exit 1
+fi
+
+if [ -n "$LIVE_REPOSITORY" ]; then
+  echo "checking live Actions policy: $LIVE_REPOSITORY"
+  bash "$SCRIPT_DIR/check-actions-policy.sh" "$LIVE_REPOSITORY"
 fi
 echo "rsr-profile check: OK — scaffold matches declared capabilities."

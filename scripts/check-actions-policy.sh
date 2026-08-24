@@ -1,38 +1,66 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
-# check-actions-policy.sh — RSR Actions Allowlist Policy gate
+# Check the LIVE GitHub Actions policy for a repository (standards#486).
 #
-# Part of Issue #486: Wire allowlist preflight into governance gate.
-#
-# This script wraps check-allowed-actions.sh to validate that every `uses:`
-# in the caller repo's workflows is covered by the canonical allowlist.
-# It is designed to run in CI (as part of governance-reusable.yml) with
-# minimal dependencies: only actions/checkout (github-owned, always permitted),
-# so it can never itself startup-fail due to an allowlist gap.
-#
-# Exit codes:
-#   0 = all `uses:` are covered by the canonical allowlist
-#   1 = one or more gaps detected
-#   2 = allowlist file not found (should never happen in standards repo)
-#
-# Usage: check-actions-policy.sh [WORKFLOWS_DIR]
-#   WORKFLOWS_DIR defaults to .github/workflows
+# Usage: check-actions-policy.sh <owner/repo> [allowed-actions.json]
+# Exit: 0 compliant | 1 policy violation/API failure | 2 setup error
 set -euo pipefail
 
-WF_DIR="${1:-.github/workflows}"
+REPOSITORY="${1:?usage: check-actions-policy.sh <owner/repo> [allowed-actions.json]}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CANON="${2:-${ALLOWLIST_JSON:-$SCRIPT_DIR/../rhodium-standard-repositories/actions-allowlist/allowed-actions.json}}"
+GH_BIN="${GH_BIN:-gh}"
 
-# The canonical allowlist lives in this repo at
-# rhodium-standard-repositories/actions-allowlist/allowed-actions.json
-# Resolve the canonical allowlist. $ALLOWLIST_JSON lets the caller point at a
-# copy staged outside the scanned tree — required for consumer repos, which do
-# not have rhodium-standard-repositories/ in their own checkout.
-CANON="${ALLOWLIST_JSON:-rhodium-standard-repositories/actions-allowlist/allowed-actions.json}"
+[ -f "$CANON" ] || { echo "ERROR: canonical allowlist not found: $CANON" >&2; exit 2; }
+command -v "$GH_BIN" >/dev/null 2>&1 || { echo "ERROR: GitHub CLI not found: $GH_BIN" >&2; exit 2; }
 
-if [ ! -f "$CANON" ]; then
-  echo "::error::Canonical allowlist not found: $CANON"
-  echo "This script must be run from the standards repository or a checkout that includes it."
-  exit 2
-fi
+permissions="$($GH_BIN api "repos/$REPOSITORY/actions/permissions")" || {
+  echo "ERROR: could not read live Actions permissions for $REPOSITORY" >&2
+  exit 1
+}
 
-# Run the actual check
-exec bash "${0%/*}/check-allowed-actions.sh" "$CANON" "$WF_DIR"
+enabled="$(jq -r '.enabled // false' <<<"$permissions")"
+allowed="$(jq -r '.allowed_actions // "missing"' <<<"$permissions")"
+sha_pin="$(jq -r '.sha_pinning_required // false' <<<"$permissions")"
+
+[ "$enabled" = true ] || { echo "ERROR: Actions are disabled for $REPOSITORY" >&2; exit 1; }
+[ "$sha_pin" = true ] || { echo "ERROR: sha_pinning_required is OFF for $REPOSITORY" >&2; exit 1; }
+
+case "$allowed" in
+  all)
+    echo "policy ok: repository=$REPOSITORY allowed=all sha_pin=true"
+    ;;
+  selected)
+    selected="$($GH_BIN api "repos/$REPOSITORY/actions/permissions/selected-actions")" || {
+      echo "ERROR: could not read selected Actions policy for $REPOSITORY" >&2
+      exit 1
+    }
+    count="$(jq -r '(.patterns_allowed // []) | length' <<<"$selected")"
+    [ "$count" -gt 0 ] || {
+      echo "ERROR: allowed_actions=selected with EMPTY patterns_allowed for $REPOSITORY" >&2
+      exit 1
+    }
+    missing="$(jq -n --argjson canon "$(<"$CANON")" --argjson live "$selected" '
+      [($canon.patterns_allowed // [])[] as $required
+       | select((($live.patterns_allowed // []) | index($required)) == null)
+       | $required]')"
+    if [ "$(jq 'length' <<<"$missing")" -ne 0 ]; then
+      echo "ERROR: live selected allowlist is not a superset of the canonical policy:" >&2
+      jq -r '.[] | "  missing: \(.)"' <<<"$missing" >&2
+      exit 1
+    fi
+    for flag in github_owned_allowed verified_allowed; do
+      required="$(jq -r --arg flag "$flag" '.[$flag] // false' "$CANON")"
+      live="$(jq -r --arg flag "$flag" '.[$flag] // false' <<<"$selected")"
+      if [ "$required" = true ] && [ "$live" != true ]; then
+        echo "ERROR: selected policy disables required flag $flag" >&2
+        exit 1
+      fi
+    done
+    echo "policy ok: repository=$REPOSITORY allowed=selected patterns=$count sha_pin=true"
+    ;;
+  *)
+    echo "ERROR: unsupported allowed_actions value '$allowed' for $REPOSITORY" >&2
+    exit 1
+    ;;
+esac

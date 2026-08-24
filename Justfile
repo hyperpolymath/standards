@@ -41,6 +41,20 @@ staleness-test:
     @echo "=== propagate-workflow-pins ==="
     @bash scripts/tests/propagate-workflow-pins-test.sh
 
+# Check the repository's workflow references and, when a repository slug is
+# supplied, its live Actions policy. Example: just check-allowlist hyperpolymath/standards
+check-allowlist repository="":
+    @bash scripts/check-allowed-actions.sh rhodium-standard-repositories/actions-allowlist/allowed-actions.json .github/workflows
+    @if [ -n "{{repository}}" ]; then bash scripts/check-actions-policy.sh "{{repository}}"; fi
+
+# Apply the estate default (all + mandatory SHA pinning). Use posture=selected
+# only for a designated high-sensitivity repository.
+set-allowlist repository posture="all":
+    @ACTIONS_POSTURE="{{posture}}" bash scripts/set-allowed-actions.sh "{{repository}}"
+
+actions-policy-test:
+    @bash scripts/tests/actions-policy-486-test.sh
+
 # Wave-0 anti-false-green regression: proves each fixed validator CAN fail
 false-green-test:
     @bash scripts/tests/wave0-false-green-test.sh
