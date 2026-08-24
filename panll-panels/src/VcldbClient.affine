@@ -1,55 +1,65 @@
 // SPDX-License-Identifier: MPL-2.0
-// VeriSimDB query client. AffineScript port of VcldbClient.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module VcldbClient;
 
-extern fn fetch_post(url: String, init: Json) -> Promise<Json> = "global" "fetch";
-extern fn json_stringify_any(v: a) -> Option<String> = "JSON" "stringifyAny";
-extern fn json_to_query_result(j: Json) -> QueryResult = "json" "asQueryResult";
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// VeriSimDB query client — executes VCL queries, returns octad rows.
+//
+// Thin wrapper over fetch(). Consumers (panels) call one of the
+// structd helpers below rather than constructing raw VCL strings.
 
-pub type OctadRow = {
-  id: String,
-  entity: String,
-  semantic: Dict<Json>,
-  temporal: Dict<Json>,
+struct octadRow { {
+  "id": string,
+  "entity": string,
+  "semantic": Js.Dict.t<Js.Json.t>,
+  "temporal": Js.Dict.t<Js.Json.t>,
 }
 
-pub type QueryResult = {
-  rows: [OctadRow],
-  query_ms: Int,
+struct queryResult { {
+  rows: array<octadRow>,
+  queryMs: int,
 }
 
-pub let base_url = "http://localhost:8097";
+@val external fetch: (string, 'a) => promise<'b> = "fetch"
 
-pub fn run_vcl(vcl: String) -> Effect[Async] Result<QueryResult, String> {
-  let body = match json_stringify_any(json_object([("vcl", json_string(vcl))])) {
-    Some(s) => s, None => "{}",
-  };
-  let init = json_object([
-    ("method", json_string("POST")),
-    ("headers", json_object([("Content-Type", json_string("application/json"))])),
-    ("body", json_string(body)),
-  ]);
+fn baseUrl = "http://localhost:8097"
+
+fn runVcl = async (vcl: string): result<queryResult, string> => {
+  fn body = Js.Json.stringifyAny({"vcl": vcl})->Belt.Option.getWithDefault("{}")
+  fn init = {
+    "method": "POST",
+    "headers": Js.Dict.fromArray([("Content-Type", "application/json")]),
+    "body": body,
+  }
   try {
-    let resp = await fetch_post(base_url ++ "/vcl/query", init);
-    Ok(json_to_query_result(resp))
-  } catch _e {
-    Err("VeriSimDB query failed — is it running on port 8097?")
+    fn resp = await fetch(baseUrl ++ "/vcl/query", init)
+    fn json: queryResult = %raw("resp.json()")
+    Ok(json)
+  } catch {
+  | _ => Error("VeriSimDB query failed — is it running on port 8097?")
   }
 }
 
-pub fn grade_distribution() -> Effect[Async] Result<QueryResult, String> {
-  run_vcl("octads(entity=\"crg-grade\") |> latest_per(\"component\") |> group_by(\"grade\") |> count()")
-}
+// ─────────────────────────────────────────────────────────────
+// Typed queries — one per panel use-case
+// ─────────────────────────────────────────────────────────────
 
-pub fn open_findings() -> Effect[Async] Result<QueryResult, String> {
-  run_vcl("octads(entity=\"compliance-scan\") |> where(\"temporal.resolved_at == null\") |> group_by(\"repo, severity\") |> count()")
-}
+fn gradeDistribution = () =>
+  runVcl(`octads(entity="crg-grade") |> latest_per("component") |> group_by("grade") |> count()`)
 
-pub fn current_proofs() -> Effect[Async] Result<QueryResult, String> {
-  run_vcl("octads(entity=\"proof-status\") |> latest_per(\"file, theorem_name\") |> project(\"file, prover, theorem_name, trust_level, verified_at\")")
-}
+fn openFindings = () =>
+  runVcl(
+    `octads(entity="compliance-scan") |> where("temporal.resolved_at == null") |> group_by("repo, severity") |> count()`,
+  )
 
-pub fn stale_proofs(days: Int) -> Effect[Async] Result<QueryResult, String> {
-  run_vcl("octads(entity=\"proof-status\") |> where(\"temporal.proof_age_days > " ++ show(days) ++ "\") |> order_by(\"proof_age_days desc\")")
-}
+fn currentProofs = () =>
+  runVcl(
+    `octads(entity="proof-status") |> latest_per("file, theorem_name") |> project("file, prover, theorem_name, trust_level, verified_at")`,
+  )
+
+fn staleProofs = (days: int) =>
+  runVcl(
+    `octads(entity="proof-status") |> where("temporal.proof_age_days > ${days->Belt.Int.toString}") |> order_by("proof_age_days desc")`,
+  )
+

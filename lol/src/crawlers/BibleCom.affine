@@ -1,210 +1,266 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
-//
-// Bible.com (YouVersion) web-scraping crawler. AffineScript port of BibleCom.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module BibleCom;
 
-use Crawler;
-use Http;
-use Lang1000;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell and Contributors
 
-extern fn json_parse_exn(s: String) -> Json = "JSON" "parseExn";
-extern fn json_data_array(j: Json) -> Option<[Dict<Json>]> = "json" "dataObjArray";
-extern fn json_str_field(o: Dict<Json>, key: String) -> String = "json" "strField";
-extern fn json_int_field(o: Dict<Json>, key: String) -> Int = "json" "intField";
-extern fn json_bool_field(o: Dict<Json>, key: String) -> Bool = "json" "boolField";
-extern fn str_replace_regex(s: String, pattern: String, repl: String) -> String = "string" "replaceRegExp";
-extern fn str_trim(s: String) -> String = "string" "trim";
-extern fn str_split(s: String, sep: String) -> [String] = "string" "split";
+/**
+ * Bible.com Crawler
+ *
+ * Crawler implementation for YouVersion (bible.com)
+ * Web scraping approach for Bible translations.
+ * Rate limited to 2 req/sec to respect server limits.
+ */
 
-module Config {
-  pub let base_url = "https://www.bible.com";
-  pub let api_url = "https://www.bible.com/api/bible";
-  pub let rate_limit_ms = 2000;
+open Crawler.Types
 
-  pub type VersionInfo = {
-    id: Int,
-    abbreviation: String,
-    title: String,
-    language_tag: String,
+module Config = {
+  fn baseUrl = "https://www.bible.com"
+  fn apiUrl = "https://www.bible.com/api/bible"
+  fn rateLimitMs = 2000
+
+  struct versionInfo { {
+    id: int,
+    abbreviation: string,
+    title: string,
+    languageTag: string,
   }
 }
 
-module Endpoints {
-  pub fn versions() -> String { Config.base_url ++ "/versions" }
-  pub fn version(id: Int) -> String { Config.base_url ++ "/versions/" ++ show(id) }
-  pub fn bible(id: Int, book_code: String, chapter: Int) -> String {
-    Config.base_url ++ "/bible/" ++ show(id) ++ "/" ++ book_code ++ "." ++ show(chapter)
+module Endpoints = {
+  fn versions = () => `${Config.baseUrl}/versions`
+  fn version = versionId => `${Config.baseUrl}/versions/${Int.toString(versionId)}`
+  fn bible = (versionId, bookCode, chapter) =>
+    `${Config.baseUrl}/bible/${Int.toString(versionId)}/${bookCode}.${Int.toString(chapter)}`
+  fn search = (versionId, query) =>
+    `${Config.baseUrl}/search/bible?version_id=${Int.toString(versionId)}&q=${query}`
+  fn apiChapter = (versionId, bookCode, chapter) =>
+    `${Config.apiUrl}/chapter/${Int.toString(versionId)}/${bookCode}.${Int.toString(chapter)}.json`
+}
+
+module Selectors = {
+  fn verseContainer = ".ChapterContent_verse__uvbXo"
+  fn verseNumber = ".ChapterContent_label__R2PLt"
+  fn verseText = ".ChapterContent_content__RlRwn"
+  fn chapterNav = ".ChapterContent_nav__vVPwy"
+  fn versionSelector = ".VersionSelector_container__3uKjR"
+}
+
+module Types = {
+  struct versionMeta { {
+    id: int,
+    abbreviation: string,
+    title: string,
+    language: Lang1000.Language.t,
+    hasAudio: bool,
+    hasOffline: bool,
   }
-  pub fn search(id: Int, query: String) -> String {
-    Config.base_url ++ "/search/bible?version_id=" ++ show(id) ++ "&q=" ++ query
-  }
-  pub fn api_chapter(id: Int, book_code: String, chapter: Int) -> String {
-    Config.api_url ++ "/chapter/" ++ show(id) ++ "/" ++ book_code ++ "." ++ show(chapter) ++ ".json"
+
+  struct chapterContent { {
+    versionId: int,
+    book: string,
+    chapter: int,
+    verses: array<Lang1000.Verse.t>,
+    nextChapter: option<(string, int)>,
+    prevChapter: option<(string, int)>,
   }
 }
 
-module Selectors {
-  pub let verse_container = ".ChapterContent_verse__uvbXo";
-  pub let verse_number = ".ChapterContent_label__R2PLt";
-  pub let verse_text = ".ChapterContent_content__RlRwn";
-  pub let chapter_nav = ".ChapterContent_nav__vVPwy";
-  pub let version_selector = ".VersionSelector_container__3uKjR";
-}
+module Parser = {
+  open Types
 
-module Types {
-  pub type VersionMeta = {
-    id: Int,
-    abbreviation: String,
-    title: String,
-    language: Lang1000.Language.T,
-    has_audio: Bool,
-    has_offline: Bool,
-  }
-
-  pub type ChapterContent = {
-    version_id: Int,
-    book: String,
-    chapter: Int,
-    verses: [Lang1000.Verse.T],
-    next_chapter: Option<(String, Int)>,
-    prev_chapter: Option<(String, Int)>,
-  }
-}
-
-module Parser {
-  use Types;
-
-  pub fn parse_version_list(json: Json) -> Crawler.Parser.ParseResult<[Types.VersionMeta]> {
-    match json_data_array(json) {
-      None => Crawler.Parser.NoMatch,
-      Some(arr) => {
-        let versions = [];
-        let i = 0;
-        while i < len(arr) {
-          let v = arr[i];
-          let lang_tag = json_str_field(v, "language_tag");
-          versions = versions ++ [Types.VersionMeta {
-            id: json_int_field(v, "id"),
-            abbreviation: json_str_field(v, "abbreviation"),
-            title: json_str_field(v, "title"),
-            language: Lang1000.Language.make(lang_tag, lang_tag, None, None, None),
-            has_audio: json_bool_field(v, "has_audio"),
-            has_offline: json_bool_field(v, "has_offline"),
-          }];
-          i = i + 1;
-        }
+  /** Parse version listing from API JSON response */
+  fn parseVersionList = (json: JSON.t): Crawler.Parser.parseResult<array<versionMeta>> => {
+    switch json {
+    | Object(obj) =>
+      switch obj->Dict.get("data") {
+      | Some(Array(arr)) =>
+        fn versions = arr->Array.filterMap(item => {
+          switch item {
+          | Object(v) =>
+            fn getString = (d: Dict.t<JSON.t>, k: string) =>
+              switch d->Dict.get(k) {
+              | Some(String(s)) => s
+              | _ => ""
+              }
+            fn getInt = (d: Dict.t<JSON.t>, k: string) =>
+              switch d->Dict.get(k) {
+              | Some(Number(n)) => Float.toInt(n)
+              | _ => 0
+              }
+            fn getBool = (d: Dict.t<JSON.t>, k: string) =>
+              switch d->Dict.get(k) {
+              | Some(Boolean(b)) => b
+              | _ => false
+              }
+            fn langTag = getString(v, "language_tag")
+            Some({
+              id: getInt(v, "id"),
+              abbreviation: getString(v, "abbreviation"),
+              title: getString(v, "title"),
+              language: Lang1000.Language.make(~code=langTag, ~name=langTag, ()),
+              hasAudio: getBool(v, "has_audio"),
+              hasOffline: getBool(v, "has_offline"),
+            })
+          | _ => None
+          }
+        })
         Crawler.Parser.Parsed(versions)
+      | _ => Crawler.Parser.NoMatch
       }
+    | _ => Crawler.Parser.NoMatch
     }
   }
 
-  pub fn strip_html_tags(html: String) -> String {
-    str_trim(str_replace_regex(str_replace_regex(html, "<[^>]+>", ""), "\\s+", " "))
+  /** Extract clean text from HTML by stripping tags */
+  fn stripHtmlTags = (html: string): string => {
+    html
+    ->String.replaceRegExp(%re("/<[^>]+>/g"), "")
+    ->String.replaceRegExp(%re("/\s+/g"), " ")
+    ->String.trim
   }
 
-  pub fn parse_chapter_html(html: String, version_id: Int, book: String, chapter: Int,
-                            language_code: String) -> Crawler.Parser.ParseResult<Types.ChapterContent> {
-    let verses = [];
-    let blocks = str_split(html, "data-usfm=\"");
-    let i = 1;
-    while i < len(blocks) {
-      let cleaned = strip_html_tags(blocks[i]);
-      if len(cleaned) > 0 {
-        verses = verses ++ [Lang1000.Verse.make(
-          Lang1000.Verse.make_reference(book, chapter, len(verses) + 1),
-          cleaned, language_code)];
+  /** Parse chapter content from HTML page */
+  fn parseChapterHtml = (
+    html: string,
+    ~versionId: int,
+    ~book: string,
+    ~chapter: int,
+    ~languageCode: string,
+    (),
+  ): Crawler.Parser.parseResult<chapterContent> => {
+    // Extract verse blocks using regex on HTML structure
+    fn verseRegex = %re(
+      "/data-usfm=\"([^\"]+)\"[^>]*>.*?<span[^>]*class=\"[^\"]*content[^\"]*\"[^>]*>(.*?)<\/span>/gs"
+    )
+    fn verses = []
+    fn _ = html->String.replaceRegExp(verseRegex, (match_, _offset, _str) => {
+      // This is a simplified extraction - the regex captures verse refs and content
+      fn cleaned = stripHtmlTags(match_)
+      if String.length(cleaned) > 0 {
+        fn verse = Lang1000.Verse.make(
+          ~reference=Lang1000.Verse.makeReference(~book, ~chapter, ~verse=Array.length(verses) + 1),
+          ~text=cleaned,
+          ~language=languageCode,
+        )
+        ignore(Array.concat(verses, [verse]))
       }
-      i = i + 1;
-    }
-    if len(verses) > 0 {
-      Crawler.Parser.Parsed(Types.ChapterContent {
-        version_id: version_id, book: book, chapter: chapter,
-        verses: verses, next_chapter: None, prev_chapter: None,
+      match_
+    })
+
+    if Array.length(verses) > 0 {
+      Crawler.Parser.Parsed({
+        versionId,
+        book,
+        chapter,
+        verses,
+        nextChapter: None,
+        prevChapter: None,
       })
     } else {
       Crawler.Parser.NoMatch
     }
   }
 
-  pub fn normalize_text(text: String) -> String {
-    str_replace_regex(str_trim(text), "\\s+", " ")
+  fn normalizeText = (text: string): string => {
+    text
+    ->String.trim
+    ->String.replaceRegExp(%re("/\s+/g"), " ")
   }
 }
 
-module Crawler_ {
-  use Crawler.Types;
-
-  pub type T = {
-    rate_limiter: Crawler.RateLimiter.T,
-    mut state: Crawler.Types.CrawlerState,
-    mut cached_versions: Option<[Types.VersionMeta]>,
+module Crawler = {
+  struct t { {
+    rateLimiter: Crawler.RateLimiter.t,
+    mutable state: crawlerState,
+    mutable cachedVersions: option<array<Types.versionMeta>>,
   }
 
-  pub fn make() -> T {
-    T {
-      rate_limiter: Crawler.RateLimiter.make(Config.rate_limit_ms),
-      state: Crawler.Types.Idle,
-      cached_versions: None,
-    }
+  fn make = () => {
+    rateLimiter: Crawler.RateLimiter.make(~delayMs=Config.rateLimitMs, ()),
+    state: Idle,
+    cachedVersions: None,
   }
 
-  pub fn fetch_versions(crawler: T) -> Effect[Async] Crawler.Types.CrawlResult<[Types.VersionMeta]> {
-    match crawler.cached_versions {
-      Some(versions) => Crawler.Types.Success(versions),
-      None => {
-        crawler.state = Crawler.Types.Crawling("versions");
-        let resp = await Http.get_with_rate_limit(Endpoints.versions(), None, crawler.rate_limiter);
-        crawler.state = Crawler.Types.Idle;
-        match resp {
-          Ok(r) => {
-            match Parser.parse_version_list(json_parse_exn(r.body)) {
-              Crawler.Parser.Parsed(versions) => {
-                crawler.cached_versions = Some(versions);
-                Crawler.Types.Success(versions)
-              }
-              _ => Crawler.Types.Failure("Failed to parse versions"),
-            }
-          }
-          Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
-          Err(_) => Crawler.Types.Failure("Request failed"),
+  fn fetchVersions = async (crawler: t): crawlResult<array<Types.versionMeta>> => {
+    switch crawler.cachedVersions {
+    | Some(versions) => Success(versions)
+    | None =>
+      crawler.state = Crawling("versions")
+      fn resp = await Http.getWithRateLimit(
+        Endpoints.versions(),
+        ~rateLimiter=crawler.rateLimiter,
+        (),
+      )
+      crawler.state = Idle
+      switch resp {
+      | Ok({body}) =>
+        switch Parser.parseVersionList(JSON.parseExn(body)) {
+        | Crawler.Parser.Parsed(versions) =>
+          crawler.cachedVersions = Some(versions)
+          Success(versions)
+        | _ => Failure("Failed to parse versions")
         }
+      | Error(Http.HttpError(code, msg)) => Failure(`HTTP ${Int.toString(code)}: ${msg}`)
+      | Error(_) => Failure("Request failed")
       }
     }
   }
 
-  pub fn fetch_chapter(crawler: T, version_id: Int, book: String, chapter: Int,
-                       language_code: String) -> Effect[Async] Crawler.Types.CrawlResult<Types.ChapterContent> {
-    let resp = await Http.get_with_rate_limit(Endpoints.bible(version_id, book, chapter), None, crawler.rate_limiter);
-    match resp {
-      Ok(r) => {
-        match Parser.parse_chapter_html(r.body, version_id, book, chapter, language_code) {
-          Crawler.Parser.Parsed(content) => Crawler.Types.Success(content),
-          _ => Crawler.Types.Failure("Failed to parse chapter HTML"),
-        }
+  fn fetchChapter = async (
+    crawler: t,
+    versionId: int,
+    book: string,
+    chapter: int,
+    languageCode: string,
+  ): crawlResult<Types.chapterContent> => {
+    fn resp = await Http.getWithRateLimit(
+      Endpoints.bible(versionId, book, chapter),
+      ~rateLimiter=crawler.rateLimiter,
+      (),
+    )
+    switch resp {
+    | Ok({body}) =>
+      switch Parser.parseChapterHtml(body, ~versionId, ~book, ~chapter, ~languageCode, ()) {
+      | Crawler.Parser.Parsed(content) => Success(content)
+      | _ => Failure("Failed to parse chapter HTML")
       }
-      Err(Http.HttpError(code, msg)) => Crawler.Types.Failure("HTTP " ++ show(code) ++ ": " ++ msg),
-      Err(_) => Crawler.Types.Failure("Request failed"),
+    | Error(Http.HttpError(code, msg)) => Failure(`HTTP ${Int.toString(code)}: ${msg}`)
+    | Error(_) => Failure("Request failed")
     }
   }
 
-  pub fn fetch_book(crawler: T, version_id: Int, book: String, total_chapters: Int,
-                    language_code: String) -> Effect[Async] Crawler.Types.CrawlResult<[Types.ChapterContent]> {
-    let chapters = [];
-    let failed = false;
-    let fail_msg = "";
-    let ch = 1;
-    while ch <= total_chapters {
-      if !failed {
-        match await fetch_chapter(crawler, version_id, book, ch, language_code) {
-          Crawler.Types.Success(content) => { chapters = chapters ++ [content]; }
-          Crawler.Types.Failure(msg)     => { failed = true; fail_msg = msg; }
-          Crawler.Types.Pending          => {}
+  fn fetchBook = async (
+    crawler: t,
+    versionId: int,
+    book: string,
+    totalChapters: int,
+    languageCode: string,
+  ): crawlResult<array<Types.chapterContent>> => {
+    fn chapters = []
+    fn failed = ref(false)
+    fn failMsg = ref("")
+
+    for ch in 1 to totalChapters {
+      if !failed.contents {
+        fn result = await fetchChapter(crawler, versionId, book, ch, languageCode)
+        switch result {
+        | Success(content) => ignore(Array.concat(chapters, [content]))
+        | Failure(msg) =>
+          failed := true
+          failMsg := msg
+        | Pending => ()
         }
       }
-      ch = ch + 1;
     }
-    if failed { Crawler.Types.Failure(fail_msg) } else { Crawler.Types.Success(chapters) }
+
+    if failed.contents {
+      Failure(failMsg.contents)
+    } else {
+      Success(chapters)
+    }
   }
 }
+

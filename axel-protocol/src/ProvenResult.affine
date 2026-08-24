@@ -1,39 +1,50 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-//
-// Result type for proven bindings. AffineScript port of ProvenResult.res.
-// Matches the JS { ok: boolean, value?: T, error?: string } pattern.
+// Ported via Harvard Engine (Semantic pass)
 
 module ProvenResult;
 
-pub type JsResult<v> = {
-  ok: Bool,
-  value: Option<v>,
-  error: Option<String>,
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+/**
+ * Result struct for proven bindings
+ * Matches the JavaScript { ok: boolean, value?: T, error?: string } pattern
+ */
+
+struct t<'value, 'error> = result<'value, 'error>
+
+// JavaScript interop structs
+struct jsResult<'value> = {
+  ok: bool,
+  value: option<'value>,
+  error: option<string>,
 }
 
-extern fn ok_js(value: v) -> JsResult<v> = "proven/result" "ok";
-extern fn err_js(error: String) -> JsResult<v> = "proven/result" "err";
+@module("proven/result")
+external okJs: 'value => jsResult<'value> = "ok"
 
-// Convert a JS result to an AffineScript Result.
-pub fn from_js(js: JsResult<v>) -> Result<v, String> {
-  if js.ok {
-    match js.value {
-      Some(v) => Ok(v),
-      None    => Err("Ok result missing value"),
+@module("proven/result")
+external errJs: string => jsResult<'never> = "err"
+
+// Convert JavaScript result to ReScript result
+fn fromJs = (jsResult: jsResult<'value>): result<'value, string> => {
+  if jsResult.ok {
+    switch jsResult.value {
+    | Some(v) => Ok(v)
+    | None => Error("Ok result missing value")
     }
   } else {
-    match js.error {
-      Some(e) => Err(e),
-      None    => Err("Unknown error"),
+    switch jsResult.error {
+    | Some(e) => Error(e)
+    | None => Error("Unknown error")
     }
   }
 }
 
-// Convert an AffineScript Result to a JS result.
-pub fn to_js(r: Result<v, String>) -> JsResult<v> {
-  match r {
-    Ok(value)  => JsResult { ok: true,  value: Some(value), error: None },
-    Err(error) => JsResult { ok: false, value: None,        error: Some(error) },
+// Convert ReScript result to JavaScript result
+fn toJs = (result: result<'value, string>): jsResult<'value> => {
+  switch result {
+  | Ok(value) => {ok: true, value: Some(value), error: None}
+  | Error(error) => {ok: false, value: None, error: Some(error)}
   }
 }
+

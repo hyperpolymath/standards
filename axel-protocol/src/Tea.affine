@@ -1,79 +1,75 @@
 // SPDX-License-Identifier: MPL-2.0
-// Minimal TEA implementation for STAMP. AffineScript port of Tea.res.
-// Compatible with the full rescript-tea architecture.
+// Ported via Harvard Engine (Semantic pass)
 
 module Tea;
 
-module Cmd {
-  pub type T<msg> = Unit
-  pub fn none() -> T<msg> { Unit }
-  pub fn msg(_m: msg) -> T<msg> { Unit }
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Minimal TEA implementation for STAMP
+// Compatible with full rescript-tea architecture
+
+module Cmd = {
+  struct t<'msg> = unit
+  fn none = ()
+  fn msg = (_msg: 'msg) => ()
 }
 
-module Sub {
-  pub type T<msg> = Unit
-  pub fn none() -> T<msg> { Unit }
+module Sub = {
+  struct t<'msg> = unit
+  fn none = ()
 }
 
-module Html {
-  // A node is represented as its serialised HTML string; an attribute as
-  // its serialised `name="value"` fragment (faithful to the .res Obj.magic
-  // string representation).
-  pub type Node = String
-  pub type Attribute = String
+module Html = {
+  struct node
+  struct attribute
 
-  extern fn dom_get_by_id(id: String) -> Option<DomElement> = "dom" "getElementById";
-  extern fn dom_set_inner_html(el: DomElement, html: String) -> Unit = "dom" "setInnerHTML";
-  extern type DomElement;
+  @val external document: 'a = "document"
+  @send external getElementById: ('a, string) => Js.Nullable.t<Dom.element> = "getElementById"
+  @set external setInnerHTML: (Dom.element, string) => unit = "innerHTML"
 
-  pub fn no_node() -> Node { "" }
+  fn noNode: node = Obj.magic("")
 
-  pub fn text(s: String) -> Node { s }
+  fn text = (str: string): node => Obj.magic(str)
 
-  fn join_nodes(children: [Node]) -> String {
-    let out = "";
-    let i = 0;
-    while i < len(children) {
-      out = out ++ children[i];
-      i = i + 1;
-    }
-    out
+  fn tag = (tagName: string, _attrs: array<attribute>, children: array<node>): node => {
+    // Use raw JavaScript to concatenate children
+    fn childrenHtml: string = %raw(`
+      children.map(c => c).join('')
+    `)
+    Obj.magic(`<${tagName}>${childrenHtml}</${tagName}>`)
   }
 
-  pub fn tag(tag_name: String, _attrs: [Attribute], children: [Node]) -> Node {
-    "<" ++ tag_name ++ ">" ++ join_nodes(children) ++ "</" ++ tag_name ++ ">"
-  }
+  fn div = (attrs, children) => tag("div", attrs, children)
+  fn p = (attrs, children) => tag("p", attrs, children)
+  fn h2 = (attrs, children) => tag("h2", attrs, children)
+  fn h3 = (attrs, children) => tag("h3", attrs, children)
+  fn h4 = (attrs, children) => tag("h4", attrs, children)
+  fn pre = (attrs, children) => tag("pre", attrs, children)
+  fn code = (attrs, children) => tag("code", attrs, children)
+  fn button = (attrs, children) => tag("button", attrs, children)
+  fn section = (attrs, children) => tag("section", attrs, children)
 
-  pub fn div(attrs: [Attribute], children: [Node]) -> Node { tag("div", attrs, children) }
-  pub fn p(attrs: [Attribute], children: [Node]) -> Node { tag("p", attrs, children) }
-  pub fn h2(attrs: [Attribute], children: [Node]) -> Node { tag("h2", attrs, children) }
-  pub fn h3(attrs: [Attribute], children: [Node]) -> Node { tag("h3", attrs, children) }
-  pub fn h4(attrs: [Attribute], children: [Node]) -> Node { tag("h4", attrs, children) }
-  pub fn pre(attrs: [Attribute], children: [Node]) -> Node { tag("pre", attrs, children) }
-  pub fn code(attrs: [Attribute], children: [Node]) -> Node { tag("code", attrs, children) }
-  pub fn button(attrs: [Attribute], children: [Node]) -> Node { tag("button", attrs, children) }
-  pub fn section(attrs: [Attribute], children: [Node]) -> Node { tag("section", attrs, children) }
-
-  pub fn class(name: String) -> Attribute { "class=\"" ++ name ++ "\"" }
-  pub fn id(name: String) -> Attribute { "id=\"" ++ name ++ "\"" }
-  pub fn on_click(_handler: msg) -> Attribute { "" }
+  fn class' = (name: string): attribute => Obj.magic(`class="${name}"`)
+  fn id = (name: string): attribute => Obj.magic(`id="${name}"`)
+  fn onClick = (_handler: 'msg): attribute => Obj.magic("")
 }
 
-module App {
-  pub type Program<model, msg> = {
-    init: fn() -> (model, Cmd.T<msg>),
-    update: fn(model, msg) -> (model, Cmd.T<msg>),
-    view: fn(model) -> Html.Node,
-    subscriptions: fn(model) -> Sub.T<msg>,
+module App = {
+  struct program<'model, 'msg> = {
+    init: unit => ('model, Cmd.t<'msg>),
+    update: ('model, 'msg) => ('model, Cmd.t<'msg>),
+    view: 'model => Html.node,
+    subscriptions: 'model => Sub.t<'msg>,
   }
 
-  pub fn standard_program(program: Program<model, msg>) -> Effect[IO] Unit {
-    let (model, _cmd) = (program.init)();
-    let html = (program.view)(model);
+  fn standardProgram = (program: program<'model, 'msg>) => {
+    fn (model, _cmd) = program.init()
+    fn html = program.view(model)
 
-    match Html.dom_get_by_id("tea-app") {
-      Some(el) => Html.dom_set_inner_html(el, html),
-      None     => Console.log("TEA mount point #tea-app not found"),
+    // Mount to DOM
+    switch Html.document->Html.getElementById("tea-app")->Js.Nullable.toOption {
+    | Some(el) => el->Html.setInnerHTML(Obj.magic(html))
+    | None => Js.log("TEA mount point #tea-app not found")
     }
   }
 }
+

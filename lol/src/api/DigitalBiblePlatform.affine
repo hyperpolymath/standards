@@ -1,367 +1,385 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
-//
-// Digital Bible Platform API wrapper. AffineScript port of DigitalBiblePlatform.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module DigitalBiblePlatform;
 
-use Crawler;
-use Http;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell and Contributors
 
-extern fn json_parse_exn(s: String) -> Json = "JSON" "parseExn";
-extern fn json_as_object(j: Json) -> Option<Dict<Json>> = "json" "asObject";
-extern fn json_as_array(j: Json) -> Option<[Json]> = "json" "asArray";
-extern fn json_data_field(j: Json) -> Option<Json> = "json" "dataField";
-extern fn json_str_field(o: Dict<Json>, key: String) -> String = "json" "strField";
-extern fn json_opt_str_field(o: Dict<Json>, key: String) -> Option<String> = "json" "optStrField";
-extern fn json_int_field(o: Dict<Json>, key: String) -> Int = "json" "intField";
-extern fn json_str_array_field(o: Dict<Json>, key: String) -> [String] = "json" "strArrayField";
-extern fn json_obj_array(j: Json) -> Option<[Dict<Json>]> = "json" "objArray";
+/**
+ * Digital Bible Platform API
+ *
+ * Official API wrapper for the Digital Bible Platform,
+ * providing access to Bible translations in 1500+ languages.
+ * Implements all 6 API methods with proper error handling.
+ */
 
-module Config {
-  pub let api_base_url = "https://api.scripture.api.bible/v1";
-  pub let cdn_base_url = "https://cdn.scripture.api.bible";
+module Config = {
+  fn apiBaseUrl = "https://api.scripture.api.bible/v1"
+  fn cdnBaseUrl = "https://cdn.scripture.api.bible"
 
-  pub type Environment = | Production | Sandbox
+  struct environment {
+    | Production
+    | Sandbox
 
-  pub fn get_base_url(env: Environment) -> String {
-    match env {
-      Production => api_base_url,
-      Sandbox    => "https://api-sandbox.scripture.api.bible/v1",
+  fn getBaseUrl = env =>
+    switch env {
+    | Production => apiBaseUrl
+    | Sandbox => "https://api-sandbox.scripture.api.bible/v1"
     }
+}
+
+module Types = {
+  struct language { {
+    id: string,
+    name: string,
+    nameLocal: string,
+    script: string,
+    scriptDirection: [#ltr | #rtl],
+  }
+
+  struct bible { {
+    id: string,
+    dblId: string,
+    abbreviation: string,
+    abbreviationLocal: string,
+    name: string,
+    nameLocal: string,
+    description: option<string>,
+    descriptionLocal: option<string>,
+    language: language,
+    countries: array<string>,
+    struct_: string,
+  }
+
+  struct book { {
+    id: string,
+    bibleId: string,
+    abbreviation: string,
+    name: string,
+    nameLong: string,
+    chapters: array<chapter>,
+  }
+  and chapter = {
+    id: string,
+    bibleId: string,
+    bookId: string,
+    number: string,
+    reference: string,
+  }
+
+  struct verse { {
+    id: string,
+    orgId: string,
+    bibleId: string,
+    bookId: string,
+    chapterId: string,
+    reference: string,
+    content: string,
+  }
+
+  struct passage { {
+    id: string,
+    bibleId: string,
+    orgId: string,
+    reference: string,
+    content: string,
+    verseCount: int,
+    copyright: string,
+  }
+
+  struct apiResponse<'a> = {
+    data: 'a,
+    meta: option<{
+      fums: string,
+      fumsId: string,
+      fumsJs: string,
+    }>,
+  }
+
+  struct apiError { {
+    statusCode: int,
+    error: string,
+    message: string,
   }
 }
 
-module Types {
-  pub type ScriptDirection = | Ltr | Rtl
+module JsonHelpers = {
+  fn getString = (obj: Dict.t<JSON.t>, key: string): string =>
+    switch obj->Dict.get(key) {
+    | Some(String(s)) => s
+    | _ => ""
+    }
 
-  pub type Language = {
-    id: String,
-    name: String,
-    name_local: String,
-    script: String,
-    script_direction: ScriptDirection,
-  }
+  fn getOptString = (obj: Dict.t<JSON.t>, key: string): option<string> =>
+    switch obj->Dict.get(key) {
+    | Some(String(s)) => Some(s)
+    | _ => None
+    }
 
-  pub type Chapter = {
-    id: String,
-    bible_id: String,
-    book_id: String,
-    number: String,
-    reference: String,
-  }
+  fn getInt = (obj: Dict.t<JSON.t>, key: string): int =>
+    switch obj->Dict.get(key) {
+    | Some(Number(n)) => Float.toInt(n)
+    | _ => 0
+    }
 
-  pub type Book = {
-    id: String,
-    bible_id: String,
-    abbreviation: String,
-    name: String,
-    name_long: String,
-    chapters: [Chapter],
-  }
+  fn getStringArray = (obj: Dict.t<JSON.t>, key: string): array<string> =>
+    switch obj->Dict.get(key) {
+    | Some(Array(arr)) => arr->Array.filterMap(v => switch v {
+      | String(s) => Some(s)
+      | _ => None
+      })
+    | _ => []
+    }
 
-  pub type Bible = {
-    id: String,
-    dbl_id: String,
-    abbreviation: String,
-    abbreviation_local: String,
-    name: String,
-    name_local: String,
-    description: Option<String>,
-    description_local: Option<String>,
-    language: Language,
-    countries: [String],
-    type_: String,
-  }
-
-  pub type Verse = {
-    id: String,
-    org_id: String,
-    bible_id: String,
-    book_id: String,
-    chapter_id: String,
-    reference: String,
-    content: String,
-  }
-
-  pub type Passage = {
-    id: String,
-    bible_id: String,
-    org_id: String,
-    reference: String,
-    content: String,
-    verse_count: Int,
-    copyright: String,
-  }
-
-  pub type ApiError = {
-    status_code: Int,
-    error: String,
-    message: String,
-  }
+  fn getDirection = (obj: Dict.t<JSON.t>, key: string): [#ltr | #rtl] =>
+    switch obj->Dict.get(key) {
+    | Some(String("RTL")) | Some(String("rtl")) => #rtl
+    | _ => #ltr
+    }
 }
 
-module JsonHelpers {
-  pub fn get_direction(obj: Dict<Json>, key: String) -> Types.ScriptDirection {
-    match json_opt_str_field(obj, key) {
-      Some("RTL") => Types.Rtl,
-      Some("rtl") => Types.Rtl,
-      _           => Types.Ltr,
-    }
-  }
-}
+module Client = {
+  open Types
+  open JsonHelpers
 
-module Client {
-  use Types;
-
-  pub type T = {
-    api_key: String,
-    environment: Config.Environment,
-    rate_limiter: Crawler.RateLimiter.T,
+  struct t { {
+    apiKey: string,
+    environment: Config.environment,
+    rateLimiter: Crawler.RateLimiter.t,
   }
 
-  pub fn make(api_key: String, environment: Config.Environment) -> T {
-    T {
-      api_key: api_key,
-      environment: environment,
-      rate_limiter: Crawler.RateLimiter.make(100),
-    }
+  fn make = (~apiKey, ~environment=Config.Production, ()) => {
+    apiKey,
+    environment,
+    rateLimiter: Crawler.RateLimiter.make(~delayMs=100, ()),
   }
 
-  pub fn get_auth_headers(client: T) -> Dict<String> {
-    let headers = dict_empty();
-    dict_set(headers, "api-key", client.api_key);
-    dict_set(headers, "Accept", "application/json");
+  fn getAuthHeaders = client => {
+    fn headers = Dict.make()
+    Dict.set(headers, "api-key", client.apiKey)
+    Dict.set(headers, "Accept", "application/json")
     headers
   }
 
-  pub fn make_error(code: Int, msg: String) -> Types.ApiError {
-    Types.ApiError { status_code: code, error: "Error", message: msg }
+  fn makeError = (code, msg): apiError => {
+    statusCode: code,
+    error: "Error",
+    message: msg,
   }
 
-  pub fn api_request(client: T, url: String) -> Effect[Async] Result<Json, Types.ApiError> {
-    let headers = get_auth_headers(client);
-    let resp = await Http.get_with_rate_limit(url, Some(headers), client.rate_limiter);
-    match resp {
-      Ok(r) => {
-        try {
-          let json = json_parse_exn(r.body);
-          match json_data_field(json) { Some(data) => Ok(data), None => Ok(json) }
-        } catch _e {
-          Err(make_error(500, "Invalid JSON response"))
+  /** Generic API request helper */
+  fn apiRequest = async (client: t, url: string): result<JSON.t, apiError> => {
+    fn headers = getAuthHeaders(client)
+    fn resp = await Http.getWithRateLimit(url, ~headers, ~rateLimiter=client.rateLimiter, ())
+    switch resp {
+    | Ok({body}) =>
+      try {
+        fn json = JSON.parseExn(body)
+        switch json {
+        | Object(obj) =>
+          switch obj->Dict.get("data") {
+          | Some(data) => Ok(data)
+          | None => Ok(json)
+          }
+        | _ => Ok(json)
         }
+      } catch {
+      | _ => Error(makeError(500, "Invalid JSON response"))
       }
-      Err(Http.HttpError(code, msg)) => Err(make_error(code, msg)),
-      Err(Http.NetworkError(msg))    => Err(make_error(0, msg)),
-      Err(Http.TimeoutError)         => Err(make_error(408, "Request timed out")),
-      Err(Http.ParseError(msg))      => Err(make_error(422, msg)),
+    | Error(Http.HttpError(code, msg)) => Error(makeError(code, msg))
+    | Error(Http.NetworkError(msg)) => Error(makeError(0, msg))
+    | Error(Http.TimeoutError) => Error(makeError(408, "Request timed out"))
+    | Error(Http.ParseError(msg)) => Error(makeError(422, msg))
     }
   }
 
-  pub fn parse_language(obj: Dict<Json>) -> Types.Language {
-    Types.Language {
-      id: json_str_field(obj, "id"),
-      name: json_str_field(obj, "name"),
-      name_local: json_str_field(obj, "nameLocal"),
-      script: json_str_field(obj, "script"),
-      script_direction: JsonHelpers.get_direction(obj, "scriptDirection"),
-    }
+  fn parseLanguage = (obj: Dict.t<JSON.t>): language => {
+    id: getString(obj, "id"),
+    name: getString(obj, "name"),
+    nameLocal: getString(obj, "nameLocal"),
+    script: getString(obj, "script"),
+    scriptDirection: getDirection(obj, "scriptDirection"),
   }
 
-  pub fn parse_bible(obj: Dict<Json>) -> Types.Bible {
-    let lang = match json_as_object(json_obj_or_null(obj, "language")) {
-      Some(l) => parse_language(l),
-      None => Types.Language { id: "", name: "", name_local: "", script: "", script_direction: Types.Ltr },
-    };
-    Types.Bible {
-      id: json_str_field(obj, "id"),
-      dbl_id: json_str_field(obj, "dblId"),
-      abbreviation: json_str_field(obj, "abbreviation"),
-      abbreviation_local: json_str_field(obj, "abbreviationLocal"),
-      name: json_str_field(obj, "name"),
-      name_local: json_str_field(obj, "nameLocal"),
-      description: json_opt_str_field(obj, "description"),
-      description_local: json_opt_str_field(obj, "descriptionLocal"),
+  fn parseBible = (obj: Dict.t<JSON.t>): bible => {
+    fn lang = switch obj->Dict.get("language") {
+    | Some(Object(l)) => parseLanguage(l)
+    | _ => {id: "", name: "", nameLocal: "", script: "", scriptDirection: #ltr}
+    }
+    {
+      id: getString(obj, "id"),
+      dblId: getString(obj, "dblId"),
+      abbreviation: getString(obj, "abbreviation"),
+      abbreviationLocal: getString(obj, "abbreviationLocal"),
+      name: getString(obj, "name"),
+      nameLocal: getString(obj, "nameLocal"),
+      description: getOptString(obj, "description"),
+      descriptionLocal: getOptString(obj, "descriptionLocal"),
       language: lang,
-      countries: json_str_array_field(obj, "countries"),
-      type_: json_str_field(obj, "type"),
+      countries: getStringArray(obj, "countries"),
+      struct_: getString(obj, "struct"),
     }
   }
 
-  fn query_string(params: [String]) -> String {
-    if len(params) == 0 {
-      ""
+  /** Get list of available Bibles, optionally filtered */
+  fn getBibles = async (
+    client: t,
+    ~language: option<string>=?,
+    ~abbreviation: option<string>=?,
+    (),
+  ): result<array<bible>, apiError> => {
+    fn baseUrl = Config.getBaseUrl(client.environment)
+    fn params = []
+    switch language {
+    | Some(l) => ignore(Array.concat(params, [`language=${l}`]))
+    | None => ()
+    }
+    switch abbreviation {
+    | Some(a) => ignore(Array.concat(params, [`abbreviation=${a}`]))
+    | None => ()
+    }
+    fn queryStr = if Array.length(params) > 0 {
+      "?" ++ params->Array.join("&")
     } else {
-      let out = "?";
-      let i = 0;
-      while i < len(params) {
-        out = if i == 0 { out ++ params[i] } else { out ++ "&" ++ params[i] };
-        i = i + 1;
-      }
-      out
+      ""
+    }
+    fn resp = await apiRequest(client, `${baseUrl}/bibles${queryStr}`)
+    switch resp {
+    | Ok(Array(arr)) =>
+      Ok(arr->Array.filterMap(item => switch item {
+      | Object(obj) => Some(parseBible(obj))
+      | _ => None
+      }))
+    | Ok(_) => Error(makeError(500, "Unexpected response format"))
+    | Error(e) => Error(e)
     }
   }
 
-  pub fn get_bibles(client: T, language: Option<String>,
-                    abbreviation: Option<String>) -> Effect[Async] Result<[Types.Bible], Types.ApiError> {
-    let base_url = Config.get_base_url(client.environment);
-    let params = [];
-    match language { Some(l) => { params = params ++ ["language=" ++ l]; } None => {} }
-    match abbreviation { Some(a) => { params = params ++ ["abbreviation=" ++ a]; } None => {} }
-    match await api_request(client, base_url ++ "/bibles" ++ query_string(params)) {
-      Ok(data) => {
-        match json_obj_array(data) {
-          Some(objs) => {
-            let out = [];
-            let i = 0;
-            while i < len(objs) { out = out ++ [parse_bible(objs[i])]; i = i + 1; }
-            Ok(out)
-          }
-          None => Err(make_error(500, "Unexpected response format")),
-        }
-      }
-      Err(e) => Err(e),
+  /** Get a specific Bible by ID */
+  fn getBible = async (client: t, ~bibleId: string): result<bible, apiError> => {
+    fn baseUrl = Config.getBaseUrl(client.environment)
+    fn resp = await apiRequest(client, `${baseUrl}/bibles/${bibleId}`)
+    switch resp {
+    | Ok(Object(obj)) => Ok(parseBible(obj))
+    | Ok(_) => Error(makeError(500, "Unexpected response format"))
+    | Error(e) => Error(e)
     }
   }
 
-  pub fn get_bible(client: T, bible_id: String) -> Effect[Async] Result<Types.Bible, Types.ApiError> {
-    let base_url = Config.get_base_url(client.environment);
-    match await api_request(client, base_url ++ "/bibles/" ++ bible_id) {
-      Ok(data) => {
-        match json_as_object(data) {
-          Some(obj) => Ok(parse_bible(obj)),
-          None => Err(make_error(500, "Unexpected response format")),
+  /** Get books for a Bible */
+  fn getBooks = async (client: t, ~bibleId: string): result<array<book>, apiError> => {
+    fn baseUrl = Config.getBaseUrl(client.environment)
+    fn resp = await apiRequest(client, `${baseUrl}/bibles/${bibleId}/books`)
+    switch resp {
+    | Ok(Array(arr)) =>
+      Ok(arr->Array.filterMap(item => switch item {
+      | Object(obj) =>
+        fn chapters = switch obj->Dict.get("chapters") {
+        | Some(Array(chArr)) => chArr->Array.filterMap(ch => switch ch {
+          | Object(chObj) => Some({
+              id: getString(chObj, "id"),
+              bibleId: getString(chObj, "bibleId"),
+              bookId: getString(chObj, "bookId"),
+              number: getString(chObj, "number"),
+              reference: getString(chObj, "reference"),
+            })
+          | _ => None
+          })
+        | _ => []
         }
-      }
-      Err(e) => Err(e),
+        Some({
+          id: getString(obj, "id"),
+          bibleId: getString(obj, "bibleId"),
+          abbreviation: getString(obj, "abbreviation"),
+          name: getString(obj, "name"),
+          nameLong: getString(obj, "nameLong"),
+          chapters,
+        })
+      | _ => None
+      }))
+    | Ok(_) => Error(makeError(500, "Unexpected response format"))
+    | Error(e) => Error(e)
     }
   }
 
-  pub fn get_books(client: T, bible_id: String) -> Effect[Async] Result<[Types.Book], Types.ApiError> {
-    let base_url = Config.get_base_url(client.environment);
-    match await api_request(client, base_url ++ "/bibles/" ++ bible_id ++ "/books") {
-      Ok(data) => {
-        match json_obj_array(data) {
-          Some(objs) => {
-            let out = [];
-            let i = 0;
-            while i < len(objs) {
-              let obj = objs[i];
-              let chapters = [];
-              match json_obj_array(json_obj_or_null(obj, "chapters")) {
-                Some(chs) => {
-                  let c = 0;
-                  while c < len(chs) {
-                    let ch = chs[c];
-                    chapters = chapters ++ [Types.Chapter {
-                      id: json_str_field(ch, "id"),
-                      bible_id: json_str_field(ch, "bibleId"),
-                      book_id: json_str_field(ch, "bookId"),
-                      number: json_str_field(ch, "number"),
-                      reference: json_str_field(ch, "reference"),
-                    }];
-                    c = c + 1;
-                  }
-                }
-                None => {}
-              }
-              out = out ++ [Types.Book {
-                id: json_str_field(obj, "id"),
-                bible_id: json_str_field(obj, "bibleId"),
-                abbreviation: json_str_field(obj, "abbreviation"),
-                name: json_str_field(obj, "name"),
-                name_long: json_str_field(obj, "nameLong"),
-                chapters: chapters,
-              }];
-              i = i + 1;
-            }
-            Ok(out)
-          }
-          None => Err(make_error(500, "Unexpected response format")),
-        }
-      }
-      Err(e) => Err(e),
+  /** Get chapters for a book */
+  fn getChapters = async (
+    client: t,
+    ~bibleId: string,
+    ~bookId: string,
+  ): result<array<chapter>, apiError> => {
+    fn baseUrl = Config.getBaseUrl(client.environment)
+    fn resp = await apiRequest(client, `${baseUrl}/bibles/${bibleId}/books/${bookId}/chapters`)
+    switch resp {
+    | Ok(Array(arr)) =>
+      Ok(arr->Array.filterMap(item => switch item {
+      | Object(obj) => Some({
+          id: getString(obj, "id"),
+          bibleId: getString(obj, "bibleId"),
+          bookId: getString(obj, "bookId"),
+          number: getString(obj, "number"),
+          reference: getString(obj, "reference"),
+        })
+      | _ => None
+      }))
+    | Ok(_) => Error(makeError(500, "Unexpected response format"))
+    | Error(e) => Error(e)
     }
   }
 
-  pub fn get_chapters(client: T, bible_id: String, book_id: String) -> Effect[Async] Result<[Types.Chapter], Types.ApiError> {
-    let base_url = Config.get_base_url(client.environment);
-    match await api_request(client, base_url ++ "/bibles/" ++ bible_id ++ "/books/" ++ book_id ++ "/chapters") {
-      Ok(data) => {
-        match json_obj_array(data) {
-          Some(objs) => {
-            let out = [];
-            let i = 0;
-            while i < len(objs) {
-              let o = objs[i];
-              out = out ++ [Types.Chapter {
-                id: json_str_field(o, "id"),
-                bible_id: json_str_field(o, "bibleId"),
-                book_id: json_str_field(o, "bookId"),
-                number: json_str_field(o, "number"),
-                reference: json_str_field(o, "reference"),
-              }];
-              i = i + 1;
-            }
-            Ok(out)
-          }
-          None => Err(make_error(500, "Unexpected response format")),
-        }
-      }
-      Err(e) => Err(e),
+  /** Get verses for a chapter */
+  fn getVerses = async (
+    client: t,
+    ~bibleId: string,
+    ~chapterId: string,
+  ): result<array<verse>, apiError> => {
+    fn baseUrl = Config.getBaseUrl(client.environment)
+    fn resp = await apiRequest(
+      client,
+      `${baseUrl}/bibles/${bibleId}/chapters/${chapterId}/verses`,
+    )
+    switch resp {
+    | Ok(Array(arr)) =>
+      Ok(arr->Array.filterMap(item => switch item {
+      | Object(obj) => Some({
+          id: getString(obj, "id"),
+          orgId: getString(obj, "orgId"),
+          bibleId: getString(obj, "bibleId"),
+          bookId: getString(obj, "bookId"),
+          chapterId: getString(obj, "chapterId"),
+          reference: getString(obj, "reference"),
+          content: getString(obj, "content"),
+        })
+      | _ => None
+      }))
+    | Ok(_) => Error(makeError(500, "Unexpected response format"))
+    | Error(e) => Error(e)
     }
   }
 
-  pub fn get_verses(client: T, bible_id: String, chapter_id: String) -> Effect[Async] Result<[Types.Verse], Types.ApiError> {
-    let base_url = Config.get_base_url(client.environment);
-    match await api_request(client, base_url ++ "/bibles/" ++ bible_id ++ "/chapters/" ++ chapter_id ++ "/verses") {
-      Ok(data) => {
-        match json_obj_array(data) {
-          Some(objs) => {
-            let out = [];
-            let i = 0;
-            while i < len(objs) {
-              let o = objs[i];
-              out = out ++ [Types.Verse {
-                id: json_str_field(o, "id"),
-                org_id: json_str_field(o, "orgId"),
-                bible_id: json_str_field(o, "bibleId"),
-                book_id: json_str_field(o, "bookId"),
-                chapter_id: json_str_field(o, "chapterId"),
-                reference: json_str_field(o, "reference"),
-                content: json_str_field(o, "content"),
-              }];
-              i = i + 1;
-            }
-            Ok(out)
-          }
-          None => Err(make_error(500, "Unexpected response format")),
-        }
-      }
-      Err(e) => Err(e),
-    }
-  }
-
-  pub fn get_passage(client: T, bible_id: String, passage_id: String) -> Effect[Async] Result<Types.Passage, Types.ApiError> {
-    let base_url = Config.get_base_url(client.environment);
-    match await api_request(client, base_url ++ "/bibles/" ++ bible_id ++ "/passages/" ++ passage_id) {
-      Ok(data) => {
-        match json_as_object(data) {
-          Some(obj) => Ok(Types.Passage {
-            id: json_str_field(obj, "id"),
-            bible_id: json_str_field(obj, "bibleId"),
-            org_id: json_str_field(obj, "orgId"),
-            reference: json_str_field(obj, "reference"),
-            content: json_str_field(obj, "content"),
-            verse_count: json_int_field(obj, "verseCount"),
-            copyright: json_str_field(obj, "copyright"),
-          }),
-          None => Err(make_error(500, "Unexpected response format")),
-        }
-      }
-      Err(e) => Err(e),
+  /** Get a passage (range of verses) */
+  fn getPassage = async (
+    client: t,
+    ~bibleId: string,
+    ~passageId: string,
+  ): result<passage, apiError> => {
+    fn baseUrl = Config.getBaseUrl(client.environment)
+    fn resp = await apiRequest(client, `${baseUrl}/bibles/${bibleId}/passages/${passageId}`)
+    switch resp {
+    | Ok(Object(obj)) =>
+      Ok({
+        id: getString(obj, "id"),
+        bibleId: getString(obj, "bibleId"),
+        orgId: getString(obj, "orgId"),
+        reference: getString(obj, "reference"),
+        content: getString(obj, "content"),
+        verseCount: getInt(obj, "verseCount"),
+        copyright: getString(obj, "copyright"),
+      })
+    | Ok(_) => Error(makeError(500, "Unexpected response format"))
+    | Error(e) => Error(e)
     }
   }
 }
 
-extern fn json_obj_or_null(o: Dict<Json>, key: String) -> Json = "json" "fieldOrNull";

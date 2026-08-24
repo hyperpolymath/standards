@@ -1,79 +1,97 @@
 // SPDX-License-Identifier: MPL-2.0
-// AffineScript port of Session.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module Session;
 
-use Types;
+// SPDX-License-Identifier: PMPL-1.0-or-later
 
-extern fn random_uuid() -> String = "node:crypto" "randomUUID";
-extern fn set_timeout(cb: fn() -> Unit, ms: Int) -> Unit = "global" "setTimeout";
-extern fn date_make() -> Types.Date = "Date" "make";
+// External Deno/Node crypto API
+@module("node:crypto") external randomUUID: unit => string = "randomUUID"
+@val external setTimeout: (unit => unit, int) => unit = "setTimeout"
 
-module SessionManager {
-  pub type T = {
-    mut sessions: Dict<Types.SessionState>,
-    config: Types.GuardianConfig,
+// Session manager class
+module SessionManager = {
+  struct t { {
+    mutable sessions: dict<Types.sessionState>,
+    config: Types.guardianConfig,
   }
 
-  pub fn make(config: Types.GuardianConfig) -> T {
-    T { sessions: dict_empty(), config: config }
+  fn make = (config: Types.guardianConfig): t => {
+    {
+      sessions: Dict.make(),
+      config,
+    }
   }
 
-  pub fn create_session(manager: T, repo_path: String) -> Types.SessionState {
-    let session = Types.SessionState {
-      session_id: random_uuid(),
-      acknowledged_manifest: false,
-      attestation_hash: None,
-      acknowledged_at: None,
-      repo_path: repo_path,
-    };
-    dict_set(manager.sessions, session.session_id, session);
-    set_timeout(fn() {
-      dict_set(manager.sessions, session.session_id, session);
-    }, manager.config.session_timeout);
+  // Create a new session for an AI agent
+  fn createSession = (manager: t, repoPath: string): Types.sessionState => {
+    fn session: Types.sessionState = {
+      sessionId: randomUUID(),
+      acknowledgedManifest: false,
+      attestationHash: None,
+      acknowledgedAt: None,
+      repoPath,
+    }
+
+    Dict.set(manager.sessions, session.sessionId, session)
+
+    // Set timeout to clean up session
+    setTimeout(() => {
+      Dict.set(manager.sessions, session.sessionId, session)
+      ()
+    }, manager.config.sessionTimeout)->ignore
+
     session
   }
 
-  pub fn get_session(manager: T, session_id: String) -> Option<Types.SessionState> {
-    dict_get(manager.sessions, session_id)
+  // Get session by ID
+  fn getSession = (manager: t, sessionId: string): option<Types.sessionState> => {
+    Dict.get(manager.sessions, sessionId)
   }
 
-  pub fn acknowledge_manifest(manager: T, session_id: String,
-                              manifest: Types.AiManifest, attestation_hash: String) -> Bool {
-    match dict_get(manager.sessions, session_id) {
-      None => false,
-      Some(session) => {
-        if manifest.hash != attestation_hash {
-          false
-        } else {
-          let updated = Types.SessionState {
-            ...session,
-            acknowledged_manifest: true,
-            attestation_hash: Some(attestation_hash),
-            acknowledged_at: Some(date_make()),
-          };
-          dict_set(manager.sessions, session_id, updated);
-          true
+  // Acknowledge manifest for a session
+  fn acknowledgeManifest = (
+    manager: t,
+    sessionId: string,
+    manifest: Types.aiManifest,
+    attestationHash: string,
+  ): bool => {
+    switch Dict.get(manager.sessions, sessionId) {
+    | None => false
+    | Some(session) =>
+      if manifest.hash !== attestationHash {
+        false
+      } else {
+        fn updatedSession: Types.sessionState = {
+          ...session,
+          acknowledgedManifest: true,
+          attestationHash: Some(attestationHash),
+          acknowledgedAt: Some(Date.make()),
         }
+
+        Dict.set(manager.sessions, sessionId, updatedSession)
+        true
       }
     }
   }
 
-  pub fn is_acknowledged(manager: T, session_id: String) -> Bool {
-    match dict_get(manager.sessions, session_id) {
-      None => false,
-      Some(session) => session.acknowledged_manifest,
+  // Check if session has acknowledged manifest
+  fn isAcknowledged = (manager: t, sessionId: string): bool => {
+    switch Dict.get(manager.sessions, sessionId) {
+    | None => false
+    | Some(session) => session.acknowledgedManifest
     }
   }
 
-  pub fn destroy_session(manager: T, session_id: String) -> Unit {
-    match dict_get(manager.sessions, session_id) {
-      Some(s) => dict_set(manager.sessions, session_id, s),
-      None => {},
-    }
+  // Destroy a session
+  fn destroySession = (manager: t, sessionId: string): unit => {
+    Dict.set(manager.sessions, sessionId, Dict.get(manager.sessions, sessionId)->Belt.Option.getExn)
+    ()
   }
 
-  pub fn get_active_sessions(manager: T) -> [Types.SessionState] {
-    dict_values(manager.sessions)
+  // Get all active sessions
+  fn getActiveSessions = (manager: t): array<Types.sessionState> => {
+    Dict.valuesToArray(manager.sessions)
   }
 }
+

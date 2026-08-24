@@ -1,31 +1,26 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) 2026 Jonathan D.A. Jewell and Contributors
-//
-// 1000Langs - super-parallel corpus crawler CLI.
-// AffineScript port of Lang1000.res.
+// Ported via Harvard Engine (Semantic pass)
 
 module Lang1000;
 
-use CorpusAnalyzer;
-use Export;
-use Crawler;
-use BibleCloud;
-use BibleCom;
-use PngScriptures;
-use EBible;
-use FindBible;
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell and Contributors
 
-extern fn console_log(msg: String) -> Unit = "console" "log";
-extern fn console_error(msg: String) -> Unit = "console" "error";
-extern fn deno_args() -> [String] = "Deno" "args";
-extern fn deno_exit(code: Int) -> Unit = "Deno" "exit";
+/**
+ * 1000Langs - Super-Parallel Corpus Crawler
+ *
+ * A multilingual corpus building system supporting 1500+ languages
+ * from parallel Bible translations across multiple sources.
+ *
+ * CLI interface for Deno runtime with VeriSimDB quality verification.
+ */
 
-module Config {
-  pub let version = "0.1.0";
-  pub let name = "1000Langs";
-  pub let description = "Super-parallel corpus crawler for multilingual NLP research";
+module Config = {
+  fn version = "0.1.0"
+  fn name = "1000Langs"
+  fn description = "Super-parallel corpus crawler for multilingual NLP research"
 
-  pub type Source =
+  struct source {
     | BibleCloud
     | BibleCom
     | BibleIs
@@ -33,268 +28,274 @@ module Config {
     | EBible
     | FindBible
 
-  pub let all_sources = [BibleCloud, BibleCom, BibleIs, PngScriptures, EBible, FindBible];
+  fn allSources = [BibleCloud, BibleCom, BibleIs, PngScriptures, EBible, FindBible]
 
-  pub fn source_to_string(s: Source) -> String {
-    match s {
-      BibleCloud    => "bible.cloud",
-      BibleCom      => "bible.com",
-      BibleIs       => "bible.is",
-      PngScriptures => "pngscriptures.org",
-      EBible        => "ebible.org",
-      FindBible     => "find.bible",
+  fn sourceToString = source =>
+    switch source {
+    | BibleCloud => "bible.cloud"
+    | BibleCom => "bible.com"
+    | BibleIs => "bible.is"
+    | PngScriptures => "pngscriptures.org"
+    | EBible => "ebible.org"
+    | FindBible => "find.bible"
     }
-  }
 
-  pub fn source_from_string(s: String) -> Option<Source> {
-    match s {
-      "bible.cloud"      => Some(BibleCloud),
-      "bible_cloud"      => Some(BibleCloud),
-      "biblecloud"       => Some(BibleCloud),
-      "bible.com"        => Some(BibleCom),
-      "bible_com"        => Some(BibleCom),
-      "biblecom"         => Some(BibleCom),
-      "bible.is"         => Some(BibleIs),
-      "bible_is"         => Some(BibleIs),
-      "bibleis"          => Some(BibleIs),
-      "pngscriptures"    => Some(PngScriptures),
-      "pngscriptures.org" => Some(PngScriptures),
-      "png_scriptures"   => Some(PngScriptures),
-      "ebible"           => Some(EBible),
-      "ebible.org"       => Some(EBible),
-      "e_bible"          => Some(EBible),
-      "find.bible"       => Some(FindBible),
-      "find_bible"       => Some(FindBible),
-      "findbible"        => Some(FindBible),
-      _                  => None,
+  fn sourceFromString = str =>
+    switch str {
+    | "bible.cloud" | "bible_cloud" | "biblecloud" => Some(BibleCloud)
+    | "bible.com" | "bible_com" | "biblecom" => Some(BibleCom)
+    | "bible.is" | "bible_is" | "bibleis" => Some(BibleIs)
+    | "pngscriptures" | "pngscriptures.org" | "png_scriptures" => Some(PngScriptures)
+    | "ebible" | "ebible.org" | "e_bible" => Some(EBible)
+    | "find.bible" | "find_bible" | "findbible" => Some(FindBible)
+    | _ => None
     }
-  }
 }
 
-module Language {
-  pub type Iso639_3 = String
-  pub type LanguageName = String
+module Language = {
+  struct iso639_3 { string
+  struct languageName { string
 
-  pub type T = {
-    code: Iso639_3,
-    name: LanguageName,
-    family: Option<String>,
-    script: Option<String>,
-    country: Option<String>,
+  struct t { {
+    code: iso639_3,
+    name: languageName,
+    family: option<string>,
+    script: option<string>,
+    country: option<string>,
   }
 
-  pub fn make(code: Iso639_3, name: LanguageName, family: Option<String>,
-              script: Option<String>, country: Option<String>) -> T {
-    T { code: code, name: name, family: family, script: script, country: country }
+  fn make = (~code, ~name, ~family=?, ~script=?, ~country=?, ()) => {
+    code,
+    name,
+    family,
+    script,
+    country,
   }
 
-  pub fn get_code(lang: T) -> Iso639_3 { lang.code }
-  pub fn get_name(lang: T) -> LanguageName { lang.name }
+  fn getCode = lang => lang.code
+  fn getName = lang => lang.name
 }
 
-module Verse {
-  pub type Book = String
-  pub type Chapter = Int
-  pub type VerseNum = Int
+module Verse = {
+  struct book { string
+  struct chapter { int
+  struct verseNum { int
 
-  pub type Reference = { book: Book, chapter: Chapter, verse: VerseNum }
-
-  pub type T = {
-    reference: Reference,
-    text: String,
-    language: Language.Iso639_3,
+  struct reference { {
+    book: book,
+    chapter: chapter,
+    verse: verseNum,
   }
 
-  pub fn make_reference(book: Book, chapter: Chapter, verse: VerseNum) -> Reference {
-    Reference { book: book, chapter: chapter, verse: verse }
+  struct t { {
+    reference: reference,
+    text: string,
+    language: Language.iso639_3,
   }
 
-  pub fn make(reference: Reference, text: String, language: Language.Iso639_3) -> T {
-    T { reference: reference, text: text, language: language }
-  }
+  fn makeReference = (~book, ~chapter, ~verse) => {book, chapter, verse}
 
-  pub fn to_canonical_id(r: Reference) -> String {
-    r.book ++ "." ++ show(r.chapter) ++ "." ++ show(r.verse)
-  }
+  fn make = (~reference, ~text, ~language) => {reference, text, language}
+
+  fn toCanonicalId = ref =>
+    `${ref.book}.${Int.toString(ref.chapter)}.${Int.toString(ref.verse)}`
 }
 
-module Corpus {
-  pub type Alignment = {
-    reference_id: String,
-    translations: Dict<String>,
+module Corpus = {
+  struct alignment { {
+    referenceId: string,
+    translations: Dict.t<string>,
   }
 
-  pub type T = {
-    name: String,
-    languages: [Language.T],
-    alignments: [Alignment],
-    metadata: Dict<String>,
+  struct t { {
+    name: string,
+    languages: array<Language.t>,
+    alignments: array<alignment>,
+    metadata: Dict.t<string>,
   }
 
-  pub fn empty(name: String) -> T {
-    T { name: name, languages: [], alignments: [], metadata: dict_empty() }
+  fn empty = name => {
+    name,
+    languages: [],
+    alignments: [],
+    metadata: Dict.make(),
   }
 
-  pub fn add_language(corpus: T, lang: Language.T) -> T {
-    T { ...corpus, languages: corpus.languages ++ [lang] }
+  fn addLanguage = (corpus, lang) => {
+    ...corpus,
+    languages: Array.concat(corpus.languages, [lang]),
   }
 
-  pub fn add_alignment(corpus: T, alignment: Alignment) -> T {
-    T { ...corpus, alignments: corpus.alignments ++ [alignment] }
+  fn addAlignment = (corpus, alignment) => {
+    ...corpus,
+    alignments: Array.concat(corpus.alignments, [alignment]),
   }
 
-  pub fn language_count(corpus: T) -> Int { len(corpus.languages) }
-  pub fn alignment_count(corpus: T) -> Int { len(corpus.alignments) }
+  fn languageCount = corpus => Array.length(corpus.languages)
+  fn alignmentCount = corpus => Array.length(corpus.alignments)
 }
 
-module Cli {
-  pub type Command =
-    | Crawl(Config.Source, String, Option<String>)
-    | Verify(Option<String>)
+/** Deno CLI argument access */
+@val @scope("Deno") external args: array<string> = "args"
+@val @scope("Deno") external exit: int => unit = "exit"
+
+module Cli = {
+  struct command {
+    | Crawl({source: Config.source, lang: string, output: option<string>})
+    | Verify({output: option<string>})
     | ListSources
     | Help
     | Version
 
-  pub fn get_arg(args: [String], flag: String) -> Option<String> {
-    let idx = array_find_index(args, flag);
-    if idx >= 0 && idx + 1 < len(args) {
-      Some(args[idx + 1])
+  fn getArg = (args: array<string>, flag: string): option<string> => {
+    fn idx = args->Array.findIndex(a => a == flag)
+    if idx >= 0 && idx + 1 < Array.length(args) {
+      Some(Array.getUnsafe(args, idx + 1))
     } else {
       None
     }
   }
 
-  pub fn parse_args(argv: [String]) -> Command {
-    if len(argv) == 0 {
+  fn parseArgs = (argv: array<string>): command => {
+    if Array.length(argv) == 0 {
       Help
     } else {
-      match argv[0] {
-        "crawl" => {
-          let source_str = match get_arg(argv, "--source") { Some(s) => s, None => "bible.cloud" };
-          let lang = match get_arg(argv, "--lang") { Some(l) => l, None => "eng" };
-          let output = get_arg(argv, "--output");
-          match Config.source_from_string(source_str) {
-            Some(source) => Crawl(source, lang, output),
-            None => { console_error("Unknown source: " ++ source_str); Help }
-          }
+      fn cmd = Array.getUnsafe(argv, 0)
+      switch cmd {
+      | "crawl" =>
+        fn sourceStr = getArg(argv, "--source")->Option.getOr("bible.cloud")
+        fn lang = getArg(argv, "--lang")->Option.getOr("eng")
+        fn output = getArg(argv, "--output")
+        switch Config.sourceFromString(sourceStr) {
+        | Some(source) => Crawl({source, lang, output})
+        | None =>
+          Console.error(`Unknown source: ${sourceStr}`)
+          Help
         }
-        "verify"       => Verify(get_arg(argv, "--output")),
-        "list-sources" => ListSources,
-        "version"      => Version,
-        "--version"    => Version,
-        "-v"           => Version,
-        _              => Help,
+      | "verify" =>
+        fn output = getArg(argv, "--output")
+        Verify({output})
+      | "list-sources" => ListSources
+      | "version" | "--version" | "-v" => Version
+      | "help" | "--help" | "-h" | _ => Help
       }
     }
   }
 
-  pub fn print_help() -> Effect[IO] Unit {
-    console_log(Config.name ++ " v" ++ Config.version);
-    console_log(Config.description);
-    console_log("");
-    console_log("Usage:");
-    console_log("  1000langs crawl --source <name> --lang <code> [--output <path>]");
-    console_log("  1000langs verify [--output <path>]");
-    console_log("  1000langs list-sources");
-    console_log("  1000langs version");
-    console_log("  1000langs help");
-    console_log("");
-    console_log("Sources:");
-    let i = 0;
-    while i < len(Config.all_sources) {
-      console_log("  " ++ Config.source_to_string(Config.all_sources[i]));
-      i = i + 1;
-    }
+  fn printHelp = () => {
+    Console.log(`${Config.name} v${Config.version}`)
+    Console.log(Config.description)
+    Console.log("")
+    Console.log("Usage:")
+    Console.log("  1000langs crawl --source <name> --lang <code> [--output <path>]")
+    Console.log("  1000langs verify [--output <path>]")
+    Console.log("  1000langs list-sources")
+    Console.log("  1000langs version")
+    Console.log("  1000langs help")
+    Console.log("")
+    Console.log("Sources:")
+    Config.allSources->Array.forEach(s => {
+      Console.log(`  ${Config.sourceToString(s)}`)
+    })
   }
 
-  pub fn print_version() -> Effect[IO] Unit {
-    console_log(Config.name ++ " v" ++ Config.version)
+  fn printVersion = () => {
+    Console.log(`${Config.name} v${Config.version}`)
   }
 
-  pub fn print_sources() -> Effect[IO] Unit {
-    console_log("Available corpus sources:");
-    let i = 0;
-    while i < len(Config.all_sources) {
-      console_log("  " ++ Config.source_to_string(Config.all_sources[i]));
-      i = i + 1;
-    }
+  fn printSources = () => {
+    Console.log("Available corpus sources:")
+    Config.allSources->Array.forEach(s => {
+      Console.log(`  ${Config.sourceToString(s)}`)
+    })
   }
 
-  pub fn run_verify(output: Option<String>) -> Effect[Async] Unit {
-    console_log("Running corpus quality verification...");
-    let corpus = Corpus.empty("1000langs-corpus");
-    let result = CorpusAnalyzer.analyze_full(corpus, "eng", "lol", "0.1.0");
-    let output_path = match output { Some(o) => o, None => "/tmp/lol-scan.json" };
-    await Export.write_to_file(result, output_path);
-    console_log("Scan written to: " ++ output_path);
-    console_log("Weak points: " ++ show(len(result.weak_points)))
+  fn runVerify = async (output: option<string>) => {
+    Console.log("Running corpus quality verification...")
+    // Create a test corpus for demonstration
+    fn corpus = Corpus.empty("1000langs-corpus")
+    fn result = CorpusAnalyzer.analyzeFull(corpus, ())
+    fn outputPath = output->Option.getOr("/tmp/lol-scan.json")
+    await Export.writeToFile(result, outputPath)
+    Console.log(`Scan written to: ${outputPath}`)
+    Console.log(
+      `Weak points: ${Int.toString(Array.length(result.weak_points))}`,
+    )
   }
 
-  pub fn run_crawl(source: Config.Source, lang: String, output: Option<String>) -> Effect[Async] Unit {
-    console_log("Crawling " ++ Config.source_to_string(source) ++ " for language: " ++ lang);
-    let _ = output;
-    match source {
-      BibleCloud => {
-        console_log("Using BibleCloud API crawler...");
-        let crawler = BibleCloud.Crawler_.make(None);
-        match await BibleCloud.Crawler_.fetch_bibles(crawler) {
-          Crawler.Types.Success(bibles) => console_log("Found " ++ show(len(bibles)) ++ " Bibles"),
-          Crawler.Types.Failure(msg)    => console_error("Crawl failed: " ++ msg),
-          Crawler.Types.Pending         => console_log("Crawl pending (no API key configured)"),
-        }
+  fn runCrawl = async (source: Config.source, lang: string, output: option<string>) => {
+    Console.log(
+      `Crawling ${Config.sourceToString(source)} for language: ${lang}`,
+    )
+    fn _ = output
+    switch source {
+    | BibleCloud =>
+      Console.log("Using BibleCloud API crawler...")
+      fn crawler = BibleCloud.Crawler.make()
+      fn result = await BibleCloud.Crawler.fetchBibles(crawler)
+      switch result {
+      | Crawler.Types.Success(bibles) =>
+        Console.log(`Found ${Int.toString(Array.length(bibles))} Bibles`)
+      | Crawler.Types.Failure(msg) => Console.error(`Crawl failed: ${msg}`)
+      | Crawler.Types.Pending => Console.log("Crawl pending (no API key configured)")
       }
-      BibleCom => {
-        console_log("Using BibleCom web scraper...");
-        let crawler = BibleCom.Crawler_.make();
-        match await BibleCom.Crawler_.fetch_versions(crawler) {
-          Crawler.Types.Success(versions) => console_log("Found " ++ show(len(versions)) ++ " versions"),
-          Crawler.Types.Failure(msg)      => console_error("Crawl failed: " ++ msg),
-          Crawler.Types.Pending           => {},
-        }
+    | BibleCom =>
+      Console.log("Using BibleCom web scraper...")
+      fn crawler = BibleCom.Crawler.make()
+      fn result = await BibleCom.Crawler.fetchVersions(crawler)
+      switch result {
+      | Crawler.Types.Success(versions) =>
+        Console.log(`Found ${Int.toString(Array.length(versions))} versions`)
+      | Crawler.Types.Failure(msg) => Console.error(`Crawl failed: ${msg}`)
+      | Crawler.Types.Pending => ()
       }
-      PngScriptures => {
-        console_log("Using PNG Scriptures crawler...");
-        let crawler = PngScriptures.Crawler_.make("./downloads/png");
-        match await PngScriptures.Crawler_.fetch_languages(crawler) {
-          Crawler.Types.Success(langs) => console_log("Found " ++ show(len(langs)) ++ " languages"),
-          Crawler.Types.Failure(msg)   => console_error("Crawl failed: " ++ msg),
-          Crawler.Types.Pending        => {},
-        }
+    | PngScriptures =>
+      Console.log("Using PNG Scriptures crawler...")
+      fn crawler = PngScriptures.Crawler.make()
+      fn result = await PngScriptures.Crawler.fetchLanguages(crawler)
+      switch result {
+      | Crawler.Types.Success(langs) =>
+        Console.log(`Found ${Int.toString(Array.length(langs))} languages`)
+      | Crawler.Types.Failure(msg) => Console.error(`Crawl failed: ${msg}`)
+      | Crawler.Types.Pending => ()
       }
-      EBible => {
-        console_log("Using eBible.org crawler...");
-        let crawler = EBible.Crawler_.make();
-        match await EBible.Crawler_.fetch_translations(crawler) {
-          Crawler.Types.Success(translations) => console_log("Found " ++ show(len(translations)) ++ " translations"),
-          Crawler.Types.Failure(msg)          => console_error("Crawl failed: " ++ msg),
-          Crawler.Types.Pending               => {},
-        }
+    | EBible =>
+      Console.log("Using eBible.org crawler...")
+      fn crawler = EBible.Crawler.make()
+      fn result = await EBible.Crawler.fetchTranslations(crawler)
+      switch result {
+      | Crawler.Types.Success(translations) =>
+        Console.log(`Found ${Int.toString(Array.length(translations))} translations`)
+      | Crawler.Types.Failure(msg) => Console.error(`Crawl failed: ${msg}`)
+      | Crawler.Types.Pending => ()
       }
-      FindBible => {
-        console_log("Using Find.Bible crawler...");
-        let crawler = FindBible.Crawler_.make();
-        match await FindBible.Crawler_.fetch_languages(crawler) {
-          Crawler.Types.Success(langs) => console_log("Found " ++ show(len(langs)) ++ " languages"),
-          Crawler.Types.Failure(msg)   => console_error("Crawl failed: " ++ msg),
-          Crawler.Types.Pending        => {},
-        }
+    | FindBible =>
+      Console.log("Using Find.Bible crawler...")
+      fn crawler = FindBible.Crawler.make()
+      fn result = await FindBible.Crawler.fetchLanguages(crawler)
+      switch result {
+      | Crawler.Types.Success(langs) =>
+        Console.log(`Found ${Int.toString(Array.length(langs))} languages`)
+      | Crawler.Types.Failure(msg) => Console.error(`Crawl failed: ${msg}`)
+      | Crawler.Types.Pending => ()
       }
-      BibleIs => {
-        console_log("BibleIs uses the Digital Bible Platform API...");
-        console_log("Configure API key via BIBLE_API_KEY environment variable")
-      }
+    | BibleIs =>
+      Console.log("BibleIs uses the Digital Bible Platform API...")
+      Console.log("Configure API key via BIBLE_API_KEY environment variable")
     }
   }
 }
 
-pub fn main() -> Effect[Async] Unit {
-  match Cli.parse_args(deno_args()) {
-    Cli.Help                       => Cli.print_help(),
-    Cli.Version                    => Cli.print_version(),
-    Cli.ListSources                => Cli.print_sources(),
-    Cli.Verify(output)             => await Cli.run_verify(output),
-    Cli.Crawl(source, lang, output) => await Cli.run_crawl(source, lang, output),
+fn main = async () => {
+  fn cmd = Cli.parseArgs(args)
+  switch cmd {
+  | Cli.Help => Cli.printHelp()
+  | Cli.Version => Cli.printVersion()
+  | Cli.ListSources => Cli.printSources()
+  | Cli.Verify({output}) => await Cli.runVerify(output)
+  | Cli.Crawl({source, lang, output}) => await Cli.runCrawl(source, lang, output)
   }
 }
 
-main()
+ignore(main())
+
