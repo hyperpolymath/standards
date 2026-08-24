@@ -38,7 +38,7 @@
 # * Plain-language translation — user never authors a Nickel schema for
 #   a cipher suite; AI does the spec work, user reviews in domain
 #   language ("TLS 1.3 with PQ key exchange, HSTS preload, 1yr").
-# * Evidence sinks: VeriSimDB (queryable) + 6a2/DRIFT.a2ml (repo-local).
+# * Evidence sinks: VeriSimDB (queryable) + descriptiles/DRIFT.a2ml (repo-local).
 # * Failure-mode defenses cross-referenced — trust carries the most
 #   defenses of any verb because the threat surface is widest.
 
@@ -142,7 +142,7 @@ let base    = import "../_base.ncl" in
       },
       {
         kind        = 'drift_log,
-        path        = ".machine_readable/6a2/DRIFT.a2ml",
+        path        = ".machine_readable/descriptiles/DRIFT.a2ml",
         append_only = true,
       },
     ],
@@ -232,7 +232,7 @@ let base    = import "../_base.ncl" in
             signature_required = true,
           },
         ],
-        signed_record_destination = ".machine_readable/6a2/ratification-<session-id>.a2ml",
+        signed_record_destination = ".machine_readable/descriptiles/ratification-<session-id>.a2ml",
         must_precede_work = true,
       },
 

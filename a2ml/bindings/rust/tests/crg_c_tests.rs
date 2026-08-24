@@ -614,7 +614,7 @@ fn e2e_dogfood_parse_machine_readable_state() {
     // Try to find any .a2ml file in .machine_readable/
     let state_path = standards_root
         .join(".machine_readable")
-        .join("6a2")
+        .join("descriptiles")
         .join("STATE.a2ml");
 
     if !state_path.exists() {

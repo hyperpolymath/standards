@@ -31,7 +31,8 @@ declare -A REPL=( ["6a2"]="descriptiles" ["agent_instructions"]="bot_directives"
 is_excluded() {
   case "$1" in
     CANONICAL-NAMES.adoc|scripts/check-canonical-names.sh|scripts/tests/*|\
-    *MIGRATION*|*migration*|*CHANGELOG*|*/6a2/*) return 0 ;;
+    *MIGRATION*|*migration*|*CHANGELOG*|\
+    standards-update/.machine_readable/6scm-archive/.machine_readable/6a2/*) return 0 ;;
   esac
   return 1
 }
@@ -43,17 +44,17 @@ rc=0
 current_file=""
 while IFS= read -r line; do
   case "$line" in
-    "+++ b/"*) current_file="${line#+++ b/}" ;;
+    "+++ b/"*)
+      current_file="${line#+++ b/}"
+      if ! is_excluded "$current_file" &&
+         [[ "/$current_file/" == */.machine_readable/6a2/* ]]; then
+        echo "❌ $current_file: reintroduces deprecated '.machine_readable/6a2/' — use '.machine_readable/descriptiles/' (CANONICAL-NAMES.adoc)"
+        rc=1
+      fi
+      ;;
     "+"*)
       is_excluded "$current_file" && continue
       body="${line#+}"
-      # Hypatia baselines identify findings by their literal on-disk path. This
-      # narrow matcher records an existing legacy path; it does not name a new
-      # product, interface, or source location.
-      if [ "$current_file" = ".hypatia-baseline.json" ] &&
-         printf '%s' "$body" | grep -Fq '"file_pattern": ".machine_readable/6a2/*.a2ml"'; then
-        continue
-      fi
       # Skip a line that is DESCRIBING the deprecation rather than using the old
       # name — it also mentions the canonical replacement or the mandate itself
       # (e.g. tooling comments, this guard's own wiring, docs about the rename).
