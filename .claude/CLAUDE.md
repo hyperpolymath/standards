@@ -112,11 +112,19 @@ for the canonical statement.
 > ruling and agent behaviour had diverged: agents were being instructed to migrate
 > *away* from the estate's first-choice runtime.
 >
-> **Still unresolved, deliberately left alone:** the table below bans TypeScript in
-> favour of AffineScript, while `LANGUAGE-POLICY.adoc` §1.2 states "TypeScript is
-> *permitted under Bun*". Those two cannot both be right. The AffineScript
-> direction is a substantive architectural position rather than an oversight, so
-> it is flagged here for an owner ruling instead of being changed.
+> **RESOLVED 2026-08-25 — this file governs.** The contradiction previously
+> flagged here (this table bans TypeScript in favour of AffineScript, while
+> `LANGUAGE-POLICY.adoc` §1.2 stated "TypeScript is *permitted under Bun*") has
+> been ruled by the owner: **AffineScript governs.** `LANGUAGE-POLICY.adoc` §1.2
+> was the error and has been rewritten to match.
+>
+> The distinction that keeps both documents coherent: **Bun is the runtime, tier 1
+> and unchanged; AffineScript is the language for new application code.** Those
+> were run together in the withdrawn text. TypeScript is permitted only where
+> AffineScript cannot reach — the same narrow, transitional carve-out JavaScript
+> holds below.
+>
+> ReScript's ban is uncontested, and its migration destination is **AffineScript**.
 
 ### BANNED - Do Not Use
 
