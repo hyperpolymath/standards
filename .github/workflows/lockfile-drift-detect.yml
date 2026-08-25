@@ -1,0 +1,179 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# lockfile-drift-detect.yml — estate-wide sweep for the recurring CI killer.
+#
+# THE FAULT: Dependabot bumps an action version in a workflow; nobody
+# regenerates `.github/workflows/actions.lock`; the workflow then requests a
+# version the lockfile does not record, and GitHub rejects the run at
+# `startup_failure` with ZERO jobs — no log, no annotation, nothing in REST.
+#
+# It is SELF-REINFLICTING. Measured 2026-08-25: 60 of 60 sampled repos carry
+# both a lockfile and a Dependabot config, so the whole estate re-acquires this
+# on every action bump. That is why repos appear to "go bad again" after being
+# fixed — nobody broke them, the clock did.
+#
+# Proven on hypatia#723: three drifted entries discriminated perfectly (every
+# workflow using one was dead, every workflow using none was alive), and
+# regeneration took all four dead workflows from `startup_failure` to running.
+#
+# This workflow REPORTS ONLY. It opens/updates one tracking issue and never
+# mutates another repository — consistent with the estate guardrail that
+# unattended cross-repo mutation is a human decision.
+name: Lockfile Drift Detect
+
+on:
+  schedule:
+    # Tuesday 07:20 UTC — after Dependabot's usual weekly window, so a bump
+    # and its resulting drift are caught in the same week rather than the next.
+    - cron: '20 7 * * 2'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Max repos to scan (0 = all)'
+        type: string
+        default: '0'
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sweep:
+    name: Sweep the estate for lockfile drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout standards (for the checker script)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Sweep
+        id: sweep
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LIMIT: ${{ inputs.limit || '0' }}
+        run: |
+          set -euo pipefail
+          : > drift-report.tsv
+          printf 'repo\tworkflow\trequested\tlocked\n' >> drift-report.tsv
+
+          # Enumerate, then filter. `gh repo list` has a denominator we can
+          # state; `gh search` does not. A count landing on a round number is a
+          # page size, not a measurement.
+          gh repo list hyperpolymath --limit 1000 --no-archived \
+            --json name --jq '.[].name' > repos.txt
+          TOTAL=$(wc -l < repos.txt)
+          echo "enumerated $TOTAL non-archived repos"
+          # NOT `[ test ] && cmd` — under `set -e` a false test makes the whole
+          # compound non-zero and kills the run, and 0 is the DEFAULT.
+          if [ "$LIMIT" != "0" ]; then
+            head -n "$LIMIT" repos.txt > r.tmp
+            mv r.tmp repos.txt
+          fi
+
+          scanned=0; withlock=0; drifted=0
+          while read -r r; do
+            scanned=$((scanned+1))
+            # Cheap probe first: skip repos with no lockfile (that is failure
+            # mode 1, not drift, and a lockfile-free repo may be legitimately
+            # outside the enforcement cohort).
+            gh api "repos/hyperpolymath/$r/contents/.github/workflows/actions.lock" \
+              --jq .size >/dev/null 2>&1 || continue
+            withlock=$((withlock+1))
+
+            rm -rf _w
+            if ! git clone -q --depth 1 \
+                 "https://x-access-token:${GH_TOKEN}@github.com/hyperpolymath/$r.git" _w 2>/dev/null; then
+              continue
+            fi
+            if ! bash scripts/check-lockfile-drift.sh _w >> drift-report.tsv 2>/dev/null; then
+              drifted=$((drifted+1))
+            fi
+            rm -rf _w
+          done < repos.txt
+
+          rows=$(( $(wc -l < drift-report.tsv) - 1 ))
+          {
+            echo "total=$TOTAL"
+            echo "scanned=$scanned"
+            echo "withlock=$withlock"
+            echo "drifted=$drifted"
+            echo "rows=$rows"
+          } >> "$GITHUB_OUTPUT"
+          echo "scanned=$scanned withlock=$withlock drifted=$drifted rows=$rows"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: lockfile-drift-report
+          path: drift-report.tsv
+          retention-days: 90
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "## Lockfile Drift Detect"
+            echo
+            echo "| | |"
+            echo "|---|---:|"
+            echo "| non-archived repos | ${{ steps.sweep.outputs.total }} |"
+            echo "| scanned | ${{ steps.sweep.outputs.scanned }} |"
+            echo "| carrying a lockfile | ${{ steps.sweep.outputs.withlock }} |"
+            echo "| **with drift** | **${{ steps.sweep.outputs.drifted }}** |"
+            echo "| drifted entries | ${{ steps.sweep.outputs.rows }} |"
+            echo
+            echo '```'
+            head -40 drift-report.tsv
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open / update the tracking issue
+        if: steps.sweep.outputs.drifted != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          title="lockfile drift: ${{ steps.sweep.outputs.drifted }} repo(s) as of $(date -u +%Y-%m-%d)"
+
+          # NOTE: deliberately NOT a heredoc. A heredoc body sits at column 0,
+          # which terminates the enclosing `run: |` block scalar and makes the
+          # workflow unparseable — the exact defect that took
+          # .git-private-farm/inbox-steward-propagate.yml out of service and
+          # blocked `gh actions-lock` from running at all. Build the body with
+          # indented appends instead.
+          {
+            echo "Automated sweep for **lockfile version drift** — the estate's recurring CI killer."
+            echo
+            echo "**The fault.** Dependabot bumps an action version in a workflow; \`actions.lock\` is not regenerated; the workflow then requests a version the lockfile does not record, and GitHub rejects the run at \`startup_failure\` with **zero jobs** — no log, no annotation. It is self-reinflicting, so affected repos recur."
+            echo
+            echo "**To fix a listed repo:** run \`gh actions-lock\`, then restore the SPDX header to line 1 (the tool restamps its banner above it and the workflow-security linter greps \`head -1\` only)."
+            echo
+            echo "**Calibration:** a listed row is a genuine inconsistency but is *not* proof that workflow is dead — some drift is survivable. The reliable direction is the converse: workflows that were dead had drifted entries."
+            echo
+            echo "Full list in the run's \`lockfile-drift-report.tsv\` artifact."
+            echo
+            echo "| | |"
+            echo "|---|---:|"
+            echo "| scanned | ${{ steps.sweep.outputs.scanned }} |"
+            echo "| carrying a lockfile | ${{ steps.sweep.outputs.withlock }} |"
+            echo "| **with drift** | **${{ steps.sweep.outputs.drifted }}** |"
+            echo "| drifted entries | ${{ steps.sweep.outputs.rows }} |"
+          } > issue-body.md
+          body="$(cat issue-body.md)"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label lockfile-drift \
+                       --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" \
+              --body "Re-swept $(date -u +%Y-%m-%d): **${{ steps.sweep.outputs.drifted }}** repo(s) drifted."
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" \
+              --label lockfile-drift || \
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
