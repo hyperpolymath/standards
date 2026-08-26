@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// (PMPL-1.0-or-later preferred; MPL-2.0 required for Hex.pm)
+// (MPL-2.0 required for Hex.pm)
 //
 // a2ml_gleam/parser — A2ML document parser.
 //
