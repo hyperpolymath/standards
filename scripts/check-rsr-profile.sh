@@ -22,7 +22,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATES="${RSR_GATES:-$SCRIPT_DIR/../.machine_readable/template-capability-gates.toml}"
 REPO="${1:-.}"
 LIVE_REPOSITORY="${2:-${RSR_REPOSITORY:-}}"
-PROFILE="$REPO/.machine_readable/rsr-profile.a2ml"
+# The machine tree is `machine-readable/` (canonical since 2026-08). The dotted
+# `.machine_readable/` form is the LEGACY location and is still accepted, because
+# the canon, scaffoldia, the julia variant and ~300 minted repos all still carry
+# it; flipping in one move would strand every one of them on the same day.
+# Remove the legacy branch once the estate migration completes.
+PROFILE="$REPO/machine-readable/rsr-profile.a2ml"
+[ -f "$PROFILE" ] || PROFILE="$REPO/.machine_readable/rsr-profile.a2ml"
 
 [ -f "$GATES" ] || { echo "ERROR: gates file not found: $GATES" >&2; exit 2; }
 [ -f "$PROFILE" ] || { echo "ERROR: no profile at $PROFILE" >&2; exit 2; }
@@ -73,8 +79,23 @@ fi
 has_cap() { printf '%s\n' "$EFFECTIVE" | grep -qx "$1"; }
 
 # Presence of a module path: file, dir/ (trailing slash), or glob (contains *).
+#
+# A row may list ALTERNATIVES separated by '|', satisfied if ANY of them exists.
+# Without this every row was an independent AND, which is why the table demanded
+# both build/guix.scm AND flake.nix for one capability - contradicting criterion
+# 1.2.1 ("Nix fallback only") and making `reproducible-build` unsatisfiable for
+# any repo that had correctly retired Nix. Alternation is what that table always
+# meant; it just had no way to say it.
 present() {
-  local key="$1"
+  local key="$1" alt
+  if [[ "$key" == *"|"* ]]; then
+    local -a alts
+    IFS='|' read -r -a alts <<< "$key"
+    for alt in "${alts[@]}"; do
+      present "$alt" && return 0
+    done
+    return 1
+  fi
   case "$key" in
     */) [ -d "$REPO/${key%/}" ] ;;
     *'*'*) ( shopt -s globstar nullglob; compgen -G "$REPO/$key" >/dev/null ) ;;
@@ -87,6 +108,17 @@ echo "profile: ${PRESET:+preset=$PRESET }${DIRECT:+direct-capabilities}"
 echo "effective capabilities: $(printf '%s\n' "$EFFECTIVE" | paste -sd ' ' -)"
 echo
 
+# A spine (template) repo legitimately carries capability-gated modules it does
+# not declare - it ships them for the repos minted from it. [carrier] lists them.
+ROLE="$(section rsr-profile "$PROFILE" | quoted_on_key role | sed -n 1p || true)"
+CARRIER=""
+if [ "$ROLE" = "spine" ]; then
+  CARRIER="$(section carrier "$GATES" | quoted_on_key paths || true)"
+  echo "role: spine - [carrier] paths exempt from VESTIGIAL"
+  echo
+fi
+is_carrier() { [ -n "$CARRIER" ] && printf '%s\n' "$CARRIER" | grep -qx "$1"; }
+
 fail=0
 while IFS= read -r line; do
   path="$(printf '%s' "$line" | grep -oE '"[^"]+"' | sed -n 1p | tr -d '"')"
@@ -95,7 +127,13 @@ while IFS= read -r line; do
   if has_cap "$cap"; then
     present "$path" || { echo "  MISSING ($cap): $path"; fail=1; }
   else
-    present "$path" && { echo "  VESTIGIAL (no '$cap' capability): $path"; fail=1; }
+    if present "$path"; then
+      if is_carrier "$path"; then
+        echo "  carried for downstream (no '$cap' capability, spine): $path"
+      else
+        echo "  VESTIGIAL (no '$cap' capability): $path"; fail=1
+      fi
+    fi
   fi
 done < <(section gates "$GATES")
 
@@ -105,7 +143,7 @@ if [ "$fail" -ne 0 ]; then
 rsr-profile check: FAIL — scaffold does not match declared capabilities.
 Fix one of:
   * remove the vestigial module, OR
-  * declare the capability in .machine_readable/rsr-profile.a2ml (with a
+  * declare the capability in machine-readable/rsr-profile.a2ml (with a
     [rationale] line), OR
   * add the missing module.
 MSG
