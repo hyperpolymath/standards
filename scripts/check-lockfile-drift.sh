@@ -68,7 +68,10 @@ for wf in "$WFDIR"/*.yml "$WFDIR"/*.yaml; do
   #     those legitimately carry a bare `[]` entry and are not drift
   #   * strip sub-action paths: `github/codeql-action/init@v1` is recorded in
   #     the lockfile as `github/codeql-action@v1`
-  grep -oE "uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[A-Za-z0-9._-]+" "$wf" 2>/dev/null \
+  # Strip comments FIRST. A commented-out `#  - uses: foo@sha` is dead code;
+  # flagging it is a false positive, and a detector that cries wolf is ignored.
+  sed -E 's/^[[:space:]]*#.*$//' "$wf" 2>/dev/null \
+    | grep -oE "uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[A-Za-z0-9._-]+" 2>/dev/null \
     | sed -E 's/uses:[[:space:]]*//' \
     | grep -v '/\.github/workflows/' \
     | sed -E 's#^([^/]+/[^/@]+)(/[^@]*)?@#\1@#' \
