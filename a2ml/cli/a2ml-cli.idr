@@ -35,7 +35,7 @@ A2ML CLI v""" ++ version ++ """
 Attested Markup Language - Command Line Interface
 Copyright (c) 2026 Jonathan D.A. Jewell
 
-License: PMPL-1.0-or-later
+License: MPL-2.0 (code) / CC-BY-SA-4.0 (docs)
 Repository: https://github.com/hyperpolymath/standards/tree/main/a2ml
 """
 
