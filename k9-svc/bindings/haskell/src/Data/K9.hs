@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: MPL-2.0
--- (PMPL-1.0-or-later preferred; MPL-2.0 required for Hackage OSI-approved policy)
+-- (MPL-2.0 required for Hackage OSI-approved policy)
 --
 -- Data.K9 — Top-level re-export module for the K9 library.
 --

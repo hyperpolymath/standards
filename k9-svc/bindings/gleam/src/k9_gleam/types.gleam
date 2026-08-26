@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// (PMPL-1.0-or-later preferred; MPL-2.0 required for Hex.pm)
+// (MPL-2.0 required for Hex.pm)
 //
 // k9_gleam/types — Core data types for K9 (Self-Validating Components).
 //

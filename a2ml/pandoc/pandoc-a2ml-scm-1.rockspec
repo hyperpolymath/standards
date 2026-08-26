@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: MPL-2.0
--- (PMPL-1.0-or-later preferred; MIT required for LuaRocks OSI-approved policy)
+-- (MIT required for LuaRocks OSI-approved policy)
 --
 -- pandoc-a2ml-scm-1.rockspec — LuaRocks package spec for pandoc-a2ml.
 --

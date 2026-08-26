@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: MPL-2.0
--- (PMPL-1.0-or-later preferred; MPL-2.0 required for Hackage OSI-approved policy)
+-- (MPL-2.0 required for Hackage OSI-approved policy)
 --
 -- Data.A2ML.Renderer — Render A2ML AST back to A2ML surface syntax.
 --

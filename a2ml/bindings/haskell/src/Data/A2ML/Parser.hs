@@ -1,5 +1,5 @@
 -- SPDX-License-Identifier: MPL-2.0
--- (PMPL-1.0-or-later preferred; MPL-2.0 required for Hackage OSI-approved policy)
+-- (MPL-2.0 required for Hackage OSI-approved policy)
 --
 -- Data.A2ML.Parser — Parser for A2ML (Attested Markup Language) documents.
 --

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-// (PMPL-1.0-or-later preferred; MPL-2.0 required for crates.io)
+// (MPL-2.0 required for crates.io)
 
 //! Line-by-line parser for K9 self-validating configuration files.
 //!
