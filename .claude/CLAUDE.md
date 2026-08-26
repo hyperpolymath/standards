@@ -18,7 +18,7 @@
 | **2. The 007 repo** | All Rights Reserved (ARR) | `hyperpolymath/007` specifically. Out-of-scope for any normalisation, scanning, or labelling. Surface to owner only. |
 | **3. Shared with son (Joshua)** | `AGPL-3.0-or-later` | Repos with son as co-author/maintainer. Examples: `idaptik`, `paint-type`. Permanent. |
 | **4. Third-party / forks** | DO NOT TOUCH | Whatever upstream chose. Never sweep, never normalise. Flag as out-of-scope if it surfaces in an audit. |
-| **5. Palimpsest carve-out (extremely narrow)** | `PMPL-1.0-or-later` | EXACTLY three repos: `palimpsest-license` + `palimpsest-plasma` + `metadatastician/consent-aware-web`. The first two retroactively; `metadatastician/consent-aware-web` **prospectively only** (don't flip existing content). NOWHERE ELSE. |
+| **5. Palimpsest register** | `PMPL-1.0-or-later` | **Only repos named in the register** in `LICENCE-POLICY.adoc` Rule 2 — currently five: `palimpsest-license`, `palimpsest-plasma`, `metadatastician/consent-aware-web` (prospectively only — don't flip existing content), `insolvency-tycoon`, `sim-public-relations`. The cap of three was lifted 2026-08-26 as the Palimpsest family develops; the register is a growing **allowlist**, so PMPL in an unlisted repo is still drift. `LICENCE-POLICY.adoc` is authoritative — do not duplicate the list's contents here. |
 
 ### Hard rules for agents
 
