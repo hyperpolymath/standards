@@ -110,14 +110,29 @@ echo
 
 # A spine (template) repo legitimately carries capability-gated modules it does
 # not declare - it ships them for the repos minted from it. [carrier] lists them.
-ROLE="$(section rsr-profile "$PROFILE" | quoted_on_key role | sed -n 1p || true)"
+# Read role from $PBODY, which already falls back from [rsr-profile] to
+# [profile]. Re-reading [rsr-profile] directly lost the role for any repo
+# using the [profile] spelling the script otherwise supports.
+ROLE="$(printf '%s\n' "$PBODY" | quoted_on_key role | sed -n 1p || true)"
 CARRIER=""
 if [ "$ROLE" = "spine" ]; then
   CARRIER="$(section carrier "$GATES" | quoted_on_key paths || true)"
   echo "role: spine - [carrier] paths exempt from VESTIGIAL"
   echo
 fi
-is_carrier() { [ -n "$CARRIER" ] && printf '%s\n' "$CARRIER" | grep -qx "$1"; }
+# A gate row may be an alternation ("a|b"); a carrier entry names ONE path.
+# Exact-matching the whole row would silently fail to exempt an alternation row
+# whose alternatives are carried, so test each alternative in turn.
+is_carrier() {
+  [ -n "$CARRIER" ] || return 1
+  local alt
+  local -a alts
+  IFS='|' read -r -a alts <<< "$1"
+  for alt in "${alts[@]}"; do
+    printf '%s\n' "$CARRIER" | grep -qx "$alt" && return 0
+  done
+  return 1
+}
 
 fail=0
 while IFS= read -r line; do
