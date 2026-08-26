@@ -86,7 +86,7 @@ for the canonical statement.
 |---------------|----------|-------|
 | **AffineScript** | Primary application code | Compiles to typed-wasm; affine/linear types. Replaces ReScript across the estate (RS/TS/JS → AffineScript → typed-wasm). |
 | **Bun** | JS/TS runtime & package management (tier 1) | Default for all new work. Executes `.ts` directly, no build step. Uses an npm-compatible `package.json` plus `bun.lock` — both are expected, not anti-patterns. |
-| **Deno** | JS/TS runtime (tier 2) | Grandfathered. Existing Deno projects need not migrate; prefer over pnpm/npm where Bun cannot be used. |
+| **Deno** | ~~JS/TS runtime~~ **BEING REMOVED** | Owner ruling 2026-08-26: *"deno is to go and bun is the way we are going, put it first everywhere unless not possible and explain why if not."* Existing Deno projects **must migrate to Bun**. Where Bun genuinely cannot be used, the reason must be documented in the repo — not left silently on Deno. |
 | **Rust/SPARK** | Performance-critical, systems, WASM, CLI tools, safety-critical | "Rust" always means "Rust/SPARK" per terminology note above. Preferred over Ada where reachable. |
 | **Zig** | **APIs, FFIs, gateways, client SDKs (estate default 2026-05-28)**, memory-safe systems where Rust/SPARK is overkill | Zig is the estate-wide default for all API/FFI/gateway/client-SDK work unless explicitly special-cased; Idris2 owns ABIs. Completed V-lang→Zig migration 2026-05-28. |
 | **Idris2** | Formal verification (primary, ABI-style proofs) | ATS2 rejected. Proven-library status in `proven` repo. |
@@ -125,6 +125,17 @@ for the canonical statement.
 > holds below.
 >
 > ReScript's ban is uncontested, and its migration destination is **AffineScript**.
+
+> **SUPERSEDED 2026-08-26 — Deno is no longer tier 2.** The owner ruled:
+> *"deno is to go and bun is the way we are going, put it first everywhere unless not
+> possible and explain why if not."* The "Bun > Deno > pnpm > npm" ordering above described
+> a **preference**; it is now a **removal**. Deno's row has been updated accordingly.
+>
+> This matters because this file is what agents read first. While it said Deno was
+> "grandfathered … need not migrate", agents correctly declined to migrate — and the
+> dependency rules below compounded it: *"No package.json for runtime deps — use deno.json
+> imports"* left repos with **no manifest at all**. `hyperpolymath/ubicity` could not build
+> under any toolchain for exactly this reason (see ubicity#107). Both rules are corrected.
 
 ### BANNED - Do Not Use
 
@@ -179,13 +190,13 @@ Both are FOSS with independent governance (no Big Tech).
      (`docs/migrations/js-to-affinescript`) carves out MCP/LSP protocol glue and
      VSCode-host code (*"MCP glue … Should NOT appear in `portable now`"*). Those
      stay until the AffineScript MCP/LSP/VSCode bindings ship (affinescript#446).
-     Genuinely-portable Deno CLI scripts are the convert-now bucket.
+     Genuinely-portable Deno CLI scripts are the convert-now bucket; anything not yet portable to AffineScript moves to **Bun**, not left on Deno.
    - **Compile-verify, wire-first.** A port is not done until the `.affine` builds
      green (`just check`) and the compiled output is wired as the live entry with
      the original removed *in the same PR*. Never ship an unbuilt `.affine` or
      delete a working `.ts`/`.res` for one that has not compiled.
-2. **No package.json for runtime deps** - Use deno.json imports
-3. **No node_modules in production** - Deno caches deps automatically
+2. **Use `package.json` + `bun.lock` for JS runtime deps** - Bun is npm-compatible; a manifest is REQUIRED. (This line previously said "No package.json - use deno.json imports", which left repos with undeclared dependencies that could not build under any toolchain.)
+3. **`bun install --production` for production deps** - Bun resolves from `package.json` and pins via `bun.lock`
 4. **No Go code** - Use Rust instead
 5. **No Python** - All Python must be rewritten
 6. **No Kotlin/Swift for mobile** - Use Tauri 2.0+ or Dioxus
@@ -195,7 +206,7 @@ Both are FOSS with independent governance (no Big Tech).
 
 - **Primary**: Guix (guix.scm)
 - **Fallback**: Nix (flake.nix)
-- **JS deps**: Deno (deno.json imports)
+- **JS deps**: **Bun** (`package.json` + `bun.lock`); `bunx <tool>` to run one-off tooling
 
 ### Documentation Format
 
