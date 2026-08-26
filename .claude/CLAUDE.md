@@ -85,8 +85,7 @@ for the canonical statement.
 | Language/Tool | Use Case | Notes |
 |---------------|----------|-------|
 | **AffineScript** | Primary application code | Compiles to typed-wasm; affine/linear types. Replaces ReScript across the estate (RS/TS/JS → AffineScript → typed-wasm). |
-| **Bun** | JS/TS runtime & package management (tier 1) | Default for all new work. Executes `.ts` directly, no build step. Uses an npm-compatible `package.json` plus `bun.lock` — both are expected, not anti-patterns. |
-| **Deno** | ~~JS/TS runtime~~ **BEING REMOVED** | Owner ruling 2026-08-26: *"deno is to go and bun is the way we are going, put it first everywhere unless not possible and explain why if not."* Existing Deno projects **must migrate to Bun**. Where Bun genuinely cannot be used, the reason must be documented in the repo — not left silently on Deno. |
+| **Bun** | JS runtime & package management (tier 1) | Default for all new work. Runs compiled ESM/JS directly — no bundler step. Uses an npm-compatible `package.json` plus `bun.lock` — both are expected, not anti-patterns. |
 | **Rust/SPARK** | Performance-critical, systems, WASM, CLI tools, safety-critical | "Rust" always means "Rust/SPARK" per terminology note above. Preferred over Ada where reachable. |
 | **Zig** | **APIs, FFIs, gateways, client SDKs (estate default 2026-05-28)**, memory-safe systems where Rust/SPARK is overkill | Zig is the estate-wide default for all API/FFI/gateway/client-SDK work unless explicitly special-cased; Idris2 owns ABIs. Completed V-lang→Zig migration 2026-05-28. |
 | **Idris2** | Formal verification (primary, ABI-style proofs) | ATS2 rejected. Proven-library status in `proven` repo. |
@@ -120,16 +119,29 @@ for the canonical statement.
 >
 > The distinction that keeps both documents coherent: **Bun is the runtime, tier 1
 > and unchanged; AffineScript is the language for new application code.** Those
-> were run together in the withdrawn text. TypeScript is permitted only where
-> AffineScript cannot reach — the same narrow, transitional carve-out JavaScript
-> holds below.
+> were run together in the withdrawn text.
+>
+> ⚠ **TIGHTENED 2026-08-27 — owner ruling.** Asked about the Bun row advertising direct
+> `.ts` execution, the owner ruled: *"no typescript … that should not exist at all."*
+> The previous sentence here read "TypeScript is permitted only where AffineScript cannot
+> reach". That is now **too permissive**: TypeScript is not a fallback tier, and no tool
+> description in this file may advertise TypeScript support. Every `.ts` reference has been
+> removed from the Bun row, including "JS/TS" in its label.
+>
+> ⚠ **This collides with the "TypeScript Exemptions (Approved)" table below**, which
+> documents real technical carve-outs — `.d.ts` declaration files, the VS Code extension
+> host (npm/Node-native, `@vscode/test-electron` has no alternative), and MCP/LSP protocol
+> glue. Those are **not** stylistic preferences and cannot simply be deleted. They are left
+> standing and flagged for an explicit owner decision: either retire each carve-out with a
+> migration path, or restate the rule as "no new TypeScript, these listed exemptions
+> excepted". **Not resolved unilaterally.**
 >
 > ReScript's ban is uncontested, and its migration destination is **AffineScript**.
 
 > **SUPERSEDED 2026-08-26 — Deno is no longer tier 2.** The owner ruled:
 > *"deno is to go and bun is the way we are going, put it first everywhere unless not
 > possible and explain why if not."* The "Bun > Deno > pnpm > npm" ordering above described
-> a **preference**; it is now a **removal**. Deno's row has been updated accordingly.
+> a **preference**; it is now a **removal**. Deno has been **moved out of ALLOWED into BANNED** accordingly - a struck-through row in an ALLOWED table is ambiguous to the agents that read this file (codacy raised exactly that on #655).
 >
 > This matters because this file is what agents read first. While it said Deno was
 > "grandfathered … need not migrate", agents correctly declined to migrate — and the
@@ -143,6 +155,7 @@ for the canonical statement.
 |--------|-------------|-------|
 | TypeScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
 | **ReScript** | AffineScript | Banned in new code as of 2026-04-30. Existing `.res` files migrate to `.affine` directly (do not pass through ReScript). |
+| **Deno** | Bun | **Being removed.** Owner ruling 2026-08-26: *"deno is to go and bun is the way we are going, put it first everywhere unless not possible and explain why if not."* Existing Deno projects must migrate to Bun; where Bun genuinely cannot be used, the reason must be documented in the repo. Assessment of all 30 remaining `deno.json` locations: #658. |
 | Node.js | Bun | Bun is Node-compatible; run the code, drop the runtime. |
 | npm | Bun | npm is tier 4 — *permitted, never preferred*, not banned. `package-lock.json` must still not be tracked (standards#67). |
 | yarn | Bun | yarn is not in the tier list at all. |
