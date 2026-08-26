@@ -61,7 +61,7 @@ TOPOLOGY="TOPOLOGY.adoc"
 read -r -d '' SPECS <<'TSV' || true
 estate-constitution|governance|constitution/|Hyperpolymath Estate Constitution|the highest estate-level rules, authority precedence, assurance, contribution, exceptions, and known tensions
 a2ml|foundation|a2ml/|A2ML — Attested Markup Language|the typed/verified machine-readable document format
-k9-svc|foundation|k9-svc/|K9 Self-Validating Components|self-validating components with embedded contracts + deploy logic
+k9-svc|foundation|k9-svc/|K9 Self-Validating Components|the K9 specification, security analysis and adoption guidance (implementations live in hyperpolymath/k9-ecosystem)
 contractiles|foundation|contractiles/|Contractiles (Must/Trust/Dust/Intend)|policy-enforcement primitives the K9 layer is built from
 meta-a2ml|foundation|meta-a2ml/|META.a2ml spec|architecture decisions / governance metadata format
 state-a2ml|foundation|state-a2ml/|STATE.a2ml spec|project-state metadata format (drives this registry's topology)
