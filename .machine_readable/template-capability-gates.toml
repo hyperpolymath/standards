@@ -19,11 +19,15 @@ policy = "TEMPLATE-APPLICABILITY-POLICY.adoc"
 # Zotero, a userscript manager): the host owns the runtime and the packaging
 # rules, so host-mandated files are exempt from the usual language gates the
 # way interop-target bindings are.
-known = ["rust", "zig", "agda", "idris2", "haskell", "gleam", "elixir", "affinescript", "julia", "ocaml", "bash", "cli", "library", "ffi", "abi", "api-service", "formal-proofs", "mobile", "web-ui", "docs-site", "published-package", "container", "reproducible-build", "governance-tier", "benchmarks", "plugin"]
+known = ["rust", "zig", "agda", "idris2", "haskell", "gleam", "elixir", "affinescript", "julia", "ocaml", "bash", "cli", "library", "ffi", "abi", "api-service", "formal-proofs", "mobile", "web-ui", "docs-site", "published-package", "container", "reproducible-build", "governance-tier", "benchmarks", "plugin", "deno"]  # "deno": criterion 4.3.1 gates on it; without it here that criterion could never become applicable
 
 [baseline]
 # Always carried (gate = empty). Globs/dirs allowed; not capability-gated.
-paths = ["README.adoc", "EXPLAINME.adoc", "LICENSE", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md", "0-AI-MANIFEST.a2ml", ".machine_readable/descriptiles/", ".machine_readable/rsr-profile.a2ml", ".well-known/", ".gitignore", "Justfile"]
+# '|' offers alternatives; a path is satisfied if ANY alternative exists.
+# GitHub resolves community-health files from .github/ as readily as the root,
+# and the estate's canonical location for them IS .github/ - naming only the
+# root form marked every conforming repo as missing them.
+paths = ["README.adoc", "EXPLAINME.adoc|docs/EXPLAINME.adoc", "LICENSE", "SECURITY.md|.github/SECURITY.md", "CONTRIBUTING.md|.github/CONTRIBUTING.md", "CODE_OF_CONDUCT.md|.github/CODE_OF_CONDUCT.md", "CHANGELOG.adoc|CHANGELOG.md", "0-AI-MANIFEST.a2ml", "machine-readable/descriptiles/|.machine_readable/descriptiles/", "machine-readable/rsr-profile.a2ml|.machine_readable/rsr-profile.a2ml", ".well-known/", ".gitignore", "Justfile"]
 
 [gates]
 # "module path (file, dir/, or glob)" = "gating capability"
@@ -33,21 +37,38 @@ paths = ["README.adoc", "EXPLAINME.adoc", "LICENSE", "SECURITY.md", "CONTRIBUTIN
 ".github/workflows/rust-ci.yml" = "rust"
 "src/interface/ffi/" = "ffi"
 "abi.ipkg" = "abi"
-"src/interface/Abi/" = "abi"
+"src/interface/abi/|src/interface/Abi/" = "abi"
 "src/interface/generated/" = "abi"
 "verification/proofs/" = "formal-proofs"
 ".github/workflows/e2e.yml" = "api-service"
-"container/" = "container"
-"Containerfile" = "container"
-"build/guix.scm" = "reproducible-build"
-"flake.nix" = "reproducible-build"
+"build/container/|container/" = "container"
+"build/container/Containerfile|container/Containerfile|Containerfile" = "container"
+# Guix is primary; Nix is fallback-only (criterion 1.2.1). As two separate rows
+# this demanded BOTH, so every repo that correctly retired Nix failed the gate.
+"guix.scm|build/guix.scm|flake.nix" = "reproducible-build"
 "affinescript/" = "affinescript"
 "benches/" = "benchmarks"
 ".github/workflows/release.yml" = "published-package"
-"AUDIT.adoc" = "governance-tier"
-"AFFIRMATION.adoc" = "governance-tier"
-"GOVERNANCE.adoc" = "governance-tier"
-"MAINTAINERS.adoc" = "governance-tier"
+"docs/AUDIT.adoc|AUDIT.adoc" = "governance-tier"
+"docs/AFFIRMATION.adoc|AFFIRMATION.adoc" = "governance-tier"
+"docs/GOVERNANCE.adoc|GOVERNANCE.adoc|.github/GOVERNANCE.md" = "governance-tier"
+"docs/MAINTAINERS.adoc|MAINTAINERS.adoc" = "governance-tier"
+
+[carrier]
+# Paths a SPINE (template) repo may carry WITHOUT declaring the gating
+# capability, because it carries them for the repos minted from it.
+#
+# The spine is the one repo for which "present but not declared" is correct
+# rather than drift: rsr-template-repo ships rust-ci.yml so that a Rust project
+# minted from it has one, while itself carrying no Rust. Before this section the
+# model had no way to express that, so it reported the template's entire reason
+# for existing as VESTIGIAL - and the template's own profile [notes] had already
+# argued, correctly, that declaring capabilities it lacks would be worse.
+#
+# Applies ONLY where the profile declares role = "spine". A minted repo carrying
+# these without the capability is still drift, which is the behaviour that
+# matters for the other ~300 repos.
+paths = [".github/workflows/rust-ci.yml", ".github/workflows/release.yml", ".github/workflows/e2e.yml", ".github/workflows/boj-build.yml"]
 
 [presets]
 # OPTIONAL shorthands. A profile may declare `capabilities = [...]` directly
