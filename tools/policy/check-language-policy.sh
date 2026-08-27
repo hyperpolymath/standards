@@ -30,12 +30,14 @@ for f in $files; do
          'Bun is listed as BANNED with Deno as replacement - inverted. Bun is tier 1.'
   fi
   # 2. The rule that told repos not to declare dependencies at all. hyperpolymath/ubicity
+  # a phrase inside a blockquote or quotation marks is HISTORY, not policy
+  live(){ grep -vE '^[[:space:]]*>' "$1" | grep -vE '"[^"]*'"$2"'[^"]*"|\u201c[^\u201d]*'"$2"'[^\u201d]*\u201d'; }
   #    imported zod and glob, shipped no manifest, and could not build under ANY toolchain.
-  if grep -nF 'No package.json for runtime deps' "$f" >/dev/null; then
+  if live "$f" 'No package.json for runtime deps' | grep -qF 'No package.json for runtime deps'; then
     fail "$f:$(grep -nF 'No package.json for runtime deps' "$f" | head -1 | cut -d: -f1)" \
          'Forbids declaring dependencies. Bun is npm-compatible; a manifest is REQUIRED.'
   fi
-  if grep -nF 'deno.json imports' "$f" >/dev/null; then
+  if live "$f" 'deno.json imports' | grep -qF 'deno.json imports'; then
     fail "$f:$(grep -nF 'deno.json imports' "$f" | head -1 | cut -d: -f1)" \
          'Directs dependency declaration into deno.json. Use package.json + bun.lock.'
   fi
