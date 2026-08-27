@@ -131,7 +131,6 @@ for the canonical statement.
 | Banned | Replacement | Notes |
 |--------|-------------|-------|
 | TypeScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
-| ReScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
 | **ReScript** | AffineScript | Banned in new code as of 2026-04-30. Existing `.res` files migrate to `.affine` directly (do not pass through ReScript). |
 | Node.js | Bun | Bun is Node-compatible; run the code, drop the runtime. |
 | npm | Bun | npm is tier 4 — *permitted, never preferred*, not banned. `package-lock.json` must still not be tracked (standards#67). |
