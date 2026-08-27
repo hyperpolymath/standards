@@ -64,9 +64,9 @@ for f in $files; do
 
   # --- must appear, if the file carries a language-policy table ---------------
   if grep -qE '^### (ALLOWED|BANNED)' "$f"; then
-    grep -qE '^\| \*\*Bun\*\* \|' "$f" || \
+    { grep -qE '^\|[[:space:]]*\*\*Bun\*\*[[:space:]]*\|' "$f" || grep -qiE '^[-*][[:space:]]+\*{0,2}Bun\*{0,2}\b' "$f"; } || \
       fail "$f" 'No Bun row in ALLOWED. Bun is the tier-1 JS runtime and package manager.'
-    grep -qE '^\| \*?\*?Deno\*?\*? \| Bun \|' "$f" || \
+    { grep -qE '^\|[[:space:]]*\*{0,2}Deno\*{0,2}[[:space:]]*\|[[:space:]]*\*{0,2}Bun\*{0,2}[[:space:]]*\|' "$f" || grep -qiE '^[-*][[:space:]]+Deno[[:space:]]*\(use Bun\)' "$f"; } || \
       fail "$f" 'Deno is not listed in BANNED with Bun as its replacement (ruling 2026-08-26).'
   fi
 done
