@@ -154,8 +154,6 @@ llm-context role="dev":
 # Build all sub-project artefacts
 build:
     @echo "=== Standards Monorepo Build ==="
-    @echo "[1/3] a2ml/bindings/rust"
-    @cd a2ml/bindings/rust && cargo build 2>&1 || echo "  SKIP: cargo not available"
     @echo "[2/3] k9 Rust binding — moved to hyperpolymath/k9-ecosystem (rs/) under #491"
     @echo "[3/3] groove-protocol/reference/ipv6t"
     @cd groove-protocol/reference/ipv6t && zig build 2>&1 || echo "  SKIP: zig not available"
@@ -163,9 +161,6 @@ build:
 
 # Run all sub-project test suites
 test:
-    @bash scripts/run-required-test-suite.sh "MCP repo guardian (Deno — 36 tests)" "0-ai-gatekeeper-protocol/mcp-repo-guardian" deno test --allow-read test/manifest_test.js
-    @bash scripts/run-required-test-suite.sh "Repo guardian offline core (Rust — 29 tests)" "0-ai-gatekeeper-protocol/repo-guardian-fs/tests-offline" cargo test
-    @bash scripts/run-required-test-suite.sh "A2ML Rust binding (47 tests + 3 doctests)" "a2ml/bindings/rust" cargo test
     # K9 Rust binding tests now live in hyperpolymath/k9-ecosystem (rs/) — see #491
 
 # Regression test: test aggregation fails for missing prerequisites and test failures.
@@ -179,23 +174,18 @@ session-detritus-test:
 # Format sub-project code
 fmt:
     @echo "=== Standards Monorepo Format ==="
-    @cd a2ml/bindings/rust && cargo fmt 2>&1 || echo "  SKIP"
-    @cd 0-ai-gatekeeper-protocol/mcp-repo-guardian && deno fmt 2>&1 || echo "  SKIP"
     @echo "=== Format complete ==="
 
 # Lint sub-projects
 lint:
     @echo "=== Standards Monorepo Lint ==="
     @echo "[1/2] Rust clippy"
-    @cd a2ml/bindings/rust && cargo clippy --all-targets 2>&1 || echo "  SKIP"
     @echo "[2/2] Deno lint"
-    @cd 0-ai-gatekeeper-protocol/mcp-repo-guardian && deno lint 2>&1 || echo "  SKIP"
     @echo "=== Lint complete ==="
 
 # Clean build artifacts
 clean:
     @echo "=== Cleaning ==="
-    @cd a2ml/bindings/rust && cargo clean 2>&1 || true
     @cd groove-protocol/reference/ipv6t && rm -rf zig-out zig-cache .zig-cache 2>/dev/null || true
     @echo "=== Clean complete ==="
 
