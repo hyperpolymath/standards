@@ -49,7 +49,7 @@ for f in $files; do
   fi
   # 4. Blanking scars. A bulk purge substituted a token with an EMPTY STRING, which also
   #    produced `rm -rf /lib` in wordpress-tools (the lethal shape is <token>/path -> /path).
-  if awk -F'|' 'NF==4 && $2 ~ /^[[:space:]]*$/{exit 0} END{exit 1}' "$f"; then
+  if awk -F'|' 'NF>=4 && $2 ~ /^[[:space:]]*$/{exit 0} END{exit 1}' "$f"; then
     fail "$f" 'Policy table row with an EMPTY first cell - blanking scar from a bulk substitution.'
   fi
   if grep -nF '| **** |' "$f" >/dev/null; then
