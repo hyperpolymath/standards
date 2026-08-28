@@ -20,7 +20,7 @@ elif command -v python3  >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null
 elif command -v ruby     >/dev/null 2>&1; then parser=ruby
 else
   echo "::warning::no YAML parser available (yq, python3+pyyaml, or ruby) — cannot verify workflows"
-  exit 0
+  exit 1
 fi
 
 parse_ok() {

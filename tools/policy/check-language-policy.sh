@@ -31,25 +31,26 @@ for f in $files; do
   fi
   # 2. The rule that told repos not to declare dependencies at all. hyperpolymath/ubicity
   # a phrase inside a blockquote or quotation marks is HISTORY, not policy
-  live(){ grep -vE '^[[:space:]]*>' "$1" | grep -vE '"[^"]*'"$2"'[^"]*"|“[^”]*'"$2"'[^”]*”'; }
+  live(){ grep -vE '^[[:space:]]*>' "$1" | grep -vE '"[^"]*('"$2"')[^"]*"|“[^”]*('"$2"')[^”]*”'; }
   #    imported zod and glob, shipped no manifest, and could not build under ANY toolchain.
-  if live "$f" 'No package.json for runtime deps' | grep -qF 'No package.json for runtime deps'; then
+  if live "$f" 'No package.json for runtime deps' | grep -F 'No package.json for runtime deps' >/dev/null; then
     fail "$f:$(grep -nF 'No package.json for runtime deps' "$f" | head -1 | cut -d: -f1)" \
          'Forbids declaring dependencies. Bun is npm-compatible; a manifest is REQUIRED.'
   fi
-  if live "$f" 'deno.json imports' | grep -qF 'deno.json imports'; then
+  if live "$f" 'deno.json imports' | grep -F 'deno.json imports' >/dev/null; then
     fail "$f:$(grep -nF 'deno.json imports' "$f" | head -1 | cut -d: -f1)" \
          'Directs dependency declaration into deno.json. Use package.json + bun.lock.'
   fi
   # 3. No tool description may advertise TypeScript. Owner ruling 2026-08-27:
   #    "no typescript ... that should not exist at all."
-  if grep -nE 'Executes .\.ts. directly|JS/TS runtime' "$f" >/dev/null; then
-    fail "$f:$(grep -nE 'Executes .\.ts. directly|JS/TS runtime' "$f" | head -1 | cut -d: -f1)" \
+  typescript_runtime='Executes .\.ts. directly|JS/TS runtime|[Ss]upports? TypeScript|[Rr]uns? [^[:alnum:][:space:]]*\.ts[^[:alnum:][:space:]]* files?'
+  if live "$f" "$typescript_runtime" | grep -E "$typescript_runtime" >/dev/null; then
+    fail "$f:$(grep -nE "$typescript_runtime" "$f" | head -1 | cut -d: -f1)" \
          'Advertises TypeScript execution. TypeScript is banned; do not describe tools as TS runtimes.'
   fi
   # 4. Blanking scars. A bulk purge substituted a token with an EMPTY STRING, which also
   #    produced `rm -rf /lib` in wordpress-tools (the lethal shape is <token>/path -> /path).
-  if awk -F'|' 'NF>=4 && $2 ~ /^[[:space:]]*$/{exit 0} END{exit 1}' "$f"; then
+  if awk -F'|' 'NF>=4 && $2 ~ /^[[:space:]]*$/{found=1; exit} END{exit !found}' "$f"; then
     fail "$f" 'Policy table row with an EMPTY first cell - blanking scar from a bulk substitution.'
   fi
   if grep -nF '| **** |' "$f" >/dev/null; then
