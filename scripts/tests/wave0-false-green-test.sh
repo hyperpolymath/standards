@@ -24,22 +24,11 @@ bad()  { echo "  ❌ $1"; fail=$((fail + 1)); }
 # expect <wanted-code> <actual-code> <label>
 expect() { if [ "$2" -eq "$1" ]; then ok "$3 (exit $2)"; else bad "$3 (wanted $1, got $2)"; fi; }
 
-echo "== check-6scm.sh =="
-SIX="$ROOT/a2ml/scripts/check-6scm.sh"
-# (1) obsolete no-op: no sources, no mirror -> exit 0
-w="$TMP/six-obsolete"; mkdir -p "$w/.machine_readable/6a2"; cp "$SIX" "$w/check.sh"
-( cd "$w" && bash check.sh >/dev/null 2>&1 ); expect 0 $? "obsolete no-op passes"
-# (2) orphan drift: mirror files but no sources -> exit 1
-w="$TMP/six-orphan"; mkdir -p "$w/.machine_readable/6scm"; echo x > "$w/.machine_readable/6scm/STATE.scm"; cp "$SIX" "$w/check.sh"
-( cd "$w" && bash check.sh >/dev/null 2>&1 ); expect 1 $? "orphan-mirror drift fails"
-# (3) out-of-sync: source present, mirror differs -> exit 1
-w="$TMP/six-desync"; mkdir -p "$w/.machine_readable/6scm"
-printf 'a\n' > "$w/.machine_readable/STATE.scm"; printf 'b\n' > "$w/.machine_readable/6scm/STATE.scm"; cp "$SIX" "$w/check.sh"
-( cd "$w" && bash check.sh >/dev/null 2>&1 ); expect 1 $? "out-of-sync mirror fails"
-# (4) in-sync: source present, mirror identical -> exit 0
-w="$TMP/six-sync"; mkdir -p "$w/.machine_readable/6scm"
-printf 'a\n' > "$w/.machine_readable/STATE.scm"; printf 'a\n' > "$w/.machine_readable/6scm/STATE.scm"; cp "$SIX" "$w/check.sh"
-( cd "$w" && bash check.sh >/dev/null 2>&1 ); expect 0 $? "in-sync mirror passes"
+# NOTE: the check-6scm.sh section was removed on 2026-08-28 when a2ml/ was
+# evicted to hyperpolymath/a2ml (standards#490). The script it exercised now
+# lives there, so these four cases belong in that repo's test suite, not this
+# one. Leaving them here would make a REQUIRED check fail for a file this
+# repository no longer contains.
 
 echo "== check-mustfile-structure.sh =="
 MS="$ROOT/scripts/check-mustfile-structure.sh"

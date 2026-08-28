@@ -21,12 +21,14 @@ on:
       - 'a2ml/a2ml-core.ipkg'
       - 'avow-protocol/avow-lib/src/abi/*.idr'
       - '.github/workflows/echidna-verify.yml'
+  # NO path filter on pull_request, deliberately. `Idris2 - a2ml proofs` is a
+  # REQUIRED context, and a workflow-level path filter means the whole workflow
+  # never triggers for a PR that touches nothing else - so the context never
+  # reports and the PR deadlocks. Filtering moved to job level below: the
+  # workflow always starts, and the expensive jobs skip when no proofs changed.
+  # A job skipped by `if:` still emits a check run whose conclusion GitHub
+  # accepts for a required status check.
   pull_request:
-    paths:
-      - 'lol/proofs/**'
-      - 'a2ml/src/**/*.idr'
-      - 'a2ml/a2ml-core.ipkg'
-      - 'avow-protocol/avow-lib/src/abi/*.idr'
   schedule:
     # Weekly re-verification to catch stale-proof drift
     - cron: '0 6 * * 1'
@@ -45,8 +47,38 @@ permissions:
   contents: read
 
 jobs:
+  detect-proof-changes:
+    timeout-minutes: 5
+    name: Detect proof changes
+    runs-on: ubuntu-latest
+    outputs:
+      proofs: ${{ steps.check.outputs.proofs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          fetch-depth: 0
+      - name: Did this change touch any proof source?
+        id: check
+        shell: bash
+        run: |
+          # Non-PR events (push, schedule, dispatch) always verify.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "proofs=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          changed=$(git diff --name-only "$base" "$head" 2>/dev/null || true)
+          if printf '%s\n' "$changed" | grep -qE '^(lol/proofs/|a2ml/src/.*\.idr$|a2ml/a2ml-core\.ipkg$|avow-protocol/avow-lib/src/abi/.*\.idr$|\.github/workflows/echidna-verify\.yml$)'; then
+            echo "proofs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "proofs=false" >> "$GITHUB_OUTPUT"
+          fi
+
   agda-lol:
     name: Agda — lol/proofs
+    needs: detect-proof-changes
+    if: needs.detect-proof-changes.outputs.proofs == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -88,6 +120,8 @@ jobs:
 
   idris2-a2ml:
     name: Idris2 — a2ml proofs
+    needs: detect-proof-changes
+    if: needs.detect-proof-changes.outputs.proofs == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -158,6 +192,8 @@ jobs:
 
   idris2-avow:
     name: Idris2 — AVOW consent proofs
+    needs: detect-proof-changes
+    if: needs.detect-proof-changes.outputs.proofs == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -207,6 +243,17 @@ jobs:
       - name: Type-check AVOW proofs
         run: |
           export PATH="$HOME/.pack/bin:$PATH"
+          # The per-file `if [ -f ]` guard below was written to tolerate absent
+          # proofs, but the `cd` ahead of it was NOT guarded, so a missing
+          # directory killed the step before the guard could ever run. In this
+          # repo avow-protocol/ holds only BINDING.adoc - the proofs live in the
+          # avow-protocol repository - so the cd always failed and this job was
+          # permanently red. It only became visible once the workflow began
+          # running on pull requests.
+          if [ ! -d avow-protocol/avow-lib ]; then
+            echo "::notice title=AVOW proofs::avow-protocol/avow-lib is not present here (this repo carries only the BINDING). Nothing to type-check."
+            exit 0
+          fi
           cd avow-protocol/avow-lib
           for f in src/abi/Consent.idr src/abi/Unsubscribe.idr src/abi/Types.idr; do
             if [ -f "$f" ]; then
@@ -226,7 +273,7 @@ jobs:
   trust-summary:
     timeout-minutes: 10
     name: Trust pipeline summary
-    needs: [agda-lol, idris2-a2ml, idris2-avow]
+    needs: [detect-proof-changes, agda-lol, idris2-a2ml, idris2-avow]
     runs-on: ubuntu-latest
     if: always()
     steps:

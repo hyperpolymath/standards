@@ -118,22 +118,29 @@ jobs:
   validate-hypatia-baseline:
     name: Validate Hypatia Baseline
     needs: workflow-staleness
-    if: needs.workflow-staleness.outputs.has_baseline == 'true'
+    # NOTE: deliberately NO job-level `if:`. This context is REQUIRED by branch
+    # protection, and a skipped job never satisfies a required context — so a
+    # repo without a baseline blocked forever, by construction. The job now
+    # always runs; the EXPENSIVE steps are guarded individually, so it still
+    # costs nothing when there is no baseline to validate.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout caller repository
+        if: needs.workflow-staleness.outputs.has_baseline == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup Elixir for Hypatia scanner
+        if: needs.workflow-staleness.outputs.has_baseline == 'true'
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           elixir-version: '1.19.4'
           otp-version: '28.3'
 
       - name: Resolve Hypatia HEAD commit
+        if: needs.workflow-staleness.outputs.has_baseline == 'true'
         id: hypatia-rev
         run: |
           # Pin the cache to the *current* Hypatia main tip. Resolved before the
@@ -148,6 +155,7 @@ jobs:
           echo "Resolved hypatia HEAD: $sha"
 
       - name: Cache Hex/Mix and Scanner Build
+        if: needs.workflow-staleness.outputs.has_baseline == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -164,12 +172,14 @@ jobs:
           key: hypatia-scanner-v3-${{ runner.os }}-${{ steps.hypatia-rev.outputs.sha }}
 
       - name: Clone Hypatia
+        if: needs.workflow-staleness.outputs.has_baseline == 'true'
         run: |
           if [ ! -d "$HOME/hypatia" ]; then
             git clone --depth 1 https://github.com/hyperpolymath/hypatia.git "$HOME/hypatia"
           fi
 
       - name: Build Hypatia scanner
+        if: needs.workflow-staleness.outputs.has_baseline == 'true'
         run: |
           cd "$HOME/hypatia"
           if [ ! -x hypatia ]; then
@@ -181,6 +191,7 @@ jobs:
       # mirroring the language-policy job below. Pinned to main because
       # github.workflow_sha resolves to the *caller* repo's SHA (which would 404).
       - name: Check out standards for the baseline filter
+        if: needs.workflow-staleness.outputs.has_baseline == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
@@ -191,6 +202,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Run Hypatia scan (Baseline validation)
+        if: needs.workflow-staleness.outputs.has_baseline == 'true'
         env:
           # Preserve the historical strictness: fail on ANY finding not
           # acknowledged by .hypatia-baseline.json (not just >= high). Set to
@@ -240,6 +252,12 @@ jobs:
           # see the PR description.)
           bash "$RUNNER_TEMP/apply-baseline.sh" \
             hypatia-findings.json .hypatia-baseline.json blocking
+
+      - name: No baseline to validate
+        if: needs.workflow-staleness.outputs.has_baseline != 'true'
+        run: |
+          echo "No .hypatia-baseline.json in this repo — nothing to validate."
+          echo "The job still reports success so the required context is satisfied."
   language-policy:
     name: Language / package anti-pattern policy
     runs-on: ${{ inputs.runs-on }}

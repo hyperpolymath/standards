@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# K9-SVC contractile validation.
+#
+# Extracted from boj-build.yml. `K9-SVC contractile validation` is a REQUIRED
+# status check, but boj-build.yml declares only `push:` and `workflow_dispatch:`
+# - it has no `pull_request:` trigger at all, so the context could never report
+# on a pull request and every PR deadlocked waiting for it.
+#
+# It lives in its own file rather than gaining a `pull_request:` trigger inside
+# boj-build.yml so that a required check is not coupled to the BoJ integration:
+# a change to the BoJ trigger cannot alter whether this gate reports.
+#
+# The job name below is VERBATIM from the required-context list. A required
+# context is matched against the emitted job name, so renaming it silently
+# un-gates the branch.
+name: K9-SVC Contractile Validation
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-contractiles:
+    name: K9-SVC contractile validation
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: K9-SVC Validation
+        run: |
+          set -euo pipefail
+          echo "Running K9-SVC contractile validation..."
+          # Real structural validation (no placeholder): every Mustfile check
+          # must carry a severity and a means of discharge (run or verification).
+          # A hollow check fails loudly. See scripts/check-mustfile-structure.sh
+          # (unit-tested by scripts/tests/wave0-false-green-test.sh).
+          bash scripts/check-mustfile-structure.sh
+
+      - name: Mustfile Enforcement (execute the checks)
+        run: |
+          set -euo pipefail
+          # Execute the Mustfile's `- run:` invariants — the mandatory checks
+          # that were previously declared but never run by any CI job. A failing
+          # critical/high check fails the build (fail loudly); warning-severity
+          # failures are reported but non-blocking. See scripts/run-mustfile.sh.
+          bash scripts/run-mustfile.sh
+
+      - name: Contractile Check
+        run: |
+          set -euo pipefail
+          echo "Checking contractile completeness..."
+          index=".machine_readable/contractiles/INDEX.a2ml"
+          if [ ! -f "$index" ]; then
+            echo "❌ Contractile registry not found: $index"
+            exit 1
+          fi
+          # Read the canonical verb set from the registry rather than hard-coding
+          # it (INDEX.a2ml §Registry: consumers SHOULD discover verbs from here).
+          # Each verb's trident lists "<verb>/<Verb>file.a2ml" as its first entry.
+          mapfile -t files < <(grep -oE '"[a-z]+/[A-Z][a-z]+file\.a2ml"' "$index" | tr -d '"' | sort -u)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "❌ No contractile files discovered in $index"
+            exit 1
+          fi
+          missing=0
+          for rel in "${files[@]}"; do
+            if [ -f ".machine_readable/contractiles/$rel" ]; then
+              echo "✅ $rel"
+            else
+              echo "❌ Missing: $rel"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo "❌ $missing contractile(s) missing"
+            exit 1
+          fi
+          echo "✅ All ${#files[@]} contractiles present"

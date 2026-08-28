@@ -60,8 +60,7 @@ TOPOLOGY="TOPOLOGY.adoc"
 # ---------------------------------------------------------------------------
 read -r -d '' SPECS <<'TSV' || true
 estate-constitution|governance|constitution/|Hyperpolymath Estate Constitution|the highest estate-level rules, authority precedence, assurance, contribution, exceptions, and known tensions
-a2ml|foundation|a2ml/|A2ML — Attested Markup Language|the typed/verified machine-readable document format
-k9-svc|foundation|k9-svc/|K9 Self-Validating Components|self-validating components with embedded contracts + deploy logic
+k9-svc|foundation|k9-svc/|K9 Self-Validating Components|the K9 specification, security analysis and adoption guidance (implementations live in hyperpolymath/k9-ecosystem)
 contractiles|foundation|contractiles/|Contractiles (Must/Trust/Dust/Intend)|policy-enforcement primitives the K9 layer is built from
 meta-a2ml|foundation|meta-a2ml/|META.a2ml spec|architecture decisions / governance metadata format
 state-a2ml|foundation|state-a2ml/|STATE.a2ml spec|project-state metadata format (drives this registry's topology)
@@ -112,6 +111,7 @@ read -r -d '' EXTERNAL_SPECS <<'TSV' || true
 affine-spec|language|language-coupled|hyperpolymath/affinescript|https://github.com/hyperpolymath/affinescript/blob/main/spec/affine.adoc|v2.0.0||PENDING-FIRST-SYNC|application/vnd.affinescript.affine|affinescript:affine@2|AffineScript .affine (faces / source documents)|faces, canonical-lowering invariant, canonical islands, idiom packs, mimicry bindings, project face policy
 affex-manifest|language|language-coupled|hyperpolymath/affinescript|https://github.com/hyperpolymath/affinescript/blob/main/spec/affex.adoc|v2.0.0|2|PENDING-FIRST-SYNC|application/vnd.affinescript.affex|affinescript:affex@2|AffineScript .affex (face-interop manifest)|derived regenerable manifest; declaration heads not full bodies; format_version bumps independently
 affmap-provenance|language|language-coupled|hyperpolymath/affinescript|https://github.com/hyperpolymath/affinescript/blob/main/spec/affmap.adoc|v2.0.0||PENDING-FIRST-SYNC|application/vnd.affinescript.affmap|affinescript:affmap@2|AffineScript .affmap (provenance)|provenance format; own pointer for independent staleness tracking
+a2ml|foundation|format-coupled|hyperpolymath/a2ml|https://github.com/hyperpolymath/a2ml/blob/main/README.adoc|v1.0.0||PENDING-FIRST-SYNC|application/vnd.a2ml|a2ml:a2ml@1|A2ML — Attested Markup Language|the typed/verified machine-readable document format; evicted from standards 2026-08-28 per #490
 consent-aware-web|protocol|service-coupled|metadatastician/consent-aware-web|https://github.com/metadatastician/consent-aware-web/blob/main/README.adoc|v0.2.0||PENDING-FIRST-SYNC|application/aibdp+json|ietf:aibdp@0.2|Consent-Aware Web (AIBDP + HTTP 430)|consent headers / AI-usage boundaries for HTTP; extracted from this repo 2026-08-07
 TSV
 

@@ -32,7 +32,7 @@ model = "semver-with-errata"
 rule-major = "A MAJOR bump is an era change: it MAY remove or redefine criteria and MAY move a criterion between tiers. Cutting a major freezes the prior major's rsr-criteria as an immutable, hash-pinned artefact under archive/."
 rule-minor = "A MINOR bump MAY ADD criteria or ADD a capability gate, but MUST NOT make a previously-conforming repo non-conforming at the same tier. Additive only."
 rule-patch = "A PATCH bump is editorial (wording, detection-rule id corrections, template_ref fixes) with no criteria-set change."
-freeze-mechanism = "A released major is frozen by pinning this file's byte-hash in .machine_readable/REGISTRY.a2ml (or the spec's own VERSIONS ledger), NOT by a prose 'FROZEN' banner. A freeze guard in CI (see [oracle].freeze-guard) fails any PR that mutates a frozen major's criteria file."
+freeze-mechanism = "A released major is frozen by pinning this file's byte-hash in machine-readable/REGISTRY.a2ml (or the spec's own VERSIONS ledger), NOT by a prose 'FROZEN' banner. A freeze guard in CI (see [oracle].freeze-guard) fails any PR that mutates a frozen major's criteria file."
 errata = "Corrections that do not change criteria semantics are recorded in RSR-SPEC-v2.adoc Appendix E (Errata) and shipped as PATCH bumps."
 
 [tiers]
@@ -46,12 +46,12 @@ scale = "X F E D C B A maps onto the readiness-grade scale; RSR tiers are the re
 
 [scoring]
 # The capability-gated model (replaces v1.0's flat 'every repo needs all 11 categories').
-applicable-set = "A criterion is APPLICABLE to a repo iff its `gate` is `universal` OR the repo's .machine_readable/rsr-profile.a2ml declares the gating capability (per TEMPLATE-APPLICABILITY-POLICY.adoc). Non-applicable criteria are scored `na` and excluded from the denominator."
+applicable-set = "A criterion is APPLICABLE to a repo iff its `gate` is `universal` OR the repo's machine-readable/rsr-profile.a2ml declares the gating capability (per TEMPLATE-APPLICABILITY-POLICY.adoc). Non-applicable criteria are scored `na` and excluded from the denominator."
 denominator = "sum of weights of APPLICABLE criteria"
 numerator = "sum of weights of APPLICABLE criteria whose `detect` returns pass"
 partial = "A criterion MAY return `partial` (e.g. some but not all files present); partial contributes half its weight and is reported explicitly."
 na-honesty = "A repo MUST NOT reach a tier by declaring away (via rsr-profile) a capability it actually has. hypatia cross-checks declared capabilities against detected ones (structural_drift) and flags under-declaration as :review."
-report = "The oracle writes a per-repo scorecard to verisim-data (.machine_readable/scorecards/<repo>.scorecard.a2ml shape) with per-criterion verdicts, the applicable set, and the resulting tier."
+report = "The oracle writes a per-repo scorecard to verisim-data (machine-readable/scorecards/<repo>.scorecard.a2ml shape) with per-criterion verdicts, the applicable set, and the resulting tier."
 
 [oracle]
 # ONE normative checker. RSR v1.0 shipped five divergent checkers; v2.0 designates
@@ -89,9 +89,9 @@ criteria = [
   { id = "1.1.2", name = "justfile",          desc = "Justfile task runner present with real recipes",                 tier = "bronze", gate = "universal",          detect = "build_system_rules/justfile",   template_ref = "Justfile" },
   { id = "1.1.3", name = "no-makefile",       desc = "No Makefile (Mustfile/justfile only)",                           tier = "bronze", gate = "universal",          detect = "cicd_rules/makefile_detected",  template_ref = "-" },
   { id = "1.1.4", name = "editorconfig",      desc = ".editorconfig present",                                          tier = "silver", gate = "universal",          detect = "manual",                        template_ref = ".editorconfig" },
-  { id = "1.2.1", name = "guix-primary",      desc = "Guix manifest (guix.scm) as primary reproducible build; Nix fallback only", tier = "silver", gate = "reproducible-build", detect = "build_system_rules/guix_primary", template_ref = "build/" },
-  { id = "1.2.2", name = "git-hooks",         desc = ".pre-commit-config.yaml with real hooks",                        tier = "silver", gate = "universal",          detect = "manual",                        template_ref = ".pre-commit-config.yaml" },
-  { id = "1.2.3", name = "container-rootless", desc = "Container config uses rootless Podman + Chainguard/Wolfi base", tier = "gold",   gate = "container",          detect = "cicd_rules/containerfile_base",  template_ref = "container/" },
+  { id = "1.2.1", name = "guix-primary",      desc = "Guix manifest (guix.scm) as the reproducible build (Guix only)", tier = "silver", gate = "reproducible-build", detect = "build_system_rules/guix_primary", template_ref = "build/" },
+  { id = "1.2.2", name = "git-hooks",         desc = ".pre-commit-config.yaml with real hooks",                        tier = "silver", gate = "universal",          detect = "manual",                        template_ref = "ci/.pre-commit-config.yaml" },
+  { id = "1.2.3", name = "container-rootless", desc = "Container config uses rootless Podman + Chainguard/Wolfi base", tier = "gold",   gate = "container",          detect = "cicd_rules/containerfile_base",  template_ref = "build/container/" },
   { id = "1.2.4", name = "tool-versions",     desc = ".tool-versions pins toolchain versions",                         tier = "silver", gate = "universal",          detect = "manual",                        template_ref = ".tool-versions" },
 ]
 
@@ -103,13 +103,13 @@ weight = 12
 criteria = [
   { id = "2.1.1", name = "readme-adoc",   desc = "README.adoc present (.adoc primary per estate doc policy)",       tier = "bronze", gate = "universal", detect = "root_hygiene/readme",           template_ref = "README.adoc" },
   { id = "2.1.2", name = "license-file",  desc = "LICENSE present + LICENSES/ REUSE texts (NOT LICENSE.txt)",       tier = "bronze", gate = "universal", detect = "root_hygiene/license",          template_ref = "LICENSE, LICENSES/" },
-  { id = "2.1.3", name = "security-md",   desc = "SECURITY.md with a vulnerability-disclosure policy",              tier = "bronze", gate = "universal", detect = "root_hygiene/security",         template_ref = "SECURITY.md" },
-  { id = "2.1.4", name = "coc-md",        desc = "CODE_OF_CONDUCT.md",                                              tier = "silver", gate = "universal", detect = "root_hygiene/coc",              template_ref = "CODE_OF_CONDUCT.md" },
-  { id = "2.1.5", name = "contributing-md", desc = "CONTRIBUTING.md",                                              tier = "silver", gate = "universal", detect = "root_hygiene/contributing",     template_ref = "CONTRIBUTING.md" },
-  { id = "2.1.6", name = "changelog",     desc = "CHANGELOG.md (Keep a Changelog)",                                tier = "silver", gate = "universal", detect = "root_hygiene/changelog",        template_ref = "CHANGELOG.md" },
-  { id = "2.1.7", name = "maintainers",   desc = "MAINTAINERS.adoc",                                               tier = "silver", gate = "universal", detect = "root_hygiene/maintainers",      template_ref = "MAINTAINERS.adoc" },
-  { id = "2.1.8", name = "governance",    desc = "GOVERNANCE.adoc",                                                tier = "gold",   gate = "governance-tier", detect = "root_hygiene/governance",  template_ref = "GOVERNANCE.adoc" },
-  { id = "2.1.9", name = "funding",       desc = "FUNDING.yml / .github/FUNDING.yml",                              tier = "gold",   gate = "governance-tier", detect = "manual",                   template_ref = "FUNDING.yml" },
+  { id = "2.1.3", name = "security-md",   desc = "SECURITY.md with a vulnerability-disclosure policy",              tier = "bronze", gate = "universal", detect = "root_hygiene/security",         template_ref = ".github/SECURITY.md" },
+  { id = "2.1.4", name = "coc-md",        desc = "CODE_OF_CONDUCT.md",                                              tier = "silver", gate = "universal", detect = "root_hygiene/coc",              template_ref = ".github/CODE_OF_CONDUCT.md" },
+  { id = "2.1.5", name = "contributing-md", desc = "CONTRIBUTING.md",                                              tier = "silver", gate = "universal", detect = "root_hygiene/contributing",     template_ref = ".github/CONTRIBUTING.md" },
+  { id = "2.1.6", name = "changelog",     desc = "CHANGELOG.adoc, or .md (Keep a Changelog)",                                tier = "silver", gate = "universal", detect = "root_hygiene/changelog",        template_ref = "CHANGELOG.adoc" },
+  { id = "2.1.7", name = "maintainers",   desc = "MAINTAINERS.adoc",                                               tier = "silver", gate = "governance-tier", detect = "root_hygiene/maintainers", template_ref = "docs/MAINTAINERS.adoc" },
+  { id = "2.1.8", name = "governance",    desc = "GOVERNANCE.adoc",                                                tier = "gold",   gate = "governance-tier", detect = "root_hygiene/governance",  template_ref = "docs/GOVERNANCE.adoc" },
+  { id = "2.1.9", name = "funding",       desc = "FUNDING.yml / .github/FUNDING.yml",                              tier = "gold",   gate = "governance-tier", detect = "manual",                   template_ref = ".github/FUNDING.yml" },
   { id = "2.1.10", name = "gitignore",    desc = ".gitignore and .gitattributes present",                          tier = "bronze", gate = "universal", detect = "manual",                        template_ref = ".gitignore, .gitattributes" },
   { id = "2.2.1", name = "wellknown-core", desc = ".well-known/{security.txt,ai.txt,humans.txt}",                   tier = "silver", gate = "universal", detect = "structural_drift/SD020",        template_ref = ".well-known/" },
   { id = "2.2.2", name = "wellknown-ext",  desc = ".well-known/{consent-required.txt,provenance.json}",             tier = "gold",   gate = "web-ui",    detect = "manual",                        template_ref = "-" },
@@ -122,17 +122,17 @@ key = "machine-readable-substrate"
 name = "Machine-Readable Substrate (Descriptiles)"
 weight = 14
 criteria = [
-  { id = "3.1.1", name = "descriptiles-dir", desc = ".machine_readable/descriptiles/ present (NOT 6a2/, which is deprecated 2026-06-30)", tier = "gold", gate = "universal", detect = "structural_drift/SD003", template_ref = ".machine_readable/descriptiles/" },
-  { id = "3.1.2", name = "state",       desc = "STATE.a2ml — current state/progress (valid record dialect)",   tier = "gold", gate = "universal", detect = "structural_drift/SD004", template_ref = ".machine_readable/descriptiles/STATE.a2ml" },
-  { id = "3.1.3", name = "meta",        desc = "META.a2ml — ADRs / constitutional authority",                  tier = "gold", gate = "universal", detect = "structural_drift/SD005", template_ref = ".machine_readable/descriptiles/META.a2ml" },
-  { id = "3.1.4", name = "ecosystem",   desc = "ECOSYSTEM.a2ml — estate position + what-this-is-not",           tier = "gold", gate = "universal", detect = "structural_drift/SD006", template_ref = ".machine_readable/descriptiles/ECOSYSTEM.a2ml" },
-  { id = "3.1.5", name = "agentic",     desc = "AGENTIC.a2ml — agent permissions / risk gating",               tier = "gold", gate = "universal", detect = "structural_drift/SD007", template_ref = ".machine_readable/descriptiles/AGENTIC.a2ml" },
-  { id = "3.1.6", name = "neurosym",    desc = "NEUROSYM.a2ml — proof obligations / meaning of ops",            tier = "gold", gate = "universal", detect = "structural_drift/SD008", template_ref = ".machine_readable/descriptiles/NEUROSYM.a2ml" },
-  { id = "3.1.7", name = "playbook",    desc = "PLAYBOOK.a2ml — operational runbook",                          tier = "gold", gate = "universal", detect = "structural_drift/SD009", template_ref = ".machine_readable/descriptiles/PLAYBOOK.a2ml" },
-  { id = "3.1.8", name = "anchor",      desc = "ANCHOR.a2ml — semantic authority + golden path",               tier = "gold", gate = "universal", detect = "structural_drift/SD010", template_ref = ".machine_readable/descriptiles/ANCHOR.a2ml" },
-  { id = "3.1.9", name = "clade",       desc = "CLADE.a2ml — identity/lineage (registers into gv-clade-index)", tier = "gold", gate = "governance-tier", detect = "structural_drift/SD011", template_ref = ".machine_readable/descriptiles/CLADE.a2ml" },
+  { id = "3.1.1", name = "descriptiles-dir", desc = "machine-readable/descriptiles/ present (NOT 6a2/, which is deprecated 2026-06-30)", tier = "gold", gate = "universal", detect = "structural_drift/SD003", template_ref = "machine-readable/descriptiles/" },
+  { id = "3.1.2", name = "state",       desc = "STATE.a2ml — current state/progress (valid record dialect)",   tier = "gold", gate = "universal", detect = "structural_drift/SD004", template_ref = "machine-readable/descriptiles/STATE.a2ml" },
+  { id = "3.1.3", name = "meta",        desc = "META.a2ml — ADRs / constitutional authority",                  tier = "gold", gate = "universal", detect = "structural_drift/SD005", template_ref = "machine-readable/descriptiles/META.a2ml" },
+  { id = "3.1.4", name = "ecosystem",   desc = "ECOSYSTEM.a2ml — estate position + what-this-is-not",           tier = "gold", gate = "universal", detect = "structural_drift/SD006", template_ref = "machine-readable/descriptiles/ECOSYSTEM.a2ml" },
+  { id = "3.1.5", name = "agentic",     desc = "AGENTIC.a2ml — agent permissions / risk gating",               tier = "gold", gate = "universal", detect = "structural_drift/SD007", template_ref = "machine-readable/descriptiles/AGENTIC.a2ml" },
+  { id = "3.1.6", name = "neurosym",    desc = "NEUROSYM.a2ml — proof obligations / meaning of ops",            tier = "gold", gate = "universal", detect = "structural_drift/SD008", template_ref = "machine-readable/descriptiles/NEUROSYM.a2ml" },
+  { id = "3.1.7", name = "playbook",    desc = "PLAYBOOK.a2ml — operational runbook",                          tier = "gold", gate = "universal", detect = "structural_drift/SD009", template_ref = "machine-readable/descriptiles/PLAYBOOK.a2ml" },
+  { id = "3.1.8", name = "anchor",      desc = "ANCHOR.a2ml — semantic authority + golden path",               tier = "gold", gate = "universal", detect = "structural_drift/SD010", template_ref = "machine-readable/descriptiles/anchors/ANCHOR.a2ml" },
+  { id = "3.1.9", name = "clade",       desc = "CLADE.a2ml — identity/lineage (registers into gv-clade-index)", tier = "gold", gate = "governance-tier", detect = "structural_drift/SD011", template_ref = "machine-readable/descriptiles/CLADE.a2ml" },
   { id = "3.2.1", name = "a2ml-valid",  desc = "All .a2ml files parse + validate against their record-dialect profile", tier = "gold", gate = "universal", detect = "rsr-conformance/a2ml_valid", template_ref = "-" },
-  { id = "3.2.2", name = "rsr-profile", desc = ".machine_readable/rsr-profile.a2ml declares capabilities (drives applicable set)", tier = "silver", gate = "universal", detect = "rsr-conformance/profile_present", template_ref = ".machine_readable/rsr-profile.a2ml" },
+  { id = "3.2.2", name = "rsr-profile", desc = "machine-readable/rsr-profile.a2ml declares capabilities (drives applicable set)", tier = "silver", gate = "universal", detect = "rsr-conformance/profile_present", template_ref = "machine-readable/rsr-profile.a2ml" },
 ]
 
 [[category]]
@@ -150,7 +150,7 @@ criteria = [
   { id = "4.2.2", name = "scorecard-9",  desc = "OpenSSF Scorecard >= 9.0",                                      tier = "gold",   gate = "universal", detect = "scorecard_compliance/aggregate", template_ref = ".github/workflows/scorecard.yml" },
   { id = "4.3.1", name = "deno-perms",   desc = "Explicit Deno permission flags (no bare --allow-all)",          tier = "silver", gate = "deno",      detect = "cicd_rules/deno_permissions",   template_ref = "-" },
   { id = "4.3.2", name = "sbom",         desc = "SBOM generated on release",                                     tier = "gold",   gate = "published-package", detect = "supply_chain/sbom",     template_ref = ".github/workflows/release.yml" },
-  { id = "4.3.3", name = "rootless",     desc = "Containers run rootless",                                        tier = "gold",   gate = "container", detect = "cicd_rules/rootless_container",  template_ref = "container/" },
+  { id = "4.3.3", name = "rootless",     desc = "Containers run rootless",                                        tier = "gold",   gate = "container", detect = "cicd_rules/rootless_container",  template_ref = "build/container/" },
 ]
 
 [[category]]
@@ -160,11 +160,11 @@ name = "Language Policy Conformance"
 weight = 12
 criteria = [
   { id = "5.1.1", name = "no-python",     desc = "No Python (fully banned)",                                     tier = "bronze", gate = "universal", detect = "cicd_rules/python_detected",    template_ref = ".github/workflows/estate-rules.yml" },
-  { id = "5.1.2", name = "no-typescript", desc = "No new TypeScript outside approved carve-outs",                 tier = "bronze", gate = "universal", detect = "cicd_rules/typescript_detected", template_ref = ".github/workflows/ts-blocker.yml" },
+  { id = "5.1.2", name = "no-typescript", desc = "No new TypeScript outside approved carve-outs",                 tier = "bronze", gate = "universal", detect = "cicd_rules/typescript_detected", template_ref = ".github/workflows/runtime-policy.yml" },
   { id = "5.1.3", name = "no-rescript",   desc = "No new ReScript outside approved carve-outs",                   tier = "bronze", gate = "universal", detect = "cicd_rules/rescript_detected",  template_ref = "-" },
   { id = "5.1.4", name = "no-vlang",      desc = "No V-lang (migration completed 2026-05-28)",                    tier = "bronze", gate = "universal", detect = "cicd_rules/vlang_detected",     template_ref = "-" },
   { id = "5.1.5", name = "no-go",         desc = "No Go (use Rust/SPARK)",                                        tier = "bronze", gate = "universal", detect = "cicd_rules/go_detected",        template_ref = "-" },
-  { id = "5.1.6", name = "no-node-npm",   desc = "No Node/npm/bun runtime deps (use Deno)",                       tier = "bronze", gate = "universal", detect = "cicd_rules/nodejs_detected",    template_ref = ".github/workflows/npm-bun-blocker.yml" },
+  { id = "5.1.6", name = "no-node-npm",   desc = "No Node/npm/bun runtime deps (use Deno)",                       tier = "bronze", gate = "universal", detect = "cicd_rules/nodejs_detected",    template_ref = ".github/workflows/runtime-policy.yml" },
   { id = "5.2.1", name = "spark-ready",   desc = "Rust projects designed to admit SPARK/Ada modules",             tier = "rhodium", gate = "rust",     detect = "manual",                        template_ref = "-" },
   { id = "5.2.2", name = "proofs-clean",  desc = "No believe_me / sorry / Admitted in load-bearing proofs",       tier = "gold",   gate = "formal-proofs", detect = "proof_obligation/no_holes", template_ref = "verification/" },
 ]
@@ -192,7 +192,7 @@ criteria = [
   { id = "7.1.1", name = "licence-classified", desc = "Licence matches the estate 5-way classification (detection FLAG-ONLY / :review; never auto-edited)", tier = "bronze", gate = "universal", detect = "cicd_rules/license_finding", template_ref = "LICENSE" },
   { id = "7.1.2", name = "reuse-compliant",   desc = "REUSE-style LICENSES/ dir with full texts",                 tier = "silver", gate = "universal", detect = "cicd_rules/reuse_lint",         template_ref = "LICENSES/" },
   { id = "7.1.3", name = "spdx-audit",        desc = "SPDX identifiers resolve to real licences (no scrambled ids)", tier = "silver", gate = "universal", detect = "cicd_rules/spdx_valid",     template_ref = "-" },
-  { id = "7.2.1", name = "dco",               desc = "DCO sign-off or CLA on contributions",                      tier = "gold",   gate = "governance-tier", detect = "manual",                template_ref = "CONTRIBUTING.md" },
+  { id = "7.2.1", name = "dco",               desc = "DCO sign-off or CLA on contributions",                      tier = "gold",   gate = "governance-tier", detect = "manual",                template_ref = ".github/CONTRIBUTING.md" },
 ]
 
 [[category]]
@@ -201,7 +201,7 @@ key = "lifecycle-management"
 name = "Lifecycle Management"
 weight = 4
 criteria = [
-  { id = "8.1.1", name = "semver",       desc = "Semantic versioning for releases",                              tier = "silver", gate = "published-package", detect = "manual",                template_ref = "CHANGELOG.md" },
+  { id = "8.1.1", name = "semver",       desc = "Semantic versioning for releases",                              tier = "silver", gate = "published-package", detect = "manual",                template_ref = "CHANGELOG.adoc" },
   { id = "8.1.2", name = "pinned-deps",  desc = "Dependency versions pinned/locked",                             tier = "silver", gate = "universal", detect = "supply_chain/unpinned_dep",     template_ref = "-" },
   { id = "8.1.3", name = "deprecation",  desc = "Deprecation + sunset policy documented",                        tier = "gold",   gate = "published-package", detect = "manual",                template_ref = "-" },
   { id = "8.1.4", name = "no-scaffold-stub", desc = "No scaffold-stub guix.scm (placeholders / empty inputs / source #f)", tier = "silver", gate = "reproducible-build", detect = "structural_drift/SD021", template_ref = "-" },
@@ -225,9 +225,9 @@ key = "community-governance"
 name = "Community & Governance"
 weight = 2
 criteria = [
-  { id = "10.1.1", name = "governance-model", desc = "Governance model documented (not just a stub)",             tier = "gold",   gate = "governance-tier", detect = "manual",                template_ref = "GOVERNANCE.adoc" },
-  { id = "10.1.2", name = "succession",       desc = "Succession / bus-factor plan",                              tier = "rhodium", gate = "governance-tier", detect = "manual",               template_ref = "MAINTAINERS.adoc" },
-  { id = "10.1.3", name = "affirmation",      desc = "AFFIRMATION.adoc (no-overclaim ethos) present",             tier = "gold",   gate = "governance-tier", detect = "manual",                template_ref = "AFFIRMATION.adoc" },
+  { id = "10.1.1", name = "governance-model", desc = "Governance model documented (not just a stub)",             tier = "gold",   gate = "governance-tier", detect = "manual",                template_ref = "docs/GOVERNANCE.adoc" },
+  { id = "10.1.2", name = "succession",       desc = "Succession / bus-factor plan",                              tier = "rhodium", gate = "governance-tier", detect = "manual",               template_ref = "docs/MAINTAINERS.adoc" },
+  { id = "10.1.3", name = "affirmation",      desc = "AFFIRMATION.adoc (no-overclaim ethos) present",             tier = "gold",   gate = "governance-tier", detect = "manual",                template_ref = "docs/AFFIRMATION.adoc" },
 ]
 
 [[category]]
@@ -236,7 +236,7 @@ key = "accountability-provenance"
 name = "Accountability & Provenance"
 weight = 1
 criteria = [
-  { id = "11.1.1", name = "audit-doc",       desc = "AUDIT.adoc — audit trail / evidence ledger",                tier = "gold",   gate = "governance-tier", detect = "manual",                template_ref = "AUDIT.adoc" },
+  { id = "11.1.1", name = "audit-doc",       desc = "AUDIT.adoc — audit trail / evidence ledger",                tier = "gold",   gate = "governance-tier", detect = "manual",                template_ref = "docs/AUDIT.adoc" },
   { id = "11.1.2", name = "provenance-json",  desc = ".well-known/provenance.json provenance chain",              tier = "rhodium", gate = "web-ui",          detect = "manual",                template_ref = "-" },
   { id = "11.1.3", name = "signed-commits",   desc = "Commits signed (advisory in agent envs; see estate note)",  tier = "rhodium", gate = "universal",       detect = "git_state/unsigned_commit", template_ref = "-" },
 ]

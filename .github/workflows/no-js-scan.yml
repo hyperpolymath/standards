@@ -9,22 +9,13 @@ name: No-JS Scan (warn-first)
 # hypatia (cicd_rules/javascript_detected); this is an additive companion.
 
 on:
+  # NO path filter, deliberately. The previous filter matched only
+  # **/*.{js,jsx,mjs,cjs,ts,tsx} - precisely the files estate policy bans - so
+  # the better the estate complied, the more reliably this required check never
+  # ran and deadlocked every PR. The scan is a cheap grep; always run it.
   push:
-    paths:
-      - '**/*.js'
-      - '**/*.jsx'
-      - '**/*.mjs'
-      - '**/*.cjs'
-      - '**/*.ts'
-      - '**/*.tsx'
+    branches: [main]
   pull_request:
-    paths:
-      - '**/*.js'
-      - '**/*.jsx'
-      - '**/*.mjs'
-      - '**/*.cjs'
-      - '**/*.ts'
-      - '**/*.tsx'
 
 # Estate guardrail: cancel superseded runs (read-only check, no mutation).
 concurrency:
@@ -91,9 +82,26 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-          if [ "${count}" -gt 0 ]; then
-            echo "::warning title=No-JS (warn-first)::${count} hand-authored JS/TS file(s) present. Estate target is AffineScript->typed-wasm / Rust+Zig->wasm. See standards docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc (non-blocking)."
+          # Ratchet. The existing files are debt, not a blocker; what is
+          # forbidden is ADDING to them. Reading the baseline from a committed
+          # file makes every reduction a visible, reviewable commit.
+          baseline_file=".github/no-js-baseline.txt"
+          baseline=$(tr -cd '0-9' < "${baseline_file}" 2>/dev/null || echo "")
+          if [ -z "${baseline}" ]; then
+            echo "::error title=No-JS ratchet::${baseline_file} is missing or not a number."
+            echo "A ratchet with no baseline cannot fail, which is the defect this replaced."
+            exit 1
           fi
 
-          # Warn-first: never fail the build.
+          echo "count=${count} baseline=${baseline}"
+
+          if [ "${count}" -gt "${baseline}" ]; then
+            echo "::error title=No-JS ratchet::${count} hand-authored JS/TS files, baseline is ${baseline}. Adding hand-authored JS/TS is not permitted; estate target is AffineScript->typed-wasm or Rust+Zig->wasm. See docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc."
+            exit 1
+          fi
+
+          if [ "${count}" -lt "${baseline}" ]; then
+            echo "::notice title=No-JS ratchet::${count} < baseline ${baseline}. Lower ${baseline_file} to ${count} to lock the improvement in."
+          fi
+
           exit 0
