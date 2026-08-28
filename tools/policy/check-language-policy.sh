@@ -31,7 +31,7 @@ for f in $files; do
   fi
   # 2. The rule that told repos not to declare dependencies at all. hyperpolymath/ubicity
   # a phrase inside a blockquote or quotation marks is HISTORY, not policy
-  live(){ grep -vE '^[[:space:]]*>' "$1" | grep -vE '"[^"]*'"$2"'[^"]*"|\u201c[^\u201d]*'"$2"'[^\u201d]*\u201d'; }
+  live(){ grep -vE '^[[:space:]]*>' "$1" | grep -vE '"[^"]*'"$2"'[^"]*"|“[^”]*'"$2"'[^”]*”'; }
   #    imported zod and glob, shipped no manifest, and could not build under ANY toolchain.
   if live "$f" 'No package.json for runtime deps' | grep -qF 'No package.json for runtime deps'; then
     fail "$f:$(grep -nF 'No package.json for runtime deps' "$f" | head -1 | cut -d: -f1)" \
