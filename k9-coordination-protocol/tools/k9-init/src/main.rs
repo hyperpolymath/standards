@@ -15,6 +15,9 @@ use std::process::ExitCode;
 
 const SCHEMA_VERSION: &str = "1.0.0";
 
+/// Facts gathered from a repository's descriptile files.
+///
+/// Used to populate the initial coordination.k9 scaffold.
 struct RepoFacts {
     repo_name: String,
     languages: Vec<String>,
@@ -25,6 +28,16 @@ struct RepoFacts {
     has_neurosym: bool,
 }
 
+/// Application entry point for the k9-init scaffold tool.
+///
+/// Reads descriptile files from `.machine_readable/descriptiles/` and generates
+/// a starter `coordination.k9` file with language, practices, and metadata.
+///
+/// # Exit codes
+///
+/// - `0` (SUCCESS): coordination.k9 written successfully.
+/// - `1` (FAILURE): Output file already exists and --force was not given, or write failed.
+/// - `2`: Invalid command-line arguments.
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let (repo_root, out_path, force) = match parse_args(&args) {
@@ -73,6 +86,18 @@ fn main() -> ExitCode {
     }
 }
 
+/// Parse command-line arguments for k9-init.
+///
+/// # Arguments
+///
+/// Expected arguments:
+/// - `[REPO_ROOT]` (positional, optional): Repository root directory (defaults to `.`).
+/// - `--out PATH` (optional): Output path for coordination.k9 (defaults to `<REPO_ROOT>/coordination.k9`).
+/// - `--force` (optional): Overwrite existing output file without prompting.
+///
+/// # Returns
+///
+/// `Ok((repo_root, output_path, force_flag))` on success, or an error message string.
 fn parse_args(args: &[String]) -> Result<(PathBuf, Option<PathBuf>, bool), String> {
     let mut out: Option<PathBuf> = None;
     let mut force = false;
@@ -100,6 +125,19 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, Option<PathBuf>, bool), Strin
     Ok((root, out, force))
 }
 
+/// Gather repository facts from descriptile files.
+///
+/// Reads AGENTIC.a2ml, META.a2ml, and NEUROSYM.a2ml from
+/// `.machine_readable/descriptiles/` and extracts language lists,
+/// banned items, and development practices.
+///
+/// # Arguments
+///
+/// * `repo_root` - The root directory of the repository to scan.
+///
+/// # Returns
+///
+/// A `RepoFacts` struct populated with extracted information, or defaults if files are missing.
 fn gather_facts(repo_root: &Path) -> RepoFacts {
     let a2ml_dir = repo_root.join(".machine_readable").join("descriptiles");
     let agentic = a2ml_dir.join("AGENTIC.a2ml");
@@ -260,6 +298,19 @@ fn extract_pairs(text: &str, section: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Render a coordination.k9 file from gathered repository facts.
+///
+/// Generates a complete K9 coordination document with metadata, project info,
+/// invariants derived from practices and banned languages, architecture placeholders,
+/// and innervation (signal/reflex) sections.
+///
+/// # Arguments
+///
+/// * `f` - The repository facts to render into K9 format.
+///
+/// # Returns
+///
+/// A complete coordination.k9 document as a string.
 fn render_k9(f: &RepoFacts) -> String {
     let today = "TODO-DATE";
     let mut s = String::new();
@@ -349,6 +400,18 @@ fn render_k9(f: &RepoFacts) -> String {
     s
 }
 
+/// Convert a string to a slug (lowercase, alphanumeric and hyphens only).
+///
+/// Replaces non-alphanumeric characters (except hyphens) with hyphens and
+/// lowercases all letters.
+///
+/// # Arguments
+///
+/// * `s` - The string to slugify.
+///
+/// # Returns
+///
+/// A slug version of the input string.
 fn slug(s: &str) -> String {
     s.chars()
         .map(|c| {
@@ -361,6 +424,17 @@ fn slug(s: &str) -> String {
         .collect()
 }
 
+/// Map a language name to its common file extension.
+///
+/// Used to generate file-pattern rules for banned languages.
+///
+/// # Arguments
+///
+/// * `name` - The language name (e.g., `"typescript"`, `"python"`).
+///
+/// # Returns
+///
+/// The common file extension for that language (e.g., `"ts"`, `"py"`).
 fn lang_ext(name: &str) -> String {
     match name.to_ascii_lowercase().as_str() {
         "typescript" => "ts".into(),

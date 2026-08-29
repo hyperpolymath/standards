@@ -17,6 +17,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+/// Application entry point for the playbook-to-recipe converter.
+///
+/// Parses command-line arguments, reads a PLAYBOOK.a2ml file, extracts procedures,
+/// and generates one Hypatia-compatible recipe file per procedure.
+///
+/// # Exit codes
+///
+/// - `0` (SUCCESS): All recipes written successfully.
+/// - `1` (FAILURE): I/O error reading/writing files.
+/// - `2`: Invalid command-line arguments.
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let (playbook, out_dir, repo_hint) = match parse_args(&args) {
@@ -64,6 +74,18 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Parse command-line arguments into playbook path, output directory, and optional repo name.
+///
+/// # Arguments
+///
+/// Expected flags:
+/// - `--playbook PATH` (required): Path to the PLAYBOOK.a2ml file to parse.
+/// - `--out DIR` (required): Output directory for generated recipe files.
+/// - `--repo NAME` (optional): Repository name to use in recipe IDs (defaults to inferred name).
+///
+/// # Returns
+///
+/// `Ok((playbook_path, output_dir, repo_name))` on success, or an error message string.
 fn parse_args(args: &[String]) -> Result<(PathBuf, PathBuf, Option<String>), String> {
     let mut pb: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
@@ -95,6 +117,14 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, PathBuf, Option<String>), Str
     ))
 }
 
+/// Infer the repository name by walking up from the playbook path.
+///
+/// Looks for a `.machine_readable/` directory in the path hierarchy and returns
+/// the name of its parent directory as the repository name.
+///
+/// # Returns
+///
+/// The inferred repository name, or `"unknown"` if no `.machine_readable/` parent is found.
 fn infer_repo(playbook: &Path) -> String {
     // Find the repo name: look up from .machine_readable/ grandparent.
     let mut cur = playbook.parent();
@@ -259,6 +289,20 @@ fn balanced_sexp(s: &str) -> &str {
     s
 }
 
+/// Render a recipe as A2ML text for a single procedure.
+///
+/// Generates a Hypatia-compatible recipe file with SPDX header, metadata,
+/// and the procedure's steps.
+///
+/// # Arguments
+///
+/// * `repo` - The repository name (used in the recipe ID).
+/// * `proc_name` - The procedure name (e.g., `"deploy"`, `"rollback"`).
+/// * `steps` - The ordered list of (step_name, command) pairs.
+///
+/// # Returns
+///
+/// A complete A2ML recipe document as a string.
 fn render_recipe(repo: &str, proc_name: &str, steps: &[(String, String)]) -> String {
     let mut s = String::new();
     s.push_str("# SPDX-License-Identifier: MPL-2.0\n");
@@ -282,6 +326,17 @@ fn render_recipe(repo: &str, proc_name: &str, steps: &[(String, String)]) -> Str
     s
 }
 
+/// Convert a hyphen/underscore-separated string to title case.
+///
+/// Replaces hyphens and underscores with spaces and capitalises the first
+/// character of each word.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(title_case("deploy"), "Deploy");
+/// assert_eq!(title_case("run-tests"), "Run Tests");
+/// ```
 fn title_case(s: &str) -> String {
     let mut out = String::new();
     let mut cap = true;

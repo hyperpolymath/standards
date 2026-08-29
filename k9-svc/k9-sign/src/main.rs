@@ -81,10 +81,27 @@ struct KeyDirs {
 }
 
 impl KeyDirs {
+    /// Create a new KeyDirs using the default system config directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the system config directory cannot be determined.
     fn new() -> Result<Self> {
         Self::with_config_dir(None)
     }
 
+    /// Create a new KeyDirs with an optional override config directory.
+    ///
+    /// Used for testing to isolate key storage from the user's actual config.
+    ///
+    /// # Arguments
+    ///
+    /// * `config_dir` - Override config directory, or None to use the default.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the default config directory cannot be determined
+    /// when `config_dir` is None.
     #[cfg(test)]
     fn with_config_dir(config_dir: Option<PathBuf>) -> Result<Self> {
         let config = match config_dir {
@@ -100,11 +117,22 @@ impl KeyDirs {
         Ok(KeyDirs { keys, trusted })
     }
 
+    /// Stub implementation that always uses the default config directory.
+    ///
+    /// In non-test builds, config directory override is not supported.
     #[cfg(not(test))]
     fn with_config_dir(_config_dir: Option<PathBuf>) -> Result<Self> {
         Self::new()
     }
 
+    /// Ensure the keys and trusted directories exist with proper permissions.
+    ///
+    /// Creates both directories if they don't exist, and on Unix systems sets
+    /// permissions to 700 (owner-only access).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if directory creation or permission setting fails.
     fn ensure_created(&self) -> Result<()> {
         fs::create_dir_all(&self.keys).context("Failed to create keys directory")?;
         fs::create_dir_all(&self.trusted).context("Failed to create trusted directory")?;
@@ -120,14 +148,41 @@ impl KeyDirs {
         Ok(())
     }
 
+    /// Return the path to a private key file for the given key name.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The key name (e.g., `"primary"`).
+    ///
+    /// # Returns
+    ///
+    /// Path to the private key file (e.g., `~/.config/k9/keys/primary.key`).
     fn private_key_path(&self, name: &str) -> PathBuf {
         self.keys.join(format!("{}.key", name))
     }
 
+    /// Return the path to a public key file for the given key name.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The key name (e.g., `"primary"`).
+    ///
+    /// # Returns
+    ///
+    /// Path to the public key file (e.g., `~/.config/k9/keys/primary.pub`).
     fn public_key_path(&self, name: &str) -> PathBuf {
         self.keys.join(format!("{}.pub", name))
     }
 
+    /// Return the path to a trusted public key file for the given key name.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The key name (e.g., `"primary"`).
+    ///
+    /// # Returns
+    ///
+    /// Path to the trusted public key file (e.g., `~/.config/k9/keys/trusted/primary.pub`).
     fn trusted_key_path(&self, name: &str) -> PathBuf {
         self.trusted.join(format!("{}.pub", name))
     }
