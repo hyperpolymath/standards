@@ -44,10 +44,31 @@ init_fixture "$blockquote"
 write_policy "$blockquote" '> Historical policy Supports TypeScript.'
 (cd "$blockquote" && expect_pass "$language_gate")
 
+quoted_invariants="$fixture/quoted-invariants"
+init_fixture "$quoted_invariants"
+write_policy "$quoted_invariants" '> |  | historical blank |'
+printf '%s\n' '> **No new  files**' >> "$quoted_invariants/.claude/CLAUDE.md"
+git -C "$quoted_invariants" add .claude/CLAUDE.md
+(cd "$quoted_invariants" && expect_pass "$language_gate")
+
 blank="$fixture/blank"
 init_fixture "$blank"
 write_policy "$blank" '|  | replacement |'
 (cd "$blank" && expect_fail "$language_gate")
+
+missing_bun="$fixture/missing-bun"
+init_fixture "$missing_bun"
+mkdir -p "$missing_bun/.claude"
+printf '%s\n' '### ALLOWED' '### BANNED' '| **Deno** | **Bun** |' > "$missing_bun/.claude/CLAUDE.md"
+git -C "$missing_bun" add .claude/CLAUDE.md
+(cd "$missing_bun" && expect_fail "$language_gate")
+
+missing_deno="$fixture/missing-deno"
+init_fixture "$missing_deno"
+mkdir -p "$missing_deno/.claude"
+printf '%s\n' '### ALLOWED' '| **Bun** | JS runtime |' '### BANNED' > "$missing_deno/.claude/CLAUDE.md"
+git -C "$missing_deno" add .claude/CLAUDE.md
+(cd "$missing_deno" && expect_fail "$language_gate")
 
 no_workflows="$fixture/no-workflows"
 init_fixture "$no_workflows"
@@ -76,5 +97,13 @@ mkdir -p "$invalid/.github/workflows"
 printf '%s\n' 'name: test' 'jobs: [' > "$invalid/.github/workflows/test.yml"
 git -C "$invalid" add .github/workflows/test.yml
 (cd "$invalid" && expect_fail "$workflow_gate")
+
+control="$fixture/control"
+init_fixture "$control"
+mkdir -p "$control/.github/workflows"
+printf 'name: test\001\non: push\njobs: {}\n' > "$control/.github/workflows/test.yml"
+git -C "$control" add .github/workflows/test.yml
+control_output=$(cd "$control" && "$workflow_gate" 2>&1 || true)
+grep -q 'contains a YAML-forbidden control character' <<<"$control_output"
 
 echo 'policy gate controls passed'

@@ -31,7 +31,7 @@ for file in "${files[@]}"; do
   echo "checking $file"
   live=$(live_lines "$file")
 
-  if grep -nF -- '| Bun | Deno |' "$file" >/dev/null; then
+  if grep -nF -- '| Bun | Deno |' <<<"$live" >/dev/null; then
     fail "$file" 'Bun is listed as banned with Deno as its replacement.'
   fi
   if grep -F 'No package.json for runtime deps' <<<"$live" >/dev/null; then
@@ -46,26 +46,26 @@ for file in "${files[@]}"; do
     fail "$file" 'Policy advertises TypeScript execution.'
   fi
 
-  if awk -F'|' 'NF >= 4 && $2 ~ /^[[:space:]]*$/ { found=1; exit } END { exit !found }' "$file"; then
+  if awk -F'|' 'NF >= 4 && $2 ~ /^[[:space:]]*$/ { found=1 } END { exit !found }' <<<"$live"; then
     fail "$file" 'Policy table contains an empty first cell (a blanking scar).'
   fi
-  if grep -F '| **** |' "$file" >/dev/null; then
+  if grep -F '| **** |' <<<"$live" >/dev/null; then
     fail "$file" 'Policy table contains an empty bold cell.'
   fi
-  if grep -E '\*\*No new +files\*\*|Only where +cannot' "$file" >/dev/null; then
+  if grep -E '\*\*No new +files\*\*|Only where +cannot' <<<"$live" >/dev/null; then
     fail "$file" 'Enforcement text contains a blanked language name.'
   fi
-  if grep -E '^\|[[:space:]]*AffineScript[[:space:]]*\|[[:space:]]*AffineScript[[:space:]]*\|' "$file" >/dev/null; then
+  if grep -E '^\|[[:space:]]*AffineScript[[:space:]]*\|[[:space:]]*AffineScript[[:space:]]*\|' <<<"$live" >/dev/null; then
     fail "$file" 'The banned table maps AffineScript to itself.'
   fi
 
-  if grep -qE '^### (ALLOWED|BANNED)' "$file"; then
-    if ! grep -qE '^\|[[:space:]]*\*\*Bun\*\*[[:space:]]*\|' "$file" &&
-       ! grep -qiE '^[-*][[:space:]]+\*{0,2}Bun\*{0,2}([[:space:]]|$)' "$file"; then
+  if grep -qE '^### (ALLOWED|BANNED)' <<<"$live"; then
+    if ! grep -qE '^\|[[:space:]]*\*\*Bun\*\*[[:space:]]*\|' <<<"$live" &&
+       ! grep -qiE '^[-*][[:space:]]+\*{0,2}Bun\*{0,2}([[:space:]]|$)' <<<"$live"; then
       fail "$file" 'No Bun entry appears in the allowed policy.'
     fi
-    if ! grep -qE '^\|[[:space:]]*\*{0,2}Deno\*{0,2}[[:space:]]*\|[[:space:]]*\*{0,2}Bun\*{0,2}[[:space:]]*\|' "$file" &&
-       ! grep -qiE '^[-*][[:space:]]+Deno[[:space:]]*\(use Bun\)' "$file"; then
+    if ! grep -qE '^\|[[:space:]]*\*{0,2}Deno\*{0,2}[[:space:]]*\|[[:space:]]*\*{0,2}Bun\*{0,2}[[:space:]]*\|' <<<"$live" &&
+       ! grep -qiE '^[-*][[:space:]]+Deno[[:space:]]*\(use Bun\)' <<<"$live"; then
       fail "$file" 'Deno is not listed as banned with Bun as its replacement.'
     fi
   fi

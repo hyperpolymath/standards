@@ -40,8 +40,8 @@ parse_ok() {
 
 has_forbidden_control() {
   od -An -v -tu1 "$1" | awk '
-    { for (i=1; i<=NF; i++) if (($i < 9) || ($i > 10 && $i < 13) || ($i > 13 && $i < 32)) exit 0 }
-    END { exit 1 }
+    { for (i=1; i<=NF; i++) if (($i < 9) || ($i > 10 && $i < 13) || ($i > 13 && $i < 32)) found=1 }
+    END { exit !found }
   '
 }
 
