@@ -185,6 +185,33 @@ test/fixtures/
 EOF
 }
 
+setup_coq_multiline_comments_only() {
+  mkdir -p formal
+  cat > formal/Commentary.v <<'EOF'
+(** A documentation block may discuss old proof state.
+    Admitted markers in prior revisions are not executable here.
+    (* Nested comments may also mention:
+       admit.
+    *)
+    Axiom references in prose are not declarations. *)
+Theorem closed : True.
+Proof. exact I. Qed.
+EOF
+}
+
+setup_coq_comment_then_real_admitted() {
+  mkdir -p formal docs
+  cat > formal/ActualDebt.v <<'EOF'
+(* Admitted. inside a comment must not count. *)
+Theorem open_obligation : True.
+Admitted.
+EOF
+  cat > docs/proof-debt.md <<'EOF'
+# Proof Debt
+(Intentionally empty: the real marker must fail this positive control.)
+EOF
+}
+
 # Existing behaviour must still work.
 run_case "marker with no docs and no ignore fails (early exit)" \
   1 "No docs/proof-debt.md (or equivalent) found" setup_marker_no_docs
@@ -210,6 +237,12 @@ run_case "ignore pattern that does not match still fails" \
 
 run_case "mixed: one marker exempted, one documented in proof-debt" \
   0 "1 marker(s) exempted via .trusted-base-ignore" setup_mixed_exempt_and_documented
+
+run_case "Coq nested multiline comment prose is not executable debt" \
+  0 "No soundness-relevant escape hatches detected" setup_coq_multiline_comments_only
+
+run_case "real Coq Admitted after a comment still fails" \
+  1 "1/1 escape hatch(es) are undocumented" setup_coq_comment_then_real_admitted
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

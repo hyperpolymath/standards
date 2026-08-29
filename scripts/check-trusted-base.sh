@@ -91,11 +91,35 @@ emit_marker() {
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$markers_tsv"
 }
 
+# Coq comments nest and may span lines. A line-oriented grep sees prose inside
+# `(* ... *)` as code whenever the interior line does not begin with a comment
+# delimiter. Strip nested block comments while preserving line count before
+# looking for proof escape hatches.
+strip_coq_noncode() {
+  awk '
+    {
+      line = $0; out = ""; i = 1; n = length(line)
+      while (i <= n) {
+        pair = substr(line, i, 2)
+        if (depth > 0) {
+          if (pair == "(*") { depth++; i += 2; continue }
+          if (pair == "*)") { depth--; i += 2; continue }
+          i++; continue
+        }
+        if (pair == "(*") { depth++; i += 2; continue }
+        out = out substr(line, i, 1); i++
+      }
+      print out
+    }
+  ' "$1"
+}
+
 # Coq Axiom / Admitted
 echo "$proof_files" | grep -E '\.v$' | while read -r f; do
   [ -z "$f" ] && continue
-  grep -nE '^[[:space:]]*(Axiom|Admitted|admit\.)' "$f" 2>/dev/null | while IFS=: read -r ln rest; do
-    emit_marker "$f" "$ln" "coq-axiom-or-admit" "$(echo "$rest" | head -c 80)"
+  strip_coq_noncode "$f" 2>/dev/null | grep -nE '^[[:space:]]*(Axiom|Admitted|admit\.)' | while IFS=: read -r ln rest; do
+    orig="$(sed -n "${ln}p" "$f" 2>/dev/null)"
+    emit_marker "$f" "$ln" "coq-axiom-or-admit" "$(echo "$orig" | head -c 80)"
   done
 done
 
