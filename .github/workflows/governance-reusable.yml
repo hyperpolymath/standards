@@ -1131,27 +1131,22 @@ jobs:
           done
           [ $failed -eq 1 ] && { echo "Add SPDX header + permissions:"; exit 1; }
           echo "All workflows have SPDX headers + permissions"
-      - name: Check SHA-pinned actions
+      - name: Check locked or SHA-pinned actions
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ -f .github/workflows/actions.lock ]; then
-            # The lockfile records transitive dependency evidence, while direct
-            # workflow references remain visibly SHA-pinned. Keep both layers:
-            # external analysers and GitHub's sha_pinning_required setting do
-            # not infer direct pins from actions.lock.
+            # actions.lock is the authoritative immutable resolution for both
+            # direct actions and their transitive dependencies. Do not also
+            # rewrite direct refs to raw SHAs: gh actions-lock omits refs that
+            # no tag or branch contains, and GitHub then rejects the workflow
+            # at startup. Measured in oikosbot PR #78 on 2026-08-29: five
+            # previously executable workflows became startup_failure after the
+            # redundant direct-SHA conversion; restoring their locked version
+            # refs made GitHub's native resolver accept them again.
             gh extension install github/gh-actions-lock
             bash "$RUNNER_TEMP/update-actions-lock.sh" --verify-local
-            unpinned=$(grep -rnE --include='*.yml' --include='*.yaml' \
-              "^[[:space:]]+uses:" .github/workflows/ | \
-              grep -v "@[a-f0-9]\{40\}" | \
-              grep -v "uses: \./\|uses: docker://\|uses: hyperpolymath/standards/" || true)
-            if [ -n "$unpinned" ]; then
-              echo "ERROR: direct workflow references not SHA-pinned:"
-              echo "$unpinned"
-              exit 1
-            fi
-            echo "Lockfile coverage verified; direct references SHA-pinned"
+            echo "Immutable direct and transitive lockfile coverage verified"
           else
             unpinned=$(grep -rnE --include='*.yml' --include='*.yaml' \
               "^[[:space:]]+uses:" .github/workflows/ | \
