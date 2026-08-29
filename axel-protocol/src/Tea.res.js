@@ -15,12 +15,14 @@ let Sub = {
 };
 
 function text(str) {
-  return str;
+  return document.createTextNode(str);
 }
 
-function tag(tagName, _attrs, children) {
-  let childrenHtml = (children.map(c => c).join(''));
-  return `<` + tagName + `>` + childrenHtml + `</` + tagName + `>`;
+function tag(tagName, attrs, children) {
+  let element = document.createElement(tagName);
+  attrs.forEach(attribute => attribute(element));
+  children.forEach(child => element.appendChild(child));
+  return element;
 }
 
 function div(attrs, children) {
@@ -60,11 +62,11 @@ function section(attrs, children) {
 }
 
 function class$p(name) {
-  return `class="` + name + `"`;
+  return element => element.setAttribute("class", name);
 }
 
 function id(name) {
-  return `id="` + name + `"`;
+  return element => element.setAttribute("id", name);
 }
 
 function onClick(_handler) {
@@ -96,7 +98,7 @@ function standardProgram(program) {
   if (el == null) {
     console.log("TEA mount point #tea-app not found");
   } else {
-    el.textContent = html;
+    el.replaceChildren(html);
   }
 }
 

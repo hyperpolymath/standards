@@ -24,18 +24,22 @@ module Html = {
 
   @val external document: 'a = "document"
   @send external getElementById: ('a, string) => Js.Nullable.t<Dom.element> = "getElementById"
-  @set external setTextContent: (Dom.element, string) => unit = "textContent"
+  @send external replaceChildren: (Dom.element, node) => unit = "replaceChildren"
 
   fn noNode: node = Obj.magic("")
 
-  fn text = (str: string): node => Obj.magic(str)
+  fn text = (str: string): node => Obj.magic(%raw(`document.createTextNode(str)`))
 
-  fn tag = (tagName: string, _attrs: array<attribute>, children: array<node>): node => {
-    // Use raw JavaScript to concatenate children
-    fn childrenHtml: string = %raw(`
-      children.map(c => c).join('')
-    `)
-    Obj.magic(`<${tagName}>${childrenHtml}</${tagName}>`)
+  fn tag = (tagName: string, attrs: array<attribute>, children: array<node>): node => {
+    // Construct nodes directly. Text is never interpreted as markup.
+    Obj.magic(%raw(`
+      (() => {
+        const element = document.createElement(tagName);
+        attrs.forEach(attribute => attribute(element));
+        children.forEach(child => element.appendChild(child));
+        return element;
+      })()
+    `))
   }
 
   fn div = (attrs, children) => tag("div", attrs, children)
@@ -48,8 +52,10 @@ module Html = {
   fn button = (attrs, children) => tag("button", attrs, children)
   fn section = (attrs, children) => tag("section", attrs, children)
 
-  fn class' = (name: string): attribute => Obj.magic(`class="${name}"`)
-  fn id = (name: string): attribute => Obj.magic(`id="${name}"`)
+  fn class' = (name: string): attribute =>
+    Obj.magic(%raw(`element => element.setAttribute("class", name)`))
+  fn id = (name: string): attribute =>
+    Obj.magic(%raw(`element => element.setAttribute("id", name)`))
   fn onClick = (_handler: 'msg): attribute => Obj.magic("")
 }
 
@@ -67,7 +73,7 @@ module App = {
 
     // Mount to DOM
     switch Html.document->Html.getElementById("tea-app")->Js.Nullable.toOption {
-    | Some(el) => el->Html.setTextContent(Obj.magic(html))
+    | Some(el) => el->Html.replaceChildren(html)
     | None => Js.log("TEA mount point #tea-app not found")
     }
   }
