@@ -454,8 +454,16 @@ fi
 for wf in "$REPO_ROOT"/.github/workflows/*.yml "$REPO_ROOT"/.github/workflows/*.yaml; do
   [ -f "$wf" ] || continue
 
-  # Rule: no_scorecard_sarif_code_scanning (structural — independent of pins)
-  if grep -q "ossf/scorecard-action@" "$wf" && grep -q "github/codeql-action/upload-sarif@" "$wf"; then
+  # Rule: no_scorecard_sarif_code_scanning (structural — independent of pins).
+  # Exempt scorecard-reusable.yml when this IS the standards repo: that file
+  # is the canonical implementation of the pattern this rule detects, and no
+  # other repo ever carries these two lines locally (they call it via
+  # `uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@sha`
+  # instead). Without this guard the rule tripped on its own canonical source
+  # unconditionally, the same false-positive the sibling
+  # no_retired_scorecard_enforcer rule above already guards against.
+  if { [ "$IS_STANDARDS" = "false" ] || [ "$(basename "$wf")" != "scorecard-reusable.yml" ]; } \
+     && grep -q "ossf/scorecard-action@" "$wf" && grep -q "github/codeql-action/upload-sarif@" "$wf"; then
     echo "::error file=$wf::OSSF Scorecard must not upload SARIF to GitHub Code Scanning unless it runs for every PR head commit."
     FAILED=1
   fi
