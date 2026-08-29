@@ -36,6 +36,7 @@ if [[ "$args" == *"/selected-actions "* ]]; then
 fi
 
 case "$scenario" in
+  api-unavailable) exit 4 ;;
   sha-off|setter-reset) printf '%s\n' '{"enabled":true,"allowed_actions":"all","sha_pinning_required":false}' ;;
   selected-empty|selected-missing|selected-ok|setter-selected)
     printf '%s\n' '{"enabled":true,"allowed_actions":"selected","sha_pinning_required":true}' ;;
@@ -61,6 +62,7 @@ expect() {
 }
 
 expect "all + SHA pinning passes" 0 all-ok "$CHECK" owner/repo "$CANON"
+expect "API/authentication failure is unavailable, not a policy verdict" 3 api-unavailable "$CHECK" owner/repo "$CANON"
 expect "SHA pinning off blocks" 1 sha-off "$CHECK" owner/repo "$CANON"
 expect "disabled Actions blocks" 1 disabled "$CHECK" owner/repo "$CANON"
 expect "empty selected allowlist blocks" 1 selected-empty "$CHECK" owner/repo "$CANON"

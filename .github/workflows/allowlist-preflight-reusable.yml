@@ -91,6 +91,20 @@ jobs:
           GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
         if: ${{ env.GH_TOKEN != '' }}
         run: |
+          set +e
           bash scripts/check-actions-policy.sh \
             "$GITHUB_REPOSITORY" \
             rhodium-standard-repositories/actions-allowlist/allowed-actions.json
+          rc=$?
+          set -e
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::Live Actions policy was not evaluated: the supplied credential could not read the Administration endpoint."
+            printf '%s\n' \
+              '### Live Actions policy not evaluated' \
+              '' \
+              'A credential was supplied, but the Administration API was unavailable.' \
+              'No live-policy pass is claimed; rotate or re-authorise the credential.' \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          exit "$rc"

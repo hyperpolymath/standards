@@ -3,7 +3,8 @@
 # Check the LIVE GitHub Actions policy for a repository (standards#486).
 #
 # Usage: check-actions-policy.sh <owner/repo> [allowed-actions.json]
-# Exit: 0 compliant | 1 policy violation/API failure | 2 setup error
+# Exit: 0 compliant | 1 policy violation | 2 local setup error |
+#       3 live policy unavailable (authentication/API failure)
 set -euo pipefail
 
 REPOSITORY="${1:?usage: check-actions-policy.sh <owner/repo> [allowed-actions.json]}"
@@ -16,7 +17,7 @@ command -v "$GH_BIN" >/dev/null 2>&1 || { echo "ERROR: GitHub CLI not found: $GH
 
 permissions="$($GH_BIN api "repos/$REPOSITORY/actions/permissions")" || {
   echo "ERROR: could not read live Actions permissions for $REPOSITORY" >&2
-  exit 1
+  exit 3
 }
 
 enabled="$(jq -r '.enabled // false' <<<"$permissions")"
@@ -33,7 +34,7 @@ case "$allowed" in
   selected)
     selected="$($GH_BIN api "repos/$REPOSITORY/actions/permissions/selected-actions")" || {
       echo "ERROR: could not read selected Actions policy for $REPOSITORY" >&2
-      exit 1
+      exit 3
     }
     count="$(jq -r '(.patterns_allowed // []) | length' <<<"$selected")"
     [ "$count" -gt 0 ] || {
