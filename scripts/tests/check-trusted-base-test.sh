@@ -218,11 +218,31 @@ setup_coq_string_delimiters_then_real_marker() {
 From Coq Require Import Strings.String.
 Definition opening_delimiter : string := "(* not a comment".
 Definition escaped_quote : string := "text "" (* still a string".
+Definition multiline_delimiters : string := "first line
+(* neither opens a comment
+nor does this close one *)
+last line".
+(* A quoted delimiter inside a real comment must not change its depth:
+   "(*"
+*)
 Axiom string_delimiters_do_not_hide_this : True.
 EOF
   cat > docs/proof-debt.md <<'EOF'
 # Proof Debt
 (Intentionally empty: a string delimiter must not hide the real axiom.)
+EOF
+}
+
+setup_coq_unterminated_string() {
+  mkdir -p formal docs
+  cat > formal/UnterminatedString.v <<'EOF'
+From Coq Require Import Strings.String.
+Definition malformed : string := "this never closes
+Admitted.
+EOF
+  cat > docs/proof-debt.md <<'EOF'
+# Proof Debt
+(Intentionally empty: malformed input must fail closed.)
 EOF
 }
 
@@ -274,6 +294,9 @@ run_case "Coq comment delimiters inside strings cannot hide a later axiom" \
 
 run_case "real Coq marker after a same-line leading comment still fails" \
   1 "1/1 escape hatch(es) are undocumented" setup_coq_leading_comment_then_real_marker
+
+run_case "unterminated Coq string fails closed instead of hiding the file" \
+  1 "1/1 escape hatch(es) are undocumented" setup_coq_unterminated_string
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

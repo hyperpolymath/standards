@@ -94,30 +94,34 @@ emit_marker() {
 # Coq comments nest and may span lines. A line-oriented grep sees prose inside
 # `(* ... *)` as code whenever the interior line does not begin with a comment
 # delimiter. Strip nested block comments and strings while preserving line
-# count before looking for proof escape hatches. String state deliberately
-# resets on each line: malformed input must over-flag, never hide the remainder
-# of a file from this soundness gate. Coq escapes a quote as `""` in strings.
+# count before looking for proof escape hatches. Coq permits multiline strings
+# and escapes a quote as `""`, so string state spans lines and takes precedence
+# over comment delimiters. An unterminated string emits a synthetic marker so
+# malformed input fails closed instead of hiding the remainder of the file.
 strip_coq_noncode() {
   awk '
     {
-      line = $0; out = ""; i = 1; n = length(line); instr = 0
+      line = $0; out = ""; i = 1; n = length(line)
       while (i <= n) {
         c = substr(line, i, 1); pair = substr(line, i, 2)
-        if (depth > 0) {
-          if (pair == "(*") { depth++; i += 2; continue }
-          if (pair == "*)") { depth--; i += 2; continue }
-          i++; continue
-        }
         if (instr) {
           if (pair == "\"\"") { i += 2; continue }
           if (c == "\"") { instr = 0; i++; continue }
           i++; continue
         }
-        if (pair == "(*") { depth++; i += 2; continue }
         if (c == "\"") { instr = 1; i++; continue }
+        if (depth > 0) {
+          if (pair == "(*") { depth++; i += 2; continue }
+          if (pair == "*)") { depth--; i += 2; continue }
+          i++; continue
+        }
+        if (pair == "(*") { depth++; i += 2; continue }
         out = out c; i++
       }
       print out
+    }
+    END {
+      if (instr) print "Axiom __unterminated_coq_string"
     }
   ' "$1"
 }
