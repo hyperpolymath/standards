@@ -5,9 +5,10 @@ set -uo pipefail
 # check-action-pins-resolve.sh — verify every SHA-pinned action actually EXISTS.
 #
 # ── Why this gate exists ────────────────────────────────────────────────────
-# The governance linter's "Check SHA-pinned actions" step verifies the *shape*
-# of a pin (`@` + 40 hex chars). It cannot tell a real commit from an invented
-# one, because a fabricated SHA is a perfectly well-formed 40-hex string.
+# The governance linter's "Check locked or SHA-pinned actions" step delegates
+# lockfile integrity to gh actions-lock. For repositories without a lockfile it
+# verifies the *shape* of each direct pin (`@` + 40 hex chars), but cannot tell
+# a real commit from an invented one: a fabricated SHA is still well formed.
 #
 # That gap is not theoretical. Measured across the estate on 2026-07-28:
 #
