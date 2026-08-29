@@ -26,6 +26,70 @@ restore_workflows() {
     done
 }
 
+workflow_references_reusable_dependency() {
+  workflow=$1
+  dependency=$2
+  repo=${dependency%@*}
+  ref=${dependency#*@}
+
+  [ -f "$workflow" ] || return 1
+  awk -v prefix="$repo/.github/workflows/" -v suffix="@$ref" '
+    /^[[:space:]]*uses:[[:space:]]*/ {
+      value = $0
+      sub(/^[[:space:]]*uses:[[:space:]]*/, "", value)
+      sub(/[[:space:]]*#.*/, "", value)
+      sub(/[[:space:]]*$/, "", value)
+      if (index(value, prefix) == 1 &&
+          length(value) >= length(suffix) &&
+          substr(value, length(value) - length(suffix) + 1) == suffix) {
+        found = 1
+      }
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$workflow"
+}
+
+verify_lock_coverage() {
+  # gh-actions-lock v0.1.6 does not recognise reusable-workflow `uses:`
+  # paths. GitHub's startup enforcement nevertheless requires callers to
+  # carry the reusable repository and its transitive actions in actions.lock.
+  # Accept only the tool's `stale` false positive when the named workflow
+  # contains the exact owner/repo/.github/workflows/file@ref dependency.
+  # Every other finding, including a wrong ref, remains blocking.
+  command -v jq >/dev/null 2>&1 || {
+    "$GH_BIN" actions-lock --verify-local
+    return
+  }
+
+  set +e
+  result=$("$GH_BIN" actions-lock --verify-local --json=valid,findings)
+  status=$?
+  set -e
+
+  if ! printf '%s' "$result" | jq -e '.valid != null and (.findings | type == "array")' >/dev/null 2>&1; then
+    printf '%s\n' "$result"
+    return "$status"
+  fi
+  if [ "$(printf '%s' "$result" | jq -r '.valid')" = true ]; then
+    return 0
+  fi
+
+  remaining=0
+  while IFS=$'\t' read -r category workflow dependency; do
+    if [ "$category" = stale ] &&
+       workflow_references_reusable_dependency "$workflow" "$dependency"; then
+      echo "Accepted reusable-workflow lock coverage: $workflow -> $dependency"
+    else
+      remaining=$((remaining + 1))
+    fi
+  done < <(printf '%s' "$result" | jq -r '.findings[] | [.category, .workflow, .dependency] | @tsv')
+
+  if [ "$remaining" -ne 0 ]; then
+    printf '%s\n' "$result"
+    return 1
+  fi
+}
+
 cleanup() {
   status=$?
   if [ "$COMPLETE" != true ]; then
@@ -62,6 +126,6 @@ fi
 # Despite its name, --verify-local can migrate local `./` action paths to an
 # invalid `$/` spelling. Treat verification as mutating and restore authored
 # workflow bytes afterward too.
-"$GH_BIN" actions-lock --verify-local
+verify_lock_coverage
 restore_workflows
 COMPLETE=true

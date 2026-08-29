@@ -29,7 +29,20 @@ if [ "${2:-}" = "--verify-local" ]; then
     .github/workflows/actions.lock
   sed -i 's#uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1#uses: actions/checkout@v7.0.1#' \
     .github/workflows/ci.yml
-  exit
+  case "${FAKE_VERIFY_FINDING:-}" in
+    reusable-exact)
+      printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/reusable.yml","category":"stale","dependency":"hyperpolymath/standards@abc123"}]}'
+      exit 1
+      ;;
+    reusable-wrong-ref)
+      printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/reusable.yml","category":"stale","dependency":"hyperpolymath/standards@wrong456"}]}'
+      exit 1
+      ;;
+    *)
+      printf '%s\n' '{"valid":true,"findings":[]}'
+      exit
+      ;;
+  esac
 fi
 sed -i '1i# This workflow is managed by gh actions-lock.' .github/workflows/ci.yml
 sed -i 's#actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1#actions/checkout@v7.0.1#' \
@@ -74,6 +87,27 @@ GH_BIN="$WORK/bin/fake-gh" bash "$UPDATE" --verify-local .github/workflows >/dev
 cmp -s "$WORK/ci.before-verify" .github/workflows/ci.yml
 cmp -s "$WORK/lock.before-verify" .github/workflows/actions.lock
 echo "PASS: Actions lock verification restores tool-authored workflow edits"
+
+cat > .github/workflows/reusable.yml <<'EOF'
+# SPDX-License-Identifier: MPL-2.0
+name: Reusable caller
+on: push
+permissions: {}
+jobs:
+  governance:
+    uses: hyperpolymath/standards/.github/workflows/governance-reusable.yml@abc123
+EOF
+
+FAKE_VERIFY_FINDING=reusable-exact GH_BIN="$WORK/bin/fake-gh" \
+  bash "$UPDATE" --verify-local .github/workflows >/dev/null
+echo "PASS: exact reusable-workflow dependency is accepted"
+
+if FAKE_VERIFY_FINDING=reusable-wrong-ref GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: wrong reusable-workflow ref was accepted" >&2
+  exit 1
+fi
+echo "PASS: wrong reusable-workflow ref remains blocking"
 
 # A failed refresh must restore both authored workflows and the previous
 # lockfile; this is the production failure mode that left the original checkout
