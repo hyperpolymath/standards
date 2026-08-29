@@ -103,17 +103,51 @@ jobs:
           fi
           bash "$RUNNER_TEMP/check-allowed-actions.sh" \
             "$RUNNER_TEMP/allowed-actions.json" .github/workflows
+          rm -rf .standards-checkout
+
+  actions-policy-live:
+    name: Live Actions policy (credentialed advisory)
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout standards for the live policy gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: main
+          sparse-checkout: |
+            rhodium-standard-repositories/actions-allowlist
+            scripts/check-actions-policy.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Report unavailable live policy credential
+        env:
+          GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
+        if: ${{ env.GH_TOKEN == '' }}
+        run: |
+          echo "::notice::Live Actions policy was not evaluated: HYPATIA_SCAN_PAT was not supplied by the caller. The separate tree allowlist gate still ran."
+          # shellcheck disable=SC2016
+          printf '%s\n' \
+            '### Live Actions policy not evaluated' \
+            '' \
+            'The caller did not supply `HYPATIA_SCAN_PAT`. This advisory job' \
+            'does not claim that the repository Administration setting passed.' \
+            'The independent tree allowlist preflight remains enforced.' \
+            >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check live Actions policy
         env:
-          # GitHub's job token cannot read this Administration endpoint. Keep
-          # this dependency explicit: missing/expired credentials must make the
-          # live control red rather than silently reducing it to a tree check.
+          # The ordinary job token cannot read the repository Administration
+          # endpoint. When a caller deliberately supplies this credential, an
+          # API/authentication failure or real policy violation remains red.
           GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
+        if: ${{ env.GH_TOKEN != '' }}
         run: |
-          rm -rf .standards-checkout
-          bash "$RUNNER_TEMP/check-actions-policy.sh" \
-            "$GITHUB_REPOSITORY" "$RUNNER_TEMP/allowed-actions.json"
+          bash scripts/check-actions-policy.sh \
+            "$GITHUB_REPOSITORY" \
+            rhodium-standard-repositories/actions-allowlist/allowed-actions.json
 
   validate-hypatia-baseline:
     name: Validate Hypatia Baseline
