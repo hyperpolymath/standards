@@ -112,6 +112,13 @@ printf '%s\n' 'name: reusable' 'on: push' 'jobs:' '  gate:' '    timeout-minutes
 git -C "$reusable_timeout" add .github/workflows/test.yml
 (cd "$reusable_timeout" && expect_fail "$workflow_gate")
 
+runner_timeout="$fixture/runner-timeout"
+init_fixture "$runner_timeout"
+mkdir -p "$runner_timeout/.github/workflows"
+printf '%s\n' 'name: runner' 'on: push' 'jobs:' '  test:' '    runs-on: ubuntu-latest' '    timeout-minutes: 10' '    steps:' '      - run: true' > "$runner_timeout/.github/workflows/test.yml"
+git -C "$runner_timeout" add .github/workflows/test.yml
+(cd "$runner_timeout" && expect_pass "$workflow_gate")
+
 control="$fixture/control"
 init_fixture "$control"
 mkdir -p "$control/.github/workflows"
