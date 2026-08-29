@@ -40,14 +40,18 @@ jobs:
             echo "has_baseline=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Clone standards repository
-        run: |
-          # Treeless partial clone: full commit graph (needed by the staleness
-          # gate's ancestry / commits-behind / age math) without paying for
-          # every tree+blob in history. Falls back to a deep clone if the
-          # server rejects the partial-clone filter.
-          git clone --filter=tree:0 https://github.com/hyperpolymath/standards.git "$HOME/standards" \
-            || git clone --depth 200 https://github.com/hyperpolymath/standards.git "$HOME/standards"
+      - name: Checkout pinned standards history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          # The gate needs the full graph for ancestry and age checks, but its
+          # script must come from the exact reusable commit rather than moving
+          # main. This also lets a Standards PR test its own validator change.
+          ref: ${{ job.workflow_sha }}
+          path: .standards-history
+          fetch-depth: 0
+          filter: tree:0
+          persist-credentials: false
 
       - name: Run staleness check
         env:
@@ -60,8 +64,9 @@ jobs:
           # past this commit: the script comes from standards HEAD, but the job
           # definition comes from whatever SHA the consumer pins.
           GITHUB_TOKEN: ${{ github.token }}
+          STALENESS_STANDARDS_DIR: ${{ github.workspace }}/.standards-history
         run: |
-          bash "$HOME/standards/scripts/check-workflow-staleness.sh" .
+          bash .standards-history/scripts/check-workflow-staleness.sh .
 
   allowlist-preflight:
     name: Allowlist Preflight
@@ -80,7 +85,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          # Exact commit of this reusable workflow. This preserves consumer
+          # pin semantics and lets a standards PR test its own scripts.
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             rhodium-standard-repositories/actions-allowlist
@@ -103,17 +110,66 @@ jobs:
           fi
           bash "$RUNNER_TEMP/check-allowed-actions.sh" \
             "$RUNNER_TEMP/allowed-actions.json" .github/workflows
+          rm -rf .standards-checkout
+
+  actions-policy-live:
+    name: Live Actions policy (credentialed advisory)
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout standards for the live policy gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: ${{ job.workflow_sha }}
+          path: .standards-checkout
+          sparse-checkout: |
+            rhodium-standard-repositories/actions-allowlist
+            scripts/check-actions-policy.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Report unavailable live policy credential
+        env:
+          GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
+        if: ${{ env.GH_TOKEN == '' }}
+        run: |
+          echo "::notice::Live Actions policy was not evaluated: HYPATIA_SCAN_PAT was not supplied by the caller. The separate tree allowlist gate still ran."
+          # shellcheck disable=SC2016
+          printf '%s\n' \
+            '### Live Actions policy not evaluated' \
+            '' \
+            'The caller did not supply `HYPATIA_SCAN_PAT`. This advisory job' \
+            'does not claim that the repository Administration setting passed.' \
+            'The independent tree allowlist preflight remains enforced.' \
+            >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check live Actions policy
         env:
-          # GitHub's job token cannot read this Administration endpoint. Keep
-          # this dependency explicit: missing/expired credentials must make the
-          # live control red rather than silently reducing it to a tree check.
+          # The ordinary job token cannot read the repository Administration
+          # endpoint. When a caller deliberately supplies this credential, an
+          # API/authentication failure or real policy violation remains red.
           GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
+        if: ${{ env.GH_TOKEN != '' }}
         run: |
-          rm -rf .standards-checkout
-          bash "$RUNNER_TEMP/check-actions-policy.sh" \
-            "$GITHUB_REPOSITORY" "$RUNNER_TEMP/allowed-actions.json"
+          set +e
+          bash .standards-checkout/scripts/check-actions-policy.sh \
+            "$GITHUB_REPOSITORY" \
+            .standards-checkout/rhodium-standard-repositories/actions-allowlist/allowed-actions.json
+          rc=$?
+          set -e
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::Live Actions policy was not evaluated: the supplied credential could not read the Administration endpoint."
+            printf '%s\n' \
+              '### Live Actions policy not evaluated' \
+              '' \
+              'A credential was supplied, but the Administration API was unavailable.' \
+              'No live-policy pass is claimed; rotate or re-authorise the credential.' \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          exit "$rc"
 
   validate-hypatia-baseline:
     name: Validate Hypatia Baseline
@@ -188,14 +244,16 @@ jobs:
 
       # A reusable workflow only auto-checks-out its own YAML, not sibling
       # scripts. Sparse-check-out standards' scripts/ to get apply-baseline.sh,
-      # mirroring the language-policy job below. Pinned to main because
-      # github.workflow_sha resolves to the *caller* repo's SHA (which would 404).
+      # mirroring the language-policy job below. `job.workflow_sha` is the exact
+      # commit of this called workflow, so the filter and schema semantics cannot
+      # drift from the reusable workflow that invoked them. This also lets a
+      # standards PR test its own script change instead of silently using main.
       - name: Check out standards for the baseline filter
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts

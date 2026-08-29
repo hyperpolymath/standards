@@ -95,7 +95,7 @@ SCHEMA_ERRORS="$(jq -r '
        else empty end),
       # `type` accepts three shapes, and the third is not cosmetic:
       #   snake_case          — the Hypatia rule modules (unsafe_block, ...)
-      #   SD007-style codes   — structural_drift
+      #   SD007/HYP-S009 codes — structural_drift and canonical-home rules
       #   CamelCase           — SCORECARD PROBE NAMES (DependencyPinning,
       #                         BranchProtection, ...). Hypatia emits these
       #                         verbatim from Scorecard, and without this
@@ -106,7 +106,7 @@ SCHEMA_ERRORS="$(jq -r '
       #                         than "this finding is unrepresentable".
       #                         Found 2026-08-06 in metadatastician/stapeln.
       (if ($e.type|type) == "string"
-          and (($e.type|test("^([a-z][a-z0-9_]*|[A-Z]{2,3}[0-9]{3}|[A-Z][A-Za-z0-9]+)$"))|not)
+          and (($e.type|test("^([a-z][a-z0-9_]*|[A-Z]{2,3}(-[A-Z])?[0-9]{3}|[A-Z][A-Za-z0-9]+)$"))|not)
        then "entry[\($i)]: type fails pattern: \($e.type)" else empty end),
       (if ($e|has("file")) and ((($e.file|type) != "string") or ($e.file == ""))
        then "entry[\($i)]: file must be a non-empty string" else empty end),

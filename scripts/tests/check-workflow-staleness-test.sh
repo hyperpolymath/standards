@@ -62,8 +62,8 @@ run_case() {
   local desc="$1" expected="$2" repo="$3"; shift 3
   TOTAL=$((TOTAL + 1))
   set +e
-  env "$@" \
-    GITHUB_REPOSITORY="hyperpolymath/test-repo" \
+  env GITHUB_REPOSITORY="hyperpolymath/test-repo" \
+    "$@" \
     STALENESS_STANDARDS_DIR="$FIX" \
     bash "$CHECK_SCRIPT" "$repo" >/dev/null 2>&1
   local rc=$?
@@ -85,8 +85,8 @@ run_case_out() {
   TOTAL=$((TOTAL + 1))
   local out rc
   set +e
-  out=$(env "$@" \
-    GITHUB_REPOSITORY="hyperpolymath/test-repo" \
+  out=$(env GITHUB_REPOSITORY="hyperpolymath/test-repo" \
+    "$@" \
     STALENESS_STANDARDS_DIR="$FIX" \
     bash "$CHECK_SCRIPT" "$repo" 2>&1)
   rc=$?
@@ -183,7 +183,7 @@ R="$TEST_DIR/enforcer"; mk_repo "$R"
 touch "$R/.github/workflows/scorecard-enforcer.yml"
 run_case "retired scorecard-enforcer.yml fails" 1 "$R"
 
-# ── 9. Direct Scorecard SARIF upload -> fail ────────────────────────────────
+# ── 9. Consumer-owned direct Scorecard SARIF upload -> fail ────────────────
 R="$TEST_DIR/sarif"; mk_repo "$R"
 cat > "$R/.github/workflows/scorecard.yml" <<'EOF'
 name: Scorecard
@@ -194,7 +194,12 @@ jobs:
       - uses: ossf/scorecard-action@abc
       - uses: github/codeql-action/upload-sarif@xyz
 EOF
-run_case "direct Scorecard SARIF upload fails" 1 "$R"
+run_case "consumer direct Scorecard SARIF upload fails" 1 "$R"
+
+# The standards repository contains the canonical reusable that consumers call.
+# Its uploader is the controlled source, not a forbidden ad hoc consumer copy.
+run_case "canonical standards Scorecard SARIF uploader passes" 0 "$R" \
+  GITHUB_REPOSITORY=hyperpolymath/standards
 
 # ── 10. No workflows dir -> pass ────────────────────────────────────────────
 R="$TEST_DIR/empty"; mkdir -p "$R"
