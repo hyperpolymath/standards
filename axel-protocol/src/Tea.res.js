@@ -96,7 +96,7 @@ function standardProgram(program) {
   if (el == null) {
     console.log("TEA mount point #tea-app not found");
   } else {
-    el.innerHTML = html;
+    el.textContent = html;
   }
 }
 

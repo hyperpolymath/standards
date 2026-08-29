@@ -84,6 +84,28 @@ echo '[]' > "$WORK/empty.json"
 assert_status "empty baseline keeps finding" \
   "$WORK/findings2.json" "$WORK/empty.json" "0,1"
 
+# === Case 6: emitted hyphenated Hypatia rule IDs are representable ===
+cat > "$WORK/findings6.json" <<'EOF'
+[{"severity":"medium","rule_module":"implementation_inside_canon","type":"HYP-S009","file":"spec/Cargo.toml"}]
+EOF
+cat > "$WORK/baseline6.json" <<'EOF'
+[{"severity":"medium","rule_module":"implementation_inside_canon","type":"HYP-S009","file":"spec/Cargo.toml"}]
+EOF
+assert_status "hyphenated HYP-S009 rule type is valid and matches" \
+  "$WORK/findings6.json" "$WORK/baseline6.json" "1,0"
+
+# A malformed doubled separator must remain invalid.
+cat > "$WORK/baseline6-invalid.json" <<'EOF'
+[{"severity":"medium","rule_module":"implementation_inside_canon","type":"HYP--S009","file":"spec/Cargo.toml"}]
+EOF
+if "$APPLY" "$WORK/findings6.json" "$WORK/baseline6-invalid.json" advisory >/dev/null 2>&1; then
+  echo "FAIL: malformed HYP--S009 rule type was accepted"
+  fail=$((fail + 1))
+else
+  echo "PASS: malformed HYP--S009 rule type is rejected"
+  pass=$((pass + 1))
+fi
+
 echo
 echo "Total: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

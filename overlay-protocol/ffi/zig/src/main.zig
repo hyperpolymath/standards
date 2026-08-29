@@ -419,7 +419,7 @@ pub export fn overlay_last_error() ?[*:0]const u8 {
     if (last_error_len < last_error_buf.len) {
         last_error_buf[last_error_len] = 0;
     }
-    return @ptrCast(&last_error_buf);
+    return last_error_buf[0..last_error_len :0].ptr;
 }
 
 // ============================================================================
