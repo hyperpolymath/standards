@@ -91,11 +91,50 @@ emit_marker() {
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$markers_tsv"
 }
 
+# Coq comments nest and may span lines. A line-oriented grep sees prose inside
+# `(* ... *)` as code whenever the interior line does not begin with a comment
+# delimiter. Strip nested block comments and strings while preserving line
+# count before looking for proof escape hatches. Coq permits multiline strings
+# and escapes a quote as `""`, so string state spans lines and takes precedence
+# over comment delimiters. An unterminated string emits a synthetic marker so
+# malformed input fails closed instead of hiding the remainder of the file.
+strip_coq_noncode() {
+  awk '
+    {
+      line = $0; out = ""; i = 1; n = length(line)
+      while (i <= n) {
+        c = substr(line, i, 1); pair = substr(line, i, 2)
+        if (instr) {
+          if (pair == "\"\"") { i += 2; continue }
+          if (c == "\"") { instr = 0; i++; continue }
+          i++; continue
+        }
+        if (c == "\"") { instr = 1; i++; continue }
+        if (depth > 0) {
+          if (pair == "(*") { depth++; i += 2; continue }
+          if (pair == "*)") { depth--; i += 2; continue }
+          i++; continue
+        }
+        if (pair == "(*") { depth++; i += 2; continue }
+        out = out c; i++
+      }
+      print out
+    }
+    END {
+      if (instr) print "Axiom __unterminated_coq_string"
+    }
+  ' "$1"
+}
+
 # Coq Axiom / Admitted
 echo "$proof_files" | grep -E '\.v$' | while read -r f; do
   [ -z "$f" ] && continue
-  grep -nE '^[[:space:]]*(Axiom|Admitted|admit\.)' "$f" 2>/dev/null | while IFS=: read -r ln rest; do
-    emit_marker "$f" "$ln" "coq-axiom-or-admit" "$(echo "$rest" | head -c 80)"
+  strip_coq_noncode "$f" 2>/dev/null | grep -nE '^[[:space:]]*(Axiom|Admitted|admit\.)' | while IFS=: read -r ln rest; do
+    orig="$(sed -n "${ln}p" "$f" 2>/dev/null)"
+    # The language-aware pass already removed comments. Do not feed the
+    # original line through the generic prefix heuristic: `(* note *) Admitted.`
+    # is executable debt even though its original text begins with a comment.
+    printf '%s\t%s\t%s\t%s\n' "$f" "$ln" "coq-axiom-or-admit" "$(echo "$orig" | head -c 80)" >> "$markers_tsv"
   done
 done
 
