@@ -257,6 +257,7 @@ jobs:
           path: .standards-checkout
           sparse-checkout: |
             scripts
+            tools/policy/check-language-policy.sh
           sparse-checkout-cone-mode: false
 
       - name: Run Hypatia scan (Baseline validation)
@@ -364,9 +365,10 @@ jobs:
           repository: hyperpolymath/standards
           ref: main
           path: .standards-checkout
-          # Sparse-checkout only the scripts dir to keep this fast.
+          # Include the shared policy gate as well as the scripts it complements.
           sparse-checkout: |
             scripts
+            tools/policy/check-language-policy.sh
           sparse-checkout-cone-mode: false
 
       - name: Check for TypeScript
@@ -383,6 +385,19 @@ jobs:
         # TS→AffineScript migration (standards#239 / #241). Retirement of
         # the .ts is a separate follow-up after the dual-target window.
         run: deno run --allow-read --no-lock .standards-checkout/scripts/check-ts-allowlist.deno.js
+
+      - name: Check language-policy invariants
+        run: |
+          SCRIPT=".standards-checkout/tools/policy/check-language-policy.sh"
+          if [ ! -f "$SCRIPT" ] && [ -f tools/policy/check-language-policy.sh ]; then
+            SCRIPT="tools/policy/check-language-policy.sh"
+            echo "Using this repository's own copy (standards self-check)."
+          fi
+          if [ ! -f "$SCRIPT" ]; then
+            echo "::error::language-policy gate not found in standards@main or locally"
+            exit 1
+          fi
+          bash "$SCRIPT"
 
       - name: check-ts-allowlist source/compile drift (informational)
         # Non-blocking — informational until the AffineScript compiler
@@ -1109,6 +1124,7 @@ jobs:
           sparse-checkout: |
             scripts/check-workflow-duplicate-keys.sh
             scripts/update-actions-lock.sh
+            tools/policy/check-workflows-parse.sh
           sparse-checkout-cone-mode: false
         # ⚠ Not fatal if the file is absent. This checkout is pinned to
         # standards@main, so during a rename of the script the fetch finds
@@ -1117,6 +1133,19 @@ jobs:
         # the one pull request that cannot possibly be at fault. See the
         # fallback in the next step.
         continue-on-error: true
+
+      - name: Parse every tracked workflow
+        run: |
+          SCRIPT=".standards-dupkey/tools/policy/check-workflows-parse.sh"
+          if [ ! -f "$SCRIPT" ] && [ -f tools/policy/check-workflows-parse.sh ]; then
+            SCRIPT="tools/policy/check-workflows-parse.sh"
+            echo "Using this repository's own copy (standards self-lint)."
+          fi
+          if [ ! -f "$SCRIPT" ]; then
+            echo "::error::workflow parser gate not found in standards@main or locally"
+            exit 1
+          fi
+          bash "$SCRIPT"
 
       - name: Duplicate YAML keys in workflows
         run: |
