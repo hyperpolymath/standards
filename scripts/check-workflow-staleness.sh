@@ -41,7 +41,8 @@ set -eo pipefail
 #     calendar. The pre-cache-fix Hypatia scanner (#441) is the first entry.
 #   * FORGED — the pin is not a commit of this repository reachable from the
 #     default branch, confirmed server-side (supply-chain integrity).
-#   * the two structural rules (retired scorecard-enforcer; Scorecard SARIF).
+#   * the two structural rules (retired scorecard-enforcer; direct consumer
+#     Scorecard SARIF publication outside the canonical reusable).
 # Age outside the window is reported as a ::notice for the propagation path to
 # act on.
 #
@@ -454,9 +455,13 @@ fi
 for wf in "$REPO_ROOT"/.github/workflows/*.yml "$REPO_ROOT"/.github/workflows/*.yaml; do
   [ -f "$wf" ] || continue
 
-  # Rule: no_scorecard_sarif_code_scanning (structural — independent of pins)
-  if grep -q "ossf/scorecard-action@" "$wf" && grep -q "github/codeql-action/upload-sarif@" "$wf"; then
-    echo "::error file=$wf::OSSF Scorecard must not upload SARIF to GitHub Code Scanning unless it runs for every PR head commit."
+  # Rule: no direct consumer-owned Scorecard SARIF publisher. The canonical
+  # reusable in standards owns publication so alert delivery and policy can be
+  # repaired once rather than drifting across the estate.
+  if [ "$IS_STANDARDS" = "false" ] && \
+     grep -q "ossf/scorecard-action@" "$wf" && \
+     grep -q "github/codeql-action/upload-sarif@" "$wf"; then
+    echo "::error file=$wf::Direct Scorecard SARIF publication is retired. Call standards/scorecard-reusable.yml so publication policy remains centrally controlled."
     FAILED=1
   fi
 
@@ -473,7 +478,7 @@ for wf in "$REPO_ROOT"/.github/workflows/*.yml "$REPO_ROOT"/.github/workflows/*.
 done
 
 if [ $FAILED -ne 0 ]; then
-  echo "::error::Staleness gate failed. Each error above names a specific defect: a pin predating a known false-green fix (refresh it — waiting will not help), a pin that is not a published standards commit, a retired scorecard-enforcer.yml, or Scorecard uploading SARIF to Code Scanning. Pins that are merely old are reported as notices and do not fail."
+  echo "::error::Staleness gate failed. Each error above names a specific defect: a pin predating a known false-green fix (refresh it — waiting will not help), a pin that is not a published standards commit, a retired scorecard-enforcer.yml, or a consumer-owned direct Scorecard SARIF publisher. Pins that are merely old are reported as notices and do not fail."
   exit 1
 fi
 
