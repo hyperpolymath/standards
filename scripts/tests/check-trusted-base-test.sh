@@ -212,6 +212,31 @@ EOF
 EOF
 }
 
+setup_coq_string_delimiters_then_real_marker() {
+  mkdir -p formal docs
+  cat > formal/StringDelimiter.v <<'EOF'
+From Coq Require Import Strings.String.
+Definition opening_delimiter : string := "(* not a comment".
+Definition escaped_quote : string := "text "" (* still a string".
+Axiom string_delimiters_do_not_hide_this : True.
+EOF
+  cat > docs/proof-debt.md <<'EOF'
+# Proof Debt
+(Intentionally empty: a string delimiter must not hide the real axiom.)
+EOF
+}
+
+setup_coq_leading_comment_then_real_marker() {
+  mkdir -p formal docs
+  cat > formal/LeadingComment.v <<'EOF'
+(* explanatory prefix *) Admitted.
+EOF
+  cat > docs/proof-debt.md <<'EOF'
+# Proof Debt
+(Intentionally empty: a leading comment must not hide the real marker.)
+EOF
+}
+
 # Existing behaviour must still work.
 run_case "marker with no docs and no ignore fails (early exit)" \
   1 "No docs/proof-debt.md (or equivalent) found" setup_marker_no_docs
@@ -243,6 +268,12 @@ run_case "Coq nested multiline comment prose is not executable debt" \
 
 run_case "real Coq Admitted after a comment still fails" \
   1 "1/1 escape hatch(es) are undocumented" setup_coq_comment_then_real_admitted
+
+run_case "Coq comment delimiters inside strings cannot hide a later axiom" \
+  1 "1/1 escape hatch(es) are undocumented" setup_coq_string_delimiters_then_real_marker
+
+run_case "real Coq marker after a same-line leading comment still fails" \
+  1 "1/1 escape hatch(es) are undocumented" setup_coq_leading_comment_then_real_marker
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

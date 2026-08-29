@@ -93,21 +93,29 @@ emit_marker() {
 
 # Coq comments nest and may span lines. A line-oriented grep sees prose inside
 # `(* ... *)` as code whenever the interior line does not begin with a comment
-# delimiter. Strip nested block comments while preserving line count before
-# looking for proof escape hatches.
+# delimiter. Strip nested block comments and strings while preserving line
+# count before looking for proof escape hatches. String state deliberately
+# resets on each line: malformed input must over-flag, never hide the remainder
+# of a file from this soundness gate. Coq escapes a quote as `""` in strings.
 strip_coq_noncode() {
   awk '
     {
-      line = $0; out = ""; i = 1; n = length(line)
+      line = $0; out = ""; i = 1; n = length(line); instr = 0
       while (i <= n) {
-        pair = substr(line, i, 2)
+        c = substr(line, i, 1); pair = substr(line, i, 2)
         if (depth > 0) {
           if (pair == "(*") { depth++; i += 2; continue }
           if (pair == "*)") { depth--; i += 2; continue }
           i++; continue
         }
+        if (instr) {
+          if (pair == "\"\"") { i += 2; continue }
+          if (c == "\"") { instr = 0; i++; continue }
+          i++; continue
+        }
         if (pair == "(*") { depth++; i += 2; continue }
-        out = out substr(line, i, 1); i++
+        if (c == "\"") { instr = 1; i++; continue }
+        out = out c; i++
       }
       print out
     }
@@ -119,7 +127,10 @@ echo "$proof_files" | grep -E '\.v$' | while read -r f; do
   [ -z "$f" ] && continue
   strip_coq_noncode "$f" 2>/dev/null | grep -nE '^[[:space:]]*(Axiom|Admitted|admit\.)' | while IFS=: read -r ln rest; do
     orig="$(sed -n "${ln}p" "$f" 2>/dev/null)"
-    emit_marker "$f" "$ln" "coq-axiom-or-admit" "$(echo "$orig" | head -c 80)"
+    # The language-aware pass already removed comments. Do not feed the
+    # original line through the generic prefix heuristic: `(* note *) Admitted.`
+    # is executable debt even though its original text begins with a comment.
+    printf '%s\t%s\t%s\t%s\n' "$f" "$ln" "coq-axiom-or-admit" "$(echo "$orig" | head -c 80)" >> "$markers_tsv"
   done
 done
 
