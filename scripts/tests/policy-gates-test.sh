@@ -98,6 +98,27 @@ printf '%s\n' 'name: test' 'jobs: [' > "$invalid/.github/workflows/test.yml"
 git -C "$invalid" add .github/workflows/test.yml
 (cd "$invalid" && expect_fail "$workflow_gate")
 
+reusable_valid="$fixture/reusable-valid"
+init_fixture "$reusable_valid"
+mkdir -p "$reusable_valid/.github/workflows"
+printf '%s\n' 'name: reusable' 'on: push' 'jobs:' '  gate:' '    uses: owner/repo/.github/workflows/gate.yml@0123456789012345678901234567890123456789' > "$reusable_valid/.github/workflows/test.yml"
+git -C "$reusable_valid" add .github/workflows/test.yml
+(cd "$reusable_valid" && expect_pass "$workflow_gate")
+
+reusable_timeout="$fixture/reusable-timeout"
+init_fixture "$reusable_timeout"
+mkdir -p "$reusable_timeout/.github/workflows"
+printf '%s\n' 'name: reusable' 'on: push' 'jobs:' '  gate:' '    timeout-minutes: 10' '    uses: owner/repo/.github/workflows/gate.yml@0123456789012345678901234567890123456789' > "$reusable_timeout/.github/workflows/test.yml"
+git -C "$reusable_timeout" add .github/workflows/test.yml
+(cd "$reusable_timeout" && expect_fail "$workflow_gate")
+
+runner_timeout="$fixture/runner-timeout"
+init_fixture "$runner_timeout"
+mkdir -p "$runner_timeout/.github/workflows"
+printf '%s\n' 'name: runner' 'on: push' 'jobs:' '  test:' '    runs-on: ubuntu-latest' '    timeout-minutes: 10' '    steps:' '      - run: true' > "$runner_timeout/.github/workflows/test.yml"
+git -C "$runner_timeout" add .github/workflows/test.yml
+(cd "$runner_timeout" && expect_pass "$workflow_gate")
+
 control="$fixture/control"
 init_fixture "$control"
 mkdir -p "$control/.github/workflows"
