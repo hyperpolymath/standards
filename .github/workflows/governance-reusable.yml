@@ -1048,7 +1048,9 @@ jobs:
           repository: hyperpolymath/standards
           ref: main
           path: .standards-dupkey
-          sparse-checkout: scripts/check-workflow-duplicate-keys.sh
+          sparse-checkout: |
+            scripts/check-workflow-duplicate-keys.sh
+            scripts/update-actions-lock.sh
           sparse-checkout-cone-mode: false
         # ⚠ Not fatal if the file is absent. This checkout is pinned to
         # standards@main, so during a rename of the script the fetch finds
@@ -1084,6 +1086,20 @@ jobs:
             exit 1
           fi
           cp "$SCRIPT" "$RUNNER_TEMP/dupkeys.sh"
+          # The lockfile gate below runs in a consumer checkout, where the
+          # standards helper is not present. Preserve the canonical helper
+          # before removing this sparse standards checkout.
+          LOCK_SCRIPT=".standards-dupkey/scripts/update-actions-lock.sh"
+          if [ ! -f "$LOCK_SCRIPT" ] && [ -f scripts/update-actions-lock.sh ]; then
+            LOCK_SCRIPT="scripts/update-actions-lock.sh"
+            echo "Using this repository's own actions-lock verifier (standards self-lint)."
+          fi
+          if [ ! -f "$LOCK_SCRIPT" ]; then
+            echo "::error::actions-lock verifier not found — neither fetched from" \
+                 "standards@main nor present locally."
+            exit 1
+          fi
+          cp "$LOCK_SCRIPT" "$RUNNER_TEMP/update-actions-lock.sh"
           rm -rf .standards-dupkey
           bash "$RUNNER_TEMP/dupkeys.sh" .github/workflows
 
@@ -1125,7 +1141,7 @@ jobs:
             # external analysers and GitHub's sha_pinning_required setting do
             # not infer direct pins from actions.lock.
             gh extension install github/gh-actions-lock
-            bash scripts/update-actions-lock.sh --verify-local
+            bash "$RUNNER_TEMP/update-actions-lock.sh" --verify-local
             unpinned=$(grep -rnE --include='*.yml' --include='*.yaml' \
               "^[[:space:]]+uses:" .github/workflows/ | \
               grep -v "@[a-f0-9]\{40\}" | \
