@@ -38,6 +38,14 @@ if [ "${2:-}" = "--verify-local" ]; then
       printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/reusable.yml","category":"stale","dependency":"hyperpolymath/standards@wrong456"}]}'
       exit 1
       ;;
+    reusable-non-stale)
+      printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/reusable.yml","category":"missing","dependency":"hyperpolymath/standards@abc123"}]}'
+      exit 1
+      ;;
+    malformed-success)
+      printf '%s\n' 'not valid JSON'
+      exit 0
+      ;;
     *)
       printf '%s\n' '{"valid":true,"findings":[]}'
       exit
@@ -108,6 +116,20 @@ if FAKE_VERIFY_FINDING=reusable-wrong-ref GH_BIN="$WORK/bin/fake-gh" \
   exit 1
 fi
 echo "PASS: wrong reusable-workflow ref remains blocking"
+
+if FAKE_VERIFY_FINDING=reusable-non-stale GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: non-stale reusable-workflow finding was accepted" >&2
+  exit 1
+fi
+echo "PASS: non-stale reusable-workflow finding remains blocking"
+
+if FAKE_VERIFY_FINDING=malformed-success GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: malformed successful verifier output was accepted" >&2
+  exit 1
+fi
+echo "PASS: malformed verifier output fails closed"
 
 # A failed refresh must restore both authored workflows and the previous
 # lockfile; this is the production failure mode that left the original checkout

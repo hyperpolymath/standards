@@ -32,7 +32,7 @@ workflow_references_reusable_dependency() {
   repo=${dependency%@*}
   ref=${dependency#*@}
 
-  [ -f "$workflow" ] || return 1
+  [[ -f "$workflow" ]] || return 1
   awk -v prefix="$repo/.github/workflows/" -v suffix="@$ref" '
     /^[[:space:]]*uses:[[:space:]]*/ {
       value = $0
@@ -68,15 +68,16 @@ verify_lock_coverage() {
 
   if ! printf '%s' "$result" | jq -e '.valid != null and (.findings | type == "array")' >/dev/null 2>&1; then
     printf '%s\n' "$result"
-    return "$status"
+    [[ "$status" -ne 0 ]] && return "$status"
+    return 1
   fi
-  if [ "$(printf '%s' "$result" | jq -r '.valid')" = true ]; then
+  if printf '%s' "$result" | jq -e '.valid == true and (.findings | length == 0)' >/dev/null; then
     return 0
   fi
 
   remaining=0
   while IFS=$'\t' read -r category workflow dependency; do
-    if [ "$category" = stale ] &&
+    if [[ "$category" = stale ]] &&
        workflow_references_reusable_dependency "$workflow" "$dependency"; then
       echo "Accepted reusable-workflow lock coverage: $workflow -> $dependency"
     else
@@ -84,7 +85,7 @@ verify_lock_coverage() {
     fi
   done < <(printf '%s' "$result" | jq -r '.findings[] | [.category, .workflow, .dependency] | @tsv')
 
-  if [ "$remaining" -ne 0 ]; then
+  if [[ "$remaining" -ne 0 ]]; then
     printf '%s\n' "$result"
     return 1
   fi
