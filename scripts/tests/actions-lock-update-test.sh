@@ -46,6 +46,10 @@ if [ "${2:-}" = "--verify-local" ]; then
       printf '%s\n' 'not valid JSON'
       exit 0
       ;;
+    valid-with-warning)
+      printf '%s\n' '{"valid":true,"findings":[{"workflow":".github/workflows/ci.yml","category":"sha-as-ref","severity":"warning","dependency":"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"}]}'
+      exit 1
+      ;;
     *)
       printf '%s\n' '{"valid":true,"findings":[]}'
       exit
@@ -95,6 +99,10 @@ GH_BIN="$WORK/bin/fake-gh" bash "$UPDATE" --verify-local .github/workflows >/dev
 cmp -s "$WORK/ci.before-verify" .github/workflows/ci.yml
 cmp -s "$WORK/lock.before-verify" .github/workflows/actions.lock
 echo "PASS: Actions lock verification restores tool-authored workflow edits"
+
+FAKE_VERIFY_FINDING=valid-with-warning GH_BIN="$WORK/bin/fake-gh" \
+  bash "$UPDATE" --verify-local .github/workflows >/dev/null
+echo "PASS: valid lock with advisory warning is accepted"
 
 cat > .github/workflows/reusable.yml <<'EOF'
 # SPDX-License-Identifier: MPL-2.0

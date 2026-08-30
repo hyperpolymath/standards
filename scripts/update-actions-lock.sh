@@ -71,7 +71,12 @@ verify_lock_coverage() {
     [[ "$status" -ne 0 ]] && return "$status"
     return 1
   fi
-  if printf '%s' "$result" | jq -e '.valid == true and (.findings | length == 0)' >/dev/null; then
+  # The verifier may exit non-zero while returning a valid lock plus advisory
+  # findings (for example, sha-as-ref traceability warnings). Once the output
+  # shape is established, its structured `valid` verdict is authoritative;
+  # warnings must remain visible without turning a valid lock into a failure.
+  if printf '%s' "$result" | jq -e '.valid == true' >/dev/null; then
+    printf '%s\n' "$result"
     return 0
   fi
 
