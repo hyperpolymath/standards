@@ -1377,13 +1377,22 @@ jobs:
       - name: Exemption ratchet
         run: |
           set -euo pipefail
+          # Bootstrap rule: standards must exercise the script from the pull
+          # request being tested. Consumers must use the trusted copy from
+          # standards@main and cannot substitute a same-named local file.
+          # This mirrors the sibling debt-ratchet job below.
+          if [ "${{ github.repository }}" = "hyperpolymath/standards" ]; then
+            cp scripts/check-exemption-ratchet.sh \
+               scripts/count-ledger-entries.sh "$RUNNER_TEMP/"
+          else
+            cp .standards-checkout/scripts/check-exemption-ratchet.sh \
+               .standards-checkout/scripts/count-ledger-entries.sh "$RUNNER_TEMP/"
+          fi
           # Stage the script OUT of the scanned tree and delete the checkout,
           # so the ratchet only ever reads the CALLER's ledgers — standards has
           # ledgers of its own and they are not this repository's.
           # Both files: the ratchet calls count-ledger-entries.sh as a sibling,
           # and it has no fallback if the counter is missing — deliberately.
-          cp .standards-checkout/scripts/check-exemption-ratchet.sh \
-             .standards-checkout/scripts/count-ledger-entries.sh "$RUNNER_TEMP/"
           rm -rf .standards-checkout
           bash "$RUNNER_TEMP/check-exemption-ratchet.sh" \
             "${{ github.event.pull_request.base.sha }}"
