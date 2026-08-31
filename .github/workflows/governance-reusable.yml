@@ -1136,10 +1136,11 @@ jobs:
 
       - name: Parse every tracked workflow
         run: |
-          SCRIPT=".standards-dupkey/tools/policy/check-workflows-parse.sh"
-          if [ ! -f "$SCRIPT" ] && [ -f tools/policy/check-workflows-parse.sh ]; then
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
             SCRIPT="tools/policy/check-workflows-parse.sh"
             echo "Using this repository's own copy (standards self-lint)."
+          else
+            SCRIPT=".standards-dupkey/tools/policy/check-workflows-parse.sh"
           fi
           if [ ! -f "$SCRIPT" ]; then
             echo "::error::workflow parser gate not found in standards@main or locally"
@@ -1157,15 +1158,15 @@ jobs:
           # were dead this way, including a CodeQL workflow with zero
           # successful runs in its entire lifetime.
           set -euo pipefail
-          SCRIPT=".standards-dupkey/scripts/check-workflow-duplicate-keys.sh"
-          # Self-hosting fallback: when THIS repository is standards, its own
-          # working tree already holds the script, and during a rename that copy
-          # is the only correct one — the pinned main checkout still has the old
-          # name. Preferring the fetched copy keeps every other caller on the
-          # canonical version.
-          if [ ! -f "$SCRIPT" ] && [ -f scripts/check-workflow-duplicate-keys.sh ]; then
+          # Standards must exercise its pull-request scripts; every consumer
+          # must use the canonical scripts fetched from standards@main. A
+          # file-existence fallback is insufficient because the old script on
+          # main still exists while its replacement is being tested.
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
             SCRIPT="scripts/check-workflow-duplicate-keys.sh"
             echo "Using this repository's own copy (standards self-lint)."
+          else
+            SCRIPT=".standards-dupkey/scripts/check-workflow-duplicate-keys.sh"
           fi
           if [ ! -f "$SCRIPT" ]; then
             echo "::error::duplicate-key checker not found — neither fetched from" \
@@ -1176,10 +1177,11 @@ jobs:
           # The lockfile gate below runs in a consumer checkout, where the
           # standards helper is not present. Preserve the canonical helper
           # before removing this sparse standards checkout.
-          LOCK_SCRIPT=".standards-dupkey/scripts/update-actions-lock.sh"
-          if [ ! -f "$LOCK_SCRIPT" ] && [ -f scripts/update-actions-lock.sh ]; then
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
             LOCK_SCRIPT="scripts/update-actions-lock.sh"
             echo "Using this repository's own actions-lock verifier (standards self-lint)."
+          else
+            LOCK_SCRIPT=".standards-dupkey/scripts/update-actions-lock.sh"
           fi
           if [ ! -f "$LOCK_SCRIPT" ]; then
             echo "::error::actions-lock verifier not found — neither fetched from" \
