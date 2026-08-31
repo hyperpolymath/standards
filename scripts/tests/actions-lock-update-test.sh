@@ -46,6 +46,14 @@ if [ "${2:-}" = "--verify-local" ]; then
       printf '%s\n' 'not valid JSON'
       exit 0
       ;;
+    valid-advisory)
+      printf '%s\n' '{"valid":true,"findings":[{"workflow":".github/workflows/ci.yml","category":"sha-as-ref","severity":"warning","dependency":"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"}]}'
+      exit 1
+      ;;
+    invalid-empty)
+      printf '%s\n' '{"valid":false,"findings":[]}'
+      exit 1
+      ;;
     *)
       printf '%s\n' '{"valid":true,"findings":[]}'
       exit
@@ -123,6 +131,19 @@ if FAKE_VERIFY_FINDING=reusable-non-stale GH_BIN="$WORK/bin/fake-gh" \
   exit 1
 fi
 echo "PASS: non-stale reusable-workflow finding remains blocking"
+
+advisory_output="$(FAKE_VERIFY_FINDING=valid-advisory GH_BIN="$WORK/bin/fake-gh" \
+  bash "$UPDATE" --verify-local .github/workflows)"
+printf '%s\n' "$advisory_output" | grep -q '"category":"sha-as-ref"'
+printf '%s\n' "$advisory_output" | grep -q 'valid with advisory finding'
+echo "PASS: authoritative valid result accepts but preserves advisory findings"
+
+if FAKE_VERIFY_FINDING=invalid-empty GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: contradictory invalid result with no findings was accepted" >&2
+  exit 1
+fi
+echo "PASS: invalid result with no explainable findings fails closed"
 
 if FAKE_VERIFY_FINDING=malformed-success GH_BIN="$WORK/bin/fake-gh" \
    bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
