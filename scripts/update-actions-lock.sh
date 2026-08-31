@@ -71,21 +71,36 @@ verify_lock_coverage() {
     [[ "$status" -ne 0 ]] && return "$status"
     return 1
   fi
-  if printf '%s' "$result" | jq -e '.valid == true and (.findings | length == 0)' >/dev/null; then
+  # The authoritative validity bit and the process exit are not equivalent.
+  # gh-actions-lock v0.1.6 exits 1 for advisory findings such as `sha-as-ref`
+  # even while reporting `"valid": true`. Treating that advisory exit as an
+  # invalid lock makes every inline-SHA repository permanently red. Preserve
+  # the findings in the log, but accept the lock exactly when the tool says it
+  # is valid.
+  if printf '%s' "$result" | jq -e '.valid == true' >/dev/null; then
+    if printf '%s' "$result" | jq -e '.findings | length > 0' >/dev/null; then
+      printf '%s\n' "$result"
+      echo "actions-lock: valid with advisory finding(s)"
+    fi
     return 0
   fi
 
   remaining=0
+  accepted=0
   while IFS=$'\t' read -r category workflow dependency; do
     if [[ "$category" = stale ]] &&
        workflow_references_reusable_dependency "$workflow" "$dependency"; then
       echo "Accepted reusable-workflow lock coverage: $workflow -> $dependency"
+      accepted=$((accepted + 1))
     else
       remaining=$((remaining + 1))
     fi
   done < <(printf '%s' "$result" | jq -r '.findings[] | [.category, .workflow, .dependency] | @tsv')
 
-  if [[ "$remaining" -ne 0 ]]; then
+  # `valid:false` with no findings is contradictory and cannot be explained by
+  # the one known reusable-workflow false positive. Fail closed rather than
+  # turning an empty/malformed diagnostic into approval.
+  if [[ "$remaining" -ne 0 || "$accepted" -eq 0 ]]; then
     printf '%s\n' "$result"
     return 1
   fi
