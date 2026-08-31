@@ -249,13 +249,13 @@ Existing pre-2026-04-30 `.ts`/`.tsx` outside these carve-outs is grandfathered w
 |---|---|---|---|
 | `**/*.d.ts` | declaration | FFI/library type definitions (headers, not implementation). | Never — declaration files are the boundary, not the code. |
 | `**/bindings/deno/**`, `**/bindings/typescript/**`, `**/bindings/ts/**` | interop target | We expose work to TS/Deno consumers without authoring TS as primary code path. Exemplar: `proven/bindings/deno/` (72 files — Idris2 ABI exposed as Deno-native module). Parallel to V-lang `v-cartridge`/`v-adapter`/`v-bindings`/`v-client` carve-out. | Never — these are consumer-facing bindings. |
-| `avow-protocol/telegram-bot/avow-telegram-bot/**` | PERMANENT | Telegraf / node-telegram-bot-api are the canonical TS-native libraries for the Bot API; no AffineScript binding planned. | AffineScript Telegram-bot bindings (no scheduled issue). |
-| `**/vite.config.ts`, `**/vitest.config.ts`, `**/tsup.config.ts`, `**/tsconfig.json` | tooling | Build orchestration, not application code. | When AffineScript ships native equivalents. |
-| `affinescript-deno-test/**`, `affinescript-cli/**` | bootstrap shim | TS/JS shims used to bootstrap the AffineScript test runner / CLI. | When AffineScript self-hosts these. |
+| `**/vite.config.ts`, `**/vitest.config.ts`, `**/tsup.config.ts` | tooling | Build orchestration, not application code. | When AffineScript ships native equivalents. |
 | `rescript/**`, `servers/**`, `repos-monorepo/**`, `linguist/**` | upstream fork | Not estate-authored — vendored upstream code (ReScript compiler, third-party MCP servers, mass aggregator, GitHub linguist with `samples/TypeScript/*.ts` as ML training fixtures). | Never — upstream fork. |
 | `hyperpolymath-archive/**` | archived | GitHub-archived repos cannot accept PRs; TS is dormant. | Never — archived. |
 | `**/deps/**` | vendored package-manager dep | Elixir Mix vendored-dep directory (also adopted by other tools). Exemplar: `tma-mark2/deps/phoenix_live_view/assets/js/phoenix_live_view/*.ts` ships Phoenix LiveView's authored TS. | Never — vendored upstream. |
 | `**/vscode/**` (covers `editors/vscode/`, `extensions/vscode/`, `clients/vscode/`) | editor-host extension | VSCode extension entry points target the `vscode` extension-host API. Five estate repos (`universal-language-server-plugin`, `reposystem`, `proof-burrower`, `phronesis`, `bofj-kitt`) have a single `vscode/extension.ts`. | **Capability SHIPPED, verified 2026-08-28** — `affinescript/stdlib/Vscode.affine` (58 `extern fn`), `VscodeLanguageClient.affine` (4), the JS host shim `packages/affine-vscode/mod.js`, and `affine-vscode-publish.yml`. The remaining blocker is migration effort, not capability. Track under campaign #239; retire this row when the five VSCode extensions are ported. |
+
+Retired 2026-08-31: the `avow-protocol/telegram-bot/**` carve-out (the bot was rewritten in AffineScript — zero `.ts` on main, so the "PERMANENT" rationale no longer described reality); the `affinescript-deno-test/**` + `affinescript-cli/**` bootstrap-shim row (the test harness self-hosted to 100% `.affine` via affinescript#735/#736, and the cli is JS-only — see the npm/JavaScript tables below for its surviving front-door carve-out); and the `**/tsconfig.json` pattern (dead entry — the rule matches `*.ts`, so a `.json` path could never reach the allowlist).
 
 Adding to this list requires explicit user approval and an unblock condition (except the structural classes above, which are estate-wide policy). The detection rule and its `path_allow_prefixes` field are the single source of truth; this table mirrors that for human readability.
 
@@ -274,8 +274,8 @@ Existing pre-2026-05-25 `.res`/`.resi` outside these carve-outs is grandfathered
 | `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Mix-style vendored deps and Node-style node_modules. | Never — vendored upstream. |
 | `**/vscode/**` (covers `editors/vscode/`, `extensions/vscode/`, `clients/vscode/`) | editor-host extension | VSCode extension entry points target the `vscode` extension-host API. | When AffineScript ships the VSCode-extension API binding (top-50 roadmap, unshipped). |
 | `**/lib/js/**`, `**/lib/es6/**`, `**/lib/bs/**` | compiled output | bsc (the ReScript compiler) emits to these paths. They are not source. | Never — compiler output, not source. |
-| `affinescript-deno-test/**`, `affinescript-cli/**` | bootstrap shim | Bootstrap the AffineScript toolchain itself. | When AffineScript self-hosts these. |
-| `avow-protocol/telegram-bot/avow-telegram-bot/**` | PERMANENT | Mirrors TS Telegraf carve-out for any `.res` file in the same directory. | Never. |
+
+Retired 2026-08-31: the bootstrap-shim row (`affinescript-deno-test/**`, `affinescript-cli/**`) and the telegram-bot mirror row — both directories are 100% AffineScript on main and neither ever tracked a `.res` file, so removal changes no scan outcome.
 
 ### npm Exemptions (Approved)
 
@@ -288,7 +288,7 @@ Migration substantially complete 2026-05-31 under umbrella `hyperpolymath/standa
 | `**/vscode/**` | VSCode extension host-required (segment) | VSCode extension toolchain runs under Node; lockfile is contractually required by the host. | When AffineScript ships the VSCode-extension API binding. |
 | `vscode-` substring (`vscode-extension/`, `editors/vscode-007/`, `vscode-a2ml`, `vscode-k9`, …) | VSCode-* extension repos / subdirs | Same VSCode host-required toolchain rationale; different path-segment shape than `/vscode/`. | When AffineScript ships the VSCode-extension API binding. |
 | `tree-sitter-` substring (`tree-sitter-a2ml`, `tree-sitter-k9`, `editors/tree-sitter-ephapax`, `tree-sitter-affinescript/`, …) | tree-sitter grammar npm-publish target | Class C consumer artifact — tree-sitter grammars ship via npm with `node-gyp` native binding because every consumer (Atom/Neovim/VSCode TextMate) links the native addon. | Never — npm-publishable consumer artifact with native binding. |
-| `affinescript-deno-test/**`, `affinescript-cli/**` | bootstrap shim | Bootstrap the AffineScript toolchain itself. | When AffineScript self-hosts these. |
+| `affinescript-cli/**` | npm front door | Permanent npm distribution shim for the AffineScript toolchain (downloads the pinned native binary, SHA-256-verifies, caches, execs). Deliberately runtime-agnostic JS; reframed 2026-08-31 from "bootstrap shim" — the shim is the front door, not scaffolding awaiting self-hosting. (`affinescript-deno-test/**` dropped the same day: the harness self-hosted to 100% `.affine`.) | Never — distribution boundary; an npm shim cannot be `.affine`. |
 | `rescript/**`, `servers/**`, `repos-monorepo/**`, `linguist/**` | upstream fork | Not estate-authored — vendored upstream code. | Never — upstream fork. |
 | `hyperpolymath-archive/**` | archived | Archived repos cannot accept PRs. | Never — archived. |
 | `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Vendored deps. | Never — vendored upstream. |
@@ -307,7 +307,7 @@ Distinct from TS/RS policy: JavaScript is *allowed* where AffineScript cannot re
 |---|---|---|---|
 | `mcp-bridge/**`, `**/plugins/**` | host-required by ecosystem | MCP servers and plugin entry points where JS is the host contract (the host loads .js, not .affine). | When AS plugin-host bindings ship (top-50 roadmap). |
 | `**/*.config.js`, `**/*.config.cjs`, `**/*.config.mjs` | tooling configs | Build orchestration. | When AS ships native equivalents. |
-| `affinescript-deno-test/**`, `affinescript-cli/**` | bootstrap shim | Bootstrap the AffineScript toolchain itself. | When AS self-hosts these. |
+| `affinescript-cli/**` | npm front door | Permanent npm distribution shim for the AffineScript toolchain — same row as the npm table above; the cli's 4 JS files are the shim itself. (`affinescript-deno-test/**` dropped 2026-08-31: harness self-hosted to 100% `.affine`.) | Never — distribution boundary. |
 | `rescript/**`, `servers/**`, `repos-monorepo/**`, `linguist/**` | upstream fork | Not estate-authored — vendored upstream code (linguist samples are ML training data). | Never — upstream fork. |
 | `hyperpolymath-archive/**` | archived | Archived repos cannot accept PRs. | Never — archived. |
 | `**/deps/**`, `**/node_modules/**` | vendored package-manager dep | Vendored deps. | Never — vendored upstream. |
