@@ -154,6 +154,7 @@ for the canonical statement.
 | Banned | Replacement | Notes |
 |--------|-------------|-------|
 | TypeScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
+| ReScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
 | **ReScript** | AffineScript | Banned in new code as of 2026-04-30. Existing `.res` files migrate to `.affine` directly (do not pass through ReScript). |
 | **Deno** | Bun | **Being removed.** Owner ruling 2026-08-26: *"deno is to go and bun is the way we are going, put it first everywhere unless not possible and explain why if not."* Existing Deno projects must migrate to Bun; where Bun genuinely cannot be used, the reason must be documented in the repo. Assessment of all 30 remaining `deno.json` locations: #658. |
 | Node.js | Bun | Bun is Node-compatible; run the code, drop the runtime. |
