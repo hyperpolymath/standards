@@ -1,0 +1,309 @@
+= Standards: Critical Path and Execution Plan
+Jonathan D.A. Jewell
+v0.1.0, 2026-09-01
+:status: Draft — awaiting owner ratification
+:toc: left
+:toclevels: 3
+:sectnums:
+
+[abstract]
+== Abstract
+
+This document sequences the outstanding contractile/descriptile work across
+`standards`, `rsr-template-repo` and `scaffoldia`, and maps every open task
+(#2–#23) onto a phase or marks it off the critical path.
+
+It was written after measuring the deployed estate rather than inferring from
+the templates. That measurement **overturned the premise it started from**, and
+the reversal is the most important thing in this document. See
+<<the-reversal>>.
+
+== The reversal: upstream is not where the drift came from
+
+The working hypothesis was that `rsr-template-repo` and `scaffoldia` emit the
+layout that downstream repos copy, so fixing the templates would stop the
+bleeding. That hypothesis is **false for the existing population**, and the
+evidence is content hashes.
+
+All 555 deployed `Mustfile.a2ml` files were hashed. They collapse into 203
+distinct bodies, but the distribution is extremely top-heavy:
+
+[cols="1,>1,3",options="header"]
+|===
+| Body (md5, first 12) | Files | Where it lives
+
+| `da55003ef5b8` | 138 | flat `.machine_readable/contractiles/`, spread over **132 distinct repos, one file each**
+| `3045cf4b730e` |  97 | `docs/templates/contractiles/must/` — template documentation, 55 of them in one repo
+| `0b10326ca7b4` |  35 | 32 of them inside the `developer-ecosystem` monorepo
+| `feefc45ad389` |  33 | canonical `.machine_readable/contractiles/must/`
+| `6146e642e8b8` |  13 | matches `scaffoldia/machine-readable-design/canonical-directory-structure/`
+|===
+
+The top four bodies account for 303 of 555 files (55%).
+
+The decisive row is the first. **One byte-identical file appears once each in
+132 separate repositories.** That is not template inheritance — a template
+produces files that then diverge as repos edit them. That is a **bulk stamping
+pass**: a script that walked the estate and wrote the same file everywhere.
+
+Three consequences follow, and they restructure the whole plan:
+
+. **Fixing the templates does not fix the 555.** The templates were not the
+  source. `rsr-template-repo`'s body (`9d07b0db7c06`) appears in **zero** of the
+  74 canonical deployments. `standards`' own body (`a155204e0883`) appears in
+  **two**.
+. **But the 555 are far cheaper to fix than their number suggests**, precisely
+  because they were stamped. 132 identical files are one scripted migration with
+  one hash to verify, not 132 judgement calls.
+. **Fixing the templates is still worth doing** — just for a different reason.
+  It is prophylaxis for the next 100 repos, not remediation for the last 382.
+
+=== Scaffoldia: not the vector
+
+`scaffoldia` was inspected directly for an emitter. `grep` across
+`scaffoldia/src`, `scripts`, and `tools` for `contractile`, `Mustfile` and
+`canonical-directory-structure` found **nothing**; only the `Justfile` mentions
+contractiles at all. Neither of scaffoldia's two bodies matches the dominant
+deployed clusters.
+
+Its design copy (`6146e642e8b8`) does appear 13 times, so it has propagated —
+but by hand-copy, at 2% of the population, with no automation behind it.
+
+**Answer to the question as asked:** `rsr-template-repo` is a legitimate
+upstream and worth fixing. `scaffoldia` is not currently a generator of
+anything; treat it as a repo that needs its own duplication cleaned up, not as
+a lever.
+
+== The migration is smaller than the file count implies
+
+Repos were classified by which layouts they actually carry:
+
+[cols="3,>1,4",options="header"]
+|===
+| Class | Repos | Disposition
+
+| Canonical only — `.machine_readable/contractiles/must/` |  71 | **Already correct. No action.**
+| Flat only — `.machine_readable/contractiles/` | 155 | Pure `git mv` into the verb directory. Mechanical.
+| Both, and **divergent** |   3 | `jaffascript`, `rattlescript`, `verisimdb`. Needs a human read.
+| Both, and identical |   0 | —
+|===
+
+So the mass migration is **155 near-uniform repos plus 3 genuine decisions**,
+not 555 bespoke edits. Of those 155, 132 carry the identical stamped body, so a
+single script can move them and assert one expected hash before and after.
+
+`verisimdb` shows how the mess arose: it carries the flat files *and* the full
+canonical verb directories *and* `_base.ncl` *and* `INDEX.a2ml`. A later
+canonical pass was applied **on top of** the earlier flat stamp without removing
+what it superseded. Neither pass cleaned up after itself. That, not authorship
+drift, is the duplication mechanism.
+
+=== The hard tail
+
+Separately, **76 files sit at a bare-root `contractiles/must/`** (no
+`.machine_readable` prefix). Unlike the flat population these are **not**
+clustered — the largest group shares only 2 files. These are genuinely
+divergent and cannot be bulk-moved. They are the expensive remainder and should
+be scheduled last, after the cheap 155 have proved the tooling.
+
+== Gate 0 — unblock `standards` (one owner action, blocks everything)
+
+`standards` `main` has an in-flight merge (`MERGE_HEAD 7fc19b01`) with exactly
+one conflicted file and exactly one conflicted hunk:
+
+[source]
+----
+.machine_readable/REGISTRY.a2ml, lines 210–214
+<<<<<<< HEAD
+source_hash = "sha256:f9d32937c6d0541c82ada3d7c42cb7347fd4bbb3daa167b51b0cc420824918cc"
+=======
+source_hash = "sha256:b4a862d4c8014e17813ba5b7fc286ef4147530c13665824188dddfdcae5c9bc6"
+>>>>>>> chore/bump-standards-pins
+----
+
+Both sides are the same commit subject, "chore: bump standards workflow pins".
+This is a stale-registry collision, not a semantic disagreement.
+
+**Method:** recompute the hash of the source file that registry entry points at
+and keep the side that matches; if neither matches, the entry is stale against
+both and needs regenerating rather than picking.
+
+**Why this is first:** nothing merges into `standards` until it clears, and it
+has a second payoff. `main` is 1 commit ahead of `origin/main` with an unpushed
+pin bump (`c4d542c5`). Both spec branches contain that commit, which is why
+`git diff origin/main...spec/contractile-reconcile` currently shows **six**
+files — five unrelated workflow YAMLs plus the spec.
+
+Once the merge lands and `main` is pushed, `origin/main` will contain
+`c4d542c5` and **both spec PR diffs become clean automatically**, showing only
+their own spec file. No rebase, no force-push — landing `main` is the correct
+and only permitted purification.
+
+.Sequence
+. Owner resolves the one hunk, commits the merge.
+. Push `main`.
+. Open PRs for `spec/contractile-reconcile` (`8952c125`, CONTRACTILE-SPEC v1.2.1)
+  and `spec/descriptile-v1` (`58eb507e`, DESCRIPTILE-SPEC v0.1.1). Both are
+  pushed and `local == remote`.
+
+== Gate 1 — the ruling batch
+
+These are owner decisions, not engineering. They are the actual bottleneck:
+every expensive lane below waits on one of them. They are gathered here so they
+can be answered in one sitting.
+
+=== Ruling 2 is the keystone — and the evidence has changed
+
+The spec says a contractile is **two files** (`<Verb>file.a2ml` + `<verb>.ncl`).
+The owner's earlier layout ruling described **four** (adding `<verb>.k9.ncl` +
+`<verb>.manifest.a2ml`).
+
+New evidence: **`standards` itself implements the four-file Trident**, for all
+six verbs. `standards/.machine_readable/contractiles/must/` contains
+`Mustfile.a2ml`, `must.ncl`, `must.k9.ncl`, `must.manifest.a2ml`.
+`rsr-template-repo` does the same across all six verbs.
+
+So the normative repository violates its own normative text, and the template
+repository sides with the repository against the text. That is strong evidence
+for adopting the Trident and amending the spec — but it is presented, not
+decided.
+
+Ruling 2 gates task #12's pass criterion and every layout migration below.
+
+=== The full ruling list
+
+[cols="1,4,3",options="header"]
+|===
+| # | Question | Gates
+
+| 0 | Which `source_hash` survives in `REGISTRY.a2ml`? | Everything
+| 1 | Hoist `MUST.contractile` Universal Invariants into `standards` as inherited policy? | Rulings 2, 3; task #17
+| 2 | Two-file or four-file Trident? | Tasks #12, #6, all layout work
+| 3 | (dependent on 1) | —
+| 4–6 | As recorded in CONTRACTILE-SPEC v1.2.1 §open-rulings | —
+| 7 | The eNSAID five-tier taxonomy — supersede, or admit as a profile? | Task #23
+| 8 | The `contractiles-v1` four-file validation profile — same question | Task #23
+| 9 | The Antifile proposal — ratify, park with a date, or reject? | Task #23
+| 10 | Third layout root: `rsr-template-repo` uses `machine-readable/` (hyphen, no dot), matched by **1 file estate-wide**. Correct it to `.machine_readable/`? | Lane A
+|===
+
+=== Two loose ends, re-surfaced
+
+. An earlier owner message cut off mid-sentence at "…certainly not hiding
+  anything, and". It was never completed and no answer was given.
+. `CLAUDE.md` states the WSL UNC path as `\\wsl.localhost\Ubuntu\…`. There is no
+  Ubuntu distribution on this machine — it is Debian 13 (trixie), so the path as
+  written does not resolve. Offered three times, unanswered, deliberately not
+  edited uninvited.
+
+== Lane A — executable now, no ruling required
+
+Each of these implements a decision already made, or corrects a defect nothing
+else depends on.
+
+[cols="1,4,2",options="header"]
+|===
+| Task | Work | Note
+
+| #11 | Finish the April 2026 migrations: 90 surviving `lust/` directories, 36 `Intendfile.a2ml` across 20 repos, k9 relocation (94 moved / 75 not) | Rulings made 2026-04-18; this is pure execution
+| — | De-duplicate the `ideas-to-alphas` spec mirror (byte-identical to CONTRACTILE-SPEC) | Disposition already written into v1.2.1
+| — | Delete `standards`' stale root-level `contractiles/` — extension-less `Mustfile`, `Dustfile`, superseded by `.machine_readable/` | Flag for owner; deletion is cheap but irreversible
+| — | De-duplicate `scaffoldia`'s two divergent contractile sets | Not a generator, so no propagation risk either way
+| #8 | Write down the `boj-server` → `ssg-collection` targeting rule | Independent; small
+| #21 | Rule on `INNERVATION.adoc`: ratify, supersede, or park | Unblocks #4
+| #22 | Write the ANCHOR spec | Independent artefact family
+| #20 | Redo `formatrix-docs` (VSCode + pandoc views) | Fully off the critical path
+|===
+
+Lane A can proceed in parallel with Gate 0 and Gate 1, since none of it touches
+`standards` `main` or waits on a ruling.
+
+== Lane B — gated on ruling 2 (layout)
+
+Ordered so that the cheap, verifiable work proves the tooling before the
+expensive work uses it.
+
+. **Fix `rsr-template-repo`'s root** (ruling 10): `machine-readable/` →
+  `.machine_readable/`. One repo, six verbs, and it is the cleanest
+  implementation in the estate — the natural upstream once corrected. Low cost,
+  no downstream blast radius (only 1 file estate-wide shares that root).
+. **#6 — pilot on `vexometer`.** It is flat-only and carries the 132-cluster
+  body, so it is representative of the largest class. Close the held
+  `SATELLITES.adoc` links in the same pass.
+. **The 155-repo bulk move.** `git mv` flat → `must/` etc. Script asserts the
+  expected body hash before and after; 132 of 155 share one hash, so deviation
+  is detectable rather than assumed.
+. **The 3 divergent repos** — `jaffascript`, `rattlescript`, `verisimdb`. Human
+  read; the canonical and flat copies disagree in all three.
+. **The 76-file hard tail** at bare-root `contractiles/`. Unclustered, genuinely
+  divergent, no bulk shortcut. Schedule last.
+. **`developer-ecosystem` as its own unit.** It holds 115 of 555 files (21%),
+  92 of them inside `iser-tools`. Its scale distorts every estate-wide
+  percentage; migrate and measure it separately.
+. **#12 — the conformance audit.** Its pass criterion cannot be written until
+  ruling 2 lands. It must then cover **both** artefact families
+  (`MUST.contractile` s-expression and `Mustfile.a2ml` A2ML — 101 repos carry
+  both) and check against the two rival normative documents.
+
+.Disposition of the 97 `docs/templates/` copies
+[NOTE]
+====
+These are template *documentation*, not deployed configuration, and should not
+be swept up in the layout migration. Under the reference-not-duplicate rule they
+are candidates for replacement by a reference to `standards` — but that is a
+separate decision from where deployed contractiles live.
+====
+
+== Lane C — gated on rulings 1, 7, 8, 9 and on tasks #15/#16
+
+. **#17** — hoist Universal Invariants into `standards` (ruling 1).
+. **#23** — reconcile the two rival normative documents (rulings 7, 8) and
+  dispose of the Antifile proposal (ruling 9).
+. **#15** — enumerate the stage vocabulary for Must bands / Intent horizons.
+. **#16** — add per-clause re-affirmation timestamps to the schema.
+. **#18** — regularise the s-expression files as the sanctioned dialect
+  (blocked by #15, #16).
+. **#19** — build the contractile/descriptile linter in Julia (blocked by #16).
+  This is what finally gives the estate teeth: current runner coverage is `must`
+  4%, `trust` 2%, `dust` 6%, `intend` 5%, `adjust` 10%. Only `bust` at 63% shows
+  the loop can be closed.
+. **#5** — the format converter + CI wiring (distinct from #19).
+
+== Off the critical path
+
+[cols="1,4",options="header"]
+|===
+| Task | Why it is independent
+
+| #2 | Ratify `DIALECT-ARCHITECTURE.adoc` — must now describe **four** surfaces, not three. Independent of layout.
+| #4 | Mint `hyperpolymath/descriptiles` via subtree split — gated on #21, not on anything here.
+| #7 | Restore `stateful-artefacts-for-gitforges` from `reposystem c977c2c` (97 files, local-only). Urgent for a different reason: it exists in exactly one place.
+| #9 | Consolidate a2ml/k9 validator authority.
+| #10 | Ratify the Must/Intent split + convergence model.
+| — | Execute the Cairn rename (~345 carriers, ~12 parsers). Large, self-contained, and touches everything — schedule when nothing else is in flight.
+|===
+
+== Critical path, condensed
+
+[source]
+----
+Gate 0 (owner: one hash)
+   └─> push main ──> two spec PRs become clean, open them
+   └─> Gate 1 (owner: ruling batch, esp. #2)
+          ├─> Lane B: rsr root fix -> vexometer pilot -> 155 bulk -> 3 divergent -> 76 tail
+          │      └─> #12 conformance audit
+          └─> Lane C: #17 -> #23 -> #15/#16 -> #18, #19 -> #5
+
+Lane A runs in parallel throughout, blocked by nothing.
+----
+
+The single highest-value action is **Gate 0**: one owner decision on one line
+unblocks the repository, cleans both spec PRs without a rebase, and opens
+everything downstream.
+
+== Provenance
+
+Every count in this document was measured on 2026-09-01 against the working
+copies under `/home/hyperpolymath/developer/repos` (382 repositories), not
+inferred from specifications. Hash clusters were computed over all 555
+`Mustfile.a2ml` files excluding `.git` and worktree paths.
