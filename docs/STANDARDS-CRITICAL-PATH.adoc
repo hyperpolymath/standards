@@ -1,6 +1,6 @@
 = Standards: Critical Path and Execution Plan
 Jonathan D.A. Jewell
-v0.1.1, 2026-09-02
+v0.1.2, 2026-09-02
 :status: Draft — awaiting owner ratification
 :toc: left
 :toclevels: 3
@@ -124,9 +124,30 @@ source_hash = "sha256:b4a862d4c8014e17813ba5b7fc286ef4147530c13665824188dddfdcae
 Both sides are the same commit subject, "chore: bump standards workflow pins".
 This is a stale-registry collision, not a semantic disagreement.
 
-**Method:** recompute the hash of the source file that registry entry points at
-and keep the side that matches; if neither matches, the entry is stale against
-both and needs regenerating rather than picking.
+**Resolved 2026-09-02 — the HEAD side is correct.** `source_hash` is NOT a hash
+of `canonical_doc`; it is `git ls-files -s <home> | sha256sum`, a listing of
+every tracked blob SHA and path under the spec home. Computing it for
+`rhodium-standard-repositories/` yields
+`f9d32937c6d0541c82ada3d7c42cb7347fd4bbb3daa167b51b0cc420824918cc` — exactly the
+HEAD side. The `chore/bump-standards-pins` value is stale.
+
+**But do not hand-edit.** `scripts/build-registry.sh` declares REGISTRY.a2ml a
+generated artefact that MUST NOT be hand-edited, and ships a `--check` mode that
+`registry-verify.yml` runs in CI. The correct resolution is to regenerate:
+
+[source,console]
+----
+git checkout --ours .machine_readable/REGISTRY.a2ml
+bash scripts/build-registry.sh
+bash scripts/build-registry.sh --check   # must exit 0
+git add .machine_readable/REGISTRY.a2ml && git commit
+----
+
+This drift is a recurring class, not a one-off: `standards#381` ("REGISTRY.a2ml
+drift recurs and blocks every PR — needs a regen step or pre-commit hook") was
+closed 2026-07-27, yet in-tree comments in `build-scorecards.sh` and
+`registry-verify.yml` still describe it as unaddressed, and this conflict is a
+fresh instance. Worth reopening or adding the pre-commit hook it asked for.
 
 **Why this is first:** nothing merges into `standards` until it clears, and it
 has a second payoff. `main` is 1 commit ahead of `origin/main` with an unpushed
@@ -140,7 +161,7 @@ their own spec file. No rebase, no force-push — landing `main` is the correct
 and only permitted purification.
 
 .Sequence
-. Owner resolves the one hunk, commits the merge.
+. Regenerate REGISTRY.a2ml (see above) and commit the merge.
 . Push `main`.
 . Open PRs for `spec/contractile-reconcile` (`8952c125`, CONTRACTILE-SPEC v1.2.1)
   and `spec/descriptile-v1` (`58eb507e`, DESCRIPTILE-SPEC v0.1.1). Both are
