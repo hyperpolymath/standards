@@ -1,0 +1,506 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+// Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Descriptile System Specification
+:toc:
+:toc-placement: left
+:sectnums:
+:icons: font
+:source-highlighter: rouge
+:status: Draft — awaiting owner ratification
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v0.1.0, 2026-09-01
+
+[IMPORTANT]
+====
+*Status: Draft.* This document specifies a format that has been deployed to
+production across the estate for months **without ever having been specified**.
+It is therefore written as a *descriptive* specification first — recording what
+the ~3,967 deployed files actually contain — and only then normative about what
+they *should* contain.
+
+Sections marked *RULING REQUIRED* are decisions reserved to the owner. They are
+flagged with a recommendation, not decided here.
+====
+
+== Preamble and Scope
+
+A **descriptile** is a machine-readable artefact that *describes what a
+repository IS*. It is the complement of a **contractile**
+(see `CONTRACTILE-SPEC.adoc`), which *constrains what a repository MAY BE*.
+
+[cols="1,2,2",options="header"]
+|===
+| | Descriptile | Contractile
+
+| Mood        | Indicative — "this is so" | Deontic — "this must be so"
+| Answers     | What is here? What state is it in? | What is permitted? What is forbidden?
+| On mismatch | The description is stale         | The repository is in violation
+| Remedy      | Update the description           | Fix the repository
+| Enforcement | None — it is a claim, not a gate | Runner probes, CI gates
+|===
+
+This distinction is the single most important rule in this document, and the
+deployed population violates it in several measured places (see
+<<contamination>>). A descriptile that forbids something is a contractile
+wearing the wrong name, and it will not be enforced, because nothing reads
+descriptiles as gates.
+
+=== Scope of this document
+
+In scope: the canonical descriptile set, per-file schemas, surface syntax,
+location and naming, cross-artefact deduplication rules, and conformance
+levels.
+
+Out of scope: the contractile system (`CONTRACTILE-SPEC.adoc`), the a2ml
+surface grammar itself (`hyperpolymath/a2ml`), clade taxonomy (ADR-0002),
+and the ANCHOR artefact family — which this document finds is *not* a
+descriptile (see <<anchor>>).
+
+== Relationship to INNERVATION.adoc
+
+`INNERVATION.adoc` (v0.1.0, Draft, 2026-04-05) proposes replacing the
+descriptile set entirely: the per-repo footprint shrinks from six or seven
+files to two (`coordination.k9` + `STATE.a2ml v2`), with each descriptile's
+content reassigned:
+
+[cols="2,3",options="header"]
+|===
+| Descriptile | INNERVATION destination
+
+| META (ADRs)        | `coordination.k9` `architecture:` section
+| AGENTIC (bans)     | `coordination.k9` `do_not_create:`
+| ECOSYSTEM          | VeriSimDB `ecosystem-link` octads (derived, not authored)
+| NEUROSYM           | Hypatia enforcement layer (rules, scans)
+| PLAYBOOK           | Hypatia `recipes/*.a2ml`, via the built `playbook-to-recipe` converter
+| STATE              | `STATE.a2ml v2` — thin session journal, retained
+|===
+
+**These two documents are not rivals.** The composition is:
+
+* This specification is normative for the descriptile format *for as long as
+  descriptile files exist in the estate*.
+* INNERVATION is a *migration target*. Ratifying INNERVATION does not repeal
+  this specification — it schedules its retirement.
+* You cannot migrate off an unspecified format. Specifying the source state is
+  a precondition of executing INNERVATION, not a competitor to it.
+
+=== Measured migration progress
+
+INNERVATION has been Draft for approximately five months. Its two destination
+artefacts are deployed as follows (measured 2026-09-01, `.git` and worktree
+copies excluded):
+
+[cols="3,1,1",options="header"]
+|===
+| Artefact | Count | Coverage
+
+| Repositories in the estate          | 384 | —
+| `coordination.k9`                   | 45  | 11.7% of repos
+| `STATE.a2ml` v2 (`@state` block)    | 6   | 0.8% of 714 STATE files
+| `STATE.a2ml` total (all versions)   | 714 | —
+|===
+
+INNERVATION's own scoping states "290+ repos, ~1800 files". The measured
+figures are 384 repos and 3,967 core descriptile files — the drift it was
+written to arrest has more than doubled since it was written, while the
+migration stands at under 12%.
+
+[NOTE]
+====
+*RULING REQUIRED — INNERVATION status.* It should be ratified, superseded, or
+explicitly parked with a date. Leaving it Draft is the worst of the three: it
+suppresses investment in descriptiles (why specify what is being replaced?)
+while not actually replacing them. This document assumes "parked" and specifies
+the descriptiles accordingly.
+====
+
+== The measured population
+
+All figures 2026-09-01, across `/home/hyperpolymath/developer/repos`,
+excluding `.git` internals and `.claude/worktrees` copies.
+
+[cols="2,1,1",options="header"]
+|===
+| Descriptile | Files | Tier
+
+| `STATE.a2ml`      | 714 | Core
+| `ECOSYSTEM.a2ml`  | 695 | Core
+| `META.a2ml`       | 694 | Core
+| `NEUROSYM.a2ml`   | 622 | Extended
+| `AGENTIC.a2ml`    | 621 | Extended
+| `PLAYBOOK.a2ml`   | 621 | Extended
+| *Total*           | *3,967* |
+|===
+
+The population splits cleanly into two tiers roughly 73–93 directories apart.
+STATE, ECOSYSTEM and META are near-universal; AGENTIC, NEUROSYM and PLAYBOOK
+were rolled out later or optionally. This specification adopts that observed
+split as normative (see <<canonical-set>>).
+
+=== Directory placement
+
+[cols="2,1,3",options="header"]
+|===
+| Directory | Count | Note
+
+| `.machine_readable/6a2/`           | 578 | Plurality. Name encodes a count.
+| `.machine_readable/descriptiles/`  | 74  | Semantically correct name.
+| `.machine_readable/` (bare)        | 61  | No grouping directory.
+| `cut-calculus/` (repo root)        | 1   | Outlier; not under `.machine_readable` at all.
+|===
+
+The name `6a2` means "six a2ml files". It is *numerically wrong wherever a
+seventh file (ANCHOR) was added*, and opaque to any reader who does not already
+know the expansion. `descriptiles` is self-describing and survives a change in
+the set's cardinality.
+
+[NOTE]
+====
+*RULING REQUIRED — canonical directory name.* Recommendation: adopt
+`.machine_readable/descriptiles/` as canonical, with `6a2` as a deprecated
+alias readable for one migration cycle.
+
+The honest counter-argument: migration cost falls the wrong way, 578 to 74.
+This is a rename of 578 directories, mechanically safe but touching most of
+the estate. If INNERVATION is ratified instead, this rename is wasted work —
+which is why the INNERVATION ruling above should be taken *first*.
+====
+
+[[anchor]]
+== ANCHOR is not a descriptile
+
+`ANCHOR.a2ml` has been treated in prior discussion as a seventh descriptile.
+The measured evidence contradicts this:
+
+[cols="2,1",options="header"]
+|===
+| ANCHOR location | Count
+
+| `anchors/` (own tree)   | 240
+| `anchor/` (own tree)    | 108
+| `descriptiles/`         | 3
+| `6a2/`                  | 3
+| `.machine_readable/`    | 1
+|===
+
+348 of 355 ANCHOR files (98%) live in a dedicated `anchors/` or `anchor/`
+tree, entirely separate from the descriptile directories. Only 7 sit
+alongside descriptiles — consistent with hand-copying into a handful of repos,
+not with membership in the set.
+
+This is independently corroborated: `INNERVATION.adoc` enumerates the set as
+"six A2ML files per repo (STATE/META/ECOSYSTEM/AGENTIC/NEUROSYM/PLAYBOOK)".
+ANCHOR is absent. The `standards` repo's own `descriptiles/` directory
+likewise contains six files and no ANCHOR.
+
+*Finding:* ANCHOR is a separate artefact family carrying clade identity, SSG
+build configuration and parent links. It requires its own specification,
+which this document does not attempt. The seven copies inside descriptile
+directories should be relocated to the repo's `anchors/` tree.
+
+Its own `anchors/` (240) versus `anchor/` (108) split is a second, unrelated
+singular/plural speciation, to be settled by that specification.
+
+[[canonical-set]]
+== The canonical set
+
+A conforming repository provides, under `.machine_readable/descriptiles/`:
+
+*Core — REQUIRED:*
+
+* `STATE.a2ml` — where the work has got to
+* `META.a2ml` — why the repository is the way it is
+* `ECOSYSTEM.a2ml` — how it relates to other repositories
+
+*Extended — OPTIONAL, but if present must conform:*
+
+* `AGENTIC.a2ml` — how automated agents should work in it
+* `NEUROSYM.a2ml` — how static/symbolic analysis is configured for it
+* `PLAYBOOK.a2ml` — operational runbooks
+
+Each descriptile answers exactly one question. A field that answers a
+different file's question belongs in that file.
+
+== Surface syntax
+
+Per the a2ml dialect ruling of 2026-09-01, a2ml has sanctioned surface
+dialects; descriptiles use the **bracketed table surface** (TOML-shaped:
+`[section]` headers, `key = value`, inline-table arrays).
+
+=== Three syntaxes currently coexist
+
+This is the speciation problem that motivated this specification. Measured:
+
+[cols="3,1,3",options="header"]
+|===
+| Surface | Count | Where
+
+| Bracketed table (canonical) | ~3,961 | STATE, META, ECOSYSTEM, AGENTIC, NEUROSYM, PLAYBOOK
+| `@state(...)` block form    | 6      | STATE v2 per `a2ml-templates/STATE.a2ml.v2.spec.adoc`
+| YAML mapping (`key:` nesting) | 184  | ANCHOR (vs 172 ANCHOR in bracketed form)
+|===
+
+The ANCHOR split is near 50/50 — 184 YAML against 172 bracketed — across
+files carrying the same name and purpose. In `ephapax/.machine_readable/6a2/`,
+a YAML-shaped ANCHOR sits in the same directory as six bracketed files. This
+is dialect divergence *within a single directory*, and it is the concrete
+instance of the problem this work exists to fix.
+
+*Normative:* the bracketed table surface is canonical for all six descriptiles.
+The `@state` block form is a sanctioned STATE-only variant pending the
+INNERVATION ruling. YAML is not a sanctioned descriptile surface; the ANCHOR
+question is deferred to the ANCHOR specification.
+
+== Per-file schemas
+
+Fields are marked *R* (required), *O* (optional). Every descriptile carries
+the common affirmation fields of <<affirmation>>.
+
+=== STATE.a2ml — where the work has got to
+
+The only descriptile expected to change frequently. It is a journal, not a
+record of intent.
+
+[cols="2,1,4",options="header"]
+|===
+| Field | | Meaning
+
+| `phase`       | R | Current lifecycle stage. *Must be drawn from a closed vocabulary* — see below.
+| `last_action` | R | What was last completed, one line.
+| `next_action` | R | What should happen next, one line.
+| `updated`     | R | ISO-8601 date of last change to this file.
+| `blockers`    | O | List of what prevents `next_action`.
+|===
+
+`phase` is currently a *free string*. Measured values include
+`implementation` (×3), `v0.1-complete`, `production-ready`, `maintenance` —
+a mix of stage names and version assertions, which cannot be compared across
+repositories or aggregated into any view.
+
+[NOTE]
+====
+*RULING REQUIRED — phase vocabulary.* A closed enumeration is needed. This
+is the same closed-vocabulary problem as task #15 (Must bands / Intent
+horizons) and should be settled once for both.
+====
+
+*Must NOT contain:* directives, DO/DON'T lists, or policy. `ephapax`'s STATE
+carries an `@directive(source="owner")` block with DO and DON'T lists. Those
+are contractile content — they constrain rather than describe — and placing
+them in STATE means nothing enforces them.
+
+=== META.a2ml — why the repository is the way it is
+
+[cols="2,1,4",options="header"]
+|===
+| Field | | Meaning
+
+| `adr-NNN`             | O | Architecture decision records: `status`, `date`, `context`, `decision`, `consequences`.
+| `development-practices` | O | `code-style`, `security`, `testing`, `versioning`, `documentation`, `branching`.
+| `design-rationale`    | O | Narrative for decisions not large enough for an ADR.
+|===
+
+ADRs are the substantial content. Where a repository maintains ADRs as
+first-class documents (`docs/ADR-*.adoc`), META must *reference* them rather
+than restate them — one canonical home per decision.
+
+=== ECOSYSTEM.a2ml — how it relates to other repositories
+
+[cols="2,1,4",options="header"]
+|===
+| Field | | Meaning
+
+| `project`, `ecosystem` | R | Identity and owning ecosystem.
+| `position.type`        | R | Role, e.g. `foundation-language`.
+| `position.purpose`     | R | One paragraph.
+| `pipeline.chain`       | O | Position in a named processing chain.
+| `related-projects`     | R | Array of `{name, relationship, notes}`.
+|===
+
+`relationship` must be drawn from a closed vocabulary. Observed:
+`downstream-consumer`, `sibling-language`, `code-dependency`, `parent`.
+
+*This file is the single source of ecosystem relationships.* Per the wiring
+design of 2026-09-01, the `(ecosystem ...)` block in `INTENT.contractile` —
+carrying `belongs-to` / `depends-on` / `depended-on-by` — is to be removed in
+favour of it, because this file already holds the same information in richer
+form.
+
+=== AGENTIC.a2ml — how automated agents should work here
+
+[cols="2,1,4",options="header"]
+|===
+| Field | | Meaning
+
+| `patterns` | O | Per-activity posture: `code-review`, `refactoring`, `testing`, `documentation`.
+| `tools`    | O | Tool classes the repository expects agents to need.
+| `project-specific` | O | Free-form guidance, including disambiguation notes.
+|===
+
+*Must NOT contain:*
+
+* **Model pins.** `ephapax` pins `model = "claude-opus-4-5-20251101"`. A model
+  identifier in a per-repo descriptile is stale by construction and gives
+  agents a worse instruction than no instruction. Model selection is not a
+  property of a repository.
+* **Language allow/ban lists.** See <<contamination>>.
+
+The `@disambiguation` prose in `ephapax` — recording that agents repeatedly
+confuse the repository with the unrelated `affinescript` — is exactly the
+right kind of content for this file: a description of an observed failure
+mode, addressed to a reader.
+
+=== NEUROSYM.a2ml — how analysis is configured here
+
+[cols="2,1,4",options="header"]
+|===
+| Field | | Meaning
+
+| `scan-enabled`, `scan-depth`, `report-format` | R | Hypatia scan configuration.
+| `rulesets`      | R | Named rulesets to apply, e.g. `rsr-baseline`.
+| `neural-config` | O | `confidence-threshold`, `model`.
+|===
+
+*Must NOT contain:* rule *definitions*. See <<contamination>>. NEUROSYM
+selects which rules apply; it does not author them.
+
+=== PLAYBOOK.a2ml — operational runbooks
+
+[cols="2,1,4",options="header"]
+|===
+| Field | | Meaning
+
+| `deployment`           | O | Ordered steps.
+| `incident-response`    | O | Ordered steps.
+| `release-process`      | O | Ordered steps.
+| `maintenance-operations` | O | Named targets.
+|===
+
+PLAYBOOK carries genuine operational content and has a built converter
+(`hooks/playbook-to-recipe/`, 5/5 tests) producing Hypatia recipes. It earns
+its place in the set.
+
+*Anti-pattern, measured:* `ephapax`'s release process step 1 reads *"Update
+version and last-updated in all 6A2 files and Cargo.toml"* — manual
+synchronisation across seven files, performed by hand at release time. This
+is drift by construction, and it is the mechanism by which the affirmation
+dates in <<affirmation>> become untrustworthy. Version and date propagation
+must be generated, not instructed.
+
+[[contamination]]
+== Cross-artefact rules: no restated policy
+
+The most serious defect found in the deployed population is **contractile
+content restated inside descriptiles**, where nothing enforces it and nothing
+detects its divergence.
+
+The estate language policy currently exists in at least four places:
+
+[cols="3,4",options="header"]
+|===
+| Location | Content
+
+| Estate policy (owner ruling)             | Python / V / ReScript banned; Rust, Julia, Guile, shell sanctioned
+| `MUST.contractile` universal invariants  | Bans TypeScript, Python, Go, npm
+| `AGENTIC.a2ml` `[constraints]`           | `banned = ["typescript","go","python","makefile"]`, `languages = ["rust","zig","idris2","coq","bash","just"]`
+| `NEUROSYM.a2ml` `[symbolic-rules]`       | `no-unsafe-idris` (`believe_me\|assert_total`), `no-unsafe-coq` (`Admitted`)
+|===
+
+These four do not agree. `AGENTIC` bans `makefile`, which `MUST.contractile`
+does not, and which is not a language. `AGENTIC`'s allow-list omits Julia and
+Guile, both sanctioned estate-wide. `NEUROSYM`'s symbolic rules restate
+invariants already in `MUST.contractile`.
+
+Only one of the four is enforced. The other three are claims that drifted
+without anything noticing — including, in `AGENTIC`, a claim that
+*contradicts* current estate policy.
+
+*Normative rules:*
+
+. A descriptile MUST NOT restate a constraint expressed in a contractile.
+. Where a descriptile needs to reference a constraint, it references it by
+  name — it does not copy its content.
+. Constraints universal to the estate are inherited from `standards`, not
+  copied per repository (task #17).
+. A linter MUST flag any descriptile field whose content duplicates or
+  contradicts a contractile clause (task #19).
+
+This is the *floor versus ceiling* problem in miniature: every existing gate
+fires on insufficiency, and nothing fires on redundant, divergent, unenforced
+excess. These four copies breached no floor, which is why they survived.
+
+[[affirmation]]
+== Affirmation and staleness
+
+A descriptile makes a claim about a repository at a moment. The claim does not
+expire, and no existing check can tell a current description from an abandoned
+one.
+
+Observed practice records `last-modified-at` and `modification-summary` on
+some files, in a `project-specific` or `design-rationale` sub-table. This is
+insufficient: it records when the *file* changed, not when its *claims* were
+last confirmed true. A file reformatted in a batch edit gains a fresh
+timestamp while every claim in it goes unre-examined.
+
+*Normative:* every descriptile carries, at top level:
+
+[cols="2,1,4",options="header"]
+|===
+| Field | | Meaning
+
+| `affirmed`    | R | ISO-8601 date the content was last confirmed true by a human or a check.
+| `affirmed-by` | R | `owner`, `agent`, or the name of the automated check.
+| `expires`     | O | Date after which the claim must be re-affirmed to remain conformant.
+|===
+
+`affirmed` is distinct from `updated`. A file may be updated without being
+affirmed (a batch reformat), and affirmed without being updated (a human
+re-reads it and confirms it still holds).
+
+This is the descriptile half of task #16, which adds per-clause re-affirmation
+to the contractile schema. The two should share one date grammar.
+
+The live exhibit is `AGENTIC.a2ml`'s stale model pin: valid, well-formed,
+schema-conformant, and wrong. No validity checker catches it. Only affirmation
+age does.
+
+== Conformance
+
+[cols="1,4",options="header"]
+|===
+| Level | Requirement
+
+| *0 — Present*    | The three Core descriptiles exist in a recognised location.
+| *1 — Canonical*  | Located at `.machine_readable/descriptiles/`; bracketed-table surface; all required fields present.
+| *2 — Clean*      | Level 1, plus no restated contractile content (<<contamination>>) and `phase` drawn from the closed vocabulary.
+| *3 — Affirmed*   | Level 2, plus `affirmed` / `affirmed-by` present and within `expires`.
+|===
+
+The estate is at Level 0 pending the rulings in this document. No repository
+can currently reach Level 1, because the canonical directory name is not yet
+ruled, and none can reach Level 3, because the affirmation fields do not yet
+exist anywhere.
+
+== Open rulings
+
+Consolidated. In dependency order — each affects whether the next is worth
+doing.
+
+. **INNERVATION status** — ratify, supersede, or park with a date. Everything
+  below is conditional on this. Recommendation: park with a date; it is 11.7%
+  executed after five months.
+. **Canonical directory name** — `descriptiles` (recommended, semantically
+  correct) versus `6a2` (578 files, lower migration cost, numerically wrong).
+. **`phase` closed vocabulary** — settle jointly with task #15.
+. **ANCHOR** — accepted here as *not* a descriptile; needs its own
+  specification, and a ruling on `anchors/` versus `anchor/`.
+. **Extended-tier status** — this document makes AGENTIC / NEUROSYM /
+  PLAYBOOK optional, following the measured 3+3 split. Confirm or make all six
+  required.
+
+== Changelog
+
+* v0.1.0, 2026-09-01 — first specification of a format deployed since
+  approximately 2026-04. Descriptive of the measured population; normative
+  where the population is self-contradictory. Draft pending owner ratification.
