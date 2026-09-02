@@ -144,7 +144,7 @@ Thin = calls `hyperpolymath/standards/...-reusable.yml`.
 | Procedure | F | ✅/❌ / D | Verdict |
 |---|---|---|---|
 | `labels.yml` (08-27 sweep) | 413 | 411/1 | **KEEP · PERIODIC**; prove it can fail (planted positive). FOLD `label-triage.yml` (24) |
-| `push-email-notify.yml` | 341 | 0 green, **325 disabled**, 18 skipped, 11 sf | **DROP** — replaced by `smtp-notify-action` v0.1.0 (#39) |
+| `push-email-notify.yml` | 341 | 0 green, **325 disabled**, 18 skipped, 11 sf | **REMAKE · dormant** (owner ruling 2026-09-02: "replace it everywhere"). Keep the file and its `vars.PUSH_EMAIL_ENABLED == 'true'` gate unchanged; repoint `uses:` from `dawidd6/action-send-mail` to `hyperpolymath/smtp-notify-action@1b3b752d39a4fe4c0f28f10905e4608789d3e050 # v0.1.0` (#39; drop-in inputs) with `actions.lock` regenerated in the same PR (§6.4). The 325 disabled copies stay disabled until the owner re-arms them (no SMTP secrets exist). Sweep engine = first run of step 5 |
 | `dependabot-updates` (native) | 269 | 165/85, 18 cancelled | **KEEP native**; fix configs: 247 `nix` + 21 `guix` entries are INVALID ecosystems (memory), 276 `pip` in a Python-banned estate, 0 `julia` (add to 52) |
 | `dependabot-automerge.yml` | 137 | 21/12, **100 skipped** | **REMAKE → one thin arming job**. `allow_auto_merge=true` only *permits* auto-merge; something must still call `gh pr merge --auto --squash` per PR, which is what this file does (`tree-navigator` copy, line 120). The 100 skipped are the `if: github.actor == 'dependabot[bot]'` guard on non-Dependabot PRs: expected, not a defect. Keep the arming step as one job inside `governance-reusable` (or `gitbot-fleet`), drop the 137 bespoke copies |
 | `rhodibot.yml` | 93 | 20/69 | **OWNER?** 78% red; retire or remake |
@@ -181,7 +181,7 @@ The ask says "every procedure"; these run from a laptop or a bot, never in Actio
 CodeQL ×3 (inline, default-setup, static-analysis-gate) · Scorecard ×3 · Secret scan ×4
 (reusable, cicd-suite, GHAS, GitGuardian) · Pages ×4 · Policy ×11 files → governance ·
 CI ×5 generic files → per-language · a2ml/k9 validate ×2 coordinates · Dependency
-bots ×2 (Dependabot, Renovate) · Mail ×2 (push-email-notify, smtp-notify-action) ·
+bots ×2 (Dependabot, Renovate) · Mail ×2 (dawidd6/action-send-mail → smtp-notify-action, one caller file) ·
 Sync ×2 (mirror, instant-sync) · Auto-merge ×2 (workflow, native).
 
 ## 6. The canonical set (from scratch)
@@ -380,7 +380,7 @@ resolves the tension if Team lands on metadatastician.
 ## 9. Never re-add
 
 CodeFactor · Snyk · Mergify · ImgBot · Codacy (R1) · Renovate (R5) · Codecov ·
-gitar-bot as bypass actor (R4) · Deno anything · `instant-sync` · `push-email-notify` ·
+gitar-bot as bypass actor (R4) · Deno anything · `instant-sync` · `dawidd6/action-send-mail` (smtp-notify-action replaces it; owner ruling 2026-09-02) ·
 `dependabot-automerge.yml` (native replaces) · `required_deployments` / coverage-95 /
 Copilot-review ruleset rules · hand-typed status-check contexts.
 
@@ -404,7 +404,7 @@ Copilot-review ruleset rules · hand-typed status-check contexts.
 - **Lockfile**: `gh actions-lock --no-fix` green on pilots; one `lock-refresh` PR from `standards` lands green on a pilot with a signed commit and a regenerated lock; a hand-corrupted lock on a pilot PR goes red (planted positive for §6.4). Dependabot no longer opens `github-actions` PRs on pilots.
 - **Auto-merge arming**: a Dependabot dependency PR on a pilot is armed by the §5.5 job and merges without a human once gates are green.
 - **startup_failure = 0** on pilots via the banner reader (`curl` the run page — memory), not `?status=failure`.
-- **Merges without `--admin`**: pilot PRs merge through the ruleset with no bypass; `mergeStateStatus == CLEAN`.
+- **Merges without `--admin`**: pilot PRs merge through the ruleset with no bypass; `mergeStateStatus ∈ {CLEAN, UNSTABLE}` captured *before* the merge (UNSTABLE = every required context green while a non-required one is red; proven on double-track-browser #98, 2026-09-02), and the resulting push's entry in `GET repos/{o}/{r}/rulesets/rule-suites?ref=main` carries `result: pass`, not `bypass`. The rule-suite result is the discriminator; the merge exit code is not.
 - **Census re-run** after the sweep: workflow files per repo ≤ 8 (+ opt-ins); governance latest-green ≥ 90%; casket/pages/release no longer in the bottom-5.
 - Horizon statement attached to every count (AGENTS.md §5).
 
