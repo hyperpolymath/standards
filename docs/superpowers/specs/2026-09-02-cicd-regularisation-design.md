@@ -427,3 +427,26 @@ O9 metadatastician installs with no ruling: slack, microsoft-teams-for-github,
 thanks-dev, linear-data-importer, linear-code (keep or uninstall) ·
 O10 `workflow-templates/` on a User-account `.github` (plant one, check the "New
 workflow" page); if invisible, hyperpolymath distribution = rsr-template-repo only.
+
+## 13. Amendments from step 1 (2026-09-02, same day)
+
+Facts found while writing the canonical artefacts; each overrides the section it names.
+
+| § | Was | Now | Evidence |
+|---|---|---|---|
+| 10 step 1 paths | `standards/rulesets/`, `settings/`, `autolinks/` at repo root | **`config/rulesets/`, `config/settings/`, `config/autolinks/`** + `config/README.adoc` | `config/` already holds the estate gitleaks baseline; no new root directories; Mustfile root rules constrain only loose `.contractile` files and `REGISTRY.a2ml` |
+| 7.1 P-priv | classic branch protection fallback, `base-classic.json` | **Dropped.** Rulesets work on private Free repos | Planted POST+DELETE on `dev-notes-vault` (private), 2026-09-02 |
+| 7.3 name | ruleset `Base` | Identity = active branch ruleset targeting exactly `["~DEFAULT_BRANCH"]`; name irrelevant. Live name everywhere sampled is `Optimus-Branch`; no `Base` exists | `gh api repos/{o}/{r}/rulesets` on standards, hypatia, verisimdb |
+| 7.3 rules | `required_linear_history`; `update` unmentioned | **No `required_linear_history`** (live has none; O8 decides squash-only vs merge commits). **`update` dropped** (live has it; it makes main writable by bypass actors only) | live ruleset 14285635 |
+| 7.3 bypass modes | unspecified | all Integration + admin = `pull_request`; RepositoryRole 2 (maintain) dropped; `always` nowhere on the branch ruleset | `config/README.adoc` |
+| 7.3 strict | unspecified | `strict_required_status_checks_policy: false`, decided | PR #714 sat BEHIND |
+| 7.3 tags | "keep `tag-protection.json`" | `config/rulesets/immutable-tags.json`: drop `required_status_checks`, `required_deployments`, `required_linear_history` (unsatisfiable at tag creation → no workflow could create tags); bypass = admin + OikosBot `always` | live ruleset 18110117 |
+| 6.4 credential | "the single App credential it already holds" | **standards holds no App credential.** No `APP_ID` variable, no `APP_PRIVATE_KEY` secret; `signed-push-smoke.yml` red on every run since 2026-08-24. `lock-refresh` and App-created tags are blocked on **O11** | `gh secret list`, `gh variable list`, run 32717664038 |
+| 7.6 ADR | ADR- "estate-central → standards/docs/decisions" | **ADR- is repo-local** on all 336 repos with autolinks; 10 point at a renamed repo (rename residue). Templated `{{OWNER}}/{{REPO}}` | full audit `$CLAUDE_JOB_DIR/tmp/autolinks-all.tsv`, 428 repos, 0 errors |
+| 7.6 audit | 28/40 sampled | 335 repos identical six-prefix set, 1 minus RFC (`cloudguard-cli`), **92 none** (57 hyperpolymath, 35 metadatastician = almost the whole org) | same |
+| 7.6 profiles | JLSEC/HEX prefixes proposed | `julia.json` and `elixir.json` ship **empty** with a stated reason: no verified advisory prefix with a stable URL; GHSA-/OSV- in base cover both. `OSV-` added to base | rustsec/osv URL shapes verified; nothing invented |
+| 7.2 allowlist | prune list | 118 → 92 patterns; `hyperpolymath/*` subsumes 20 explicit entries; Python-adjacent trio and `ad-m/github-push-action` listed as review candidates, not pruned | `config/settings/actions-allowlist.json` |
+| 12 | O1–O10 | **O11 added**: create or pick the estate GitHub App (OikosBot 2538504 is the owner's own), plant `APP_ID` (variable) + `APP_PRIVATE_KEY` (secret) on `hyperpolymath/standards` | — |
+| 7.6 ADR template | `docs/decisions/ADR-<num>.adoc` | ADR files are `ADR-<num>-<slug>.adoc`; the live template 404s on every repo. Canon = code-search URL `search?q=ADR-<num>+path%3Adocs%2Fdecisions&type=code` | `ADR-003.adoc` on standards = HTTP 404, 2026-09-02 |
+| 7.2 allowlist enforcement | "prune" implied enforcement | `verified_allowed` is true, so verified creators bypass the list; prune is hygiene, R1 is enforced by deleting workflows. **O12 added**: flip `verified_allowed` to false after a `uses:` census | `config/settings/actions-allowlist.json` |
+| 7.3 direct push | unstated | With every bypass at `pull_request` and no `always` actor, main is PR-only for everyone including the owner; emergency path = disable the ruleset. FYI posted on #715 | `config/rulesets/base.json` |
