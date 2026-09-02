@@ -450,3 +450,25 @@ Facts found while writing the canonical artefacts; each overrides the section it
 | 7.6 ADR template | `docs/decisions/ADR-<num>.adoc` | ADR files are `ADR-<num>-<slug>.adoc`; the live template 404s on every repo. Canon = code-search URL `search?q=ADR-<num>+path%3Adocs%2Fdecisions&type=code` | `ADR-003.adoc` on standards = HTTP 404, 2026-09-02 |
 | 7.2 allowlist enforcement | "prune" implied enforcement | `verified_allowed` is true, so verified creators bypass the list; prune is hygiene, R1 is enforced by deleting workflows. **O12 added**: flip `verified_allowed` to false after a `uses:` census | `config/settings/actions-allowlist.json` |
 | 7.3 direct push | unstated | With every bypass at `pull_request` and no `always` actor, main is PR-only for everyone including the owner; emergency path = disable the ruleset. FYI posted on #715 | `config/rulesets/base.json` |
+
+## 14. Fold table — estate policy files → governance-reusable jobs (step 2f)
+
+Doc only; step 5 deletes the left column once the right column is green on the pilots.
+Job names are the frozen contexts (§6.2; guard = `tests/test_governance_reusable_shape.sh`).
+
+| Estate file (repos) | Governance job (context) | Fold decision |
+|---|---|---|
+| `security-policy.yml` (61) | `Security policy checks` | Fold. Weak crypto / HTTP URL findings are ADVISORY `::warning`; hardcoded secrets FAIL. Delete file |
+| `runtime-policy.yml` (47), `language-policy.yml` (12), `ts-blocker.yml` (7) | `Language / package anti-pattern policy` | Fold. Delete files |
+| `npm-bun-blocker.yml` (7) | — | DROP: contradicts the Bun ruling; no job carries it |
+| `rsr-antipattern.yml` (24) | `Language / package anti-pattern policy` | DROP the file (its reusable does not exist); the job already covers the anti-pattern list |
+| `wellknown-enforcement.yml` (60) | `Well-Known (RFC 9116 + RSR)` | Fold. Open: is `security.txt` MUST or SHOULD → owner ruling **O13** (#715). Until ruled the job keeps today's severity |
+| `estate-rules.yml` (40) | `Trusted-base reduction policy` + `Licence consistency` | Fold; the two jobs are the surviving halves. Delete file |
+| `guix-policy.yml` (25), `guix-nix-policy.yml` (35) | `Guix packaging policy (Nix retired)` | Fold. Presence-only checks in the files were fake; the job's checks must keep a planted positive |
+| `container-policy.yml` (7) | `Security policy checks` | Fold the digest-pin rule into the job as a new sub-check with a planted positive; delete file |
+| `workflow-linter.yml` (141) | `Workflow security linter` + `Actions lockfile verify` | Fold. Inline `uses:` are linted too (the file missed them). Lock verification is its own context (PR 2a) |
+| `dogfood-gate.yml` (240, 164 variants): invisible-character job | new governance job (name TBD in PR 2b, e.g. `Invisible characters`) | REMAKE as a GATE. Reference implementation = double-track-browser #90: `grep -aP '(*UTF)[…]'`, in-step probe that the pattern fires on a planted NBSP, `::error` + exit 1 on findings |
+| `dogfood-gate.yml`: groove / A2ML / K9 checks | — | Keep as the `*-ecosystem/validate-action` opt-ins (§5.6); not governance |
+| `cicd-suite/spdx-license-check`, `palimpsest-license` action | `Licence consistency` | Fold. SPDX line-1 rule lives in one place |
+| `Validate Hypatia Baseline` (governance) vs `hypatia-scan` threshold | `Validate Hypatia Baseline` + `scan / Hypatia Neurosymbolic Analysis` | Align: governance validates baseline file shape only (info); the severity threshold (high) is owned by `hypatia-scan-reusable`. One owner per rule, no double jeopardy |
+| `Live Actions policy (credentialed advisory)`, `Code quality + docs`, `Allowlist Preflight` | (advisory) | Never required contexts (`config/rulesets/gates.json`). They warn, they do not gate |
