@@ -27,9 +27,11 @@
 #   1. NO SILENT GROWTH.       An exemption ledger may lose entries freely.
 #                              Gaining entries requires an explicit, reviewed
 #                              declaration in the commit message.
-#   2. NO ANONYMOUS ENTRIES.   Every .hypatia-baseline.json entry must carry a
-#                              `note` or a `tracking_issue`. "What is this?"
-#                              must be answerable without archaeology.
+#   2. NO NEW ANONYMOUS DEBT.  Every new or changed .hypatia-baseline.json
+#                              entry must carry a `note` or a `tracking_issue`.
+#                              Legacy anonymous entries are tolerated only
+#                              while identical as complete JSON values;
+#                              touching one requires documenting it.
 #   3. NO WILDCARD LEDGERS.    A `**` pattern in a banned-language ledger
 #                              silently absorbs files added later, which turns
 #                              a migration ledger into a permanent blind spot.
@@ -148,13 +150,65 @@ for path in "${LEDGERS[@]}"; do
   fi
 done
 
-# 2. No anonymous baseline entries.
+# 2. No new or changed anonymous baseline entries.
+#
+# This is deliberately a ratchet, not an instantaneous cleanliness gate. A
+# repository may already have anonymous legacy entries when it adopts the
+# shared workflow. Failing every unrelated PR until all of that historic debt
+# is documented makes the gate impossible to introduce and encourages blanket
+# bypasses. Instead, compare complete JSON values as a multiset:
+#
+#   * an unchanged anonymous value is grandfathered;
+#   * adding an anonymous value fails;
+#   * changing any field on an anonymous value fails (the old value vanished
+#     and a new undocumented value appeared);
+#   * adding a note/tracking_issue, or deleting an entry, is debt reduction and
+#     passes;
+#   * duplicate values are counted, so appending a second identical anonymous
+#     entry cannot hide behind one grandfathered copy.
 if [ -f .hypatia-baseline.json ]; then
-  anon="$(jq '[.[] | select((has("note")|not) and (has("tracking_issue")|not))] | length' \
-          .hypatia-baseline.json 2>/dev/null || echo 0)"
+  base_baseline="$(mktemp)"
+  trap 'rm -f "$base_baseline"' EXIT
+  if git cat-file -e "${BASE_REF}:.hypatia-baseline.json" 2>/dev/null; then
+    git show "${BASE_REF}:.hypatia-baseline.json" > "$base_baseline"
+  else
+    printf '[]\n' > "$base_baseline"
+  fi
+
+  anon_delta="$(jq -n \
+    --slurpfile before "$base_baseline" \
+    --slurpfile after .hypatia-baseline.json '
+      def anonymous:
+        (has("note") | not) and (has("tracking_issue") | not);
+
+      ($before[0]) as $base
+      | ($after[0]) as $head
+      | if (($base | type) != "array" or ($head | type) != "array") then
+          error(".hypatia-baseline.json must contain a JSON array at base and HEAD")
+        else
+          ([ $base[] | select(anonymous) ]
+            | group_by(.)
+            | map({entry: .[0], count: length})) as $base_groups
+          | ([ $head[] | select(anonymous) ]
+            | group_by(.)
+            | map({entry: .[0], count: length})) as $head_groups
+          | [ $head_groups[] as $new
+              | (($base_groups
+                  | map(select(.entry == $new.entry) | .count)
+                  | first) // 0) as $old_count
+              | select($new.count > $old_count)
+              | {entry: $new.entry, added: ($new.count - $old_count)} ]
+        end
+    ')"
+  rm -f "$base_baseline"
+  trap - EXIT
+
+  anon="$(printf '%s\n' "$anon_delta" | jq '[.[].added] | add // 0')"
   if [ "${anon:-0}" -gt 0 ]; then
-    note "ANONYMOUS      .hypatia-baseline.json: ${anon} entr(y|ies) carry neither a note nor a tracking_issue"
-    note "               Every exemption must say what it is. Add \`note\` explaining"
+    note "ANONYMOUS      .hypatia-baseline.json: ${anon} new or changed entr(y|ies) carry neither a note nor a tracking_issue"
+    printf '%s\n' "$anon_delta" | jq -r \
+      '.[] | "                 \(.added)x \(.entry | tojson)"'
+    note "               Every exemption touched now must say what it is. Add \`note\` explaining"
     note "               what the finding actually is, or \`tracking_issue\` naming the"
     note "               work that discharges it."
     fail=1
