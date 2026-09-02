@@ -334,3 +334,86 @@ overstates its coverage.
 . *Rename to tiered names*, one concept at a time, following the safe sequence.
 . *Classify and remove fake gates.* Deleting a check that cannot fail is
   strictly better than repairing it.
+
+== Estate canon — ratified 2026-09-02
+
+The tiers above were a taxonomy; this section makes them a *rule set* for the
+estate. Design spec: `docs/superpowers/specs/2026-09-02-cicd-regularisation-design.md`.
+Machine-readable form: `config/rulesets/gates.json`.
+
+=== MUST list (every repository)
+
+[cols="2,1,1,3",options="header"]
+|===
+| Workflow file | Tier | Required? | Notes
+
+| `governance.yml` → `governance-reusable.yml`
+| 🔴 GATE
+| yes, one context per job
+| N named jobs so a red names its cause; includes `actions-lock-verify`
+
+| `secret-scanner.yml` → `secret-scanner-reusable.yml`
+| 🔴 GATE
+| yes
+|
+
+| `hypatia-scan.yml` → `hypatia-scan-reusable.yml`
+| 🔴 GATE
+| yes
+| Partial until the engine runs all 34 rule modules and sees `.github/`; say so
+
+| `codeql.yml` → `codeql-reusable.yml`
+| 🔴 GATE
+| yes
+| One mode estate-wide; default setup off
+
+| `<lang>-ci.yml` (rust, elixir, julia, ada, zig, bun)
+| 🔴 GATE
+| yes, for the repo's languages
+| One thin caller per language present
+
+| `proofs.yml`, `abi-ffi-gate.yml`, `spark-theatre-gate.yml`
+| 🔴 GATE
+| yes, where present
+| The hyperpolymath core; opt-in by repo type
+
+| `scorecard.yml`, `labels.yml`, `mirror.yml`, `main-estate-audit.yml`, `stale.yml`
+| 📅 PERIODIC
+| never
+| Schedule or push only; never on `pull_request`
+
+| `oikosbot.yml`, `readme-derive.yml`, container build
+| 🟡 CHECK
+| never
+|
+
+| CodeRabbit, Sonar, GitGuardian, Copilot review
+| ⚪ ADVISORY
+| never
+| App-driven; no workflow file
+
+| `actions.lock`
+| —
+| —
+| Present everywhere (R2); regenerated in the same PR as any `uses:` change
+|===
+
+=== Naming convention for canonical callers
+
+The canonical thin caller's `name:` is `<tier prefix> <Concept>`:
+`🔴 GATE: Governance`, `🔴 GATE: Secret Scanner`, `🔴 GATE: Hypatia Scan`,
+`🔴 GATE: CodeQL`, `🔴 GATE: Rust CI`, `📅 PERIODIC: Scorecard`,
+`📅 PERIODIC: Labels`. `scripts/check-gate-tiers.sh` keys on the prefix.
+Filenames are frozen; only `name:` and job ids change.
+
+=== Two invariants added
+
+[start=6]
+. *Required contexts are derived, never typed.* The applier reads the check-run
+  names the gate files emitted on the latest default-branch run and writes
+  exactly those. A file with no run contributes nothing; a repo with nothing
+  derivable gets no status-check rule and is reported UNGATED.
+. *A GATE blocks merge for non-bypass actors.* Bypass applies to the whole
+  ruleset, so every listed app can merge around every gate. The tier claim
+  "Always" in the table above is true of humans and unlisted bots; owner
+  decision O6 (`config/rulesets/gates-only.json`) extends it to the apps.
