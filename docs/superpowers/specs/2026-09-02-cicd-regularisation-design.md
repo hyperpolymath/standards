@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: PMPL-1.0-or-later -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 <!-- Design spec — CI/CD regularisation. Approved by owner 2026-09-02 (plan mode). Execution order §10; owner decisions §12 tracked in the linked issue. -->
 
 # CI/CD regularisation — register, canonical set, universal settings, owner split
