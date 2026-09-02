@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "purpose": "Which workflow FILES are 🔴 GATE per repo profile. The applier turns these into required_status_checks contexts by reading the check-run names the latest default-branch run of each file actually emitted (integration_id 15368). Contexts are never typed by hand.",
+  "context_derivation": {
+    "source": "GET /repos/{o}/{r}/actions/workflows/{file}/runs?branch=<default>&per_page=1 then GET /repos/{o}/{r}/actions/runs/{id}/jobs",
+    "context_shape": "job name; for a reusable caller it is '<caller job id> / <reusable job name>'",
+    "integration_id": 15368,
+    "if_no_run_yet": "omit that file's contexts and report it; never write a context nothing has emitted",
+    "if_zero_contexts_overall": "do not write the required_status_checks rule at all; report the repo as UNGATED",
+    "never_required_match": "an entry in never_required_contexts matches either the whole context or the part after the first \" / \" (the reusable job name); it is removed from the derived set, never typed",
+    "context_freeze": "reusable job `name:` values and caller job ids are FROZEN until this derivation replaces every typed ruleset: renaming either turns a live required context into a phantom on every consumer. Adding a job is allowed. Guard: standards tests/test_governance_reusable_shape.sh"
+  },
+  "profiles": {
+    "base": {
+      "applies_to": "every repo",
+      "gate_workflows": [
+        "governance.yml",
+        "secret-scanner.yml",
+        "hypatia-scan.yml",
+        "codeql.yml"
+      ]
+    },
+    "rust": {
+      "detect": [
+        "Cargo.toml"
+      ],
+      "gate_workflows": [
+        "rust-ci.yml"
+      ]
+    },
+    "elixir": {
+      "detect": [
+        "mix.exs"
+      ],
+      "gate_workflows": [
+        "elixir-ci.yml"
+      ]
+    },
+    "julia": {
+      "detect": [
+        "Project.toml"
+      ],
+      "gate_workflows": [
+        "julia-ci.yml"
+      ]
+    },
+    "ada": {
+      "detect": [
+        "alire.toml",
+        "*.gpr"
+      ],
+      "gate_workflows": [
+        "ada-ci.yml"
+      ]
+    },
+    "zig": {
+      "detect": [
+        "build.zig"
+      ],
+      "gate_workflows": [
+        "zig-ci.yml"
+      ]
+    },
+    "bun": {
+      "detect": [
+        "bun.lock",
+        "bun.lockb"
+      ],
+      "gate_workflows": [
+        "bun-ci.yml"
+      ]
+    },
+    "proof": {
+      "detect_workflows": [
+        "proofs.yml",
+        "abi-ffi-gate.yml",
+        "spark-theatre-gate.yml"
+      ],
+      "gate_workflows": [
+        "proofs.yml",
+        "abi-ffi-gate.yml",
+        "spark-theatre-gate.yml"
+      ]
+    }
+  },
+  "never_required_workflows": [
+    "scorecard.yml",
+    "labels.yml",
+    "mirror.yml",
+    "main-estate-audit.yml",
+    "stale.yml",
+    "oikosbot.yml",
+    "readme-derive.yml",
+    "sonarqube.yml"
+  ],
+  "never_required_contexts": [
+    "Allowlist Preflight",
+    "Code quality + docs",
+    "CodeQL (default setup)",
+    "Live Actions policy (credentialed advisory)",
+    "SonarCloud Code Analysis"
+  ]
+}

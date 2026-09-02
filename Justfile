@@ -161,7 +161,7 @@ build:
 
 # Run all sub-project test suites
 test:
-    # K9 Rust binding tests now live in hyperpolymath/k9-ecosystem (rs/) — see #491
+    @bash scripts/run-shell-test-suite.sh
 
 # Regression test: test aggregation fails for missing prerequisites and test failures.
 test-runner-test:
