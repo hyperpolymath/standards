@@ -1,0 +1,178 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Estate canon: rulesets, settings, autolinks
+:toc: macro
+
+toc::[]
+
+== What this is
+
+The single source of truth for how every repository in the estate is
+*configured* — as opposed to what runs in it (`.github/workflows/*-reusable.yml`)
+or what the code must satisfy (the Mustfiles). Design spec:
+`docs/superpowers/specs/2026-09-02-cicd-regularisation-design.md`.
+Tier rules: `docs/CICD-SIGNAL-DISCIPLINE.adoc`, section "Estate canon".
+
+[cols="1,3",options="header"]
+|===
+| Path | Holds
+
+| `rulesets/base.json`
+| The one branch ruleset. Applied to every repo, both owners. Template: the
+  applier fills `required_status_checks` (see `gates.json`).
+
+| `rulesets/gates.json`
+| Which workflow *files* are 🔴 GATE per profile, and how contexts are derived.
+
+| `rulesets/gates-only.json`
+| Owner decision O6 only: a second ruleset carrying just the status-check rule
+  with a short bypass list, so AI-reviewer apps cannot merge around gates.
+  *Not applied unless O6 is ruled.*
+
+| `rulesets/immutable-tags.json`
+| The tag ruleset. Tags are created by an admin or by the estate App only.
+
+| `settings/repo.json`
+| Repository settings PATCH body plus the Actions-permission endpoints.
+
+| `settings/actions-allowlist.json`
+| The estate Actions allowlist. *Apply at the tail of the sweep, never before.*
+
+| `autolinks/*.json`
+| Autolink references per profile; `base` plus language/proof additions.
+|===
+
+== Identity is the target, never the name
+
+Live rulesets (2026-09-02) are called `Optimus-Branch` on every sampled repo;
+older waves were called `Base`, `Backup`, `Pages-fix`. Names drift. The applier
+and the verifier identify *the* branch ruleset as: the active ruleset whose
+target is `branch` and whose include list is exactly `["~DEFAULT_BRANCH"]`.
+Exactly one such ruleset must exist; zero or two is a verifier failure. The
+same rule for tags with `["~ALL"]`. The `name` field in these files is what a
+fresh POST uses; an existing ruleset is PUT by id and keeps whatever name it has.
+
+== What the base ruleset deliberately drops from the live copy
+
+[cols="1,2",options="header"]
+|===
+| Live rule | Why it is gone
+
+| `code_scanning` (CodeQL, Hypatia, Scorecard alerts)
+| Doubles the CodeQL/Hypatia gates and makes Scorecard — a PERIODIC — block PRs.
+
+| `code_quality`, `copilot_code_review`, `code_coverage` 95 %, `required_deployments` github-pages
+| Nothing in the estate satisfies them, so every merge went through `--admin`,
+  which bypasses everything else too (spec §4).
+
+| `update`
+| "Restrict updates" makes the default branch writable by bypass actors only;
+  the `pull_request` rule already forces changes through PRs.
+
+| `require_code_owner_review`, `required_review_thread_resolution`, `require_extra_approval_for_unattributed_changes`
+| No CODEOWNERS estate-wide; thread resolution and attribution approvals were
+  unsatisfiable for bot PRs.
+
+| bypass mode `always` on apps and RepositoryRole 2 (maintain)
+| `always` lets an app push straight to the default branch. All Integration
+  bypass is `pull_request`; the maintain role is dropped; admin (5) keeps
+  `pull_request` — the emergency path is the owner flipping the ruleset, not a
+  standing push right.
+
+| Integration ids 56611 (codacy), 827041 (gitar-bot), 254 (codecov), 2740 (renovate), 57789 (advanced-security), 1561, 85455, 946600
+| R1/R4 removals, advanced-security needs no bypass, the last three are
+  unresolved (owner decision O5).
+|===
+
+Kept: `deletion`, `non_fast_forward`, `required_signatures`, `pull_request`
+(0 approvals, squash only pending O8), `required_status_checks`.
+
+`strict_required_status_checks_policy` is *false*, decided: with strict on,
+every PR must be rebased onto the tip of the default branch before merge, which
+on 400 repos with bot PRs means permanent `BEHIND` states (PR #714 in this repo
+sat BEHIND on the day this was written). Gates test the change; freshness is
+Dependabot's job.
+
+== Contexts are derived, never typed
+
+Hand-typed contexts produced seven spellings of CodeQL and four of Hypatia
+across the estate. `gates.json` names workflow *files*; the applier reads the
+check-run names those files emitted on the latest default-branch run and writes
+exactly those, with `integration_id` 15368. A file with no run yet contributes
+nothing and is reported. A repo with no derivable contexts gets no
+`required_status_checks` rule and is reported as UNGATED — an empty rule would
+be a fake gate.
+
+Canonical thin callers carry the tier in their `name:` (`🔴 GATE: Governance`,
+`📅 PERIODIC: Scorecard`); `scripts/check-gate-tiers.sh` keys on that prefix.
+Filenames never change (renames register phantom workflows); names and job ids do.
+
+== Bypass binds the whole ruleset
+
+GitHub applies bypass per ruleset, not per rule, so every actor in the bypass
+list can merge around every GATE. Nine apps are listed (owner ruling R3). That
+means a GATE binds humans and unlisted bots; the AI-reviewer apps can merge a
+red PR. `gates-only.json` is the fix if the owner wants it (O6).
+
+== Tags and the App credential
+
+`immutable-tags.json` drops the live copy's `required_status_checks`,
+`required_deployments` and `required_linear_history` — none can be satisfied
+at tag-creation time, which is why no workflow in the estate could create a
+tag. Creation is reserved to admins and to OikosBot (2538504) in `always`
+mode, so release workflows create tags *through the App*.
+
+That App credential does not exist yet. `hyperpolymath/standards` holds no
+`APP_ID` variable and no `APP_PRIVATE_KEY` secret (checked 2026-09-02;
+`signed-push-smoke.yml` has failed on every run since 2026-08-24 for that
+reason). Until the owner plants them (decision O11), the periodic
+`lock-refresh` and App-created tags cannot run; tags stay admin-only.
+
+== Settings notes
+
+* `secret_scanning` and `secret_scanning_push_protection` are not available on
+  private repos of a Free account; the applier drops that block on
+  `visibility: private` and reports it. Rulesets *do* work on private Free
+  repos (planted POST on `dev-notes-vault`, 2026-09-02), so there is no classic
+  branch-protection fallback and no `base-classic.json`.
+* `allow_merge_commit` / `allow_rebase_merge` are false pending O8. Rebase
+  merges cannot be signed; merge commits are the owner's call.
+* `sha_pinning_required` is set through the Actions-permissions endpoint;
+  `actions.lock` is the file-level pin (both, per R2).
+
+== Allowlist: order matters
+
+`actions-allowlist.json` is 92 patterns, down from 118 live. It is applied
+*last*, after the sweep has removed every workflow that references a pruned
+action. Applied first it kills those workflows silently (the 87 %-dead-runs
+incident in memory). `hyperpolymath/*` subsumes the 20 explicit entries that
+were on the live list, including four coordinates that no longer exist.
+
+== Autolinks
+
+Audit 2026-09-02, all 428 repos with workflows:
+
+[cols="3,1",options="header"]
+|===
+| Finding | Repos
+
+| The copied six-prefix set (GHSA, PROV, CVE, ADR, RUSTSEC, RFC) | 335
+| Same set minus RFC (`cloudguard-cli`) | 1
+| No autolinks at all | 92 (57 hyperpolymath, 35 metadatastician — nearly the whole org)
+| ADR- pointing at a *different* repo (renamed after the trial was copied) | 10
+|===
+
+`ADR-` is repo-local on every repo, not estate-central; `base.json` templates
+it with `{{OWNER}}/{{REPO}}`. `PROV-` and `RUSTSEC-` move out of the base set
+into the `proof` and `rust` profiles. The applier adds missing prefixes and
+rewrites wrong templates by default; removing extras is `--prune`, opt-in,
+because 300 repos carrying a harmless `PROV-` is not worth 300 API writes.
+
+== Apply order (per repo)
+
+. settings PATCH + Actions permissions + workflow permissions
+. autolinks
+. branch ruleset (POST if none matches the identity rule, PUT by id if one does; refuse if two)
+. tag ruleset
+. verifier: identity rule, phantom contexts = 0, live ≡ canonical
+. allowlist — *tail of the sweep only*
