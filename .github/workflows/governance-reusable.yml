@@ -1115,24 +1115,19 @@ jobs:
           # governance jobs on every PR estate-wide. github.sha resolves to the
           # same merge commit but is always fetchable.
           ref: ${{ github.sha }}
-      - name: Checkout standards for the duplicate-key check
+      - name: Checkout the pinned Standards policy helpers
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          # Execute helper code from the same immutable Standards revision as
+          # this reusable workflow. A moving `main` checkout would let a caller
+          # pinned to workflow revision X execute implementation revision Y.
+          ref: ${{ job.workflow_sha }}
           path: .standards-dupkey
           sparse-checkout: |
             scripts/check-workflow-duplicate-keys.sh
             tools/policy/check-workflows-parse.sh
           sparse-checkout-cone-mode: false
-        # ⚠ Not fatal if the file is absent. This checkout is pinned to
-        # standards@main, so during a rename of the script the fetch finds
-        # nothing — the new name does not exist on main until the renaming pull
-        # request merges. Without this, the RENAME ITSELF fails the linter, on
-        # the one pull request that cannot possibly be at fault. See the
-        # fallback in the next step.
-        continue-on-error: true
-
       - name: Parse every tracked workflow
         run: |
           if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
@@ -1142,7 +1137,7 @@ jobs:
             SCRIPT=".standards-dupkey/tools/policy/check-workflows-parse.sh"
           fi
           if [ ! -f "$SCRIPT" ]; then
-            echo "::error::workflow parser gate not found in standards@main or locally"
+            echo "::error::workflow parser gate not found in the pinned Standards revision or locally"
             exit 1
           fi
           bash "$SCRIPT"
@@ -1157,10 +1152,9 @@ jobs:
           # were dead this way, including a CodeQL workflow with zero
           # successful runs in its entire lifetime.
           set -euo pipefail
-          # Standards must exercise its pull-request scripts; every consumer
-          # must use the canonical scripts fetched from standards@main. A
-          # file-existence fallback is insufficient because the old script on
-          # main still exists while its replacement is being tested.
+          # Standards exercises its pull-request scripts; every consumer uses
+          # the canonical scripts fetched from this workflow's immutable
+          # Standards revision.
           if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
             SCRIPT="scripts/check-workflow-duplicate-keys.sh"
             echo "Using this repository's own copy (standards self-lint)."
@@ -1169,13 +1163,25 @@ jobs:
           fi
           if [ ! -f "$SCRIPT" ]; then
             echo "::error::duplicate-key checker not found — neither fetched from" \
-                 "standards@main nor present locally."
+                 "the pinned Standards revision nor present locally."
             exit 1
           fi
           cp "$SCRIPT" "$RUNNER_TEMP/dupkeys.sh"
           # The lockfile gate below runs in a consumer checkout, where the
           # standards helper is not present. Preserve the canonical helper
           # before removing this sparse standards checkout.
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
+            LOCK_SCRIPT="scripts/update-actions-lock.sh"
+            echo "Using this repository's own actions-lock verifier (standards self-lint)."
+          else
+            LOCK_SCRIPT=".standards-dupkey/scripts/update-actions-lock.sh"
+          fi
+          if [ ! -f "$LOCK_SCRIPT" ]; then
+            echo "::error::actions-lock verifier not found — neither fetched from" \
+                 "the pinned Standards revision nor present locally."
+            exit 1
+          fi
+          cp "$LOCK_SCRIPT" "$RUNNER_TEMP/update-actions-lock.sh"
           rm -rf .standards-dupkey
           bash "$RUNNER_TEMP/dupkeys.sh" .github/workflows
 
