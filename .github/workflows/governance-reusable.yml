@@ -23,7 +23,7 @@ permissions:
 jobs:
   workflow-staleness:
     name: Check Workflow Staleness
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 10
     outputs:
       has_baseline: ${{ steps.check.outputs.has_baseline }}
@@ -135,7 +135,7 @@ jobs:
           GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
         if: ${{ env.GH_TOKEN == '' }}
         run: |
-          echo "::notice::Live Actions policy was not evaluated: HYPATIA_SCAN_PAT was not supplied by the caller. The separate tree allowlist gate still ran."
+          echo "::warning::Live Actions policy was not evaluated: HYPATIA_SCAN_PAT was not supplied by the caller. The separate tree allowlist gate still ran."
           # shellcheck disable=SC2016
           printf '%s\n' \
             '### Live Actions policy not evaluated' \
@@ -160,7 +160,7 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -eq 3 ]; then
-            echo "::notice::Live Actions policy was not evaluated: the supplied credential could not read the Administration endpoint."
+            echo "::warning::Live Actions policy was not evaluated: the supplied credential could not read the Administration endpoint."
             printf '%s\n' \
               '### Live Actions policy not evaluated' \
               '' \
@@ -179,7 +179,7 @@ jobs:
     # repo without a baseline blocked forever, by construction. The job now
     # always runs; the EXPENSIVE steps are guarded individually, so it still
     # costs nothing when there is no baseline to validate.
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 15
     steps:
       - name: Checkout caller repository
@@ -753,17 +753,17 @@ jobs:
           FAILED=false
           WEAK_CRYPTO=$(grep -rE 'md5\(|sha1\(' --include="*.py" --include="*.rb" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" . 2>/dev/null | grep -v 'checksum\|cache\|test\|spec' | head -5 || true)
           if [ -n "$WEAK_CRYPTO" ]; then
-            echo "⚠️ Weak crypto (MD5/SHA1) detected. Use SHA256+ for security:"
+            echo "::warning::Weak crypto (MD5/SHA1) detected — ADVISORY, does not fail this job. Use SHA256+:"
             echo "$WEAK_CRYPTO"
           fi
           HTTP_URLS=$(grep -rE 'http://[^l][^o][^c]' --include="*.py" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" --include="*.yaml" --include="*.yml" . 2>/dev/null | grep -v 'localhost\|127.0.0.1\|example\|test\|spec' | head -5 || true)
           if [ -n "$HTTP_URLS" ]; then
-            echo "⚠️ HTTP URLs found. Use HTTPS:"
+            echo "::warning::HTTP URLs found — ADVISORY, does not fail this job. Use HTTPS:"
             echo "$HTTP_URLS"
           fi
           SECRETS=$(grep -rEi '(api_key|apikey|secret_key|password)\s*[=:]\s*["\x27][A-Za-z0-9+/=]{20,}' --include="*.py" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" --include="*.env" . 2>/dev/null | grep -v 'example\|sample\|test\|mock\|placeholder' | head -3 || true)
           if [ -n "$SECRETS" ]; then
-            echo "❌ Potential hardcoded secrets detected!"
+            echo "::error::Potential hardcoded secrets detected — this FAILS the job:"
             FAILED=true
           fi
           if [ "$FAILED" = true ]; then
@@ -1126,7 +1126,6 @@ jobs:
           path: .standards-dupkey
           sparse-checkout: |
             scripts/check-workflow-duplicate-keys.sh
-            scripts/update-actions-lock.sh
             tools/policy/check-workflows-parse.sh
           sparse-checkout-cone-mode: false
       - name: Parse every tracked workflow
@@ -1214,43 +1213,6 @@ jobs:
           done
           [ $failed -eq 1 ] && { echo "Add SPDX header + permissions:"; exit 1; }
           echo "All workflows have SPDX headers + permissions"
-      - name: Check locked or SHA-pinned actions
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ -f .github/workflows/actions.lock ]; then
-            # actions.lock is the authoritative immutable resolution for both
-            # direct actions and their transitive dependencies. Do not also
-            # rewrite direct refs to raw SHAs: gh actions-lock omits refs that
-            # no tag or branch contains, and GitHub then rejects the workflow
-            # at startup. Measured in oikosbot PR #78 on 2026-08-29: five
-            # previously executable workflows became startup_failure after the
-            # redundant direct-SHA conversion; restoring their locked version
-            # refs made GitHub's native resolver accept them again.
-            gh extension install github/gh-actions-lock
-            bash "$RUNNER_TEMP/update-actions-lock.sh" --verify-local
-            echo "Immutable direct and transitive lockfile coverage verified"
-          else
-            unpinned=$(grep -rnE --include='*.yml' --include='*.yaml' \
-              "^[[:space:]]+uses:" .github/workflows/ | \
-              grep -v "@[a-f0-9]\{40\}" | \
-              grep -v "uses: \./\|uses: docker://\|uses: actions/github-script\|uses: hyperpolymath/standards/" || true)
-            if [ -n "$unpinned" ]; then
-              echo "ERROR: no .github/workflows/actions.lock in THIS TREE, and these refs are not SHA-pinned."
-            echo "  Prefer \`gh actions-lock\` — it also locks the transitive dependencies"
-            echo "  of composite actions, which an inline SHA cannot express."
-            echo "  Do NOT do both: gh actions-lock refuses a ref no tag or branch contains,"
-            echo "  so inline pinning REMOVES actions from the lockfile."
-              echo "$unpinned"
-              exit 1
-            fi
-            echo "All actions are SHA-pinned"
-          fi
-      # The step above proves a pin has the right SHAPE. It cannot prove the
-      # SHA EXISTS — a fabricated 40-hex string passes it. Measured 2026-07-28:
-      # 112 of 613 unique estate pins (18%) do not resolve, in 876 committed
-      # files. An unresolvable `uses:` yields NO check run, so those repos look
-      # green while the job never ran. This step closes that gap.
       - name: Checkout standards for the pin-existence gate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1277,6 +1239,68 @@ jobs:
             echo "ERROR: Duplicate CodeQL workflows found"; exit 1
           fi
           echo "No critical duplicates found"
+
+  # actions-lock-verify — its own context so a lockfile red names its cause
+  # (spec 2026-09-02-cicd-regularisation-design §6.4, R2). Formerly a step
+  # buried inside workflow-lint, where "Workflow security linter" red could
+  # mean SPDX, permissions, duplicate keys, parse, pin-resolve OR the lock.
+  # The gate logic lives in scripts/check-actions-lock-gate.sh (tested by
+  # scripts/tests/check-actions-lock-gate-test.sh): lock present → the
+  # authoritative `gh actions-lock --verify-local`; lock absent → unpinned
+  # refs are red now, all-pinned-but-no-lock is a ::warning until
+  # ENFORCE_ACTIONS_LOCK_FROM (2026-10-01), red after.
+  #
+  # Standards is checked out at `job.workflow_sha` = the SHA of THIS reusable
+  # as pinned by the caller (verified 2026-09-02 on consumer run logs), so the
+  # gate script and the YAML move together — one speed, no `ref: main` float.
+  actions-lock-verify:
+    name: Actions lockfile verify
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+      - name: Checkout standards for the lock gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: ${{ job.workflow_sha }}
+          path: .standards-lock
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/check-actions-lock-gate.sh
+            scripts/update-actions-lock.sh
+          sparse-checkout-cone-mode: false
+      - name: Install gh actions-lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh extension install github/gh-actions-lock
+      - name: Verify actions.lock (or SHA pins during the grace window)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
+            SRC=scripts
+            echo "Using this repository's own gate + verifier (standards self-lint)."
+          else
+            SRC=.standards-lock/scripts
+          fi
+          for f in check-actions-lock-gate.sh update-actions-lock.sh; do
+            if [ ! -f "$SRC/$f" ]; then
+              echo "::error::actions-lock gate: $f not found in $SRC (standards checkout at job.workflow_sha failed?)"
+              exit 1
+            fi
+            cp "$SRC/$f" "$RUNNER_TEMP/$f"
+          done
+          rm -rf .standards-lock
+          ACTIONS_LOCK_VERIFIER="$RUNNER_TEMP/update-actions-lock.sh" \
+            bash "$RUNNER_TEMP/check-actions-lock-gate.sh" .github/workflows
 
   trusted-base:
     name: Trusted-base reduction policy
