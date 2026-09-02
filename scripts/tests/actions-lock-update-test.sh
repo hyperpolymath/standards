@@ -25,10 +25,9 @@ cat > "$WORK/bin/fake-gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [ "${2:-}" = "--verify-local" ]; then
-  grep -q "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" \
+  grep -q "actions/checkout@v7.0.1" \
     .github/workflows/actions.lock
-  sed -i 's#uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1#uses: actions/checkout@v7.0.1#' \
-    .github/workflows/ci.yml
+  sed -i '1i# verifier-only mutation' .github/workflows/ci.yml
   case "${FAKE_VERIFY_FINDING:-}" in
     reusable-exact)
       printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/reusable.yml","category":"stale","dependency":"hyperpolymath/standards@abc123"}]}'
@@ -60,7 +59,8 @@ if [ "${2:-}" = "--verify-local" ]; then
       ;;
   esac
 fi
-sed -i '1i# This workflow is managed by gh actions-lock.' .github/workflows/ci.yml
+grep -q '^# This workflow is managed by gh actions-lock.$' .github/workflows/ci.yml ||
+  sed -i '1i# This workflow is managed by gh actions-lock.' .github/workflows/ci.yml
 sed -i 's#actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1#actions/checkout@v7.0.1#' \
   .github/workflows/ci.yml
 cat > .github/workflows/actions.lock <<'LOCK'
@@ -81,10 +81,10 @@ chmod +x "$WORK/bin/fake-gh"
 cd "$WORK"
 GH_BIN="$WORK/bin/fake-gh" bash "$UPDATE" .github/workflows >/dev/null
 
-grep -q 'uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' \
+grep -q 'uses: actions/checkout@v7.0.1' \
   .github/workflows/ci.yml
 [ "$(grep -c '^# This workflow is managed by gh actions-lock.$' .github/workflows/ci.yml)" -eq 1 ]
-grep -q "'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1':" \
+grep -q "'actions/checkout@v7.0.1':" \
   .github/workflows/actions.lock
 
 cp .github/workflows/ci.yml "$WORK/ci.before"
@@ -93,7 +93,7 @@ GH_BIN="$WORK/bin/fake-gh" bash "$UPDATE" .github/workflows >/dev/null
 cmp -s "$WORK/ci.before" .github/workflows/ci.yml
 cmp -s "$WORK/lock.before" .github/workflows/actions.lock
 
-echo "PASS: Actions lock refresh preserves inline SHA source and is idempotent"
+echo "PASS: Actions lock refresh keeps authoritative symbolic source and is idempotent"
 
 # Verification is mutating in released gh-actions-lock versions too. The safe
 # verification mode must restore workflow bytes while leaving the lock intact.
