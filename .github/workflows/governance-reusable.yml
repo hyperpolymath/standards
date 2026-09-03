@@ -370,7 +370,22 @@ jobs:
         # Read-only execution; never writes outside the runner workspace.
         # Pure bash + awk, so no JS runtime is installed on the runner.
         # Source of truth: `scripts/check-ts-allowlist.sh` in standards.
-        run: bash .standards-checkout/scripts/check-ts-allowlist.sh
+        # The local fallback is for standards' OWN PRs: the checkout above
+        # pins standards@main, so a script added in a PR is not there yet.
+        # It is gated on the caller being standards, so no consumer repo can
+        # shadow this required gate with a permissive repo-local copy.
+        run: |
+          SCRIPT=".standards-checkout/scripts/check-ts-allowlist.sh"
+          if [ ! -f "$SCRIPT" ] && [ "$GITHUB_REPOSITORY" = "hyperpolymath/standards" ] \
+             && [ -f scripts/check-ts-allowlist.sh ]; then
+            SCRIPT="scripts/check-ts-allowlist.sh"
+            echo "Using this repository's own copy (standards self-check)."
+          fi
+          if [ ! -f "$SCRIPT" ]; then
+            echo "::error::check-ts-allowlist gate not found in standards@main or locally"
+            exit 1
+          fi
+          bash "$SCRIPT"
 
       - name: Check language-policy invariants
         run: |
