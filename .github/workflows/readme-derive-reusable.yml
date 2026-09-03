@@ -170,10 +170,32 @@ jobs:
           CANONICAL: ${{ steps.decl.outputs.canonical }}
         run: |
           set -euo pipefail
+          # This step COMMITS what it generates, so a diagnostic that does not
+          # stop it is a wrong README baked into a consumer repo. Neither tool
+          # below reports cleanliness through its exit code by default, and
+          # each needs a different remedy:
+          #
+          #   asciidoctor's --failure-level defaults to FATAL, so even
+          #   "ERROR: dropping cells from incomplete row" exits 0 — one stray
+          #   '|' in a table cell shifts every later cell and the derived
+          #   Markdown silently loses them. The flag below makes the exit code
+          #   mean what `set -e` already assumes it means.
+          #
+          #   asciidoctor-reducer has no --failure-level at all (only
+          #   --log-level, which changes what is printed, not what is
+          #   returned), so its exit code cannot be made to carry its verdict.
+          #   Its stderr is captured and treated as the verdict instead.
+          #
           # 1) flatten includes so the source is self-contained
-          asciidoctor-reducer "$CANONICAL" -o "$RUNNER_TEMP/reduced.adoc"
+          asciidoctor-reducer "$CANONICAL" -o "$RUNNER_TEMP/reduced.adoc" \
+            2>"$RUNNER_TEMP/reducer.err"
+          if [ -s "$RUNNER_TEMP/reducer.err" ]; then
+            echo "::error::asciidoctor-reducer reported a problem flattening $CANONICAL, so the derived README would be generated from a source it could not read cleanly. Its exit code is 0 either way, which is why this is checked on stderr."
+            cat "$RUNNER_TEMP/reducer.err" >&2
+            exit 1
+          fi
           # 2) reliable route: asciidoc -> docbook -> gfm (direct converters lose structure)
-          asciidoctor -b docbook5 -a attribute-missing=drop \
+          asciidoctor --failure-level=WARN -b docbook5 -a attribute-missing=drop \
             "$RUNNER_TEMP/reduced.adoc" -o "$RUNNER_TEMP/reduced.xml"
           pandoc -f docbook -t gfm --wrap=preserve \
             "$RUNNER_TEMP/reduced.xml" -o "$RUNNER_TEMP/body.md"
@@ -228,8 +250,8 @@ jobs:
 
           To regenerate locally (requires asciidoctor, asciidoctor-reducer, pandoc):
 
-            asciidoctor-reducer README.adoc -o /tmp/reduced.adoc
-            asciidoctor -b docbook5 -a attribute-missing=drop /tmp/reduced.adoc -o /tmp/reduced.xml
+            asciidoctor-reducer README.adoc -o /tmp/reduced.adoc     # must print nothing
+            asciidoctor --failure-level=WARN -b docbook5 -a attribute-missing=drop /tmp/reduced.adoc -o /tmp/reduced.xml
             pandoc -f docbook -t gfm --wrap=preserve /tmp/reduced.xml -o /tmp/body.md
             # then prepend the SPDX + GENERATED banner (see the workflow's stamp step)
 
