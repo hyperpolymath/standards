@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 # READ ONLY. Estate CI/CD census over GraphQL: what each repository REQUIRES
 # and what it actually EMITS — the pair needed to find phantom required checks.
 #
