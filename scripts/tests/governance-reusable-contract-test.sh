@@ -8,6 +8,7 @@ GOVERNANCE="$ROOT/.github/workflows/governance-reusable.yml"
 FOCUSED="$ROOT/.github/workflows/allowlist-preflight-reusable.yml"
 RSR_SEED="$ROOT/rhodium-standard-repositories/.github/workflows/allowlist-preflight.yml"
 LOCK_HELPER="$ROOT/scripts/update-actions-lock.sh"
+LOCK_GATE="$ROOT/scripts/check-actions-lock-gate.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -26,10 +27,22 @@ fi
 if grep -Fq 'bash scripts/update-actions-lock.sh --verify-local' "$GOVERNANCE"; then
   fail "reusable governance still assumes a consumer-local Standards helper"
 fi
+# The workflow no longer names `--verify-local` directly: it stages both
+# helpers into RUNNER_TEMP and runs the gate, which delegates to the
+# authoritative verifier. Assert that composition, and follow the
+# `--verify-local` literal to where it now lives.
 # RUNNER_TEMP is an asserted workflow literal.
 # shellcheck disable=SC2016
-grep -Fq 'bash "$RUNNER_TEMP/update-actions-lock.sh" --verify-local' "$GOVERNANCE" ||
-  fail "reusable governance does not execute the staged pinned lock verifier"
+grep -Fq 'ACTIONS_LOCK_VERIFIER="$RUNNER_TEMP/update-actions-lock.sh"' "$GOVERNANCE" ||
+  fail "reusable governance does not point the lock gate at the staged pinned verifier"
+# shellcheck disable=SC2016
+grep -Fq 'bash "$RUNNER_TEMP/check-actions-lock-gate.sh"' "$GOVERNANCE" ||
+  fail "reusable governance does not execute the staged pinned lock gate"
+[ -f "$LOCK_GATE" ] || fail "lock gate script is missing from the pinned helper set"
+# VERIFIER is an asserted script literal.
+# shellcheck disable=SC2016
+grep -Fq 'bash "$VERIFIER" --verify-local' "$LOCK_GATE" ||
+  fail "lock gate does not delegate to the authoritative verifier with --verify-local"
 
 for workflow in "$GOVERNANCE" "$FOCUSED"; do
   grep -Fq 'Live Actions policy (credentialed advisory)' "$workflow" ||

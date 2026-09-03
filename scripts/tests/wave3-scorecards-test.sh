@@ -83,7 +83,17 @@ if bash "$GEN" --verify >/dev/null 2>&1; then bad "--verify missed a broken pass
 cp "$TMP/orig.a2ml" "$TGT"
 # (b) pass rows with HOLDING checks keep --verify green (replace all with `true`)
 sed 's/^check = ".*"$/check = "true"/' "$TMP/orig.a2ml" > "$TGT"
-if bash "$GEN" --verify >/dev/null 2>&1; then ok "--verify green with holding pass-checks"; else bad "--verify failed on holding checks"; fi
+bout="$(bash "$GEN" --verify 2>&1)"; brc=$?
+if [ "$brc" -eq 0 ]; then ok "--verify green with holding pass-checks"; else
+  # Print WHY this failed. A bare `>/dev/null 2>&1` here once cost two CI
+  # round-trips to diagnose: a stale generated file (REGISTRY.a2ml) broke a
+  # real pass-check in a DIFFERENT scorecard, and all this assertion could
+  # say was "it failed". Only pass rows in other scorecards can do this —
+  # every check in the mutated fixture is `true`.
+  printf '  --- offending --verify output ---\n%s\n  ---------------------------------\n' \
+    "$(printf '%s\n' "$bout" | grep -Ei 'FAILED|broken|could not run|not hold|✗|❌' | head -10)" >&2
+  bad "--verify failed on holding checks"
+fi
 # (c) grounded count appears in verify output (capture first: `grep -q` closing
 # the pipe early can SIGPIPE the still-writing generator under pipefail)
 cout="$(bash "$GEN" --verify 2>&1 || true)"
@@ -94,7 +104,7 @@ awk '1; /^status = "fail"$/ && !done {print "check = \"true\""; done=1}' "$TMP/o
 vout="$(bash "$GEN" --verify 2>&1)"; vrc=$?
 if [ "$vrc" -eq 0 ] && grep -q 'stale-fail' <<< "$vout"; then ok "stale-fail is advisory, reported, non-fatal"; else
   # some scorecards may have no fail rows; treat absence of any fail row as skip-ok
-  grep -q '^status = "fail"$' "$TMP/orig.a2ml" && bad "stale-fail not handled (rc=$vrc)" || ok "no fail rows in fixture (skip)"
+  grep -q '^status = "fail"$' "$TMP/orig.a2ml" && { printf '  --- verify output ---\n%s\n  ---\n' "$(printf '%s\n' "$vout" | tail -10)" >&2; bad "stale-fail not handled (rc=$vrc)"; } || ok "no fail rows in fixture (skip)"
 fi
 cp "$TMP/orig.a2ml" "$TGT"
 bash "$GEN" >/dev/null 2>&1  # restore dashboard
