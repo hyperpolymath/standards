@@ -118,6 +118,20 @@ try "feature-only target is rejected" test "$RC" -eq 2
 try "rejected target leaves consumer unchanged" file_has "$R/.github/workflows/governance.yml" "governance-reusable.yml@${OLD}"
 try "rejection explains default-branch reachability" contains "not reachable" "$OUT"
 
+# ── 9. A stale origin/main must not hide a newer local main ──────────────────
+git -C "$UPSTREAM" update-ref refs/remotes/origin/main "$TARGET"
+touch "$UPSTREAM/mainline-newer"
+git -C "$UPSTREAM" add mainline-newer
+git -C "$UPSTREAM" commit -q -m mainline-newer
+NEWER_TARGET=$(git -C "$UPSTREAM" rev-parse HEAD)
+R="$TEST_DIR/stale-origin"; mk_consumer "$R"
+set +e
+OUT=$(bash "$PROP" --to "$NEWER_TARGET" "$R" 2>&1)
+RC=$?
+set -e
+try "newer local main target survives stale origin/main" test "$RC" -eq 0
+try "stale origin/main does not report unreachable" not_contains "not reachable" "$OUT"
+
 echo "----------------------------------------"
 echo "$PASS/$TOTAL test cases passed."
 [ "$PASS" -eq "$TOTAL" ] || { echo "Some propagation tests FAILED."; exit 1; }

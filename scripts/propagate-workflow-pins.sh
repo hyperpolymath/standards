@@ -115,26 +115,31 @@ validate_target() {
   }
 
   local sd="${STANDARDS_DIR:-$HOME/standards}" ref head gd
+  local local_main_seen=false
   if git -C "$sd" cat-file -e "${TARGET_SHA}^{commit}" >/dev/null 2>&1; then
     for ref in refs/remotes/origin/main refs/heads/main; do
       if head=$(git -C "$sd" rev-parse --verify "${ref}^{commit}" 2>/dev/null); then
+        local_main_seen=true
         if git -C "$sd" merge-base --is-ancestor "$TARGET_SHA" "$head"; then
           return 0
         fi
-
-        # A complete local graph gives a conclusive negative. A shallow or
-        # partial clone does not; let the server settle that case below.
-        gd=$(git -C "$sd" rev-parse --absolute-git-dir 2>/dev/null || true)
-        if [ -n "$gd" ] && [ ! -e "$gd/shallow" ] &&
-           [ "$(git -C "$sd" config --get remote.origin.promisor 2>/dev/null || true)" != true ] &&
-           [ -z "$(git -C "$sd" config --get remote.origin.partialclonefilter 2>/dev/null || true)" ]; then
-          log "ERROR: target ${TARGET_SHA} exists but is not reachable from local standards main (${head})."
-          return 1
-        fi
-        break
       fi
     done
+
+    # Only reject after every usable local main ref has been checked. A
+    # shallow or partial graph is not conclusive, so defer that case to the
+    # authoritative server comparison below.
+    gd=$(git -C "$sd" rev-parse --absolute-git-dir 2>/dev/null || true)
+    if [[ "$local_main_seen" == true && -n "$gd" && ! -e "$gd/shallow" ]] &&
+       [[ "$(git -C "$sd" config --get remote.origin.promisor 2>/dev/null || true)" != true ]] &&
+       [[ -z "$(git -C "$sd" config --get remote.origin.partialclonefilter 2>/dev/null || true)" ]]; then
+      log "ERROR: target ${TARGET_SHA} exists but is not reachable from any available local standards main ref."
+      return 1
+    fi
   fi
+
+  # Neither usable local main ref proved reachability. Local refs can be stale,
+  # so only the authoritative server comparison may return a negative result.
 
   local api="${STANDARDS_REACHABILITY_API_BASE:-https://api.github.com}"
   local -a auth=()
