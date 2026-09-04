@@ -72,7 +72,7 @@ log() { printf '%s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------------------
 # Resolve the target SHA
-# ---------------------------------------------------------------------------
+# resolve_target resolves the standards commit SHA from an explicit target, a local main ref, or the remote main ref.
 
 resolve_target() {
   if [ -n "$TARGET_SHA" ]; then printf '%s' "$TARGET_SHA"; return 0; fi
@@ -107,7 +107,7 @@ fi
 # Prove that the proposed pin is a full commit SHA reachable from standards'
 # default branch. Merely proving that `/commits/<sha>` exists is insufficient:
 # a squash-merged PR leaves its intermediate commits addressable through the
-# API but unusable as cross-repository reusable-workflow refs.
+# validate_target verifies that TARGET_SHA is a full commit SHA reachable from the standards repository's main branch.
 validate_target() {
   [[ "$TARGET_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || {
     log "ERROR: target must be a full 40-character hexadecimal commit SHA: $TARGET_SHA"
