@@ -18,6 +18,20 @@
 # repository in the estate. If a suppression is only correct for one repo, it
 # belongs in that repo's own `.gitleaks.toml`, beside the code it describes.
 #
+# THIS FILE IS LIVE PRODUCTION CONFIG, AND FOR MOST CONSUMERS IT IS UNPINNED.
+# The reusable stages this baseline by TWO paths. A consumer that HAS its own
+# `.gitleaks.toml` receives the copy fetched at `${{ job.workflow_sha }}` —
+# pinned to whichever reusable SHA that consumer pins. A consumer with NO
+# `.gitleaks.toml`, which is the large majority, is served by an earlier and
+# ungated step that fetches from this repository's DEFAULT BRANCH. For those
+# repositories an edit here takes effect on their very next run, with no pin
+# standing between them and it.
+#
+# Two things follow. Edit this file as you would edit something already in
+# production — a broadened pattern blinds 400+ repositories the same day. And
+# a deliberate change arrives UNEVENLY: instantly for no-config consumers, and
+# only at pin-bump speed for the rest. Stage behaviour changes accordingly.
+#
 # WHY THIS FILE EXISTS
 # --------------------
 # Until #500 the estate's gitleaks step carried `continue-on-error: true`, so
@@ -57,32 +71,61 @@ useDefault = true
 [allowlist]
 description = "Estate baseline: dependency metadata, anchored placeholder shapes, published test vectors"
 
-# ⚠ KNOWN LIMIT OF THE `regexes` SECTION BELOW — READ BEFORE ADDING ONE.
+# HOW THE `regexes` SECTION BELOW ACTUALLY BEHAVES — MEASURED. READ BEFORE EDITING.
 #
-# gitleaks 8.18.4 matches these allowlist regexes against the finding's MATCH
-# (the whole matched span, including surrounding context), NOT against the
-# extracted secret. Setting `regexTarget` does not change this — measured with
-# all three documented values, "secret", "match" and unset, on an EXACT-value
-# entry:
+# An earlier revision of this comment claimed that gitleaks matches these
+# allowlist regexes against a finding's MATCH rather than its SECRET, and
+# concluded that an anchored `^value$` entry is silently INERT for
+# `generic-api-key`. THAT CLAIM IS FALSE, and every entry below depends on it
+# being false — none of them sets `regexTarget`, and all eight are anchored on
+# the value. Re-measured 2026-09-04 on the CI-pinned gitleaks 8.18.4, with the
+# config and the JSON report both kept OUTSIDE the scanned tree:
 #
-#     regexTarget unset / "secret" / "match", regex matching the SECRET
-#         -> NOT suppressed
-#     regexTarget "match",                    regex matching the MATCH
-#         -> suppressed
+#   fixture   Key : Ed25519_Private_Key;
+#   MATCH   = `Key : Ed25519_Private_Key;`      SECRET = `Ed25519_Private_Key`
 #
-# CONSEQUENCE. An anchored `^value$` entry only works for rules whose match
-# IS the secret — `aws-access-token` and the other prefix rules. For
-# `generic-api-key`, whose match spans the surrounding assignment (the key
-# name, the separator and the quotes) and not just the value, an anchored
-# entry is silently INERT: it neither errors nor warns, it simply never fires.
-# `generic-api-key` is the estate's single largest source of false positives
-# (62 of the 140 measured on 2026-08-06), so this is exactly the rule the
-# regexes are most wanted for.
+#     allowlist entry under test          findings   (control, no entry = 1)
+#     ^SECRET$, regexTarget unset             0       SUPPRESSED
+#     ^SECRET$, regexTarget = "secret"        0       SUPPRESSED
+#     ^SECRET$, regexTarget = "match"         1       not suppressed
+#     ^MATCH$,  regexTarget = "match"         0       SUPPRESSED
 #
-# So: for a `generic-api-key` false positive, prefer a PATH entry in the
-# owning repository's own `.gitleaks.toml`, where the exemption is local and
-# its justification sits beside the code. Do not add an anchored value regex
-# here and assume it took effect — verify it, the failure is silent.
+# `regexTarget` DEFAULTS TO THE SECRET. An anchored value regex is the normal,
+# working way to exempt a `generic-api-key` false positive and needs no
+# `regexTarget` at all. Field evidence agrees: one anchored value regex took
+# metadatastician/cerro-torre from 19 findings to 12.
+#
+# ANCHOR ON THE SECRET AS THE TOOL EXTRACTS IT, NOT ON THE STRING YOU SEE. A
+# specific rule outranks `generic-api-key` and may extract a NARROWER secret
+# than the quoted value. Measured on the same fixture: `tok = "AKIA…EXAMPLE..."`
+# is reported by `aws-access-token` with the trailing `...` NOT part of the
+# secret, so the placeholder regex below — which requires it — does not fire;
+# `sk_test_…` is reported by `stripe-access-token`, not by the `_test_` rule.
+# Read the finding's `Secret` field (`--report-format json`) and anchor on
+# that. Guessing from the source line is how a correct-looking entry misses.
+#
+# WHY THE FALSE CLAIM WAS BELIEVABLE — THE INSTRUMENT TRAP. If the gitleaks
+# config or the JSON report lives INSIDE `--source`, gitleaks scans them too;
+# their own credential-shaped content trips `generic-api-key`, the count never
+# reaches zero, and a WORKING allowlist entry reads as inert. That is the most
+# likely way the original measurement went wrong — it is easy to hit, silent,
+# and it produces exactly the observation the old comment recorded. Reproduce
+# correctly with `scripts/verify-regextarget-claim.sh`, which aborts unless the
+# control shows exactly one finding.
+#
+# CONSEQUENCE FOR EDITORS — PREFER A VALUE ENTRY OVER A PATH ENTRY. A `regexes`
+# entry suppresses exactly one string, so a credential planted in the same file
+# is STILL caught. A `paths` entry blinds the whole file to everything. Reach
+# for a path entry only where the value's SHAPE genuinely is a credential's —
+# 64 lowercase hex, say, which is byte-for-byte a hex-encoded Ed25519 private
+# key, so exempting the class would blind every such key in the tree. (Scoping
+# a regex to a path — `[[allowlists]]` with `condition = "AND"` — would answer
+# that case, but is SILENTLY IGNORED at 8.18.4; it arrives at 8.19+.)
+#
+# The character classes below are deliberately narrow, and that is not an
+# oversight to be widened. `[A-Za-z]*` has no `_`, so the CamelCase crypto-type
+# entry does NOT match Ada snake_case names such as `Ed25519_Private_Key`;
+# those belong in the owning repository's own `.gitleaks.toml`, beside the code.
 
 paths = [
   # This file, at its canonical path and under the name it is staged as in a
