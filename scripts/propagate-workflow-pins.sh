@@ -114,7 +114,7 @@ validate_target() {
     return 1
   }
 
-  local sd="${STANDARDS_DIR:-$HOME/standards}" ref head gd
+  local sd="${STANDARDS_DIR:-$HOME/standards}" ref head shallow
   local local_main_seen=false
   if git -C "$sd" cat-file -e "${TARGET_SHA}^{commit}" >/dev/null 2>&1; then
     for ref in refs/remotes/origin/main refs/heads/main; do
@@ -129,8 +129,8 @@ validate_target() {
     # Only reject after every usable local main ref has been checked. A
     # shallow or partial graph is not conclusive, so defer that case to the
     # authoritative server comparison below.
-    gd=$(git -C "$sd" rev-parse --absolute-git-dir 2>/dev/null || true)
-    if [[ "$local_main_seen" == true && -n "$gd" && ! -e "$gd/shallow" ]] &&
+    shallow=$(git -C "$sd" rev-parse --is-shallow-repository 2>/dev/null || printf 'true')
+    if [[ "$local_main_seen" == true && "$shallow" != true ]] &&
        [[ "$(git -C "$sd" config --get remote.origin.promisor 2>/dev/null || true)" != true ]] &&
        [[ -z "$(git -C "$sd" config --get remote.origin.partialclonefilter 2>/dev/null || true)" ]]; then
       log "ERROR: target ${TARGET_SHA} exists but is not reachable from any available local standards main ref."

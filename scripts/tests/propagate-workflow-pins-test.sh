@@ -132,6 +132,32 @@ set -e
 try "newer local main target survives stale origin/main" test "$RC" -eq 0
 try "stale origin/main does not report unreachable" not_contains "not reachable" "$OUT"
 
+# ── 10. A linked worktree retains the shared clone's shallow status ────────────
+SHALLOW_REMOTE="$TEST_DIR/standards-remote.git"
+SHALLOW_CLONE="$TEST_DIR/standards-shallow"
+SHALLOW_WORKTREE="$TEST_DIR/standards-shallow-worktree"
+FAKE_BIN="$TEST_DIR/fake-bin"
+git init -q --bare "$SHALLOW_REMOTE"
+git -C "$UPSTREAM" push -q "$SHALLOW_REMOTE" main
+git -C "$SHALLOW_REMOTE" symbolic-ref HEAD refs/heads/main
+git clone -q --depth 1 "file://$SHALLOW_REMOTE" "$SHALLOW_CLONE"
+git -C "$SHALLOW_CLONE" fetch -q origin "$TARGET"
+git -C "$SHALLOW_CLONE" worktree add -q -b reachability-test "$SHALLOW_WORKTREE" HEAD
+mkdir -p "$FAKE_BIN"
+cat > "$FAKE_BIN/curl" <<'EOF'
+#!/usr/bin/env sh
+printf '%s\n' '{"status":"ahead"}'
+EOF
+chmod +x "$FAKE_BIN/curl"
+R="$TEST_DIR/shallow-consumer"; mk_consumer "$R"
+set +e
+OUT=$(STANDARDS_DIR="$SHALLOW_WORKTREE" PATH="$FAKE_BIN:$PATH" \
+  bash "$PROP" --to "$TARGET" "$R" 2>&1)
+RC=$?
+set -e
+try "linked shallow worktree defers to server reachability" test "$RC" -eq 0
+try "linked shallow worktree does not report unreachable" not_contains "not reachable" "$OUT"
+
 echo "----------------------------------------"
 echo "$PASS/$TOTAL test cases passed."
 [ "$PASS" -eq "$TOTAL" ] || { echo "Some propagation tests FAILED."; exit 1; }
