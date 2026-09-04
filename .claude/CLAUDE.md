@@ -282,7 +282,7 @@ Retired 2026-08-31: the bootstrap-shim row (`affinescript-deno-test/**`, `affine
 
 The hyperpolymath "npm banned" policy (2026-05-25) has the following approved exemptions on the hypatia rule `cicd_rules/nodejs_detected` (matches `package-lock.json`).
 
-Migration substantially complete 2026-05-31 under umbrella `hyperpolymath/standards#253` (172 manifests at campaign start; all seven STEP issues #261/#262/#265/#268/#270/#273/#275 closed; ~22 physical-migration PRs landed plus three named-bucket audits closed `SUBSTANTIALLY DONE`; per-repo follow-up trackers cover the residual longtail). See `project_estate_npm_to_deno_2026_05_28.md`. Per-repo recipe: `docs/migrations/npm-to-deno-template/MIGRATION.md`.
+Migration substantially complete 2026-05-31 under umbrella `hyperpolymath/standards#253` (172 manifests at campaign start; all seven STEP issues #261/#262/#265/#268/#270/#273/#275 closed; ~22 physical-migration PRs landed plus three named-bucket audits closed `SUBSTANTIALLY DONE`; per-repo follow-up trackers cover the residual longtail). See `project_estate_npm_to_deno_2026_05_28.md`.
 
 | Path / Pattern | Class | Rationale | Unblock condition |
 |---|---|---|---|
