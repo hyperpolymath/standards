@@ -12,7 +12,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROP="$SCRIPT_DIR/../propagate-workflow-pins.sh"
 
 OLD="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-TARGET="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+# A real local commit graph makes reachability part of every test. The
+# propagation primitive must reject a SHA that merely exists on a feature
+# branch: GitHub cannot resolve such a SHA as a cross-repo reusable workflow.
+UPSTREAM="$TEST_DIR/standards"
+git init -q -b main "$UPSTREAM"
+git -C "$UPSTREAM" config user.email t@t
+git -C "$UPSTREAM" config user.name t
+touch "$UPSTREAM/reusable.yml"
+git -C "$UPSTREAM" add reusable.yml
+git -C "$UPSTREAM" commit -q -m main
+TARGET=$(git -C "$UPSTREAM" rev-parse HEAD)
+git -C "$UPSTREAM" checkout -q -b feature
+touch "$UPSTREAM/feature-only"
+git -C "$UPSTREAM" add feature-only
+git -C "$UPSTREAM" commit -q -m feature
+ORPHAN=$(git -C "$UPSTREAM" rev-parse HEAD)
+git -C "$UPSTREAM" checkout -q main
+export STANDARDS_DIR="$UPSTREAM"
 
 PASS=0; TOTAL=0
 
@@ -89,6 +107,16 @@ ROOT="$TEST_DIR/many"; mk_consumer "$ROOT/repoA"; mk_consumer "$ROOT/repoB"
 OUT=$(bash "$PROP" --to "$TARGET" "$ROOT")
 try "parent-dir mode sees repoA" contains repoA "$OUT"
 try "parent-dir mode sees repoB" contains repoB "$OUT"
+
+# ── 8. Existing but non-mainline target is refused before any rewrite ───────
+R="$TEST_DIR/orphan"; mk_consumer "$R"
+set +e
+OUT=$(bash "$PROP" --fix --to "$ORPHAN" "$R" 2>&1)
+RC=$?
+set -e
+try "feature-only target is rejected" test "$RC" -eq 2
+try "rejected target leaves consumer unchanged" file_has "$R/.github/workflows/governance.yml" "governance-reusable.yml@${OLD}"
+try "rejection explains default-branch reachability" contains "not reachable" "$OUT"
 
 echo "----------------------------------------"
 echo "$PASS/$TOTAL test cases passed."

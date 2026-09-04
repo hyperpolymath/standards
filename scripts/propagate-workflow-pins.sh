@@ -37,8 +37,9 @@
 #   PATH may be a single consumer repo (has .github/workflows) or a parent
 #   directory of many repos. Defaults to the current directory.
 #   --to <sha>  target standards SHA to pin to. If omitted, resolved from
-#               (in order) $STANDARDS_TARGET_SHA, a local standards checkout
-#               ($STANDARDS_DIR or ~/standards), then `git ls-remote` HEAD.
+#               (in order) $STANDARDS_TARGET_SHA, the main ref of a local
+#               standards checkout ($STANDARDS_DIR or ~/standards), then the
+#               remote main ref. A feature-worktree HEAD is never selected.
 #
 # Output: tab-separated audit lines suitable for review.
 
@@ -77,13 +78,22 @@ resolve_target() {
   if [ -n "$TARGET_SHA" ]; then printf '%s' "$TARGET_SHA"; return 0; fi
 
   local sd="${STANDARDS_DIR:-$HOME/standards}"
-  if git -C "$sd" rev-parse HEAD >/dev/null 2>&1; then
-    git -C "$sd" rev-parse HEAD; return 0
-  fi
+  # The old implementation used HEAD. When invoked from a standards feature
+  # worktree, that propagated a PR-intermediate commit before it had landed on
+  # main. GitHub's contents API could read that commit, but cross-repository
+  # reusable workflows rejected it as `workflow was not found` (251 active
+  # workflow files / 70 repos in the 2026-09-04 incident).
+  local ref
+  for ref in refs/remotes/origin/main refs/heads/main; do
+    if git -C "$sd" rev-parse --verify "${ref}^{commit}" >/dev/null 2>&1; then
+      git -C "$sd" rev-parse "${ref}^{commit}"
+      return 0
+    fi
+  done
 
   # Network fallback — the live standards HEAD.
   local remote
-  remote=$(git ls-remote https://github.com/hyperpolymath/standards.git HEAD 2>/dev/null | awk '{print $1}')
+  remote=$(git ls-remote https://github.com/hyperpolymath/standards.git refs/heads/main 2>/dev/null | awk '{print $1}')
   if [ -n "$remote" ]; then printf '%s' "$remote"; return 0; fi
 
   return 1
@@ -93,6 +103,61 @@ if ! TARGET_SHA="$(resolve_target)"; then
   log "ERROR: could not resolve a target standards SHA. Pass --to <sha> or set STANDARDS_TARGET_SHA."
   exit 2
 fi
+
+# Prove that the proposed pin is a full commit SHA reachable from standards'
+# default branch. Merely proving that `/commits/<sha>` exists is insufficient:
+# a squash-merged PR leaves its intermediate commits addressable through the
+# API but unusable as cross-repository reusable-workflow refs.
+validate_target() {
+  [[ "$TARGET_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || {
+    log "ERROR: target must be a full 40-character hexadecimal commit SHA: $TARGET_SHA"
+    return 1
+  }
+
+  local sd="${STANDARDS_DIR:-$HOME/standards}" ref head gd
+  if git -C "$sd" cat-file -e "${TARGET_SHA}^{commit}" >/dev/null 2>&1; then
+    for ref in refs/remotes/origin/main refs/heads/main; do
+      if head=$(git -C "$sd" rev-parse --verify "${ref}^{commit}" 2>/dev/null); then
+        if git -C "$sd" merge-base --is-ancestor "$TARGET_SHA" "$head"; then
+          return 0
+        fi
+
+        # A complete local graph gives a conclusive negative. A shallow or
+        # partial clone does not; let the server settle that case below.
+        gd=$(git -C "$sd" rev-parse --absolute-git-dir 2>/dev/null || true)
+        if [ -n "$gd" ] && [ ! -e "$gd/shallow" ] &&
+           [ "$(git -C "$sd" config --get remote.origin.promisor 2>/dev/null || true)" != true ] &&
+           [ -z "$(git -C "$sd" config --get remote.origin.partialclonefilter 2>/dev/null || true)" ]; then
+          log "ERROR: target ${TARGET_SHA} exists but is not reachable from local standards main (${head})."
+          return 1
+        fi
+        break
+      fi
+    done
+  fi
+
+  local api="${STANDARDS_REACHABILITY_API_BASE:-https://api.github.com}"
+  local -a auth=()
+  [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  local body status
+  body=$(curl -fsS --max-time 20 \
+    -H 'Accept: application/vnd.github+json' \
+    "${auth[@]}" \
+    "$api/repos/hyperpolymath/standards/compare/${TARGET_SHA}...main") || {
+      log "ERROR: could not prove target ${TARGET_SHA} is reachable from standards main; refusing propagation."
+      return 1
+    }
+  status=$(printf '%s' "$body" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n1)
+  case "$status" in
+    identical|ahead) return 0 ;;
+    *)
+      log "ERROR: target ${TARGET_SHA} is not reachable from standards main (compare status: ${status:-unknown}); refusing propagation."
+      return 1
+      ;;
+  esac
+}
+
+validate_target || exit 2
 
 # ---------------------------------------------------------------------------
 # Per-file rewrite (the unit-testable core)
