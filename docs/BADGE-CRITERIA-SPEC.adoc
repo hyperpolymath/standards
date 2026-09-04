@@ -1,0 +1,679 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+
+= Readiness Badge Criteria (BC) v0.1 — DRAFT
+:toc: left
+:toclevels: 3
+:sectnums:
+:status: DRAFT — not yet ratified; Q1–Q3 need owner rulings (see Open questions)
+:reviewed: 2026-09-04 — citations re-verified against main; see Provenance
+:date: 2026-08-28
+
+This document is the human-readable normative form, and the only form that
+lands with it. Two companions are deliberately held back:
+
+* A *machine-readable twin* is drafted but not included. The estate's
+  `.a2ml` -> `.deed` conversion is in flight and owned by another agent, so
+  the twin lands after that conversion, in whichever extension it settles
+  on, rather than being born needing a rename.
+* A *worked example* against a real repository is step 2 of standards#446
+  and waits on the pilot-subject confirm still open as item 5 of
+  standards#709.
+
+== Scope
+
+This document is step 1 of standards#446: the criteria/axes spec for a
+readiness badge. It defines *what a readiness badge asserts*, *what
+evidence must back the assertion*, *how confidence is expressed*, *what
+withdraws the badge*, and *how a self-assessment becomes a verified
+assessment*.
+
+It defines no new grade scale. The grade scales already exist and are
+normative:
+
+[cols="1,3,3",options="header"]
+|===
+| Axis | Normative source | Subject it grades
+
+| CRG
+| `component-readiness-grades/COMPONENT-READINESS-GRADES.adoc` + `.a2ml` (v2.0 in-repo header; v2.2 referenced by the profile templates)
+| A released component: crate, library, binary, plugin, schema, vendored artefact
+
+| TRG
+| `toolchain-readiness-grades/TOOLCHAIN-READINESS-GRADES.adoc` + `.a2ml` (v1.0)
+| A toolchain component of a language
+
+| ARG
+| `adoption-readiness-grades/ADOPTION-READINESS-GRADES.adoc` + `.a2ml` (v1.0)
+| A language's user-facing adoption surface
+
+| FRG
+| `foundations-readiness-grades/FOUNDATIONS-READINESS-GRADES.adoc` + `.a2ml` (v1.0)
+| A language's typing-discipline formalisation
+|===
+
+All four share the ordinal scale `X(0) F(1) E(2) D(3) C(4) B(5) A(6)`
+(`COMPONENT-READINESS-GRADES.a2ml` `(grades ...)`; ranks restated in
+`hypatia-rules/crg-demotion-detector.a2ml` `@grade_ranks`).
+
+=== Non-goals
+
+. *No new scale.* A badge is a rendering of an existing axis grade, never
+  a fifth grade.
+. *No composite score.* There is no single "quality" number. Aggregation
+  across axes is *worst-of, never averaging* (ARG spec §5, restated in
+  `ADOPTION-READINESS-GRADES.a2ml` `(conformance ...)`).
+. *No evaluation engine.* Evaluating other projects and other frameworks
+  is step 3 of standards#446. This document is deliberately confined to
+  the criteria a badge must satisfy, whoever the subject is.
+. *No replacement of the visual-identity registry.*
+  `.well-known/badges/registry.a2ml` remains the source of badge
+  identity (label, colour, link target, logo). This spec *adds* entries
+  to it; see §8.
+
+== The assertion
+
+A readiness badge is an *assertion about one subject on one axis at one
+commit*. It asserts exactly the following tuple and nothing else:
+
+[cols="1,4",options="header"]
+|===
+| Field | Meaning
+
+| `axis`
+| One of `CRG`, `TRG`, `ARG`, `FRG`
+
+| `subject`
+| The graded unit. For CRG a released component; for TRG/ARG/FRG a language
+
+| `claimed`
+| The grade letter the assessor asserts, from `{X,F,E,D,C,B,A}`
+
+| `floor`
+| The *measured floor*: the highest grade every one of whose MUST criteria is discharged by an executable check that exits 0 on `basis_commit` (§4)
+
+| `assessed_date`
+| ISO date the assessment was recorded
+
+| `basis_commit`
+| The commit the assessment and every check was run against
+
+| `evidence_uri`
+| A resolvable pointer to the profile or self-assessment carrying the per-criterion evidence
+
+| `issuer_class`
+| `self` \| `estate-audit` \| `external` (§7)
+
+| `verification_state`
+| `self-assessed` \| `verified` \| `stale` \| `suppressed` (§6, §7)
+|===
+
+A badge asserts *readiness on a stated axis, as of a stated commit,
+backed by stated evidence*. It does not assert fitness for a purpose,
+absence of defects, or comparative superiority. Any rendering that
+implies more than the tuple above is non-conformant.
+
+=== What a badge asserts, per axis
+
+CRG badge:: "This released component has been tested to grade `<letter>`
+against CRG's evidence requirements." At `C` this asserts dogfooding and
+deep annotation; at `B` it asserts 6+ diverse external targets meeting
+`(diversity-metrics ...)`; at `A` it asserts field signal and no
+unresolved harm. Where a repo publishes several components, the
+repository-level CRG badge is the *worst-of* its released components
+(the `CRG-PROFILE-TEMPLATE.adoc` convention), and the badge MUST name
+which component set it aggregates.
+
+TRG badge:: "This toolchain has passed the MoSCoW tiers to grade
+`<letter>`." TRG is a strict superset of CRG
+(`TOOLCHAIN-READINESS-GRADES.a2ml` `(relationship "strict-superset")`),
+so a TRG badge implies at least the corresponding CRG evidence for the
+toolchain components it covers.
+
+ARG badge:: "This language's adoption surface is usable to grade
+`<letter>`." Constrained by `ARG <= TRG` at all times
+(`ADOPTION-READINESS-GRADES.a2ml` `(conformance ...)`).
+
+FRG badge:: "This language's typing discipline is formalised to grade
+`<letter>` in a qualifying prover." `ARG-A requires FRG >= B`
+(`FOUNDATIONS-READINESS-GRADES.a2ml` `(cross-axis ...)`).
+
+=== Applicability and `n/a`
+
+An axis may not apply to a subject. ARG and FRG grade *languages*; both
+`SELF-ASSESSMENT.adoc` files say so in terms — "ARG grades languages,
+not specifications. ... The ARG spec cannot self-grade with an ARG
+letter, because the ARG spec is not a language."
+
+Therefore:
+
+* An inapplicable axis is recorded as `n/a` *with a stated reason*.
+* `n/a` is not a pass. It never raises the measured floor, is never
+  rendered as a grade letter, and never contributes to a worst-of
+  aggregate.
+* A badge that silently omits an inapplicable axis is non-conformant;
+  omission and inapplicability are different states and must be
+  distinguishable.
+
+== Honesty rules
+
+These are the load-bearing content of this spec. Each restates, in badge
+terms, a rule the estate already enforces somewhere else; the citation
+is given so the rule is not a new invention.
+
+[[H1]]
+H1 — Evidence or silence:: Every criterion marked `pass` MUST carry a
+resolvable `evidence` pointer (file path with anchor, CI job name, or
+issue URL). A `pass` with empty evidence is a defect, not a pass. Source:
+`scorecard.schema.json` `evidence` — "Empty/absent evidence with
+status=pass is a scorecard defect the generator rejects", enforced by
+`scripts/build-scorecards.sh` `parse_scorecard()`.
+
+[[H2]]
+H2 — Grounded beats asserted:: A `pass` that carries an executable
+`check` — a read-only command, run from the repository root, exiting 0
+iff the criterion holds *now* — is a *grounded pass*. A `pass` without a
+check is a *self-asserted pass*: legal, but visibly marked, and it never
+raises the measured floor (§4). Source: `scorecard.schema.json` `check`;
+`build-scorecards.sh --verify` ("a `pass` is only as good as a check that
+exits 0 right now").
+
+[[H3]]
+H3 — Range, not point:: The badge carries `floor–claimed`, not a single
+letter, whenever `floor < claimed`. A single letter may be rendered only
+when `floor == claimed`. This is the confidence interval standards#446
+asks for, expressed in machinery that already exists rather than in a new
+estimator.
+
+[[H4]]
+H4 — Aspirational is never a pass:: A criterion that is an intentionally
+unreachable reach target is `aspirational` and is counted as unmet.
+Source: `scorecard.schema.json` status enum — "NEVER counted as pass";
+`build-scorecards.sh` header.
+
+[[H5]]
+H5 — Unenforced is visible, not hidden:: A criterion with no mechanical
+system records `system = "none"`. This is legal. It lowers the subject's
+systems-coverage percentage, which MUST be published alongside the badge.
+Source: `scorecard.schema.json` `system` — "'none' is legal but VISIBLE".
+
+[[H6]]
+H6 — One declaration site:: For each `(subject, axis)` there is exactly
+one authoritative declaration: the `crg-grade` / `trg-grade` /
+`arg-grade` / `frg-grade` key in the subject's
+`.machine_readable/descriptiles/STATE.a2ml`. Prose self-assessments and
+profiles are *evidence*, not declarations. Two sites disagreeing is a
+`badge-defect` that suppresses the badge until reconciled (§6, suppression).
+Source: `crg-overclaim-detector.a2ml` `@scanner` reads STATE.a2ml as the
+declared grade; `@self_consistency_heuristic` treats
+declaration-versus-metadata contradiction as a finding in its own right.
+
+[[H7]]
+H7 — Measured versus estimated is marked per criterion:: Every criterion
+row records which it is. `grounded` (a check ran and exited 0) is
+measured. `self-asserted`, `manual-only` and `aspirational` are
+estimated. A badge MUST publish the count of each. Source: the
+`Grounded passes` column of `COMPLIANCE-DASHBOARD.adoc`.
+
+[[H8]]
+H8 — Honest low beats dishonest high:: Where evidence is absent, the
+correct action is to lower the claim, not to soften the criterion.
+Source, verbatim, from `crg-overclaim-detector.a2ml` `@action`: *"Per CRG
+v2.0 'honest D > dishonest B' — demote or provide evidence."*
+
+[[H9]]
+H9 — No borrowed and no composite scores:: A readiness badge MUST NOT
+restate a third-party score, and MUST NOT be combined with other axes
+into a single number. Aggregation within an axis is worst-of. This is the
+direct response to the third-party-scorer problem that motivates
+standards#446; replacing someone else's opaque ruler with our own opaque
+ruler would not be an improvement.
+
+[[H10]]
+H10 — Cross-axis constraints hold or the badge is suppressed:: `ARG <=
+TRG`; `ARG = A` requires `FRG >= B`. A badge set violating a stated
+cross-axis rule is suppressed on the violating axis until reconciled.
+
+[[H11]]
+H11 — Checks are read-only:: A check MUST NOT mutate the working tree,
+and MUST NOT touch licence or SPDX content (Manual-Only licence policy).
+Source: `scorecard.schema.json` `check`.
+
+[[H12]]
+H12 — Missing tooling is not a failure:: If a check cannot run because a
+tool it needs is absent, the result is `unrunnable`, never `fail`. An
+incomplete verification environment MUST refuse to verify rather than
+report failures. Source: `build-scorecards.sh` `run_verify()` environment
+preflight, added after seven real passes were wrongly reported as fake
+when `rg`/`xmllint`/`jq` were missing.
+
+== Confidence: the measured floor
+
+`floor` is defined mechanically:
+
+....
+floor(subject, axis) =
+  the highest grade G in X < F < E < D < C < B < A such that,
+  for every grade H <= G, every MUST criterion of H has an executable
+  `check` that exited 0 against basis_commit.
+....
+
+Consequences, all intended:
+
+* A subject with no executable checks at all has `floor = X`. That is the
+  honest reading: nothing has been mechanically demonstrated.
+* Manual-only, aspirational and self-asserted criteria do not raise the
+  floor (H2, H4). They may still support a `claimed` grade, because human
+  judgement is a legitimate basis for a claim — it is simply not a
+  measurement.
+* `floor <= claimed` is an invariant. `floor > claimed` means the subject
+  is *underclaiming*; it is reported as a re-grade candidate, not an
+  error. Source: `build-scorecards.sh --verify` "stale-fail (advisory:
+  re-grade candidate)".
+* `claimed - floor` (in ordinal ranks) is the *confidence width*. Wide is
+  not forbidden; wide-and-unpublished is.
+
+Rendering:
+
+[cols="1,2,3",options="header"]
+|===
+| Condition | Rendered as | Reading
+
+| `floor == claimed`
+| `CRG C`
+| Every MUST up to C is mechanically demonstrated
+
+| `floor < claimed`
+| `CRG X–C`
+| Claimed C; X is what checks currently prove
+
+| axis `n/a`
+| `CRG n/a`
+| Axis does not apply; reason published in the profile
+
+| suppressed
+| `CRG —` plus defect id
+| A badge defect is open; see §6
+|===
+
+== Criteria a badge must satisfy
+
+Written as MUST / SHOULD / COULD with an executable `check` per row, in
+the vocabulary of `scorecard.schema.json`, so that a badge assertion can
+be audited by the same generator that audits specs. `<S>` is the subject
+repository root; `<axis>` is the lowercase axis name.
+
+=== MUST
+
+[cols="1,4,4",options="header"]
+|===
+| id | Requirement | check
+
+| BC-M1
+| The subject MUST declare its grade in exactly one machine-readable site: `.machine_readable/descriptiles/STATE.a2ml`, key `<axis>-grade`.
+| `grep -qE '^ *<axis>-grade *= *"[XFEDCBA]"' .machine_readable/descriptiles/STATE.a2ml`
+
+| BC-M2
+| The declaration MUST carry an assessed date and the commit it was assessed against.
+| `grep -qE '^ *<axis>-grade-assessed *= *"[0-9]{4}-[0-9]{2}-[0-9]{2}"' .machine_readable/descriptiles/STATE.a2ml && grep -qE '^ *<axis>-grade-basis-commit *= *"[0-9a-f]{7,40}"' .machine_readable/descriptiles/STATE.a2ml`
+
+| BC-M3
+| A profile document MUST exist for the axis, carrying one row per criterion with `status` and `evidence`, per the axis profile template.
+| `test -f spec/<AXIS>-PROFILE.adoc`
+
+| BC-M4
+| Every criterion row with `status = pass` MUST carry non-empty `evidence` (H1).
+| `bash scripts/badge-lint.sh --evidence spec/<AXIS>-PROFILE.adoc`
+
+| BC-M5
+| The subject MUST publish `floor`, and `floor <= claimed` MUST hold (H3, §4).
+| `bash scripts/badge-lint.sh --floor <axis>`
+
+| BC-M6
+| The subject MUST publish its grounded / self-asserted / manual-only / aspirational counts alongside the badge (H7).
+| `bash scripts/badge-lint.sh --counts <axis>`
+
+| BC-M7
+| Every `check` string in the profile MUST be read-only and MUST NOT match licence/SPDX mutation (H11).
+| `bash scripts/badge-lint.sh --readonly spec/<AXIS>-PROFILE.adoc`
+
+| BC-M8
+| No declaration site may contradict another; prose self-assessments MUST agree with `STATE.a2ml` or be marked superseded (H6).
+| `bash scripts/badge-lint.sh --single-source <axis>`
+
+| BC-M9
+| An inapplicable axis MUST be recorded as `n/a` with a reason, never omitted (§2.2).
+| `bash scripts/badge-lint.sh --applicability <axis>`
+
+| BC-M10
+| Stated cross-axis constraints MUST hold, or the badge is suppressed (H10).
+| `bash scripts/badge-lint.sh --cross-axis`
+
+| BC-M11
+| The badge MUST NOT restate a third-party grade, and the subject's README MUST NOT carry both this badge and an unlabelled third-party quality grade (H9).
+| `bash scripts/badge-lint.sh --no-borrowed README.adoc`
+
+| BC-M12
+| The badge entry MUST be registered in `.well-known/badges/registry.a2ml` before it may be rendered (§8).
+| `grep -q '<subject>' .well-known/badges/registry.a2ml`
+|===
+
+`scripts/badge-lint.sh` does not exist. It is *specified* by the check
+column above and is the single implementation deliverable this spec
+creates; until it exists, BC-M4 through BC-M11 are unenforced and MUST
+be recorded as `system = "none"`, not as passes. Saying so here rather
+than assuming the script is the point of H5.
+
+=== SHOULD
+
+[cols="1,4,4",options="header"]
+|===
+| id | Requirement | check
+
+| BC-S1
+| Every MUST criterion of the claimed grade SHOULD carry an executable check, so that `floor == claimed`.
+| `bash scripts/badge-lint.sh --floor <axis> --require-equal`
+
+| BC-S2
+| The checks SHOULD run in CI on the graded commit, not only on a maintainer's machine (prerequisite for `verified`, §7).
+| `test -f .github/workflows/badge-verify.yml`
+
+| BC-S3
+| The assessment SHOULD be re-run at least once per release cycle; an assessment older than the declared review interval is `stale` (§6, staleness).
+| `bash scripts/badge-lint.sh --freshness <axis>`
+
+| BC-S4
+| Where a repository publishes several components, the per-component grades SHOULD be listed, not only the worst-of aggregate.
+| `bash scripts/badge-lint.sh --components`
+|===
+
+=== COULD
+
+[cols="1,4",options="header"]
+|===
+| id | Requirement
+
+| BC-C1
+| Grade transitions COULD be persisted as `crg-grade` octads in VeriSimDB, enabling `HYP-S001` to fire on real demotions (`.verisimdb/config.toml` already declares the octad schema).
+
+| BC-C2
+| A badge COULD be signed, replacing the `PLACEHOLDER-ED25519-SIGNATURE` currently sitting in `.well-known/badges/registry.a2ml` `@attestation`.
+
+| BC-C3
+| The criteria COULD be applied to an external subject, including to an evaluation framework itself — step 3 of standards#446, explicitly out of scope here.
+|===
+
+== Demotion, suppression and staleness
+
+Three distinct outcomes, deliberately not conflated.
+
+*Demotion* — the grade goes down. Triggers:
+
+[cols="1,4,3",options="header"]
+|===
+| id | Trigger | Source
+
+| D1
+| An evidence pointer no longer resolves, or a grounding check that previously exited 0 now fails.
+| `build-scorecards.sh --verify`: "pass + check exits !=0 -> HARD ERROR"
+
+| D2
+| A recorded grade moves backwards along `X F E D C B A`.
+| `hypatia-rules/crg-demotion-detector.a2ml` (HYP-S001)
+
+| D3
+| The declared grade exceeds what the evidence artefacts support — including the self-consistency heuristics (claims >= C with version < 0.5.0 and completion < 50 and no dogfooding evidence; claims >= B with no external targets; claims A with no field signal).
+| `hypatia-rules/crg-overclaim-detector.a2ml` (HYP-S005)
+
+| D4
+| Any axis-specific demotion trigger in the axis spec fires — e.g. CRG's `(demotion (from C) (to D) (trigger "Home context changes..."))`.
+| `COMPONENT-READINESS-GRADES.a2ml` `(transitions ...)`
+
+| D5
+| An unresolved harm report. Routes to `F`, not to the next letter down.
+| `COMPONENT-READINESS-GRADES.a2ml` `(demotion (from A) (to F) ...)`
+|===
+
+*Suppression* — the badge is withdrawn without asserting a new grade,
+because the assertion itself is malformed. Triggers: declaration-site
+contradiction (H6), cross-axis violation (H10), `floor > claimed`
+unreconciled, a `pass` row with no evidence (H1), or a check that mutates
+(H11). A suppressed badge renders as `—` plus the defect id. Suppression
+is not a grade and MUST NOT be recorded as one, because HYP-S001 would
+read a suppression written as a grade change as a real demotion.
+
+*Staleness* — the assessment is older than the declared review interval.
+Staleness is a *distinct visible state*, never an automatic demotion.
+Rationale, from estate experience: clock-driven gates have previously
+turned a single ageing pin into a red board across the estate, and a
+clock-driven grade change would be indistinguishable to HYP-S001 from a
+genuine regression. A stale badge renders its last grade with a `stale`
+marker and its assessed date.
+
+== From self-assessment to verification
+
+Three issuer classes, in increasing strength:
+
+[cols="1,3,4",options="header"]
+|===
+| Class | Who | What it permits
+
+| `self`
+| The subject's own maintainer
+| `verification_state = self-assessed`. Checks may have been run locally. This is the default and is not a lesser badge — it is an honestly labelled one.
+
+| `estate-audit`
+| A second party inside the estate, not the component's author
+| `verification_state = verified`, but only if every grounding check ran in CI against the recorded `basis_commit` and the run id is cited.
+
+| `external`
+| A party outside the estate
+| `verification_state = verified`, with the external party and method named. Required for any claim that the framework has been applied *to* someone, rather than *by* us.
+|===
+
+The path:
+
+. Author the axis profile from the axis template
+  (`<axis>-readiness-grades/templates/<AXIS>-PROFILE-TEMPLATE.adoc`), one
+  row per criterion, `status` + `evidence` + `check`.
+. Declare the grade in `STATE.a2ml` (BC-M1, BC-M2). This is the only
+  declaration site.
+. Run the checks. Record grounded / self-asserted / manual-only /
+  aspirational counts, and compute `floor`.
+. Register the badge in `.well-known/badges/registry.a2ml` (BC-M12).
+. Render `floor–claimed`, `self-assessed`.
+. To reach `verified`: wire the checks into CI on the graded commit
+  (BC-S2), have a second party re-run them, and cite the run id.
+
+The asymmetry is deliberate: a claim can be made cheaply and honestly at
+`self`; upgrading its *credibility* costs a CI run and a second party, not
+a stronger adjective.
+
+== Visual identity and the registry
+
+`.well-known/badges/registry.a2ml` stays the authority for badge
+identity. This spec adds a readiness-badge section to it; it does not
+alter the four existing entries (Panic-Tested, Idris Inside, Palimpsest,
+Rhodium RSR).
+
+Colour map — reused verbatim from the `crg-badge` recipe in the standards
+`Justfile` so that the badge and the existing tooling cannot drift:
+
+[cols="1,1,1,1,1,1,1",options="header"]
+|===
+| A | B | C | D | E | F | X
+
+| brightgreen | green | yellow | orange | red | critical | lightgrey
+|===
+
+Label form: `<AXIS>` for the label, `<floor>–<claimed>` (or the single
+letter when equal) for the message, suffixed ` (self)` when
+`verification_state = self-assessed`. The link target is the profile
+document, so a reader is one click from the evidence rather than from a
+marketing page.
+
+Two defects in the existing registry are recorded here rather than fixed,
+because fixing them is out of scope for a criteria spec:
+
+* `.well-known/badges/registry.a2ml` line 1 is `# Hyperpolymath Project
+  Badge Registry`, not an SPDX identifier. The estate linter reads
+  `head -1`.
+* Its `@attestation` block carries `signature:
+  PLACEHOLDER-ED25519-SIGNATURE`. The registry is currently unsigned; any
+  claim that badges are attested would be false today.
+
+== Known-inert enforcement
+
+This spec cites Hypatia rules as its demotion machinery. Those rules do
+not currently run, and this section exists so that no reader infers
+otherwise.
+
+* `hypatia-rules/crg-demotion-detector.a2ml` (HYP-S001) and
+  `crg-overclaim-detector.a2ml` (HYP-S005) query VeriSimDB octads.
+* `.verisimdb/config.toml` declares the `crg-grade` octad schema, so the
+  schema exists; no evidence in this repository shows a deployed
+  instance.
+* Neither `.github/workflows/hypatia-scan.yml` nor
+  `hypatia-scan-reusable.yml` references `hypatia-rules/` at all
+  (measured: `grep -c hypatia-rules` returns 0 for both). The repo-local
+  rule files are not loaded by the scan that would run them.
+* Consequently every demotion trigger in §6 is, today, a *documented
+  intention* rather than an operating control. They are marked
+  `system = "none"` in `badge-criteria.a2ml` accordingly.
+
+A criteria spec that cited dead enforcement as live would commit exactly
+the defect it exists to prevent.
+
+== Conformance
+
+A subject conforms to BC v0.1 when:
+
+. Every BC-M row is `pass` with evidence, or is `fail` and published as
+  such.
+. `floor` is published and `floor <= claimed`.
+. Grounded / self-asserted / manual-only / aspirational counts are
+  published.
+. No axis is silently omitted.
+. The rendered badge carries the range, the verification state, and a
+  link to the profile.
+
+A subject that fails conformance MUST NOT render a badge. It may
+publish its profile; the profile is useful even when the badge is not
+earned.
+
+== Open questions
+
+Recorded in the style of `ADOPTION-READINESS-GRADES.a2ml`
+`(open-questions ...)`. These need owner rulings before BC goes
+estate-wide.
+
+Q1 — one badge or four?::
+Four axes exist. Rendering four badges is honest but heavy; rendering a
+worst-of single badge is compact but hides which axis is limiting.
+Current draft: per-axis badges, with worst-of used only *within* CRG
+across components. Ruling needed.
+
+Q2 — who may issue `verified`?::
+The draft allows `estate-audit` (a second party inside the estate) to
+issue `verified` provided the checks ran in CI. An alternative is to
+reserve `verified` for `external` only, which would mean the estate has
+no verified badges for the foreseeable future. Ruling needed.
+
+Q3 — is the measured floor too harsh at launch?::
+Under §4 almost every subject in the estate starts at `floor = X`,
+because almost nothing has per-grade executable checks yet. That is
+accurate, and it is also a badge that says `CRG X–C` on every repo, which
+may read as noise rather than signal. Options: ship it as-is (accurate,
+unflattering); or gate badge rendering on `floor >= D` so a badge appears
+only once something is mechanically demonstrated. Ruling needed.
+
+Q4 — a2ml dialect (DEFERRED, not a BC question)::
+Three A2ML dialects are in live use in this repo: s-expression (the four
+grade specs), TOML-ish (the 28 scorecards), and `@block` (the Hypatia
+rules). This was recorded as a BC open question while a machine-readable
+twin was expected to land alongside this document. It no longer is one:
+the twin is held behind the `.a2ml` -> `.deed` conversion, and the dialect
+question belongs to whoever owns that conversion. BC takes no position and
+needs no ruling here. Listed only so the question is not lost.
+
+== What I did NOT check
+
+* Whether `scripts/badge-lint.sh` is feasible as specified. Its check
+  strings are written as a contract for an implementation that does not
+  exist; none of BC-M4..BC-M11 has been executed.
+* Whether a VeriSimDB instance is deployed anywhere outside this
+  repository. The conclusion "inert" rests on the absence of a reference
+  from the two hypatia-scan workflows and on the `component-readiness-grades`
+  scorecard's own statement; it is not a deployment audit.
+* The CRG version number -- *resolved on 2026-09-04, after this draft was
+  written.* Three files agree on *v2.0*:
+  `component-readiness-grades/COMPONENT-READINESS-GRADES.adoc` line 3,
+  the same directory's `.a2ml` line 11 (`(version "2.0")`), and
+  `hypatia-rules/crg-overclaim-detector.a2ml` line 242. Only
+  `templates/CRG-PROFILE-TEMPLATE.adoc` claims v2.2 (lines 17 and 25), and
+  no v2.2 spec exists in the repository -- so that is a defect in the
+  template, not an ambiguity in the spec. Filed as standards#733.
+  *This document cites v2.0.*
+* Any rendering behaviour of shields.io. The colour map is copied from
+  the Justfile; no badge was rendered.
+* Whether the four existing registry badges are in use anywhere, or
+  whether the ED25519 attestation was ever real.
+* Anything about `boj-server` beyond the badge removal noted below.
+
+*Correction to this draft.* The sentence originally here read "the owner
+moved the pilot to `standards`". That was wrong. The pilot subject is *not*
+settled: standards#446 puts three options on the table -- pilot =
+`boj-server`, pilot = `standards`, or defer the framework -- and the confirm
+is still open as item 5 of standards#709. The worked example's working
+filename must not be read as a ruling.
+
+*Update since drafting.* The Glama third-party badge question is now partly
+closed: the badge line was removed from both `boj-server` READMEs on
+2026-08-31 via hyperpolymath/boj-server#324. That step is correct under all
+three options, so it pre-empts nothing. The Glama listing links,
+`glama.json` and `docs/glama/` remain untouched, pending the same #709 item.
+
+== Provenance
+
+This document was drafted on 2026-08-28 against a read-only depth-1 clone of
+`hyperpolymath/standards` at commit `4e74daad2f74bd836eec04ff2f4202bee973107c`.
+Nothing was written to the repository during drafting.
+
+It was reviewed on 2026-09-04 against `origin/main` at `516bd724`, *38 commits
+later*. Path existence alone is a weak check -- a file can survive while the
+field a citation rests on is renamed away -- so the review verified cited
+*content*, not just cited paths:
+
+[cols="3,2,3"]
+|===
+| Citation rests on | Location | Verified 2026-09-04
+
+| Honesty rules H1, H2, H4, H5, H11
+| `.machine_readable/scorecards/scorecard.schema.json`
+| Fields `evidence`, `check`, `aspirational`, `system` all still present
+
+| Honesty rule H12
+| `scripts/build-scorecards.sh`
+| `run_verify()` defined at line 184, invoked at line 436
+
+| Honesty rule H8
+| `hypatia-rules/crg-overclaim-detector.a2ml`
+| Line 242 still carries `honest D > dishonest B`
+
+| Honesty rule H6
+| `.machine_readable/STATE.a2ml`
+| `@scanner` glob unchanged
+
+| Demotion triggers D2–D5, cross-axis rules
+| the four `*-readiness-grades/*.adoc` specs
+| All four present; `ARG <= TRG` and `ARG-A requires FRG >= B` unchanged
+|===
+
+The one discrepancy the review did surface -- the CRG version number -- is
+recorded above and filed as standards#733. No honesty rule lost its
+grounding.
+
+*Nothing in this document has been executed.* It is a criteria specification,
+which is step 1 of standards#446 and deliberately stops short of step 2 (a
+pilot) and step 3 (an evaluation engine). The check strings in §8 are written
+as a contract for an implementation that does not yet exist.
