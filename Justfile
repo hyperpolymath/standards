@@ -247,19 +247,6 @@ help-me:
     @echo "Include the output of 'just doctor' in your report."
 
 
-# Verify scripts/check-ts-allowlist.deno.js matches what compiling
-# scripts/check-ts-allowlist.affine produces. Run after editing the
-# .affine source. Exit 0 = in sync; non-zero with diff = drifted.
-# See standards#312.
-check-ts-allowlist-drift:
-    @command -v affinescript >/dev/null 2>&1 || { echo "affinescript compiler not on PATH — skipping drift check"; exit 0; }
-    @tmp="$$(mktemp /tmp/check-ts-allowlist-drift.XXXXXX.deno.js)"; \
-      affinescript compile --deno-esm -o "$$tmp" scripts/check-ts-allowlist.affine; \
-      diff -u scripts/check-ts-allowlist.deno.js "$$tmp"; \
-      rc=$$?; \
-      rm -f "$$tmp"; \
-      exit $$rc
-
 # Print the current CRG grade (reads from READINESS.md '**Current Grade:** X' line)
 crg-grade:
     @grade=$$(grep -oP '(?<=\*\*Current Grade:\*\* )[A-FX]' READINESS.md 2>/dev/null | head -1); \

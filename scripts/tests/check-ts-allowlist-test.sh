@@ -2,19 +2,19 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 #
-# Regression test for the compiled scripts/check-ts-allowlist.deno.js artifact.
-# The canonical source is check-ts-allowlist.affine, which is covered by the
-# separate source/compile drift check. Each case constructs a fresh fixture tree
-# under a tmpdir, runs the executable artifact with `--allow-read`, and asserts
-# exit code + key output substrings. Mirrors the behaviour the previous inline-
-# Python step was relied on for, so a future change cannot silently regress
-# estate-wide policy.
+# Regression test for scripts/check-ts-allowlist.sh, the hand-authored
+# JavaScript/TypeScript gate that governance-reusable.yml runs on every estate
+# repo. Each case constructs a fresh fixture tree under a tmpdir, runs the gate
+# against it, and asserts exit code + key output substrings. Mirrors the
+# behaviour the previous inline-Python step was relied on for, so a future
+# change cannot silently regress estate-wide policy. The gate was a Deno
+# artifact until 2026-09-04; it is now pure bash + awk with no JS runtime.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_TARGETS=(
-  "$SCRIPT_DIR/../check-ts-allowlist.deno.js"
+  "$SCRIPT_DIR/../check-ts-allowlist.sh"
 )
 
 for target in "${SCRIPT_TARGETS[@]}"; do
@@ -44,7 +44,7 @@ run_case() {
   for target in "${SCRIPT_TARGETS[@]}"; do
     set +e
     local out
-    out="$(cd "$tmp" && deno run --allow-read --no-lock "$target" 2>&1)"
+    out="$(cd "$tmp" && bash "$target" 2>&1)"
     local actual_exit=$?
     set -e
 
