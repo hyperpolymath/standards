@@ -79,6 +79,53 @@ jobs:
           results_file: results.sarif
           results_format: sarif
           publish_results: false
+      # scorecard-action forces Local (filesystem) mode on pull_request events,
+      # so the PR run only ever produces the supply-chain/local category. The
+      # code-scanning ruleset evaluates Scorecard per category and main's
+      # scheduled run also carries supply-chain/branch-protection and
+      # supply-chain/online-scm, so a PR is "expecting 2 results" forever.
+      # Those two categories are repo-state properties (branch protection, CI,
+      # code review, maintenance), not properties of a commit, and scorecard
+      # refuses to compute them for a non-HEAD --commit. So measure them at
+      # repository HEAD with the pinned scorecard CLI, restricted to exactly the
+      # repo-level checks, and merge the runs into the same SARIF. The local
+      # category stays the scorecard-action measurement of the PR tree.
+      - name: Install scorecard CLI (pinned + checksum-verified)
+        run: |
+          set -euo pipefail
+          SCORECARD_VERSION=5.5.0
+          SHA256=83b90a05c1540ef1390db1cd5711e5fd04be9c1d8537fb84d39d02092d6a8dff
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o scorecard.tar.gz \
+            "https://github.com/ossf/scorecard/releases/download/v${SCORECARD_VERSION}/scorecard_${SCORECARD_VERSION}_linux_amd64.tar.gz"
+          echo "${SHA256}  scorecard.tar.gz" | sha256sum -c -
+          tar -xzf scorecard.tar.gz scorecard
+          chmod +x scorecard
+          ./scorecard version
+      - name: Measure repo-level checks at HEAD
+        env:
+          ENABLE_SARIF: "1"
+          GITHUB_AUTH_TOKEN: ${{ github.token }}
+          # Policy file from scorecard-action at the same pinned SHA as above.
+          POLICY_URL: https://raw.githubusercontent.com/ossf/scorecard-action/2d1146689b8cda280b9bc96326124645441f03bc/policies/template.yml
+          POLICY_SHA256: 6e75dcc0df989d333492c0e1f6e484fc5b4d26ab768333ddcd0e3788539689b0
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/policy.yml" "$POLICY_URL"
+          echo "${POLICY_SHA256}  $RUNNER_TEMP/policy.yml" | sha256sum -c -
+          "$RUNNER_TEMP/scorecard" \
+            --repo="github.com/${GITHUB_REPOSITORY}" \
+            --checks=Branch-Protection,CI-Tests,CII-Best-Practices,Code-Review,Contributors,Maintained,Signed-Releases \
+            --format=sarif --policy="$RUNNER_TEMP/policy.yml" --show-details \
+            > "$RUNNER_TEMP/repo-state.sarif"
+          # Merge: keep every run from the PR-tree scan, append the repo-level
+          # runs. Fail if the result is not exactly the three categories.
+          jq -s '.[0] as $pr | .[1] as $head | $pr | .runs += $head.runs' \
+            results.sarif "$RUNNER_TEMP/repo-state.sarif" > merged.sarif
+          mv merged.sarif results.sarif
+          jq -r '.runs[].automationDetails.id' results.sarif
+          n=$(jq '[.runs[].automationDetails.id | split("/")[0:2] | join("/")] | unique | length' results.sarif)
+          test "$n" -eq 3 || { echo "expected 3 Scorecard categories, got $n" >&2; exit 1; }
       - name: Upload SARIF to code scanning
         uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
