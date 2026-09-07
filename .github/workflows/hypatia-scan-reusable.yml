@@ -182,6 +182,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Filter SARIF through the baseline before upload
+        id: filter_baseline
         if: always()
         run: |
           # ⚠ WITHOUT THIS, ACKNOWLEDGING A FINDING DOES NOT UNBLOCK ANYTHING.
@@ -269,6 +270,8 @@ jobs:
       - name: Block high and critical findings when requested
         id: blocking-findings
         if: inputs.block-on-high
+        env:
+          HYPATIA_BASELINE_FILTERED: ${{ steps.filter_baseline.outputs.filtered }}
         run: |
           set -euo pipefail
           # Use the scanner's authoritative SARIF projection, after the same
@@ -287,6 +290,10 @@ jobs:
               exit 2
             fi
             bash scripts/apply-baseline.sh hypatia-findings.relativized.json .hypatia-baseline.json advisory >/dev/null
+            if [ "${HYPATIA_BASELINE_FILTERED:-}" != "true" ]; then
+              echo "::error::Baseline validation passed but SARIF filtering did not complete"
+              exit 2
+            fi
           fi
           # Missing/truncated output must never become a clean security gate.
           if ! jq -se '

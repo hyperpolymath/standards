@@ -86,6 +86,8 @@ sarif_check 'baseline without validator refuses' 2 "$clean"
 mkdir scripts
 cp "$repo/scripts/apply-baseline.sh" scripts/apply-baseline.sh
 printf '%s' '[]' > hypatia-findings.relativized.json
+sarif_check 'unconfirmed baseline filtering refuses' 2 "$clean"
+export HYPATIA_BASELINE_FILTERED=true
 sarif_check 'valid baseline accepted' 0 "$clean"
 printf '%s' '{}' > .hypatia-baseline.json
 sarif_check 'malformed baseline refuses even without findings' 2 "$clean"
