@@ -19,7 +19,7 @@ export GITHUB_OUTPUT="$tmp/output" GITHUB_STEP_SUMMARY="$tmp/summary"
 cd "$tmp"
 check() {
   local name=$1 expected=$2 payload=$3 actual
-  if [ "$payload" = MISSING ]; then
+  if [[ "$payload" = MISSING ]]; then
     rm -f hypatia-findings.json
   else
     printf '%s' "$payload" > hypatia-findings.json
@@ -29,7 +29,7 @@ check() {
   else
     actual=$?
   fi
-  if [ "$actual" -ne "$expected" ]; then
+  if [[ "$actual" -ne "$expected" ]]; then
     printf 'FAIL: %s: expected %s, got %s\n' "$name" "$expected" "$actual"
     cat result.log
     exit 1
