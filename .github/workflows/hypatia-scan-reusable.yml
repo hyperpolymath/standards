@@ -5,6 +5,12 @@ name: Hypatia Reusable Scan
 
 on:
   workflow_call:
+    inputs:
+      block-on-high:
+        description: Refuse any high or critical finding, without requiring a baseline
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   actions: read
@@ -75,7 +81,6 @@ jobs:
           fi
 
       - name: Run Hypatia scan
-        id: scan
         env:
           # The scanner reads a single env var, GITHUB_TOKEN, to pull Dependabot,
           # code-scanning and secret-scanning alerts (lib/rules/{dependabot,
@@ -102,26 +107,45 @@ jobs:
           # category ("hypatia") as the historical upload, so GitHub RECONCILES:
           # findings fixed in code since the last scan auto-close instead of
           # orphaning as stale open alerts.
-          HYPATIA_FORMAT=sarif "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero > hypatia.sarif || echo '{"version":"2.1.0","runs":[]}' > hypatia.sarif
+          HYPATIA_FORMAT=sarif "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero > hypatia.sarif
 
-          FINDING_COUNT=$(jq '. | length' hypatia-findings.json 2>/dev/null || echo 0)
-          CRITICAL=$(jq '[.[] | select(.severity == "critical")] | length' hypatia-findings.json 2>/dev/null || echo 0)
-          HIGH=$(jq '[.[] | select(.severity == "high")] | length' hypatia-findings.json 2>/dev/null || echo 0)
-          MEDIUM=$(jq '[.[] | select(.severity == "medium")] | length' hypatia-findings.json 2>/dev/null || echo 0)
+      - name: Validate findings and count severities
+        id: scan
+        run: |
+          set -euo pipefail
+          # Exactly one JSON array, with a recognised severity on every finding.
+          # Missing/truncated output is a scanner error, never an empty clean scan.
+          if [ ! -s hypatia-findings.json ] || ! jq -e -s '
+            length == 1 and (.[0] | type == "array" and all(.[];
+              type == "object" and (.severity as $s |
+                ["critical", "high", "medium", "low", "info", "informational"] | index($s) != null)))
+          ' hypatia-findings.json >/dev/null; then
+            echo "::error::Hypatia did not produce one valid findings array"
+            exit 2
+          fi
 
-          echo "findings_count=$FINDING_COUNT" >> $GITHUB_OUTPUT
-          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
-          echo "high=$HIGH" >> $GITHUB_OUTPUT
-          echo "medium=$MEDIUM" >> $GITHUB_OUTPUT
+          FINDING_COUNT=$(jq '. | length' hypatia-findings.json)
+          CRITICAL=$(jq '[.[] | select(.severity == "critical")] | length' hypatia-findings.json)
+          HIGH=$(jq '[.[] | select(.severity == "high")] | length' hypatia-findings.json)
+          MEDIUM=$(jq '[.[] | select(.severity == "medium")] | length' hypatia-findings.json)
 
-          echo "## Hypatia Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
-          echo "| High     | $HIGH |" >> $GITHUB_STEP_SUMMARY
-          echo "| Medium   | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Total**| $FINDING_COUNT |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "findings_count=$FINDING_COUNT"
+            echo "critical=$CRITICAL"
+            echo "high=$HIGH"
+            echo "medium=$MEDIUM"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Hypatia Scan Results"
+            echo ""
+            echo "| Severity | Count |"
+            echo "|----------|-------|"
+            echo "| Critical | $CRITICAL |"
+            echo "| High     | $HIGH |"
+            echo "| Medium   | $MEDIUM |"
+            echo "| **Total**| $FINDING_COUNT |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Relativize finding paths
         if: always()
@@ -242,8 +266,20 @@ jobs:
             echo "No committed baseline — gate stays advisory (see next step)."
           fi
 
+      - name: Block high and critical findings when requested
+        id: blocking-findings
+        if: inputs.block-on-high
+        run: |
+          set -euo pipefail
+          count=$(jq '[.[] | select(.severity == "high" or .severity == "critical")] | length' hypatia-findings.json)
+          if [ "$count" -gt 0 ]; then
+            echo "::error::Hypatia found $count high or critical finding(s); see the scan artifact"
+            exit 1
+          fi
+          echo "Hypatia blocking gate: no high or critical findings"
+
       - name: Check for critical issues (ADVISORY — does not gate)
-        if: steps.scan.outputs.critical > 0
+        if: '!inputs.block-on-high && steps.scan.outputs.critical > 0'
         run: |
           # This scan is ADVISORY / fix-forward WHEN NO BASELINE IS COMMITTED
           # (the step above becomes the blocking gate once .hypatia-baseline.json
