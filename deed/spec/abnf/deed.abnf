@@ -10,18 +10,19 @@
 deed          = header *comment form
 
 header        = 1*spdx-line
-spdx-line     = ";;" SP "SPDX-" 1*(VCHAR / SP) CRLF
+spdx-line     = ";;" SP "SPDX-" 1*(VCHAR / SP) line-end
 
-form          = "(" doc-head version-field *field *clause ")"
+form          = "(" doc-head token-sep version-field
+                *(token-sep (field / clause)) [token-sep] ")"
 doc-head      = "estate-deed" / "repo-deed" / "estate-atlas-deed" / "praxis-deed"
-version-field = ":schema-version" 1*WSP string   ; REQUIRED on every head
+version-field = ":schema-version" token-sep string   ; REQUIRED on every head
 
-field         = keyword value
-clause        = "(" symbol *field *clause ")"
+field         = keyword token-sep value
+clause        = "(" symbol *(token-sep (field / clause)) [token-sep] ")"
 
 keyword       = ":" symbol
 value         = string / symbol / integer / boolean / uuid5 / quoted / list
-list          = "(" *value ")"
+list          = "(" [value *(token-sep value)] [token-sep] ")"
 quoted        = "'" ( symbol / list )
 
 symbol        = ALPHA *( ALPHA / DIGIT / "." / "*" / "/" / "<" / ">"
@@ -32,15 +33,25 @@ symbol        = ALPHA *( ALPHA / DIGIT / "." / "*" / "/" / "<" / ">"
                 ; it is never a field separator.
 
 string        = DQUOTE *( str-char / escape ) DQUOTE
-str-char      = %x20-21 / %x23-5B / %x5D-10FFFF   ; any char except " and \
+str-char      = %x20-21 / %x23-5B / %x5D-7E / UTF8-2 / UTF8-3 / UTF8-4
+                                                    ; any char except " and \
 escape        = "\" ( DQUOTE / "\" / "n" / "t" )  ; no other escape is valid
+
+UTF8-2        = %xC2-DF UTF8-tail
+UTF8-3        = %xE0 %xA0-BF UTF8-tail / %xE1-EC 2UTF8-tail
+                / %xED %x80-9F UTF8-tail / %xEE-EF 2UTF8-tail
+UTF8-4        = %xF0 %x90-BF 2UTF8-tail / %xF1-F3 3UTF8-tail
+                / %xF4 %x80-8F 2UTF8-tail
+UTF8-tail     = %x80-BF
 
 integer       = [ "-" ] 1*DIGIT
 boolean       = "#t" / "#f"                       ; never "true", never "yes"
 uuid5         = "#u5" string                      ; body is the NAME input to
                                                   ; RFC 4122 4.3 under the
                                                   ; estate namespace
-comment       = ";" *( VCHAR / SP ) CRLF
+token-sep     = 1*(WSP / line-end / comment)
+line-end      = CRLF / LF
+comment       = ";" *( VCHAR / SP ) line-end
 
 ; Order is not semantic. Fields and clauses are order-free; a canonical
 ; ordering is a lint convention for diffability, never a parse rule.

@@ -27,7 +27,7 @@ Landing it is the owner's call.
 
 == Why this document exists
 
-Three measured facts, 2026-09-08, motivate every decision below.
+Two measured facts, 2026-09-08, motivate the decisions below.
 
 *Fact 1 — the only runnable gate cannot read a deed.* `validate-a2ml.sh`
 recognises four identity forms and no more:
@@ -56,17 +56,9 @@ rc=1
 against *20* occurrences of `a2ml`. No tool in the estate scans a `.deed` file
 today.
 
-*Fact 3 — the identity primitive already exists, compiles, and is decidable.*
-`src/A2ML/BaseVocab.idr` builds clean (11/11 modules, `%default total`) and its
-own header states its purpose: "the anti-desync primitive: one neutral shape
-for a thing that can be identified, located, attributed, and integrity-checked.
-It names no downstream consumer."
-
-The gap is therefore not a missing grammar. It is that a *typed, total,
-surface-neutral* identity core exists in Idris2, and a *weaker, rival* identity
-rule exists in shell regex, and neither knows about `.deed`. This document
-closes that by defining the deed surface in terms of the typed core, and by
-specifying the single change the validator needs.
+The gap is therefore that the existing shell validator knows neither the deed
+surface nor `.deed` files. This document closes that by defining the deed
+surface and specifying the single change the validator needs.
 
 == Scope and non-goals
 
@@ -86,7 +78,7 @@ identical input bytes.
 |===
 | `COMMENT`  | `;;` to end of line. A single `;` is also a comment; `;;` is the
                convention for a whole-line comment and `;` for a trailing one.
-| `WS`       | space, tab, CR, LF. Insignificant except as a token separator.
+| `WS`       | space, tab, CRLF, or LF. Insignificant except as a token separator.
 | `SYMBOL`   | `[A-Za-z][A-Za-z0-9.*/<>=!?+-]*`. Dots are structural: `Type.Software.Library`
                is one symbol whose dotted segments are meaningful to the type resolver.
 | `KEYWORD`  | `:` followed by a `SYMBOL`. Hyphen, never underscore: `:schema-version`.
@@ -110,17 +102,21 @@ speciation artefact, not a deed.
 ----
 Deed         ::= Header COMMENT* Form
 Header       ::= SpdxLine+                  ; see Section 4.1
-Form         ::= "(" DocHead VersionField Field* Clause* ")"
+Form         ::= "(" DocHead TokenSep VersionField
+                    (TokenSep (Field | Clause))* TokenSep? ")"
 DocHead      ::= "estate-deed" | "repo-deed" | "estate-atlas-deed"
                | "praxis-deed"
-VersionField ::= ":schema-version" STRING   ; REQUIRED on every head
+VersionField ::= ":schema-version" TokenSep STRING   ; REQUIRED on every head
 
-Field        ::= KEYWORD Value
+Field        ::= KEYWORD TokenSep Value
 Value        ::= STRING | SYMBOL | INTEGER | BOOLEAN | UUID5
                | QUOTED | List
-List         ::= "(" Value* ")"
+List         ::= "(" (Value (TokenSep Value)*)? TokenSep? ")"
 
-Clause       ::= "(" SYMBOL Field* Clause* ")"
+Clause       ::= "(" SYMBOL (TokenSep (Field | Clause))* TokenSep? ")"
+TokenSep     ::= (WSP | LineEnd | Comment)+
+LineEnd      ::= CRLF | LF
+Comment      ::= ";" (VCHAR | SP)* LineEnd
 ----
 
 A *Field* is a keyword/value pair. A *Clause* is a named sub-form that may
@@ -170,10 +166,13 @@ second extension.
 | Stem pattern      | Head form           | Meaning
 
 | `estate_chora.deed` | `estate-deed`       | *Noun.* The estate's vocabulary. One per estate.
-| `*_chora.deed`      | `repo-deed`         | *Noun.* What a repo IS. A record.
+| `*_chora.deed` (except `estate_chora.deed`) | `repo-deed` | *Noun.* What a repo IS. A record.
 | `ATLAS.deed`        | `estate-atlas-deed` | *Noun.* The registry of all deeds.
 | `*_praxis.deed`     | `praxis-deed`       | *Verb.* What a tool DOES. Rules.
 |===
+
+The repository pattern explicitly excludes `estate_chora.deed`; dispatchers
+MUST apply the exact estate filename rule before the repository pattern.
 
 *RULED 2026-09-08 by the owner:* `praxis-deed` is a genuine fourth head, not a
 facet of `repo-deed`. A tool carries obligations a repo does not — what it
