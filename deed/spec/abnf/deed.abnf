@@ -1,0 +1,48 @@
+; SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+; SPDX-License-Identifier: CC-BY-SA-4.0
+;
+; DEED grammar, v0.1.0 DRAFT
+; Normative for parsing. Prose and rationale: ../DEED-GRAMMAR-SPEC.adoc
+;
+; NOTE: there is no "key = value" production and no "[section]" production.
+; The only bracket is "(". A file using "=" is not a deed.
+
+deed          = header *comment form
+
+header        = 1*spdx-line
+spdx-line     = ";;" SP "SPDX-" 1*(VCHAR / SP) CRLF
+
+form          = "(" doc-head version-field *field *clause ")"
+doc-head      = "estate-deed" / "repo-deed" / "estate-atlas-deed" / "praxis-deed"
+version-field = ":schema-version" 1*WSP string   ; REQUIRED on every head
+
+field         = keyword value
+clause        = "(" symbol *field *clause ")"
+
+keyword       = ":" symbol
+value         = string / symbol / integer / boolean / uuid5 / quoted / list
+list          = "(" *value ")"
+quoted        = "'" ( symbol / list )
+
+symbol        = ALPHA *( ALPHA / DIGIT / "." / "*" / "/" / "<" / ">"
+                       / "=" / "!" / "?" / "+" / "-" )
+                ; "." is STRUCTURAL: Type.Software.Library is ONE symbol
+                ; whose dotted segments are meaningful to the type resolver.
+                ; "=" may appear INSIDE a symbol (e.g. a comparison operator);
+                ; it is never a field separator.
+
+string        = DQUOTE *( str-char / escape ) DQUOTE
+str-char      = %x20-21 / %x23-5B / %x5D-10FFFF   ; any char except " and \
+escape        = "\" ( DQUOTE / "\" / "n" / "t" )  ; no other escape is valid
+
+integer       = [ "-" ] 1*DIGIT
+boolean       = "#t" / "#f"                       ; never "true", never "yes"
+uuid5         = "#u5" string                      ; body is the NAME input to
+                                                  ; RFC 4122 4.3 under the
+                                                  ; estate namespace
+comment       = ";" *( VCHAR / SP ) CRLF
+
+; Order is not semantic. Fields and clauses are order-free; a canonical
+; ordering is a lint convention for diffability, never a parse rule.
+; Where precedence matters (rules in a praxis deed) it is carried by an
+; explicit :priority INTEGER, never by file position.
