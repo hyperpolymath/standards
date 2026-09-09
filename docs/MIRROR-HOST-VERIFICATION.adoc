@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: MPL-2.0
+= Mirror SSH host verification
+
+The reusable mirror workflow verifies the remote Ed25519 host fingerprint
+before exporting a strict SSH configuration or pushing any refs. An empty,
+malformed, changed, or unapproved host key fails that mirror job. The fetched
+key is never trusted merely because `ssh-keyscan` returned it.
+
+Callers enable each mirror with its optional secret: `GITLAB_SSH_KEY`,
+`BITBUCKET_SSH_KEY`, `CODEBERG_SSH_KEY`, `SOURCEHUT_SSH_KEY`, `DISROOT_SSH_KEY`,
+`GITEA_SSH_KEY`, or `RADICLE_KEY`. Prefer explicit secret mappings in callers.
+An absent secret leaves that mirror disabled.
+
+GitLab, Bitbucket, Codeberg, and Disroot have published fingerprints pinned
+in the workflow. Their official reference pages are:
+
+* https://docs.gitlab.com/user/gitlab_com/#ssh-host-keys-fingerprints[GitLab]
+* https://support.atlassian.com/bitbucket-cloud/docs/configure-ssh-and-two-step-verification/[Bitbucket]
+* https://docs.codeberg.org/security/ssh-fingerprint/[Codeberg]
+* https://disroot.org/services/git[Disroot]
+
+SourceHut requires `SOURCEHUT_SSH_FINGERPRINT`. A custom Gitea mirror requires
+both `GITEA_HOST` and `GITEA_SSH_FINGERPRINT`. Obtain these values through an
+authenticated administrative channel or the forge's published host-key
+documentation. Do not populate them from the network scan being verified.
+
+For an approved host-key rotation, set the corresponding repository or
+organisation variable `<FORGE>_SSH_FINGERPRINT` to the approved `SHA256:...`
+value. The six SSH forges support this override. The expected value contains
+one Ed25519 fingerprint, with no surrounding whitespace or key material.
+
+Mirror organisation selection is `<FORGE>_ORG`, then `MIRROR_ORG`, then the
+GitHub repository owner. This preserves per-forge destinations while allowing
+a shared destination for transferred repositories.
+
+`scripts/tests/science-ci-security-test.sh` exercises every actual SSH
+verification step with the real `ssh-keygen` fingerprint implementation. It
+tests approved, tampered, absent, malformed, and unapproved keys, including
+that failure cannot export a trusted SSH configuration. The same suite checks
+that the Hypatia source checkout matches its resolved cache identity.
