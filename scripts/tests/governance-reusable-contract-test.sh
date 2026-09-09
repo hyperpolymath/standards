@@ -18,8 +18,8 @@ fail() {
 helper_checkout="$(grep -F -A 18 -- '- name: Checkout the pinned Standards policy helpers' "$GOVERNANCE")"
 # GitHub expression is an asserted literal.
 # shellcheck disable=SC2016
-printf '%s\n' "$helper_checkout" | grep -Fq 'ref: ${{ job.workflow_sha }}' ||
-  fail "governance helpers are not fetched from job.workflow_sha"
+printf '%s\n' "$helper_checkout" | grep -Eq 'ref: [0-9a-f]{40}$' ||
+  fail "governance helpers are not fetched from an immutable commit"
 if printf '%s\n' "$helper_checkout" | grep -Eq '^[[:space:]]*ref:[[:space:]]*main[[:space:]]*$'; then
   fail "governance helper execution still follows moving main"
 fi

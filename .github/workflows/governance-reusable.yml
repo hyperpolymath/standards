@@ -45,9 +45,9 @@ jobs:
         with:
           repository: hyperpolymath/standards
           # The gate needs the full graph for ancestry and age checks, but its
-          # script must come from the exact reusable commit rather than moving
-          # main. This also lets a Standards PR test its own validator change.
-          ref: ${{ job.workflow_sha }}
+          # script comes from a reviewed immutable helper revision. GitHub does
+          # not expose job.workflow_sha; an absent property silently floats.
+          ref: 73856a817dcaa91a87cca97f32f47fb0edb8b9a1
           path: .standards-history
           fetch-depth: 0
           filter: tree:0
@@ -87,7 +87,7 @@ jobs:
           repository: hyperpolymath/standards
           # Exact commit of this reusable workflow. This preserves consumer
           # pin semantics and lets a standards PR test its own scripts.
-          ref: ${{ job.workflow_sha }}
+          ref: 73856a817dcaa91a87cca97f32f47fb0edb8b9a1
           path: .standards-checkout
           sparse-checkout: |
             rhodium-standard-repositories/actions-allowlist
@@ -123,7 +123,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: ${{ job.workflow_sha }}
+          ref: 73856a817dcaa91a87cca97f32f47fb0edb8b9a1
           path: .standards-checkout
           sparse-checkout: |
             rhodium-standard-repositories/actions-allowlist
@@ -267,7 +267,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: ${{ job.workflow_sha }}
+          ref: 73856a817dcaa91a87cca97f32f47fb0edb8b9a1
           path: .standards-checkout
           sparse-checkout: |
             scripts
@@ -1107,15 +1107,24 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          # Execute helper code from the same immutable Standards revision as
-          # this reusable workflow. A moving `main` checkout would let a caller
-          # pinned to workflow revision X execute implementation revision Y.
-          ref: ${{ job.workflow_sha }}
+          # Execute helpers from this reviewed immutable revision, which includes
+          # the parser and descriptile-policy checks. Bump this helper pin when
+          # changing the implementation; job.workflow_sha is not a GitHub context.
+          ref: 73856a817dcaa91a87cca97f32f47fb0edb8b9a1
           path: .standards-dupkey
           sparse-checkout: |
             scripts/check-workflow-duplicate-keys.sh
+            scripts/check-descriptile-policy.sh
             tools/policy/check-workflows-parse.sh
           sparse-checkout-cone-mode: false
+      - name: Check descriptile policy consistency
+        run: |
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
+            SCRIPT=scripts/check-descriptile-policy.sh
+          else
+            SCRIPT=.standards-dupkey/scripts/check-descriptile-policy.sh
+          fi
+          bash "$SCRIPT"
       - name: Parse every tracked workflow
         run: |
           if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
@@ -1242,7 +1251,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: ${{ job.workflow_sha }}
+          ref: 73856a817dcaa91a87cca97f32f47fb0edb8b9a1
           path: .standards-lock
           persist-credentials: false
           sparse-checkout: |
