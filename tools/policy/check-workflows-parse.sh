@@ -21,19 +21,16 @@ fi
 parser=''
 if command -v yq >/dev/null 2>&1; then
   parser=yq
-elif command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' >/dev/null 2>&1; then
-  parser=python
 elif command -v ruby >/dev/null 2>&1; then
   parser=ruby
 else
-  echo "::error::no YAML parser available (yq, python3+pyyaml, or ruby)"
+  echo "::error::no YAML parser available (yq or ruby)"
   exit 1
 fi
 
 parse_ok() {
   case "$parser" in
     yq) yq '.' "$1" >/dev/null 2>&1 ;;
-    python) python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1], encoding="utf-8"))' "$1" >/dev/null 2>&1 ;;
     ruby) ruby -ryaml -e 'YAML.safe_load(File.read(ARGV[0]), aliases: true)' "$1" >/dev/null 2>&1 ;;
   esac
 }
@@ -46,9 +43,6 @@ has_reusable_timeout() {
     yq)
       yq -e '[.jobs[] | select(has("uses") and has("timeout-minutes"))] | length > 0' "$1" >/dev/null 2>&1
       ;;
-    python)
-      python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}; sys.exit(not any(isinstance(j,dict) and "uses" in j and "timeout-minutes" in j for j in (d.get("jobs") or {}).values()))' "$1"
-      ;;
     ruby)
       ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0]), aliases: true) || {}; jobs=d["jobs"] || {}; exit(jobs.values.any? { |j| j.is_a?(Hash) && j.key?("uses") && j.key?("timeout-minutes") } ? 0 : 1)' "$1"
       ;;
@@ -59,7 +53,6 @@ has_reusable_timeout() {
 has_no_jobs() {
   case "$parser" in
     yq) yq -e '.jobs == null or (.jobs | length == 0)' "$1" >/dev/null 2>&1 ;;
-    python) python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1], encoding="utf-8")); sys.exit(not (not isinstance(d,dict) or not isinstance(d.get("jobs"),dict) or not d["jobs"]))' "$1" ;;
     ruby) ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0]), aliases: true); exit(!d.is_a?(Hash) || !d["jobs"].is_a?(Hash) || d["jobs"].empty? ? 0 : 1)' "$1" ;;
   esac
 }

@@ -89,9 +89,16 @@ ln -s "$(command -v git)" "$without_parser/bin/git"
 valid="$fixture/valid"
 init_fixture "$valid"
 mkdir -p "$valid/.github/workflows"
-printf '%s\n' 'name: test' 'on: push' 'jobs: {}' > "$valid/.github/workflows/test.yml"
+printf '%s\n' 'name: test' 'on: push' 'jobs:' '  test:' '    runs-on: ubuntu-latest' '    steps:' '      - run: echo tested' > "$valid/.github/workflows/test.yml"
 git -C "$valid" add .github/workflows/test.yml
 (cd "$valid" && expect_pass "$workflow_gate")
+
+empty_jobs="$fixture/empty-jobs"
+init_fixture "$empty_jobs"
+mkdir -p "$empty_jobs/.github/workflows"
+printf '%s\n' 'name: test' 'on: push' 'jobs: {}' > "$empty_jobs/.github/workflows/test.yml"
+git -C "$empty_jobs" add .github/workflows/test.yml
+(cd "$empty_jobs" && expect_fail "$workflow_gate")
 
 invalid="$fixture/invalid"
 init_fixture "$invalid"
