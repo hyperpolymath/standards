@@ -55,6 +55,15 @@ has_reusable_timeout() {
   esac
 }
 
+# A syntactically valid file with no jobs is still rejected at startup.
+has_no_jobs() {
+  case "$parser" in
+    yq) yq -e '.jobs == null or (.jobs | length == 0)' "$1" >/dev/null 2>&1 ;;
+    python) python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1], encoding="utf-8")); sys.exit(not (not isinstance(d,dict) or not isinstance(d.get("jobs"),dict) or not d["jobs"]))' "$1" ;;
+    ruby) ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0]), aliases: true); exit(!d.is_a?(Hash) || !d["jobs"].is_a?(Hash) || d["jobs"].empty? ? 0 : 1)' "$1" ;;
+  esac
+}
+
 has_forbidden_control() {
   od -An -v -tu1 "$1" | awk '
     { for (i=1; i<=NF; i++) if (($i < 9) || ($i > 10 && $i < 13) || ($i > 13 && $i < 32)) found=1 }
@@ -71,6 +80,9 @@ for file in "${workflows[@]}"; do
     if has_forbidden_control "$file"; then
       echo '    contains a YAML-forbidden control character'
     fi
+  elif has_no_jobs "$file"; then
+    status=1
+    printf '::error file=%s::workflow has no executable jobs; commented templates do not create checks\n' "$file"
   elif has_reusable_timeout "$file"; then
     status=1
     printf '%s\n' "::error file=$file::a reusable-workflow call job cannot declare timeout-minutes; GitHub rejects it before creating any jobs"
