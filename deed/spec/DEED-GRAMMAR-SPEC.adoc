@@ -109,24 +109,44 @@ speciation artefact, not a deed.
 
 [source]
 ----
-Deed         ::= Header COMMENT* Form
+Deed         ::= Header Sep? Form Sep?
 Header       ::= SpdxLine+                  ; see Section 4.1
-Form         ::= "(" DocHead VersionField Field* Clause* ")"
+
+Sep          ::= ( WS | COMMENT )+          ; A COMMENT *is* a separator, so a
+                                            ; comment is legal anywhere a
+                                            ; separator is — including between
+                                            ; the tokens of a form. Mirrors
+                                            ; `token-sep` in abnf/deed.abnf.
+
+Form         ::= "(" DocHead Sep VersionField ( Sep ( Field | Clause ) )* Sep? ")"
 DocHead      ::= "estate-deed" | "repo-deed" | "estate-atlas-deed"
                | "praxis-deed"
-VersionField ::= ":schema-version" STRING   ; REQUIRED on every head
+VersionField ::= ":schema-version" Sep STRING   ; REQUIRED on every head
 
-Field        ::= KEYWORD Value
+Field        ::= KEYWORD Sep Value
 Value        ::= STRING | SYMBOL | INTEGER | BOOLEAN | UUID5
                | QUOTED | List
-List         ::= "(" Value* ")"
+List         ::= "(" ( Value ( Sep Value )* )? Sep? ")"
 
-Clause       ::= "(" SYMBOL Field* Clause* ")"
+Clause       ::= "(" SYMBOL ( Sep ( Field | Clause ) )* Sep? ")"
 ----
 
 A *Field* is a keyword/value pair. A *Clause* is a named sub-form that may
 itself carry fields and nested clauses. This is the whole grammar; everything
 else in a deed is vocabulary, not syntax.
+
+Both layers are order-free and comment-transparent, and they now say so in the
+same way. `Sep` above and `token-sep` in `abnf/deed.abnf` are the same
+production: a run of whitespace *or comments*, so a comment is legal anywhere a
+separator is — between the tokens of a form, not merely before it. Fields and
+clauses may appear in any order and may interleave: the repetition is
+`( Sep ( Field | Clause ) )*`, deliberately not `Field* Clause*`. A canonical
+ordering is a lint convention for diffability, never a parse rule; where
+precedence matters — the rules of a praxis deed — it is carried by an explicit
+`:priority` INTEGER, never by file position.
+
+*RULED 2026-09-08 by the owner* on standards#752 — "I think you are right, I am
+used to the enbf grammars, is this so for teh anbf, if so please fix."
 
 === Required header
 
@@ -190,7 +210,7 @@ NOTE: ABNF cannot express negation, so this exclusion is carried as a side
 condition in both this document and `abnf/deed.abnf`. The side condition is
 normative: the grammar alone is not sufficient to dispatch a filename.
 
-*RULED 2026-09-09 by the owner* on standards#752 — "yes, let's adopt this, good
+*RULED 2026-09-08 by the owner* on standards#752 — "yes, let's adopt this, good
 idea, the chora replaces the clade of course."
 
 *RULED 2026-09-08 by the owner:* `praxis-deed` is a genuine fourth head, not a
