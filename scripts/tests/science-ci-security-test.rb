@@ -33,6 +33,11 @@ workflow('mirror-reusable.yml')['jobs'].each do |name, job|
   assert(job['steps'].index(verify) < job['steps'].index(push), "#{name}: verifies too late")
   assert(verify['if'] == push['if'], "#{name}: verification condition differs from push")
   assert(!verify['continue-on-error'], "#{name}: verification failure is ignored")
+  assert(job['continue-on-error'] == true, 'GitLab mirror must remain advisory') if name == 'mirror-gitlab'
+  if name == 'mirror-disroot'
+    assert(verify['env']['APPROVED_FINGERPRINT'] == '${{ vars.DISROOT_SSH_FINGERPRINT }}',
+           'Disroot must require an independently approved fingerprint')
+  end
   Dir.mktmpdir('mirror-verification-') do |tmp|
     stub = File.join(tmp, 'ssh-keyscan')
     File.write(stub, "#!/bin/sh\nprintf '%s' \"$TEST_HOST_KEY\"\n")
@@ -96,5 +101,18 @@ Dir.mktmpdir('policy-startup-') do |tmp|
   assert(!status.success?, 'Retired policy path was accepted')
   File.write(path, File.read(path).sub('.machine_readable/STATE', '.machine_readable/descriptiles/STATE'))
   [parser, checker].each { |check| run!('bash', check, chdir: tmp) }
+  [%(echo "test -f .machine_readable/STATE.a2ml"),
+   %(printf '%s\\n' 'check_file .machine_readable/META.a2ml')].each do |example|
+    File.write(path, "name: CI\non: push\njobs:\n  test:\n    steps:\n      - run: |\n          #{example}\n")
+    run!('bash', checker, chdir: tmp)
+  end
+  [%(test -f ".machine_readable/STATE.a2ml"),
+   %(test -e '.machine_readable/6a2/META.a2ml'),
+   %(check_file '.machine_readable/AGENTIC.a2ml'),
+   %(echo "$(test -f .machine_readable/STATE.a2ml)")].each do |example|
+    File.write(path, "name: CI\non: push\njobs:\n  test:\n    steps:\n      - run: |\n          #{example}\n")
+    _out, _err, status = Open3.capture3('bash', checker, chdir: tmp)
+    assert(!status.success?, "Executable retired-path check was accepted: #{example}")
+  end
 end
 puts 'PASS: empty workflows and retired policy fail; executable jobs with canonical policy pass'

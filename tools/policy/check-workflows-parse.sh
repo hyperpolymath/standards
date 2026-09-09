@@ -52,7 +52,7 @@ has_reusable_timeout() {
 # A syntactically valid file with no jobs is still rejected at startup.
 has_no_jobs() {
   case "$parser" in
-    yq) yq -e '.jobs == null or (.jobs | length == 0)' "$1" >/dev/null 2>&1 ;;
+    yq) yq -e '(.jobs | type) != "!!map" or (.jobs | length == 0)' "$1" >/dev/null 2>&1 ;;
     ruby) ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0]), aliases: true); exit(!d.is_a?(Hash) || !d["jobs"].is_a?(Hash) || d["jobs"].empty? ? 0 : 1)' "$1" ;;
   esac
 }

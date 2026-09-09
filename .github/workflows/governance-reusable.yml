@@ -258,10 +258,9 @@ jobs:
 
       # A reusable workflow only auto-checks-out its own YAML, not sibling
       # scripts. Sparse-check-out standards' scripts/ to get apply-baseline.sh,
-      # mirroring the language-policy job below. `job.workflow_sha` is the exact
-      # commit of this called workflow, so the filter and schema semantics cannot
-      # drift from the reusable workflow that invoked them. This also lets a
-      # standards PR test its own script change instead of silently using main.
+      # mirroring the language-policy job below. The explicit immutable helper
+      # pin selects the reviewed filter and schema implementation. Update that
+      # pin when changing helpers; GitHub does not expose job.workflow_sha.
       - name: Check out standards for the baseline filter
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1232,9 +1231,9 @@ jobs:
   # refs are red now, all-pinned-but-no-lock is a ::warning until
   # ENFORCE_ACTIONS_LOCK_FROM (2026-10-01), red after.
   #
-  # Standards is checked out at `job.workflow_sha` = the SHA of THIS reusable
-  # as pinned by the caller (verified 2026-09-02 on consumer run logs), so the
-  # gate script and the YAML move together — one speed, no `ref: main` float.
+  # Standards helpers are checked out at an explicit reviewed commit. Update
+  # this immutable helper pin when the gate implementation changes; it does
+  # not automatically follow the caller's reusable-workflow revision.
   actions-lock-verify:
     name: Actions lockfile verify
     runs-on: ${{ inputs.runs-on }}
@@ -1275,7 +1274,7 @@ jobs:
           fi
           for f in check-actions-lock-gate.sh update-actions-lock.sh; do
             if [ ! -f "$SRC/$f" ]; then
-              echo "::error::actions-lock gate: $f not found in $SRC (standards checkout at job.workflow_sha failed?)"
+              echo "::error::actions-lock gate: $f not found in $SRC (standards checkout at the explicit helper pin failed?)"
               exit 1
             fi
             cp "$SRC/$f" "$RUNNER_TEMP/$f"
