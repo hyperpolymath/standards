@@ -39,6 +39,14 @@ FINDINGS_FILE="${1:-}"
 BASELINE_FILE="${2:-}"
 MODE="${3:-advisory}"
 BLOCKING_THRESHOLD="${BLOCKING_THRESHOLD:-high}"
+case "$MODE" in
+  advisory|blocking) ;;
+  *) echo "error: invalid baseline mode: $MODE" >&2; exit 2 ;;
+esac
+case "$BLOCKING_THRESHOLD" in
+  info|low|medium|high|critical) ;;
+  *) echo "error: invalid blocking threshold: $BLOCKING_THRESHOLD" >&2; exit 2 ;;
+esac
 TODAY="$(date -u +%Y-%m-%d)"
 
 if [[ -z "$FINDINGS_FILE" || -z "$BASELINE_FILE" ]]; then
@@ -152,6 +160,15 @@ EXPIRED_COUNT=$((EXPIRED_COUNT - ACTIVE_COUNT))
 ANNOTATED="$(jq -n \
   --argjson findings "$FINDINGS_JSON" \
   --argjson baseline "$ACTIVE_BASELINE" '
+  # Tokenise the two supported wildcards; every other character is literal.
+  # No sentinel substitution: a real filename may contain DOUBLESTAR.
+  def glob_regex:
+    [scan("\\*\\*|\\*|[^*]")
+     | if . == "**" then ".*"
+       elif . == "*" then "[^/]*"
+       elif inside(".\\+?^$()[]{}|") then "\\" + .
+       else . end]
+    | "\\A" + join("") + "\\z";
   # Two captures are essential here:
   #   `f as $finding` — without this, references like `f.file` inside the
   #   select() get re-evaluated against the current baseline entry (the
@@ -177,10 +194,7 @@ ANNOTATED="$(jq -n \
             | $pat != null
             and ($finding.file | test(
               $pat
-              | gsub("\\*\\*"; "DOUBLESTAR")
-              | gsub("\\*"; "[^/]*")
-              | gsub("DOUBLESTAR"; ".*")
-              | "^" + . + "$"
+              | glob_regex
             ))
           )
         )

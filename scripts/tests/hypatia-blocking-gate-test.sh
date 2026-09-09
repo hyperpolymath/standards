@@ -25,6 +25,13 @@ check() {
     printf '%s' "$payload" > hypatia-findings.json
   fi
   if bash validate.sh >result.log 2>&1; then
+    # Fixture for the authoritative renderer's severity projection. The
+    # separate controls below exercise malformed SARIF and historical echoes.
+    jq '{version:"2.1.0", runs:[{tool:{driver:{name:"Hypatia"}}, results:
+      [.[] | {ruleId:"hypatia/control/planted", level:
+        (if .severity == "critical" or .severity == "high" then "error"
+         elif .severity == "medium" then "warning" else "note" end)}]}]}' \
+      hypatia-findings.json > hypatia.sarif
     if bash gate.sh >>result.log 2>&1; then actual=0; else actual=$?; fi
   else
     actual=$?
@@ -48,3 +55,39 @@ check 'null is not a findings array' 2 'null'
 check 'unknown severity refuses' 2 '[{"severity":"unknown"}]'
 check 'missing severity refuses' 2 '[{}]'
 check 'multiple JSON documents refuse' 2 '[] []'
+
+sarif_check() {
+  local name=$1 expected=$2 payload=$3 actual
+  if [[ "$payload" = MISSING ]]; then
+    rm -f hypatia.sarif
+  else
+    printf '%s' "$payload" > hypatia.sarif
+  fi
+  if bash gate.sh >result.log 2>&1; then actual=0; else actual=$?; fi
+  if [[ "$actual" -ne "$expected" ]]; then
+    printf 'FAIL: %s: expected %s, got %s\n' "$name" "$expected" "$actual"
+    cat result.log
+    exit 1
+  fi
+  printf 'PASS: %s\n' "$name"
+}
+clean='{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Hypatia"}},"results":[]}]}'
+printf '%s' '[{"rule_module":"code_scanning_alerts","type":"CSA003","severity":"high"}]' > hypatia-findings.json
+sarif_check 'historical echo does not block a clean current scan' 0 "$clean"
+sarif_check 'missing SARIF refuses' 2 MISSING
+sarif_check 'empty SARIF refuses' 2 ''
+sarif_check 'truncated SARIF refuses' 2 '{"version":'
+sarif_check 'multiple SARIF documents refuse' 2 "$clean $clean"
+sarif_check 'empty runs refuse' 2 '{"version":"2.1.0","runs":[]}'
+sarif_check 'missing results refuse' 2 '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Hypatia"}}}]}'
+sarif_check 'unknown result level refuses' 2 '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Hypatia"}},"results":[{"ruleId":"control","level":"unknown"}]}]}'
+printf '%s' '[]' > .hypatia-baseline.json
+sarif_check 'baseline without validator refuses' 2 "$clean"
+mkdir scripts
+cp "$repo/scripts/apply-baseline.sh" scripts/apply-baseline.sh
+printf '%s' '[]' > hypatia-findings.relativized.json
+sarif_check 'unconfirmed baseline filtering refuses' 2 "$clean"
+export HYPATIA_BASELINE_FILTERED=true
+sarif_check 'valid baseline accepted' 0 "$clean"
+printf '%s' '{}' > .hypatia-baseline.json
+sarif_check 'malformed baseline refuses even without findings' 2 "$clean"

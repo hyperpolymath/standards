@@ -7,7 +7,7 @@ on:
   workflow_call:
     inputs:
       block-on-high:
-        description: Refuse any high or critical finding, without requiring a baseline
+        description: Refuse current high or critical findings after validated baseline filtering; no baseline is required
         type: boolean
         required: false
         default: false
@@ -175,13 +175,16 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          # Includes the filter's completion output and literal-glob matching.
+          # Keep the helper immutable and compatible with the strict gate.
+          ref: 6b0bfce648cf9b306693cea0af0bd5f6fc9fea0f
           path: .standards-checkout
           sparse-checkout: |
             scripts
           sparse-checkout-cone-mode: false
 
       - name: Filter SARIF through the baseline before upload
+        id: filter_baseline
         if: always()
         run: |
           # ⚠ WITHOUT THIS, ACKNOWLEDGING A FINDING DOES NOT UNBLOCK ANYTHING.
@@ -246,7 +249,7 @@ jobs:
           retention-days: 90
 
       - name: Gate on baseline (blocking when a baseline is committed)
-        if: steps.scan.outputs.findings_count > 0
+        if: '!inputs.block-on-high && steps.scan.outputs.findings_count > 0'
         run: |
           # Wave-8 gate promotion: when the calling repo commits a
           # .hypatia-baseline.json (schema: .machine_readable/hypatia-baseline.
@@ -269,14 +272,51 @@ jobs:
       - name: Block high and critical findings when requested
         id: blocking-findings
         if: inputs.block-on-high
+        env:
+          HYPATIA_BASELINE_FILTERED: ${{ steps.filter_baseline.outputs.filtered }}
         run: |
           set -euo pipefail
-          count=$(jq '[.[] | select(.severity == "high" or .severity == "critical")] | length' hypatia-findings.json)
+          # Use the scanner's authoritative SARIF projection, after the same
+          # baseline filter used for the Security tab. Raw JSON also contains
+          # code_scanning_alerts: historical GitHub alert summaries, including
+          # alerts fixed by this PR that cannot close until it reaches main.
+          # Hypatia already excludes those meta-rules in its SARIF renderer.
+          # Counting them here creates a circular merge dependency. Raw JSON
+          # remains in the artifact for the fleet's historical-debt review.
+          # Validate a present baseline even when there are no current errors.
+          # Advisory mode validates without gating historical meta-findings;
+          # the final filtered SARIF below supplies the blocking decision.
+          if [ -f .hypatia-baseline.json ]; then
+            if [ ! -f scripts/apply-baseline.sh ]; then
+              echo "::error::A committed baseline requires scripts/apply-baseline.sh"
+              exit 2
+            fi
+            bash scripts/apply-baseline.sh hypatia-findings.relativized.json .hypatia-baseline.json advisory >/dev/null
+            if [ "${HYPATIA_BASELINE_FILTERED:-}" != "true" ]; then
+              echo "::error::Baseline validation passed but SARIF filtering did not complete"
+              exit 2
+            fi
+          fi
+          # Missing/truncated output must never become a clean security gate.
+          if ! jq -se '
+            length == 1 and (.[0] |
+              .version == "2.1.0" and (.runs | type == "array" and length > 0) and
+              all(.runs[];
+                .tool.driver.name == "Hypatia" and
+                (.results | type == "array") and
+                all(.results[];
+                  type == "object" and (.ruleId | type == "string" and length > 0) and
+                  (.level as $level | ["error", "warning", "note", "none"] | index($level) != null))))
+          ' hypatia.sarif >/dev/null; then
+            echo "::error::Hypatia did not produce one valid SARIF findings document"
+            exit 2
+          fi
+          count=$(jq '[.runs[].results[] | select(.level == "error")] | length' hypatia.sarif)
           if [ "$count" -gt 0 ]; then
-            echo "::error::Hypatia found $count high or critical finding(s); see the scan artifact"
+            echo "::error::Hypatia found $count current high or critical finding(s); see the SARIF artifact"
             exit 1
           fi
-          echo "Hypatia blocking gate: no high or critical findings"
+          echo "Hypatia blocking gate: no current high or critical findings after baseline filtering"
 
       - name: Check for critical issues (ADVISORY — does not gate)
         if: '!inputs.block-on-high && steps.scan.outputs.critical > 0'

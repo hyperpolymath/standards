@@ -16,13 +16,13 @@ on:
         description: Fine-grained token with repository Administration read access
         required: false
 
-permissions:
-  actions: read
-  contents: read
+permissions: {}
 
 jobs:
   workflow-staleness:
     name: Check Workflow Staleness
+    permissions:
+      contents: read
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 10
     outputs:
@@ -173,6 +173,8 @@ jobs:
 
   validate-hypatia-baseline:
     name: Validate Hypatia Baseline
+    permissions:
+      contents: read
     needs: workflow-staleness
     # NOTE: deliberately NO job-level `if:`. This context is REQUIRED by branch
     # protection, and a skipped job never satisfies a required context — so a
@@ -195,20 +197,27 @@ jobs:
           elixir-version: '1.19.4'
           otp-version: '28.3'
 
-      - name: Resolve Hypatia HEAD commit
+      - name: Resolve pinned Hypatia commit
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         id: hypatia-rev
         run: |
-          # Pin the cache to the *current* Hypatia main tip. Resolved before the
-          # cache step because cache restore happens before the clone, so the key
-          # cannot hash a not-yet-cloned tree — it must hash the remote ref.
-          sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
-          if [ -z "$sha" ]; then
-            echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
-            exit 1
-          fi
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "Resolved hypatia HEAD: $sha"
+          # PINNED, not floating. This job is a REQUIRED status check on ~120
+          # caller repos, and every caller pins THIS workflow to a SHA. Cloning
+          # Hypatia's moving tip here defeated all of those pins: the scanner's
+          # ruleset changed under every consumer whenever hypatia main advanced,
+          # so a caller could go red with no change on its side.
+          #
+          # Bump procedure (one edit, one PR on standards, then re-pin callers):
+          #   1. sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git refs/heads/main | cut -f1)
+          #   2. replace HYPATIA_PIN below with that sha (verify it is on main:
+          #      gh api repos/hyperpolymath/hypatia/commits/$sha)
+          #   3. the cache key below embeds the sha, so a bump misses the cache and
+          #      rebuilds the escript; no manual cache invalidation needed.
+          # Never pin a tag here: hypatia v1.0.0 (2026-01-10) is not an ancestor
+          # of main and is >1,000 commits behind it.
+          HYPATIA_PIN=0e913426e20282accb49d2fa5d14d5bedbc5a6c2
+          echo "sha=$HYPATIA_PIN" >> "$GITHUB_OUTPUT"
+          echo "Pinned hypatia commit: $HYPATIA_PIN"
 
       - name: Cache Hex/Mix and Scanner Build
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
@@ -227,11 +236,16 @@ jobs:
           # the rebuild, reintroducing the staleness.
           key: hypatia-scanner-v3-${{ runner.os }}-${{ steps.hypatia-rev.outputs.sha }}
 
-      - name: Clone Hypatia
+      - name: Clone Hypatia at the pinned commit
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         run: |
+          # ~/hypatia is restored from the sha-keyed cache above when present;
+          # only clone on a cache miss, and only ever the pinned commit.
           if [ ! -d "$HOME/hypatia" ]; then
-            git clone --depth 1 https://github.com/hyperpolymath/hypatia.git "$HOME/hypatia"
+            git init -q "$HOME/hypatia"
+            git -C "$HOME/hypatia" remote add origin https://github.com/hyperpolymath/hypatia.git
+            git -C "$HOME/hypatia" fetch -q --depth 1 origin "${{ steps.hypatia-rev.outputs.sha }}"
+            git -C "$HOME/hypatia" checkout -q FETCH_HEAD
           fi
 
       - name: Build Hypatia scanner
@@ -978,7 +992,7 @@ jobs:
         continue-on-error: true
         # advisory: informational only; repos can opt into blocking locally
       - name: EditorConfig check
-        uses: editorconfig-checker/action-editorconfig-checker@840e866d93b8e032123c23bac69dece044d4d84c # v2.2.0
+        uses: editorconfig-checker/action-editorconfig-checker@51f63319f592f97930c73d9c46184d20bd206393 # v3.0.0
         # advisory: formatting hygiene is reported from the reusable estate
         # bundle; repos opt into blocking formatter checks locally when ready.
         continue-on-error: true

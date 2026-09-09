@@ -15,7 +15,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APPLY="$SCRIPT_DIR/../apply-baseline.sh"
+APPLY="${APPLY_BASELINE_TARGET:-$SCRIPT_DIR/../apply-baseline.sh}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -25,7 +25,7 @@ fail=0
 assert_status() {
   local label="$1" findings="$2" baseline="$3" expected="$4"
   local got
-  got=$("$APPLY" "$findings" "$baseline" advisory 2>/dev/null \
+  got=$(bash "$APPLY" "$findings" "$baseline" advisory \
     | jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"')
   if [ "$got" = "$expected" ]; then
     echo "PASS: $label  (suppressed,kept=$got)"
@@ -98,13 +98,40 @@ assert_status "hyphenated HYP-S009 rule type is valid and matches" \
 cat > "$WORK/baseline6-invalid.json" <<'EOF'
 [{"severity":"medium","rule_module":"implementation_inside_canon","type":"HYP--S009","file":"spec/Cargo.toml"}]
 EOF
-if "$APPLY" "$WORK/findings6.json" "$WORK/baseline6-invalid.json" advisory >/dev/null 2>&1; then
+if bash "$APPLY" "$WORK/findings6.json" "$WORK/baseline6-invalid.json" advisory >/dev/null 2>&1; then
   echo "FAIL: malformed HYP--S009 rule type was accepted"
   fail=$((fail + 1))
 else
   echo "PASS: malformed HYP--S009 rule type is rejected"
   pass=$((pass + 1))
 fi
+
+# Regex metacharacters and the former sentinel must remain literal glob text.
+for literal in 'src/foo.rs' 'src/a+b(1)[2]{x}^$?.rs' 'src/DOUBLESTAR.rs'; do
+  jq -n --arg file "$literal" '[{severity:"high",rule_module:"cicd_rules",type:"banned_language_file",file:$file}]' > "$WORK/literal.json"
+  jq -n --arg pattern "$literal" '[{severity:"high",rule_module:"cicd_rules",type:"banned_language_file",file_pattern:$pattern}]' > "$WORK/literal-baseline.json"
+  assert_status "literal glob matches itself: $literal" "$WORK/literal.json" "$WORK/literal-baseline.json" "1,0"
+done
+jq -n '[{severity:"high",rule_module:"cicd_rules",type:"banned_language_file",file_pattern:"src/foo.rs"}]' > "$WORK/literal-baseline.json"
+for unrelated in 'src/fooXrs' $'src/foo.rs\nother'; do
+  jq -n --arg file "$unrelated" '[{severity:"high",rule_module:"cicd_rules",type:"banned_language_file",file:$file}]' > "$WORK/unrelated.json"
+  assert_status "literal glob rejects unrelated path" "$WORK/unrelated.json" "$WORK/literal-baseline.json" "0,1"
+done
+
+assert_invalid_option() {
+  local label="$1" mode="$2" threshold="$3" status=0
+  BLOCKING_THRESHOLD="$threshold" bash "$APPLY" "$WORK/findings1.json" "$WORK/empty.json" "$mode" > "$WORK/invalid.out" 2> "$WORK/invalid.err" || status=$?
+  if [ "$status" -eq 2 ]; then
+    echo "PASS: $label rejected as invalid configuration"
+    pass=$((pass + 1))
+  else
+    echo "FAIL: $label returned $status (expected 2)"
+    cat "$WORK/invalid.err"
+    fail=$((fail + 1))
+  fi
+}
+assert_invalid_option "invalid mode" bypass high
+assert_invalid_option "invalid threshold" blocking nonsense
 
 echo
 echo "Total: $pass passed, $fail failed"
