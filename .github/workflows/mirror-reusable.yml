@@ -66,6 +66,8 @@ permissions:
 
 jobs:
   mirror-gitlab:
+    # Advisory mirror: verification still fails closed and skips the push.
+    continue-on-error: true
     timeout-minutes: 20
     runs-on: ${{ inputs.runs-on }}
     if: vars.GITLAB_MIRROR_ENABLED == 'true'
@@ -117,7 +119,7 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           MIRROR_HOST: gitlab.com
         run: |
-          git remote add gitlab git@gitlab.com:${MIRROR_ORG}/${REPO_NAME}.git || true
+          git remote add gitlab "git@gitlab.com:${MIRROR_ORG}/${REPO_NAME}.git" || true
           git push --force gitlab main
       - name: Skipped (GITLAB_SSH_KEY not configured)
         if: ${{ env.GITLAB_KEY == '' }}
@@ -168,7 +170,7 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           MIRROR_HOST: bitbucket.org
         run: |
-          git remote add bitbucket git@bitbucket.org:${MIRROR_ORG}/${REPO_NAME}.git || true
+          git remote add bitbucket "git@bitbucket.org:${MIRROR_ORG}/${REPO_NAME}.git" || true
           git push --force bitbucket main
       - name: Skipped (BITBUCKET_SSH_KEY not configured)
         if: ${{ env.BITBUCKET_KEY == '' }}
@@ -219,7 +221,7 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           MIRROR_HOST: codeberg.org
         run: |
-          git remote add codeberg git@codeberg.org:${MIRROR_ORG}/${REPO_NAME}.git || true
+          git remote add codeberg "git@codeberg.org:${MIRROR_ORG}/${REPO_NAME}.git" || true
           git push --force codeberg main
       - name: Skipped (CODEBERG_SSH_KEY not configured)
         if: ${{ env.CODEBERG_KEY == '' }}
@@ -270,7 +272,7 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           MIRROR_HOST: git.sr.ht
         run: |
-          git remote add sourcehut git@git.sr.ht:~${MIRROR_ORG}/${REPO_NAME} || true
+          git remote add sourcehut "git@git.sr.ht:~${MIRROR_ORG}/${REPO_NAME}" || true
           git push --force sourcehut main
       - name: Skipped (SOURCEHUT_SSH_KEY not configured)
         if: ${{ env.SOURCEHUT_KEY == '' }}
@@ -297,10 +299,10 @@ jobs:
         if: ${{ env.DISROOT_KEY != '' }}
         env:
           MIRROR_HOST: git.disroot.org
-          APPROVED_FINGERPRINT: ${{ vars.DISROOT_SSH_FINGERPRINT || 'SHA256:B8RHZmR8N7oyt0DG04jn+SWDDRpFrQh4F2Vo3PfUNqY' }}
+          APPROVED_FINGERPRINT: ${{ vars.DISROOT_SSH_FINGERPRINT }}
         run: |
           set -euo pipefail
-          # Approved independently of ssh-keyscan; source: https://disroot.org/services/git
+          # Caller must approve this independently of the ssh-keyscan result.
           if [[ ! "$MIRROR_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] ||
              [[ ! "$APPROVED_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]; then
             echo "::error::Configure a valid DISROOT_SSH_FINGERPRINT and mirror hostname"
@@ -321,7 +323,7 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           MIRROR_HOST: git.disroot.org
         run: |
-          git remote add disroot git@git.disroot.org:${MIRROR_ORG}/${REPO_NAME}.git || true
+          git remote add disroot "git@git.disroot.org:${MIRROR_ORG}/${REPO_NAME}.git" || true
           git push --force disroot main
       - name: Skipped (DISROOT_SSH_KEY not configured)
         if: ${{ env.DISROOT_KEY == '' }}
@@ -372,7 +374,7 @@ jobs:
           REPO_NAME: ${{ github.event.repository.name }}
           MIRROR_HOST: ${{ vars.GITEA_HOST }}
         run: |
-          git remote add gitea git@${MIRROR_HOST}:${MIRROR_ORG}/${REPO_NAME}.git || true
+          git remote add gitea "git@${MIRROR_HOST}:${MIRROR_ORG}/${REPO_NAME}.git" || true
           git push --force gitea main
       - name: Skipped (GITEA_SSH_KEY not configured)
         if: ${{ env.GITEA_KEY == '' }}
@@ -412,12 +414,12 @@ jobs:
         if: ${{ env.RADICLE_KEY != '' }}
         run: |
           cargo install radicle-cli --locked
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Mirror to Radicle
         if: ${{ env.RADICLE_KEY != '' }}
         run: |
           mkdir -p ~/.radicle/keys
-          echo "${{ secrets.RADICLE_KEY }}" > ~/.radicle/keys/radicle
+          printf "%s\n" "$RADICLE_KEY" > ~/.radicle/keys/radicle
           chmod 600 ~/.radicle/keys/radicle
           rad sync --announce || echo "Radicle sync attempted"
       - name: Skipped (RADICLE_KEY not configured)

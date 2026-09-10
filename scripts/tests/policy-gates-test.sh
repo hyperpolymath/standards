@@ -104,6 +104,11 @@ for malformed_jobs in 'jobs: scalar' 'jobs: [one, two]' 'jobs: null'; do
   (cd "$empty_jobs" && expect_fail "$workflow_gate")
 done
 
+for invalid_jobs in 'placeholder' '[placeholder]'; do
+  printf '%s\n' 'name: test' 'on: push' "jobs: $invalid_jobs" > "$empty_jobs/.github/workflows/test.yml"
+  (cd "$empty_jobs" && expect_fail "$workflow_gate")
+done
+
 invalid="$fixture/invalid"
 init_fixture "$invalid"
 mkdir -p "$invalid/.github/workflows"
