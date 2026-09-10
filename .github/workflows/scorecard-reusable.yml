@@ -45,16 +45,36 @@ jobs:
       # estate froze: measured in this repo on 2026-08-25, all 12 Scorecard
       # alerts were stuck at 2026-06-03 while Hypatia's updated 2026-08-24.
       # The badge kept working, which is why it went unnoticed.
+      - name: Checkout native-lock reconciliation helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: 591cea1b074b56367f25ec0084a0c4ab66b42a7e
+          path: .standards-scorecard
+          persist-credentials: false
+          sparse-checkout: scripts/reconcile-scorecard-actions-lock.rb
+          sparse-checkout-cone-mode: false
+      - name: Reconcile native action pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh extension install github/gh-actions-lock --pin v0.1.6
+          ruby .standards-scorecard/scripts/reconcile-scorecard-actions-lock.rb \
+            results.sarif results.reconciled.sarif actions-lock-audit.json
       - name: Upload SARIF to code scanning
         uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v3
         with:
-          sarif_file: results.sarif
+          sarif_file: results.reconciled.sarif
 
       - name: Upload results artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scorecard-results
-          path: results.sarif
+          path: |
+            results.sarif
+            results.reconciled.sarif
+            actions-lock-audit.json
           retention-days: 90
 
   pull-request:
@@ -126,14 +146,34 @@ jobs:
           jq -r '.runs[].automationDetails.id' results.sarif
           n=$(jq '[.runs[].automationDetails.id | split("/")[0:2] | join("/")] | unique | length' results.sarif)
           test "$n" -eq 3 || { echo "expected 3 Scorecard categories, got $n" >&2; exit 1; }
+      - name: Checkout native-lock reconciliation helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: 591cea1b074b56367f25ec0084a0c4ab66b42a7e
+          path: .standards-scorecard
+          persist-credentials: false
+          sparse-checkout: scripts/reconcile-scorecard-actions-lock.rb
+          sparse-checkout-cone-mode: false
+      - name: Reconcile native action pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh extension install github/gh-actions-lock --pin v0.1.6
+          ruby .standards-scorecard/scripts/reconcile-scorecard-actions-lock.rb \
+            results.sarif results.reconciled.sarif actions-lock-audit.json
       - name: Upload SARIF to code scanning
         uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
-          sarif_file: results.sarif
+          sarif_file: results.reconciled.sarif
       - name: Retain scan evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scorecard-pr-results
-          path: results.sarif
+          path: |
+            results.sarif
+            results.reconciled.sarif
+            actions-lock-audit.json
           if-no-files-found: error
           retention-days: 14
