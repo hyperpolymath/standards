@@ -99,6 +99,10 @@ mkdir -p "$empty_jobs/.github/workflows"
 printf '%s\n' 'name: test' 'on: push' 'jobs: {}' > "$empty_jobs/.github/workflows/test.yml"
 git -C "$empty_jobs" add .github/workflows/test.yml
 (cd "$empty_jobs" && expect_fail "$workflow_gate")
+for malformed_jobs in 'jobs: scalar' 'jobs: [one, two]' 'jobs: null'; do
+  printf '%s\n' 'name: test' 'on: push' "$malformed_jobs" > "$empty_jobs/.github/workflows/test.yml"
+  (cd "$empty_jobs" && expect_fail "$workflow_gate")
+done
 
 invalid="$fixture/invalid"
 init_fixture "$invalid"

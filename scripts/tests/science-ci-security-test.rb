@@ -96,5 +96,7 @@ Dir.mktmpdir('policy-startup-') do |tmp|
   assert(!status.success?, 'Retired policy path was accepted')
   File.write(path, File.read(path).sub('.machine_readable/STATE', '.machine_readable/descriptiles/STATE'))
   [parser, checker].each { |check| run!('bash', check, chdir: tmp) }
+  File.write(path, "name: CI\non: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo 'test -f .machine_readable/STATE.a2ml'\n")
+  run!('bash', checker, chdir: tmp)
 end
 puts 'PASS: empty workflows and retired policy fail; executable jobs with canonical policy pass'

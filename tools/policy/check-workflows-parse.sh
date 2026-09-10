@@ -24,7 +24,7 @@ if command -v yq >/dev/null 2>&1; then
 elif command -v ruby >/dev/null 2>&1; then
   parser=ruby
 else
-  echo "::error::no YAML parser available (yq or ruby)"
+  echo "::error::no YAML parser available (yq or ruby)" >&2
   exit 1
 fi
 
@@ -51,10 +51,13 @@ has_reusable_timeout() {
 
 # A syntactically valid file with no jobs is still rejected at startup.
 has_no_jobs() {
+  local file="$1" result
   case "$parser" in
-    yq) yq -e '.jobs == null or (.jobs | length == 0)' "$1" >/dev/null 2>&1 ;;
-    ruby) ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0]), aliases: true); exit(!d.is_a?(Hash) || !d["jobs"].is_a?(Hash) || d["jobs"].empty? ? 0 : 1)' "$1" ;;
+    yq) yq -e '(.jobs | tag) != "!!map" or (.jobs | length == 0)' "$file" >/dev/null 2>&1; result=$? ;;
+    ruby) ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0]), aliases: true); exit(!d.is_a?(Hash) || !d["jobs"].is_a?(Hash) || d["jobs"].empty? ? 0 : 1)' "$file"; result=$? ;;
+    *) echo "::error::unsupported workflow parser: $parser" >&2; return 0 ;;
   esac
+  return "$result"
 }
 
 has_forbidden_control() {

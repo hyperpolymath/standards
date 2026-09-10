@@ -5,11 +5,13 @@ set -euo pipefail
 status=0
 while IFS= read -r -d '' file; do
   [[ -f "$file" ]] || continue
-  # Restrict this check to executable file-existence tests. Historical prose
-  # and commented examples are not policy enforcement.
+  # Recognise direct shell tests and check_file calls at a command start,
+  # including inline YAML run steps. Quoted echo examples are not execution.
+  # Compound expressions and dynamically constructed paths need shell analysis.
   if awk '
     /^[[:space:]]*#/ { next }
-    /(-f[[:space:]]|-e[[:space:]]|check_file[[:space:]])/ && /\.machine_readable\/(6a2\/)?(STATE|META|ECOSYSTEM|AGENTIC|NEUROSYM|PLAYBOOK|ANCHOR)\.a2ml/ { found=1; print FNR ":" $0 }
+    /^[[:space:]]*(-[[:space:]]+)?run:[[:space:]]*/ { sub(/^[[:space:]]*(-[[:space:]]+)?run:[[:space:]]*/, "") }
+    /^[[:space:]]*((if|elif|while|until)[[:space:]]+)?(![[:space:]]+)?((test|\[\[?)[[:space:]]+(![[:space:]]+)?-[fe][[:space:]]+|check_file[[:space:]]+)["\047]?\.machine_readable\/(6a2\/)?(STATE|META|ECOSYSTEM|AGENTIC|NEUROSYM|PLAYBOOK|ANCHOR)\.a2ml(["\047]|[[:space:];]|$)/ { found=1; print FNR ":" $0 }
     END { exit !found }
   ' "$file"; then
     printf '::error file=%s::Policy requires a retired descriptile path; use .machine_readable/descriptiles/ and reconcile existing files\n' "$file"
