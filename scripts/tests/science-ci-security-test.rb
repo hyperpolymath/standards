@@ -86,6 +86,31 @@ Dir.mktmpdir('scanner-source-') do |tmp|
 end
 puts 'PASS: scanner checks out the resolved commit on cache miss/hit and rejects a mismatched cache'
 
+step = workflow('hypatia-scan-reusable.yml')['jobs']['scan']['steps'].find do |candidate|
+  candidate['name'] == 'Validate findings and count severities'
+end
+Dir.mktmpdir('scanner-contract-') do |tmp|
+  output = File.join(tmp, 'output')
+  env = { 'GITHUB_OUTPUT' => output, 'GITHUB_STEP_SUMMARY' => File.join(tmp, 'summary') }
+  findings = File.join(tmp, 'hypatia-findings.json')
+  File.write(findings, '[{"severity":"warn"},{"severity":"medium"},{"severity":"critical"}]')
+  run!(env, 'bash', '-c', step.fetch('run'), chdir: tmp)
+  assert(File.read(output).lines.map(&:chomp).include?('medium=2'), 'warn was not counted at medium rank')
+  assert(File.read(output).include?('critical=1'), 'critical finding was lost')
+  ['', '[', '[] []', '{}', '[{"severity":"unknown"}]', '[{}]'].each do |invalid|
+    FileUtils.rm_f(output)
+    File.write(findings, invalid)
+    _out, _err, status = Open3.capture3(env, 'bash', '-c', step.fetch('run'), chdir: tmp)
+    assert(status.exitstatus == 2, "Invalid scanner output accepted: #{invalid.inspect}")
+    assert(!File.exist?(output), 'Invalid output produced gate counts')
+  end
+  File.write(findings, '[{"severity":"warn","rule_module":"research_extensions","type":"RE001","file":"ci.yml"}]')
+  _out, _err, status = Open3.capture3({ 'BLOCKING_THRESHOLD' => 'medium' }, 'bash',
+    File.join(ROOT, 'scripts/apply-baseline.sh'), findings, File.join(tmp, 'absent-baseline.json'), 'blocking')
+  assert(status.exitstatus == 1, 'warn escaped the medium baseline threshold')
+end
+puts 'PASS: warn retains medium severity; malformed, unknown, and multiple scanner documents fail closed'
+
 Dir.mktmpdir('policy-startup-') do |tmp|
   path = File.join(tmp, '.github/workflows/ci.yml')
   FileUtils.mkdir_p(File.dirname(path))
