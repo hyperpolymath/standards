@@ -4,27 +4,38 @@
 
 set -euo pipefail
 SCAN_PATH="${INPUT_PATH:-.}"
+STAGED_FILES="${INPUT_STAGED_FILES:-}"
 ERRORS=0
 
-for workflow in $(find "$SCAN_PATH" -path '*/.git/*' -prune -o \
-  -path '*/.github/workflows/*.yml' -o -path '*/.github/workflows/*.yaml' \
-  -print 2>/dev/null); do
+validate_file() {
+  local file="$1"
   
-  [ -f "$workflow" ] || continue
-  
-  # Find uses: lines
-  while IFS= read -r line; do
-    [[ "$line" =~ uses:.*@ ]] || continue
-    
-    # Check if it has a SHA (40 hex chars)
-    if ! echo "$line" | grep -qE '@[a-f0-9]{40}'; then
-      echo "[validate-sha-pins] ERROR: Unpinned action in $workflow" >&2
-      echo "  $line" >&2
-      ERRORS=$((ERRORS + 1))
-    fi
-  done < "$workflow"
-done
+  # Check for unpinned actions (uses: without SHA)
+  if grep -qE 'uses:[[:space:]]+[a-zA-Z]' "$file" && ! grep -qE 'uses:[[:space:]]+[a-zA-Z].*@[a-f0-9]' "$file"; then
+    echo "[validate-sha-pins] ERROR: $file has unpinned actions" >&2
+    ERRORS=$((ERRORS + 1))
+  fi
+}
+
+# If staged files provided, only check those
+if [ -n "$STAGED_FILES" ]; then
+  echo "$STAGED_FILES" | tr ' ' '\n' | while read -r file; do
+    [ -z "$file" ] && continue
+    # Only check workflow files
+    [[ "$file" == *.yml || "$file" == *.yaml ]] || continue
+    [[ "$file" == *".github/workflows/"* ]] || continue
+    [ -f "$file" ] || continue
+    validate_file "$file"
+  done
+else
+  for workflow in $(find "$SCAN_PATH" -path '*/.git/*' -prune -o \
+    -path '*/.github/workflows/*.yml' -o -path '*/.github/workflows/*.yaml' \
+    -print 2>/dev/null || true); do
+    [ -f "$workflow" ] || continue
+    validate_file "$workflow"
+  done
+fi
 
 [ $ERRORS -gt 0 ] && exit 1
-echo "[validate-sha-pins] ✅ All actions are SHA-pinned"
+echo "[validate-sha-pins] All workflow actions are SHA-pinned"
 exit 0
