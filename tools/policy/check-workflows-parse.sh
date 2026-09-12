@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
 # Fail if any tracked GitHub Actions workflow does not parse as YAML.
 set -uo pipefail
 
@@ -62,6 +63,20 @@ has_forbidden_control() {
   '
 }
 
+has_no_jobs() {
+  case "$parser" in
+    yq)
+      yq -e '.jobs == null or (.jobs | type) != "!!map"' "$1" >/dev/null 2>&1
+      ;;
+    python)
+      python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}; jobs=d.get("jobs"); sys.exit(0 if jobs is not None and isinstance(jobs, dict) else 1)' "$1"
+      ;;
+    ruby)
+      ruby -ryaml -e 'd=YAML.safe_load(File.read(ARGV[0]), aliases: true) || {}; jobs=d["jobs"]; exit(jobs.nil? || !jobs.is_a?(Hash) ? 0 : 1)' "$1"
+      ;;
+  esac
+}
+
 status=0
 for file in "${workflows[@]}"; do
   [ -f "$file" ] || continue
@@ -71,6 +86,9 @@ for file in "${workflows[@]}"; do
     if has_forbidden_control "$file"; then
       echo '    contains a YAML-forbidden control character'
     fi
+  elif has_no_jobs "$file"; then
+    status=1
+    printf '::error file=%s::workflow has no jobs; a workflow without jobs produces no check run\n' "$file"
   elif has_reusable_timeout "$file"; then
     status=1
     printf '%s\n' "::error file=$file::a reusable-workflow call job cannot declare timeout-minutes; GitHub rejects it before creating any jobs"

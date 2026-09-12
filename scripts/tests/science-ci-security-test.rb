@@ -107,7 +107,7 @@ Dir.mktmpdir('scanner-contract-') do |tmp|
   assert(File.read(output).include?('critical=1'), 'critical finding was lost')
   assert(File.read(output).include?('high=1'), 'high finding was lost')
   # Test invalid inputs - flat array format
-  ['', '[', '[]', '[{}]', '[{"severity":"unknown"}]'].each do |invalid|
+  ['', '[', '[] []', '[{}]', '[{"severity":"unknown"}]'].each do |invalid|
     FileUtils.rm_f(output)
     File.write(findings, invalid)
     _out, _err, status = Open3.capture3(env, 'bash', '-c', step.fetch('run'), chdir: tmp)
