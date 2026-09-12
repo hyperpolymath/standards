@@ -19,7 +19,7 @@ validate_file() {
 
 # If staged files provided, only check those
 if [ -n "$STAGED_FILES" ]; then
-  echo "$STAGED_FILES" | tr ' ' '\n' | while read -r file; do
+  while IFS=$'\n' read -r file; do
     [ -z "$file" ] && continue
     # Check all text files
     case "$file" in
@@ -28,14 +28,14 @@ if [ -n "$STAGED_FILES" ]; then
     esac
     [ -f "$file" ] || continue
     validate_file "$file"
-  done
+  done <<< "$STAGED_FILES"
 else
   # Check machine readable directory
   MACHINE_READABLE="$SCAN_PATH/.machine_readable"
   if [ -d "$MACHINE_READABLE" ]; then
-    for file in $(find "$MACHINE_READABLE" -type f \( -name '*.a2ml' -o -name '*.md' -o -name '*.txt' \) 2>/dev/null || true); do
+    while IFS= read -r file; do
       validate_file "$file"
-    done
+    done < <(find "$MACHINE_READABLE" -type f \( -name '*.a2ml' -o -name '*.md' -o -name '*.txt' \) 2>/dev/null || true)
   fi
 fi
 

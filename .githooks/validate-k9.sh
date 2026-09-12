@@ -24,17 +24,17 @@ validate_file() {
 
 # If staged files provided, only check those
 if [ -n "$STAGED_FILES" ]; then
-  echo "$STAGED_FILES" | tr ' ' '\n' | while read -r file; do
+  while IFS=$'\n' read -r file; do
     [ -z "$file" ] && continue
     # Only check .k9 files
     [[ "$file" == *.k9 || "$file" == *.k9.ncl ]] || continue
     [ -f "$file" ] || continue
     validate_file "$file"
-  done
+  done <<< "$STAGED_FILES"
 else
-  find "$SCAN_PATH" -path '*/.git/*' -prune -o \( -name '*.k9' -o -name '*.k9.ncl' \) -type f -print 2>/dev/null | while read -r file; do
+  while IFS= read -r file; do
     validate_file "$file"
-  done
+  done < <(find "$SCAN_PATH" -path '*/.git/*' -prune -o \( -name '*.k9' -o -name '*.k9.ncl' \) -type f -print 2>/dev/null)
 fi
 
 [ $ERRORS -gt 0 ] && exit 1
