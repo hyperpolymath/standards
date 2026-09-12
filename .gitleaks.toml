@@ -16,3 +16,44 @@
 
 [extend]
 path = "config/gitleaks/estate-baseline.toml"
+
+# REPO-LOCAL SUPPRESSION — scripts/verify-regextarget-claim.sh
+#
+# That script is the standing gate for the claim this repo's estate baseline
+# documents. Its fixture is the canonical estate false positive, the Ada
+# declaration `Key : Ed25519_Private_Key;`, where the MATCH is the whole
+# declaration and the SECRET is the type name. `generic-api-key` cannot tell
+# that from a real key and flags it at lines 50, 55 and 115 — so the gate's own
+# fixture is a true instance of the false positive it exists to demonstrate.
+# Nothing here is a credential.
+#
+# WHY A VALUE ENTRY AND NOT A `paths` ENTRY. estate-baseline.toml prescribes the
+# value entry in terms — "PREFER A VALUE ENTRY OVER A PATH ENTRY… a `paths`
+# entry blinds the whole file to everything" — and reserves path entries for
+# values whose SHAPE genuinely is a credential's. Its separate instruction that
+# Ada snake_case names "belong in the owning repository's own .gitleaks.toml,
+# beside the code" is about WHERE the entry lives, not WHICH instrument it uses.
+#
+# MEASURED 2026-09-04, CI-pinned gitleaks 8.18.4, planting a real `ghp_` token
+# into that script and rescanning:
+#
+#     paths = ['''^scripts/verify-regextarget-claim\.sh$''']   ->  0 findings, MISSED
+#     regexes = ['''^Ed25519_Private_Key$''']                  ->  1 finding,  CAUGHT
+#
+# Both reach 0 on the clean tree, so the naive check cannot tell them apart.
+# The path entry would make this the one file in the repository where a real
+# credential could be committed unnoticed, and it is a file about credentials.
+#
+# Also verified: a top-level [allowlist] here MERGES with the extended
+# baseline's rather than replacing it — the baseline's CamelCase crypto-type
+# coverage stays live alongside this entry.
+#
+# NOT in the estate baseline, deliberately. The baseline's crypto-type entry is
+# `[A-Za-z]*` with no `_` and its comment says that narrowness "is not an
+# oversight to be widened"; widening it would suppress this shape across 400+
+# repositories, including findings pending owner review in cerro-torre.
+[allowlist]
+description = "standards-local: Ada crypto type name in the gitleaks regexTarget verification gate"
+regexes = [
+  '''^Ed25519_Private_Key$''',
+]

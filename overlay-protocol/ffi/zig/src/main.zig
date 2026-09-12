@@ -91,12 +91,15 @@ threadlocal var last_error_buf: [1024]u8 = undefined;
 threadlocal var last_error_len: usize = 0;
 
 fn setError(msg: []const u8) void {
-    const len = @min(msg.len, last_error_buf.len);
+    // Reserve one byte for the sentinel required by the exported C pointer.
+    const len = @min(msg.len, last_error_buf.len - 1);
     @memcpy(last_error_buf[0..len], msg[0..len]);
+    last_error_buf[len] = 0;
     last_error_len = len;
 }
 
 fn clearError() void {
+    last_error_buf[0] = 0;
     last_error_len = 0;
 }
 
@@ -415,11 +418,8 @@ pub export fn overlay_peer_types_distinct(a: PeerType, b: PeerType) u32 {
 /// Get the last error message. Returns null if no error.
 pub export fn overlay_last_error() ?[*:0]const u8 {
     if (last_error_len == 0) return null;
-    // Null-terminate for C compatibility
-    if (last_error_len < last_error_buf.len) {
-        last_error_buf[last_error_len] = 0;
-    }
-    return @ptrCast(&last_error_buf);
+    // setError owns and preserves the in-bounds sentinel invariant.
+    return last_error_buf[0..last_error_len :0].ptr;
 }
 
 // ============================================================================
@@ -546,6 +546,27 @@ test "peer type names" {
 test "peer types distinct" {
     try std.testing.expectEqual(@as(u32, 1), overlay_peer_types_distinct(.o_extension, .aggregate_library));
     try std.testing.expectEqual(@as(u32, 0), overlay_peer_types_distinct(.o_extension, .o_extension));
+}
+
+test "last error reserves and writes an in-bounds C sentinel" {
+    const oversized = [_]u8{'x'} ** (last_error_buf.len + 32);
+    setError(&oversized);
+
+    try std.testing.expectEqual(last_error_buf.len - 1, last_error_len);
+    try std.testing.expectEqual(@as(u8, 0), last_error_buf[last_error_len]);
+
+    const err = overlay_last_error() orelse return error.ExpectedLastError;
+    const message = std.mem.span(err);
+    try std.testing.expectEqual(last_error_buf.len - 1, message.len);
+    try std.testing.expect(std.mem.allEqual(u8, message, 'x'));
+}
+
+test "clearing the last error clears its sentinel and exported value" {
+    setError("failure");
+    clearError();
+
+    try std.testing.expectEqual(@as(u8, 0), last_error_buf[0]);
+    try std.testing.expectEqual(@as(?[*:0]const u8, null), overlay_last_error());
 }
 
 test "version" {

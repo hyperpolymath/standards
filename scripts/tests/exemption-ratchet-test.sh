@@ -14,7 +14,22 @@ SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/check-exemption-ratchet.sh"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"; git init -q .; git config user.email t@example.com; git config user.name T
 
-printf '[{"severity":"high","rule_module":"m","type":"t","file":"a.rs","note":"why"}]\n' > .hypatia-baseline.json
+# Reproduce the adoption case that exposed the defect: a repository already
+# has many anonymous legacy entries. Unrelated work must not be blocked merely
+# because those values predate the ratchet; only a new or changed anonymous
+# value is a violation.
+jq -n '[range(0; 44) | {
+  severity: "medium",
+  rule_module: "legacy",
+  type: ("legacy-" + tostring),
+  file: ("legacy-" + tostring + ".rs")
+}] + [{
+  severity: "high",
+  rule_module: "m",
+  type: "t",
+  file: "a.rs",
+  note: "why"
+}]' > .hypatia-baseline.json
 printf 'cicd_rules/banned_language_file:src/A.res\n' > .hypatia-ignore
 git add -A; git commit -q -m base
 BASE="$(git rev-parse HEAD)"
@@ -27,7 +42,7 @@ expect() { # expect <wanted-exit> <label>
   else fail=$((fail+1)); echo "  FAIL  $label (wanted exit $want, got $got)"; fi
 }
 
-expect 0 "unchanged ledgers pass"
+expect 0 "44 unchanged anonymous legacy entries pass"
 
 # jq, not an interpreter: estate policy bans Python, and the JS runtime has
 # already moved once. jq is what the rest of the estate's CI already uses.
@@ -47,6 +62,39 @@ git commit -aqm "anonymous
 
 Ratchet-exception: .hypatia-baseline.json — declared"
 expect 1 "anonymous entry fails even when growth is declared"
+
+# Multiset semantics matter: one grandfathered value must not license an
+# unlimited number of identical copies.
+git checkout -q "$BASE" -- .hypatia-baseline.json .hypatia-ignore
+jq '. + [.[0]]' .hypatia-baseline.json > .baseline.tmp \
+  && mv .baseline.tmp .hypatia-baseline.json
+git commit -aqm "duplicate anonymous legacy entry
+
+Ratchet-exception: .hypatia-baseline.json — duplicate-control fixture"
+expect 1 "appending a duplicate anonymous entry fails"
+
+# A same-size rewrite is still new anonymous debt: comparing counts alone
+# misses it. Full-value comparison must see the modified value.
+git checkout -q "$BASE" -- .hypatia-baseline.json .hypatia-ignore
+jq '.[0].severity = "high"' .hypatia-baseline.json > .baseline.tmp \
+  && mv .baseline.tmp .hypatia-baseline.json
+git commit -aqm "modify anonymous legacy entry"
+expect 1 "modified anonymous entry fails without ledger growth"
+
+# Documentation is debt reduction. Although the JSON value changed, its new
+# form is no longer anonymous and therefore must pass.
+git checkout -q "$BASE" -- .hypatia-baseline.json .hypatia-ignore
+jq '.[0].note = "legacy finding documented when touched"' \
+  .hypatia-baseline.json > .baseline.tmp && mv .baseline.tmp .hypatia-baseline.json
+git commit -aqm "document legacy entry"
+expect 0 "adding documentation to a legacy anonymous entry passes"
+
+# Removing grandfathered debt is always allowed.
+git checkout -q "$BASE" -- .hypatia-baseline.json .hypatia-ignore
+jq 'del(.[0])' .hypatia-baseline.json > .baseline.tmp \
+  && mv .baseline.tmp .hypatia-baseline.json
+git commit -aqm "remove legacy entry"
+expect 0 "deleting a legacy anonymous entry passes"
 
 git checkout -q "$BASE" -- .hypatia-baseline.json
 printf 'cicd_rules/banned_language_file:src/**\n' > .hypatia-ignore

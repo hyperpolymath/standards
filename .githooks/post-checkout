@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
+# Hyperpolymath Estate Post-checkout Hook
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+CHECKOUT_FLAG="${3:-0}"
+
+# Only run on branch checkouts
+[ "$CHECKOUT_FLAG" != "1" ] && exit 0
+
+echo -e "${CYAN}============================================${NC}"
+echo -e "${CYAN}  Hyperpolymath Post-checkout Hook${NC}"
+echo -e "${CYAN}============================================${NC}"
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+echo -e "${BLUE}[post-checkout]${NC} Checked out: $CURRENT_BRANCH"
+
+# Branch-specific setup
+BRANCH_SETUP="$REPO_ROOT/scripts/setup-${CURRENT_BRANCH//\//-}.sh"
+[ -f "$BRANCH_SETUP" ] && [ -x "$BRANCH_SETUP" ] && {
+  echo -e "${BLUE}[post-checkout]${NC} Running branch setup..."
+  bash "$BRANCH_SETUP" 2>&1 && echo "✅ Branch setup completed" || echo "⚠️  Branch setup failed" >&2
+}
+
+# Virtualenv
+[ -d "$REPO_ROOT/.venv" ] && echo -e "${YELLOW}[post-checkout]${NC} Activate: source .venv/bin/activate${NC}"
+[ -d "$REPO_ROOT/venv" ] && echo -e "${YELLOW}[post-checkout]${NC} Activate: source venv/bin/activate${NC}"
+[ -f "$REPO_ROOT/pyproject.toml" ] && [ ! -d "$REPO_ROOT/.venv" ] && [ ! -d "$REPO_ROOT/venv" ] && \
+  echo -e "${YELLOW}[post-checkout]${NC} Setup: python -m venv .venv && source .venv/bin/activate${NC}"
+
+# Node.js
+[ -f "$REPO_ROOT/package.json" ] && [ ! -d "$REPO_ROOT/node_modules" ] && \
+  echo -e "${YELLOW}[post-checkout]${NC} Install: bun install or npm install${NC}"
+
+# Rust
+[ -f "$REPO_ROOT/Cargo.toml" ] && echo -e "${YELLOW}[post-checkout]${NC} Build: cargo build${NC}"
+
+# Submodules
+[ -f "$REPO_ROOT/.gitmodules" ] && git submodule status 2>/dev/null | grep -q '^[-+]' && \
+  echo -e "${YELLOW}[post-checkout]${NC} Update submodules: git submodule update --init --recursive${NC}"
+
+# Hooks check
+CURRENT_HOOKS=$(git config core.hooksPath 2>/dev/null || echo "")
+[ -z "$CURRENT_HOOKS" ] && [ -d "$REPO_ROOT/.githooks" ] && \
+  echo -e "${YELLOW}[post-checkout]${NC} Install hooks: git config core.hooksPath .githooks${NC}"
+
+# Protected branch warning
+for branch in main master develop release production staging; do
+  [ "$CURRENT_BRANCH" = "$branch" ] && {
+    echo -e "${YELLOW}[post-checkout]${NC} ⚠️  Protected branch: $branch - use PRs${NC}"
+    break
+  }
+done
+
+# Last commit
+LAST_COMMIT=$(git log -1 --pretty=format:"%h - %an, %ar : %s" 2>/dev/null || echo "")
+[ -n "$LAST_COMMIT" ] && echo -e "${BLUE}[post-checkout]${NC} Last: $LAST_COMMIT"
+
+echo ""
+echo -e "${GREEN}[post-checkout] ✅ All actions completed${NC}"
+exit 0

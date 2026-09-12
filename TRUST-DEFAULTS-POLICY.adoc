@@ -1,0 +1,879 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Trust Defaults Policy
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toc-placement: preamble
+:sectnums:
+
+Every repository in the estate ships the best-of-best *security* defaults,
+switched on, as its `Trustfile` contractile. A repository may remove them only
+through the clearly marked `just strip-rsr-defaults` family, which warns before
+it acts. Accessibility defaults are the sibling policy,
+link:ACCESSIBILITY-DEFAULTS-POLICY.adoc[ACCESSIBILITY-DEFAULTS-POLICY.adoc], and
+ship as the `Adjustfile`.
+
+Status: *ratified by the owner 2026-09-02* (rulings recorded in the session of
+that date). Canonical machine-readable exemplar:
+`.machine_readable/contractiles/trust/Trustfile.a2ml` in this repository. The
+RSR template carries a copy of this document under `docs/standards/`.
+
+== Principles
+
+. *Defaults on, opt-out loud.* Best of best is the starting point; a repo works
+  backwards from it, never up to it. Removal is an explicit, logged act
+  (<<strip>>).
+. *Declared is not verified.* A Trustfile entry whose `run:` cannot fail is a
+  fake gate. Every entry either carries an offline probe that can fail, or is
+  marked `status: declared` so the gap is visible in the file. Live network
+  facts (DNS answers, TLS handshakes, edge settings) are never Trustfile
+  gates; the contractile runner is offline by design
+  (`security.allow_network = false`). Continuous live review is a separate
+  pipeline (<<review>>).
+. *Post-quantum per protocol, never as a blanket.* "Always post-quantum" is
+  written as a table (<<pq>>) because several protocols have no deployable
+  post-quantum option yet. A gate that demands PQ where none exists cannot
+  pass and is therefore fatal debt.
+. *Elliptic-curve first.* ECC keys and signatures are the default in every
+  protocol; RSA appears only as an explicit fallback row for consumers that
+  cannot verify ECC.
+. *IPv6 preferred.* Services publish AAAA first and A second; single-stack IPv4
+  is an exception (<<exceptions>>).
+. *One control plane.* Every default below is a stable toggle key
+  (<<keys>>) so scaffoldia can set it per repository and opsm can carry the
+  same key at package level. scaffoldia is the long-term home of this
+  control; the `just` strip family is the interim, in-repo form of it.
+
+[[network]]
+== Network: ports, protocols, lockdown
+
+* *Transaction-gated ports.* Every listening port exists for a declared
+  transaction set. A port with no declared transaction is closed. Firewalls
+  and container port maps enumerate ports from that declaration, never the
+  reverse.
+* *Protocol declared per port.* Each port names exactly the transports it
+  serves: `tcp`, `udp`, `quic` (UDP/443 for HTTP/3), `sctp`, or a real-time
+  streaming transport (SRT, RTP over UDP, WebRTC data channels). An `EXPOSE`
+  line or compose `ports:` entry without a transport suffix fails the
+  Trustfile (`ports-declare-transport`). Unlisted transports on a listed port
+  are dropped, not merely unserved.
+* *Lockdown while in use.* When a component of a system is active (a
+  container, a sidecar, a dev server), every port that component does not
+  declare is locked down on that host and in that namespace. "Locked down"
+  means dropped at the packet filter, not "no listener".
+* *Port choice.* Pick a port that is unassigned in the IANA registry and not
+  a common default. Do not squat well-known service ports to "cover" an
+  attack surface: the listening service is the surface, not the number, and
+  malware-associated ports attract intrusion-detection false alarms and
+  clashes. Record the choice in the port registry
+  (link:PORT-REGISTRY.adoc[PORT-REGISTRY.adoc], migrating to
+  `hyperpolymath/verisim-data`). Example: BerryWiki uses 23779, keypad
+  "BERRY", loopback only.
+* *Loopback for local tools.* Single-user local tools bind `127.0.0.1` or
+  `[::1]`, never `0.0.0.0` or `[::]`, and refuse a non-loopback bind unless a
+  profile explicitly permits it.
+* *Trust nothing from the wire.* No identity header (`Remote-User`,
+  `X-Forwarded-*`) is honoured unless the peer is a declared trusted proxy.
+
+[[host]]
+== Host, image and container hardening
+
+* *OWASP across the board.* Every service targets OWASP ASVS Level 2 as the
+  floor; Level 3 for anything handling authentication, secrets, payment or
+  health data. The OWASP Top 10 and the API Security Top 10 are the threat
+  checklists in `[THREAT_MODEL]`. Web content follows the OWASP secure
+  headers project (<<web>>).
+* *SELinux-hardened images.* Images run under SELinux enforcing with a
+  labelled type; containers start with `--security-opt label=type:<type>`
+  (or the equivalent quadlet key), `no-new-privileges`, all capabilities
+  dropped and only the needed ones re-added, a read-only root filesystem,
+  a seccomp profile, and a non-root `USER`. Secrets are never bind-mounted
+  with `:Z` relabelling into a shared path. Images are pinned by digest
+  (`container-images-pinned`).
+* *DHCP hardening, when DHCP is used.* Kea or dnsmasq only. Static leases for
+  infrastructure; lease logging on; unsigned dynamic DNS updates off; DHCP
+  snooping and RA Guard on the switch or bridge; DHCPv6 with RA `M`/`O` flags
+  set deliberately, never by default; rogue-server detection alerts. A repo
+  that ships no DHCP declares the key `dhcp: none` and the section is
+  skipped.
+* *Application servers (Tomcat and similar).* Shutdown port disabled
+  (`port="-1"`), manager and host-manager applications removed, `autoDeploy`
+  off, `Server` header cleared, error pages replaced, run as a dedicated
+  non-root user, TLS terminated by the reverse proxy in <<servers>>, JMX
+  bound to loopback or off.
+* *PHP hardening as standard.* `expose_php=0`, `disable_functions` per the
+  aegis rule set in the exemplar `[PHP_HARDENING]`, `open_basedir` to the
+  site root, `session.cookie_httponly=1`, `session.cookie_secure=1`,
+  `session.cookie_samesite=Strict`, `allow_url_include=0`,
+  `display_errors=0` in production, opcache validated. Any repo containing a
+  `.php` file must carry the hardening ini (`php-hardening-present`).
+* *www directory layout.* Served content lives under
+  `/srv/site/www/public`; nothing above `public` is reachable from the web
+  server's document root; configuration, secrets and logs sit beside it in
+  `/srv/site/{config,secrets,logs}` with `secrets` readable only by the
+  service user. Repositories mirror this as `www/{public,config}` plus
+  `www/security_headers`, `www/well_known`, `www/resource_records` (the
+  Website Security section of the template Trustfile checks these).
+
+[[web]]
+== Web tier
+
+=== HTTPS only
+
+* HTTP answers only with a permanent redirect to HTTPS; no content is ever
+  served over cleartext.
+* *HSTS* with `max-age=63072000; includeSubDomains; preload`, and the domain
+  submitted to the preload list once every subdomain is HTTPS-only. The
+  preload flag is a one-way door and is recorded as an exception if a
+  subdomain must stay HTTP.
+* *Key pinning.* HPKP (`Public-Key-Pins`) is *not* used. Browsers removed it in
+  2018 through 2020, and a wrong pin bricks the site. The replacements are
+  all in force here: CAA records with account binding, Certificate
+  Transparency monitoring with alerts, DANE (TLSA) for services whose clients
+  verify it, and ECH.
+
+=== Response headers
+
+`Strict-Transport-Security`, `Content-Security-Policy` (default-src 'self';
+no `unsafe-inline` for scripts; nonces or hashes where inline is
+unavoidable), `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+strict-origin-when-cross-origin`, `Permissions-Policy` denying every
+capability not used, `Cross-Origin-Opener-Policy: same-origin`,
+`Cross-Origin-Resource-Policy: same-origin`, `X-Frame-Options: DENY` unless
+framing is designed in, and removal of `Server` and `X-Powered-By`. The
+exemplar `[RESPONSE_HEADERS]` carries the values; the template checks
+presence (`site-security-headers`).
+
+=== Root files and `.well-known`
+
+[cols="2,4,1", options="header"]
+|===
+| Path | Content | Default
+| `/.well-known/security.txt` | RFC 9116: `Contact`, `Expires` (under one year), `Encryption`, `Preferred-Languages`, `Canonical`; signed | required
+| `/.well-known/mta-sts.txt` | MTA-STS policy, `mode: enforce`, matches the `_mta-sts` TXT id | required when mail
+| `/.well-known/acme-challenge/` | HTTP-01 fallback for ACME; DNS-01 is preferred (<<tls>>) | required when public TLS
+| `/.well-known/keybase.txt` | Keybase site proof (or the `_keybase` TXT record); proves domain ownership against the owner's Keybase identity | recommended
+| `/.well-known/change-password` | Redirect to the password-change page | required when accounts
+| `/.well-known/consent` | consent-aware-web endpoint announced by the `_consent` TXT (`v=CAdRE1`) and the AIBDP manifest | required
+| `/.well-known/openid-configuration` | Only when the site is an OpenID provider | conditional
+| `/robots.txt` | Explicit allow for the site, disallow for private paths, `Sitemap:` line; AI crawlers governed by the consent manifest, not by robots alone | required
+| `/humans.txt` | Team, thanks, technology colophon | recommended
+| `/llms.txt` | llmstxt.org summary for language-model consumers, pointing at the AIBDP manifest for the binding terms | required
+| `/ai.txt` | Machine-readable AI-use terms mirroring the AIBDP manifest (kept for crawlers that read only this path) | required
+| `/ads.txt` | Present only when the site sells advertising; otherwise the IAB "no authorised sellers" placeholder line so the absence is a statement, not an omission | required
+|===
+
+*consent-aware-web naming.* The repository was "consent-aware HTTP" and was
+renamed "consent-aware-web". Keep the new name: the suite now includes an
+HTTP status code (430 Consent Required), a manifest format (AIBDP) and
+DNS/`.well-known` discovery, so "web" is the correct scope for the suite.
+"Consent-aware HTTP" remains the precise term for the protocol layer inside it
+(the status code and the request/response semantics) and should be used in
+the Internet-Draft titles, which already do so.
+
+=== http-capability-gateway
+
+Capability-scoped access to every HTTP surface: the `_capabilities` TXT
+record (`v=OCAP1`) and the `[CAPABILITY_GATEWAY]` section of the exemplar
+declare which capabilities an origin exposes; nothing outside the declared
+set is routable. Origins sit behind the gateway or behind a reverse proxy
+that enforces the same declaration.
+
+[[servers]]
+=== Server configurations
+
+The estate ships hardened reference configurations for the following. The
+owner's list (Caddy, Apache, Cowboy/Bandit, Nginx, OpenLiteSpeed) is right;
+the rows marked *added* are the very likely companions.
+
+[cols="2,3,3", options="header"]
+|===
+| Server | Role | Hardening baseline
+| Caddy | Default edge for small sites; automatic ACME | TLS 1.3, ECH, HTTP/3, headers via a shared snippet, `admin off` or loopback
+| Nginx | Reverse proxy and static origin | `server_tokens off`, TLS 1.2 minimum, OCSP stapling, `limit_req`, no `autoindex`
+| Apache httpd | Legacy and PHP origins | `ServerTokens Prod`, `ServerSignature Off`, `mod_security` with the OWASP Core Rule Set, `AllowOverride None`
+| OpenLiteSpeed | High-throughput PHP origin | admin console on loopback only, LSAPI as non-root, same headers snippet
+| Cowboy / Bandit | Erlang and Elixir origins (Phoenix, boj-server MK2) | Bandit preferred for HTTP/2 and WebSocket; TLS by the proxy; `max_header_value_length` and request limits set
+| Tomcat *(added)* | Java origins | see <<host>>
+| HAProxy *(added)* | L4/L7 load balancer and TLS terminator in front of several origins | PROXY protocol to origins, `ssl-default-bind-options`, stick tables for rate limiting
+| Traefik *(added)* | Container-native edge for compose and quadlet stacks | dashboard off, providers restricted to labelled services
+| Unbound / Knot *(added)* | Recursive resolver / authoritative DNS when self-hosted | DoT/DoQ/DoH listeners, DNSSEC validation, QNAME minimisation
+| Postfix + Dovecot *(added)* | Only if mail is self-hosted; otherwise Cloudflare Email Routing | DANE-verified outbound, MTA-STS, TLS-RPT reporting
+|===
+
+*Preferred origin.* Everything above is a reference configuration for a
+conventional server. The preferred origin for new services is
+`hyperpolymath/proven-servers` (formally verified Idris 2 server components),
+and toolchain surfaces are offered through `boj-server` with cartridges
+(<<boj>>).
+
+[[dns]]
+== DNS
+
+=== Records every public zone carries
+
+[cols="2,4", options="header"]
+|===
+| Record | Default
+| DNSSEC | Signed. Algorithm 13 (ECDSAP256SHA256) today; algorithm 15 (Ed25519) where the registrar accepts the DS. NSEC3 with opt-out off, or NSEC with minimal responses. DS published at the registrar; CDS/CDNSKEY on for automated rollover
+| ZONEMD | RFC 8976 digest in the apex, regenerated on every zone change (`zonemd: enabled`)
+| CAA | `issue` for the chosen CA with `accounturi` (ACME account binding) and `validationmethods`; `issuewild ";"` unless wildcards are designed in; `iodef mailto:` to the security contact
+| TLSA | DANE for every TLS service: `_443._tcp` usage 3 selector 1 matching 1 (current key) plus a usage 2 anchor for rollover; `_25._tcp` for MX hosts
+| SSHFP | Type 4 (Ed25519) with SHA-256 (`4 2`) for every SSH host; `1 2` (RSA) only while an RSA host key exists; `VerifyHostKeyDNS yes` documented for clients. Rotate with the host key
+| HTTPS / SVCB | `alpn="h3,h2"`, `ipv6hint` first, `ech=` carrying the ECH config list
+| MTA-STS | `_mta-sts` TXT with an id that changes on every policy edit; policy file `mode: enforce`
+| TLS-RPT | `_smtp._tls` TXT (`v=TLSRPTv1; rua=mailto:`) so DANE and MTA-STS failures are reported
+| SPF | `-all`; include only the senders in use; under ten lookups
+| DMARC | `p=reject; sp=reject; adkim=s; aspf=s; rua=; ruf=`
+| DKIM | Two selectors: Ed25519 (RFC 8463, `k=ed25519`) and RSA-2048 (`k=rsa`). Outbound mail is dual-signed; the RSA signature exists only for verifiers without Ed25519 support. Both rotate annually, RSA first
+| PTR | Every published A and AAAA has a matching reverse record. IPv6 reverse zones are nibble-format `ip6.arpa` and are delegated or hosted with the same DNSSEC posture as the forward zone
+| `_consent`, `_capabilities` | consent-aware-web and http-capability-gateway discovery TXT records
+| `_keybase` | Keybase DNS proof when the `.well-known` proof is not used
+|===
+
+=== Zone architecture
+
+* *Primary-primary.* Two providers, each authoritative and each accepting
+  the same declarative push (<<push>>), so no single provider outage or
+  account compromise takes the zone. Where a provider cannot be a peer, a
+  hidden primary with at least two secondaries on different providers.
+* *Split-horizon.* Internal names are served only from an internal view;
+  the public zone never contains RFC 1918 or ULA addresses, internal
+  hostnames, or infrastructure records. Views are separate zone files with
+  separate signing keys, never one zone with conditional answers.
+
+[[ttl]]
+=== TTL policy
+
+TTLs are set *per record type and per phase*, not by numerology.
+
+[cols="2,1,3", options="header"]
+|===
+| Record | Steady state | Notes
+| NS, DS, DNSKEY | 24 h | Change rarely; long TTL protects against resolver churn
+| CAA, TLSA, SSHFP, MTA-STS, TLS-RPT | 1 h | Security anchors; short enough that a rotation propagates within the hour
+| A, AAAA, HTTPS behind a proxy | 5 min | Proxy edge addresses move; short TTL is cheap
+| A, AAAA on a fixed origin | 1 h | Lower to 60 s from 48 h before a planned move, restore after
+| MX, TXT (SPF, DMARC, DKIM) | 1 h | DKIM 5 min during a rotation
+| SOA minimum (negative caching) | 5 min |
+|===
+
+*On "asymmetric prime-number TTLs".* The idea that two records should carry
+different prime-valued TTLs so that they refresh out of phase is not a
+recognised practice and does not do what it promises:
+
+. Within one RRset (all the A records for one name, say) RFC 2181 §5.2
+  requires every record to carry the same TTL, and resolvers normalise a
+  mixed set to its lowest value. So "two primes for the same name" collapses
+  to one TTL.
+. Across different RRsets, resolvers cache each answer independently from
+  the moment *they* first asked, not from the zone's clock. Two caches never
+  share a phase to stagger, and several resolvers add their own jitter. Prime
+  values therefore buy no coverage that ordinary values do not.
+. What the advice is reaching for, keeping one record alive while another
+  refreshes, is delivered by the table above: long TTLs on anchors, short
+  TTLs on addresses, and a pre-announced lowering before changes.
+
+[[transport]]
+=== Resolver transport, ECH, ODoH
+
+* *Encrypted resolution everywhere.* Hosts and containers resolve over DoT
+  (853/tcp), DoQ (853/udp, RFC 9250) or DoH (443); plaintext 53 is allowed
+  only to a loopback stub. Self-hosted resolvers (Unbound, Knot Resolver)
+  expose all three.
+* *ODoH where a proxy exists.* Oblivious DoH (RFC 9230) is used for client
+  resolution when an ODoH proxy is available, so the resolver never sees the
+  client address. It is not used for the servers' own authoritative traffic.
+* *ECH.* Encrypted Client Hello is on at the edge; the config list is
+  published in the HTTPS record and the site's DoH/DoT resolver path is what
+  keeps the SNI private end to end. ECH without encrypted resolution is
+  recorded as `status: partial`.
+
+[[push]]
+=== Cloudflare settings and how they are pushed
+
+All zone records and edge settings are declared in the repository and pushed
+declaratively. Hand edits in the dashboard are a policy violation and are
+detected by drift comparison.
+
+* *Tooling.* The three existing DNS-as-code tools each fail an estate rule:
+  OctoDNS is Python (banned estate-wide); DNSControl is Go but its
+  configuration language is JavaScript, which collides with the
+  no-JavaScript-source policy; Terraform's Cloudflare provider works but is
+  stateful and heavyweight for what is a table of records. Interim: the
+  Cloudflare Terraform provider. Proposed: a small Elixir reconciler
+  (Cloudflare provider first, plus a zone-file emitter for the self-hosted
+  primaries) whose zone spec is the Nickel record table shared with the
+  Trustfile, so one source both pushes and verifies. It would run as a
+  supervised drift detector and feed authority-watch's `technical`
+  profile. Scope it to the providers the estate uses; never chase
+  OctoDNS's provider breadth. This is a proposed mint, not a decision.
+* *Token.* A scoped API token per zone with `Zone:DNS:Edit` and
+  `Zone:Zone Settings:Edit` only, held as a CI secret, never in the repo.
+* *Edge settings under control.* Always Use HTTPS, HSTS (with preload),
+  minimum TLS 1.2, TLS 1.3 on, ECH on, HTTP/3 on, 0-RTT off unless measured
+  safe, Opportunistic Encryption off (HTTPS-only makes it moot), Universal
+  SSL with the ECDSA certificate first, Authenticated Origin Pulls, WAF
+  managed rules plus the OWASP Core Rule Set, Bot Fight Mode, Email Routing
+  when mail is not self-hosted, DNSSEC with multi-signer off unless
+  primary-primary needs it, Browser Integrity Check, and the
+  `[CLOUDFLARE_EDGE_SECURITY]` list in the exemplar.
+* *Reverse DNS.* PTR and `ip6.arpa` nibble zones are declared in the same
+  file and pushed to whichever provider holds the reverse delegation.
+* *Flow.* Trustfile `[DNS]` and `[CLOUDFLARE]` are the source; a
+  `just dns-plan` recipe renders the declaration and shows the diff;
+  `just dns-push` applies it from CI after review. The Trustfile's offline
+  gate checks that the declaration exists and parses; the live comparison is
+  <<review>>.
+
+[[tls]]
+== TLS, certificates and keys
+
+* TLS 1.3 preferred, 1.2 minimum, no CBC suites, no RSA key exchange.
+* Certificates are ECDSA P-256 (RSA only for a recorded legacy consumer);
+  issued by ACME with DNS-01 as the primary challenge (a scoped token that
+  can write only `_acme-challenge`) and HTTP-01 as the fallback; CAA
+  `accounturi` binds issuance to the ACME account; must-staple and OCSP
+  stapling on; every issuance appears in CT logs and is monitored.
+* Key exchange groups in order: `X25519MLKEM768`, `X25519`, `secp256r1`. The
+  draft codepoint `X25519Kyber768Draft00` is retired and must not be listed.
+* SSH: Ed25519 host and user keys; key exchange
+  `mlkem768x25519-sha256` (OpenSSH 9.9 and later) with
+  `sntrup761x25519-sha512` as the fallback; SSHFP published.
+* Keybase: the owner's identity proofs cover every apex domain
+  (`.well-known/keybase.txt` or `_keybase` TXT) and the signing keys used for
+  releases are the ones proven there.
+
+[[pq]]
+=== Post-quantum, per protocol
+
+[cols="2,3,2", options="header"]
+|===
+| Protocol | Post-quantum position today | Trustfile status
+| TLS 1.3 | Hybrid `X25519MLKEM768` key exchange; certificates remain ECDSA (no CA issues ML-DSA certificates yet) | verified (config grep)
+| SSH | Hybrid `mlkem768x25519-sha256` or `sntrup761x25519-sha512` | verified (config grep)
+| Signatures on packages and releases | Hybrid Ed25519 + ML-DSA-87 (opsm already does this); SLSA provenance | verified where opsm is used
+| Encryption at rest | ML-KEM-1024 hybrid envelopes (opsm) | verified where opsm is used
+| DNSSEC | No deployed PQ algorithm; Ed25519 or ECDSA P-256 | declared
+| DKIM | No PQ algorithm; Ed25519 + RSA | declared
+| SSHFP, TLSA, CAA | Hashes of the above; no PQ change needed | n/a
+| WireGuard / VPN | Pre-shared key layer as the PQ hedge until a hybrid handshake ships | declared
+|===
+
+Names are the FIPS ones (ML-KEM, ML-DSA) in every new document; "Kyber" and
+"Dilithium" appear only as aliases in prose.
+
+[[toolchain]]
+== Toolchain updates
+
+* Every repository carries `mise.toml`. Tools are pinned by *policy*, not by
+  hand: the version spec is `latest` for tools that publish stable releases,
+  and the refresh recipe (`just toolchain-refresh`, wrapping `mise up --bump`)
+  runs weekly and opens a pull request with the bumps.
+* `latest` in mise resolves to the newest non-prerelease version listed for
+  the tool (observed 2026-09-02: `node` resolves to 26.8.1, `node@25` to
+  25.9.0). Prereleases (alpha, beta, rc, nightly) are never selected
+  implicitly; a repo that needs one records it in <<exceptions>> with the
+  reason and the exit condition.
+* This complements
+  link:TOOLING-VERSION-INTEGRITY-POLICY.adoc[TOOLING-VERSION-INTEGRITY-POLICY.adoc]:
+  Rule 1 (never install unversioned) is satisfied because mise resolves
+  `latest` to a concrete version in `mise.lock`; Rule 2 (declare the minimum)
+  is the `[tools]` table; Rule 5 (resolve at source) is why the refresh
+  recipe lives in the shared `build/just/` module, not per repo.
+
+[[i18n]]
+== Internationalisation, search and shell
+
+* Every user-facing repository ships an i18n catalogue (message keys, not
+  literal strings) with an English source catalogue and a hook for the `lol`
+  ("loads of languages") repository: `i18n.lol = required | optional`. `lol`
+  was minted as pending by the 2026-08-27 ruling and does not exist on disk
+  yet; until it does, the hook is `status: declared`.
+* `agrep` is the approximate-search tool offered in the Justfile
+  (`just search <pattern>`).
+* A `Justfile` is the only task runner (no Makefiles), with `just setup` as
+  the first-run recipe.
+* `pay-respects` (the maintained successor to thefuck) and shell completions
+  for the Justfile are set up by `just setup` and listed in `mise.toml`.
+* The standards documents (this policy, the accessibility policy, the
+  language and licence policies) are copied into `docs/standards/` of every
+  repository and are removed together by `strip-rsr-defaults standards`.
+
+[[boj]]
+== Preferred infrastructure components
+
+* *proven-servers* first: any new network service is composed from the
+  verified components before a conventional server is considered.
+* *boj-server and cartridges* are offered first class: one stdio MCP endpoint
+  for the whole toolchain, with MCP, LSP, debug, build and lint surfaces
+  provided as cartridges from `boj-server-cartridges` and selected per repo
+  (`boj.cartridges = [mcp, lsp, debug, build, lint]`).
+* *hybrid-automation-router* routes automation events (watchers, webhooks,
+  queues, schedules) to targets by capability, tag and priority; it is the
+  default automation fabric, and the contract in
+  `panll/contracts/automation_router.toml` is the interface.
+* *CADRE Router* (Configurable Adaptive Distributed Routing Engine) is the
+  routing and coordination layer: the Elixir `cadre-router` provides the
+  distributed route table with `consensus: :raft | :crdt`, and
+  `cadre-router` + `cadre-tea-router` provide type-safe URL routing and TEA
+  navigation for ReScript and AffineScript front ends. New TEA applications
+  use `cadre-tea-router`; new distributed services use the Elixir router in
+  raft mode.
+
+[[review]]
+== Continuous review of these standards
+
+mise updates tools; it does not review policy. The estate uses
+`metadatastician/authority-watch` for that: it observes the authoritative
+sources (IETF RFC and draft streams, IANA registries, OWASP releases, CA/B
+Forum ballots, browser TLS roadmaps, Cloudflare changelogs, WCAG editor's
+drafts), detects changes, runs them through the Observation, Interpretation,
+Approval and Publication states, and publishes a signed update bundle only
+after a human has approved it. The bundle is a pull request against this
+repository and the template, never an automatic edit. Live conformance
+checks (DNS answers, TLS handshakes, edge settings, header scans) are
+authority-watch consumers as well, so drift is reported through the same
+approval path.
+
+[[keys]]
+== Control-plane keys (scaffoldia and opsm)
+
+Every default above is addressable by a stable key. scaffoldia sets them per
+repository (and auto-suggests the sections that follow from a design: a
+Tomcat origin pulls in the Tomcat row, a DHCP component pulls in DHCP
+hardening); opsm carries the same keys at package level with the FIPS
+algorithm names.
+
+[cols="3,2,3", options="header"]
+|===
+| Key | Values | Section
+| `net.ports.transaction_gated` | true | <<network>>
+| `net.ports.declare_transport` | true | <<network>>
+| `net.ports.lockdown_unused` | true | <<network>>
+| `net.bind.local_tools` | loopback | <<network>>
+| `net.ipv6.preferred` | true | <<network>>
+| `host.owasp.asvs_level` | 2 \| 3 | <<host>>
+| `host.selinux.enforcing` | true | <<host>>
+| `host.dhcp` | none \| kea \| dnsmasq | <<host>>
+| `host.appserver` | none \| tomcat \| ... | <<host>>
+| `web.https_only`, `web.hsts.preload` | true | <<web>>
+| `web.headers.profile` | owasp-strict | <<web>>
+| `web.headers.ledger` | ratchet | <<header-ratchet>>
+| `web.platform` | static \| wordpress \| plesk \| tomcat \| nextcloud \| custom | <<header-ratchet>>
+| `perms.state` | serve \| develop \| configure \| uninstall | <<perms-deadman>>
+| `perms.timeout` | duration | <<perms-deadman>>
+| `perms.deadman` | on \| off | <<perms-deadman>>
+| `perms.scopes` | list of path classes | <<perms-deadman>>
+| `storage.at_rest` | method | <<encryption-at-rest>>
+| `supply_chain.tracking` | sbom+provenance+osv | <<supply-chain>>
+| `robustifier.packs` | list | <<robustifier>>
+| `web.www.layout` | srv-site | <<host>>
+| `web.php.hardening` | aegis | <<host>>
+| `web.capability_gateway` | true | <<web>>
+| `web.consent_aware` | true | <<web>>
+| `web.root_files` | list | <<web>>
+| `web.server` | caddy \| nginx \| apache \| openlitespeed \| cowboy \| bandit \| tomcat \| proven-servers | <<servers>>
+| `dns.dnssec.algorithm` | 13 \| 15 | <<dns>>
+| `dns.zonemd`, `dns.caa`, `dns.tlsa`, `dns.sshfp`, `dns.ptr` | true | <<dns>>
+| `dns.architecture` | primary-primary \| hidden-primary \| split-horizon | <<dns>>
+| `dns.ttl.profile` | standard \| pre-migration | <<ttl>>
+| `dns.transport` | dot \| doq \| doh \| odoh | <<transport>>
+| `dns.push.tool` | dnscontrol \| terraform | <<push>>
+| `mail.mta_sts`, `mail.tls_rpt`, `mail.dmarc.policy` | true / reject | <<dns>>
+| `mail.dkim.algorithms` | [ed25519, rsa2048] | <<dns>>
+| `tls.groups` | [X25519MLKEM768, X25519, secp256r1] | <<tls>>
+| `tls.ech` | true | <<transport>>
+| `tls.pinning` | none (HPKP forbidden) | <<web>>
+| `tls.acme.challenge` | dns-01 \| http-01 | <<tls>>
+| `identity.keybase` | true | <<tls>>
+| `toolchain.mise.policy` | latest-stable | <<toolchain>>
+| `i18n.lol` | required \| optional | <<i18n>>
+| `shell.pay_respects`, `shell.completions`, `search.agrep` | true | <<i18n>>
+| `infra.proven_servers` | preferred | <<boj>>
+| `boj.cartridges` | [mcp, lsp, debug, build, lint] | <<boj>>
+| `automation.router` | hybrid-automation-router | <<boj>>
+| `routing.layer` | cadre-router \| cadre-tea-router | <<boj>>
+| `review.pipeline` | authority-watch | <<review>>
+| `defaults.trust`, `defaults.adjust`, `defaults.standards` | full \| blank | <<strip>>
+|===
+
+[[strip]]
+== Removing defaults: the `strip-rsr-defaults` family
+
+Removal is a first-class, reversible, loud operation, shipped in the template
+as `build/just/contractile-defaults.just`:
+
+* `just strip-rsr-defaults` with no arguments prints the menu of strippable
+  items with what each removes.
+* `just strip-rsr-defaults trustfile adjustfile ...` strips named items;
+  `all` strips every item in the registry.
+* `just strip-defaults-scaffold <group>...` removes whole scaffold groups
+  that a small repository does not need: `academic` (whitepapers, theory,
+  proposals), `verification` (proofs, safety case, fuzzing), `ai` (AI
+  manifests, `.machine_readable/ai`, arrival pack, bot directives), `hypatia`
+  (scanner workflow and ignore file), `container` (delegates to
+  `no-container`). Groups are data in
+  `.machine_readable/contractile-defaults/strip-registry.tsv`, which is the
+  same list scaffoldia will read when it takes over composition.
+* Every recipe refuses unless invoked with the literal confirmation token,
+  prints what it is about to remove, moves originals to a `stripped/` holding
+  directory rather than deleting them, and leaves a `STRIPPED` marker so
+  `just defaults-status` and the Adjustfile can see the state.
+  `just restore-defaults` reverses it.
+* Stripping is for genuinely small repositories (a hello-world documentation
+  test, a manifesto, a personal page), not for avoiding a gate on a service.
+  A stripped Trustfile on anything that listens on a port is an exception
+  that must be recorded.
+
+[[verification]]
+== What the Trustfile verifies, and what it only declares
+
+[cols="3,1,3", options="header"]
+|===
+| Check | Offline probe | Trustfile id (template)
+| `EXPOSE` / `ports:` lines carry a transport | yes | `ports-declare-transport`
+| Port declaration file present when anything is exposed | yes | `ports-declared`
+| Container runs non-root, digest-pinned, SELinux label option present | yes | `container-images-pinned`, `container-selinux-label`
+| No `http://` URL in served content (loopback and schema namespaces excluded) | yes | `site-https-only`
+| HSTS with preload in the headers file | yes | `site-hsts-preload`
+| CSP has no `unsafe-inline` for `script-src` | yes | `site-csp-no-inline-script`
+| Zone declaration carries DNSSEC, ZONEMD, CAA, TLSA, SSHFP, MTA-STS, TLS-RPT, DMARC, both DKIM selectors | yes (grep of the declared zone) | `site-resource-records-complete`
+| TLS group list starts with `X25519MLKEM768` and lacks the draft codepoint | yes | `tls-pq-groups`
+| `.well-known` and root files present | yes | `site-well-known-complete`, `site-root-files`
+| PHP hardening ini present when `.php` exists | yes | `php-hardening-present`
+| `mise.toml` present, no prerelease pins | yes | `mise-present`, `mise-no-prerelease`
+| Policy copies present in `docs/standards/` | yes | `standards-docs-present`
+| Live DNS answers, TLS handshake, ECH, edge settings, PTR resolution | no; authority-watch | `status: declared`
+| DHCP, Tomcat hardening applied on a host | no | `status: declared`
+| i18n hook into `lol` | no (repo pending) | `status: declared`
+|===
+
+[[exceptions]]
+== Exceptions register
+
+Exceptions are recorded in the repository's Trustfile `[EXCEPTIONS]` block
+with a reason, an owner and an exit condition. Standing estate-wide
+exceptions:
+
+[cols="2,3,3", options="header"]
+|===
+| Exception | Reason | Exit
+| IPv4 loopback (`127.0.0.1`) for single-user local tools (BerryWiki) | `[::1]`-only binds break on hosts with IPv6 disabled in WSL; loopback is not a network exposure | none required
+| RSA-2048 DKIM selector | Verifiers without Ed25519 support | Remove when the major providers all verify RFC 8463
+| DNSSEC not post-quantum | No standardised PQ DNSSEC algorithm | Revisit on IETF DNSOP publication
+| Prerelease toolchains | Recorded per repo | Per repo
+|===
+
+[[header-ratchet]]
+== Security headers: the grant ratchet (CSP and Permissions-Policy autodetect)
+
+Owner request 2026-09-02: header configuration should detect what a site
+actually needs, add it onto the existing configuration after a warning and
+an acceptance, and be encoded as you go during development, so the finished
+site neither blocks a capability it needs (geolocation, a script) nor grants
+more than the narrowest working form. It must not switch off capabilities a
+platform such as WordPress depends on.
+
+This is feasible because both headers have a report-only mode and both
+report violations as structured events. The mechanism is a *ratchet*:
+
+. *Deny-all baseline.* The enforced `Content-Security-Policy` starts at
+  `default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors
+  'none'` plus `'self'` for the resource types the site serves, and
+  `Permissions-Policy` starts with every feature set to `()`.
+. *Observe.* During development the site is served with
+  `Content-Security-Policy-Report-Only` and `Permissions-Policy-Report-Only`
+  carrying the *proposed* enforced policy, with `report-to` pointing at the
+  local collector (`just headers-observe` starts it on loopback). In
+  parallel, a static scan of the served tree finds external origins in
+  `src`, `href`, `action`, `@import`, `url()`, `fetch(` and `navigator.`
+  feature calls. Both sources produce *observations*.
+. *Propose.* `just headers-propose` folds observations into candidate grants,
+  each with the narrowest form that would satisfy it: a specific origin
+  rather than a scheme wildcard, a nonce or hash rather than
+  `'unsafe-inline'`, `self` rather than `*` for a feature, and the specific
+  directive rather than `default-src`. Each candidate names the file or
+  report that produced it.
+. *Warn and accept.* Nothing enters the enforced policy without
+  `just headers-accept <grant-id> --reason "<why>"`, which records the grant
+  in the Trustfile `[RESPONSE_HEADERS]` grants ledger with the date, the
+  reason and the observation that justified it. A grant that would widen to
+  `'unsafe-inline'`, `'unsafe-eval'`, `*`, `data:` for scripts, or a
+  `Permissions-Policy` feature set to `*` prints the warning in full and
+  requires `--i-accept-the-widening`.
+. *Enforce.* `just headers-enforce` renders the enforced headers from the
+  accepted grants only, for every server in the matrix (<<servers>>) from
+  one source. The Trustfile gate `headers-match-ledger` fails if a served
+  header is looser than the ledger; a header tighter than the ledger passes.
+. *Prune.* An accepted grant with no observation in the last N observe runs
+  is reported as a prune candidate, not failed; capabilities used rarely
+  (a payment flow, a camera) are real even when they are quiet.
+. *As you go.* The pre-commit self-check runs the static scan and refuses a
+  commit that introduces a new external origin or feature use without an
+  accepted grant. The grant therefore lands in the same commit as the code
+  that needs it, which is the "encoded as you go" property.
+
+*Platform presets.* Autodetect must never remove what a platform needs. A
+repo declares its platform (`web.platform = wordpress | plesk | tomcat |
+nextcloud | static | custom`), and the preset preloads that platform's
+known grant set in its narrowest working form, marked `origin: preset` in
+the ledger so it is distinguishable from observed grants. The WordPress
+preset, for example, grants `script-src 'self'` plus the admin's known
+inline needs under a nonce where the version supports it and under
+`'unsafe-inline'` scoped to `/wp-admin/` paths where it does not, allows the
+REST and oEmbed endpoints, and keeps `Permissions-Policy` features WordPress
+core and common blocks use (`fullscreen=(self)`, `picture-in-picture=(self)`,
+`clipboard-write=(self)`), while everything WordPress does not use stays
+`()`. Presets are maintained in `rsr-robustifier` under the `link-hygiene`
+and `small-checks` packs and reviewed through authority-watch's technical
+profile when a platform release changes its needs.
+
+*Trustfile encoding.* The ledger is a block under `[RESPONSE_HEADERS]`:
+
+----
+grants:
+  csp.script-src.cdnjs:
+    directive: script-src
+    value: https://cdnjs.cloudflare.com
+    observed: www/public/index.html:42 (2026-09-02)
+    accepted: 2026-09-02 owner "syntax highlighting bundle, pinned version"
+  permissions.geolocation.self:
+    directive: geolocation
+    value: (self)
+    observed: report 2026-09-02T10:14Z /map
+    accepted: 2026-09-02 owner "store finder needs the user's position"
+----
+
+*Limits, stated plainly.* Report-only observation covers what a developer
+exercises; a path nobody clicks during development is discovered in
+production, which is why the enforced policy also ships with `report-to`
+so late violations still arrive as observations rather than as silent
+breakage. Static scanning cannot see origins constructed at runtime, so a
+site that builds URLs dynamically declares them by hand. Neither limit makes
+the ratchet weaker than today's practice, which is a hand-written header
+that is never revisited.
+
+[[perms-deadman]]
+== File permissions: the dead man's handle
+
+Owner request 2026-09-02: when a repository is not being edited by a
+developer or configured by a platform developer, and its files have no
+reason to change until uninstall, permissions across the tree should fall
+automatically to the minimum set. Platforms publish this as advice
+(WordPress: directories `755`, files `644`, `wp-config.php` `600`, the
+uploads tree writable by the web user only); the estate enforces it.
+
+*Why enforce rather than advise.* Advice of the form "directories 755,
+files 644, except this one 600" hands the user a search query, and the
+answers to that query are commands they cannot evaluate, on a site where
+anyone can post one. A user who cannot tell `chmod -R` from `rm -rf` is
+exactly the user the advice is aimed at. The estate rule is that the
+security mechanism runs itself and the human-facing surface is one
+toggle and a status line; a shell instruction is never the mechanism.
+The same rule is why <<header-ratchet>> proposes and applies grants
+instead of printing a header for the user to paste.
+
+*States.* A deployed tree is always in exactly one declared state:
+
+[cols="1,3,2", options="header"]
+|===
+| State | Meaning | Who may enter it
+| `serve` | Nothing changes. Code, templates and configuration are read-only to every principal including the web user; only the declared writable paths (uploads, cache, sessions, logs) are writable, and by the service user alone. This is the resting state. | automatic
+| `develop` | A developer is editing. Source paths writable by the developer principal; still read-only to the web user. | developer, with a timeout
+| `configure` | A platform developer is changing configuration or installing an extension. Configuration and extension paths writable by the platform principal. | platform developer, with a timeout
+| `uninstall` | Everything writable by the owning principal for removal. | owner, one-shot
+|===
+
+*Permission map.* The Trustfile `[PERMISSIONS]` block declares path classes
+and the mode each class has in each state, in the narrowest working form
+for the declared platform (`web.platform`, <<header-ratchet>>). The
+WordPress preset, for instance, declares `code` (`755`/`644`), `config`
+(`wp-config.php` `600`, owner-only), `writable` (`wp-content/uploads`,
+`wp-content/cache`, service user), and `extension` (`wp-content/plugins`,
+`wp-content/themes`, writable only in `configure`).
+
+*The handle.* `just perms-enter <develop|configure> --for <duration>` applies
+that state's map and starts a timer. The timer is the dead man's handle:
+when it expires, or when the developer's session ends, or on any reboot,
+the tree returns to `serve` and the map is re-applied. Extending is an
+explicit action, never automatic. `just perms-lockdown` returns to `serve`
+immediately. `just perms-enter uninstall` is one-shot and prints what it is
+about to widen.
+
+*One toggle, then scopes.* `perms.deadman = on | off` is the whole
+setting for most repositories; `off` leaves the map declared but never
+applied, so a repo can adopt it in two steps. Where a platform's path
+classes are determinable, a state can be entered for a *scope* rather
+than the whole tree: `just perms-enter configure --scope security-config`
+widens only the paths in that class (for WordPress: `wp-config.php`, the
+`.htaccess` files, the security plugin's own directory) and leaves every
+other class in `serve`; `--scope wp-content/plugins/foo/` names a
+directory directly. Scopes are the class names in the map plus any path
+under the tree, each carries its own timer, and `just perms-status` lists
+which scopes are currently widened and for how long. The whole-tree
+form is the degenerate case of the scoped form, not a separate mechanism.
+
+*Enforcement.* Two layers, both required.
+`perms-match-state` (Trustfile gate) compares the live modes with the map
+for the declared state and fails on any path looser than declared; a path
+tighter than declared passes. A systemd path unit (or the platform's
+equivalent) watches the tree in `serve` and re-applies the map on any mode
+change, so a stray `chmod 777` lasts seconds, not until the next audit.
+Ownership is part of the map: a file owned by the wrong principal is as
+much a failure as a wrong mode.
+
+*What this does not do.* It does not stop the web user writing to paths
+declared writable, which is where platform vulnerabilities usually land
+(uploads executing as code). That is the job of the server configuration
+in the matrix (<<servers>>): no execution from writable paths, declared in
+the same preset.
+
+[[badges]]
+== Badges
+
+A badge is a claim. A README carries a badge only when the badge is
+generated by the gate it names, so that a red gate produces a red badge
+and a removed gate removes the badge. Hand-pasted "WCAG AA", "OWASP
+compliant", "SLSA 3" or licence badges with no lane behind them are the
+fake-gate pattern in picture form ([[unverified-compliance-badges]] in
+memory records the estate's own instance of it). The template ships the
+badge row for the gates it ships (CI, REUSE, Scorecard, Trustfile,
+Adjustfile) and nothing else; `strip-defaults` removes the badges with the
+gates they belong to.
+
+[[small-checks]]
+== Small checks that make a big difference
+
+Owner addition 2026-09-02. Each is cheap, each is a real gate where an
+offline probe exists, and each is in the template Trustfile.
+
+[cols="3,4,2", options="header"]
+|===
+| Check | Rule | Trustfile id
+| Mixed content | No `http://` sub-resource (script, style, image, frame, font, fetch) in any served page. A mixed-content fixer (`upgrade-insecure-requests` in the CSP plus a rewrite of authored `http://` links to `https://` at build time) is on by default; a link that must stay `http://` carries an explicit `data-allow-http` marker and a reason | `site-no-mixed-content`
+| Tracking parameters on links | Outbound links are stripped of advertising and tracking query keys (`utm_*`, `fbclid`, `gclid`, `dclid`, `msclkid`, `mc_eid`, `igshid`, `yclid`, `_hsenc`, `_hsmi`, `ref_src`, `s=`) at link creation. Keeping them is allowed only when the link is declared as advertising at creation time (`data-ad-link` or an `ads:` entry), because then the parameters are the point | `links-no-tracking-params`
+| Update and management ports | The "unused ports locked" rule (<<network>>) does not close the ports software needs to update itself or be managed. These are declared as transaction-gated ports in the port declaration, restricted to management source addresses, and reviewed: Plesk 8443/tcp (and 8447/tcp for the installer on Windows and Linux hosts), Webmin 10000/tcp, SMTP submission 587/tcp and 465/tcp with any optional management port the MTA exposes, package-mirror egress on 443/tcp, container-registry egress on 443/tcp | `ports-management-declared`
+| Email-address obfuscation | No bare email address in served HTML. Addresses are rendered through the obfuscation helper (entity-encoded, split, or CSS-reversed) or replaced by a contact form; `mailto:` links are allowed only through the helper. `security.txt` keeps its plain address by design (RFC 9116 requires it) and is the recorded exception | `no-bare-email-addresses`
+| Obvious secret exposure | Beyond the gitleaks gate: any file matching `*.env`, `*.pem`, `*.key`, `*.p12`, `id_*`, `*.kdbx`, `*credentials*`, `*secret*` is either absent or encrypted (age or sops header present). A plaintext `.env` fails; `.env.example` with placeholder values passes | `no-plaintext-secret-files`
+| Unencrypted text files with sensitive names | Any `*.txt`, `*.md`, `*.adoc` whose name or first lines contain `password`, `passphrase`, `token`, `private key`, `api key` is flagged; the fix is to move the content to the encrypted secrets store | `no-sensitive-plaintext`
+| Self-check recipe | `just trust-selfcheck` runs every offline probe above in under ten seconds and is wired into the pre-commit hook, so the small things are caught before a push, not by the scanner | `trust-selfcheck-present`
+|===
+
+[[encryption-at-rest]]
+== Encryption at rest, governed by the template
+
+Owner question 2026-09-02: how easy is it to enable encryption at rest by
+default from the template? The answer splits by layer, because a repository
+template can only govern what is in the repository and what it declares.
+
+[cols="2,4,1", options="header"]
+|===
+| Layer | What the template does | Status
+| Secrets in the repository | Encrypted by default. `secrets/` and any `*.env` are age-encrypted (`sops` with an age recipient list in `.sops.yaml`; the recipient is the repo's deploy key, the owner's key, and a recovery key). `just secrets-edit` decrypts to a tmpfs, never to the working tree. Plaintext secret files fail the Trustfile | verified (offline)
+| Application data at rest | The service declares its data store and its encryption: SQLite with SQLCipher or an age-wrapped file, PostgreSQL with TDE or a LUKS volume, object storage with SSE-KMS. The declaration is `storage.at_rest = <method>`; `none` is refused for anything holding personal data | declared
+| Container volumes | Compose and quadlet files request encrypted volumes where the driver supports it (`o=encrypted` on supported drivers, or a LUKS-backed host path). The Trustfile checks that a volume declaration exists and does not carry an explicit `unencrypted` marker | verified (grep)
+| Host disks | LUKS2 with a TPM-sealed key on servers; the template ships the declaration and the `docs/standards` guidance; the live state is an authority-watch conformance check | declared
+| Backups | Every backup target is encrypted (age or restic with a repository key); the backup recipe refuses a target without a key | verified (recipe)
+|===
+
+So "easy" is true for the first layer and for the declarations; the other
+layers are host and platform work that the template makes visible and
+`rsr-robustifier` (<<robustifier>>) automates where a platform API exists.
+
+[[supply-chain]]
+== Supply-chain-aware tracking
+
+Already in force through `[CONTAINER_SUPPLY_CHAIN]` and
+`[SUPPLY_CHAIN_DEPS]`: digest-pinned images, `actions.lock`, SHA-pinned
+actions, lockfiles committed, `cargo-deny` and `cargo-auditable`. The
+tracking layer on top of that, offered by the robustifier and used by
+default in opsm:
+
+* an SBOM (CycloneDX) emitted per build and attached to the release;
+* SLSA provenance (Level 3 in opsm; Level 2 for ordinary repos through
+  GitHub artifact attestations);
+* OSV scanning of the SBOM on a schedule, with findings routed through the
+  same authority-watch approval path as standards changes, so a
+  vulnerability in a dependency and a deprecation of an algorithm arrive at
+  the owner through one queue;
+* hybrid Ed25519 + ML-DSA-87 signatures on every release artefact (opsm
+  already does this; the robustifier makes it available to any repo).
+
+[[robustifier]]
+== `rsr-robustifier`: the bolt-on module
+
+Owner ruling 2026-09-02: the checks above, encryption at rest, and
+supply-chain tracking would overwhelm the core template, so they live in a
+separate module that bolts on and ramps things up, with customisable adds.
+
+* *Shape.* `rsr-robustifier` is a sibling repository to the template. It
+  carries an *add registry* (`add-registry.tsv`: pack | paths | description |
+  keys it sets) that is the exact inverse of the template's strip registry
+  (<<strip>>). `just robustify` with no arguments prints the menu of packs;
+  `just robustify <pack>...` applies named packs; `just robustify all`
+  applies everything. Each pack adds Trustfile entries, Justfile recipes,
+  configuration, and the scaffoldia keys it sets, and each is removable by
+  the same `strip-rsr-defaults` mechanism because it registers its paths in
+  the strip registry when applied.
+* *Initial packs.* `small-checks` (the table above), `secrets-at-rest`
+  (sops/age wiring), `data-at-rest` (declarations and volume checks),
+  `supply-chain` (SBOM, provenance, OSV, signing), `management-ports`
+  (declared update and management ports per platform), `link-hygiene`
+  (tracking-parameter stripping and mixed-content fixer), `email-obfuscation`.
+* *Ramp.* Packs declare a level (`1` cheap and offline, `2` needs a platform
+  API or a secret, `3` changes runtime behaviour). `just robustify --level 1`
+  applies everything that cannot break anything; a repo climbs the levels
+  deliberately.
+* *Not in the core by default.* The template ships the Trustfile entries for
+  the small checks (they are offline and cheap) but not the packs that need
+  platform access; those are robustifier-only, so a hello-world repository is
+  never asked for a KMS.
+* *Relationship to scaffoldia and opsm.* scaffoldia composes packs at repo
+  creation from its settings; opsm consumes the `supply-chain` pack as its
+  own default and exposes the same keys at package level.
+
+[[review-split]]
+== authority-watch: one engine, two profiles
+
+Owner question 2026-09-02: should the legal and regulatory monitoring that
+authority-watch does today be separated from a second function that
+directly changes code, such as noticing that an algorithm or a key size is
+now dated and proposing the switch? Ruling recorded here:
+
+* *One engine.* The Observation, Interpretation, Approval and Publication
+  state machine and its human approval gate are the same for both. Two
+  engines would mean two approval queues and two audit trails for changes
+  that often arrive together.
+* *Two profiles.* A `legal` profile (legislation, regulations, standards
+  bodies, licences, terms) and a `technical` profile (IETF and IANA streams,
+  NIST and CA/B Forum, browser and OpenSSH deprecation notices, OSV and
+  advisory feeds, the estate's own crypto and protocol registry). Profiles
+  differ in source catalogue, cadence and severity mapping.
+* *Two output adapters.* The legal profile emits document diffs (prose, an
+  AsciiDoc change with citations). The technical profile emits *registry
+  diffs*: a change to a control-plane key, for example
+  `tls.groups: -X25519Kyber768Draft00 +X25519MLKEM768`, rendered as a pull
+  request against the exemplar Trustfile, the template, and any repo that
+  carries the key. That is what makes it "expedited and convenient": the
+  approval is one click and the change lands everywhere the key lives.
+* *Why they stay together.* The owner's observation is right: licences,
+  EULAs and terms are implied by software-standards changes. A dependency
+  bump changes SPDX terms; a provider changing its terms changes which edge
+  settings are permitted; a regulation (an accessibility act, a data
+  residency rule) changes which technical keys are mandatory. Those
+  cross-feed events need a single queue with both profiles' context, which
+  is exactly what one engine with two profiles gives and two separate tools
+  would lose.
+* *Not mise.* mise resolves versions; it has no notion of a deprecation
+  that is not yet a release, and no approval gate.
+
+== Related
+
+* link:ACCESSIBILITY-DEFAULTS-POLICY.adoc[Accessibility Defaults Policy]
+* link:LANGUAGE-POLICY.adoc[Language Policy] (Python ban; permitted languages)
+* link:TOOLING-VERSION-INTEGRITY-POLICY.adoc[Tooling Version Integrity Policy]
+* link:PORT-REGISTRY.adoc[Port Registry]
+* `.machine_readable/contractiles/trust/Trustfile.a2ml` (exemplar)
+* `metadatastician/authority-watch`, `metadatastician/consent-aware-web`,
+  `hyperpolymath/proven-servers`, `hyperpolymath/boj-server`,
+  `hyperpolymath/hybrid-automation-router`, `hyperpolymath/cadre-router`

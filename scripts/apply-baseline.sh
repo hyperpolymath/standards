@@ -39,6 +39,14 @@ FINDINGS_FILE="${1:-}"
 BASELINE_FILE="${2:-}"
 MODE="${3:-advisory}"
 BLOCKING_THRESHOLD="${BLOCKING_THRESHOLD:-high}"
+case "$MODE" in
+  advisory|blocking) ;;
+  *) echo "error: invalid baseline mode: $MODE" >&2; exit 2 ;;
+esac
+case "$BLOCKING_THRESHOLD" in
+  info|low|medium|high|critical) ;;
+  *) echo "error: invalid blocking threshold: $BLOCKING_THRESHOLD" >&2; exit 2 ;;
+esac
 TODAY="$(date -u +%Y-%m-%d)"
 
 if [[ -z "$FINDINGS_FILE" || -z "$BASELINE_FILE" ]]; then
@@ -95,7 +103,7 @@ SCHEMA_ERRORS="$(jq -r '
        else empty end),
       # `type` accepts three shapes, and the third is not cosmetic:
       #   snake_case          — the Hypatia rule modules (unsafe_block, ...)
-      #   SD007-style codes   — structural_drift
+      #   SD007/HYP-S009 codes — structural_drift and canonical-home rules
       #   CamelCase           — SCORECARD PROBE NAMES (DependencyPinning,
       #                         BranchProtection, ...). Hypatia emits these
       #                         verbatim from Scorecard, and without this
@@ -106,7 +114,7 @@ SCHEMA_ERRORS="$(jq -r '
       #                         than "this finding is unrepresentable".
       #                         Found 2026-08-06 in metadatastician/stapeln.
       (if ($e.type|type) == "string"
-          and (($e.type|test("^([a-z][a-z0-9_]*|[A-Z]{2,3}[0-9]{3}|[A-Z][A-Za-z0-9]+)$"))|not)
+          and (($e.type|test("^([a-z][a-z0-9_]*|[A-Z]{2,3}(-[A-Z])?[0-9]{3}|[A-Z][A-Za-z0-9]+)$"))|not)
        then "entry[\($i)]: type fails pattern: \($e.type)" else empty end),
       (if ($e|has("file")) and ((($e.file|type) != "string") or ($e.file == ""))
        then "entry[\($i)]: file must be a non-empty string" else empty end),
@@ -152,6 +160,15 @@ EXPIRED_COUNT=$((EXPIRED_COUNT - ACTIVE_COUNT))
 ANNOTATED="$(jq -n \
   --argjson findings "$FINDINGS_JSON" \
   --argjson baseline "$ACTIVE_BASELINE" '
+  # Tokenise the two supported wildcards; every other character is literal.
+  # No sentinel substitution: a real filename may contain DOUBLESTAR.
+  def glob_regex:
+    [scan("\\*\\*|\\*|[^*]")
+     | if . == "**" then ".*"
+       elif . == "*" then "[^/]*"
+       elif inside(".\\+?^$()[]{}|") then "\\" + .
+       else . end]
+    | "\\A" + join("") + "\\z";
   # Two captures are essential here:
   #   `f as $finding` — without this, references like `f.file` inside the
   #   select() get re-evaluated against the current baseline entry (the
@@ -177,10 +194,7 @@ ANNOTATED="$(jq -n \
             | $pat != null
             and ($finding.file | test(
               $pat
-              | gsub("\\*\\*"; "DOUBLESTAR")
-              | gsub("\\*"; "[^/]*")
-              | gsub("DOUBLESTAR"; ".*")
-              | "^" + . + "$"
+              | glob_regex
             ))
           )
         )
@@ -215,15 +229,16 @@ KEPT="$(jq '[.[] | select(.baseline_status != "acknowledged")]' <<<"$ANNOTATED")
 SUPPRESSED="$(jq '[.[] | select(.baseline_status == "acknowledged")]' <<<"$ANNOTATED")"
 
 # Severity rank for blocking decision.
+# Unknown severities are treated as critical to fail-safe.
 rank() {
   case "$1" in
     critical) echo 5 ;;
     high)     echo 4 ;;
-    medium)   echo 3 ;;
+    medium|warn) echo 3 ;;
     low)      echo 2 ;;
-    info)     echo 1 ;;
+    info|informational) echo 1 ;;
     advisory) echo 0 ;;
-    *)        echo 0 ;;
+    *)        echo 5 ;;  # Unknown severity → critical rank
   esac
 }
 

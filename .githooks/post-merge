@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
+# Hyperpolymath Estate Post-merge Hook
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+
+echo -e "${CYAN}============================================${NC}"
+echo -e "${CYAN}  Hyperpolymath Post-merge Hook${NC}"
+echo -e "${CYAN}  Branch: $CURRENT_BRANCH${NC}"
+echo -e "${CYAN}============================================${NC}"
+
+# Main branch auto-actions
+if ([ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]) && [ -n "${1:-}" ]; then
+  # Check for deployment scripts
+  for script in deploy.sh scripts/post-merge.sh; do
+    [ -f "$REPO_ROOT/$script" ] && [ -x "$REPO_ROOT/$script" ] && {
+      echo -e "${BLUE}[post-merge]${NC} Running $script..."
+      bash "$REPO_ROOT/$script" 2>&1 && echo "✅ $script completed" || echo "⚠️  $script failed (non-blocking)" >&2
+    }
+  done
+  
+  # Justfile support
+  [ -f "$REPO_ROOT/Justfile" ] && command -v just &>/dev/null && \
+    just --summary 2>/dev/null | grep -q "post-merge" && {
+      echo -e "${BLUE}[post-merge]${NC} Running just post-merge..."
+      just post-merge 2>&1 && echo "✅ just post-merge completed" || echo "⚠️  just failed (non-blocking)" >&2
+    }
+  
+  # Makefile support
+  ([ -f "$REPO_ROOT/Makefile" ] || [ -f "$REPO_ROOT/makefile" ]) && \
+    (grep -q "post-merge:" "$REPO_ROOT/Makefile" 2>/dev/null || grep -q "post-merge:" "$REPO_ROOT/makefile" 2>/dev/null) && {
+      echo -e "${BLUE}[post-merge]${NC} Running make post-merge..."
+      make post-merge 2>&1 && echo "✅ make post-merge completed" || echo "⚠️  make failed (non-blocking)" >&2
+    }
+fi
+
+# Submodule init
+[ -f "$REPO_ROOT/.gitmodules" ] && {
+  echo -e "${BLUE}[post-merge]${NC} Initializing submodules..."
+  git submodule update --init --recursive 2>&1 && echo "✅ Submodules initialized" || \
+    echo "⚠️  Submodule init issue (non-blocking)" >&2
+}
+
+# Environment reminders
+[ -d "$REPO_ROOT/.venv" ] && echo -e "${YELLOW}[post-merge]${NC} Virtualenv: source .venv/bin/activate${NC}"
+[ -d "$REPO_ROOT/venv" ] && echo -e "${YELLOW}[post-merge]${NC} Virtualenv: source venv/bin/activate${NC}"
+[ -f "$REPO_ROOT/package.json" ] && [ ! -d "$REPO_ROOT/node_modules" ] && \
+  echo -e "${YELLOW}[post-merge]${NC} Install deps: bun install or npm install${NC}"
+
+# Hook installation check
+CURRENT_HOOKS=$(git config core.hooksPath 2>/dev/null || echo "")
+[ -z "$CURRENT_HOOKS" ] && [ -d "$REPO_ROOT/.githooks" ] && \
+  echo -e "${YELLOW}[post-merge]${NC} Install hooks: git config core.hooksPath .githooks${NC}"
+
+echo ""
+echo -e "${GREEN}[post-merge] ✅ All post-merge actions completed${NC}"
+exit 0

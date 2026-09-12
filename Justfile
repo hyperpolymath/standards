@@ -161,7 +161,7 @@ build:
 
 # Run all sub-project test suites
 test:
-    # K9 Rust binding tests now live in hyperpolymath/k9-ecosystem (rs/) — see #491
+    @bash scripts/run-shell-test-suite.sh
 
 # Regression test: test aggregation fails for missing prerequisites and test failures.
 test-runner-test:
@@ -246,19 +246,6 @@ help-me:
     @echo ""
     @echo "Include the output of 'just doctor' in your report."
 
-
-# Verify scripts/check-ts-allowlist.deno.js matches what compiling
-# scripts/check-ts-allowlist.affine produces. Run after editing the
-# .affine source. Exit 0 = in sync; non-zero with diff = drifted.
-# See standards#312.
-check-ts-allowlist-drift:
-    @command -v affinescript >/dev/null 2>&1 || { echo "affinescript compiler not on PATH — skipping drift check"; exit 0; }
-    @tmp="$$(mktemp /tmp/check-ts-allowlist-drift.XXXXXX.deno.js)"; \
-      affinescript compile --deno-esm -o "$$tmp" scripts/check-ts-allowlist.affine; \
-      diff -u scripts/check-ts-allowlist.deno.js "$$tmp"; \
-      rc=$$?; \
-      rm -f "$$tmp"; \
-      exit $$rc
 
 # Print the current CRG grade (reads from READINESS.md '**Current Grade:** X' line)
 crg-grade:

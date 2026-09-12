@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
+# Hyperpolymath Estate Pre-rebase Hook
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+UPSTREAM="${1:-}"
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+ERRORS=0
+
+echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}  Hyperpolymath Pre-rebase Hook${NC}"
+echo -e "${BLUE}========================================${NC}"
+
+# Block rebase onto main/master
+if [ -n "$UPSTREAM" ]; then
+  UPSTREAM_BASE=${UPSTREAM#refs/heads/}
+  case "$UPSTREAM_BASE" in
+    main|master)
+      echo -e "${RED}[pre-rebase] BLOCKED: Rebasing onto $UPSTREAM_BASE${NC}" >&2
+      echo "Use: git rebase --onto main <old-base> your-branch" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+# Block protected branch rebase
+for protected in main master develop release production staging; do
+  [ "$CURRENT_BRANCH" = "$protected" ] && {
+    echo -e "${RED}[pre-rebase] BLOCKED: Cannot rebase $protected${NC}" >&2
+    exit 1
+  }
+done
+
+# Force push warning
+echo -e "${YELLOW}[pre-rebase] Use --force-with-lease, not --force${NC}" >&2
+
+# Uncommitted changes
+! git diff --quiet 2>/dev/null && {
+  echo -e "${RED}[pre-rebase] BLOCKED: Uncommitted changes${NC}" >&2
+  echo "Commit or stash first" >&2
+  exit 1
+}
+
+# Stash warning
+STASH_COUNT=$(git stash list 2>/dev/null | wc -l)
+[ $STASH_COUNT -gt 0 ] && echo -e "${YELLOW}[pre-rebase] You have $STASH_COUNT stash(es)${NC}" >&2
+
+echo -e "${BLUE}[pre-rebase] Standards: prefer merge over rebase${NC}"
+echo ""
+[ $ERRORS -gt 0 ] && { echo -e "${RED}[pre-rebase] FAILED${NC}"; exit 1; }
+echo -e "${GREEN}[pre-rebase] ✅ PASSED${NC}"
+exit 0

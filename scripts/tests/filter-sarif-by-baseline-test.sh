@@ -93,5 +93,21 @@ echo '[{"severity":"low","rule_module":"code_safety","type":"unwrap_without_chec
 bash "$S" "$T/in.sarif" "$T/f.json" "$T/b.json" "$T/out.sarif" >/dev/null 2>&1
 ck "an empty SARIF survives filtering" 0 "$(count "$T/out.sarif")"
 
+# The blocking workflow needs affirmative evidence that filtering completed.
+export GITHUB_OUTPUT="$T/filter-output"
+: > "$GITHUB_OUTPUT"
+mk_sarif; mk_findings
+bash "$S" "$T/in.sarif" "$T/f.json" "$T/b.json" "$T/out.sarif" > "$T/filter.log" 2>&1
+ck "successful filtering is reported" 'filtered=true' "$(cat "$GITHUB_OUTPUT")"
+: > "$GITHUB_OUTPUT"
+bash "$S" "$T/in.sarif" "$T/f.json" "$T/bad.json" "$T/out.sarif" > "$T/filter.log" 2>&1
+ck "invalid baseline cannot report filtering success" '' "$(cat "$GITHUB_OUTPUT")"
+: > "$GITHUB_OUTPUT"
+APPLY_BASELINE="$T/missing-validator" bash "$S" "$T/in.sarif" "$T/f.json" "$T/b.json" "$T/out.sarif" > "$T/filter.log" 2>&1
+ck "missing validator cannot report filtering success" '' "$(cat "$GITHUB_OUTPUT")"
+: > "$GITHUB_OUTPUT"
+bash "$S" "$T/in.sarif" "$T/empty.json" "$T/b.json" "$T/out.sarif" > "$T/filter.log" 2>&1
+ck "completed zero-match filtering is reported" 'filtered=true' "$(cat "$GITHUB_OUTPUT")"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

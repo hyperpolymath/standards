@@ -1,0 +1,137 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Optimal repository settings
+:toc: macro
+:toclevels: 3
+:std-canon: link:../config/settings/repo.json[`config/settings/repo.json`]
+
+toc::[]
+
+== The canon is the JSON, not this document
+
+{std-canon} is the single source of truth for estate repository settings.
+This document explains how to *apply* and *measure* it. It deliberately
+restates no value that the JSON already carries.
+
+[IMPORTANT]
+====
+Never draft a rival settings file. If a setting needs to change, change
+{std-canon}. A second file describing "the settings we actually use" is how an
+estate acquires two contradictory canons, and the drift is invisible until
+something is measured against the wrong one.
+====
+
+The canon covers one `PATCH /repos/{owner}/{repo}` body plus four sibling
+endpoints, each named in the JSON with its own `endpoint` key:
+
+* `PUT /repos/{o}/{r}/actions/permissions`
+* `PUT /repos/{o}/{r}/actions/permissions/workflow`
+* `PUT /repos/{o}/{r}/vulnerability-alerts`
+* `PUT /repos/{o}/{r}/automated-security-fixes`
+
+Per-repository variation is confined to the keys under
+`per_repo_deltas_allowed`. Everything else is estate-constant.
+
+== Exclusion rules
+
+These are the cases where "not compliant" is the wrong verdict. Each was
+established by measurement, not by reading the API documentation.
+
+=== Forks are excluded entirely
+
+A fork inherits settings and files from upstream. Applying the canon to a fork
+rewrites work that is not ours, and the estate's standing rule is that forks
+never carry estate-authored files. Exclude forks from both application *and*
+compliance counting — leaving them in the denominator produces a permanent
+false deficit.
+
+=== Private repositories on a Free account: N/A, never `disabled`
+
+`secret_scanning` and `secret_scanning_push_protection` are not available on
+private repositories of a Free account. The applier drops the
+`security_and_analysis` block when `visibility=private` and reports the drop;
+`repo_private_overrides` in the canon keeps `dependabot_security_updates`.
+
+The trap is in the *reporting*, not the applying. Such a repository must be
+recorded as **N/A**, never as `disabled`. Recording it as `disabled` invents a
+remediable finding that no PATCH can ever clear, and it will be re-opened by
+every subsequent audit for as long as the account stays on Free.
+
+=== `security_and_analysis` is absent from LIST endpoints
+
+`GET /orgs/{org}/repos` and `GET /users/{user}/repos` do **not** return the
+`security_and_analysis` object at all. It appears only on the single-repository
+`GET /repos/{owner}/{repo}`.
+
+Consequence: a census built from a list endpoint sees the key as missing and,
+if it treats missing as false, reports the entire estate as non-compliant. Any
+audit touching these keys must spend one API call per repository. There is no
+bulk shortcut, and a bulk result that claims to have one is measuring absence
+of a field rather than absence of a setting.
+
+=== Ordering: `secret_scanning` before `secret_scanning_push_protection`
+
+Push protection is a dependent of secret scanning. Sending both in one PATCH
+body, or sending push protection first, can be rejected or silently ignored
+depending on the repository's starting state.
+
+Apply in two steps, and verify between them:
+
+[source,bash]
+----
+gh api -X PATCH "repos/$O/$R" \
+  -f 'security_and_analysis[secret_scanning][status]=enabled'
+
+gh api -X PATCH "repos/$O/$R" \
+  -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled'
+----
+
+A single combined PATCH that returns HTTP 200 is *not* evidence both landed.
+Read the settings back before recording compliance.
+
+== Measuring compliance
+
+Read per repository, never from a list:
+
+[source,bash]
+----
+gh api "repos/$O/$R" --jq '{
+  squash: .allow_squash_merge,
+  merge: .allow_merge_commit,
+  rebase: .allow_rebase_merge,
+  delete_on_merge: .delete_branch_on_merge,
+  auto_merge: .allow_auto_merge,
+  signoff: .web_commit_signoff_required,
+  ss: .security_and_analysis.secret_scanning.status,
+  pp: .security_and_analysis.secret_scanning_push_protection.status
+}'
+----
+
+Partition the results into **compliant**, **remediable** and **N/A** — three
+buckets, not two. Collapsing N/A into non-compliant is the single most common
+way these audits produce a number that cannot be driven to zero.
+
+As last measured across the estate, compliance against this canon sat at
+97–100% depending on the key, with the residue concentrated in the exclusion
+classes above rather than in genuine drift.
+
+== Open owner decision
+
+`open_owner_decisions.O8` in the canon is unresolved and is recorded here so it
+is not lost:
+
+[quote]
+____
+`allow_merge_commit` / `allow_rebase_merge` are false (squash-only). If the
+owner keeps merge commits, flip `allow_merge_commit` to true and add `merge` to
+`allowed_merge_methods` in `rulesets/base.json`.
+____
+
+Note the second half. Flipping the repository setting alone leaves the ruleset
+refusing the merge method the setting now permits, which presents to a
+contributor as an unexplained blocked merge. The two must move together.
+
+== Related
+
+* {std-canon} — the canonical settings
+* link:../config/rulesets/base.json[`config/rulesets/base.json`] — ruleset canon, coupled to O8 above
+* link:../config/rulesets/gates.json[`config/rulesets/gates.json`] — required-context policy

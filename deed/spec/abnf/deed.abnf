@@ -1,0 +1,84 @@
+; SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+; SPDX-License-Identifier: CC-BY-SA-4.0
+;
+; DEED grammar, v0.1.0 DRAFT
+; Normative for parsing. Prose and rationale: ../DEED-GRAMMAR-SPEC.adoc
+;
+; NOTE: there is no "key = value" production and no "[section]" production.
+; The only bracket is "(". A file using "=" is not a deed.
+
+deed          = header [token-sep] form [token-sep]
+
+header        = 1*spdx-line
+spdx-line     = ";;" SP "SPDX-" 1*text-char line-end
+
+form          = "(" doc-head token-sep version-field
+                *(token-sep (field / clause)) [token-sep] ")"
+doc-head      = "estate-deed" / "repo-deed" / "estate-atlas-deed" / "praxis-deed"
+version-field = ":schema-version" token-sep string   ; REQUIRED on every head
+
+; --- Filename dispatch -------------------------------------------------
+; The document form is selected by the filename STEM before parsing begins.
+; This production grammars the NAME, not the contents.
+
+deed-filename = estate-file / atlas-file / praxis-file / repo-file
+estate-file   = "estate_chora.deed"          ; -> estate-deed
+atlas-file    = "ATLAS.deed"                 ; -> estate-atlas-deed
+praxis-file   = stem "_praxis.deed"          ; -> praxis-deed
+repo-file     = stem "_chora.deed"           ; -> repo-deed
+stem          = 1*( ALPHA / DIGIT / "-" / "." / "_" )
+
+; SIDE CONDITION (normative, and NOT expressible in ABNF, which has no
+; negation): in repo-file, <stem> MUST NOT be the exact string "estate".
+; The literal "estate_chora.deed" also matches repo-file, so a conforming
+; implementation MUST test estate-file BEFORE repo-file and MUST NOT parse
+; estate_chora.deed as a repo-deed. Dispatch is exact-stem-first.
+; See ../DEED-GRAMMAR-SPEC.adoc#chora-dispatch-exclusion.
+; RULED 2026-09-08 by the owner on standards#752.
+
+field         = keyword token-sep value
+clause        = "(" symbol *(token-sep (field / clause)) [token-sep] ")"
+
+keyword       = ":" symbol
+value         = string / symbol / integer / boolean / uuid5 / quoted / list
+list          = "(" [value *(token-sep value)] [token-sep] ")"
+quoted        = "'" ( symbol / list )
+
+symbol        = ALPHA *( ALPHA / DIGIT / "." / "*" / "/" / "<" / ">"
+                       / "=" / "!" / "?" / "+" / "-" )
+                ; "." is STRUCTURAL: Type.Software.Library is ONE symbol
+                ; whose dotted segments are meaningful to the type resolver.
+                ; "=" may appear INSIDE a symbol (e.g. a comparison operator);
+                ; it is never a field separator.
+
+string        = DQUOTE *( str-char / escape ) DQUOTE
+str-char      = %x20-21 / %x23-5B / %x5D-7E / UTF8-2 / UTF8-3 / UTF8-4
+                                                    ; any char except " and \
+escape        = "\" ( DQUOTE / "\" / "n" / "t" )  ; no other escape is valid
+
+UTF8-2        = %xC2-DF UTF8-tail
+UTF8-3        = %xE0 %xA0-BF UTF8-tail / %xE1-EC 2UTF8-tail
+                / %xED %x80-9F UTF8-tail / %xEE-EF 2UTF8-tail
+UTF8-4        = %xF0 %x90-BF 2UTF8-tail / %xF1-F3 3UTF8-tail
+                / %xF4 %x80-8F 2UTF8-tail
+UTF8-tail     = %x80-BF
+
+; Comments and SPDX payloads are UTF-8, NOT ASCII. The lexical section of the
+; spec says "a deed is a sequence of UTF-8 bytes", and the header the spec
+; MANDATES carries "©" (%xC2 %xA9) — which VCHAR (%x21-7E) rejects. Before
+; this rule, the normative grammar rejected the specification's own example.
+text-char     = VCHAR / SP / UTF8-2 / UTF8-3 / UTF8-4
+
+integer       = [ "-" ] 1*DIGIT
+boolean       = "#t" / "#f"                       ; never "true", never "yes"
+uuid5         = "#u5" string                      ; body is the NAME input to
+                                                  ; RFC 4122 4.3 under the
+                                                  ; estate namespace
+token-sep     = 1*(WSP / line-end / comment)
+line-end      = CRLF / LF
+comment       = ";" *text-char line-end
+
+; Order is not semantic. Fields and clauses are order-free; a canonical
+; ordering is a lint convention for diffability, never a parse rule.
+; Where precedence matters (rules in a praxis deed) it is carried by an
+; explicit :priority INTEGER, never by file position.

@@ -12,7 +12,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROP="$SCRIPT_DIR/../propagate-workflow-pins.sh"
 
 OLD="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-TARGET="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+# A real local commit graph makes reachability part of every test. The
+# propagation primitive must reject a SHA that merely exists on a feature
+# branch: GitHub cannot resolve such a SHA as a cross-repo reusable workflow.
+UPSTREAM="$TEST_DIR/standards"
+git init -q -b main "$UPSTREAM"
+git -C "$UPSTREAM" config user.email t@t
+git -C "$UPSTREAM" config user.name t
+touch "$UPSTREAM/reusable.yml"
+git -C "$UPSTREAM" add reusable.yml
+git -C "$UPSTREAM" commit -q -m main
+TARGET=$(git -C "$UPSTREAM" rev-parse HEAD)
+git -C "$UPSTREAM" checkout -q -b feature
+touch "$UPSTREAM/feature-only"
+git -C "$UPSTREAM" add feature-only
+git -C "$UPSTREAM" commit -q -m feature
+ORPHAN=$(git -C "$UPSTREAM" rev-parse HEAD)
+git -C "$UPSTREAM" checkout -q main
+export STANDARDS_DIR="$UPSTREAM"
 
 PASS=0; TOTAL=0
 
@@ -89,6 +107,56 @@ ROOT="$TEST_DIR/many"; mk_consumer "$ROOT/repoA"; mk_consumer "$ROOT/repoB"
 OUT=$(bash "$PROP" --to "$TARGET" "$ROOT")
 try "parent-dir mode sees repoA" contains repoA "$OUT"
 try "parent-dir mode sees repoB" contains repoB "$OUT"
+
+# ── 8. Existing but non-mainline target is refused before any rewrite ───────
+R="$TEST_DIR/orphan"; mk_consumer "$R"
+set +e
+OUT=$(bash "$PROP" --fix --to "$ORPHAN" "$R" 2>&1)
+RC=$?
+set -e
+try "feature-only target is rejected" test "$RC" -eq 2
+try "rejected target leaves consumer unchanged" file_has "$R/.github/workflows/governance.yml" "governance-reusable.yml@${OLD}"
+try "rejection explains default-branch reachability" contains "not reachable" "$OUT"
+
+# ── 9. A stale origin/main must not hide a newer local main ──────────────────
+git -C "$UPSTREAM" update-ref refs/remotes/origin/main "$TARGET"
+touch "$UPSTREAM/mainline-newer"
+git -C "$UPSTREAM" add mainline-newer
+git -C "$UPSTREAM" commit -q -m mainline-newer
+NEWER_TARGET=$(git -C "$UPSTREAM" rev-parse HEAD)
+R="$TEST_DIR/stale-origin"; mk_consumer "$R"
+set +e
+OUT=$(bash "$PROP" --to "$NEWER_TARGET" "$R" 2>&1)
+RC=$?
+set -e
+try "newer local main target survives stale origin/main" test "$RC" -eq 0
+try "stale origin/main does not report unreachable" not_contains "not reachable" "$OUT"
+
+# ── 10. A linked worktree retains the shared clone's shallow status ────────────
+SHALLOW_REMOTE="$TEST_DIR/standards-remote.git"
+SHALLOW_CLONE="$TEST_DIR/standards-shallow"
+SHALLOW_WORKTREE="$TEST_DIR/standards-shallow-worktree"
+FAKE_BIN="$TEST_DIR/fake-bin"
+git init -q --bare "$SHALLOW_REMOTE"
+git -C "$UPSTREAM" push -q "$SHALLOW_REMOTE" main
+git -C "$SHALLOW_REMOTE" symbolic-ref HEAD refs/heads/main
+git clone -q --depth 1 "file://$SHALLOW_REMOTE" "$SHALLOW_CLONE"
+git -C "$SHALLOW_CLONE" fetch -q origin "$TARGET"
+git -C "$SHALLOW_CLONE" worktree add -q -b reachability-test "$SHALLOW_WORKTREE" HEAD
+mkdir -p "$FAKE_BIN"
+cat > "$FAKE_BIN/curl" <<'EOF'
+#!/usr/bin/env sh
+printf '%s\n' '{"status":"ahead"}'
+EOF
+chmod +x "$FAKE_BIN/curl"
+R="$TEST_DIR/shallow-consumer"; mk_consumer "$R"
+set +e
+OUT=$(STANDARDS_DIR="$SHALLOW_WORKTREE" PATH="$FAKE_BIN:$PATH" \
+  bash "$PROP" --to "$TARGET" "$R" 2>&1)
+RC=$?
+set -e
+try "linked shallow worktree defers to server reachability" test "$RC" -eq 0
+try "linked shallow worktree does not report unreachable" not_contains "not reachable" "$OUT"
 
 echo "----------------------------------------"
 echo "$PASS/$TOTAL test cases passed."

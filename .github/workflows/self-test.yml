@@ -35,59 +35,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # check-ts-allowlist-test.sh executes the generated Deno target, and the
-      # scorecard grounding suite runs pass-checks that use the same toolchain.
-      # Without installing Deno, the suite reported 18 assertion failures as
-      # one red test file and also made the scorecard fixtures fail.
-      - name: Install Deno test runtime
-        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
-        with:
-          deno-version: v2.x
-
       # PyYAML is required by the secret-scanner canary. The scorecard
       # grounding tests execute the same checks as registry-verify, including
       # checks that require ripgrep and xmllint.
       - name: Install test dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ripgrep libxml2-utils
+          sudo apt-get install -y --no-install-recommends ripgrep libxml2-utils ruby ruby-minitest
           python3 -m pip install --user --quiet pyyaml
 
       - name: Run tests/*.sh and scripts/tests/*.sh
-        run: |
-          set -uo pipefail
-
-          mapfile -t TESTS < <(
-            {
-              find tests -maxdepth 1 -name '*.sh' -type f
-              find scripts/tests -maxdepth 1 -name '*.sh' -type f
-            } | sort
-          )
-
-          # Fail closed. If the suite is empty the discovery is broken, and a
-          # green tick here would assert something untrue.
-          if [ ${#TESTS[@]} -eq 0 ]; then
-            echo "::error::No tests found under tests/ or scripts/tests/ — discovery is broken."
-            exit 1
-          fi
-          echo "Discovered ${#TESTS[@]} test file(s)."
-
-          failed=0
-          for t in "${TESTS[@]}"; do
-            echo "::group::$t"
-            if bash "$t"; then
-              echo "PASS $t"
-            else
-              rc=$?
-              echo "::error file=$t::$t failed (exit $rc)"
-              failed=$((failed+1))
-            fi
-            echo "::endgroup::"
-          done
-
-          echo
-          if [ "$failed" -gt 0 ]; then
-            echo "::error::$failed of ${#TESTS[@]} test file(s) failed."
-            exit 1
-          fi
-          echo "All ${#TESTS[@]} test file(s) passed."
+        run: bash scripts/run-shell-test-suite.sh

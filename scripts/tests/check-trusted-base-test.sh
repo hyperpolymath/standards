@@ -185,6 +185,78 @@ test/fixtures/
 EOF
 }
 
+setup_coq_multiline_comments_only() {
+  mkdir -p formal
+  cat > formal/Commentary.v <<'EOF'
+(** A documentation block may discuss old proof state.
+    Admitted markers in prior revisions are not executable here.
+    (* Nested comments may also mention:
+       admit.
+    *)
+    Axiom references in prose are not declarations. *)
+Theorem closed : True.
+Proof. exact I. Qed.
+EOF
+}
+
+setup_coq_comment_then_real_admitted() {
+  mkdir -p formal docs
+  cat > formal/ActualDebt.v <<'EOF'
+(* Admitted. inside a comment must not count. *)
+Theorem open_obligation : True.
+Admitted.
+EOF
+  cat > docs/proof-debt.md <<'EOF'
+# Proof Debt
+(Intentionally empty: the real marker must fail this positive control.)
+EOF
+}
+
+setup_coq_string_delimiters_then_real_marker() {
+  mkdir -p formal docs
+  cat > formal/StringDelimiter.v <<'EOF'
+From Coq Require Import Strings.String.
+Definition opening_delimiter : string := "(* not a comment".
+Definition escaped_quote : string := "text "" (* still a string".
+Definition multiline_delimiters : string := "first line
+(* neither opens a comment
+nor does this close one *)
+last line".
+(* A quoted delimiter inside a real comment must not change its depth:
+   "(*"
+*)
+Axiom string_delimiters_do_not_hide_this : True.
+EOF
+  cat > docs/proof-debt.md <<'EOF'
+# Proof Debt
+(Intentionally empty: a string delimiter must not hide the real axiom.)
+EOF
+}
+
+setup_coq_unterminated_string() {
+  mkdir -p formal docs
+  cat > formal/UnterminatedString.v <<'EOF'
+From Coq Require Import Strings.String.
+Definition malformed : string := "this never closes
+Admitted.
+EOF
+  cat > docs/proof-debt.md <<'EOF'
+# Proof Debt
+(Intentionally empty: malformed input must fail closed.)
+EOF
+}
+
+setup_coq_leading_comment_then_real_marker() {
+  mkdir -p formal docs
+  cat > formal/LeadingComment.v <<'EOF'
+(* explanatory prefix *) Admitted.
+EOF
+  cat > docs/proof-debt.md <<'EOF'
+# Proof Debt
+(Intentionally empty: a leading comment must not hide the real marker.)
+EOF
+}
+
 # Existing behaviour must still work.
 run_case "marker with no docs and no ignore fails (early exit)" \
   1 "No docs/proof-debt.md (or equivalent) found" setup_marker_no_docs
@@ -210,6 +282,21 @@ run_case "ignore pattern that does not match still fails" \
 
 run_case "mixed: one marker exempted, one documented in proof-debt" \
   0 "1 marker(s) exempted via .trusted-base-ignore" setup_mixed_exempt_and_documented
+
+run_case "Coq nested multiline comment prose is not executable debt" \
+  0 "No soundness-relevant escape hatches detected" setup_coq_multiline_comments_only
+
+run_case "real Coq Admitted after a comment still fails" \
+  1 "1/1 escape hatch(es) are undocumented" setup_coq_comment_then_real_admitted
+
+run_case "Coq comment delimiters inside strings cannot hide a later axiom" \
+  1 "1/1 escape hatch(es) are undocumented" setup_coq_string_delimiters_then_real_marker
+
+run_case "real Coq marker after a same-line leading comment still fails" \
+  1 "1/1 escape hatch(es) are undocumented" setup_coq_leading_comment_then_real_marker
+
+run_case "unterminated Coq string fails closed instead of hiding the file" \
+  1 "1/1 escape hatch(es) are undocumented" setup_coq_unterminated_string
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"
