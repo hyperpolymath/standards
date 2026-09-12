@@ -98,9 +98,9 @@ count_at() {
       # script mid-report: it printed the first ledger's line, then exited 1
       # with no verdict at all. Exit 1 means "ratchet FAILED", so a repo that
       # had cleared its ledger would be reported as violating the ratchet, with
-      # no reason given and nothing to fix. Caught by gitar-bot review, and it
-      # is the same failure class this check exists to prevent: a gate that
-      # fails for a reason unrelated to what it measures.
+      # no reason given and nothing to fix. Regression reported on 2026-08-06:
+      # https://github.com/hyperpolymath/standards/pull/588#discussion_r3731377032
+      # Keep the no-match case successful so the gate reports its actual verdict.
       printf '%s' "$blob" | { grep -vEc '^\s*(#|$)' || true; } | tr -d ' \n' ;;
   esac
 }
