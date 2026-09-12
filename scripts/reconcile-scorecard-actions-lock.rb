@@ -10,6 +10,9 @@ require 'yaml'
 module ScorecardActionsLock
   PIN_MESSAGE = /\Ascore is \d+: (?:GitHub-owned |third-party )?GitHubAction not pinned by hash\n/
 
+  # Return the one-based line numbers of remote GitHub Action +uses+ entries in
+  # the workflow. Local actions, containers and text containing +uses+ are
+  # excluded.
   def self.action_lines(path)
     lines = []
     visit = lambda do |node|
@@ -27,6 +30,13 @@ module ScorecardActionsLock
     lines
   end
 
+  # Remove Scorecard action-pin findings only when they identify a remote action
+  # entry in a regular workflow below +root+ and native action-lock verification
+  # succeeds. The supplied SARIF document is updated in place and returned with
+  # audit records for removed findings.
+  #
+  # Invokes +gh actions-lock+ once per eligible workflow. Raises when the SARIF
+  # structure or native verification result is invalid, or verification fails.
   def self.reconcile(document, root)
     raise 'Expected a SARIF 2.1.0 document with runs' unless document.is_a?(Hash) &&
       document['version'] == '2.1.0' && document['runs'].is_a?(Array) && !document['runs'].empty?
