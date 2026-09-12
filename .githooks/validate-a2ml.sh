@@ -32,19 +32,19 @@ validate_file() {
 
 # If STAGED_FILES is provided, only validate those files
 if [ -n "$STAGED_FILES" ]; then
-  echo "$STAGED_FILES" | tr ' ' '\n' | while read -r file; do
+  while IFS=$'\n' read -r file; do
     [ -z "$file" ] && continue
     # Only check .a2ml files
     [[ "$file" == *.a2ml ]] || continue
     # Check if file exists
     [ -f "$file" ] || continue
     validate_file "$file"
-  done
+  done <<< "$STAGED_FILES"
 else
   # Scan entire path for .a2ml files
-  find "$SCAN_PATH" -path '*/.git/*' -prune -o -name '*.a2ml' -type f -print 2>/dev/null | while read -r file; do
+  while IFS= read -r file; do
     validate_file "$file"
-  done
+  done < <(find "$SCAN_PATH" -path '*/.git/*' -prune -o -name '*.a2ml' -type f -print 2>/dev/null)
 fi
 
 [ $ERRORS -gt 0 ] && exit 1

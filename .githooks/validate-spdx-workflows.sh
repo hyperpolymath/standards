@@ -26,21 +26,21 @@ validate_file() {
 
 # If staged files provided, only check those
 if [ -n "$STAGED_FILES" ]; then
-  echo "$STAGED_FILES" | tr ' ' '\n' | while read -r file; do
+  while IFS=$'\n' read -r file; do
     [ -z "$file" ] && continue
     # Only check workflow files
     [[ "$file" == *.yml || "$file" == *.yaml ]] || continue
     [[ "$file" == *".github/workflows/"* ]] || continue
     [ -f "$file" ] || continue
     validate_file "$file"
-  done
+  done <<< "$STAGED_FILES"
 else
-  find "$SCAN_PATH" -path '*/.git/*' -prune -o \
+  while IFS= read -r file; do
+    validate_file "$file"
+  done < <(find "$SCAN_PATH" -path '*/.git/*' -prune -o \
     -type f \( -name '*.yml' -o -name '*.yaml' \) \
     -path '*/.github/workflows/*' \
-    -print 2>/dev/null | while read -r file; do
-    validate_file "$file"
-  done
+    -print 2>/dev/null)
 fi
 
 [ $ERRORS -gt 0 ] && exit 1
