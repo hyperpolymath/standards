@@ -16,14 +16,14 @@ on:
         description: Fine-grained token with repository Administration read access
         required: false
 
-permissions: {}
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   workflow-staleness:
     name: Check Workflow Staleness
-    permissions:
-      contents: read
-    runs-on: ${{ inputs.runs-on }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       has_baseline: ${{ steps.check.outputs.has_baseline }}
@@ -35,9 +35,9 @@ jobs:
         id: check
         run: |
           if [ -f ".hypatia-baseline.json" ]; then
-            echo "has_baseline=true" >> "$GITHUB_OUTPUT"
+            echo "has_baseline=true" >> $GITHUB_OUTPUT
           else
-            echo "has_baseline=false" >> "$GITHUB_OUTPUT"
+            echo "has_baseline=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout pinned standards history
@@ -45,13 +45,13 @@ jobs:
         with:
           repository: hyperpolymath/standards
           # The gate needs the full graph for ancestry and age checks, but its
-          # script comes from a reviewed immutable helper revision. GitHub does
-          # not expose job.workflow_sha; an absent property silently floats.
-          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
-          persist-credentials: false
+          # script must come from the exact reusable commit rather than moving
+          # main. This also lets a Standards PR test its own validator change.
+          ref: ${{ job.workflow_sha }}
           path: .standards-history
           fetch-depth: 0
           filter: tree:0
+          persist-credentials: false
 
       - name: Run staleness check
         env:
@@ -85,10 +85,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          # Immutable helper revision paired with this workflow. Standards PRs
-          # test their own scripts through the bootstrap rule below.
-          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
-          persist-credentials: false
+          # Exact commit of this reusable workflow. This preserves consumer
+          # pin semantics and lets a standards PR test its own scripts.
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             rhodium-standard-repositories/actions-allowlist
@@ -124,8 +123,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
-          persist-credentials: false
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             rhodium-standard-repositories/actions-allowlist
@@ -137,7 +135,7 @@ jobs:
           GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
         if: ${{ env.GH_TOKEN == '' }}
         run: |
-          echo "::warning::Live Actions policy was not evaluated: HYPATIA_SCAN_PAT was not supplied by the caller. The separate tree allowlist gate still ran."
+          echo "::notice::Live Actions policy was not evaluated: HYPATIA_SCAN_PAT was not supplied by the caller. The separate tree allowlist gate still ran."
           # shellcheck disable=SC2016
           printf '%s\n' \
             '### Live Actions policy not evaluated' \
@@ -162,7 +160,7 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -eq 3 ]; then
-            echo "::warning::Live Actions policy was not evaluated: the supplied credential could not read the Administration endpoint."
+            echo "::notice::Live Actions policy was not evaluated: the supplied credential could not read the Administration endpoint."
             printf '%s\n' \
               '### Live Actions policy not evaluated' \
               '' \
@@ -175,15 +173,13 @@ jobs:
 
   validate-hypatia-baseline:
     name: Validate Hypatia Baseline
-    permissions:
-      contents: read
     needs: workflow-staleness
     # NOTE: deliberately NO job-level `if:`. This context is REQUIRED by branch
     # protection, and a skipped job never satisfies a required context — so a
     # repo without a baseline blocked forever, by construction. The job now
     # always runs; the EXPENSIVE steps are guarded individually, so it still
     # costs nothing when there is no baseline to validate.
-    runs-on: ${{ inputs.runs-on }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout caller repository
@@ -199,27 +195,20 @@ jobs:
           elixir-version: '1.19.4'
           otp-version: '28.3'
 
-      - name: Resolve pinned Hypatia commit
+      - name: Resolve Hypatia HEAD commit
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         id: hypatia-rev
         run: |
-          # PINNED, not floating. This job is a REQUIRED status check on ~120
-          # caller repos, and every caller pins THIS workflow to a SHA. Cloning
-          # Hypatia's moving tip here defeated all of those pins: the scanner's
-          # ruleset changed under every consumer whenever hypatia main advanced,
-          # so a caller could go red with no change on its side.
-          #
-          # Bump procedure (one edit, one PR on standards, then re-pin callers):
-          #   1. sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git refs/heads/main | cut -f1)
-          #   2. replace HYPATIA_PIN below with that sha (verify it is on main:
-          #      gh api repos/hyperpolymath/hypatia/commits/$sha)
-          #   3. the cache key below embeds the sha, so a bump misses the cache and
-          #      rebuilds the escript; no manual cache invalidation needed.
-          # Never pin a tag here: hypatia v1.0.0 (2026-01-10) is not an ancestor
-          # of main and is >1,000 commits behind it.
-          HYPATIA_PIN=0e913426e20282accb49d2fa5d14d5bedbc5a6c2
-          echo "sha=$HYPATIA_PIN" >> "$GITHUB_OUTPUT"
-          echo "Pinned hypatia commit: $HYPATIA_PIN"
+          # Pin the cache to the *current* Hypatia main tip. Resolved before the
+          # cache step because cache restore happens before the clone, so the key
+          # cannot hash a not-yet-cloned tree — it must hash the remote ref.
+          sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
+          if [ -z "$sha" ]; then
+            echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Resolved hypatia HEAD: $sha"
 
       - name: Cache Hex/Mix and Scanner Build
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
@@ -238,16 +227,11 @@ jobs:
           # the rebuild, reintroducing the staleness.
           key: hypatia-scanner-v3-${{ runner.os }}-${{ steps.hypatia-rev.outputs.sha }}
 
-      - name: Clone Hypatia at the pinned commit
+      - name: Clone Hypatia
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         run: |
-          # ~/hypatia is restored from the sha-keyed cache above when present;
-          # only clone on a cache miss, and only ever the pinned commit.
           if [ ! -d "$HOME/hypatia" ]; then
-            git init -q "$HOME/hypatia"
-            git -C "$HOME/hypatia" remote add origin https://github.com/hyperpolymath/hypatia.git
-            git -C "$HOME/hypatia" fetch -q --depth 1 origin "${{ steps.hypatia-rev.outputs.sha }}"
-            git -C "$HOME/hypatia" checkout -q FETCH_HEAD
+            git clone --depth 1 https://github.com/hyperpolymath/hypatia.git "$HOME/hypatia"
           fi
 
       - name: Build Hypatia scanner
@@ -260,20 +244,17 @@ jobs:
 
       # A reusable workflow only auto-checks-out its own YAML, not sibling
       # scripts. Sparse-check-out standards' scripts/ to get apply-baseline.sh,
-      # mirroring the language-policy job below. The explicit immutable helper
-      # commit below keeps the filter and schema semantics reviewable. Update
-      # that pin when changing the helpers; the job context has no workflow_sha.
+      # mirroring the language-policy job below. Pinned to main because
+      # github.workflow_sha resolves to the *caller* repo's SHA (which would 404).
       - name: Check out standards for the baseline filter
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
-          persist-credentials: false
+          ref: main
           path: .standards-checkout
           sparse-checkout: |
             scripts
-            tools/policy/check-language-policy.sh
           sparse-checkout-cone-mode: false
 
       - name: Run Hypatia scan (Baseline validation)
@@ -370,51 +351,63 @@ jobs:
       # drift is just whatever's on standards/main between the reusable
       # version and the script version — acceptable since scripts here
       # are read-only governance checks.
+      - name: Set up Deno
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.x
+
       - name: Check out standards repo for shared scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
           ref: main
           path: .standards-checkout
-          # Include the shared policy gate as well as the scripts it complements.
+          # Sparse-checkout only the scripts dir to keep this fast.
           sparse-checkout: |
             scripts
-            tools/policy/check-language-policy.sh
           sparse-checkout-cone-mode: false
 
       - name: Check for TypeScript
         # Read-only execution; never writes outside the runner workspace.
-        # Pure bash + awk, so no JS runtime is installed on the runner.
-        # Source of truth: `scripts/check-ts-allowlist.sh` in standards.
-        # The local fallback is for standards' OWN PRs: the checkout above
-        # pins standards@main, so a script added in a PR is not there yet.
-        # It is gated on the caller being standards, so no consumer repo can
-        # shadow this required gate with a permissive repo-local copy.
-        run: |
-          SCRIPT=".standards-checkout/scripts/check-ts-allowlist.sh"
-          if [ ! -f "$SCRIPT" ] && [ "$GITHUB_REPOSITORY" = "hyperpolymath/standards" ] \
-             && [ -f scripts/check-ts-allowlist.sh ]; then
-            SCRIPT="scripts/check-ts-allowlist.sh"
-            echo "Using this repository's own copy (standards self-check)."
-          fi
-          if [ ! -f "$SCRIPT" ]; then
-            echo "::error::check-ts-allowlist gate not found in standards@main or locally"
-            exit 1
-          fi
-          bash "$SCRIPT"
+        # `--no-lock` so an empty / stale / missing `deno.lock` doesn't fail
+        # `deno run` before the file-walker even starts — the script does not
+        # import anything, so the lockfile is irrelevant to its execution.
+        # See standards#294.
+        #
+        # Runs the AffineScript-compiled `.deno.js` (source of truth:
+        # `scripts/check-ts-allowlist.affine`). The .ts archetype is kept
+        # alongside for the regression suite (`scripts/tests/check-ts-
+        # allowlist-test.sh`) and for parallel-validation during the
+        # TS→AffineScript migration (standards#239 / #241). Retirement of
+        # the .ts is a separate follow-up after the dual-target window.
+        run: deno run --allow-read --no-lock .standards-checkout/scripts/check-ts-allowlist.deno.js
 
-      - name: Check language-policy invariants
+      - name: check-ts-allowlist source/compile drift (informational)
+        # Non-blocking — informational until the AffineScript compiler
+        # output is hash-pinned per compiler version. The compiler header
+        # currently stamps "Generated by AffineScript compiler" which is
+        # a moving target as the codegen evolves, so spurious diff =
+        # "compiler bumped" vs real diff = "someone edited .affine
+        # without recompiling". Promotion to blocking is gated on a
+        # compiler-version pin landing (see standards#312).
+        continue-on-error: true
         run: |
-          SCRIPT=".standards-checkout/tools/policy/check-language-policy.sh"
-          if [ ! -f "$SCRIPT" ] && [ -f tools/policy/check-language-policy.sh ]; then
-            SCRIPT="tools/policy/check-language-policy.sh"
-            echo "Using this repository's own copy (standards self-check)."
+          if ! command -v affinescript >/dev/null 2>&1; then
+            echo "::notice::affinescript compiler unavailable on runner — skipping drift check"
+            exit 0
           fi
-          if [ ! -f "$SCRIPT" ]; then
-            echo "::error::language-policy gate not found in standards@main or locally"
-            exit 1
+          tmp="$(mktemp /tmp/check-ts-allowlist-drift.XXXXXX.deno.js)"
+          if ! affinescript compile --deno-esm -o "$tmp" .standards-checkout/scripts/check-ts-allowlist.affine; then
+            echo "::warning::affinescript compile failed — drift check skipped"
+            rm -f "$tmp"
+            exit 0
           fi
-          bash "$SCRIPT"
+          if diff -u .standards-checkout/scripts/check-ts-allowlist.deno.js "$tmp"; then
+            echo "✅ check-ts-allowlist .affine source and .deno.js compiled output are in sync"
+          else
+            echo "::warning::check-ts-allowlist.deno.js drifted from check-ts-allowlist.affine — re-run \`just check-ts-allowlist-drift\` locally and recommit the .deno.js"
+          fi
+          rm -f "$tmp"
 
       # Shared escape hatch for the banned-language-file checks below.
       # Honours three exemption mechanisms (see
@@ -743,17 +736,17 @@ jobs:
           FAILED=false
           WEAK_CRYPTO=$(grep -rE 'md5\(|sha1\(' --include="*.py" --include="*.rb" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" . 2>/dev/null | grep -v 'checksum\|cache\|test\|spec' | head -5 || true)
           if [ -n "$WEAK_CRYPTO" ]; then
-            echo "::warning::Weak crypto (MD5/SHA1) detected — ADVISORY, does not fail this job. Use SHA256+:"
+            echo "⚠️ Weak crypto (MD5/SHA1) detected. Use SHA256+ for security:"
             echo "$WEAK_CRYPTO"
           fi
           HTTP_URLS=$(grep -rE 'http://[^l][^o][^c]' --include="*.py" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" --include="*.yaml" --include="*.yml" . 2>/dev/null | grep -v 'localhost\|127.0.0.1\|example\|test\|spec' | head -5 || true)
           if [ -n "$HTTP_URLS" ]; then
-            echo "::warning::HTTP URLs found — ADVISORY, does not fail this job. Use HTTPS:"
+            echo "⚠️ HTTP URLs found. Use HTTPS:"
             echo "$HTTP_URLS"
           fi
           SECRETS=$(grep -rEi '(api_key|apikey|secret_key|password)\s*[=:]\s*["\x27][A-Za-z0-9+/=]{20,}' --include="*.py" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" --include="*.env" . 2>/dev/null | grep -v 'example\|sample\|test\|mock\|placeholder' | head -3 || true)
           if [ -n "$SECRETS" ]; then
-            echo "::error::Potential hardcoded secrets detected — this FAILS the job:"
+            echo "❌ Potential hardcoded secrets detected!"
             FAILED=true
           fi
           if [ "$FAILED" = true ]; then
@@ -994,7 +987,7 @@ jobs:
         continue-on-error: true
         # advisory: informational only; repos can opt into blocking locally
       - name: EditorConfig check
-        uses: editorconfig-checker/action-editorconfig-checker@51f63319f592f97930c73d9c46184d20bd206393 # v3.0.0
+        uses: editorconfig-checker/action-editorconfig-checker@840e866d93b8e032123c23bac69dece044d4d84c # v2.2.0
         # advisory: formatting hygiene is reported from the reusable estate
         # bundle; repos opt into blocking formatter checks locally when ready.
         continue-on-error: true
@@ -1105,42 +1098,23 @@ jobs:
           # governance jobs on every PR estate-wide. github.sha resolves to the
           # same merge commit but is always fetchable.
           ref: ${{ github.sha }}
-      - name: Checkout the pinned Standards policy helpers
+      - name: Checkout standards for the duplicate-key check
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          # Execute helpers from this reviewed immutable revision, which includes
-          # the parser and descriptile-policy checks. Bump this helper pin when
-          # changing the implementation; job.workflow_sha is not a GitHub context.
-          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
-          persist-credentials: false
+          ref: main
           path: .standards-dupkey
           sparse-checkout: |
             scripts/check-workflow-duplicate-keys.sh
-            scripts/check-descriptile-policy.sh
-            tools/policy/check-workflows-parse.sh
+            scripts/update-actions-lock.sh
           sparse-checkout-cone-mode: false
-      - name: Check descriptile policy consistency
-        run: |
-          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
-            SCRIPT=scripts/check-descriptile-policy.sh
-          else
-            SCRIPT=.standards-dupkey/scripts/check-descriptile-policy.sh
-          fi
-          bash "$SCRIPT"
-      - name: Parse every tracked workflow
-        run: |
-          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
-            SCRIPT="tools/policy/check-workflows-parse.sh"
-            echo "Using this repository's own copy (standards self-lint)."
-          else
-            SCRIPT=".standards-dupkey/tools/policy/check-workflows-parse.sh"
-          fi
-          if [ ! -f "$SCRIPT" ]; then
-            echo "::error::workflow parser gate not found in the pinned Standards revision or locally"
-            exit 1
-          fi
-          bash "$SCRIPT"
+        # ⚠ Not fatal if the file is absent. This checkout is pinned to
+        # standards@main, so during a rename of the script the fetch finds
+        # nothing — the new name does not exist on main until the renaming pull
+        # request merges. Without this, the RENAME ITSELF fails the linter, on
+        # the one pull request that cannot possibly be at fault. See the
+        # fallback in the next step.
+        continue-on-error: true
 
       - name: Duplicate YAML keys in workflows
         run: |
@@ -1152,21 +1126,36 @@ jobs:
           # were dead this way, including a CodeQL workflow with zero
           # successful runs in its entire lifetime.
           set -euo pipefail
-          # Standards exercises its pull-request scripts; every consumer uses
-          # the canonical scripts fetched from this workflow's immutable
-          # Standards revision.
-          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
+          SCRIPT=".standards-dupkey/scripts/check-workflow-duplicate-keys.sh"
+          # Self-hosting fallback: when THIS repository is standards, its own
+          # working tree already holds the script, and during a rename that copy
+          # is the only correct one — the pinned main checkout still has the old
+          # name. Preferring the fetched copy keeps every other caller on the
+          # canonical version.
+          if [ ! -f "$SCRIPT" ] && [ -f scripts/check-workflow-duplicate-keys.sh ]; then
             SCRIPT="scripts/check-workflow-duplicate-keys.sh"
             echo "Using this repository's own copy (standards self-lint)."
-          else
-            SCRIPT=".standards-dupkey/scripts/check-workflow-duplicate-keys.sh"
           fi
           if [ ! -f "$SCRIPT" ]; then
             echo "::error::duplicate-key checker not found — neither fetched from" \
-                 "the pinned Standards revision nor present locally."
+                 "standards@main nor present locally."
             exit 1
           fi
           cp "$SCRIPT" "$RUNNER_TEMP/dupkeys.sh"
+          # The lockfile gate below runs in a consumer checkout, where the
+          # standards helper is not present. Preserve the canonical helper
+          # before removing this sparse standards checkout.
+          LOCK_SCRIPT=".standards-dupkey/scripts/update-actions-lock.sh"
+          if [ ! -f "$LOCK_SCRIPT" ] && [ -f scripts/update-actions-lock.sh ]; then
+            LOCK_SCRIPT="scripts/update-actions-lock.sh"
+            echo "Using this repository's own actions-lock verifier (standards self-lint)."
+          fi
+          if [ ! -f "$LOCK_SCRIPT" ]; then
+            echo "::error::actions-lock verifier not found — neither fetched from" \
+                 "standards@main nor present locally."
+            exit 1
+          fi
+          cp "$LOCK_SCRIPT" "$RUNNER_TEMP/update-actions-lock.sh"
           rm -rf .standards-dupkey
           bash "$RUNNER_TEMP/dupkeys.sh" .github/workflows
 
@@ -1198,6 +1187,43 @@ jobs:
           done
           [ $failed -eq 1 ] && { echo "Add SPDX header + permissions:"; exit 1; }
           echo "All workflows have SPDX headers + permissions"
+      - name: Check locked or SHA-pinned actions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f .github/workflows/actions.lock ]; then
+            # actions.lock is the authoritative immutable resolution for both
+            # direct actions and their transitive dependencies. Do not also
+            # rewrite direct refs to raw SHAs: gh actions-lock omits refs that
+            # no tag or branch contains, and GitHub then rejects the workflow
+            # at startup. Measured in oikosbot PR #78 on 2026-08-29: five
+            # previously executable workflows became startup_failure after the
+            # redundant direct-SHA conversion; restoring their locked version
+            # refs made GitHub's native resolver accept them again.
+            gh extension install github/gh-actions-lock
+            bash "$RUNNER_TEMP/update-actions-lock.sh" --verify-local
+            echo "Immutable direct and transitive lockfile coverage verified"
+          else
+            unpinned=$(grep -rnE --include='*.yml' --include='*.yaml' \
+              "^[[:space:]]+uses:" .github/workflows/ | \
+              grep -v "@[a-f0-9]\{40\}" | \
+              grep -v "uses: \./\|uses: docker://\|uses: actions/github-script\|uses: hyperpolymath/standards/" || true)
+            if [ -n "$unpinned" ]; then
+              echo "ERROR: no .github/workflows/actions.lock in THIS TREE, and these refs are not SHA-pinned."
+            echo "  Prefer \`gh actions-lock\` — it also locks the transitive dependencies"
+            echo "  of composite actions, which an inline SHA cannot express."
+            echo "  Do NOT do both: gh actions-lock refuses a ref no tag or branch contains,"
+            echo "  so inline pinning REMOVES actions from the lockfile."
+              echo "$unpinned"
+              exit 1
+            fi
+            echo "All actions are SHA-pinned"
+          fi
+      # The step above proves a pin has the right SHAPE. It cannot prove the
+      # SHA EXISTS — a fabricated 40-hex string passes it. Measured 2026-07-28:
+      # 112 of 613 unique estate pins (18%) do not resolve, in 876 committed
+      # files. An unresolvable `uses:` yields NO check run, so those repos look
+      # green while the job never ran. This step closes that gap.
       - name: Checkout standards for the pin-existence gate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1224,67 +1250,6 @@ jobs:
             echo "ERROR: Duplicate CodeQL workflows found"; exit 1
           fi
           echo "No critical duplicates found"
-
-  # actions-lock-verify — its own context so a lockfile red names its cause
-  # (spec 2026-09-02-cicd-regularisation-design §6.4, R2). Formerly a step
-  # buried inside workflow-lint, where "Workflow security linter" red could
-  # mean SPDX, permissions, duplicate keys, parse, pin-resolve OR the lock.
-  # The gate logic lives in scripts/check-actions-lock-gate.sh (tested by
-  # scripts/tests/check-actions-lock-gate-test.sh): lock present → the
-  # authoritative `gh actions-lock --verify-local`; lock absent → unpinned
-  # refs are red now, all-pinned-but-no-lock is a ::warning until
-  # ENFORCE_ACTIONS_LOCK_FROM (2026-10-01), red after.
-  #
-  # Standards helpers use the explicit immutable commit below. Update that
-  # helper pin with helper changes; job.workflow_sha is not a GitHub context.
-  actions-lock-verify:
-    name: Actions lockfile verify
-    runs-on: ${{ inputs.runs-on }}
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout caller repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.sha }}
-      - name: Checkout standards for the lock gate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: hyperpolymath/standards
-          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
-          persist-credentials: false
-          path: .standards-lock
-          sparse-checkout: |
-            scripts/check-actions-lock-gate.sh
-            scripts/update-actions-lock.sh
-          sparse-checkout-cone-mode: false
-      - name: Install gh actions-lock
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh extension install github/gh-actions-lock
-      - name: Verify actions.lock (or SHA pins during the grace window)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -uo pipefail
-          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
-            SRC=scripts
-            echo "Using this repository's own gate + verifier (standards self-lint)."
-          else
-            SRC=.standards-lock/scripts
-          fi
-          for f in check-actions-lock-gate.sh update-actions-lock.sh; do
-            if [ ! -f "$SRC/$f" ]; then
-              echo "::error::actions-lock gate: $f not found in $SRC (standards checkout at the explicit helper pin failed?)"
-              exit 1
-            fi
-            cp "$SRC/$f" "$RUNNER_TEMP/$f"
-          done
-          rm -rf .standards-lock
-          ACTIONS_LOCK_VERIFIER="$RUNNER_TEMP/update-actions-lock.sh" \
-            bash "$RUNNER_TEMP/check-actions-lock-gate.sh" .github/workflows
 
   trusted-base:
     name: Trusted-base reduction policy
@@ -1381,22 +1346,13 @@ jobs:
       - name: Exemption ratchet
         run: |
           set -euo pipefail
-          # Bootstrap rule: standards must exercise the script from the pull
-          # request being tested. Consumers must use the trusted copy from
-          # standards@main and cannot substitute a same-named local file.
-          # This mirrors the sibling debt-ratchet job below.
-          if [ "${{ github.repository }}" = "hyperpolymath/standards" ]; then
-            cp scripts/check-exemption-ratchet.sh \
-               scripts/count-ledger-entries.sh "$RUNNER_TEMP/"
-          else
-            cp .standards-checkout/scripts/check-exemption-ratchet.sh \
-               .standards-checkout/scripts/count-ledger-entries.sh "$RUNNER_TEMP/"
-          fi
           # Stage the script OUT of the scanned tree and delete the checkout,
           # so the ratchet only ever reads the CALLER's ledgers — standards has
           # ledgers of its own and they are not this repository's.
           # Both files: the ratchet calls count-ledger-entries.sh as a sibling,
           # and it has no fallback if the counter is missing — deliberately.
+          cp .standards-checkout/scripts/check-exemption-ratchet.sh \
+             .standards-checkout/scripts/count-ledger-entries.sh "$RUNNER_TEMP/"
           rm -rf .standards-checkout
           bash "$RUNNER_TEMP/check-exemption-ratchet.sh" \
             "${{ github.event.pull_request.base.sha }}"
