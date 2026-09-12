@@ -35,9 +35,9 @@ jobs:
         id: check
         run: |
           if [ -f ".hypatia-baseline.json" ]; then
-            echo "has_baseline=true" >> $GITHUB_OUTPUT
+            echo "has_baseline=true" >> "$GITHUB_OUTPUT"
           else
-            echo "has_baseline=false" >> $GITHUB_OUTPUT
+            echo "has_baseline=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout pinned standards history
@@ -45,13 +45,13 @@ jobs:
         with:
           repository: hyperpolymath/standards
           # The gate needs the full graph for ancestry and age checks, but its
-          # script must come from the exact reusable commit rather than moving
-          # main. This also lets a Standards PR test its own validator change.
-          ref: ${{ job.workflow_sha }}
+          # script comes from a reviewed immutable helper revision. GitHub does
+          # not expose job.workflow_sha; an absent property silently floats.
+          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
+          persist-credentials: false
           path: .standards-history
           fetch-depth: 0
           filter: tree:0
-          persist-credentials: false
 
       - name: Run staleness check
         env:
@@ -85,9 +85,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          # Exact commit of this reusable workflow. This preserves consumer
-          # pin semantics and lets a standards PR test its own scripts.
-          ref: ${{ job.workflow_sha }}
+          # Immutable helper revision paired with this workflow. Standards PRs
+          # test their own scripts through the bootstrap rule below.
+          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
+          persist-credentials: false
           path: .standards-checkout
           sparse-checkout: |
             rhodium-standard-repositories/actions-allowlist
@@ -123,7 +124,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: ${{ job.workflow_sha }}
+          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
+          persist-credentials: false
           path: .standards-checkout
           sparse-checkout: |
             rhodium-standard-repositories/actions-allowlist
@@ -258,16 +260,16 @@ jobs:
 
       # A reusable workflow only auto-checks-out its own YAML, not sibling
       # scripts. Sparse-check-out standards' scripts/ to get apply-baseline.sh,
-      # mirroring the language-policy job below. `job.workflow_sha` is the exact
-      # commit of this called workflow, so the filter and schema semantics cannot
-      # drift from the reusable workflow that invoked them. This also lets a
-      # standards PR test its own script change instead of silently using main.
+      # mirroring the language-policy job below. The explicit immutable helper
+      # commit below keeps the filter and schema semantics reviewable. Update
+      # that pin when changing the helpers; the job context has no workflow_sha.
       - name: Check out standards for the baseline filter
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: ${{ job.workflow_sha }}
+          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
+          persist-credentials: false
           path: .standards-checkout
           sparse-checkout: |
             scripts
@@ -1107,15 +1109,25 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          # Execute helper code from the same immutable Standards revision as
-          # this reusable workflow. A moving `main` checkout would let a caller
-          # pinned to workflow revision X execute implementation revision Y.
-          ref: ${{ job.workflow_sha }}
+          # Execute helpers from this reviewed immutable revision, which includes
+          # the parser and descriptile-policy checks. Bump this helper pin when
+          # changing the implementation; job.workflow_sha is not a GitHub context.
+          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
+          persist-credentials: false
           path: .standards-dupkey
           sparse-checkout: |
             scripts/check-workflow-duplicate-keys.sh
+            scripts/check-descriptile-policy.sh
             tools/policy/check-workflows-parse.sh
           sparse-checkout-cone-mode: false
+      - name: Check descriptile policy consistency
+        run: |
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
+            SCRIPT=scripts/check-descriptile-policy.sh
+          else
+            SCRIPT=.standards-dupkey/scripts/check-descriptile-policy.sh
+          fi
+          bash "$SCRIPT"
       - name: Parse every tracked workflow
         run: |
           if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
@@ -1223,9 +1235,8 @@ jobs:
   # refs are red now, all-pinned-but-no-lock is a ::warning until
   # ENFORCE_ACTIONS_LOCK_FROM (2026-10-01), red after.
   #
-  # Standards is checked out at `job.workflow_sha` = the SHA of THIS reusable
-  # as pinned by the caller (verified 2026-09-02 on consumer run logs), so the
-  # gate script and the YAML move together — one speed, no `ref: main` float.
+  # Standards helpers use the explicit immutable commit below. Update that
+  # helper pin with helper changes; job.workflow_sha is not a GitHub context.
   actions-lock-verify:
     name: Actions lockfile verify
     runs-on: ${{ inputs.runs-on }}
@@ -1242,9 +1253,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: ${{ job.workflow_sha }}
-          path: .standards-lock
+          ref: 874ffe5839095bd9b181eb465ec20fb473cda7c5
           persist-credentials: false
+          path: .standards-lock
           sparse-checkout: |
             scripts/check-actions-lock-gate.sh
             scripts/update-actions-lock.sh
@@ -1266,7 +1277,7 @@ jobs:
           fi
           for f in check-actions-lock-gate.sh update-actions-lock.sh; do
             if [ ! -f "$SRC/$f" ]; then
-              echo "::error::actions-lock gate: $f not found in $SRC (standards checkout at job.workflow_sha failed?)"
+              echo "::error::actions-lock gate: $f not found in $SRC (standards checkout at the explicit helper pin failed?)"
               exit 1
             fi
             cp "$SRC/$f" "$RUNNER_TEMP/$f"

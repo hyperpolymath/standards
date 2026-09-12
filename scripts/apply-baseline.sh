@@ -234,9 +234,9 @@ rank() {
   case "$1" in
     critical) echo 5 ;;
     high)     echo 4 ;;
-    medium)   echo 3 ;;
+    medium|warn) echo 3 ;;
     low)      echo 2 ;;
-    info)     echo 1 ;;
+    info|informational) echo 1 ;;
     advisory) echo 0 ;;
     *)        echo 5 ;;  # Unknown severity → critical rank
   esac
