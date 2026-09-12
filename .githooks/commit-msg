@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
+# Hyperpolymath Estate Commit Message Hook
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+ERRORS=0
+WARNINGS=0
+
+add_error() { echo -e "${RED}[commit-msg] ERROR: $1${NC}" >&2; ERRORS=$((ERRORS + 1)); }
+add_warning() { echo -e "${YELLOW}[commit-msg] WARNING: $1${NC}" >&2; WARNINGS=$((WARNINGS + 1)); }
+
+echo -e "${BLUE}[commit-msg] Validating for $CURRENT_BRANCH${NC}"
+
+# CHECK 1: Non-empty
+[ -z "$COMMIT_MSG" ] && { add_error "Commit message is empty"; exit 1; }
+
+# CHECK 2: Conventional commits format
+if ! echo "$COMMIT_MSG" | head -1 | grep -qE '^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\([a-z0-9-]+(\s*,\s*[a-z0-9-]+)*\))?:\s'; then
+  add_error "Does not follow conventional commits format"
+  echo "Expected: type(scope): description" >&2
+  echo "Types: feat, fix, docs, style, refactor, test, chore, build, ci, perf, revert" >&2
+  exit 1
+fi
+
+# CHECK 3: Issue reference (warning)
+! echo "$COMMIT_MSG" | grep -qE '(#[0-9]+|github\.com/.*/(issues|pull)/[0-9]+)' && \
+  add_warning "Should reference an issue or PR"
+
+# CHECK 4: Subject length
+SUBJECT=$(echo "$COMMIT_MSG" | head -1)
+SUBJECT_LENGTH=${#SUBJECT}
+[ $SUBJECT_LENGTH -gt 72 ] && { add_error "Subject exceeds 72 chars (${SUBJECT_LENGTH})"; exit 1; }
+[ $SUBJECT_LENGTH -gt 50 ] && add_warning "Subject exceeds 50 chars (${SUBJECT_LENGTH})"
+
+# CHECK 5: Body for non-trivial changes
+LINE_COUNT=$(echo "$COMMIT_MSG" | wc -l)
+COMMIT_TYPE=$(echo "$COMMIT_MSG" | head -1 | cut -d'(' -f1 | xargs)
+case "$COMMIT_TYPE" in
+  chore|style|docs) NEEDS_BODY=false;;
+  *) NEEDS_BODY=true;;
+esac
+echo "$COMMIT_MSG" | head -1 | grep -qE '^(Merge|Revert)' && NEEDS_BODY=false
+
+[ "$NEEDS_BODY" = true ] && [ $LINE_COUNT -eq 1 ] && \
+  add_warning "Non-trivial changes should have a commit body"
+
+# CHECK 6: Trailing whitespace
+echo "$SUBJECT" | grep -qE '[[:space:]]+$' && { add_error "Subject has trailing whitespace"; exit 1; }
+
+# CHECK 7: Lowercase type
+FIRST_WORD=$(echo "$COMMIT_MSG" | head -1 | cut -d'(' -f1 | cut -d':' -f1 | xargs)
+LOWER_FIRST=$(echo "$FIRST_WORD" | tr '[:upper:]' '[:lower:]')
+[ "$FIRST_WORD" != "$LOWER_FIRST" ] && { add_error "Type must be lowercase: '$LOWER_FIRST'" ; exit 1; }
+
+echo ""
+if [ $ERRORS -gt 0 ]; then
+  echo -e "${RED}[commit-msg] FAILED with $ERRORS error(s)${NC}" >&2
+  echo "Override with: git commit --no-verify"
+  exit 1
+else
+  [ $WARNINGS -gt 0 ] && echo -e "${YELLOW}[commit-msg] Accepted with $WARNINGS warning(s)${NC}"
+  echo -e "${GREEN}[commit-msg] ✅ Valid commit message${NC}"
+  exit 0
+fi
