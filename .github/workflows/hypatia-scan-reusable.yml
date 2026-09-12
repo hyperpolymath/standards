@@ -42,7 +42,7 @@ jobs:
           # cache step because cache restore happens before the clone, so the key
           # cannot hash a not-yet-cloned tree — it must hash the remote ref.
           sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
-          if [ -z "$sha" ]; then
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
             exit 1
           fi
@@ -63,15 +63,25 @@ jobs:
           # SD022, hypatia#545) never reached CI. No restore-keys on purpose —
           # a partial restore would repopulate ~/hypatia and the guards below
           # would then skip the rebuild, reintroducing the staleness.
-          key: hypatia-scanner-v3-${{ runner.os }}-${{ steps.hypatia-rev.outputs.sha }}
+          key: hypatia-scanner-v4-${{ runner.os }}-${{ steps.hypatia-rev.outputs.sha }}
 
-      - name: Clone Hypatia
+      - name: Check out resolved Hypatia commit
+        env:
+          HYPATIA_SHA: ${{ steps.hypatia-rev.outputs.sha }}
         run: |
-          # On a cache miss ~/hypatia is absent, so this clones the SHA the key
-          # was computed from. On a cache hit it is present (correct SHA) and we
-          # skip — the guard is now safe because the key is source-pinned.
+          set -euo pipefail
           if [ ! -d "$HOME/hypatia" ]; then
-            git clone --depth 1 https://github.com/hyperpolymath/hypatia.git "$HOME/hypatia"
+            git init "$HOME/hypatia"
+            git -C "$HOME/hypatia" remote add origin https://github.com/hyperpolymath/hypatia.git
+            git -C "$HOME/hypatia" fetch --depth 1 origin "$HYPATIA_SHA"
+            git -C "$HOME/hypatia" checkout --detach FETCH_HEAD
+          fi
+          # A cache is usable only when its source matches the key, including
+          # on cache hits. v4 invalidates caches populated by the moving clone.
+          ACTUAL_SHA=$(git -C "$HOME/hypatia" rev-parse HEAD)
+          if [ "$ACTUAL_SHA" != "$HYPATIA_SHA" ]; then
+            echo "::error::Hypatia cached source does not match the resolved commit"
+            exit 1
           fi
 
       - name: Build Hypatia scanner
@@ -119,7 +129,7 @@ jobs:
           if [ ! -s hypatia-findings.json ] || ! jq -e '
             type == "array" and length > 0 and all(.[];
               type == "object" and (.severity as $s |
-                ["critical", "high", "medium", "low", "info", "informational"] | index($s) != null))
+                ["critical", "high", "medium", "warn", "low", "info", "informational"] | index($s) != null)))
           ' hypatia-findings.json >/dev/null; then
             echo "::error::Hypatia did not produce a valid findings array"
             exit 2
@@ -128,7 +138,8 @@ jobs:
           FINDING_COUNT=$(jq '. | length' hypatia-findings.json)
           CRITICAL=$(jq '[.[] | select(.severity == "critical")] | length' hypatia-findings.json)
           HIGH=$(jq '[.[] | select(.severity == "high")] | length' hypatia-findings.json)
-          MEDIUM=$(jq '[.[] | select(.severity == "medium")] | length' hypatia-findings.json)
+          # Hypatia's research rules use "warn" at the same rank as "medium".
+          MEDIUM=$(jq '[.[] | select(.severity == "medium" or .severity == "warn")] | length' hypatia-findings.json)
 
           {
             echo "findings_count=$FINDING_COUNT"
