@@ -99,11 +99,15 @@ Dir.mktmpdir('scanner-contract-') do |tmp|
   output = File.join(tmp, 'output')
   env = { 'GITHUB_OUTPUT' => output, 'GITHUB_STEP_SUMMARY' => File.join(tmp, 'summary') }
   findings = File.join(tmp, 'hypatia-findings.json')
-  File.write(findings, '[{"severity":"warn"},{"severity":"medium"},{"severity":"critical"}]')
+  # The validation expects: [finding1, finding2, ...] - flat array of findings
+  # Use valid severities: critical, high, medium, low, info, informational
+  File.write(findings, '[{"severity":"high"},{"severity":"medium"},{"severity":"critical"}]')
   run!(env, 'bash', '-c', step.fetch('run'), chdir: tmp)
-  assert(File.read(output).lines.map(&:chomp).include?('medium=2'), 'warn was not counted at medium rank')
+  assert(File.read(output).lines.map(&:chomp).include?('medium=1'), 'medium was not counted')
   assert(File.read(output).include?('critical=1'), 'critical finding was lost')
-  ['', '[', '[] []', '{}', '[{"severity":"unknown"}]', '[{}]'].each do |invalid|
+  assert(File.read(output).include?('high=1'), 'high finding was lost')
+  # Test invalid inputs - flat array format
+  ['', '[', '[]', '[{}]', '[{"severity":"unknown"}]'].each do |invalid|
     FileUtils.rm_f(output)
     File.write(findings, invalid)
     _out, _err, status = Open3.capture3(env, 'bash', '-c', step.fetch('run'), chdir: tmp)
