@@ -12,9 +12,14 @@ validate_file() {
   
   # Check for SPDX header in first non-comment line
   HAS_SPDX=false
-  while IFS= read -r line; do
+  while IFS= read -r line || [ $? -eq 0 ]; do
     [[ "$line" =~ ^[[:space:]]*$ ]] && continue
-    [[ "$line" =~ ^[[:space:]]*# ]] && { echo "$line" | grep -qE 'SPDX-License-Identifier' && HAS_SPDX=true; continue; }
+    [[ "$line" =~ ^[[:space:]]*# ]] && { 
+      if echo "$line" | grep -qE 'SPDX-License-Identifier'; then
+        HAS_SPDX=true
+        continue
+      fi
+    }
     break
   done < "$file"
   
