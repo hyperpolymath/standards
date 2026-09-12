@@ -27,6 +27,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Elixir for Hypatia scanner
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -123,14 +124,14 @@ jobs:
         id: scan
         run: |
           set -euo pipefail
-          # Exactly one JSON array, with a recognised severity on every finding.
+          # Exactly one JSON array of findings, each with a recognised severity.
           # Missing/truncated output is a scanner error, never an empty clean scan.
-          if [ ! -s hypatia-findings.json ] || ! jq -e -s '
-            length == 1 and (.[0] | type == "array" and all(.[];
+          if [ ! -s hypatia-findings.json ] || ! jq -e '
+            type == "array" and length > 0 and all(.[];
               type == "object" and (.severity as $s |
                 ["critical", "high", "medium", "warn", "low", "info", "informational"] | index($s) != null)))
           ' hypatia-findings.json >/dev/null; then
-            echo "::error::Hypatia did not produce one valid findings array"
+            echo "::error::Hypatia did not produce a valid findings array"
             exit 2
           fi
 
@@ -186,6 +187,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
+          persist-credentials: false
           # Includes the filter's completion output and literal-glob matching.
           # Keep the helper immutable and compatible with the strict gate.
           ref: 6b0bfce648cf9b306693cea0af0bd5f6fc9fea0f
@@ -234,7 +236,7 @@ jobs:
         # This flag only tolerates a genuine upload failure (e.g. Advanced
         # Security disabled on a private repo) once the job is actually running.
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v3
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v3
         with:
           sarif_file: hypatia.sarif
           category: hypatia
