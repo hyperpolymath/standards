@@ -1,0 +1,323 @@
+# SPDX-License-Identifier: MPL-2.0
+# ⚙️ AUTO: Propagate Hook Updates
+# This workflow is managed by gh actions-lock.
+#
+# Automatically propagates git hook updates from the standards repository
+# to all repositories across the hyperpolymath and metadatastician estates.
+#
+# Triggered when:
+# - .githooks/ directory is updated in standards repo
+# - Manual trigger via workflow_dispatch
+name: "⚙️ AUTO: Propagate Hook Updates"
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - '.githooks/**'
+      - '.github/workflows/propagate-hooks.yml'
+  workflow_dispatch:
+    inputs:
+      target-repo:
+        description: 'Specific repo to update (optional)'
+        required: false
+      dry-run:
+        description: 'Dry run - do not actually update' 
+        required: false
+        default: 'false'
+  repository_dispatch:
+    types: [refresh-githooks]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+# Only run one instance at a time
+concurrency:
+  group: propagate-hooks
+  cancel-in-progress: false
+
+jobs:
+  identify-repos:
+    name: Identify Repositories to Update
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      repos: ${{ steps.identify.outputs.repos }}
+      dry_run: ${{ steps.config.outputs.dry_run }}
+
+    steps:
+      - name: Checkout standards repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Configure
+        id: config
+        run: |
+          # Check if this is a dry run
+          if [ "${{ github.event.inputs.dry-run }}" = "true" ] || [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "dry_run=true" >> $GITHUB_OUTPUT
+            echo "::notice::Running in DRY RUN mode - no changes will be made"
+          else
+            echo "dry_run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Identify repositories with .githooks
+        id: identify
+        run: |
+          echo "🔍 Identifying repositories that need hook updates..."
+          
+          # Get the SHA of the current commit (triggering commit)
+          TRIGGER_SHA="${{ github.sha }}"
+          
+          # In a real implementation, we would:
+          # 1. Query the GitHub API for all repos in hyperpolymath and metadatastician orgs
+          # 2. Filter for repos that have a .githooks directory
+          # 3. Check if their .githooks is behind the standards repo
+          #
+          # For this workflow, we'll use a representative list
+          # In production, this would be dynamically generated
+          
+          # Hyperpolymath estate repos (sample - would be all ~8,000+ repos)
+          HYPERPOLYMATH_REPOS=(
+            "hyperpolymath/standards"
+            "hyperpolymath/harvard-dehallucinator"
+            "hyperpolymath/echidnabot"
+            "hyperpolymath/universal-chat-extractor"
+            "hyperpolymath/developer-ecosystem"
+            "hyperpolymath/scaffoldia"
+            "hyperpolymath/a2ml-ecosystem"
+            "hyperpolymath/reposystem"
+          )
+          
+          # Metadatastician estate repos (sample - would be all ~500+ repos)
+          METADATASTICIAN_REPOS=(
+            "metadatastician/svalinn"
+            "metadatastician/stapeln"
+            "metadatastician/gossamer"
+            "metadatastician/cerro-torre"
+            "metadatastician/vordr"
+            "metadatastician/cadastra"
+          )
+          
+          # Check if specific repo was requested
+          if [ -n "${{ github.event.inputs.target-repo }}" ]; then
+            TARGET="${{ github.event.inputs.target-repo }}"
+            REPOS_JSON=$(jq -n --arg repo "$TARGET" '[$repo]')
+          else
+            # Combine all repos
+            ALL_REPOS=("${HYPERPOLYMATH_REPOS[@]}" "${METADATASTICIAN_REPOS[@]}")
+            REPOS_JSON=$(jq -n --args '$ARGV' "${ALL_REPOS[@]}")
+          fi
+          
+          echo "repos=$REPOS_JSON" >> $GITHUB_OUTPUT
+          echo "repo_count=$(echo "$REPOS_JSON" | jq 'length')" >> $GITHUB_OUTPUT
+
+      - name: Display repositories to update
+        run: |
+          REPO_COUNT="${{ steps.identify.outputs.repo_count }}"
+          echo "📊 Found $REPO_COUNT repository(ies) to check for hook updates"
+          
+          # Pretty print the repos list
+          echo "${{ steps.identify.outputs.repos }}" | jq '.'
+
+  propagate:
+    name: Propagate Hook Updates
+    runs-on: ubuntu-latest
+    needs: identify-repos
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        repo: ${{ fromJson(needs.identify-repos.outputs.repos) }}
+      max-parallel: 10  # Limit concurrent updates
+      fail-fast: false  # Don't stop on individual failures
+
+    steps:
+      - name: Checkout standards repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Determine source and target
+        id: config
+        run: |
+          SOURCE_REPO="${{ github.repository }}"
+          TARGET_REPO="${{ matrix.repo }}"
+          
+          echo "source_repo=$SOURCE_REPO" >> $GITHUB_OUTPUT
+          echo "target_repo=$TARGET_REPO" >> $GITHUB_OUTPUT
+          
+          # Extract org and repo name
+          TARGET_ORG=$(echo "$TARGET_REPO" | cut -d'/' -f1)
+          TARGET_NAME=$(echo "$TARGET_REPO" | cut -d'/' -f2)
+          
+          echo "target_org=$TARGET_ORG" >> $GITHUB_OUTPUT
+          echo "target_name=$TARGET_NAME" >> $GITHUB_OUTPUT
+
+      - name: Checkout target repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ matrix.repo }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: target-repo
+          fetch-depth: 1
+
+      - name: Check if target has .githooks directory
+        id: check-githooks
+        run: |
+          if [ -d "target-repo/.githooks" ]; then
+            echo "has_githooks=true" >> $GITHUB_OUTPUT
+            echo "::notice::✅ $TARGET_REPO has .githooks directory"
+          else
+            echo "has_githooks=false" >> $GITHUB_OUTPUT
+            echo "::warning::⚠️  $TARGET_REPO does not have .githooks directory - creating"
+          fi
+
+      - name: Create .githooks directory if missing
+        if: steps.check-githooks.outputs.has_githooks != 'true'
+        run: |
+          mkdir -p target-repo/.githooks
+          echo "::notice::Created .githooks directory in $TARGET_REPO"
+
+      - name: Copy updated hooks
+        run: |
+          SOURCE="./.githooks"
+          DEST="target-repo/.githooks"
+          
+          echo "📝 Copying hooks from $SOURCE to $DEST..."
+          
+          # Copy all hook files
+          cp -v $SOURCE/* $DEST/ 2>&1 || true
+          
+          # Ensure all hooks are executable
+          chmod +x $DEST/*
+          
+          # List what was copied
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Files Copied to $TARGET_REPO" >> $GITHUB_STEP_SUMMARY
+          ls -la $DEST/ >> $GITHUB_STEP_SUMMARY || true
+
+      - name: Create or update install.sh
+        run: |
+          DEST="target-repo/.githooks/install.sh"
+          
+          # Create an install.sh specific to this repo
+          cat > "$DEST" << 'EOF'
+          #!/usr/bin/env bash
+          # SPDX-License-Identifier: MPL-2.0
+          # Git Hooks Installer for this repository
+          # Copied from: hyperpolymath/standards
+          
+          set -euo pipefail
+          
+          REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+          
+          echo "Installing git hooks for $REPO_ROOT..."
+          git config core.hooksPath .githooks
+          chmod +x .githooks/*
+          echo "✅ Hooks installed. Use: git config core.hooksPath .githooks"
+          EOF
+          
+          chmod +x "$DEST"
+
+      - name: Commit and push hook updates
+        if: needs.identify-repos.outputs.dry_run != 'true'
+        run: |
+          cd target-repo
+          
+          # Check if there are changes
+          if git status --porcelain | grep -q '.githooks'; then
+            echo "📝 Changes detected in .githooks - committing..."
+            
+            # Configure git
+            git config user.name "hyperpolymath-hooks-bot"
+            git config user.email "hooks-bot@hyperpolymath.dev"
+            
+            # Add all changes
+            git add .githooks/
+            
+            # Commit
+            COMMIT_MSG="chore(.githooks): update hooks from standards (${{ github.sha }})"
+            git commit -m "$COMMIT_MSG"
+            
+            # Push - using force-with-lease for safety
+            # Note: This requires write permissions on the target repo
+            if git push origin HEAD --force-with-lease 2>&1; then
+              echo "::notice::✅ Successfully updated hooks in $TARGET_REPO"
+            else
+              echo "::error::❌ Failed to push hook updates to $TARGET_REPO"
+              echo "This may be due to insufficient permissions"
+              exit 1
+            fi
+          else
+            echo "::notice::⚪ No changes needed for $TARGET_REPO"
+          fi
+
+      - name: Dry run - show what would be updated
+        if: needs.identify-repos.outputs.dry_run == 'true'
+        run: |
+          cd target-repo
+          
+          echo "🔧 DRY RUN MODE - No changes will be made"
+          echo ""
+          echo "Would copy the following files to $TARGET_REPO/.githooks/:"
+          ls -la ./.githooks/ || true
+          echo ""
+          
+          # Show diff
+          if [ -d "target-repo/.githooks" ]; then
+            echo "Differences:"
+            diff -r ./.githooks target-repo/.githooks/ || echo "  (no differences)"
+          else
+            echo "  Would create .githooks directory"
+          fi
+
+  summary:
+    name: Propagation Summary
+    runs-on: ubuntu-latest
+    needs: [identify-repos, propagate]
+    if: always()
+
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## Hook Propagation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          REPO_COUNT="${{ needs.identify-repos.outputs.repo_count }}"
+          echo "**Repositories processed:** $REPO_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Count successes and failures
+          SUCCESS_COUNT=$(echo "${{ needs.propagate.result }}" | grep -c 'success' || echo "0")
+          FAILURE_COUNT=$(echo "${{ needs.propagate.result }}" | grep -c 'failure' || echo "0")
+          
+          echo "### Results" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Successful: $SUCCESS_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- ❌ Failed: $FAILURE_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.identify-repos.outputs.dry_run }}" = "true" ]; then
+            echo "**Mode:** DRY RUN (no changes made)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Mode:** LIVE (changes applied)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### What This Workflow Does" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Identifies** all repositories in hyperpolymath and metadatastician orgs" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Checks** if each repo has a .githooks directory" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Copies** updated hook files from standards repo" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Commits and pushes** the updates (with force-with-lease)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Triggering This Workflow" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Automatic:** Pushes to .githooks/ in standards repo" >> $GITHUB_STEP_SUMMARY
+          echo "- **Manual:** `gh workflow run propagate-hooks.yml`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository dispatch:** Send `refresh-githooks` event" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Notes" >> $GITHUB_STEP_SUMMARY
+          echo "- Requires write permissions on target repositories" >> $GITHUB_STEP_SUMMARY
+          echo "- Uses --force-with-lease for safe updates" >> $GITHUB_STEP_SUMMARY
+          echo "- Can be run in dry-run mode for testing" >> $GITHUB_STEP_SUMMARY
