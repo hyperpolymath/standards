@@ -8,8 +8,16 @@ module RulesetConstraintRepair
   RETIRED = %w[update required_deployments code_quality code_coverage].freeze
   WRITABLE = %w[name target enforcement conditions bypass_actors rules].freeze
 
-  # Supply an app ID only after GitHub rejects it as no longer installed. Removing
-  # a stale bypass tightens access; never infer app availability from its name.
+  # Build a new ruleset update body with the four retired constraints removed,
+  # preserving the other writable fields and leaving +source+ unchanged.
+  #
+  # When +uninstalled_app_id+ is supplied, also remove only that integration's
+  # bypass. Supply an ID only after GitHub rejects it as no longer installed;
+  # never infer app availability from its name.
+  #
+  # Raises ArgumentError unless the source is an active default-branch ruleset
+  # with pull-request protection, or if the requested integration ID is invalid
+  # or absent. A supplied ID also requires +source+ to contain +bypass_actors+.
   def self.plan(source, uninstalled_app_id: nil)
     unless source.is_a?(Hash) && source['target'] == 'branch' && source['enforcement'] == 'active' &&
            source.dig('conditions', 'ref_name', 'include') == ['~DEFAULT_BRANCH'] &&
