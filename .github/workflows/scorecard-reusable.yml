@@ -55,6 +55,16 @@ jobs:
           sparse-checkout: scripts/reconcile-scorecard-actions-lock.rb
           sparse-checkout-cone-mode: false
       - name: Reconcile native action pins
+        id: reconcile
+        # Fail open on the ARTEFACT, never on the outcome. Previously this step
+        # ran under `set -euo pipefail` with no `continue-on-error`, and the
+        # upload below consumed results.reconciled.sarif. Any reconciler failure
+        # therefore skipped the upload entirely, and code scanning silently kept
+        # serving the PREVIOUS scan's alerts behind a green badge. That is the
+        # same shape as the ~2-month freeze recorded above (PR #393).
+        # The upload is now unconditional; the run still fails, at the end of
+        # the job, once the results are safely published.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -62,10 +72,23 @@ jobs:
           gh extension install github/gh-actions-lock --pin v0.1.6
           ruby .standards-scorecard/scripts/reconcile-scorecard-actions-lock.rb \
             results.sarif results.reconciled.sarif actions-lock-audit.json
+
+      - name: Select SARIF to upload
+        id: select-sarif
+        run: |
+          set -euo pipefail
+          if [ -s results.reconciled.sarif ]; then
+            printf 'file=%s\n' results.reconciled.sarif >> "$GITHUB_OUTPUT"
+            printf 'reconciled=true\n' >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=Scorecard reconciliation produced no SARIF::Uploading raw results.sarif. Native action pins will appear UNRECONCILED in this upload."
+            printf 'file=%s\n' results.sarif >> "$GITHUB_OUTPUT"
+            printf 'reconciled=false\n' >> "$GITHUB_OUTPUT"
+          fi
       - name: Upload SARIF to code scanning
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v3
         with:
-          sarif_file: results.reconciled.sarif
+          sarif_file: ${{ steps.select-sarif.outputs.file }}
 
       - name: Upload results artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -76,6 +99,15 @@ jobs:
             results.reconciled.sarif
             actions-lock-audit.json
           retention-days: 90
+
+      # The upload above can no longer be skipped, so a reconciler outage cannot
+      # freeze this repo's Security tab. A failed reconciliation is still a
+      # failure, and is surfaced here rather than swallowed.
+      - name: Fail if reconciliation did not succeed
+        if: "!cancelled() && (steps.reconcile.outcome != 'success' || steps.select-sarif.outputs.reconciled != 'true')"
+        run: |
+          echo "::error title=Scorecard reconciliation failed::Reconcile step outcome was '${{ steps.reconcile.outcome }}'. Raw SARIF was uploaded so results are not lost, but this run fails by design."
+          exit 1
 
   pull-request:
     if: github.event_name == 'pull_request'
@@ -156,6 +188,16 @@ jobs:
           sparse-checkout: scripts/reconcile-scorecard-actions-lock.rb
           sparse-checkout-cone-mode: false
       - name: Reconcile native action pins
+        id: reconcile
+        # Fail open on the ARTEFACT, never on the outcome. Previously this step
+        # ran under `set -euo pipefail` with no `continue-on-error`, and the
+        # upload below consumed results.reconciled.sarif. Any reconciler failure
+        # therefore skipped the upload entirely, and code scanning silently kept
+        # serving the PREVIOUS scan's alerts behind a green badge. That is the
+        # same shape as the ~2-month freeze recorded above (PR #393).
+        # The upload is now unconditional; the run still fails, at the end of
+        # the job, once the results are safely published.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -163,10 +205,23 @@ jobs:
           gh extension install github/gh-actions-lock --pin v0.1.6
           ruby .standards-scorecard/scripts/reconcile-scorecard-actions-lock.rb \
             results.sarif results.reconciled.sarif actions-lock-audit.json
+
+      - name: Select SARIF to upload
+        id: select-sarif
+        run: |
+          set -euo pipefail
+          if [ -s results.reconciled.sarif ]; then
+            printf 'file=%s\n' results.reconciled.sarif >> "$GITHUB_OUTPUT"
+            printf 'reconciled=true\n' >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=Scorecard reconciliation produced no SARIF::Uploading raw results.sarif. Native action pins will appear UNRECONCILED in this upload."
+            printf 'file=%s\n' results.sarif >> "$GITHUB_OUTPUT"
+            printf 'reconciled=false\n' >> "$GITHUB_OUTPUT"
+          fi
       - name: Upload SARIF to code scanning
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
-          sarif_file: results.reconciled.sarif
+          sarif_file: ${{ steps.select-sarif.outputs.file }}
       - name: Retain scan evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -177,3 +232,12 @@ jobs:
             actions-lock-audit.json
           if-no-files-found: error
           retention-days: 14
+
+      # The upload above can no longer be skipped, so a reconciler outage cannot
+      # freeze this repo's Security tab. A failed reconciliation is still a
+      # failure, and is surfaced here rather than swallowed.
+      - name: Fail if reconciliation did not succeed
+        if: "!cancelled() && (steps.reconcile.outcome != 'success' || steps.select-sarif.outputs.reconciled != 'true')"
+        run: |
+          echo "::error title=Scorecard reconciliation failed::Reconcile step outcome was '${{ steps.reconcile.outcome }}'. Raw SARIF was uploaded so results are not lost, but this run fails by design."
+          exit 1
