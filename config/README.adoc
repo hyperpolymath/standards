@@ -29,6 +29,12 @@ Tier rules: `docs/CICD-SIGNAL-DISCIPLINE.adoc`, section "Estate canon".
   with a short bypass list, so AI-reviewer apps cannot merge around gates.
   *Not applied unless O6 is ruled.*
 
+| `rulesets/Optimus-Extras.json`
+| The opt-in additive OVERLAY (owner rulings R4/R6). Carries ONLY rules that
+  `base.json` does not have, so the two never duplicate. Ships on ZERO repos;
+  turned on per repo with `branch-protection-apply.sh --overlay <repo>` and off
+  again with `--overlay-off`. See "Two layers, no duplication" below.
+
 | `rulesets/immutable-tags.json`
 | The tag ruleset. Tags are created by an admin or by the estate App only.
 
@@ -44,13 +50,102 @@ Tier rules: `docs/CICD-SIGNAL-DISCIPLINE.adoc`, section "Estate canon".
 
 == Identity is the target, never the name
 
-Live rulesets (2026-09-02) are called `Optimus-Branch` on every sampled repo;
+Live rulesets (2026-09-02) were called `Optimus-Branch` on every sampled repo;
+that name is RETIRED (owner ruling R1, 2026-09-14) and its rival definition
+`rulesets/Optimus-Branch.json` is deleted, so any repo still carrying a ruleset
+by that name is self-evidently unconverted.
 older waves were called `Base`, `Backup`, `Pages-fix`. Names drift. The applier
 and the verifier identify *the* branch ruleset as: the active ruleset whose
 target is `branch` and whose include list is exactly `["~DEFAULT_BRANCH"]`.
 Exactly one such ruleset must exist; zero or two is a verifier failure. The
 same rule for tags with `["~ALL"]`. The `name` field in these files is what a
 fresh POST uses; an existing ruleset is PUT by id and keeps whatever name it has.
+
+== Two layers, no duplication
+
+Owner ruling R4 (2026-09-14): _"make the base as tight as possible, and layer the
+extras that optimus adds on top, with no duplication of base. this allows me to
+turn that on or off, but always means we have excellence at core UNLESS I think
+no, I need to turn this off or use specific settings."_
+
+GitHub rulesets are *additive* and strictest-wins, so two rulesets on the same
+ref express that model natively — no merging, no precedence table.
+
+*Layer 1 — `base.json`, always on, every default branch.* The tight core per
+ruling R5: `required_linear_history`, squash-only merges,
+`required_review_thread_resolution`, and
+`strict_required_status_checks_policy`. `require_last_push_approval` is
+deliberately *excluded* (R5), as are a review count above zero and
+`require_code_owner_review` — on a repo whose author is the sole CODEOWNER both
+are unsatisfiable by construction, which is how the retired `Optimus-Branch`
+definition made 213 pull requests permanently unmergeable.
+
+*Layer 2 — `Optimus-Extras.json`, opt-in, on zero repos by default.* Holds only
+`code_scanning`, `required_deployments`, `code_quality`, `code_coverage` and
+`copilot_code_review`. The applier refuses to run if the two files' rule-type
+sets intersect, so "no duplication of base" is enforced, not documented.
+
+=== Why the overlay ships default-OFF
+
+Those five rules are *exactly* this estate's own `UNSAT_RULES` constant minus
+`merge_queue`:
+
+  smtp-notify-sweep.sh:56
+    UNSAT_RULES='code_coverage|code_quality|code_scanning|copilot_code_review|required_deployments|merge_queue'
+
+That set was derived twice independently — once from what the live rulesets add
+over `Base`, once by the estate's own tooling from which rules cannot be
+satisfied here — and both derivations produced the same five. `standards`
+already ships a script whose job is to *strip* them. An overlay that turned them
+on by default would rebuild the exact wall this canon removes, one layer up and
+under a new name, while a second script went around removing it again.
+
+So each overlay rule goes on a repo only once its producing check is *witnessed
+reporting there*, the same discipline as `required_status_checks` below.
+
+=== The context-witness rule
+
+A required status check that never reports is not a gate — it is a permanent
+block that shows *zero red checks*, indistinguishable from a healthy pull
+request at a glance. A context is therefore written into `required_status_checks`
+only when it has actually reported on a recent default-branch head. The applier
+observes the *union* of
+
+  GET /repos/{owner}/{repo}/commits/{sha}/check-runs   -> .check_runs[].name
+  GET /repos/{owner}/{repo}/commits/{sha}/status       -> .statuses[].context
+
+because a ruleset context is satisfied by a check run *or* a legacy commit
+status, and reading only the first silently strips status-only gates such as
+`CodeRabbit`. It samples several heads — merged pull requests first, since a
+merged pull request proves the ruleset was actually satisfied at that sha — and
+unions across them, because one head reflects that head's path filters and
+whether its workflows started at all, not the repository's gate inventory.
+
+An unwitnessed context is omitted and the repo reported `UNGATED-CONTEXT`. When
+nothing at all is witnessed the rule is dropped entirely and the repo reported
+`UNGATED`: an empty `required_status_checks` is a fake gate, and GitHub rejects
+it with a 422 in any case.
+
+Silence never subtracts. If the check APIs cannot be read, or report nothing at
+all, every candidate context is preserved unfiltered — failing to look is a far
+worse error than carrying a dead gate.
+
+=== Three reasons a context never reports
+
+They need different repairs and must not be conflated:
+
+. the ruleset requires a context that nothing in the repo emits;
+. the repo sits at `allowed_actions: selected` with an empty `patterns_allowed`,
+  so runs die at startup with `jobs.total_count == 0` and no check run is ever
+  created;
+. the workflow startup-fails on *one head* while succeeding on others — so the
+  same context is satisfiable on one pull request and permanently unsatisfiable
+  on another in the same repo. Blockedness is per-head, not per-repo.
+
+Cause 3 is diagnosed with
+`gh api repos/{owner}/{repo}/actions/runs?head_sha=<sha>` and a `conclusion` of
+`startup_failure`; the *reason* appears only on the HTML run page, never in the
+REST API.
 
 == What the base ruleset deliberately drops from the live copy
 
