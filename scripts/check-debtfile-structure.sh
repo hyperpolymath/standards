@@ -45,6 +45,7 @@ entries=0
 seen_ids=" "
 
 name="" probe="" count="" ceiling="" severity="" policy="" accepted=""
+taxonomy_seen=0 taxonomy_choice="" taxonomy_default="" taxonomy_non_default="" taxonomy_reason=""
 
 note() { printf '  %s\n' "$*"; }
 bad()  { printf '  ❌ %s\n' "$*"; fail=1; }
@@ -90,6 +91,20 @@ validate() {
     *)  bad "'$name' policy '$policy' is not one of remediable|flag-only" ;;
   esac
 
+  if [ "$taxonomy_seen" -ne 0 ]; then
+    case "$taxonomy_choice" in
+      non-default) ;;
+      '') bad "'$name' has taxonomy choice fields but no '- taxonomy-choice: non-default'" ;;
+      *)  bad "'$name' taxonomy-choice '$taxonomy_choice' is not 'non-default'" ;;
+    esac
+    [ -n "$taxonomy_default" ] || bad "'$name' has no '- taxonomy-default-arm:'"
+    [ -n "$taxonomy_non_default" ] || bad "'$name' has no '- taxonomy-non-default-arm:'"
+    [ -n "$taxonomy_reason" ] || bad "'$name' has no '- taxonomy-departure-reason:'"
+    if [ -n "$taxonomy_default" ] && [ "$taxonomy_default" = "$taxonomy_non_default" ]; then
+      bad "'$name' taxonomy-default-arm and taxonomy-non-default-arm must name different arms"
+    fi
+  fi
+
   if [ -n "$accepted" ]; then
     case "$accepted" in
       [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
@@ -100,7 +115,10 @@ validate() {
   fi
 }
 
-reset_block() { name="$1"; probe=""; count=""; ceiling=""; severity=""; policy=""; accepted=""; }
+reset_block() {
+  name="$1"; probe=""; count=""; ceiling=""; severity=""; policy=""; accepted=""
+  taxonomy_seen=0; taxonomy_choice=""; taxonomy_default=""; taxonomy_non_default=""; taxonomy_reason=""
+}
 
 while IFS= read -r raw || [ -n "$raw" ]; do
   line="${raw#"${raw%%[![:space:]]*}"}"
@@ -111,6 +129,14 @@ while IFS= read -r raw || [ -n "$raw" ]; do
     '- ceiling: '*)       ceiling="${line#- ceiling: }" ;;
     '- severity: '*)      severity="${line#- severity: }" ;;
     '- policy: '*)        policy="${line#- policy: }" ;;
+    '- taxonomy-choice:'*)
+                           taxonomy_seen=1; taxonomy_choice="${line#- taxonomy-choice:}"; taxonomy_choice="${taxonomy_choice# }" ;;
+    '- taxonomy-default-arm:'*)
+                           taxonomy_seen=1; taxonomy_default="${line#- taxonomy-default-arm:}"; taxonomy_default="${taxonomy_default# }" ;;
+    '- taxonomy-non-default-arm:'*)
+                           taxonomy_seen=1; taxonomy_non_default="${line#- taxonomy-non-default-arm:}"; taxonomy_non_default="${taxonomy_non_default# }" ;;
+    '- taxonomy-departure-reason:'*)
+                           taxonomy_seen=1; taxonomy_reason="${line#- taxonomy-departure-reason:}"; taxonomy_reason="${taxonomy_reason# }" ;;
     '- accepted-until: '*) accepted="${line#- accepted-until: }" ;;
   esac
 done < "$DEBT"
