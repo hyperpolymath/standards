@@ -41,12 +41,13 @@ staleness-test:
 # Check the repository's workflow references and, when a repository slug is
 # supplied, its live Actions policy. Example: just check-allowlist hyperpolymath/standards
 check-allowlist repository="":
-    @bash scripts/check-allowed-actions.sh rhodium-standard-repositories/actions-allowlist/allowed-actions.json .github/workflows
+    @bash scripts/check-allowed-actions.sh config/settings/actions-allowlist.json .github/workflows
     @if [ -n "{{repository}}" ]; then bash scripts/check-actions-policy.sh "{{repository}}"; fi
 
-# Apply the estate default (all + mandatory SHA pinning). Use posture=selected
-# only for a designated high-sensitivity repository.
-set-allowlist repository posture="all":
+# Apply the estate default from config/settings/repo.json: allowed_actions=selected
+# + mandatory SHA pinning, with the canonical allow-list payload. posture=all
+# deliberately relaxes ONE repository; it is not the estate default.
+set-allowlist repository posture="selected":
     @ACTIONS_POSTURE="{{posture}}" bash scripts/set-allowed-actions.sh "{{repository}}"
 
 actions-policy-test:
