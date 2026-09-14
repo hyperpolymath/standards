@@ -18,10 +18,14 @@ validate_file() {
     break
   done < "$file"
   
-  [ "$HAS_SPDX" = false ] && {
+  # NOTE: this must be an `if`, not `[ ... ] && { ... }`. Under `set -e` the
+  # && form makes the function return 1 whenever the header IS present (the
+  # test is false and short-circuits), killing the script silently on VALID
+  # input. See scripts/tests/validate-spdx-workflows-test.sh.
+  if [ "$HAS_SPDX" = false ]; then
     echo "[validate-spdx-workflows] ERROR: $file missing SPDX header" >&2
     ERRORS=$((ERRORS + 1))
-  }
+  fi
 }
 
 # If staged files provided, only check those
@@ -43,6 +47,8 @@ else
     -print 2>/dev/null)
 fi
 
-[ $ERRORS -gt 0 ] && exit 1
+if [ "$ERRORS" -gt 0 ]; then
+  exit 1
+fi
 echo "[validate-spdx-workflows] All workflow files have SPDX headers"
 exit 0
