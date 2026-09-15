@@ -1,0 +1,152 @@
+# SPDX-License-Identifier: MPL-2.0
+# This workflow is managed by gh actions-lock.
+#
+# apply-workflow-pins — re-point consumer repositories at the current standards
+# reusable-workflow SHA, on a cadence.
+#
+# WHY A SCHEDULED APPLIER AND NOT A SWEEP (owner ruling STD-R-3):
+#   A fix landed in `standards` does not reach its callers. Measured 2026-09-15,
+#   28 of 29 live remote callers are SHA-pinned and exactly one tracks `@main`.
+#   A pinned caller keeps consuming the broken commit until something re-points
+#   it. A sweep does that once and then rots; an applier converges and keeps
+#   converging, which is what "the estate stays fixed" actually requires.
+#
+# DEFAULT IS AUDIT. The scheduled run writes nothing unless `mode: fix` is
+# chosen explicitly via workflow_dispatch, because the first thing this needs to
+# produce is an honest census — how many repos are BEHIND, DEAD-REF or ILLEGAL —
+# and a census is evidence only while nothing is mutating underneath it.
+
+name: apply workflow pins
+
+on:
+  schedule:
+    # Sundays 06:11 UTC. Offset off the hour: the estate's other scheduled jobs
+    # cluster on :00 and contend for the same rate-limit bucket.
+    - cron: '11 6 * * 0'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'audit (default, writes nothing) or fix (opens PRs)'
+        type: choice
+        options: [audit, fix]
+        default: audit
+      repair_illegal:
+        description: 'Also repair unparseable `uses: ../../` refs (issue #808)'
+        type: boolean
+        default: false
+      owners:
+        description: 'Comma-separated owners to walk'
+        default: 'hyperpolymath,metadatastician'
+      limit:
+        description: 'Stop after N repos (0 = no limit); use for smoke runs'
+        default: '0'
+
+concurrency:
+  group: apply-workflow-pins
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    name: Re-point standards pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # WHICH App's credentials belong in vars.APP_ID / secrets.APP_PRIVATE_KEY:
+      # a DEDICATED App for this applier, explicitly NOT OikosBot. Owner ruling
+      # STD-R-3 / R-14 (2026-09-15). OikosBot is named as a BYPASS ACTOR in the
+      # estate's rulesets; if the thing that re-points pins authenticated as the
+      # identity that may bypass the rules, it would be permanently exempt from
+      # the rules it exists to uphold. Separation of duties, not style.
+      #
+      # The App needs `contents: write` and `pull_requests: write`, and must be
+      # installed on BOTH owners. An installation token is scoped to ONE owner
+      # and carries its own rate limit, so `owner:` is required — without it the
+      # token is scoped to THIS repository and every consumer write 404s.
+      - name: Mint an App installation token for hyperpolymath
+        id: tok-user
+        if: vars.APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        continue-on-error: true
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: hyperpolymath
+
+      - name: Mint an App installation token for metadatastician
+        id: tok-org
+        if: vars.APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        continue-on-error: true
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: metadatastician
+
+      # A nonexistent secret resolves to an EMPTY STRING in silence, and a run
+      # over an empty credential reports a clean sweep while writing nothing.
+      # Decide here, before any enumeration, and say exactly what is missing.
+      # Audit mode may proceed on the read-only GITHUB_TOKEN; fix mode may not.
+      - name: Decide which credential is in play
+        id: cred
+        env:
+          APP_USER: ${{ steps.tok-user.outputs.token }}
+          MODE: ${{ inputs.mode || 'audit' }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_USER:-}" ]; then
+            echo "have_app=true" >> "$GITHUB_OUTPUT"
+            echo "An App credential is present."
+            exit 0
+          fi
+          echo "have_app=false" >> "$GITHUB_OUTPUT"
+          if [ "$MODE" = "fix" ]; then
+            cat >&2 <<'MSG'
+          FATAL: fix mode was requested but no App credential exists.
+            vars.APP_ID and secrets.APP_PRIVATE_KEY must both be set, and the App
+            must be installed on hyperpolymath and metadatastician.
+            Refusing to report a clean run that wrote nothing.
+          MSG
+            exit 1
+          fi
+          echo "::notice::AUDIT-ONLY: no App credential; census will run on GITHUB_TOKEN."
+
+      - name: Run the applier
+        env:
+          # Prefer the App token; fall back to GITHUB_TOKEN for audit reads only.
+          GH_TOKEN: ${{ steps.tok-user.outputs.token || secrets.GITHUB_TOKEN }}
+          MODE: ${{ inputs.mode || 'audit' }}
+          REPAIR: ${{ inputs.repair_illegal || false }}
+          OWNERS: ${{ inputs.owners || 'hyperpolymath,metadatastician' }}
+          LIMIT: ${{ inputs.limit || '0' }}
+        run: |
+          set -euo pipefail
+          args=(--owners "$OWNERS" --limit "$LIMIT" --out census.tsv)
+          [ "$MODE" = "fix" ] && args+=(--fix)
+          [ "$REPAIR" = "true" ] && args+=(--repair-illegal)
+          bash scripts/apply-workflow-pins-remote.sh "${args[@]}"
+
+      - name: Summarise the census
+        if: always()
+        run: |
+          set -euo pipefail
+          [ -f census.tsv ] || { echo "no census produced"; exit 0; }
+          {
+            echo '### standards pin census'
+            echo
+            echo '| status | files |'
+            echo '|---|---|'
+            awk -F'\t' 'NR>1{c[$3]++} END{for(k in c) printf "| %s | %d |\n", k, c[k]}' census.tsv | sort
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the census
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: workflow-pin-census
+          path: census.tsv
+          if-no-files-found: warn
