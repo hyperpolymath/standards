@@ -17,8 +17,14 @@ ERRORS=0
 # which is why a Dependabot-caused lockfile desync could sit unrepaired.
 is_source_file() {
   case "$1" in
+    # NOTE: *.json is deliberately NOT here. The test below requires a '#'
+    # comment line, which JSON has no syntax for, so the rule was unsatisfiable
+    # by construction and never satisfied: both .machine_readable/*.json files
+    # already on main carry zero SPDX headers. Removing it restores truth
+    # rather than weakening the check. Same defect class as the staged-mode
+    # filter bug fixed in #804, one extension over.
     *.rs|*.res|*.js|*.ts|*.sh|*.bash|*.zig|*.ex|*.exs|*.gleam) return 0 ;;
-    *.ml|*.mli|*.adb|*.ads|*.ncl|*.toml|*.json|*.yaml|*.yml)   return 0 ;;
+    *.ml|*.mli|*.adb|*.ads|*.ncl|*.toml|*.yaml|*.yml)   return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -30,7 +36,7 @@ else
     -type f \( -name '*.rs' -o -name '*.res' -o -name '*.js' -o -name '*.ts' -o -name '*.sh' \
       -o -name '*.bash' -o -name '*.zig' -o -name '*.ex' -o -name '*.exs' -o -name '*.gleam' \
       -o -name '*.ml' -o -name '*.mli' -o -name '*.adb' -o -name '*.ads' -o -name '*.ncl' \
-      -o -name '*.toml' -o -name '*.json' -o -name '*.yaml' -o -name '*.yml' \
+      -o -name '*.toml' -o -name '*.yaml' -o -name '*.yml' \
     \) -print 2>/dev/null || true)
 fi
 
