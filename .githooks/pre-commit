@@ -65,8 +65,14 @@ default_validator '(^|/)Makefile(\.|$)|\.mk$' "Makefiles not allowed. Use Mustfi
 default_validator '\.(java|kt|kts)$' "Java/Kotlin files not allowed. Use Rust/Tauri/Dioxus instead."
 default_validator '\.swift$' "Swift files not allowed. Use Tauri/Dioxus instead."
 
-# A2ML + K9 + SPDX validation
-run_validator "A2ML manifests" "validate-a2ml.sh" "staged"
+# DEED + K9 + SPDX validation
+# NOTE: the "A2ML manifests" gate was REMOVED 2026-09-15 (owner ruling R-H3).
+# A2ML no longer exists as a format. validate-a2ml.sh was written 2026-09-12 --
+# nine days AFTER the DEED rename ruling -- and greps manifest syntax
+# (^version:, ^(agent-id|pedigree):) that the live s-expression .deed grammar
+# does not have. It passed 0 of 222 tracked .a2ml files, so NO commit could be
+# made through this hook. Repairing the regex would turn all 222 red at once.
+# A .deed validator returns here once the dual-accept action lands (R-H2).
 run_validator "K9 contracts" "validate-k9.sh" "staged"
 run_validator "SPDX headers" "validate-spdx.sh" "staged"
 
@@ -78,15 +84,13 @@ run_validator "Workflow permissions" "validate-permissions.sh" "staged"
 run_validator "CodeQL configuration" "validate-codeql.sh" "staged"
 run_validator "Bot directives" "validate-bot-directives.sh" "staged"
 
-# Registry drift guard
-if [ -f "$REPO_ROOT/scripts/build-registry.sh" ]; then
-  echo -e "${BLUE}[pre-commit]${NC} Checking registry drift..."
-  if ! bash "$REPO_ROOT/scripts/build-registry.sh" --check >/dev/null 2>&1; then
-    echo -e "${RED}[pre-commit] REGISTRY.a2ml / TOPOLOGY.adoc are stale${NC}" >&2
-    echo "  Fix: bash scripts/build-registry.sh && git add .machine_readable/REGISTRY.a2ml TOPOLOGY.adoc" >&2
-    ERRORS=$((ERRORS + 1))
-  fi
-fi
+# Registry drift guard -- REMOVED 2026-09-15 (owner ruling R-H3).
+# It demanded that every commit stage .machine_readable/REGISTRY.a2ml, a generated
+# TOML-shaped artefact -- i.e. a specimen of the record dialect the owner ruled
+# SUPERSEDED on 2026-09-08. Staging it then tripped the A2ML gate above, so the
+# two gates deadlocked each other. The registry itself is UNCHANGED (R-H4);
+# reshaping scripts/build-registry.sh is a separate, deliberate job.
+# Drift is still caught in CI by .github/workflows/registry-verify.yml.
 
 # Canonical names guard
 if [ -f "$REPO_ROOT/scripts/check-canonical-names.sh" ]; then
