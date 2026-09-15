@@ -144,6 +144,65 @@ expect 0 "count below ceiling is fine (debt paid down, ceiling not yet lowered)"
 - accepted-until: 2030-01-01
 EOF
 
+expect 0 "a complete testing-taxonomy departure records both arms and its reason" <<'EOF'
+### alpha
+- description: a temporary local test is tolerated
+- probe: echo 2
+- count: 2
+- ceiling: 4
+- severity: high
+- policy: remediable
+- taxonomy-choice: non-default
+- taxonomy-default-arm: adapt the proven Idris2 test
+- taxonomy-non-default-arm: retain the temporary local test
+- taxonomy-departure-reason: upstream fixture is gated on the next release
+- accepted-until: 2030-01-01
+EOF
+
+expect 1 "a partial testing-taxonomy choice record is rejected" <<'EOF'
+### alpha
+- description: a temporary local test is tolerated
+- probe: echo 2
+- count: 2
+- ceiling: 4
+- severity: high
+- policy: remediable
+- taxonomy-choice: non-default
+- taxonomy-default-arm: adapt the proven Idris2 test
+- taxonomy-non-default-arm: retain the temporary local test
+- accepted-until: 2030-01-01
+EOF
+
+expect 1 "testing-taxonomy default and non-default arms must differ" <<'EOF'
+### alpha
+- description: a temporary local test is tolerated
+- probe: echo 2
+- count: 2
+- ceiling: 4
+- severity: high
+- policy: remediable
+- taxonomy-choice: non-default
+- taxonomy-default-arm: retain the local test
+- taxonomy-non-default-arm: retain the local test
+- taxonomy-departure-reason: no actual departure was named
+- accepted-until: 2030-01-01
+EOF
+
+expect 1 "an unknown taxonomy-choice selector is rejected" <<'EOF'
+### alpha
+- description: a temporary local test is tolerated
+- probe: echo 2
+- count: 2
+- ceiling: 4
+- severity: high
+- policy: remediable
+- taxonomy-choice: convenient
+- taxonomy-default-arm: adapt the proven Idris2 test
+- taxonomy-non-default-arm: retain the temporary local test
+- taxonomy-departure-reason: upstream fixture is gated on the next release
+- accepted-until: 2030-01-01
+EOF
+
 expect 1 "a non-integer count is rejected" <<'EOF'
 ### alpha
 - description: d

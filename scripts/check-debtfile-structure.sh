@@ -45,8 +45,7 @@ entries=0
 seen_ids=" "
 
 name="" probe="" count="" ceiling="" severity="" policy="" accepted=""
-taxonomy_default="" taxonomy_selected="" taxonomy_reason=""
-taxonomy_default_seen=0 taxonomy_selected_seen=0 taxonomy_reason_seen=0
+taxonomy_seen=0 taxonomy_choice="" taxonomy_default="" taxonomy_non_default="" taxonomy_reason=""
 
 note() { printf '  %s\n' "$*"; }
 bad()  { printf '  ❌ %s\n' "$*"; fail=1; }
@@ -93,28 +92,17 @@ validate() {
     *)  bad "'$name' policy '$policy' is not one of remediable|flag-only" ;;
   esac
 
-  if [ "$taxonomy_default_seen" -ne 0 ] || [ "$taxonomy_selected_seen" -ne 0 ] || [ "$taxonomy_reason_seen" -ne 0 ]; then
-    if [ "$taxonomy_default_seen" -eq 0 ] || [ -z "$taxonomy_default" ]; then
-      bad "'$name' has a partial taxonomy choice: missing '- taxonomy-default-arm:'"
-    fi
-    if [ "$taxonomy_selected_seen" -eq 0 ] || [ -z "$taxonomy_selected" ]; then
-      bad "'$name' has a partial taxonomy choice: missing '- taxonomy-selected-arm:'"
-    fi
-    if [ "$taxonomy_reason_seen" -eq 0 ] || ! has_nonspace "$taxonomy_reason"; then
-      bad "'$name' has a partial taxonomy choice: missing '- taxonomy-departure-reason:'"
-    fi
-
-    case "$taxonomy_default" in
-      ''|*[!a-z0-9._-]*|[!a-z0-9]*)
-        [ -n "$taxonomy_default" ] && bad "'$name' taxonomy-default-arm '$taxonomy_default' is not a stable arm id" ;;
+  if [ "$taxonomy_seen" -ne 0 ]; then
+    case "$taxonomy_choice" in
+      non-default) ;;
+      '') bad "'$name' has taxonomy choice fields but no '- taxonomy-choice: non-default'" ;;
+      *)  bad "'$name' taxonomy-choice '$taxonomy_choice' is not 'non-default'" ;;
     esac
-    case "$taxonomy_selected" in
-      ''|*[!a-z0-9._-]*|[!a-z0-9]*)
-        [ -n "$taxonomy_selected" ] && bad "'$name' taxonomy-selected-arm '$taxonomy_selected' is not a stable arm id" ;;
-    esac
-
-    if [ -n "$taxonomy_default" ] && [ "$taxonomy_default" = "$taxonomy_selected" ]; then
-      bad "'$name' taxonomy-selected-arm must differ from taxonomy-default-arm when recording a departure"
+    [ -n "$taxonomy_default" ] || bad "'$name' has no '- taxonomy-default-arm:'"
+    [ -n "$taxonomy_non_default" ] || bad "'$name' has no '- taxonomy-non-default-arm:'"
+    [ -n "$taxonomy_reason" ] || bad "'$name' has no '- taxonomy-departure-reason:'"
+    if [ -n "$taxonomy_default" ] && [ "$taxonomy_default" = "$taxonomy_non_default" ]; then
+      bad "'$name' taxonomy-default-arm and taxonomy-non-default-arm must name different arms"
     fi
   fi
 
@@ -130,8 +118,7 @@ validate() {
 
 reset_block() {
   name="$1"; probe=""; count=""; ceiling=""; severity=""; policy=""; accepted=""
-  taxonomy_default=""; taxonomy_selected=""; taxonomy_reason=""
-  taxonomy_default_seen=0; taxonomy_selected_seen=0; taxonomy_reason_seen=0
+  taxonomy_seen=0; taxonomy_choice=""; taxonomy_default=""; taxonomy_non_default=""; taxonomy_reason=""
 }
 
 while IFS= read -r raw || [ -n "$raw" ]; do
@@ -143,21 +130,14 @@ while IFS= read -r raw || [ -n "$raw" ]; do
     '- ceiling: '*)       ceiling="${line#- ceiling: }" ;;
     '- severity: '*)      severity="${line#- severity: }" ;;
     '- policy: '*)        policy="${line#- policy: }" ;;
+    '- taxonomy-choice:'*)
+                           taxonomy_seen=1; taxonomy_choice="${line#- taxonomy-choice:}"; taxonomy_choice="${taxonomy_choice# }" ;;
     '- taxonomy-default-arm:'*)
-      [ "$taxonomy_default_seen" -eq 0 ] || bad "'$name' repeats '- taxonomy-default-arm:'"
-      taxonomy_default_seen=1
-      taxonomy_default="${line#- taxonomy-default-arm:}"
-      taxonomy_default="${taxonomy_default# }" ;;
-    '- taxonomy-selected-arm:'*)
-      [ "$taxonomy_selected_seen" -eq 0 ] || bad "'$name' repeats '- taxonomy-selected-arm:'"
-      taxonomy_selected_seen=1
-      taxonomy_selected="${line#- taxonomy-selected-arm:}"
-      taxonomy_selected="${taxonomy_selected# }" ;;
+                           taxonomy_seen=1; taxonomy_default="${line#- taxonomy-default-arm:}"; taxonomy_default="${taxonomy_default# }" ;;
+    '- taxonomy-non-default-arm:'*)
+                           taxonomy_seen=1; taxonomy_non_default="${line#- taxonomy-non-default-arm:}"; taxonomy_non_default="${taxonomy_non_default# }" ;;
     '- taxonomy-departure-reason:'*)
-      [ "$taxonomy_reason_seen" -eq 0 ] || bad "'$name' repeats '- taxonomy-departure-reason:'"
-      taxonomy_reason_seen=1
-      taxonomy_reason="${line#- taxonomy-departure-reason:}"
-      taxonomy_reason="${taxonomy_reason# }" ;;
+                           taxonomy_seen=1; taxonomy_reason="${line#- taxonomy-departure-reason:}"; taxonomy_reason="${taxonomy_reason# }" ;;
     '- accepted-until: '*) accepted="${line#- accepted-until: }" ;;
   esac
 done < "$DEBT"

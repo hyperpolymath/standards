@@ -87,6 +87,25 @@ else
   fail=$((fail+1)); echo "  FAIL  --write did not ratchet down"; sed -n '1,20p' Debtfile.a2ml
 fi
 
+# Governance metadata validated by check-debtfile-structure.sh is opaque to the
+# runner and must survive its targeted count/ceiling rewrite unchanged.
+entry 'echo 2' 4 4 > Debtfile.a2ml
+cat >> Debtfile.a2ml <<'EOF'
+- taxonomy-choice: non-default
+- taxonomy-default-arm: adapt the proven Idris2 test
+- taxonomy-non-default-arm: retain the temporary local test
+- taxonomy-departure-reason: upstream fixture is gated on the next release
+EOF
+bash "$SCRIPT" --write Debtfile.a2ml >/dev/null 2>&1 || true
+if grep -q '^- taxonomy-choice: non-default$' Debtfile.a2ml \
+  && grep -q '^- taxonomy-default-arm: adapt the proven Idris2 test$' Debtfile.a2ml \
+  && grep -q '^- taxonomy-non-default-arm: retain the temporary local test$' Debtfile.a2ml \
+  && grep -q '^- taxonomy-departure-reason: upstream fixture is gated on the next release$' Debtfile.a2ml; then
+  pass=$((pass+1)); echo "  ok    --write preserves testing-taxonomy choice metadata"
+else
+  fail=$((fail+1)); echo "  FAIL  --write changed testing-taxonomy choice metadata"; sed -n '1,24p' Debtfile.a2ml
+fi
+
 entry 'echo 9' 4 4 > Debtfile.a2ml
 bash "$SCRIPT" --write Debtfile.a2ml >/dev/null 2>&1 || true
 if grep -q '^- ceiling: 4$' Debtfile.a2ml; then
