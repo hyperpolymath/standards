@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
 # Actions lockfile coverage: every SHA-pinned `uses:` ref in .github/workflows/
-# must have a matching entry in .github/workflows/actions.lock.
+# AND in .github/actions/*/action.yml must have a matching entry in
+# .github/workflows/actions.lock.
 #
 # WHY THIS EXISTS
 #
@@ -38,12 +39,21 @@
 #     keyed once as codeql-action@X, never once per sub-path.
 #   * Comparison is case-insensitive: workflows say Swatinem/rust-cache while
 #     the lockfile stores swatinem/rust-cache.
+#   * Local COMPOSITE actions (.github/actions/*/action.yml) are scanned too.
+#     Their deps are keyed in the lock under the workflow that uses them, and
+#     Dependabot bumps them like any other ref; scanning only the workflow
+#     directory leaves that drift invisible.
+#   * Membership is GLOBAL, not per-workflow-section. A ref present in some
+#     other workflow's lock section satisfies this check. A workflow with
+#     SHA-pinned refs but no lock section of its own is therefore NOT
+#     detected here -- see the PR notes.
 
 set -euo pipefail
 
 REPO_ROOT="${INPUT_PATH:-.}"
 LOCKFILE="$REPO_ROOT/.github/workflows/actions.lock"
 WORKFLOW_DIR="$REPO_ROOT/.github/workflows"
+ACTIONS_DIR="$REPO_ROOT/.github/actions"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
@@ -109,7 +119,8 @@ declare -a SEEN_ABSENT=()
 # Collect every SHA-pinned uses: ref across all workflow files.
 mapfile -t RAW < <(
   grep -rhoE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*[^[:space:]#]+@[0-9a-fA-F]{40}' \
-    "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml 2>/dev/null \
+    "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml \
+    "$ACTIONS_DIR"/*/action.yml "$ACTIONS_DIR"/*/action.yaml 2>/dev/null \
   | sed -E 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*//' \
   | sort -u
 )
