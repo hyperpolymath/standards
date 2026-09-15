@@ -131,12 +131,37 @@ note "canon: actors=[$CANON_ACTORS] rules=[$CANON_RULES]"
 # up never being run at all. Requiring NEITHER is the defect: an absent secret
 # resolves to an empty string in silence and the sweep writes nothing while
 # reporting success.
+# A credential probe must answer the question its CONSUMER asks -- "can I make
+# authenticated API calls?" -- and `gh auth status` does NOT. MEASURED 2026-09-15
+# 03:09Z: while this account was merely RATE-LIMITED, `gh auth status` reported
+#   "X Failed to log in ... The token in ~/.config/gh/hosts.yml is invalid."
+# and told the operator to re-authenticate. The token was perfectly valid. Trusting
+# that verdict makes this script abort with a FATAL that is FALSE, and sends the
+# operator to `gh auth login`, destroying a working credential to cure a condition
+# that clears itself on the next reset. (`gh api rate_limit` is no help either: it
+# is exempt from the limit and answered remaining=4999 while every other read 403'd.)
+# So classify the probe THREE ways, on the response body, never on gh's own verdict:
+#   authenticated / rate-limited-but-authenticated / genuinely-uncredentialled.
 if [ -n "${GH_TOKEN:-}" ]; then
   note "credential: GH_TOKEN from the environment"
-elif gh auth status >/dev/null 2>&1; then
-  note "credential: the authenticated gh CLI (no GH_TOKEN in the environment)"
 else
-  cat >&2 <<'NOCRED'
+  cred_probe=$(gh api user --jq '.login' 2>&1) || cred_probe_failed=1
+  if [ "${cred_probe_failed:-0}" -eq 0 ] && [ -n "$cred_probe" ]; then
+    note "credential: the authenticated gh CLI as '$cred_probe' (no GH_TOKEN in the environment)"
+  elif printf '%s' "$cred_probe" | grep -qi 'rate limit exceeded'; then
+    reset_at=$(gh api rate_limit --jq '.resources.core.reset|todate' 2>/dev/null || echo "unknown")
+    cat >&2 <<RATE
+FATAL: the credential is VALID but this account's API rate limit is EXHAUSTED.
+Refusing to start: a sweep run now would book hundreds of repos as FAILED purely
+because their reads 403'd, and that report would be indistinguishable from real
+drift. Retry after the limit resets at: $reset_at
+DO NOT run 'gh auth login' for this. The token is fine -- note that 'gh auth
+status' MISREPORTS a rate-limited account as holding an invalid token, and
+re-authenticating would throw away a working credential for no reason.
+RATE
+    exit 5
+  else
+    cat >&2 <<'NOCRED'
 FATAL: no credential. Rulesets need administration:write on every target repo.
 Neither GH_TOKEN is set nor is the gh CLI authenticated. A workflow GITHUB_TOKEN
 is repo-scoped and cannot write rulesets at all. Refusing to run a sweep that
@@ -144,12 +169,13 @@ would silently write nothing.
   in CI    : supply GH_TOKEN from actions/create-github-app-token
   by hand  : gh auth login --insecure-storage
 NOCRED
-  exit 3
+    exit 3
+  fi
 fi
 
 probe_repo="${GITHUB_REPOSITORY:-hyperpolymath/standards}"
-probe_body=$(mktemp); probe_out=$(mktemp)
-trap 'rm -f "$probe_body" "$probe_out"' EXIT
+probe_body=$(mktemp); probe_out=$(mktemp); api_err=$(mktemp)
+trap 'rm -f "$probe_body" "$probe_out" "$api_err"' EXIT
 
 # Idempotent self-write: PUT this repository's own matching tag ruleset back
 # with the bytes it already has. Succeeds iff the credential holds
@@ -239,8 +265,30 @@ verify_tag_ref() {
 
 while read -r repo; do
   [ -n "$repo" ] || continue
-  rs=$(gh api "repos/$repo/rulesets?per_page=100" --paginate 2>/dev/null) || {
-    report "$repo" "FAILED" "cannot list rulesets"; rc=2; continue; }
+  # A list failure has TWO causes with OPPOSITE dispositions, and conflating them
+  # makes this whole report untrustworthy. A free-plan owner's PRIVATE repo answers
+  #   403 {"message":"Upgrade to GitHub Pro or make this repository public ..."}
+  # even when permissions.admin is true. MEASURED 2026-09-15 over all 51 private
+  # repos in the estate: 46/46 hyperpolymath -> 200, 5/5 metadatastician -> 403,
+  # cause confirmed from the org itself (orgs/metadatastician .plan.name == "free").
+  # The boundary is the OWNER'S PLAN, not the repository, so permissions.admin is
+  # NOT a predictor. It is a PLAN CEILING, not a fault: no credential, no App
+  # installation and no retry can lift it -- only a paid plan or making the repo
+  # public. Reporting it as FAILED with rc=2 would leave the weekly workflow
+  # PERMANENTLY red after every other repo converged, and a fail-loud signal that
+  # can never go quiet is indistinguishable from noise inside a month. So it gets
+  # its own terminal state, it is counted, and it does NOT move rc.
+  if ! rs=$(gh api "repos/$repo/rulesets?per_page=100" --paginate 2>"$api_err"); then
+    if grep -q 'Upgrade to GitHub Pro' "$api_err"; then
+      report "$repo" "PLAN-EXCLUDED" \
+        "rulesets are unavailable on a private repo of a free-plan owner; not a fault and not retryable"
+    else
+      report "$repo" "FAILED" \
+        "cannot list rulesets: $(tr '\n' ' ' < "$api_err" | head -c 160)"
+      rc=2
+    fi
+    continue
+  fi
 
   # MUST be two-step. DO NOT "optimise" this into a single filtered list call.
   # The rulesets LIST endpoint returns a summary that omits `conditions`,
@@ -390,6 +438,19 @@ if [ "$VERIFY" -eq 1 ] && [ "$APPLY" -eq 1 ] && [ "${#CHANGED[@]}" -gt 0 ]; then
   done
 elif [ "$VERIFY" -eq 0 ]; then
   note "verification SKIPPED by --no-verify: no repo in this run is scored on a real tag ref"
+fi
+
+if [ "${COUNT[PLAN-EXCLUDED]:-0}" -gt 0 ]; then
+  cat >&2 <<PLAN
+
+  ${COUNT[PLAN-EXCLUDED]} repo(s) are PLAN-EXCLUDED, NOT failed. Rulesets are a paid
+  feature on a PRIVATE repository: a free-plan owner gets 403 "Upgrade to GitHub
+  Pro or make this repository public" regardless of admin rights. These repos can
+  NEVER converge on the current plan, so this run does not treat them as drift and
+  does not fail because of them. To bring them to canon the OWNER must pick one of:
+  upgrade the owning org/user plan, make the repo public, or transfer it to an
+  owner on a paid plan. Until then they are a KNOWN, RECORDED exemption from canon.
+PLAN
 fi
 
 echo "--- summary ---" >&2
