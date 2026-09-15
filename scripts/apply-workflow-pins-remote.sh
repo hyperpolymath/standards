@@ -169,7 +169,7 @@ rewrite_illegal() {
 # ---------------------------------------------------------------------------
 self_test() {
   local d rc=0 t="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  d=$(mktemp -d); trap 'rm -rf "$d"' RETURN
+  d=$(mktemp -d)
 
   printf 'jobs:\n  a:\n    uses: hyperpolymath/standards/.github/workflows/x.yml@%s\n' "$t" > "$d/fresh.yml"
   printf 'jobs:\n  a:\n    uses: hyperpolymath/standards/.github/workflows/x.yml@%s\n' "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" > "$d/behind.yml"
@@ -238,6 +238,7 @@ self_test() {
     echo "  FAIL illegal repair did not yield a legal pin: $(cat "$d/illegal.yml")" >&2; rc=1
   fi
 
+  rm -rf "$d"
   return $rc
 }
 
@@ -306,16 +307,55 @@ list_repos() {
 # stale, and reading one is what produced a false "285 callers track main"
 # census on 2026-09-15.
 fetch_workflows() {
-  local repo="$1" dest="$2" name
+  local repo="$1" dest="$2" owner="${1%%/*}" name="${1##*/}" resp
   mkdir -p "$dest"
+  resp=$(mktemp)
+
+  # ONE GraphQL call fetches every workflow file's text for a repo. The REST
+  # contents API needs one call per FILE, which over 438 repos is ~2,600 calls
+  # and roughly two hours; this is ~438 calls and minutes. The estate has a hard
+  # 5,000/hour ceiling, so the cheaper shape is not an optimisation, it is what
+  # makes an estate-wide census affordable at all.
+  if gh api graphql \
+       -f query='query($owner:String!,$name:String!){
+         repository(owner:$owner,name:$name){
+           object(expression:"HEAD:.github/workflows"){
+             ... on Tree { entries { name type object { ... on Blob { text } } } }
+           }
+         }
+       }' \
+       -F owner="$owner" -F name="$name" > "$resp" 2>/dev/null; then
+    local n b64
+    while IFS=$'\t' read -r n b64; do
+      [ -n "$n" ] || continue
+      printf '%s' "$b64" | base64 -d > "${dest}/${n}" 2>/dev/null || rm -f "${dest}/${n}"
+    done < <(jq -r '
+        (.data.repository.object.entries // [])[]
+        | select(.type == "blob")
+        | select(.name | test("\\.ya?ml$"))
+        | select(.object.text != null)
+        | "\(.name)\t\(.object.text | @base64)"' "$resp" 2>/dev/null)
+    rm -f "$resp"
+    # A repo with no .github/workflows yields an empty tree, which is a valid
+    # answer, not a failure. Only fall back when the call itself failed.
+    return 0
+  fi
+  rm -f "$resp"
+
+  # REST fallback: slower, but survives a GraphQL outage or a repo shape the
+  # query cannot express. The REMOTE content is the only evidence either way —
+  # reading a local checkout is what produced a false "285 callers track main"
+  # census on 2026-09-15.
+  local fname
   gh api "repos/${repo}/contents/.github/workflows" \
      --jq '.[] | select(.type == "file") | .name' 2>/dev/null \
   | grep -E '\.ya?ml$' \
-  | while IFS= read -r name; do
-      gh api "repos/${repo}/contents/.github/workflows/${name}" \
-         -H 'Accept: application/vnd.github.raw' > "${dest}/${name}" 2>/dev/null \
-        || rm -f "${dest}/${name}"
+  | while IFS= read -r fname; do
+      gh api "repos/${repo}/contents/.github/workflows/${fname}" \
+         -H 'Accept: application/vnd.github.raw' > "${dest}/${fname}" 2>/dev/null \
+        || rm -f "${dest}/${fname}"
     done
+  return 0
 }
 
 # land_pr <repo> <dir> <files...> — create branch, commit VERIFIED, open PR.
@@ -406,7 +446,7 @@ main() {
   local tsv; tsv=$(mktemp)
   printf 'REPO\tWORKFLOW\tSTATUS\tDETAIL\n' > "$tsv"
 
-  local work; work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+  WORKDIR=$(mktemp -d); trap 'rm -rf "${WORKDIR:-}"' EXIT
   local repos n=0
   if [ -n "$ONLY_REPO" ]; then repos="$ONLY_REPO"; else repos=$(list_repos); fi
 
@@ -414,7 +454,7 @@ main() {
   for repo in $repos; do
     [ "$LIMIT" -gt 0 ] && [ "$n" -ge "$LIMIT" ] && break
     n=$((n+1))
-    local rdir="${work}/$(echo "$repo" | tr '/' '_')"
+    local rdir="${WORKDIR}/$(echo "$repo" | tr '/' '_')"
     fetch_workflows "$repo" "$rdir"
     local found=0 changed=() wf base st detail
     shopt -s nullglob
