@@ -68,9 +68,24 @@ if grep -qiE "$placeholder_re" "$path"; then
 fi
 
 # The signature is the signature on the commit containing this content. Text
-# such as "Signed:" inside the document proves nothing. Shallow checkouts may
-# not contain the file-changing commit, so report that limitation honestly.
-signature=N
+# such as "Signed:" inside the document proves nothing.
+#
+# Rule 4: `N` is a VERDICT, not a missing reading. `git log --format=%G?`
+# returns `N` for "this commit carries no signature at all" -- which is a
+# measured violation of the standard, whose own worked example is
+# `git commit -S -s docs/AFFIRMATION.adoc`. A previous revision initialised
+# this variable to `N` as its "nothing to report" sentinel, so the genuinely
+# unsigned case shared an arm with the cases where no reading was possible and
+# fell through to a `::notice::`. A notice cannot fail a job, so an unsigned
+# affirmation passed a gate that exists to establish the affirmation is signed
+# -- the self-refuting outcome the standard warns about.
+#
+# The three states are now distinct, because only one of them is unknowable:
+#   unavailable  the working tree is not a Git repository at all
+#   ""           Git is present but the file has no commit in the available
+#                history (a shallow checkout) -- honestly indeterminate
+#   N            Git read the commit and it is unsigned -- a verdict, so fatal
+signature=unavailable
 last_update_ts=
 if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   signature=$(git -C "$root" log -1 --format='%G?' -- "$aff_file" 2>/dev/null || true)
@@ -80,8 +95,12 @@ fi
 case "$signature" in
   G) echo "Affirmation commit signature verified with a trusted key." ;;
   U) echo "::notice::Affirmation commit has a valid signature from an untrusted or locally unknown key." ;;
+  X|Y) echo "::warning::Affirmation commit signature is valid but the signature or its key has expired." ;;
   B|R|E) echo "::error::Affirmation commit signature is bad, revoked, or failed verification."; exit 1 ;;
-  *) echo "::notice::Affirmation commit signature could not be verified from the available Git history." ;;
+  N) echo "::error::Affirmation commit is UNSIGNED. AFFIRMATION-STANDARD.adoc requires a signed commit (git commit -S -s). An unsigned affirmation attests to nothing."; exit 1 ;;
+  "") echo "::notice::Affirmation commit is not in the available Git history (shallow checkout), so its signature could not be read. This is a limitation of the checkout, not a verdict; fetch full history to verify." ;;
+  unavailable) echo "::notice::Not a Git repository, so no commit signature could be read." ;;
+  *) echo "::error::Unrecognised commit signature status: ${signature}. Failing closed: a governance gate must not pass a status it cannot interpret."; exit 1 ;;
 esac
 
 # A dated affirmation is a frozen receipt, not a claim that remains current
