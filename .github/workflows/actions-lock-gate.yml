@@ -1,0 +1,36 @@
+# This workflow is managed by gh actions-lock.
+# SPDX-License-Identifier: MPL-2.0
+# Fail closed when .github/workflows/actions.lock drifts from the workflows.
+#
+# This repo's .githooks validators ran ONLY in pre-commit, and Dependabot
+# never runs pre-commit -- which is exactly how a codeql-action bump landed
+# in three reusable workflows without regenerating the lockfile, poisoning
+# every repo that calls them. A pre-commit hook cannot gate a bot; this can.
+name: Actions Lockfile Gate
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.githooks/validate-actions-lock.sh'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.githooks/validate-actions-lock.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile-coverage:
+    name: uses ⊆ actions.lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: "Every SHA-pinned uses: must be in the lockfile"
+        run: bash .githooks/validate-actions-lock.sh
