@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+#
+# test_tag_ruleset_canon.sh — structural guards on the tag-ruleset canon and on
+# the applier that deploys it. These exist because of a measured four-day
+# outage: on 2026-09-11 a body carrying a `creation` rule and an EMPTY
+# `bypass_actors` list was committed to config/rulesets/ and deployed to 372
+# repositories, after which nobody -- including the owner -- could create a tag
+# anywhere. CodeRabbit corrected the file the next morning; the correction was
+# never re-deployed, because nothing committed reads config/rulesets/.
+#
+# These are the properties a red MUST be able to name:
+#
+#   1. CANON IS USABLE: the tag canon restricts `creation` but keeps at least one
+#      bypass actor. A tag ruleset with `creation` and zero bypass actors is not
+#      "strict", it is an outage, and it is exactly what shipped.
+#   2. NO CASE COLLISION: at most one file in config/rulesets/ declares a
+#      tag ruleset over ~ALL. Two files whose names differ only by case
+#      (`Immutable-Tags.json` vs `immutable-tags.json`) is how the wrong body
+#      got deployed while the right one sat beside it.
+#   3. IDENTITY, NOT NAME: the applier must never classify a live ruleset by its
+#      `name`, and must strip `name` from a PUT body — GitHub keeps whatever name
+#      an existing ruleset has, so sending one silently renames it. Measured:
+#      372 repos named `Immutable-Tags` were blocked, 26 with that same name were
+#      not, and 2 named `Immutable Tags` were healthy. The name classifies
+#      nothing.
+#   4. TWO-STEP READ: the applier must GET each ruleset by id. The LIST endpoint
+#      omits `conditions`, `rules` and `bypass_actors`, so filtering the list
+#      matches nothing (0 of 178 live repos) and every PUT silently becomes a
+#      POST, recreating the duplicate-ruleset outage.
+#   5. NO SILENT WEAKER FALLBACK: the applier must not carry a second, admin-only
+#      canon body to fall back on when an App is not installed. One body
+#      everywhere is the decision; a fallback re-creates a two-variant estate.
+#   6. FAIL CLOSED ON DUPLICATES: rulesets are ADDITIVE, so a zero-bypass rival
+#      blocks tags even beside a healthy sibling. The applier must refuse a repo
+#      carrying two rather than guessing.
+#   7. WRITES ARE OPT-IN: the applier reports unless `--apply` is passed.
+#   8. CREDENTIAL IS ASSERTED: an absent secret resolves to an empty string in
+#      silence; the applier must exit non-zero before enumerating anything.
+#   9. BOTH OWNERS ENUMERATED: `user/repos?affiliation=owner` returns ZERO
+#      organisation repositories. metadatastician is an organisation, and a
+#      census from the user endpoint alone silently missed 212 live repos.
+set -uo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CANON="$ROOT/config/rulesets/immutable-tags.json"
+APPLIER="$ROOT/scripts/apply-tag-ruleset-canon.sh"
+RULESET_DIR="$ROOT/config/rulesets"
+pass=0; fail=0
+ok()  { echo "PASS: $1"; pass=$((pass+1)); }
+bad() { echo "FAIL: $1"; fail=$((fail+1)); }
+
+command -v jq >/dev/null || { echo "FAIL: jq is required by this test"; exit 1; }
+[ -f "$CANON" ]   || { echo "FAIL: canon missing: config/rulesets/immutable-tags.json"; exit 1; }
+[ -f "$APPLIER" ] || { echo "FAIL: applier missing: scripts/apply-tag-ruleset-canon.sh"; exit 1; }
+
+# --- 1. canon is usable -----------------------------------------------------
+jq -e '.target == "tag"' "$CANON" >/dev/null 2>&1 \
+  && ok "canon targets tag" || bad "canon .target is not \"tag\""
+jq -e '.conditions.ref_name.include == ["~ALL"]' "$CANON" >/dev/null 2>&1 \
+  && ok "canon include is exactly [\"~ALL\"]" \
+  || bad "canon include is not exactly [\"~ALL\"] — the identity rule would not match it"
+if jq -e '[.rules[].type] | index("creation")' "$CANON" >/dev/null 2>&1; then
+  if jq -e '(.bypass_actors | length) >= 1' "$CANON" >/dev/null 2>&1; then
+    ok "canon restricts creation AND keeps $(jq '.bypass_actors|length' "$CANON") bypass actor(s)"
+  else
+    bad "canon has a creation rule and ZERO bypass actors — this is the 2026-09-11 outage body, not a stricter policy"
+  fi
+else
+  bad "canon has no creation rule; immutable tags are not immutable"
+fi
+jq -e '.enforcement == "active"' "$CANON" >/dev/null 2>&1 \
+  && ok "canon enforcement is active" || bad "canon is not actively enforced"
+
+# --- 2. no case-colliding tag-~ALL sibling ----------------------------------
+tagfiles=()
+for f in "$RULESET_DIR"/*.json; do
+  [ -e "$f" ] || continue
+  if jq -e '.target == "tag" and (.conditions.ref_name.include == ["~ALL"])' "$f" >/dev/null 2>&1; then
+    tagfiles+=("$(basename "$f")")
+  fi
+done
+if [ "${#tagfiles[@]}" -eq 1 ]; then
+  ok "exactly one tag/~ALL ruleset file: ${tagfiles[0]}"
+else
+  bad "${#tagfiles[@]} tag/~ALL ruleset files (${tagfiles[*]-none}) — a case-collision here deployed the wrong body for four days"
+fi
+
+# --- 3..9. applier guards ---------------------------------------------------
+grep -q 'del(.name)' "$APPLIER" \
+  && ok "applier strips name from the PUT body" \
+  || bad "applier does not del(.name) — a PUT carrying name silently RENAMES the live ruleset"
+if grep -qE 'select\([^)]*\.name *==' "$APPLIER"; then
+  bad "applier selects a live ruleset by .name — the name classifies nothing"
+else
+  ok "applier never selects a live ruleset by .name"
+fi
+# The read must be a GET, and it must be the payload that gets CLASSIFIED.
+# Do NOT relax this to a bare 'rulesets/$id' match: a PUT and a DELETE also
+# address a ruleset by id, so such a grep is satisfied by a WRITE and stays
+# green while the classification loop reads the shapeless LIST summary. That
+# exact inert assertion was caught by mutation testing on 2026-09-15.
+loop_get=$(grep -cE 'gh api "repos/\$repo/rulesets/\$\{?id\}?"' "$APPLIER" || true)
+if [ "$loop_get" -ge 1 ]; then
+  ok "applier GETs each ruleset by id in the classification loop (two-step read)"
+else
+  bad "applier never GETs an individual ruleset per repo — the LIST endpoint omits conditions/rules/bypass_actors, so filtering the list matches NOTHING (0 of 178 measured)"
+fi
+# Inverse limb: the LIST payload must never be the thing whose shape is read.
+list_var=$(grep -oE '^[[:space:]]*[a-z_]+=\$\(gh api "repos/\$repo/rulesets\?' "$APPLIER" \
+  | grep -oE '[a-z_]+=' | head -1 | tr -d '=')
+if [ -z "$list_var" ]; then
+  bad "cannot locate the ruleset LIST call — the two-step inverse check cannot run"
+elif grep -qE "\\\$$list_var\"?\)?[[:space:]]*\\|[[:space:]]*jq[^|]*(bypass_actors|\\.rules|conditions)" "$APPLIER" \
+  || grep -qE "^[[:space:]]*d=\"?\\\$$list_var" "$APPLIER"; then
+  bad "applier reads the shape (conditions/rules/bypass_actors) out of the LIST payload \$$list_var — that summary omits all three"
+else
+  ok "the LIST payload ($list_var) is used only to enumerate ids, never for the shape"
+fi
+# Check CODE, not prose: every ruleset body the applier sends must derive from
+# the canon FILE, so there can be no second, weaker body to fall back on. A
+# comment explaining why there is no fallback must not trip this.
+bodies_from_canon=$(grep -cE '^CANON_(PUT|POST)=\$\(jq .*"\$CANON_FILE"' "$APPLIER" || true)
+inline_bodies=$(grep -nE 'gh api --method (PUT|POST) "repos/[^"]*/rulesets' "$APPLIER" \
+  | grep -vE '\$CANON_(PUT|POST)' | grep -vc 'probe_' || true)
+if [ "$bodies_from_canon" -eq 2 ] && [ "$inline_bodies" -eq 0 ]; then
+  ok "every ruleset body derives from the canon file; no second/weaker body exists"
+else
+  bad "applier sends a ruleset body not derived from the canon file (from_canon=$bodies_from_canon inline=$inline_bodies) — a fallback body re-creates a two-variant estate"
+fi
+# 8b. The gate must accept either credential source, and neither must pass.
+if grep -qE 'gh auth status' "$APPLIER" && grep -qE '\$\{GH_TOKEN:-\}' "$APPLIER"; then
+  ok "credential gate accepts an explicit token OR an authenticated CLI"
+else
+  bad "credential gate accepts only one credential source — an applier that cannot be run by hand is an applier that never runs"
+fi
+# Scope this to the GATE BLOCK. A bare grep for 'exit 3' anywhere in the file is
+# satisfied by the probe's own exit and stays green while the gate is gutted --
+# caught by mutation testing on 2026-09-15, the same inert-assertion class as the
+# two-step check above.
+gate_block=$(awk '/^if \[ -n "\$\{GH_TOKEN:-\}" \]; then/{f=1} f{print} f&&/^fi$/{exit}' "$APPLIER")
+if printf '%s' "$gate_block" | grep -qE '^[[:space:]]*exit 3[[:space:]]*$'; then
+  ok "the credential gate itself exits non-zero when neither credential exists"
+else
+  bad "the credential gate does not exit inside its own else branch — an absent secret resolves to an empty string in silence and the sweep writes nothing while reporting success"
+fi
+grep -q 'DUPLICATE-FAIL-CLOSED' "$APPLIER" \
+  && ok "applier fails closed on a repo carrying two matching tag rulesets" \
+  || bad "applier does not fail closed on duplicates — rulesets are additive, so a rival blocks despite a healthy sibling"
+grep -q 'APPLY=0' "$APPLIER" \
+  && ok "applier defaults to report-only; writes need --apply" \
+  || bad "applier does not default to report-only"
+grep -q 'exit 3' "$APPLIER" && grep -q 'GH_TOKEN' "$APPLIER" \
+  && ok "applier asserts a credential and exits 3 when absent" \
+  || bad "applier does not fail on an absent credential — an empty secret would report a clean sweep over nothing"
+grep -q 'orgs/\$org/repos' "$APPLIER" && grep -q 'user/repos?affiliation=owner' "$APPLIER" \
+  && ok "applier unions the user listing with an org listing" \
+  || bad "applier does not enumerate both owners — the user endpoint returns ZERO org repos"
+bash -n "$APPLIER" 2>/dev/null \
+  && ok "applier parses" || bad "applier is not valid bash"
+[ -x "$APPLIER" ] \
+  && ok "applier is executable" || bad "applier is not executable"
+
+echo "---"
+echo "passed=$pass failed=$fail"
+[ "$fail" -eq 0 ]

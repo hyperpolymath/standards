@@ -1,0 +1,165 @@
+# SPDX-License-Identifier: MPL-2.0
+# Converge every non-archived estate repository on the canonical immutable-tags
+# ruleset. This workflow exists because the 2026-09-11 damage (372 repositories
+# left unable to create ANY tag) persisted for days: nothing committed to this
+# repository globbed config/rulesets/, so nothing ever re-converged the estate.
+# A one-shot sweep would have cured the data and left that hole open. This is
+# the invariant instead.
+#
+# Sundays 05:29 UTC. Off the hour on purpose: the estate's crons cluster on :00
+# and contend for the same secondary rate limit.
+name: tag ruleset canon
+
+on:
+  schedule:
+    - cron: '29 5 * * 0'
+  # workflow_dispatch so the owner can force convergence the moment a
+  # credential lands or an App is installed, without waiting for Sunday.
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Write changes (unchecked = report only)'
+        type: boolean
+        default: false
+      reconcile_duplicates:
+        description: 'Delete zero-bypass rival tag rulesets where a healthy sibling exists'
+        type: boolean
+        default: false
+      limit:
+        description: 'Process at most N repositories (0 = all)'
+        type: string
+        default: '0'
+
+concurrency:
+  group: tag-ruleset-canon
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  converge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # An App installation token is scoped to ONE owner and carries its own
+      # rate limit, so it is preferred over a PAT shared with everything else.
+      # `owner:` is required: without it the token is scoped to THIS repository
+      # and every ruleset write would 404.
+      - name: Mint an App installation token for hyperpolymath
+        id: tok-user
+        if: vars.APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        continue-on-error: true
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: hyperpolymath
+
+      - name: Mint an App installation token for metadatastician
+        id: tok-org
+        if: vars.APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        continue-on-error: true
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: metadatastician
+
+      # A nonexistent secret resolves to an empty string in silence, and a sweep
+      # over an empty credential reports a clean run while writing nothing. Fail
+      # here, before any enumeration, and say exactly what is missing.
+      - name: Assert a credential exists
+        env:
+          APP_USER: ${{ steps.tok-user.outputs.token }}
+          APP_ORG: ${{ steps.tok-org.outputs.token }}
+          PAT: ${{ secrets.ESTATE_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_USER:-}" ] || [ -n "${PAT:-}" ]; then
+            echo "credential present"; exit 0
+          fi
+          cat >&2 <<'MSG'
+          FATAL: no credential can write rulesets.
+
+          Rulesets need administration:write on every target repository.
+          GITHUB_TOKEN is repo-scoped and cannot do this, so this workflow
+          refuses to run rather than report a clean sweep over nothing.
+
+          Supply EITHER:
+            * vars.APP_ID + secrets.APP_PRIVATE_KEY for a GitHub App holding
+              administration:write, installed on hyperpolymath AND on
+              metadatastician. Preferred: the App is already the canonical
+              bypass actor, and an installation token has its own rate limit.
+            * secrets.ESTATE_ADMIN_TOKEN — a PAT with repo administration.
+
+          Measured 2026-09-15: neither APP_ID nor APP_PRIVATE_KEY exists on
+          this repository, which is why signed-push-smoke.yml has never passed.
+          MSG
+          exit 3
+
+      - name: Converge hyperpolymath (user-owned repositories)
+        id: user
+        env:
+          GH_TOKEN: ${{ steps.tok-user.outputs.token || secrets.ESTATE_ADMIN_TOKEN }}
+          ESTATE_ORGS: ''
+        run: |
+          set -euo pipefail
+          args=()
+          [ "${{ inputs.apply || false }}" = "true" ] && args+=(--apply)
+          [ "${{ inputs.reconcile_duplicates || false }}" = "true" ] && args+=(--reconcile-duplicates)
+          [ "${{ inputs.limit || '0' }}" != "0" ] && args+=(--limit "${{ inputs.limit }}")
+          rc=0
+          ./scripts/apply-tag-ruleset-canon.sh "${args[@]+"${args[@]}"}" \
+            | tee canon-user.tsv || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+
+      # metadatastician is an ORGANISATION, not a second user:
+      # user/repos?affiliation=owner returns ZERO of its repositories. A census
+      # from that endpoint alone is silently single-owner and looks healthy --
+      # it is how 212 live repositories went unmeasured.
+      - name: Converge metadatastician (organisation repositories)
+        id: org
+        env:
+          GH_TOKEN: ${{ steps.tok-org.outputs.token || secrets.ESTATE_ADMIN_TOKEN }}
+          ESTATE_ORGS: 'metadatastician'
+        run: |
+          set -euo pipefail
+          args=(--skip-user)
+          [ "${{ inputs.apply || false }}" = "true" ] && args+=(--apply)
+          [ "${{ inputs.reconcile_duplicates || false }}" = "true" ] && args+=(--reconcile-duplicates)
+          rc=0
+          ./scripts/apply-tag-ruleset-canon.sh "${args[@]}" \
+            | tee canon-org.tsv || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tag-ruleset-canon-report
+          path: canon-*.tsv
+          if-no-files-found: warn
+
+      # The job must be red while any repository is off canon, otherwise a
+      # scheduled applier becomes a scheduled green light. Exit 4 means an App
+      # is not installed on an owner -- only the owner can fix that.
+      - name: Fail while drift remains
+        if: always()
+        run: |
+          set -euo pipefail
+          u='${{ steps.user.outputs.rc }}'; o='${{ steps.org.outputs.rc }}'
+          echo "hyperpolymath rc=${u:-unrun}  metadatastician rc=${o:-unrun}"
+          for f in canon-user.tsv canon-org.tsv; do
+            [ -f "$f" ] || continue
+            echo "--- $f"
+            awk -F'\t' '{c[$2]++} END {for (k in c) printf "  %5d  %s\n", c[k], k}' "$f"
+          done
+          if [ "${u:-0}" = "4" ] || [ "${o:-0}" = "4" ]; then
+            echo "::error::A canonical bypass actor's GitHub App is not installed on an owner. ONE body everywhere is the decision, so there is deliberately no admin-only fallback. The owner must install the App; an API token cannot."
+            exit 1
+          fi
+          [ "${u:-0}" = "0" ] && [ "${o:-0}" = "0" ] || {
+            echo "::error::tag ruleset drift remains; see the report artifact"; exit 1; }
+          echo "estate is on canon"
