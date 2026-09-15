@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# settings-drift-detect.yml — estate-wide sweep for settings that moved unseen.
+#
+# THE FAULT: repository settings are not in git. Nothing reviews them, nothing
+# diffs them, and a change leaves no artefact — no commit, no PR, no run. The
+# estate sits at 97–100% compliance with config/settings/repo.json at any given
+# moment, so re-applying the canon gains almost nothing. What was missing is
+# anything that NOTICES a setting moving.
+#
+# MEASURED 2026-09-14, the day this was written: the Actions allowlist on 239
+# repositories went from allowed_actions=selected with an EMPTY patterns_allowed
+# and verified_allowed=false, to a 92-pattern allowlist with verified_allowed
+# =true — between a census and the authorised write meant to fix it. Nobody
+# could say when, by whom, or whether it was deliberate, because no instrument
+# was watching. Separately, ZERO repos in the 301-repo mirror fleet had all
+# seven *_MIRROR_ENABLED variables set, and roughly a third had NONE — so their
+# mirror runs reported GREEN while backing up nowhere.
+#
+# WHY IT MATTERS MORE THAN IT LOOKS: an empty patterns_allowed refuses every
+# third-party action, including transitively through a reusable workflow,
+# because actions are judged against the CALLER repo's allow-list. Runs then die
+# at startup_failure with jobs.total_count == 0 and emit NO check run — a
+# required context never reports and the repo looks GREENER than a healthy one.
+# A settings change can disarm CI estate-wide while every dashboard stays clean.
+#
+# This workflow REPORTS ONLY. It opens/updates one tracking issue and never
+# mutates a setting or another repository — consistent with the estate guardrail
+# that unattended cross-repo mutation is a human decision. Settings are exactly
+# where that guardrail matters most.
+name: Settings Drift Detect
+
+on:
+  schedule:
+    # Monday 06:40 UTC — before the working week, so a weekend change is seen
+    # on Monday rather than discovered mid-campaign.
+    - cron: '40 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Max repos to scan (0 = all)'
+        type: string
+        default: '0'
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  detect:
+    name: Sweep the estate for settings drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Scan estate for settings drift
+        id: scan
+        env:
+          # A settings read needs more than the default GITHUB_TOKEN can see:
+          # actions/permissions and actions/variables are admin-scoped, and
+          # security_and_analysis is ABSENT from LIST endpoints entirely, so it
+          # needs a per-repo GET. Without an admin-scoped token this reports a
+          # FALSE CLEAN — it cannot read the settings it is checking. That is
+          # the "guard asks a different question than its consumer" trap, so the
+          # step fails loudly below rather than reporting an empty result.
+          GH_TOKEN: ${{ secrets.ESTATE_SETTINGS_READ_TOKEN || github.token }}
+        run: |
+          set -o pipefail
+          if ! gh api repos/${{ github.repository }}/actions/permissions >/dev/null 2>&1; then
+            echo "::error::Token cannot read actions/permissions. A clean result would be FALSE."
+            echo "::error::Set secret ESTATE_SETTINGS_READ_TOKEN to a PAT with admin:repo scope."
+            exit 2
+          fi
+          chmod +x scripts/check-settings-drift.sh
+          set +e
+          scripts/check-settings-drift.sh --limit "${{ inputs.limit || '0' }}" > drift.tsv
+          rc=$?
+          set -e
+          echo "rows=$(( $(wc -l < drift.tsv) - 1 ))" >> "$GITHUB_OUTPUT"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          cat drift.tsv
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: settings-drift
+          path: drift.tsv
+
+      - name: Open or update the tracking issue
+        if: steps.scan.outputs.rc == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Settings drift detected: ${{ steps.scan.outputs.rows }} row(s)."
+            echo
+            echo "A row means the live setting differs from \`config/settings/repo.json\`."
+            echo "It does NOT by itself mean anything is broken — read the calibration"
+            echo "section at the top of \`scripts/check-settings-drift.sh\` before acting."
+            echo "In particular a CLEAN result is not proof CI is healthy: a startup"
+            echo "failure can be event-specific and invisible in every setting and file."
+            echo
+            echo '```'
+            head -200 drift.tsv
+            echo '```'
+          } > body.md
+          n=$(gh issue list --repo "${{ github.repository }}" --state open \
+                --search "Settings drift in:title" --json number --jq '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --repo "${{ github.repository }}" --body-file body.md
+          else
+            gh issue create --repo "${{ github.repository }}" \
+              --title "Settings drift detected" --body-file body.md
+          fi
