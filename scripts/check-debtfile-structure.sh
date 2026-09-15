@@ -51,6 +51,7 @@ note() { printf '  %s\n' "$*"; }
 bad()  { printf '  ❌ %s\n' "$*"; fail=1; }
 
 is_uint() { case "${1:-}" in ''|*[!0-9]*) return 1;; *) return 0;; esac; }
+has_nonspace() { case "${1:-}" in *[![:space:]]*) return 0;; *) return 1;; esac; }
 
 validate() {
   [ -n "$name" ] || return 0

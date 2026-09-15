@@ -34,6 +34,9 @@ entry() { # entry <probe> <count> <ceiling> [accepted-until]
 - ceiling: $3
 - severity: high
 - policy: remediable
+- taxonomy-default-arm: adapt-proven-idris2-test
+- taxonomy-selected-arm: write-local-test
+- taxonomy-departure-reason: the host API is not supported by the proven suite
 - accepted-until: ${4:-2030-01-01}
 EOF
 }
@@ -74,8 +77,12 @@ expect 0 "the same probe guarded with || true is correct and passes" < <(entry '
 # --write lowers a ceiling that has been paid down, and never raises one.
 entry 'echo 2' 4 4 > Debtfile.a2ml
 bash "$SCRIPT" --write Debtfile.a2ml >/dev/null 2>&1 || true
-if grep -q '^- ceiling: 2$' Debtfile.a2ml && grep -q '^- count: 2$' Debtfile.a2ml; then
-  pass=$((pass+1)); echo "  ok    --write lowers the ceiling to the measured value and updates count"
+if grep -q '^- ceiling: 2$' Debtfile.a2ml &&
+   grep -q '^- count: 2$' Debtfile.a2ml &&
+   grep -q '^- taxonomy-default-arm: adapt-proven-idris2-test$' Debtfile.a2ml &&
+   grep -q '^- taxonomy-selected-arm: write-local-test$' Debtfile.a2ml &&
+   grep -q '^- taxonomy-departure-reason: the host API is not supported by the proven suite$' Debtfile.a2ml; then
+  pass=$((pass+1)); echo "  ok    --write updates measurements and preserves taxonomy-choice fields"
 else
   fail=$((fail+1)); echo "  FAIL  --write did not ratchet down"; sed -n '1,20p' Debtfile.a2ml
 fi
