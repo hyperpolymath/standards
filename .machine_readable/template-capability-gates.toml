@@ -19,7 +19,11 @@ policy = "TEMPLATE-APPLICABILITY-POLICY.adoc"
 # Zotero, a userscript manager): the host owns the runtime and the packaging
 # rules, so host-mandated files are exempt from the usual language gates the
 # way interop-target bindings are.
-known = ["rust", "zig", "agda", "idris2", "haskell", "gleam", "elixir", "affinescript", "julia", "ocaml", "bash", "cli", "library", "ffi", "abi", "api-service", "formal-proofs", "mobile", "web-ui", "docs-site", "published-package", "container", "reproducible-build", "governance-tier", "benchmarks", "plugin", "deno"]  # "deno": criterion 4.3.1 gates on it; without it here that criterion could never become applicable
+known = ["rust", "zig", "agda", "idris2", "haskell", "gleam", "elixir", "affinescript", "julia", "ocaml", "bash", "cli", "library", "ffi", "abi", "api-service", "formal-proofs", "mobile", "web-ui", "docs-site", "published-package", "container", "reproducible-build", "governance-tier", "benchmarks", "plugin", "deno",
+           "canon"]  # "deno": criterion 4.3.1 gates on it; without it here that criterion could never become applicable.
+# "canon": the ROLE of hyperpolymath/standards itself (see [canon] below).
+# Without it in `known`, a profile declaring role = "canon" is rejected as an
+# unknown CAPABILITY rather than accepted as an unknown role.
 
 [baseline]
 # Always carried (gate = empty). Globs/dirs allowed; not capability-gated.
@@ -70,10 +74,56 @@ paths = ["README.adoc", "EXPLAINME.adoc|docs/EXPLAINME.adoc", "LICENSE", "SECURI
 # matters for the other ~300 repos.
 paths = [".github/workflows/rust-ci.yml", ".github/workflows/release.yml", ".github/workflows/e2e.yml", ".github/workflows/boj-build.yml"]
 
+[canon]
+# Paths a CANON repo may carry WITHOUT declaring the gating capability, because
+# they are the LAW the capabilities are defined BY, not an instance of them.
+#
+# The [carrier] section above exists because the spine legitimately carries
+# modules whose capability it does not have: rsr-template-repo ships
+# rust-ci.yml so a Rust project minted from it has one, while itself carrying
+# no Rust. Before [carrier] existed the model reported the template's entire
+# reason for existing as VESTIGIAL.
+#
+# The canon has the same shape of problem one layer up, and it has had it for
+# longer. hyperpolymath/standards cannot currently be scored by the checker it
+# ships (scripts/check-rsr-profile.sh exits 2 on this repo), because:
+#
+#   * it carries the criteria SSOT, which no capability gates — the criteria
+#     are not an instance of `formal-proofs` or anything else, they are the
+#     document that DEFINES those criteria;
+#   * it carries docs/proofs/ (283 files) but `formal-proofs` means "contains
+#     mechanised proofs IN TREE, of its own code" — the canon is prose and has
+#     no code to prove, so it fails a criterion that is meaningless for it;
+#   * it carries .github/workflows/*-reusable.yml, which every other repo CALLS
+#     and the canon SERVES, which no capability describes.
+#
+# Applies ONLY where the profile declares role = "canon"
+# (.machine_readable/rsr-profile.a2ml here; machine-readable/rsr-profile.a2ml
+# once the root rename lands).
+#
+# A minted repo declaring role = "canon" to evade a gate is still drift, which
+# is the behaviour that matters for the other ~441 repos.
+paths = [
+  "rhodium-standard-repositories/spec/rsr-criteria-v2.a2ml",  # the criteria SSOT
+  "rhodium-standard-repositories/spec/archive/",              # frozen prior majors
+  "rhodium-standard-repositories/spec/RSR-SPEC-v2.adoc",      # prose authority
+  ".machine_readable/template-capability-gates.toml",         # this file
+  "TEMPLATE-APPLICABILITY-POLICY.adoc",
+  "constitution/",
+  ".github/workflows/governance-reusable.yml",                # gates other repos CALL
+  ".machine_readable/REGISTRY.a2ml",                          # generated index
+  "docs/proofs/",                                             # proof artefacts OF THE ESTATE
+  "canon.lock",                                               # the release identity
+  "standards-map.toml",
+]
+
 [presets]
 # OPTIONAL shorthands. A profile may declare `capabilities = [...]` directly
 # instead of a preset; presets are pure sugar that expands to a capability set.
 # preset name = [ base capabilities ]
+# canon = the role of hyperpolymath/standards itself. A one-line shorthand for
+# the honest capability set of a prose-and-tooling repo that owns the criteria.
+canon = ["bash", "docs-site", "governance-tier"]
 rust-cli = ["rust", "cli", "library"]
 rust-ffi-lib = ["rust", "zig", "ffi", "abi", "library"]
 rust-service = ["rust", "api-service", "container", "reproducible-build"]
