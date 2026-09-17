@@ -1,0 +1,307 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# check-canon-lockstep.sh — GATE A.
+#
+# Proposed location: hyperpolymath/standards/scripts/check-canon-lockstep.sh
+# Runs from:         .github/workflows/canon-spine-lockstep.yml
+#
+# This is the gate that makes `standards` BOUND BY `rsr-template-repo`.
+#
+# ---------------------------------------------------------------------------
+# WHAT IT ENFORCES
+#
+#   1  every sha256 in canon.lock [canon.artifacts] matches the working tree
+#   2  touching a canon artefact forces a version bump
+#   3  the spine declares criteria_sha256 == canon.lock's criteria hash
+#   4  the spine is GREEN against those criteria
+#   5  the canon itself scores Gold on its own applicable set
+#
+# Assertion 4 is the load-bearing one, and it is a deliberate reversal:
+#
+#     YOU MAY NOT TIGHTEN THE CRITERIA UNTIL THE REFERENCE IMPLEMENTATION
+#     PASSES THEM.
+#
+# ---------------------------------------------------------------------------
+# USAGE
+#   check-canon-lockstep.sh [--canon DIR] [--spine DIR] [--base REF] [--strict]
+#
+#   --canon DIR   path to hyperpolymath/standards   (default: .)
+#   --spine DIR   path to a cloned rsr-template-repo
+#   --base REF    the ref to diff against for assertion 2 (default: origin/main)
+#   --strict      promote assertions 3/4/5 from SKIP to FAIL
+#
+# EXIT
+#   0  all enabled assertions passed
+#   1  at least one assertion failed
+#   2  setup error (missing file, unresolvable ref)
+#
+# DEPENDENCIES
+#   bash        (no python - estate policy: see docs/JS-RUNTIME-POLICY.adoc,
+#                NO-JAVASCRIPT-SOURCE-POLICY.adoc; bash + awk + git only)
+#   awk, git, sha256sum, grep
+# ---------------------------------------------------------------------------
+set -uo pipefail
+
+CANON="."
+SPINE=""
+BASE_REF="origin/main"
+STRICT=0
+FAILED=0
+PASSED=0
+SKIPPED=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --canon)  CANON="$2";    shift 2 ;;
+    --spine)  SPINE="$2";    shift 2 ;;
+    --base)   BASE_REF="$2"; shift 2 ;;
+    --strict) STRICT=1;      shift ;;
+    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+pass() { PASSED=$((PASSED + 1)); printf '  \033[32mPASS\033[0m  %s\n' "$*"; }
+fail() { FAILED=$((FAILED + 1)); printf '  \033[31mFAIL\033[0m  %s\n' "$*"; }
+skip() {
+  if [ "$STRICT" -eq 1 ]; then fail "$* (SKIP promoted to FAIL by --strict)"
+  else SKIPPED=$((SKIPPED + 1)); printf '  \033[33mSKIP\033[0m  %s\n' "$*"; fi
+}
+
+LOCK="$CANON/canon.lock"
+[ -f "$LOCK" ] || { echo "ERROR: canon.lock not found at $LOCK" >&2; exit 2; }
+
+# ---------------------------------------------------------------------------
+# A minimal TOML reader. The estate mandates bash+awk (no Python, no Deno),
+# and canon.lock is authored in a deliberately flat, single-line shape so that
+# this is sufficient. This is the same discipline template-capability-gates.toml
+# already imposes on itself ("Arrays are kept single-line so the checker can
+# parse them with grep").
+# ---------------------------------------------------------------------------
+
+# toml_get <section> <key>   -> last assignment wins, comments stripped
+toml_get() {
+  awk -v want="[$1]" -v key="$2" '
+    /^[[:space:]]*\[/ { cur=$0; gsub(/[[:space:]]/,"",cur); next }
+    cur == want {
+      line=$0; sub(/#.*/,"",line)
+      if (line ~ "^[[:space:]]*"key"[[:space:]]*=") {
+        sub(/^[^=]*=[[:space:]]*/,"",line); gsub(/[[:space:]]*$/,"",line)
+        gsub(/^"|"$/,"",line); v=line
+      }
+    }
+    END { if (v != "") print v }
+  ' "$LOCK"
+}
+
+# The artefact records are inline tables that may SPAN LINES, e.g.
+#
+#   criteria = { path = "0-canon/rsr/rsr-criteria-v2.a2ml",   # from spec/
+#                sha256 = "efd024ad…",
+#                slot = "criteria", normative = true }
+#
+# so both readers below accumulate a record: they open on `<slot> = {`, take
+# every line until the closing `}` (or a line that does not continue the
+# record), strip comments, and join. Same problem, and the same solution, as
+# check-rsr-profile.sh's array_on_key().
+record() { # $1 = key name (criteria|gates|applicability|lifecycle|constitution)
+  awk -v slot="$1" '
+    /^[[:space:]]*#/ { next }
+    $0 ~ "^[[:space:]]*" slot "[[:space:]]*=[[:space:]]*\\{" { on=1 }
+    on {
+      line=$0; sub(/#.*/, "", line); rec = rec " " line
+      if (line ~ /}/) { on=0 }
+    }
+    END { sub(/^[[:space:]]*/, "", rec); print rec }
+  ' "$LOCK"
+}
+
+# toml_hash <slot> -> sha256 from that record
+toml_hash() {
+  record "$1" | grep -oE 'sha256[[:space:]]*=[[:space:]]*"[0-9a-f]{64}"' \
+             | grep -oE '[0-9a-f]{64}' | head -1
+}
+
+# toml_path <slot> -> path from that record
+toml_path() {
+  record "$1" | grep -oE 'path[[:space:]]*=[[:space:]]*"[^"]+"' \
+             | sed 's/.*"\(.*\)"/\1/' | head -1
+}
+
+# sha256 of a path: file -> plain hash; directory -> git-ls-files method,
+# matching the registry's own source_hash definition.
+hash_path() {
+  local p="$1"
+  if [ -d "$p" ]; then
+    ( cd "$CANON" && git ls-files -s "$p" | sha256sum | cut -d' ' -f1 )
+  else
+    sha256sum "$p" | cut -d' ' -f1
+  fi
+}
+
+CANON_VERSION="$(toml_get canon version)"
+echo "canon.lock: version=$CANON_VERSION  lock=$(sha256sum "$LOCK" | cut -d' ' -f1 | cut -c1-12)…"
+echo
+
+# ===========================================================================
+# ASSERTION 1 — declared hashes match the working tree
+# ===========================================================================
+echo "[1] canon artefact hashes match the working tree"
+for slot in criteria gates applicability lifecycle constitution; do
+  want="$(toml_hash "$slot")"
+  path="$(toml_path "$slot")"
+  if [ -z "$want" ] || [ -z "$path" ]; then skip "$slot: not declared in canon.lock"; continue; fi
+  if [ ! -e "$CANON/$path" ]; then
+    fail "$slot: declared path does not exist: $path"
+    continue
+  fi
+  got="$(hash_path "$CANON/$path")"
+  if [ "$want" = "$got" ]; then
+    pass "$slot  ${path}  $(echo "$got" | cut -c1-12)…"
+  else
+    fail "$slot  ${path}
+         declared $(echo "$want" | cut -c1-16)…
+         actual   $(echo "$got"  | cut -c1-16)…
+         -> the law changed without re-releasing canon.lock (bump version + rewrite hash)"
+  fi
+done
+echo
+
+# ===========================================================================
+# ASSERTION 2 — a canon artefact change forces a version bump
+# ===========================================================================
+echo "[2] canon artefact change forces a version bump"
+if git -C "$CANON" rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
+  CHANGED=""
+  for slot in criteria gates applicability lifecycle constitution; do
+    p="$(toml_path "$slot")"; [ -n "$p" ] || continue
+    if ! git -C "$CANON" diff --quiet "$BASE_REF"...HEAD -- "$p" 2>/dev/null; then
+      CHANGED="$CHANGED $slot"
+    fi
+  done
+  if [ -z "$CHANGED" ]; then
+    pass "no canon artefact changed against $BASE_REF"
+  elif ! git -C "$CANON" diff --quiet "$BASE_REF"...HEAD -- "$LOCK" 2>/dev/null; then
+    pass "canon artefacts changed ($CHANGED ) and canon.lock was bumped in the same PR"
+  else
+    fail "canon artefacts changed ($CHANGED ) but canon.lock is untouched
+         -> any change to a file named in [canon.artifacts] is a CANON CHANGE.
+            Bump [canon].version and rewrite the hash in the SAME commit."
+  fi
+else
+  skip "cannot resolve $BASE_REF in $CANON"
+fi
+echo
+
+# ===========================================================================
+# ASSERTION 3 — the spine has adopted this canon
+# ===========================================================================
+echo "[3] spine declares the same criteria hash"
+if [ -z "$SPINE" ] || [ ! -d "$SPINE" ]; then
+  skip "no --spine DIR given (set --strict in CI release jobs)"
+else
+  PROFILE="$SPINE/machine-readable/rsr-profile.a2ml"
+  [ -f "$PROFILE" ] || PROFILE="$SPINE/.machine_readable/rsr-profile.a2ml"
+  if [ ! -f "$PROFILE" ]; then
+    fail "spine has no rsr-profile.a2ml at either machine-readable/ or .machine_readable/"
+  else
+    WANT="$(toml_hash criteria)"
+    GOT="$(grep -E '^[[:space:]]*criteria_sha256[[:space:]]*=' "$PROFILE" \
+           | grep -oE '[0-9a-f]{64}' | head -1)"
+    if [ -z "$GOT" ]; then
+      fail "spine rsr-profile.a2ml has no [canon] criteria_sha256
+         -> the spine still declares conformance in free text. The binding
+            does not exist until this is a hash."
+    elif [ "$WANT" = "$GOT" ]; then
+      pass "spine criteria_sha256 == canon.lock criteria ($(echo "$GOT" | cut -c1-12)…)"
+    else
+      fail "spine is on a DIFFERENT canon
+         canon.lock  $(echo "$WANT" | cut -c1-16)…
+         spine       $(echo "$GOT"  | cut -c1-16)…
+         -> land the spine's adoption FIRST, then release the canon."
+    fi
+  fi
+fi
+echo
+
+# ===========================================================================
+# ASSERTION 4 — the reference implementation passes the criteria
+# ===========================================================================
+echo "[4] the spine is GREEN against these criteria"
+if [ -z "$SPINE" ] || [ ! -d "$SPINE" ]; then
+  skip "no --spine DIR given"
+elif ! command -v gh >/dev/null 2>&1; then
+  skip "gh not available; cannot read the spine's last dogfood-gate conclusion"
+else
+  # The oracle is hypatia's rsr-conformance family. Until it is implemented
+  # (rsr-criteria-v2.a2ml [oracle] marks it "to be implemented"), the closest
+  # available proxy is the spine's own dogfood-gate run. This assertion is
+  # written against the PROXY and must be repointed when the oracle lands.
+  SHA="$(git -C "$SPINE" rev-parse HEAD 2>/dev/null || true)"
+  if [ -z "$SHA" ]; then
+    skip "cannot resolve spine HEAD"
+  else
+    RC="$(gh run list --repo hyperpolymath/rsr-template-repo \
+            --workflow dogfood-gate.yml --commit "$SHA" \
+            --json conclusion --jq '.[0].conclusion' 2>/dev/null || true)"
+    case "$RC" in
+      success) pass "dogfood-gate is green at spine@$(echo "$SHA" | cut -c1-7)"
+               ;;
+      "")      skip "no dogfood-gate run found for spine@$(echo "$SHA" | cut -c1-7)"
+               ;;
+      *)       fail "dogfood-gate is '$RC' at spine@$(echo "$SHA" | cut -c1-7)
+         -> THE REVERSAL: you may not tighten the criteria until the reference
+            implementation passes them. Fix the spine, or revert this canon change." ;;
+    esac
+  fi
+fi
+echo
+
+# ===========================================================================
+# ASSERTION 5 — the canon satisfies its own law
+# ===========================================================================
+echo "[5] the canon scores Gold on its own applicable set"
+# Mirror scripts/check-rsr-profile.sh's own convention: the canonical machine
+# tree is machine-readable/, but the LEGACY dotted form is still accepted
+# "because the canon, scaffoldia, the julia variant and ~300 minted repos all
+# still carry it". This repo is one of them until the rename lands.
+CANON_PROFILE="$CANON/machine-readable/rsr-profile.a2ml"
+[ -f "$CANON_PROFILE" ] || CANON_PROFILE="$CANON/.machine_readable/rsr-profile.a2ml"
+if [ ! -f "$CANON_PROFILE" ]; then
+  fail "the canon has NO rsr-profile.a2ml — it cannot be scored by the checker
+       it ships (scripts/check-rsr-profile.sh exits 2 on this repo).
+       -> see artefacts/rsr-profile.canon.a2ml; requires [canon] in the gate table."
+else
+  ROLE="$(grep -E '^[[:space:]]*role[[:space:]]*=' "$CANON_PROFILE" | head -1 | grep -oE '"[^"]+"' | tr -d '"')"
+  [ "$ROLE" = "canon" ] || fail "canon rsr-profile role is '${ROLE:-unset}', expected 'canon'"
+  [ "$ROLE" = "canon" ] && pass "canon rsr-profile declares role = \"canon\""
+
+  if command -v mix >/dev/null 2>&1 && [ -d "$CANON/../hypatia" ]; then
+    # mix hypatia.rsr_score reads the applicable set from the profile and emits
+    # a scorecard. Exit 0 = at or above the required tier.
+    if ( cd "$CANON/../hypatia" && mix hypatia.rsr_score "$CANON" --require gold ) >/dev/null 2>&1; then
+      pass "hypatia rsr-conformance: canon is at Gold"
+    else
+      fail "hypatia rsr-conformance: canon is BELOW Gold on its applicable set"
+    fi
+  else
+    skip "hypatia (the one normative oracle) not available; oracle is marked 'to be implemented'"
+  fi
+fi
+echo
+
+# ===========================================================================
+echo "─────────────────────────────────────────────────────────────"
+printf 'passed %d   failed %d   skipped %d\n' "$PASSED" "$FAILED" "$SKIPPED"
+if [ "$FAILED" -gt 0 ]; then
+  echo
+  echo "GATE A FAILED — the canon and the spine are not in lockstep."
+  echo "This is not necessarily a bad change. It is very often a change made"
+  echo "in the wrong ORDER. See [canon.lockstep].order in canon.lock:"
+  echo "    spine-adopts-then-canon-releases"
+  exit 1
+fi
+echo "GATE A PASSED"
+exit 0
