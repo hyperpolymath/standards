@@ -56,7 +56,7 @@ bare filename would resolve against nothing (grammar rationale).
 4+| *Head identity*
 
 | `[identity] canonical-name` | `:canonical-name` | verbatim STRING
-| `[identity] uuid` | `:repo-uuid` | **re-derived, never copied** (see §5 P-1) — uuid5 literal `#u5"…"`
+| `[identity] uuid` | `:repo-uuid` | uuid5 literal whose BODY IS THE NAME INPUT (`#u5"github.com/<owner>/<name>"`), not the derived hex (grammar v1.0.0: "Body is the NAME input to RFC 4122 §4.3"). Translator **re-derives and compares against the instance, never copies** (§5 P-1)
 | — (new) | `:beholding-chora` | resolved from registry — uuid5 literal
 
 4+| *Clauses*
@@ -77,7 +77,7 @@ bare filename would resolve against nothing (grammar rationale).
 | `[lineage] instantiated-from` | `(lineage … :instantiated-from "…")` | verbatim STRING
 | `[status] phase` | `(status … :phase active)` | enum → SYMBOL — taxonomy verbatim: `reserved incubating active dormant` \| `merged superseded archived extinct`
 | `[status] since` | `(status … :since "…")` | verbatim STRING
-| `[status] present` | `(status … :present true)` | verbatim BOOLEAN
+| `[status] present` | `(status … :present #t)` | BOOLEAN — a2ml `true`/`false` → deed `#t`/`#f` — the ONLY booleans in the grammar; `true`/`false` are parse errors
 | `[status] aliases` | `(status … :aliases ())` | list of STRINGs
 | `[status] merged-into` / `superseded-by` / `ended` | `(status … :merged-into "" …)` | verbatim STRINGs; empty stays `""`
 | `[status] successors` | `(status … :successors ())` | list of STRINGs
@@ -99,11 +99,16 @@ Fields not listed do not exist in the deed era for this family.
 
 == 5. Provenance & validation
 
-* **P-1 (re-derivation):** for each instance the translator recomputes
-  `uuid = UUIDv5(URL, "github.com/<owner>/<name>")` and *fails closed* on
-  mismatch — never copies a uuid and never emits the one it disagrees with
-  (`enforce-uuid-provenance` doctrine; the check errs on the side of
-  specificity, it is not an unfalsifiability guarantee).
+* **P-1 (re-derivation):** the emitted `#u5` literal carries the NAME, not
+  hex — so the "never copy" rule becomes a comparison rule. For each
+  instance the translator recomputes
+  `UUIDv5(URL, "github.com/<owner>/<name>")` and *fails closed* if the
+  derivation disagrees with the instance's stored value. Oracle verified
+  and reproducible in CI: stdlib
+  `uuid.uuid5(NAMESPACE_URL, "github.com/hyperpolymath/rsr-template-repo")`
+  `== a5ea1382-a34c-5334-8a46-a2ebe904c810` — exactly the value the
+  canonical rsr-template instance stores (`enforce-uuid-provenance`
+  doctrine; the check errs on the side of specificity).
 * **P-2 (source must parse as a2ml first):** a source file that no longer
   parses as a2ml (e.g. already hand-"translated" halfway, containing `()`)
   is rejected before any output assignment. A source carrying `=` inside a
@@ -111,9 +116,10 @@ Fields not listed do not exist in the deed era for this family.
 * **P-3 (output must parse as DEED):** every emitted deed is parsed against
   the current normative grammar (`deed.anbf` v1.0.0 until the #837 ruling
   lands): full input consumed, `:schema-version` structurally first, unknown
-  clauses are *errors* (validator §conformance), no `=` anywhere outside a
-  symbol-legal position (grammar: `=` inside a symbol is legal; the field
-  separator `=` is not).
+  clauses are *errors* (validator §conformance), no `=` outside a
+  symbol-legal position, and string emission uses ONLY the four legal
+  escapes `\"` `\\` `\n` `\t` — `\r` and `\uXXXX` are parse errors; non-ASCII
+  is embedded raw as UTF-8.
 * **P-4 (dispatch check):** emitted filenames are tested estate-file-first;
   any repo named `estate` fails closed rather than silently matching
   `repo-deed` as a stem.
@@ -148,8 +154,8 @@ Emitted `rsr-template-repo_chora.deed`:
 (repo-deed
   :schema-version  "1.0.0"
   :canonical-name  "rsr-template-repo"
-  :repo-uuid       #u5"a5ea1382-a34c-5334-8a46-a2ebe904c810"
-  :beholding-chora #u5"<estate chora — resolved from gv-clade-index>"
+  :repo-uuid       #u5"github.com/hyperpolymath/rsr-template-repo"
+  :beholding-chora #u5"<estate chora NAME — resolved from gv-clade-index at emit time>"
 
   (identity :primary-forge github
             :owner          "hyperpolymath"
@@ -173,7 +179,7 @@ Emitted `rsr-template-repo_chora.deed`:
 
   (status   :phase        active
             :since        "2026-03-16"
-            :present      true
+            :present      #t
             :aliases      ()
             :merged-into  ""
             :superseded-by ""
