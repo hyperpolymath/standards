@@ -104,6 +104,12 @@ softfail() {
 }
 
 LOCK="$CANON/canon.lock"
+# Repo-relative twin of $LOCK. Assertion 2 passes the lock to `git diff`, whose
+# pathspecs resolve against the repository root, not the filesystem: with
+# --canon canon the pathspec "canon/canon.lock" matched nothing, `git diff
+# --quiet` therefore reported "no change", and the gate accused a PR that had
+# in fact bumped the lock of not bumping it.
+LOCK_REL="${LOCK#"$CANON"/}"
 [ -f "$LOCK" ] || { echo "ERROR: canon.lock not found at $LOCK" >&2; exit 2; }
 
 # ---------------------------------------------------------------------------
@@ -166,9 +172,28 @@ toml_path() {
 # sha256 of a path: file -> plain hash; directory -> git-ls-files method,
 # matching the registry's own source_hash definition.
 hash_path() {
-  local p="$1"
+  # $1 is a FILESYSTEM path, e.g. "$CANON/constitution/". Git pathspecs are
+  # resolved relative to the repository root and know nothing about the
+  # --canon prefix, so handing git "$CANON/constitution/" matched NOTHING;
+  # `git ls-files` printed nothing and sha256sum faithfully hashed the EMPTY
+  # stream — a plausible-looking digest for a directory that was never read.
+  #
+  # That is exactly why this gate reported "passed 8 failed 0 GATE A PASSED"
+  # locally (invoked as `--canon .`, where "./constitution/" happens to match)
+  # and "passed 6 failed 2 GATE A FAILED" in CI (invoked as `--canon canon`).
+  # The verdict depended on the SPELLING of the argument, not on the repository.
+  #
+  # Two changes: strip the prefix before handing the path to git, and refuse to
+  # hash an empty listing, so a wrong pathspec can never again look like a hash.
+  local p="$1" rel="${1#"$CANON"/}"
   if [ -d "$p" ]; then
-    ( cd "$CANON" && git ls-files -s "$p" | sha256sum | cut -d' ' -f1 )
+    local listing
+    listing="$( cd "$CANON" && git ls-files -s -- "$rel" )"
+    if [ -z "$listing" ]; then
+      echo "  ERROR: git ls-files matched no files for '$rel' in $CANON" >&2
+      return 1
+    fi
+    printf '%s\n' "$listing" | sha256sum | cut -d' ' -f1
   else
     sha256sum "$p" | cut -d' ' -f1
   fi
@@ -190,7 +215,10 @@ for slot in criteria gates applicability lifecycle constitution; do
     fail "$slot: declared path does not exist: $path"
     continue
   fi
-  got="$(hash_path "$CANON/$path")"
+  if ! got="$(hash_path "$CANON/$path")"; then
+    fail "$slot: could not hash '$path' — see the error above"
+    continue
+  fi
   if [ "$want" = "$got" ]; then
     pass "$slot  ${path}  $(echo "$got" | cut -c1-12)…"
   else
@@ -216,7 +244,7 @@ if git -C "$CANON" rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
   done
   if [ -z "$CHANGED" ]; then
     pass "no canon artefact changed against $BASE_REF"
-  elif ! git -C "$CANON" diff --quiet "$BASE_REF"...HEAD -- "$LOCK" 2>/dev/null; then
+  elif ! git -C "$CANON" diff --quiet "$BASE_REF"...HEAD -- "$LOCK_REL" 2>/dev/null; then
     pass "canon artefacts changed ($CHANGED ) and canon.lock was bumped in the same PR"
   else
     fail "canon artefacts changed ($CHANGED ) but canon.lock is untouched
