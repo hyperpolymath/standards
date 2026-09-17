@@ -95,7 +95,7 @@ skip() {
 #   1. land the canon change with 3/4/5 informational  -> releases canon.lock
 #   2. land the spine's adoption against the released hashes
 #   3. turn --strict on, so drift is a hard failure from then on
-# See docs/binding/04-EXECUTION-PLAN.md.
+# See the [canon.lockstep] section of canon.lock, which states the order.
 #
 # softfail() — a REAL deviation. Promoted to a failure by --strict.
 softfail() {
