@@ -156,8 +156,8 @@ llm-context role="dev":
 build:
     @echo "=== Standards Monorepo Build ==="
     @echo "[2/3] k9 Rust binding — moved to hyperpolymath/k9-ecosystem (rs/) under #491"
-    @echo "[3/3] groove-protocol/reference/ipv6t"
-    @cd groove-protocol/reference/ipv6t && zig build 2>&1 || echo "  SKIP: zig not available"
+    @echo "[3/3] 2-protocols/groove/reference/ipv6t"
+    @cd 2-protocols/groove/reference/ipv6t && zig build 2>&1 || echo "  SKIP: zig not available"
     @echo "=== Build complete ==="
 
 # Run all sub-project test suites
@@ -187,7 +187,7 @@ lint:
 # Clean build artifacts
 clean:
     @echo "=== Cleaning ==="
-    @cd groove-protocol/reference/ipv6t && rm -rf zig-out zig-cache .zig-cache 2>/dev/null || true
+    @cd 2-protocols/groove/reference/ipv6t && rm -rf zig-out zig-cache .zig-cache 2>/dev/null || true
     @echo "=== Clean complete ==="
 
 # Run panic-attacker pre-commit scan
