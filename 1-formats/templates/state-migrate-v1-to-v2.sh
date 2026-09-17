@@ -3,7 +3,7 @@
 # Migrate a repo's STATE.a2ml from v1 (Scheme, bloated) to v2 (thin journal).
 #
 # Extracts: phase, next_action, last_action, blockers.
-# See: a2ml-templates/STATE.a2ml.v2.spec.adoc
+# See: 1-formats/templates/STATE.a2ml.v2.spec.adoc
 #
 # Usage: state-migrate-v1-to-v2.sh <repo-root>
 
