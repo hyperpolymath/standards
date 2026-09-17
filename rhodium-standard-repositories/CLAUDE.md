@@ -11,7 +11,7 @@ This document provides comprehensive guidance for Claude AI when working with Rh
 - Primary repos root: `$REPOS_DIR` (typically `~/Documents/hyperpolymath-repos`)
 - Remote mapping: `https://github.com/hyperpolymath/<name>`; names are lowercase and dots become `-`
 - If a repo is missing locally, check the remote and sync it
-- Include `ai-cli-crash-capture/` and `contractiles/` from the template in new repos
+- Include `ai-cli-crash-capture/` and `1-formats/contractiles/` from the template in new repos
 - Mirror 6SCM files into `.machine_readable/6scm/`
 - Before any code generation, check `$REPOS_DIR/proven` for the current Idris “unbreakable” library status
 - If a project uses that Idris library, add an *Idris Inside* badge to the repo
@@ -194,7 +194,7 @@ repository-root/
 ├── CODE_OF_CONDUCT.md         # or .adoc
 ├── CONTRIBUTING.md            # or .adoc
 ├── FUNDING.yml                # MUST be .yml
-├── GOVERNANCE.adoc
+├── 0-canon/GOVERNANCE.adoc
 ├── MAINTAINERS.md
 ├── .gitignore                 # NOT "gitignore"
 ├── .gitattributes
@@ -485,7 +485,7 @@ This is **graduated trust without gatekeeping**—everyone can contribute, but s
 - ✅ Conflict resolution process
 
 #### Governance Model
-- ✅ GOVERNANCE.adoc defining decision-making
+- ✅ 0-canon/GOVERNANCE.adoc defining decision-making
 - ✅ Maintainer succession process
 - ✅ Voting procedures if applicable
 - ✅ Financial transparency if funded
