@@ -115,11 +115,34 @@ echo
 # using the [profile] spelling the script otherwise supports.
 ROLE="$(printf '%s\n' "$PBODY" | quoted_on_key role | sed -n 1p || true)"
 CARRIER=""
-if [ "$ROLE" = "spine" ]; then
-  CARRIER="$(section carrier "$GATES" | quoted_on_key paths || true)"
-  echo "role: spine - [carrier] paths exempt from VESTIGIAL"
-  echo
-fi
+# role = "spine": a template legitimately carries modules it does not declare,
+# because it ships them for the repos minted from it.
+# role = "canon": hyperpolymath/standards legitimately carries modules whose
+# gating capability cannot apply to it — the criteria SSOT is the document that
+# DEFINES the gates, not an instance of one; docs/proofs/ holds proof artefacts
+# OF THE ESTATE, not proofs of the canon's own code; and *-reusable.yml are the
+# gates every other repo CALLS and the canon SERVES.
+#
+# Without this the canon is unscorable BY CONSTRUCTION, which is the mechanical
+# reason it has never carried an rsr-profile.a2ml at all. See [canon] in the
+# gate table for the full rationale.
+case "$ROLE" in
+  spine)
+    CARRIER="$(section carrier "$GATES" | quoted_on_key paths || true)"
+    echo "role: spine - [carrier] paths exempt from VESTIGIAL"
+    echo
+    ;;
+  canon)
+    CARRIER="$(section canon "$GATES" | quoted_on_key paths || true)"
+    echo "role: canon - [canon] paths exempt from VESTIGIAL"
+    echo
+    ;;
+  "")
+    ;;
+  *)
+    echo "WARNING: unknown role '$ROLE' - no carrier exemption applied" >&2
+    ;;
+esac
 # A gate row may be an alternation ("a|b"); a carrier entry names ONE path.
 # Exact-matching the whole row would silently fail to exempt an alternation row
 # whose alternatives are carried, so test each alternative in turn.
