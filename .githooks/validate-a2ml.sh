@@ -245,7 +245,7 @@ validate_a2ml() {
     fi
 
     # The structured A2ML tree. Everything under a repo's machine tree —
-    # `machine-readable/` canonically, `.machine_readable/` in the legacy
+    # `.machine_readable/` canonically, `machine-readable/` in the minority
     # layout — is a typed agent-readable doc (CLADE, ANCHOR, STATE, ECOSYSTEM,
     # bot_directives/{debt,coverage,methodology}, ai/AI, policies/*,
     # integrations/*, …). Per the RSR convention these carry identity
@@ -256,10 +256,12 @@ validate_a2ml() {
     # positives on every repo built from the canonical template. Files outside
     # the machine tree are still validated.
     #
-    # The machine tree is named `machine-readable/` canonically (un-hidden
-    # 2026-08); `.machine_readable/` is the LEGACY name. BOTH are matched: the
-    # canon, scaffoldia, the julia variant and ~300 minted repos still carry the
-    # dotted form, while rsr-template-repo has moved. Matching only one name
+    # The machine tree is named `.machine_readable/` canonically (owner ruling
+    # 2026-09-17); `machine-readable/` is the minority spelling that
+    # rsr-template-repo adopted when it un-hid the tree in 2026-08 and has now
+    # reverted. BOTH are matched, and must stay matched: the canon, scaffoldia,
+    # the julia variant and ~300 minted repos carry the dotted form while ~9
+    # carry the hyphenated one. Matching only one name
     # makes whichever half of the estate has not migrated fail this check with
     # 16 spurious "missing identity field" errors -- which is exactly what
     # happened when the template renamed its tree and this action, being a
