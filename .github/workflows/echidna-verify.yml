@@ -7,6 +7,13 @@
 #   - a2ml/src/A2ML/Proofs.idr
 #   - avow-protocol/avow-lib/src/abi/*.idr
 #
+# Proof-corpus status (issue #748): all three corpora are EVICTED from this
+# repo and live in their own repos today. Each job therefore opens with a
+# presence Guard that bows out honestly ("Nothing to type-check", green,
+# toolchain spend skipped) instead of crashing deep in the job; if a corpus
+# ever returns, the job verifies it again unchanged. The jobs stay so the
+# check names keep reporting on every proof-touching run.
+#
 # Dogfooding: standards repo defines ECHIDNA trust pipeline; this workflow
 # applies that pipeline to the repo's own proofs.
 
@@ -87,7 +94,23 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Guard — proofs are evicted from this repo
+        id: guard
+        run: |
+          # Same honesty guard idris2-avow got (see its Type-check step),
+          # placed BEFORE the toolchain install so the weekly cron stops
+          # spending minutes bootstrapping for a directory that does not
+          # exist. lol/proofs moved to the lol repository; if the corpus ever
+          # returns here, this job verifies again, unchanged (issue #748).
+          if [ ! -d lol/proofs ]; then
+            echo "::notice title=Agda proofs::lol/proofs is absent here — proofs were evicted to the lol repository. Nothing to type-check; remaining steps skipped."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Agda
+        if: steps.guard.outputs.present == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y agda agda-stdlib
@@ -95,6 +118,7 @@ jobs:
 
       - name: Type-check proofs
         id: typecheck
+        if: steps.guard.outputs.present == 'true'
         run: |
           set -e
           echo "=== Agda proofs under lol/proofs ==="
@@ -106,6 +130,7 @@ jobs:
           done
 
       - name: Postulate audit
+        if: steps.guard.outputs.present == 'true'
         run: |
           echo "=== Postulate usage in lol/proofs ==="
           grep -rn "postulate" lol/proofs/theories/ || echo "No postulates found"
@@ -130,7 +155,23 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Guard — proofs are evicted from this repo
+        id: guard
+        run: |
+          # This job used to burn ~18 minutes bootstrapping Idris2 via pack
+          # and THEN `cd a2ml` into a directory that does not exist (the
+          # A2ML proof corpus lives in the a2ml repository now). Guard first,
+          # before any toolchain spend; if the corpus returns, the job
+          # verifies again, unchanged (issue #748).
+          if [ ! -d a2ml ]; then
+            echo "::notice title=Idris2 a2ml proofs::a2ml/ is absent here — the proof corpus was evicted to the a2ml repository. Nothing to type-check; remaining steps skipped."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Cache pack
+        if: steps.guard.outputs.present == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4
         with:
           path: |
@@ -141,6 +182,7 @@ jobs:
             ${{ runner.os }}-idris2-pack-
 
       - name: Install Idris2 via pack
+        if: steps.guard.outputs.present == 'true'
         run: |
           set -e
           if command -v idris2 >/dev/null 2>&1; then
@@ -172,6 +214,7 @@ jobs:
           idris2 --version
 
       - name: Type-check normative A2ML core
+        if: steps.guard.outputs.present == 'true'
         run: |
           set -euo pipefail
           export PATH="$HOME/.pack/bin:$PATH"

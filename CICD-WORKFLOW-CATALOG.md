@@ -120,7 +120,7 @@ These workflows only run when manually triggered.
 |----------|-------------|--------|----------|
 | `elixir-ci.yml` | Elixir build and test | rsr-template-repo | No |
 | `elixir-ci-reusable.yml` | Reusable Elixir CI | standards | Yes |
-| `echidna-verify.yml` | Echidna smart contract verification | standards | Yes |
+| `echidna-verify.yml` | ECHIDNA trust-pipeline proof verification (Agda/Idris2). NOT the smart-contract fuzzer. As of #748 all proof corpora are evicted to their own repos; each job starts with a presence Guard and passes green-but-honest ("Nothing to type-check") until a corpus returns — it is dormant, not broken. | standards | Yes |
 
 ### Julia
 | Workflow | Description | Source | Reusable? |
