@@ -60,15 +60,15 @@ TOPOLOGY="TOPOLOGY.adoc"
 # ---------------------------------------------------------------------------
 read -r -d '' SPECS <<'TSV' || true
 estate-constitution|governance|0-canon/constitution/|Hyperpolymath Estate Constitution|the highest estate-level rules, authority precedence, assurance, contribution, exceptions, and known tensions
-k9-svc|foundation|k9-svc/|K9 Self-Validating Components|the K9 specification, security analysis and adoption guidance (implementations live in hyperpolymath/k9-ecosystem)
+k9-svc|foundation|1-formats/k9/|K9 Self-Validating Components|the K9 specification, security analysis and adoption guidance (implementations live in hyperpolymath/k9-ecosystem)
 contractiles|foundation|1-formats/contractiles/|Contractiles (Must/Trust/Dust/Intend)|policy-enforcement primitives the K9 layer is built from
-meta-a2ml|foundation|meta-a2ml/|META.a2ml spec|architecture decisions / governance metadata format
-state-a2ml|foundation|state-a2ml/|STATE.a2ml spec|project-state metadata format (drives this registry's topology)
-ecosystem-a2ml|foundation|ecosystem-a2ml/|ECOSYSTEM.a2ml spec|ecosystem-positioning metadata format
-agentic-a2ml|foundation|agentic-a2ml/|AGENTIC.a2ml spec|AI-agent operational gating / entropy budgets
-neurosym-a2ml|foundation|neurosym-a2ml/|NEUROSYM.a2ml spec|symbolic semantics / proof obligations
-playbook-a2ml|foundation|playbook-a2ml/|PLAYBOOK.a2ml spec|executable operational runbooks
-anchor-a2ml|foundation|anchor-a2ml/|ANCHOR.a2ml spec|project-recalibration intervention format
+meta-a2ml|foundation|1-formats/a2ml/meta/|META.a2ml spec|architecture decisions / governance metadata format
+state-a2ml|foundation|1-formats/a2ml/state/|STATE.a2ml spec|project-state metadata format (drives this registry's topology)
+ecosystem-a2ml|foundation|1-formats/a2ml/ecosystem/|ECOSYSTEM.a2ml spec|ecosystem-positioning metadata format
+agentic-a2ml|foundation|1-formats/a2ml/agentic/|AGENTIC.a2ml spec|AI-agent operational gating / entropy budgets
+neurosym-a2ml|foundation|1-formats/a2ml/neurosym/|NEUROSYM.a2ml spec|symbolic semantics / proof obligations
+playbook-a2ml|foundation|1-formats/a2ml/playbook/|PLAYBOOK.a2ml spec|executable operational runbooks
+anchor-a2ml|foundation|1-formats/a2ml/anchor/|ANCHOR.a2ml spec|project-recalibration intervention format
 0-ai-gatekeeper-protocol|protocol|0-ai-gatekeeper-protocol/|0-AI Gatekeeper Protocol|the AI-agent entry/gating protocol behind 0-AI-MANIFEST
 k9-coordination-protocol|protocol|k9-coordination-protocol/|K9 Coordination Protocol|multi-agent coordination on top of K9
 avow-protocol|protocol|avow-protocol/|AVOW Protocol|consent-attested messaging / origin attribution
