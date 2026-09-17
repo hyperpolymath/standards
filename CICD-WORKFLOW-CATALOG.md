@@ -120,7 +120,7 @@ These workflows only run when manually triggered.
 |----------|-------------|--------|----------|
 | `elixir-ci.yml` | Elixir build and test | rsr-template-repo | No |
 | `elixir-ci-reusable.yml` | Reusable Elixir CI | standards | Yes |
-| `echidna-verify.yml` | ECHIDNA trust-pipeline proof verification (Agda/Idris2). NOT the smart-contract fuzzer. As of #748 all proof corpora are evicted to their own repos; each job starts with a presence Guard and passes green-but-honest ("Nothing to type-check") until a corpus returns — it is dormant, not broken. | standards | Yes |
+| `echidna-verify.yml` | ECHIDNA trust-pipeline proof verification (Agda/Idris2). NOT the smart-contract fuzzer. Corpora are evicted to their own repos; surviving jobs (`agda-lol`, `idris2-avow`) open with a presence Guard and pass green-but-honest ("Nothing to type-check") until a corpus returns (#748/#828). The `idris2-a2ml` job is EVICTED as of 2026-09-17: the a2ml project is officially retired (owner ruling), so dormancy was moot — no ruleset pinned its check context (verified live: org ruleset Optimus-Branch #23359343). | standards | Yes |
 
 ### Julia
 | Workflow | Description | Source | Reusable? |
