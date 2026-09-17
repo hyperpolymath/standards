@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # verify-claims.sh — reference verifier for the DYADT claim format.
-# See did-you-actually-do-that/spec/{CLAIM-FORMAT,VERIFICATION-PROTOCOL}.adoc.
+# See 1-formats/sub-specs/did-you-actually-do-that/spec/{CLAIM-FORMAT,VERIFICATION-PROTOCOL}.adoc.
 #
 # Re-derives each claim's outcome from PRIMARY EVIDENCE (git tree, real command
 # runs) — never from the agent's own statement/evidence text — and emits one

@@ -24,7 +24,7 @@
 # default; GitHub-required community-health files stay Markdown):
 #   README.adoc | README.md
 #   LICENSE | LICENSE.txt | LICENSE.md
-#   CONTRIBUTING.md | CONTRIBUTING.adoc
+#   CONTRIBUTING.md | 3-practice/CONTRIBUTING.adoc
 #
 # Usage: check-docs-presence.sh [repo-root]
 #
@@ -83,7 +83,7 @@ grace_missing=""
 have README.adoc README.md      || blocking_missing="$blocking_missing README"
 have LICENSE LICENSE.txt LICENSE.md || blocking_missing="$blocking_missing LICENSE"
 
-if ! have CONTRIBUTING.md CONTRIBUTING.adoc; then
+if ! have CONTRIBUTING.md 3-practice/CONTRIBUTING.adoc; then
   # String comparison is sound here: YYYY-MM-DD sorts chronologically, and both
   # operands are format-validated above.
   if [[ "$TODAY" < "$ENFORCE_CONTRIBUTING_FROM" ]]; then
@@ -104,7 +104,7 @@ if [ -n "$blocking_missing" ]; then
   echo "Required at the repository root (either extension where two are listed):"
   echo "  README.adoc      (or README.md)"
   echo "  LICENSE          (or LICENSE.txt / LICENSE.md)"
-  echo "  CONTRIBUTING.md  (or CONTRIBUTING.adoc)"
+  echo "  CONTRIBUTING.md  (or 3-practice/CONTRIBUTING.adoc)"
   echo
   echo "Estate policy: docs are AsciiDoc by default; see hyperpolymath/standards."
   exit 1

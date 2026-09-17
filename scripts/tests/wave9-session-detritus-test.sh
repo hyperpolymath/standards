@@ -24,8 +24,8 @@ for retired in \
   contractile.just \
   audit-contractiles.sh \
   SECURITY_TRAINING_SUMMARY.md \
-  axel-protocol/SONNET-TASKS.adoc \
-  0-ai-gatekeeper-protocol/AI-GATEKEEPER-PROTOCOL-COMPLETE-2026-02-07.adoc \
+  2-protocols/axel/SONNET-TASKS.adoc \
+  2-protocols/0-ai-gatekeeper/AI-GATEKEEPER-PROTOCOL-COMPLETE-2026-02-07.adoc \
   automation/K9-AUTOMATION-SPEC.a2ml \
   interop/CRG-TRG-RSR-MAPPING.a2ml \
   templates/TEMPLATE-VERSIONING-SPEC.a2ml \

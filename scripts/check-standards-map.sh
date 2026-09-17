@@ -16,7 +16,7 @@
 #        absence fails.
 #    The second half is the important one. … A one-directional allowlist only
 #    ever ratchets open."
-#                                     — rsr-template-repo/machine-readable/root-allow.txt
+#                                     — rsr-template-repo/.machine_readable/root-allow.txt
 #
 # That comment was written after a root cleanup left stale PERMISSIONS behind,
 # so the allowlist had "quietly become a licence for the very drift it was

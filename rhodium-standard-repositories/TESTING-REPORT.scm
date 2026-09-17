@@ -190,7 +190,7 @@
         (total 17)
         (failures
           ("README.md present" "Uses README.adoc instead")
-          ("CONTRIBUTING.md present" "Uses CONTRIBUTING.adoc instead")))
+          ("CONTRIBUTING.md present" "Uses 3-practice/CONTRIBUTING.adoc instead")))
       (security-architecture
         (passed 6)
         (total 6))
@@ -218,7 +218,7 @@
         (passed 5)
         (total 6)
         (failures
-          ("CONTRIBUTING.md present" "Uses CONTRIBUTING.adoc instead")))
+          ("CONTRIBUTING.md present" "Uses 3-practice/CONTRIBUTING.adoc instead")))
       (maa
         (passed 3)
         (total 4))

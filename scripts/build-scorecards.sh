@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
-# build-scorecards.sh — regenerate COMPLIANCE-DASHBOARD.adoc from the per-spec
+# build-scorecards.sh — regenerate 0-canon/COMPLIANCE-DASHBOARD.adoc from the per-spec
 # scorecards under .machine_readable/scorecards/.
 #
 # This mirrors scripts/build-registry.sh exactly in spirit:
 #   * The SCORECARDS are the hand-authored source of truth (one per LOCAL spec
 #     in REGISTRY.a2ml, keyed by spec_id, validated by scorecard.schema.json).
-#   * COMPLIANCE-DASHBOARD.adoc is DERIVED and MUST NOT be hand-edited.
+#   * 0-canon/COMPLIANCE-DASHBOARD.adoc is DERIVED and MUST NOT be hand-edited.
 #   * Deterministic + idempotent (no timestamps in generated output — the
 #     assessed_date lives in each source scorecard). Run twice → identical.
 #   * Honest. A `pass` requires evidence; an `aspirational` requirement is NEVER
@@ -22,7 +22,7 @@
 #   * every scorecard MUST key to a registered spec (orphan → hard error).
 #
 # Usage:
-#   bash scripts/build-scorecards.sh            # write COMPLIANCE-DASHBOARD.adoc
+#   bash scripts/build-scorecards.sh            # write 0-canon/COMPLIANCE-DASHBOARD.adoc
 #   bash scripts/build-scorecards.sh --check    # verify in sync; non-zero on drift
 #   bash scripts/build-scorecards.sh --strict   # also fail if any spec lacks a scorecard
 #   bash scripts/build-scorecards.sh --verify   # RUN every pass-row's `check`;
@@ -44,7 +44,7 @@ done
 
 REGISTRY=".machine_readable/REGISTRY.a2ml"
 SCDIR=".machine_readable/scorecards"
-DASHBOARD="COMPLIANCE-DASHBOARD.adoc"
+DASHBOARD="0-canon/COMPLIANCE-DASHBOARD.adoc"
 SCHEMA="$SCDIR/scorecard.schema.json"
 
 [ -f "$REGISTRY" ] || { echo "error: $REGISTRY not found (run: just registry)" >&2; exit 2; }
@@ -147,7 +147,7 @@ extract_checks() {
 # Why this exists: a check whose tool is absent is indistinguishable from a
 # check that ran and failed, so the verifier accused the repo of claiming a
 # fake pass. `xmllint` missing surfaced as exit 127; ripgrep missing made
-# release-pre-flight/v1-audit.sh exit 2, so its greps matched nothing and
+# 3-practice/release-pre-flight/v1-audit.sh exit 2, so its greps matched nothing and
 # returned 1. All seven were reported as "the pass is not real" — and all
 # seven passes were in fact real.
 #
@@ -274,7 +274,7 @@ emit_dashboard() {
 
   cat <<'HEADER'
 // SPDX-License-Identifier: CC-BY-SA-4.0
-// COMPLIANCE-DASHBOARD.adoc — DERIVED from .machine_readable/scorecards/*.scorecard.a2ml
+// 0-canon/COMPLIANCE-DASHBOARD.adoc — DERIVED from .machine_readable/scorecards/*.scorecard.a2ml
 // GENERATED FILE — DO NOT EDIT BY HAND. Run: just scorecards (scripts/build-scorecards.sh)
 
 = Standards Compliance Dashboard (derived)
@@ -364,7 +364,7 @@ HEADER
 == How this dashboard stays honest
 
 ....
-scorecards/*.scorecard.a2ml ──► scripts/build-scorecards.sh ──► COMPLIANCE-DASHBOARD.adoc
+scorecards/*.scorecard.a2ml ──► scripts/build-scorecards.sh ──► 0-canon/COMPLIANCE-DASHBOARD.adoc
         (hand-authored)                      │
    validated vs scorecard.schema.json        ▼
                                     just scorecards-check (CI)

@@ -78,8 +78,8 @@
 ;;    - Banned: TypeScript, Node/npm, Go, Python (except SaltStack), Java/Kotlin, Swift
 ;;
 ;; 4. REQUIRED FILES (by tier)
-;;    - Bronze: README, LICENSE.txt, SECURITY.md, .gitignore, .gitattributes
-;;    - Silver: +GOVERNANCE.adoc, MAINTAINERS.md, FUNDING.yml, .well-known/security.txt
+;;    - Bronze: README, LICENSE.txt, 3-practice/SECURITY.md, .gitignore, .gitattributes
+;;    - Silver: +0-canon/GOVERNANCE.adoc, MAINTAINERS.md, FUNDING.yml, .well-known/security.txt
 ;;    - Gold: +STATE.scm, META.scm, ECOSYSTEM.scm, .well-known/{ai,humans,provenance}
 ;;    - Rhodium: +Formal verification, community recognition
 ;;

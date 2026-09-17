@@ -49,7 +49,7 @@ fn check_compliance() -> Result<(), io::Error> {
         ("Documentation", vec![
             "README.md present",
             "LICENSE.txt (dual: MIT + Palimpsest)",
-            "SECURITY.md with vulnerability reporting",
+            "3-practice/SECURITY.md with vulnerability reporting",
             "CONTRIBUTING.md with TPCF framework",
             "CODE_OF_CONDUCT.md",
         ]),

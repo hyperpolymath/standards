@@ -263,10 +263,12 @@ echo "[3] spine declares the same criteria hash"
 if [ -z "$SPINE" ] || [ ! -d "$SPINE" ]; then
   skip "no --spine DIR given (set --strict in CI release jobs)"
 else
-  PROFILE="$SPINE/machine-readable/rsr-profile.a2ml"
-  [ -f "$PROFILE" ] || PROFILE="$SPINE/.machine_readable/rsr-profile.a2ml"
+  PROFILE="$SPINE/.machine_readable/rsr-profile.a2ml"
+  # Hyphenated is the minority spelling, not a rejected one: this branch stays so
+  # the ~9 repos still carrying it keep resolving.
+  [ -f "$PROFILE" ] || PROFILE="$SPINE/machine-readable/rsr-profile.a2ml"
   if [ ! -f "$PROFILE" ]; then
-    softfail "spine has no rsr-profile.a2ml at either machine-readable/ or .machine_readable/"
+    softfail "spine has no rsr-profile.a2ml at either .machine_readable/ or machine-readable/"
   else
     WANT="$(toml_hash criteria)"
     GOT="$(grep -E '^[[:space:]]*criteria_sha256[[:space:]]*=' "$PROFILE" \
@@ -325,12 +327,19 @@ echo
 # ASSERTION 5 — the canon satisfies its own law
 # ===========================================================================
 echo "[5] the canon scores Gold on its own applicable set"
-# Mirror scripts/check-rsr-profile.sh's own convention: the canonical machine
-# tree is machine-readable/, but the LEGACY dotted form is still accepted
-# "because the canon, scaffoldia, the julia variant and ~300 minted repos all
-# still carry it". This repo is one of them until the rename lands.
-CANON_PROFILE="$CANON/machine-readable/rsr-profile.a2ml"
-[ -f "$CANON_PROFILE" ] || CANON_PROFILE="$CANON/.machine_readable/rsr-profile.a2ml"
+# The canonical machine tree is `.machine_readable/`. This comment previously
+# said the opposite — that the dotted form was "LEGACY" and tolerating it was a
+# temporary shim. That was backwards. The census recorded in rsr-template-repo's
+# docs/governance/TEMPLATE-LINEAGE-AUDIT.adoc at the 2026-08 divergence is 48
+# repositories on the dotted form against 9 on the hyphenated one, and the
+# "~300 minted repos" this comment used to cite as the reason for tolerating
+# dotted are that same majority.
+#
+# So both branches below are permanent, not a shim. Dotted is canonical;
+# hyphenated must still RESOLVE, never be rejected — a repo pinned to the
+# minority spelling is not a repo with a broken gate.
+CANON_PROFILE="$CANON/.machine_readable/rsr-profile.a2ml"
+[ -f "$CANON_PROFILE" ] || CANON_PROFILE="$CANON/machine-readable/rsr-profile.a2ml"
 if [ ! -f "$CANON_PROFILE" ]; then
   softfail "the canon has NO rsr-profile.a2ml — it cannot be scored by the checker
        it ships (scripts/check-rsr-profile.sh exits 2 on this repo).

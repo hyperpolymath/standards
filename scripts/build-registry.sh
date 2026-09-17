@@ -59,34 +59,34 @@ TOPOLOGY="TOPOLOGY.adoc"
 # Add a row here when a new spec lands; the hash + topology follow automatically.
 # ---------------------------------------------------------------------------
 read -r -d '' SPECS <<'TSV' || true
-estate-constitution|governance|constitution/|Hyperpolymath Estate Constitution|the highest estate-level rules, authority precedence, assurance, contribution, exceptions, and known tensions
-k9-svc|foundation|k9-svc/|K9 Self-Validating Components|the K9 specification, security analysis and adoption guidance (implementations live in hyperpolymath/k9-ecosystem)
-contractiles|foundation|contractiles/|Contractiles (Must/Trust/Dust/Intend)|policy-enforcement primitives the K9 layer is built from
-meta-a2ml|foundation|meta-a2ml/|META.a2ml spec|architecture decisions / governance metadata format
-state-a2ml|foundation|state-a2ml/|STATE.a2ml spec|project-state metadata format (drives this registry's topology)
-ecosystem-a2ml|foundation|ecosystem-a2ml/|ECOSYSTEM.a2ml spec|ecosystem-positioning metadata format
-agentic-a2ml|foundation|agentic-a2ml/|AGENTIC.a2ml spec|AI-agent operational gating / entropy budgets
-neurosym-a2ml|foundation|neurosym-a2ml/|NEUROSYM.a2ml spec|symbolic semantics / proof obligations
-playbook-a2ml|foundation|playbook-a2ml/|PLAYBOOK.a2ml spec|executable operational runbooks
-anchor-a2ml|foundation|anchor-a2ml/|ANCHOR.a2ml spec|project-recalibration intervention format
-0-ai-gatekeeper-protocol|protocol|0-ai-gatekeeper-protocol/|0-AI Gatekeeper Protocol|the AI-agent entry/gating protocol behind 0-AI-MANIFEST
-k9-coordination-protocol|protocol|k9-coordination-protocol/|K9 Coordination Protocol|multi-agent coordination on top of K9
-avow-protocol|protocol|avow-protocol/|AVOW Protocol|consent-attested messaging / origin attribution
-axel-protocol|protocol|axel-protocol/|AXEL Protocol|age-gating + explicit-content enforcement
-overlay-protocol|protocol|overlay-protocol/|Overlay Protocol|layered overlay composition spec
+estate-constitution|governance|0-canon/constitution/|Hyperpolymath Estate Constitution|the highest estate-level rules, authority precedence, assurance, contribution, exceptions, and known tensions
+k9-svc|foundation|1-formats/k9/|K9 Self-Validating Components|the K9 specification, security analysis and adoption guidance (implementations live in hyperpolymath/k9-ecosystem)
+contractiles|foundation|1-formats/contractiles/|Contractiles (Must/Trust/Dust/Intend)|policy-enforcement primitives the K9 layer is built from
+meta-a2ml|foundation|1-formats/a2ml/meta/|META.a2ml spec|architecture decisions / governance metadata format
+state-a2ml|foundation|1-formats/a2ml/state/|STATE.a2ml spec|project-state metadata format (drives this registry's topology)
+ecosystem-a2ml|foundation|1-formats/a2ml/ecosystem/|ECOSYSTEM.a2ml spec|ecosystem-positioning metadata format
+agentic-a2ml|foundation|1-formats/a2ml/agentic/|AGENTIC.a2ml spec|AI-agent operational gating / entropy budgets
+neurosym-a2ml|foundation|1-formats/a2ml/neurosym/|NEUROSYM.a2ml spec|symbolic semantics / proof obligations
+playbook-a2ml|foundation|1-formats/a2ml/playbook/|PLAYBOOK.a2ml spec|executable operational runbooks
+anchor-a2ml|foundation|1-formats/a2ml/anchor/|ANCHOR.a2ml spec|project-recalibration intervention format
+0-ai-gatekeeper-protocol|protocol|2-protocols/0-ai-gatekeeper/|0-AI Gatekeeper Protocol|the AI-agent entry/gating protocol behind 0-AI-MANIFEST
+k9-coordination-protocol|protocol|2-protocols/k9-coordination/|K9 Coordination Protocol|multi-agent coordination on top of K9
+avow-protocol|protocol|2-protocols/avow/|AVOW Protocol|consent-attested messaging / origin attribution
+axel-protocol|protocol|2-protocols/axel/|AXEL Protocol|age-gating + explicit-content enforcement
+overlay-protocol|protocol|2-protocols/overlay/|Overlay Protocol|layered overlay composition spec
 adoption-readiness-grades|readiness|adoption-readiness-grades/|ARG — Adoption Readiness Grades|per-language adoption-maturity profile templates
 foundations-readiness-grades|readiness|foundations-readiness-grades/|FRG — Foundations Readiness Grades|per-language foundational-maturity profile templates
 component-readiness-grades|readiness|component-readiness-grades/|CRG — Component Readiness Grades|the X..A grading system for components
 toolchain-readiness-grades|readiness|toolchain-readiness-grades/|TRG — Toolchain Readiness Grades|per-toolchain readiness profile templates
 rhodium-standard-repositories|governance|rhodium-standard-repositories/|RSR — Rhodium Standard Repositories|the repository-compliance standard every repo is graded against
-session-management-standards|governance|session-management-standards/|Session Management Standards|continuity / verify / handover protocols
-did-you-actually-do-that|governance|did-you-actually-do-that/|DYADT — Did-You-Actually-Do-That|post-action agent-claim verification (Tier 4 accountability)
-ensaid-config|governance|ensaid-config/|ENSAID Config|the ensaid configuration standard
-accessibility|governance|accessibility/|Accessibility Standard|estate accessibility requirements
-publication-pre-flight|governance|publication-pre-flight/|Publication Pre-Flight|submission gate (HOL + Zenodo checklists)
-release-pre-flight|governance|release-pre-flight/|Release Pre-Flight (V1 Gate)|hard v1.0.0 audit requirements
+session-management-standards|governance|3-practice/session-management-standards/|Session Management Standards|continuity / verify / handover protocols
+did-you-actually-do-that|governance|1-formats/sub-specs/did-you-actually-do-that/|DYADT — Did-You-Actually-Do-That|post-action agent-claim verification (Tier 4 accountability)
+ensaid-config|governance|1-formats/sub-specs/ensaid-config/|ENSAID Config|the ensaid configuration standard
+accessibility|governance|3-practice/accessibility/|Accessibility Standard|estate accessibility requirements
+publication-pre-flight|governance|3-practice/publication-pre-flight/|Publication Pre-Flight|submission gate (HOL + Zenodo checklists)
+release-pre-flight|governance|3-practice/release-pre-flight/|Release Pre-Flight (V1 Gate)|hard v1.0.0 audit requirements
 hypatia-rules|integration|hypatia-rules/|Standards Hypatia Rules|the dogfooding rules that scan THIS repo (incl. drift detection)
-a2ml-templates|integration|a2ml-templates/|A2ML Templates|copy-in templates for the 7 A2ML files
+a2ml-templates|integration|1-formats/templates/|A2ML Templates|copy-in templates for the 7 A2ML files
 TSV
 
 # ---------------------------------------------------------------------------

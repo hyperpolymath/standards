@@ -5,7 +5,7 @@
 # requires: just >= 1.19.0   (import? optional-import support)
 # Enforced by the `tooling-version-integrity` must-check, not self-
 # enforcing: import? fails at parse time before any recipe can guard it.
-# See TOOLING-VERSION-INTEGRITY-POLICY.adoc (root cause: burble#39).
+# See 3-practice/TOOLING-VERSION-INTEGRITY-POLICY.adoc (root cause: burble#39).
 
 default:
     @just --list
@@ -99,7 +99,7 @@ hooks-install:
 scorecards:
     @bash scripts/build-scorecards.sh
 
-# Fail if COMPLIANCE-DASHBOARD.adoc has drifted from the scorecards
+# Fail if 0-canon/COMPLIANCE-DASHBOARD.adoc has drifted from the scorecards
 scorecards-check:
     @bash scripts/build-scorecards.sh --check
 
@@ -118,7 +118,7 @@ verify-claims path="CLAIMS.a2ml":
 
 # DYADT: run the conformance vector suite
 dyadt-conformance:
-    @bash did-you-actually-do-that/spec/conformance/run-conformance.sh
+    @bash 1-formats/sub-specs/did-you-actually-do-that/spec/conformance/run-conformance.sh
 
 # DYADT regression test (confirm/refute/unverifiable + guards)
 dyadt-test:
@@ -156,8 +156,8 @@ llm-context role="dev":
 build:
     @echo "=== Standards Monorepo Build ==="
     @echo "[2/3] k9 Rust binding — moved to hyperpolymath/k9-ecosystem (rs/) under #491"
-    @echo "[3/3] groove-protocol/reference/ipv6t"
-    @cd groove-protocol/reference/ipv6t && zig build 2>&1 || echo "  SKIP: zig not available"
+    @echo "[3/3] 2-protocols/groove/reference/ipv6t"
+    @cd 2-protocols/groove/reference/ipv6t && zig build 2>&1 || echo "  SKIP: zig not available"
     @echo "=== Build complete ==="
 
 # Run all sub-project test suites
@@ -187,7 +187,7 @@ lint:
 # Clean build artifacts
 clean:
     @echo "=== Cleaning ==="
-    @cd groove-protocol/reference/ipv6t && rm -rf zig-out zig-cache .zig-cache 2>/dev/null || true
+    @cd 2-protocols/groove/reference/ipv6t && rm -rf zig-out zig-cache .zig-cache 2>/dev/null || true
     @echo "=== Clean complete ==="
 
 # Run panic-attacker pre-commit scan

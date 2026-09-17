@@ -79,7 +79,7 @@ done < <(find "$WF_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \
 echo "tooling-integrity-lint: R1(blocking)=$r1  R4(soft-gate)=$r4  strict=$STRICT"
 
 if [ "$r1" -gt 0 ]; then
-  echo "tooling-integrity-lint: FAIL — $r1 unversioned family-tool install(s). See TOOLING-VERSION-INTEGRITY-POLICY.adoc Rule 1"
+  echo "tooling-integrity-lint: FAIL — $r1 unversioned family-tool install(s). See 3-practice/TOOLING-VERSION-INTEGRITY-POLICY.adoc Rule 1"
   exit 1
 fi
 if [ "$STRICT" -eq 1 ] && [ "$r4" -gt 0 ]; then

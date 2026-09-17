@@ -190,19 +190,19 @@
   (check 2 "2.1.2" "LICENSE.txt present (plain text)"
          (lambda () (file-exists? (repo-file "LICENSE.txt"))))
 
-  ;; 2.1.3 - SECURITY.md
-  (check 2 "2.1.3" "SECURITY.md present"
-         (lambda () (file-exists? (repo-file "SECURITY.md"))))
+  ;; 2.1.3 - 3-practice/SECURITY.md
+  (check 2 "2.1.3" "3-practice/SECURITY.md present"
+         (lambda () (file-exists? (repo-file "3-practice/SECURITY.md"))))
 
   ;; 2.1.4 - Code of Conduct
   (check 2 "2.1.4" "CODE_OF_CONDUCT present"
          (lambda () (or (file-exists? (repo-file "CODE_OF_CONDUCT.md"))
-                        (file-exists? (repo-file "CODE_OF_CONDUCT.adoc")))))
+                        (file-exists? (repo-file "3-practice/CODE_OF_CONDUCT.adoc")))))
 
   ;; 2.1.5 - Contributing
   (check 2 "2.1.5" "CONTRIBUTING present"
          (lambda () (or (file-exists? (repo-file "CONTRIBUTING.md"))
-                        (file-exists? (repo-file "CONTRIBUTING.adoc")))))
+                        (file-exists? (repo-file "3-practice/CONTRIBUTING.adoc")))))
 
   ;; 2.1.6 - Funding
   (check 2 "2.1.6" "FUNDING.yml present"
@@ -210,8 +210,8 @@
                         (file-exists? (repo-file ".github/FUNDING.yml")))))
 
   ;; 2.1.7 - Governance
-  (check 2 "2.1.7" "GOVERNANCE.adoc present"
-         (lambda () (or (file-exists? (repo-file "GOVERNANCE.adoc"))
+  (check 2 "2.1.7" "0-canon/GOVERNANCE.adoc present"
+         (lambda () (or (file-exists? (repo-file "0-canon/GOVERNANCE.adoc"))
                         (file-exists? (repo-file "GOVERNANCE.md")))))
 
   ;; 2.1.8 - Maintainers
@@ -271,12 +271,12 @@
   (check 3 "3.5.1" "No node_modules/ (post-JavaScript)"
          (lambda () (not (dir-exists? (repo-file "node_modules")))))
 
-  ;; SECURITY.md content
-  (check 3 "sec.1" "SECURITY.md has vulnerability reporting"
-         (lambda () (file-contains? "SECURITY.md" "[Rr]eport")))
+  ;; 3-practice/SECURITY.md content
+  (check 3 "sec.1" "3-practice/SECURITY.md has vulnerability reporting"
+         (lambda () (file-contains? "3-practice/SECURITY.md" "[Rr]eport")))
 
-  (check 3 "sec.2" "SECURITY.md has response timeline"
-         (lambda () (file-contains? "SECURITY.md" "[0-9]+ hours?"))))
+  (check 3 "sec.2" "3-practice/SECURITY.md has response timeline"
+         (lambda () (file-contains? "3-practice/SECURITY.md" "[0-9]+ hours?"))))
 
 ;; =============================================================================
 ;; Category 4: Architecture Principles (10%)
@@ -342,21 +342,21 @@
   ;; Code of Conduct
   (check 10 "10.1.1" "CODE_OF_CONDUCT present"
          (lambda () (or (file-exists? (repo-file "CODE_OF_CONDUCT.md"))
-                        (file-exists? (repo-file "CODE_OF_CONDUCT.adoc")))))
+                        (file-exists? (repo-file "3-practice/CODE_OF_CONDUCT.adoc")))))
 
   (check 10 "10.1.2" "CoC addresses harassment"
          (lambda () (or (file-contains? "CODE_OF_CONDUCT.md" "[Hh]arass")
-                        (file-contains? "CODE_OF_CONDUCT.adoc" "[Hh]arass"))))
+                        (file-contains? "3-practice/CODE_OF_CONDUCT.adoc" "[Hh]arass"))))
 
   ;; Governance
   (check 10 "10.2.1" "GOVERNANCE document present"
-         (lambda () (or (file-exists? (repo-file "GOVERNANCE.adoc"))
+         (lambda () (or (file-exists? (repo-file "0-canon/GOVERNANCE.adoc"))
                         (file-exists? (repo-file "GOVERNANCE.md")))))
 
   ;; TPCF framework
   (check 10 "10.3.1" "TPCF mentioned in CONTRIBUTING"
          (lambda () (or (file-contains? "CONTRIBUTING.md" "TPCF\\|[Pp]erimeter")
-                        (file-contains? "CONTRIBUTING.adoc" "TPCF\\|[Pp]erimeter")))))
+                        (file-contains? "3-practice/CONTRIBUTING.adoc" "TPCF\\|[Pp]erimeter")))))
 
 ;; =============================================================================
 ;; Scoring & Tier Calculation
