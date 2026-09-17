@@ -1,97 +1,424 @@
+// SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath)
+// SPDX-License-Identifier: MPL-2.0
 // SPDX-License-Identifier: CC-BY-SA-4.0
-// K9 Coordination Protocol - README
+
 = K9 Coordination Protocol
 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-:revdate: 2026-04-03
-:description: Universal AI agent coordination via K9 structured data files
+:version: 1.1.0
+:status: STABLE
+:revdate: 2026-04-09
 :toc:
+:toclevels: 2
+
+== Status
+
+The K9 Coordination File Specification is *STABLE* at version {version}.
+
+The normative parsing grammar is
+link:grammars/k9.abnf[K9 ABNF v1.1.1]. If this README or the prose
+specification disagrees with the ABNF about syntax, the ABNF wins.
+
+The implementation roadmap is currently at *Phase 1*. The grammar already
+supports the optional `coordination:` section used by Phase 2.
 
 == Overview
 
-The K9 Coordination Protocol defines a standard way to express project invariants,
-architectural decisions, and coordination state in K9 Kennel-level files, then
-generate native instruction files for every major AI coding tool.
+The K9 Coordination Protocol defines a standard way to express project
+invariants, protected paths, architectural decisions, prohibited patterns,
+terminology, ecosystem relationships, and mutable coordination state.
 
-=== The Problem
+A repository stores this operational governance in a single
+`coordination.k9` file. A generator reads that file and emits native
+instruction files for each supported AI coding tool.
 
-When multiple AI agents (Claude, Copilot, Cursor, Gemini, Codex, etc.) work on
-the same codebase — sequentially or concurrently — they lack shared context about:
+K9 is a *Kennel-level* format: pure data with no execution, functions, or
+evaluation.
 
-* What is intentional vs accidental
-* What architectural decisions are deliberate
+K9 is YAML-like, but it is *not YAML*. Implementations MUST use a K9-aware
+parser conforming to link:grammars/k9.abnf[k9.abnf], not a generic YAML
+parser.
+
+== The Problem
+
+When multiple AI agents—Claude, Copilot, Cursor, Gemini, Codex, and
+others—work on the same codebase sequentially or concurrently, they often
+lack shared context about:
+
+* What is intentional rather than accidental
+* Which architectural decisions are deliberate
+* Which invariants must not be violated
+* Which files and directories require approval to modify
+* What must not be created
 * What another agent is currently working on
-* What should never be created, deleted, or reorganised
+* Which terminology is correct for the project
 
-This leads to well-meaning destruction: agents "fixing" features, creating parallel
-systems, or deleting deliberate architecture because they lack context.
+This can lead to well-meaning destruction: agents “fixing” intentional
+features, creating parallel systems, replacing deliberate architecture,
+or modifying protected files because they lack operational context.
 
-=== The Solution
+== The Solution
 
-A single `coordination.k9` file per project, written in K9 Kennel format (pure data,
-no execution), which:
+Each repository SHOULD have one `coordination.k9` file at its root. It is
+the authoritative source for operational AI coordination and:
 
-1. **Declares invariants** — rules that must never be violated
-2. **Protects patterns** — files and directories that are deliberate
-3. **Records architecture** — decisions that look odd but are intentional
-4. **Prevents creation** — things that must not be introduced
-5. **Coordinates work** — (Phase 2) who is working on what
+* Declares *invariants*—rules agents must not violate
+* Protects *paths*—files and directories requiring user approval
+* Records *architecture*—decisions that may otherwise look accidental
+* Prohibits *creation*—patterns and systems that must not be introduced
+* Defines *terminology*—correct and incorrect project terms
+* Describes the *ecosystem*—dependencies, consumers, and related projects
+* Coordinates *work*—active, completed, and available tasks
 
-A generator tool reads this K9 file and emits native instruction files for every
-supported AI tool.
+When `project.deed_ref` is present, K9 references a DEED file for typed
+repository identity. K9 remains the operational source of truth; DEED is
+the epistemic identity record.
+
+== File Roles
+
+[cols="1,1,3"]
+|===
+| File | Requirement | Purpose
+
+| `coordination.k9`
+| SHOULD
+| Operational governance: invariants, protected paths, architecture,
+  prohibited patterns, and coordination state.
+
+| `repo_chora.deed` or `<project>_chora.deed`
+| OPTIONAL but RECOMMENDED
+| Typed epistemic identity and provenance. Referenced through
+  `project.deed_ref`.
+
+| `0-AI-MANIFEST.a2ml`
+| Transitional
+| Gateway used by existing agent-discovery tooling. It SHOULD point to the
+  K9 and DEED files.
+|===
+
+The normal discovery flow is:
+
+----
+0-AI-MANIFEST.a2ml
+  → coordination.k9
+    → project.deed_ref
+      → <project>_chora.deed
+----
+
+Agents that do not use the A2ML gateway MAY discover `coordination.k9`
+directly at the repository root.
+
+== Key Syntax Rules
+
+A conforming `coordination.k9` file follows these rules:
+
+. The first line MUST be exactly `K9!`.
+. No whitespace or UTF-8 BOM may precede the magic number.
+. One or more `# SPDX-` header lines MUST immediately follow the magic line.
+. Syntax is case-sensitive:
+  ** `K9!` is valid; `k9!` is invalid.
+  ** `metadata:` is valid; `Metadata:` is invalid.
+  ** `schema_version:` is valid; `Schema_Version:` is invalid.
+. Indentation MUST be exactly two spaces per level.
+. Tabs are INVALID.
+. Files MUST be valid UTF-8 without a BOM.
+. LF and CRLF line endings are accepted. Mixing them is permitted but
+  discouraged.
+. Blank lines and full-line comments are permitted between sections.
+. Blank lines and comments are not permitted within a section under the
+  current grammar.
+. Inline comments following a value are not supported.
+. Strings use double quotes and support only `\"`, `\\`, `\n`, and `\t`
+  escapes.
+. K9 does not support YAML anchors, aliases, tags, flow mappings, or other
+  general YAML syntax.
+
+== Schema Summary
+
+=== Required sections
+
+Required sections MUST appear exactly once in this order:
+
+. `metadata`
+. `project`
+. `invariants`
+
+[cols="1,3"]
+|===
+| Section | Purpose
+
+| `metadata`
+| Identifies the K9 schema, schema version, generator, and update date.
+
+| `project`
+| Provides operational project information. The required fields are
+  `name`, `description`, `license`, and `repo`. The optional `deed_ref`
+  field links to typed DEED identity.
+
+| `invariants`
+| Defines rules that agents must not violate. The section is required but
+  MAY contain zero entries.
+|===
+
+An empty invariant section is represented as:
+
+[source,text]
+----
+invariants:
+----
+
+The YAML flow-list form `invariants: []` is not part of K9 syntax.
+
+=== Optional sections
+
+Optional sections MUST appear in this order when present:
+
+. `protected`
+. `architecture`
+. `do_not_create`
+. `terminology`
+. `ecosystem`
+. `coordination`
+
+Each optional section MAY appear at most once. If present, it MUST contain
+at least one entry or subsection.
+
+[cols="1,3"]
+|===
+| Section | Purpose
+
+| `protected`
+| Paths that must not be deleted, reorganised, replaced, or modified
+  without explicit user approval.
+
+| `architecture`
+| Deliberate architectural decisions and rejected alternatives.
+
+| `do_not_create`
+| File patterns or system descriptions that must not be introduced.
+
+| `terminology`
+| Correct project terminology and known incorrect alternatives.
+
+| `ecosystem`
+| Dependencies, consumers, and related repositories.
+
+| `coordination`
+| Mutable active, completed, and available work state.
+|===
+
+== Minimal Example
+
+[source,text]
+----
+K9!
+# SPDX-License-Identifier: MPL-2.0
+
+metadata:
+  schema: k9-coordination
+  schema_version: 1.1.0
+  generated_by: k9-init
+  last_updated: 2026-04-09
+
+project:
+  name: "example-project"
+  description: "Example project using K9 coordination"
+  license: MPL-2.0
+  repo: hyperpolymath/example-project
+
+invariants:
+----
+
+If typed DEED identity is available, the project section MAY include:
+
+[source,text]
+----
+  deed_ref: example-project_chora.deed
+----
+
+The referenced file MUST exist and MUST parse as a valid `repo-deed`.
 
 == Supported Targets
 
-[cols="1,2,1"]
-|===
-| AI Tool | Output File | Location
+The generator currently advertises the following targets. This table MUST
+remain synchronized with the behavior and tests of `generator/generate.js`.
 
-| Claude Code | `CLAUDE.md` | `.claude/`
-| GitHub Copilot | `copilot-instructions.md` | `.github/`
-| OpenAI Codex | `AGENTS.md` | root
-| Cursor | `.cursorrules` | root
-| Windsurf | `.windsurfrules` | root
-| Gemini CLI | `GEMINI.md` | root
-| Cline | `.clinerules` | root
-| JetBrains Junie | `guidelines.md` | `.junie/`
-| Amazon Q | `coordination.md` | `.q/rules/`
+[cols="1,2"]
 |===
+| AI tool | Generated path
+
+| Claude Code
+| `.claude/CLAUDE.md`
+
+| GitHub Copilot
+| `.github/copilot-instructions.md`
+
+| OpenAI Codex
+| `AGENTS.md`
+
+| Cursor
+| `.cursor/INSTRUCTIONS.md`
+
+| Aider
+| `.aider/INSTRUCTIONS.md`
+
+| Windsurf
+| `.windsurfrules`
+
+| Gemini CLI
+| `GEMINI.md`
+
+| Cline
+| `.clinerules`
+
+| JetBrains Junie
+| `.junie/guidelines.md`
+
+| Amazon Q
+| `.q/rules/coordination.md`
+|===
+
+Target paths are generator behavior rather than K9 grammar. A target MUST
+only be advertised if the generator actually emits and tests it.
 
 == Usage
 
-[source,bash]
+Generate all supported instruction files:
+
+[source,shell]
 ----
-# Generate all AI config files from a coordination.k9
 deno run --allow-read --allow-write \
   standards/k9-coordination-protocol/generator/generate.js \
   ./coordination.k9
-
-# Generate for specific targets only
-deno run --allow-read --allow-write \
-  standards/k9-coordination-protocol/generator/generate.js \
-  ./coordination.k9 --targets claude,cursor,copilot
 ----
 
-== Phases
+Generate selected targets:
 
-=== Phase 1: Defensive (Current)
+[source,shell]
+----
+deno run --allow-read --allow-write \
+  standards/k9-coordination-protocol/generator/generate.js \
+  ./coordination.k9 \
+  --targets claude,cursor,copilot
+----
 
-Single K9 file declares what is and isn't negotiable. Every AI reads the same
-ground truth. Prevents accidental destruction.
+Before writing output, the generator MUST:
 
-=== Phase 2: Coordination
+. Parse the entire input using a K9-aware parser.
+. Validate the input against the normative ABNF.
+. Apply the semantic validation rules from the K9 specification.
+. Resolve and validate `project.deed_ref`, if present.
+. Stop without changing generated files if validation fails.
 
-K9 file tracks which agents are working on which areas. A new agent can read
-the coordination state and avoid stepping on active work.
+A generic YAML parser is not a conforming K9 parser.
 
-=== Phase 3: Orchestration
+== Generated Output
 
-Agents report completion. Other agents can pick up follow-on work, tidy seams
-between parallel efforts, and flag integration points.
+Generated files MUST:
+
+. State that they were generated from `coordination.k9`.
+. Include a “DO NOT EDIT DIRECTLY” warning.
+. Render applicable K9 sections in the target’s native instruction format.
+. Preserve attribution between information obtained from K9 and DEED.
+. Be generated deterministically.
+. Produce byte-identical output when run twice with identical inputs.
+
+Generated files SHOULD be committed so that AI tools receive coordination
+context immediately when they start.
+
+If a target file supports custom human-authored content, the generator MUST
+either:
+
+* Preserve that content through explicitly marked custom regions; or
+* Refuse to overwrite a file it does not own.
+
+It MUST NOT silently destroy unmanaged content.
+
+== Capability Phases
+
+The phases describe protocol adoption and generator behavior. They do not
+change the K9 grammar.
+
+=== Phase 1: Defensive — current implementation maturity
+
+The K9 file declares what is and is not negotiable:
+
+* Invariants
+* Protected paths
+* Architecture decisions
+* Prohibited creation patterns
+* Terminology
+
+Every supported AI tool receives the same operational constraints. This
+phase is intended primarily to prevent accidental destruction.
+
+=== Phase 2: Coordination — syntax available
+
+The optional `coordination:` section records:
+
+* Active agents and work areas
+* Start dates and status
+* Blockers
+* Completed work
+* Available work
+
+The grammar already supports this section. A deployment reaches Phase 2
+when agents and tooling reliably read and update the coordination state
+without modifying stable human-authored sections.
+
+=== Phase 3: Orchestration — planned behavior
+
+Agents report completion, discover available work, identify follow-on
+tasks, and flag integration points between parallel efforts.
+
+Phase 3 is an implementation roadmap. It does not currently define
+additional K9 syntax. New fields or sections require a specification and
+grammar revision before use.
+
+== Relationship to DEED
+
+K9 and DEED are complementary:
+
+[cols="1,2,2"]
+|===
+| Concern | K9 | DEED
+
+| Primary role
+| Operational governance
+| Typed epistemic identity
+
+| Typical mutability
+| Stable except for `coordination:`
+| Immutable and versioned
+
+| Syntax
+| Strict YAML-like K9 syntax
+| S-expressions
+
+| Connection
+| `project.deed_ref`
+| Referenced `repo-deed`
+|===
+
+If `deed_ref` is present:
+
+* The referenced file MUST exist.
+* It MUST parse as a valid `repo-deed`.
+* Its filename and document head MUST satisfy DEED dispatch rules.
+* Its `:canonical-name` SHOULD match `project.name`.
+* A mismatch SHOULD produce a warning.
+* DEED remains authoritative for typed identity.
 
 == See Also
 
-* link:spec/COORDINATION-K9-SPEC.adoc[Formal Specification]
-* link:examples/[Example Files]
-* link:generator/[Generator Tool]
-* link:../k9-svc/SPEC.adoc[K9 Format Specification]
-* link:../0-ai-gatekeeper-protocol/[AI Gatekeeper Protocol]
+* link:specs/K9-COORDINATION-SPEC.adoc[K9 Coordination File Specification]
+* link:grammars/k9.abnf[K9 ABNF Grammar]
+* link:examples/[Example K9 files]
+* link:generator/[Generator tool]
+* link:specs/K9-DEED-INTEGRATION-GUIDE.adoc[K9 and DEED Integration Guide]
+* link:https://www.rfc-editor.org/rfc/rfc7405[RFC 7405 — Case-Sensitive ABNF Strings]
+
+== Licence
+
+This protocol documentation is licensed under CC-BY-SA-4.0.
+
+Implementations may use any OSI-approved licence.

@@ -33,6 +33,75 @@ expect 0 "a complete entry is valid" <<'EOF'
 - accepted-until: 2030-01-01
 EOF
 
+expect 0 "a complete taxonomy choice is valid" <<'EOF'
+### alpha
+- description: d
+- probe: echo 1
+- count: 1
+- ceiling: 1
+- severity: high
+- policy: remediable
+- taxonomy-default-arm: adapt-proven-idris2-test
+- taxonomy-selected-arm: write-local-test
+- taxonomy-departure-reason: the host API is not supported by the proven suite
+- accepted-until: 2030-01-01
+EOF
+
+expect 1 "a partial taxonomy choice is rejected" <<'EOF'
+### alpha
+- description: d
+- probe: echo 1
+- count: 1
+- ceiling: 1
+- severity: high
+- policy: remediable
+- taxonomy-default-arm: adapt-proven-idris2-test
+- taxonomy-selected-arm: write-local-test
+- accepted-until: 2030-01-01
+EOF
+
+expect 1 "an empty taxonomy-choice encoding is rejected" <<'EOF'
+### alpha
+- description: d
+- probe: echo 1
+- count: 1
+- ceiling: 1
+- severity: high
+- policy: remediable
+- taxonomy-default-arm:
+- taxonomy-selected-arm:
+- taxonomy-departure-reason:
+- accepted-until: 2030-01-01
+EOF
+
+expect 1 "a taxonomy choice must select the non-default arm" <<'EOF'
+### alpha
+- description: d
+- probe: echo 1
+- count: 1
+- ceiling: 1
+- severity: high
+- policy: remediable
+- taxonomy-default-arm: adapt-proven-idris2-test
+- taxonomy-selected-arm: adapt-proven-idris2-test
+- taxonomy-departure-reason: no departure actually recorded
+- accepted-until: 2030-01-01
+EOF
+
+expect 1 "taxonomy arm identifiers use the stable-id grammar" <<'EOF'
+### alpha
+- description: d
+- probe: echo 1
+- count: 1
+- ceiling: 1
+- severity: high
+- policy: remediable
+- taxonomy-default-arm: Adapt proven test
+- taxonomy-selected-arm: write-local-test
+- taxonomy-departure-reason: the host API is not supported by the proven suite
+- accepted-until: 2030-01-01
+EOF
+
 expect 1 "an entry with no probe is rejected (a number nothing re-measures)" <<'EOF'
 ### alpha
 - description: d
@@ -72,6 +141,65 @@ expect 0 "count below ceiling is fine (debt paid down, ceiling not yet lowered)"
 - ceiling: 4
 - severity: high
 - policy: remediable
+- accepted-until: 2030-01-01
+EOF
+
+expect 0 "a complete testing-taxonomy departure records both arms and its reason" <<'EOF'
+### alpha
+- description: a temporary local test is tolerated
+- probe: echo 2
+- count: 2
+- ceiling: 4
+- severity: high
+- policy: remediable
+- taxonomy-choice: non-default
+- taxonomy-default-arm: adapt the proven Idris2 test
+- taxonomy-non-default-arm: retain the temporary local test
+- taxonomy-departure-reason: upstream fixture is gated on the next release
+- accepted-until: 2030-01-01
+EOF
+
+expect 1 "a partial testing-taxonomy choice record is rejected" <<'EOF'
+### alpha
+- description: a temporary local test is tolerated
+- probe: echo 2
+- count: 2
+- ceiling: 4
+- severity: high
+- policy: remediable
+- taxonomy-choice: non-default
+- taxonomy-default-arm: adapt the proven Idris2 test
+- taxonomy-non-default-arm: retain the temporary local test
+- accepted-until: 2030-01-01
+EOF
+
+expect 1 "testing-taxonomy default and non-default arms must differ" <<'EOF'
+### alpha
+- description: a temporary local test is tolerated
+- probe: echo 2
+- count: 2
+- ceiling: 4
+- severity: high
+- policy: remediable
+- taxonomy-choice: non-default
+- taxonomy-default-arm: retain the local test
+- taxonomy-non-default-arm: retain the local test
+- taxonomy-departure-reason: no actual departure was named
+- accepted-until: 2030-01-01
+EOF
+
+expect 1 "an unknown taxonomy-choice selector is rejected" <<'EOF'
+### alpha
+- description: a temporary local test is tolerated
+- probe: echo 2
+- count: 2
+- ceiling: 4
+- severity: high
+- policy: remediable
+- taxonomy-choice: convenient
+- taxonomy-default-arm: adapt the proven Idris2 test
+- taxonomy-non-default-arm: retain the temporary local test
+- taxonomy-departure-reason: upstream fixture is gated on the next release
 - accepted-until: 2030-01-01
 EOF
 
