@@ -42,7 +42,7 @@ in A2ML format (migrated from Guile Scheme on 2026-04-12):
 | Deno | Bun |
 | Node.js | Bun |
 | npm | Bun |
-| ~~Bun~~ | — | Bun is TIER 1 as of LANGUAGE-POLICY.adoc §1 (2026-07-29). This row is retired. |
+| ~~Bun~~ | — | Bun is TIER 1 as of 3-practice/LANGUAGE-POLICY.adoc §1 (2026-07-29). This row is retired. |
 | pnpm/yarn | Bun |
 | Go | Rust |
 | Python | Julia/Rust/AffineScript |

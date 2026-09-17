@@ -10,7 +10,7 @@
 # not detect a violation, and it claimed a pass over any input.
 #
 # POLICY — canonical source is `0-canon/rsr/
-# LANGUAGE-POLICY.adoc` §Package Management, NOT CLAUDE.md:
+# 3-practice/LANGUAGE-POLICY.adoc` §Package Management, NOT CLAUDE.md:
 #
 #   RULED 2026-05-18 (estate-wide): Guix primary + sealed-container escape;
 #   NO Nix mirror. One packager per repo. A `flake.nix` that only mirrors a
@@ -26,7 +26,7 @@
 # This script previously cited CLAUDE.md and printed
 # `✅ Nix package management detected (fallback)`. CLAUDE.md's packaging
 # section is STALE — it still describes Nix as a fallback, in 472 copies
-# estate-wide — and CLAUDE.md itself defers to LANGUAGE-POLICY.adoc as
+# estate-wide — and CLAUDE.md itself defers to 3-practice/LANGUAGE-POLICY.adoc as
 # canonical, so the .adoc wins. Blessing a flake as compliant is what let the
 # 2026-07-21 remediation sweep ship `flake.nix` to 59 repos that should have
 # received Guix or a container.
@@ -178,7 +178,7 @@ if [ -n "$NIX" ]; then
 
   echo "::error::Nix-only packaging is not compliant: ${NIX#"$ROOT"/}"
   echo
-  echo "Estate policy (LANGUAGE-POLICY.adoc, RULED 2026-05-18) is Guix primary"
+  echo "Estate policy (3-practice/LANGUAGE-POLICY.adoc, RULED 2026-05-18) is Guix primary"
   echo "+ sealed-container escape; NO Nix mirror. Replace the flake with:"
   echo "  guix.scm | manifest.scm | channels.scm | .guix-channel   (primary)"
   echo "  Containerfile                                            (escape hatch)"
@@ -206,7 +206,7 @@ fi
 
 echo "::error::Package policy violation: no packaging found."
 echo
-echo "Estate policy (LANGUAGE-POLICY.adoc, RULED 2026-05-18) is Guix primary"
+echo "Estate policy (3-practice/LANGUAGE-POLICY.adoc, RULED 2026-05-18) is Guix primary"
 echo "+ sealed-container escape; NO Nix mirror. Add one of:"
 echo "  guix.scm | manifest.scm | channels.scm | .guix-channel   (primary)"
 echo "  Containerfile                                            (escape hatch)"

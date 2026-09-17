@@ -79,12 +79,12 @@ foundations-readiness-grades|readiness|foundations-readiness-grades/|FRG — Fou
 component-readiness-grades|readiness|component-readiness-grades/|CRG — Component Readiness Grades|the X..A grading system for components
 toolchain-readiness-grades|readiness|toolchain-readiness-grades/|TRG — Toolchain Readiness Grades|per-toolchain readiness profile templates
 rhodium-standard-repositories|governance|rhodium-standard-repositories/|RSR — Rhodium Standard Repositories|the repository-compliance standard every repo is graded against
-session-management-standards|governance|session-management-standards/|Session Management Standards|continuity / verify / handover protocols
+session-management-standards|governance|3-practice/session-management-standards/|Session Management Standards|continuity / verify / handover protocols
 did-you-actually-do-that|governance|1-formats/sub-specs/did-you-actually-do-that/|DYADT — Did-You-Actually-Do-That|post-action agent-claim verification (Tier 4 accountability)
 ensaid-config|governance|1-formats/sub-specs/ensaid-config/|ENSAID Config|the ensaid configuration standard
-accessibility|governance|accessibility/|Accessibility Standard|estate accessibility requirements
-publication-pre-flight|governance|publication-pre-flight/|Publication Pre-Flight|submission gate (HOL + Zenodo checklists)
-release-pre-flight|governance|release-pre-flight/|Release Pre-Flight (V1 Gate)|hard v1.0.0 audit requirements
+accessibility|governance|3-practice/accessibility/|Accessibility Standard|estate accessibility requirements
+publication-pre-flight|governance|3-practice/publication-pre-flight/|Publication Pre-Flight|submission gate (HOL + Zenodo checklists)
+release-pre-flight|governance|3-practice/release-pre-flight/|Release Pre-Flight (V1 Gate)|hard v1.0.0 audit requirements
 hypatia-rules|integration|hypatia-rules/|Standards Hypatia Rules|the dogfooding rules that scan THIS repo (incl. drift detection)
 a2ml-templates|integration|1-formats/templates/|A2ML Templates|copy-in templates for the 7 A2ML files
 TSV

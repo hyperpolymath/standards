@@ -41,7 +41,7 @@
      (required-files
        "README.md" "README.adoc"  ; one of
        "LICENSE.txt"
-       "SECURITY.md"
+       "3-practice/SECURITY.md"
        ".gitignore"
        ".gitattributes")
      (ci-cd . #t)
@@ -50,8 +50,8 @@
     (silver
      (includes . bronze)
      (required-files
-       "CODE_OF_CONDUCT.md" "CODE_OF_CONDUCT.adoc"
-       "CONTRIBUTING.md" "CONTRIBUTING.adoc"
+       "CODE_OF_CONDUCT.md" "3-practice/CODE_OF_CONDUCT.adoc"
+       "CONTRIBUTING.md" "3-practice/CONTRIBUTING.adoc"
        "0-canon/GOVERNANCE.adoc"
        "MAINTAINERS.md"
        "FUNDING.yml")

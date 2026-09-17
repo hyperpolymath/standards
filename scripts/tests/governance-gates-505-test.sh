@@ -65,7 +65,7 @@ assert "all docs present (pre-cutoff) passes" 0 "✅ Core documentation present"
 assert "all docs present (post-cutoff) passes" 0 "✅ Core documentation present" \
   env DOCS_TODAY="$AFTER" "$DOCS" "$r"
 
-r=$(mkrepo docs-md README.md LICENSE.txt CONTRIBUTING.adoc)
+r=$(mkrepo docs-md README.md LICENSE.txt 3-practice/CONTRIBUTING.adoc)
 assert "alternate extensions accepted" 0 "✅ Core documentation present" \
   env DOCS_TODAY="$AFTER" "$DOCS" "$r"
 

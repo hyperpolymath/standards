@@ -147,7 +147,7 @@ extract_checks() {
 # Why this exists: a check whose tool is absent is indistinguishable from a
 # check that ran and failed, so the verifier accused the repo of claiming a
 # fake pass. `xmllint` missing surfaced as exit 127; ripgrep missing made
-# release-pre-flight/v1-audit.sh exit 2, so its greps matched nothing and
+# 3-practice/release-pre-flight/v1-audit.sh exit 2, so its greps matched nothing and
 # returned 1. All seven were reported as "the pass is not real" — and all
 # seven passes were in fact real.
 #

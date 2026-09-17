@@ -65,7 +65,7 @@ STRICT=0
 [ "${1:-}" = "--strict" ] && { STRICT=1; shift; }
 [ $# -eq 0 ] && { echo "usage: $0 [--strict] OWNER/REPO..." >&2; exit 2; }
 
-# Job extraction is awk, not python3: LANGUAGE-POLICY.adoc bans Python with no
+# Job extraction is awk, not python3: 3-practice/LANGUAGE-POLICY.adoc bans Python with no
 # exceptions, and a lint that enforces estate policy must not itself breach it.
 # Scope is deliberately narrow — `jobs:` at column 0, job ids at indent 2, and a
 # job-level `name:` at indent EXACTLY 4 (a step name lives at 6 or deeper).

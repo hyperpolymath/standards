@@ -39,7 +39,7 @@
      (criteria
        ((id . "2.1.1") (name . "readme") (description . "README.md or README.adoc"))
        ((id . "2.1.2") (name . "license") (description . "LICENSE.txt (plain text)"))
-       ((id . "2.1.3") (name . "security") (description . "SECURITY.md"))
+       ((id . "2.1.3") (name . "security") (description . "3-practice/SECURITY.md"))
        ((id . "2.1.4") (name . "coc") (description . "CODE_OF_CONDUCT.md/.adoc"))
        ((id . "2.1.5") (name . "contributing") (description . "CONTRIBUTING.md/.adoc"))
        ((id . "2.1.6") (name . "funding") (description . "FUNDING.yml"))
