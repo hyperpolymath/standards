@@ -9,7 +9,7 @@
 # an unconditional `✅ Package policy check passed` (standards#505). It could
 # not detect a violation, and it claimed a pass over any input.
 #
-# POLICY — canonical source is `rhodium-standard-repositories/spec/
+# POLICY — canonical source is `0-canon/rsr/
 # LANGUAGE-POLICY.adoc` §Package Management, NOT CLAUDE.md:
 #
 #   RULED 2026-05-18 (estate-wide): Guix primary + sealed-container escape;

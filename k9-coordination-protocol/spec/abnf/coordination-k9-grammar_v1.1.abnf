@@ -1,0 +1,208 @@
+; SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath)
+; SPDX-License: MPL-2.0
+; SPDX-License-Identifier: CC-BY-SA-4.0
+;
+; K9 Coordination File Grammar, v1.1.0
+; Normative for parsing coordination.k9 files
+; Prose specification: ../specs/K9-COORDINATION-SPEC.adoc
+;
+; K9 is YAML-like but NOT standard YAML. It is a domain-specific
+; coordination language with strict schema validation.
+;
+; Requires RFC 7405 (%s"..." case-sensitive string literals).
+;
+; CHANGELOG (v1.0.0 → v1.1.0):
+;   - Added %s prefix for case-sensitive literals (RFC 7405)
+;   - Unified line endings to line-end (CRLF or LF) throughout
+;   - Added blank-line support between sections
+;   - Added bare-version to value rule (unquoted 1.0.0 etc.)
+;   - Expanded iso8601-datetime to full RFC 3339 (frac-sec, tz offsets)
+;   - Added escape sequences to strings (\" \\ \n \t)
+;   - Added indent2 / indent3 aliases for nested indentation
+;   - Expanded glob-pattern with ?, [], {}
+;   - Required ≥1 entry in ecosystem / coordination sections
+;   - Fixed optional sections: explicit order, no duplicates
+
+k9-file       = magic-line line-end header *blank-line body
+
+; --- Magic Number (REQUIRED first line) ----------------------------
+magic-line    = %s"K9!"
+
+; --- SPDX Header (REQUIRED) ----------------------------------------
+header        = 1*spdx-line
+spdx-line     = "#" SP %s"SPDX-" 1*text-char line-end
+
+; --- Blank Lines (permitted between sections, not within) ----------
+blank-line    = *SP line-end
+
+; --- Body Structure ------------------------------------------------
+; Required sections MUST appear in this order.
+; Optional sections MUST appear in the order shown; each at most once.
+body          = metadata-section    *blank-line
+                project-section     *blank-line
+                invariants-section  *blank-line
+                [protected-section     *blank-line]
+                [architecture-section  *blank-line]
+                [do-not-create-section *blank-line]
+                [terminology-section   *blank-line]
+                [ecosystem-section     *blank-line]
+                [coordination-section  *blank-line]
+
+; --- Required Sections ---------------------------------------------
+
+metadata-section = %s"metadata:" line-end
+                   1*metadata-field
+
+metadata-field = indent %s"schema:"         SP value line-end
+               / indent %s"schema_version:" SP value line-end
+               / indent %s"generated_by:"   SP value line-end
+               / indent %s"last_updated:"   SP date  line-end
+
+project-section = %s"project:" line-end
+                  1*project-field
+
+project-field  = indent %s"name:"         SP string        line-end
+               / indent %s"description:"  SP string        line-end
+               / indent %s"license:"      SP spdx-id       line-end
+               / indent %s"repo:"         SP repo-path     line-end
+               / indent %s"deed_ref:"     SP deed-filename line-end
+               / indent %s"languages:"    line-end lang-list
+               / indent %s"build_system:" SP symbol        line-end
+               / indent %s"runtime:"      SP symbol        line-end
+
+lang-list      = 1*(indent "- " symbol line-end)
+
+invariants-section = %s"invariants:" line-end
+                     *invariant-entry                     ; May be empty
+
+invariant-entry = indent  "- " %s"id:"       SP symbol   line-end
+                  indent2      %s"rule:"     SP string   line-end
+                  indent2      %s"reason:"   SP string   line-end
+                  [indent2     %s"severity:" SP severity line-end]
+
+severity       = %s"critical" / %s"high" / %s"moderate"
+
+; --- Optional Sections ---------------------------------------------
+
+protected-section = %s"protected:" line-end
+                    1*protected-entry
+
+protected-entry = indent  "- " %s"path:"   SP file-path line-end
+                  indent2      %s"reason:" SP string    line-end
+
+architecture-section = %s"architecture:" line-end
+                       1*arch-entry
+
+arch-entry     = indent  "- " %s"id:"                  SP symbol line-end
+                 indent2      %s"decision:"            SP string line-end
+                 indent2      %s"reason:"              SP string line-end
+                 [indent2     %s"alternatives_rejected:" line-end alt-list]
+
+alt-list       = 1*(indent3 "- " string line-end)
+
+do-not-create-section = %s"do_not_create:" line-end
+                        1*dnc-entry
+
+dnc-entry      = indent  "- " %s"pattern:"     SP glob-pattern line-end
+                 indent2      %s"reason:"      SP string       line-end
+               / indent  "- " %s"description:" SP string       line-end
+                 indent2      %s"reason:"      SP string       line-end
+
+terminology-section = %s"terminology:" line-end
+                      1*term-entry
+
+term-entry     = indent  "- " %s"correct:"   SP symbol line-end
+                 indent2      %s"incorrect:" line-end incorrect-list
+                 [indent2     %s"context:"   SP string line-end]
+
+incorrect-list = 1*(indent3 "- " symbol line-end)
+
+ecosystem-section = %s"ecosystem:" line-end
+                    1*ecosystem-entry               ; ≥1 required
+
+ecosystem-entry = indent %s"depends_on:"  line-end dep-list
+                / indent %s"consumed_by:" line-end dep-list
+                / indent %s"related:"     line-end dep-list
+
+dep-list       = 1*(indent2 "- " %s"name:" SP symbol line-end
+                    indent3      %s"role:" SP string line-end)
+
+coordination-section = %s"coordination:" line-end
+                       1*coordination-entry          ; ≥1 required
+
+coordination-entry = indent %s"active:"    line-end active-list
+                   / indent %s"completed:" line-end completed-list
+                   / indent %s"available:" line-end available-list
+
+active-list    = 1*(indent2 "- " %s"agent:"   SP symbol line-end
+                    indent3      %s"area:"    SP string line-end
+                    indent3      %s"started:" SP date   line-end
+                    indent3      %s"status:"  SP status line-end
+                    [indent3     %s"blocker:" SP string line-end])
+
+completed-list = 1*(indent2 "- " %s"agent:"     SP symbol line-end
+                    indent3      %s"area:"      SP string line-end
+                    indent3      %s"completed:" SP date   line-end)
+
+available-list = 1*(indent2 "- " string line-end)
+
+status         = %s"in-progress" / %s"blocked" / %s"paused"
+
+; --- Primitives ----------------------------------------------------
+
+indent         = "  "                    ; Exactly 2 spaces (not tabs)
+indent2        = indent indent           ; Exactly 4 spaces
+indent3        = indent indent indent    ; Exactly 6 spaces
+
+value          = string / symbol / bare-version
+bare-version   = 1*DIGIT *("." 1*DIGIT)  ; e.g., 1.0.0, 2.3, 42
+
+string         = DQUOTE *string-char DQUOTE
+string-char    = %x20-21 / %x23-5B / %x5D-7E
+               / UTF8-2 / UTF8-3 / UTF8-4
+               / escape
+escape         = "\" (DQUOTE / "\" / %s"n" / %s"t")
+
+symbol         = ALPHA *(ALPHA / DIGIT / "-" / "_" / ".")
+spdx-id        = 1*(ALPHA / DIGIT / "-" / ".")
+repo-path      = 1*(ALPHA / DIGIT / "-" / "_" / "/")
+deed-filename  = 1*(ALPHA / DIGIT / "-" / "_" / ".") %s".deed"
+file-path      = 1*(ALPHA / DIGIT / "-" / "_" / "/" / ".")
+glob-pattern   = 1*(ALPHA / DIGIT / "-" / "_" / "/" / "."
+               / "*" / "?" / "[" / "]" / "{" / "}")
+
+date           = 4DIGIT "-" 2DIGIT "-" 2DIGIT   ; ISO 8601 calendar date
+               / iso8601-datetime                ; or full RFC 3339 datetime
+
+iso8601-datetime = 4DIGIT "-" 2DIGIT "-" 2DIGIT "T"
+                   2DIGIT ":" 2DIGIT ":" 2DIGIT
+                   ["." 1*DIGIT]
+                   ("Z" / ("+" / "-") 2DIGIT ":" 2DIGIT)
+
+; --- UTF-8 Support (RFC 3629) -------------------------------------
+
+UTF8-2         = %xC2-DF UTF8-tail
+UTF8-3         = %xE0 %xA0-BF UTF8-tail
+               / %xE1-EC 2UTF8-tail
+               / %xED %x80-9F UTF8-tail
+               / %xEE-EF 2UTF8-tail
+UTF8-4         = %xF0 %x90-BF 2UTF8-tail
+               / %xF1-F3 3UTF8-tail
+               / %xF4 %x80-8F 2UTF8-tail
+UTF8-tail      = %x80-BF
+
+text-char      = VCHAR / SP / UTF8-2 / UTF8-3 / UTF8-4
+
+line-end       = CRLF / LF
+
+; --- Notes ---------------------------------------------------------
+;  1. Indentation is EXACTLY 2 spaces per level. Tabs are INVALID.
+;  2. The magic number "K9!" MUST be the first line (no leading ws).
+;  3. SPDX header MUST appear before the first section.
+;  4. metadata, project, and invariants sections are REQUIRED.
+;  5. Optional sections appear in fixed order; each at most once.
+;  6. deed_ref links to a .deed file for typed identity.
+;  7. Line endings may be CRLF or LF (mixing is permitted).
+;  8. Blank lines are permitted between sections, not within them.
+;  9. Strings support escape sequences: \" \\ \n \t
+; 10. Bare version numbers (e.g., 1.0.0) are valid unquoted values.

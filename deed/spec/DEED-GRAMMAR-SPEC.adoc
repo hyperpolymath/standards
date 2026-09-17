@@ -1,29 +1,52 @@
-// SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
-// SPDX-License-Identifier: CC-BY-SA-4.0
 = DEED Grammar Specification
-:revnumber: 0.1.0
-:revdate: 2026-09-08
+:version: 0.2.0
 :status: DRAFT
-:media-type: application/vnd.deed
 :toc:
 :toclevels: 3
-:sectnums:
 
 [IMPORTANT]
 ====
-*Status: DRAFT, not ratified. Nothing in this document is deployed.*
+*Status:* DRAFT, not ratified. Nothing in this document is deployed.
 
-Prepared 2026-09-08. This is the specification the owner asked for as top
-priority. It is deliberately scoped to the *surface and its identity rule*,
-because that is what unblocks the `.a2ml` -> `.deed` conversion (#64) and the
-downstream consumers. The typing chapter (<<typechecking>>) is marked PROPOSED
-throughout and is not part of the v0.1 conformance surface.
-
-Placement: this belongs in `standards`. It was drafted outside that repo
-because at time of writing `standards` is on branch `e2/747-work` with 17
-uncommitted `dependabot.yml` modifications that are not this session's work.
-Landing it is the owner's call.
+v0.2.0 is a grammar-alignment revision (lexical rules, identity field table,
+normative-vs-informative grammar). It does not ratify the typing chapter.
 ====
+
+Prepared 2026-09-08. Alignment revision: 0.2.0.
+
+This is the specification the owner asked for as top priority. It is
+deliberately scoped to the surface and its identity rule, because that is
+what unblocks the `.a2ml` → `.deed` conversion (#64) and the downstream
+consumers. The typing chapter (<<typechecking>>) is marked PROPOSED
+throughout and is *not* part of the v0.1 conformance surface.
+
+*Normative grammar:* link:../abnf/deed.abnf[abnf/deed.abnf] is normative for
+parsing. The EBNF in <<concrete-syntax>> is informative.
+
+Compatible with:
+
+* link:../abnf/deed.abnf[DEED ABNF v0.1.0 DRAFT] (as amended by the alignment errata)
+* link:../specs/K9-COORDINATION-SPEC.adoc[K9 Coordination Spec] (separate surface;
+  DEED does not parse `.k9`)
+
+== Changelog
+
+[cols="1,1,3"]
+|===
+| Version | Date | Changes
+
+| 0.2.0
+| DRAFT
+| Declared ABNF normative / EBNF informative. Clarified `:schema-version` is
+  a structural first field. Unified identity-field table (pending owner
+  confirm). Documented case sensitivity, EOF, BOM, `(foo)` disambiguation,
+  `*` in symbols, tabs-as-WS. Dropped undefined validator keywords or marked
+  them. No typing-chapter changes.
+
+| 0.1.0
+| 2026-09-08
+| First draft.
+|===
 
 == Why this document exists
 
@@ -32,7 +55,6 @@ Three measured facts, 2026-09-08, motivate every decision below.
 *Fact 1 — the only runnable gate cannot read a deed.* `validate-a2ml.sh`
 recognises four identity forms and no more:
 
-[source,bash]
 ----
 if [[ "$line" =~ ^[[:space:]]*(agent[-_]id|name|project|spec_id)[[:space:]]*= ]] \
    || [[ "$line" =~ ^[[:space:]]*name[[:space:]]*: ]] \
@@ -42,8 +64,8 @@ if [[ "$line" =~ ^[[:space:]]*(agent[-_]id|name|project|spec_id)[[:space:]]*= ]]
 ----
 
 TOML `key =`, YAML `name:`, INI `[metadata]`, markup `@abstract`. A file
-written in the owner's own deed form fails on both the leading parenthesis and
-the absent `=`. Measured under `INPUT_STRICT=true`:
+written in the owner’s own deed form fails on both the leading parenthesis
+and the absent `=`. Measured under `INPUT_STRICT=true`:
 
 ----
 ::error:: No identity found (agent-id/name/project/spec_id field,
@@ -52,79 +74,119 @@ the absent `=`. Measured under `INPUT_STRICT=true`:
 rc=1
 ----
 
-*Fact 2 — `.deed` is invisible.* `grep -ci deed validate-a2ml.sh` returns *0*
-against *20* occurrences of `a2ml`. No tool in the estate scans a `.deed` file
+*Fact 2 — `.deed` is invisible.* `grep -ci deed validate-a2ml.sh` returns 0
+against 20 occurrences of `a2ml`. No tool in the estate scans a `.deed` file
 today.
 
 *Fact 3 — the identity primitive already exists, compiles, and is decidable.*
-https://github.com/hyperpolymath/a2ml/blob/main/src/A2ML/BaseVocab.idr[`BaseVocab.idr`]
-— which lives in the *a2ml* repository, not in this one — builds clean (11/11 modules, `%default total`) and its
-own header states its purpose: "the anti-desync primitive: one neutral shape
-for a thing that can be identified, located, attributed, and integrity-checked.
-It names no downstream consumer."
+`BaseVocab.idr` — which lives in the a2ml repository, not in this one —
+builds clean (11/11 modules, `%default total`) and its own header states its
+purpose: _"the anti-desync primitive: one neutral shape for a thing that can
+be identified, located, attributed, and integrity-checked. It names no
+downstream consumer."_
 
-The gap is therefore not a missing grammar. It is that a *typed, total,
-surface-neutral* identity core exists in Idris2, and a *weaker, rival* identity
+The gap is therefore not a missing grammar. It is that a typed, total,
+surface-neutral identity core exists in Idris2, and a weaker, rival identity
 rule exists in shell regex, and neither knows about `.deed`. This document
 closes that by defining the deed surface in terms of the typed core, and by
 specifying the single change the validator needs.
 
 == Scope and non-goals
 
-In scope: lexical structure, concrete syntax, the document forms, the identity
-rule, the conformance modes, and the validator obligation.
+*In scope:* lexical structure, concrete syntax, the document forms, the
+identity rule, the conformance modes, and the validator obligation.
 
-Not in scope for v0.1: the `action-parsing-rules` / `on-encounter` sub-language
-of praxis deeds (owner has flagged the existing draft syntax as a strawman);
-the vocabulary content of any particular chora; the conversion campaign itself.
+*Not in scope for v0.1:* the `action-parsing-rules` / `on-encounter`
+sub-language of praxis deeds (owner has flagged the existing draft syntax as
+a strawman); the vocabulary content of any particular chora; the conversion
+campaign itself.
 
 == Lexical structure
 
-A deed is a sequence of UTF-8 bytes. Parsers MUST be deterministic given
-identical input bytes.
+A deed is a sequence of UTF-8 bytes with *no leading BOM* (U+FEFF is
+INVALID). Parsers MUST be deterministic given identical input bytes.
+
+Keywords, document heads, booleans, UUID prefixes, filename dispatch
+literals, and string-escape letters are *case-sensitive*. `repo-deed` is
+valid; `REPO-DEED` is not. `#t` is valid; `#T` is not. This matches RFC 7405
+`%s"..."` literals in link:../abnf/deed.abnf[deed.abnf].
 
 [cols="1,3"]
 |===
-| `COMMENT`  | `;;` to end of line. A single `;` is also a comment; `;;` is the
-               convention for a whole-line comment and `;` for a trailing one.
-| `WS`       | space, tab, LF, CRLF. Insignificant except as a token separator.
-               Bare `CR` is *not* a separator: the normative `line-end` in
-               `abnf/deed.abnf` is `CRLF / LF`, and that contract holds for
-               comments and SPDX lines alike.
-| `SYMBOL`   | `[A-Za-z][A-Za-z0-9.*/<>=!?+-]*`. Dots are structural: `Type.Software.Library`
-               is one symbol whose dotted segments are meaningful to the type resolver.
-| `KEYWORD`  | `:` followed by a `SYMBOL`. Hyphen, never underscore: `:schema-version`.
-| `STRING`   | `"` … `"`, with `\\`, `\"`, `\n`, `\t` escapes. No other escape is valid.
-| `INTEGER`  | `-?[0-9]+`
-| `BOOLEAN`  | `#t` or `#f`. No other spelling is accepted — not `true`, not `yes`.
-| `UUID5`    | `#u5"` STRING-body `"`. The body is the *name* input to RFC 4122 §4.3,
-               under the estate namespace. See <<uuid-semantics>>.
-| `QUOTED`   | `'` followed by a `SYMBOL` or a list. Suppresses evaluation; used for
-               symbol data and for lists of symbols.
-| `(` `)`    | The only bracket. No `[` or `{` forms exist in this grammar.
+| Token | Rule
+
+| COMMENT
+| `;` to end of line. `;;` is the convention for a whole-line comment and
+  `;` for a trailing one. A comment *is* a token separator (see `Sep`).
+  Comments are UTF-8, not ASCII — the mandated SPDX header carries `©`.
+
+| WS
+| space (0x20), tab (0x09), LF, CRLF. Insignificant except as a token
+  separator. Bare CR is not a separator. Tabs ARE legal in DEED (unlike
+  K9, which forbids them).
+
+| SYMBOL
+| `[A-Za-z][A-Za-z0-9.*/<>=!?+-]*` — first character a letter; continuation
+  may include `*`. Dots are structural: `Type.Software.Library` is *one*
+  symbol whose dotted segments are meaningful to the type resolver.
+  Underscore is INVALID. Hyphen, never underscore.
+
+| KEYWORD
+| `:` followed by a SYMBOL. Example: `:schema-version`. Never
+  `:schema_version`.
+
+| STRING
+| `"…"`, body is printable ASCII except `"` and `\` plus UTF-8 multibyte
+  sequences. Exactly four escapes, case-sensitive: `\\`, `\"`, `\n`, `\t`.
+  Empty string `""` is valid. `\r`, `\uXXXX`, and all other escapes are
+  INVALID. Embed non-ASCII directly as UTF-8.
+
+| INTEGER
+| `-?[0-9]+`. Leading zeros are permitted (`007`) and MUST NOT be
+  interpreted as octal.
+
+| BOOLEAN
+| `#t` or `#f` only, lowercase. Not `true`, not `yes`, not `#T`, not `#F`.
+  Note: `true` and `yes` still match SYMBOL. A linter SHOULD warn if they
+  appear in a position whose vocabulary expects a boolean.
+
+| UUID5
+| `#u5` immediately followed by a STRING, with *no* intervening space:
+  `#u5"estate/chora"`. The body is the name input to RFC 4122 §4.3 under
+  the estate namespace. See <<uuid-semantics>>. UUID v4 is intentionally
+  excluded.
+
+| QUOTED
+| `'` followed by a SYMBOL or a list. Suppresses evaluation. Quoting an
+  integer, string, or boolean is a parse error.
+
+| `( )`
+| The only bracket. No `[` or `{` forms exist in this grammar.
 |===
 
-NOTE: The estate's earlier markup dialect used square brackets. Those are
-*not* part of the deed grammar. A `[section]` header in a `.deed` file is a
+[NOTE]
+====
+The estate’s earlier markup dialect used square brackets. Those are not
+part of the deed grammar. A `[section]` header in a `.deed` file is a
 speciation artefact, not a deed.
+====
 
 == Concrete syntax
 
-[source]
+The productions below are *informative EBNF*. If they disagree with
+link:../abnf/deed.abnf[abnf/deed.abnf], the ABNF wins.
+
 ----
-Deed         ::= Header Sep? Form Sep?
-Header       ::= SpdxLine+                  ; see Section 4.1
+Deed         ::= Header Sep? Form Sep? EOF
+Header       ::= SpdxLine+                  ; see Required header
 
-Sep          ::= ( WS | COMMENT )+          ; A COMMENT *is* a separator, so a
-                                            ; comment is legal anywhere a
-                                            ; separator is — including between
-                                            ; the tokens of a form. Mirrors
-                                            ; `token-sep` in abnf/deed.abnf.
+Sep          ::= ( WS | COMMENT )+          ; a COMMENT *is* a separator
 
-Form         ::= "(" DocHead Sep VersionField ( Sep ( Field | Clause ) )* Sep? ")"
+Form         ::= "(" DocHead Sep VersionField
+                 ( Sep ( Field | Clause ) )* Sep? ")"
 DocHead      ::= "estate-deed" | "repo-deed" | "estate-atlas-deed"
-               | "praxis-deed"
-VersionField ::= ":schema-version" Sep STRING   ; REQUIRED on every head
+               | "praxis-deed"              ; exact, case-sensitive
+VersionField ::= ":schema-version" Sep STRING   ; REQUIRED, structurally first
 
 Field        ::= KEYWORD Sep Value
 Value        ::= STRING | SYMBOL | INTEGER | BOOLEAN | UUID5
@@ -134,156 +196,193 @@ List         ::= "(" ( Value ( Sep Value )* )? Sep? ")"
 Clause       ::= "(" SYMBOL ( Sep ( Field | Clause ) )* Sep? ")"
 ----
 
-A *Field* is a keyword/value pair. A *Clause* is a named sub-form that may
-itself carry fields and nested clauses. This is the whole grammar; everything
-else in a deed is vocabulary, not syntax.
+A Field is a keyword/value pair. A Clause is a named sub-form that may
+itself carry fields and nested clauses. This is the whole *syntax*;
+everything else in a deed is vocabulary, not syntax.
 
-Both layers are order-free and comment-transparent, and they now say so in the
-same way. `Sep` above and `token-sep` in `abnf/deed.abnf` are the same
-production: a run of whitespace *or comments*, so a comment is legal anywhere a
-separator is — between the tokens of a form, not merely before it. Fields and
-clauses may appear in any order and may interleave: the repetition is
-`( Sep ( Field | Clause ) )*`, deliberately not `Field* Clause*`. A canonical
-ordering is a lint convention for diffability, never a parse rule; where
-precedence matters — the rules of a praxis deed — it is carried by an explicit
-`:priority` INTEGER, never by file position.
+*Exactly one* top-level `Form`. Trailing non-separator content after the
+closing `)` is a parse error. `EOF` is an implementation obligation (ABNF
+cannot name it); a conforming parser MUST consume the entire input.
 
-*RULED 2026-09-08 by the owner* on standards#752 — "I think you are right, I am
-used to the enbf grammars, is this so for teh anbf, if so please fix."
+=== List vs clause
+
+`(foo)` matches both `List` (one symbol) and `Clause` (head `foo`, no
+children). Disambiguate by *position*:
+
+* in a Value position → `List`
+* in a Field/Clause repetition (including the body of `Form`) → `Clause`
+
+`(foo bar)` is only a `List` (`bar` is neither Field nor Clause).
+`(foo :bar 1)` is only a `Clause` (`:bar` is a KEYWORD, and KEYWORD is not
+a Value).
 
 === Required header
 
 Every deed MUST begin with SPDX lines as `;;` comments, before the opening
 parenthesis:
 
-[source,lisp]
 ----
 ;; SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 ;; SPDX-License-Identifier: CC-BY-SA-4.0
 ----
 
-The existing validator already requires `SPDX-License-Identifier` within the
-first 10 lines and reports its absence. That check carries over unchanged.
+Each header line MUST match `;; SP "SPDX-" …`. At least one such line is
+required. `SPDX-License-Identifier` MUST appear in that header. The
+existing validator already requires `SPDX-License-Identifier` within the
+first 10 lines; that check carries over unchanged.
 
-=== Order is not semantic
+Non-SPDX `;;` comments and blank lines MAY appear *after* the header and
+*before* the opening `(` (they are `Sep`).
 
-Fields and clauses are order-free. A canonical ordering is a *lint convention
-for diffability*, never a parse rule. Where precedence genuinely matters — the
-rules inside a praxis deed — it is carried by an explicit `:priority` INTEGER,
-never by file position.
+=== Order is not semantic — except `:schema-version`
 
-Rationale, and this is the estate's signature failure mode: with first-match-wins,
-a broad rule inserted above a narrow one silently shadows it. No error is
-raised; the narrow rule simply stops firing. With `:priority`, shadowing shows
-up in a diff as a number changing, and the file stays sortable, formattable and
-merge-safe.
+`:schema-version` is structurally the first field after the document head.
+That is a parse rule, not a lint convention. A form whose first field is
+anything else is not a deed.
+
+All *subsequent* fields and clauses are order-free and may interleave.
+The repetition is `( Sep ( Field | Clause ) )`, deliberately not
+`Field* Clause*`. A canonical ordering of those remaining members is a
+lint convention for diffability, never a parse rule.
+
+Where precedence genuinely matters — the rules inside a praxis deed — it
+is carried by an explicit `:priority` INTEGER, never by file position.
+
+Rationale, and this is the estate’s signature failure mode: with
+first-match-wins, a broad rule inserted above a narrow one silently
+shadows it. No error is raised; the narrow rule simply stops firing. With
+`:priority`, shadowing shows up in a diff as a number changing, and the
+file stays sortable, formattable and merge-safe.
 
 Lint obligations that follow:
 
-* `:priority` values MUST be unique within a single rules block.
-* A rule whose guard is implied by a lower-priority rule's guard SHOULD warn.
+* `:priority` values MUST be unique within a single `rules` block.
+* A rule whose guard is implied by a lower-priority rule’s guard SHOULD warn.
 
-[#document-forms]
+RULED 2026-09-08 by the owner on standards#752 — match the ABNF to this
+EBNF (`:schema-version` first; remaining members order-free).
+
 == The four document forms
 
-One extension, `.deed`. The form is selected by the filename *stem*, not by a
-second extension.
+One extension, `.deed`. The form is selected by the filename stem, *before*
+parsing begins, not by a second extension. Dispatch literals are
+case-sensitive.
 
 [cols="1,1,2"]
 |===
-| Stem pattern      | Head form           | Meaning
+| Filename | Head form | Meaning
 
-| `estate_chora.deed` | `estate-deed`       | *Noun.* The estate's vocabulary. One per estate.
-| `*_chora.deed`      | `repo-deed`         | *Noun.* What a repo IS. A record.
-| `ATLAS.deed`        | `estate-atlas-deed` | *Noun.* The registry of all deeds.
-| `*_praxis.deed`     | `praxis-deed`       | *Verb.* What a tool DOES. Rules.
+| `estate_chora.deed` (exact)
+| `estate-deed`
+| Noun. The estate’s vocabulary. One per estate.
+
+| `*_chora.deed` excluding `estate_chora.deed`
+| `repo-deed`
+| Noun. What a repo IS. A record.
+
+| `ATLAS.deed` (exact)
+| `estate-atlas-deed`
+| Noun. The registry of all deeds.
+
+| `*_praxis.deed`
+| `praxis-deed`
+| Verb. What a tool DOES. Rules.
 |===
 
-[#chora-dispatch-exclusion]
-*Dispatch is exact-stem-first, and `*_chora.deed` EXCLUDES `estate_chora.deed`.*
-The two stem patterns overlap: the literal string `estate_chora.deed` also
-matches the glob `*_chora.deed`, so a naive glob dispatches the estate
-vocabulary as a repo record. A conforming implementation MUST test the exact
-stem `estate_chora` before testing the `*_chora` pattern, and MUST NOT parse
-`estate_chora.deed` as a `repo-deed`. Equivalently, the repo form is
-`<prefix>_chora.deed` where `<prefix>` is any non-empty stem other than the
-exact string `estate`.
+The stem is everything before the final suffix (`_chora.deed`,
+`_praxis.deed`, …). Do *not* split on `.` — stems may contain dots
+(`my.project_chora.deed` → stem `my.project`).
 
-NOTE: ABNF cannot express negation, so this exclusion is carried as a side
-condition in both this document and `abnf/deed.abnf`. The side condition is
-normative: the grammar alone is not sufficient to dispatch a filename.
+Dispatch is exact-stem-first, and `*_chora.deed` *excludes*
+`estate_chora.deed`. The two patterns overlap: the literal string
+`estate_chora.deed` also matches the glob `*_chora.deed`, so a naive glob
+dispatches the estate vocabulary as a repo record. A conforming
+implementation MUST test the exact name `estate_chora.deed` BEFORE the
+`*_chora.deed` pattern, and MUST NOT parse `estate_chora.deed` as a
+`repo-deed`. Equivalently, the repo form is `<prefix>_chora.deed` where
+`<prefix>` is any non-empty stem other than the exact string `estate`.
 
-*RULED 2026-09-08 by the owner* on standards#752 — "yes, let's adopt this, good
-idea, the chora replaces the clade of course."
+[NOTE]
+====
+ABNF cannot express negation, so this exclusion is a side condition in
+both this document and `abnf/deed.abnf`. The side condition is normative:
+the grammar alone is not sufficient to dispatch a filename.
+====
 
-*RULED 2026-09-08 by the owner:* `praxis-deed` is a genuine fourth head, not a
-facet of `repo-deed`. A tool carries obligations a repo does not — what it
-invokes, what it emits, what it may refuse — and those are a distinct document
-form, so they get a distinct production rather than being smuggled in as
-optional fields on a record.
+*Semantic constraint:* the `DocHead` inside the file MUST match the
+filename dispatch. `ATLAS.deed` containing `(repo-deed …)` is a
+validation error even if it parses.
 
-NOTE: This is *not* the earlier `tool-praxis-deed`, which was another session's
-coinage and was removed from this spec because it appeared in no owner text.
-The owner's own three heads were `estate-deed`, `repo-deed` and
+RULED 2026-09-08 by the owner on standards#752 — "yes, let’s adopt this,
+good idea, the chora replaces the clade of course."
+
+RULED 2026-09-08 by the owner: `praxis-deed` is a genuine fourth head, not
+a facet of `repo-deed`. A tool carries obligations a repo does not — what
+it invokes, what it emits, what it may refuse — and those are a distinct
+document form, so they get a distinct production rather than being
+smuggled in as optional fields on a record.
+
+[NOTE]
+====
+This is not the earlier `tool-praxis-deed`, which was another session’s
+coinage and was removed from this spec because it appeared in no owner
+text. The owner’s own three heads were `estate-deed`, `repo-deed` and
 `estate-atlas-deed`; `praxis-deed` is a deliberate addition ruled on
-2026-09-08, and the name is *two* words, not three.
+2026-09-08, and the name is two words, not three.
+====
 
-[#version-field]
 === `:schema-version` is required on every head
 
-*RULED 2026-09-08 by the owner.* The owner's original text was not uniform:
+RULED 2026-09-08 by the owner. The owner’s original text was not uniform:
 `estate-deed` carried `:schema-version`, `estate-atlas-deed` carried
-`:registry-version`, and `repo-deed` carried neither. The grammar normalises
-this:
+`:registry-version`, and `repo-deed` carried neither. The grammar
+normalises this:
 
-* `:schema-version` STRING is *REQUIRED* on all four heads. It versions the
-  *format*, so a consumer can refuse a file it cannot parse.
-* `:registry-version` STRING remains available on `estate-atlas-deed` as an
-  *optional additional* field. It versions the *registry's contents*, which is
-  a different thing from the format version, so nothing is lost by keeping both.
+* `:schema-version` STRING is REQUIRED on all four heads, and is
+  structurally first. It versions the *format*, so a consumer can refuse a
+  file it cannot parse.
+* `:registry-version` STRING remains available on `estate-atlas-deed` as
+  an optional additional field. It versions the registry’s *contents*.
 
-[source,lisp]
 ----
 (estate-atlas-deed
-  :schema-version   "1.0.0"   ; REQUIRED — the format
+  :schema-version   "1.0.0"   ; REQUIRED — the format, first field
   :registry-version "3"       ; optional — the contents
   ...)
 ----
 
 This is the field the current validator cannot see. Its regex is:
 
-[source,subs="none"]
 ----
 ^[[:space:]]*(version|schema_version)[[:space:]]*[=:]
 ----
 
-That matches the *underscore* spelling with no leading colon, so
-`  :schema-version "1.0.0"` FAILS and `  schema_version = "1.0"` PASSES —
+That matches the underscore spelling with no leading colon, so
+`:schema-version "1.0.0"` FAILS and `schema_version = "1.0"` PASSES —
 directly tested. See <<validator-change>>.
 
 Rationale for a single extension: the grammar is identical and only the
-structure differs. An extension should track what *parses* a file, not what it
-means — `.rs` covers both a library and a binary. `find -name '*_chora.deed'`
-costs exactly what `find -name '*.chora'` costs, so a second extension buys
-nothing a stem glob does not already give, while doubling every discovery
-pattern across the estate *during* an in-flight `.a2ml` -> `.deed` sweep. Two
-interleaved estate-wide sweeps is how this goes wrong. The existing validator
-already dispatches on basename, so stem dispatch is proven in current tooling.
+structure differs. An extension should track what parses a file, not what
+it means — `.rs` covers both a library and a binary. `find -name
+'*_chora.deed'` costs exactly what `find -name '*.chora'` costs, so a
+second extension buys nothing a stem glob does not already give, while
+doubling every discovery pattern across the estate during an in-flight
+`.a2ml` → `.deed` sweep. Two interleaved estate-wide sweeps is how this
+goes wrong. The existing validator already dispatches on basename, so stem
+dispatch is proven in current tooling.
 
-[#praxis-form]
-=== The `praxis-deed` form
+=== The praxis-deed form
 
-A praxis deed states what a tool *does*. Three fields are required, and they
-follow from rules already established elsewhere in this document rather than
-from taste:
+A praxis deed states what a tool does. Three fields are required, and they
+follow from rules already established elsewhere in this document rather
+than from taste:
 
-[source,lisp]
 ----
 ;; SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath)
 ;; SPDX-License-Identifier: CC-BY-SA-4.0
 (praxis-deed
-  :schema-version  "1.0.0"              ; REQUIRED — every head (<<version-field>>)
-  :canonical-name  "cadastre"           ; REQUIRED — identity (<<identity>>)
+  :schema-version  "1.0.0"              ; REQUIRED — first field
+  :canonical-name  "cadastre"           ; REQUIRED — identity
   :beholding-chora #u5"estate/chora"    ; REQUIRED — one declaration site
 
   (rules
@@ -291,44 +390,55 @@ from taste:
     (rule :priority 20  :when … :then …)))
 ----
 
-* `:beholding-chora` is required *because* of <<one-declaration-site>>: a tool
-  may not declare its own vocabulary, so it must name the chora it reads. A
-  UUID, never a bare filename — a bare filename resolves against nothing.
-* `:priority` is required on each rule *because* of order-independence: rule
-  precedence is carried by an explicit integer, never by file position.
+`:beholding-chora` is required because of <<one-declaration-site>>: a tool
+may not declare its own vocabulary, so it must name the chora it reads. A
+UUID, never a bare filename — a bare filename resolves against nothing.
 
-WARNING: *Provisional for v0.1.* The owner ruled on 2026-09-08 that
-`praxis-deed` is a genuine fourth head. The owner did *not* rule on which
-fields beyond these three a praxis deed must carry — candidates such as
-`:invokes`, `:emits` and `:may-refuse` are *not* specified here, because
-inventing them is precisely the failure this document exists to stop. A tool
-deed conforms in v0.1 on the three fields above; anything further is a v0.2
+`:priority` is required on each rule because of order-independence: rule
+precedence is carried by an explicit integer, never by file position.
+
+[WARNING]
+====
+*Provisional for v0.1.* The owner ruled on 2026-09-08 that `praxis-deed`
+is a genuine fourth head. The owner did not rule on which fields beyond
+these three a praxis deed must carry — candidates such as `:invokes`,
+`:emits` and `:may-refuse` are not specified here, because inventing them
+is precisely the failure this document exists to stop. A tool deed
+conforms in v0.1 on the three fields above; anything further is a v0.2
 question.
+====
 
-`estate-atlas-deed` is *not* folded into this form. The atlas is a registry —
-a noun, a record of what exists — and keeps its own head. A praxis deed is a
-verb.
+`estate-atlas-deed` is not folded into this form. The atlas is a registry
+— a noun, a record of what exists — and keeps its own head. A praxis deed
+is a verb.
 
-[#one-declaration-site]
 === One declaration site
 
-Vocabulary — types, tropes, lattices — is declared in `estate_chora.deed` and
-*nowhere else*. Every other deed references it. This is the owner's ruling of
-2026-09-04, verbatim: "it should be referrring to the chora".
+Vocabulary — types, tropes, lattices — is declared in `estate_chora.deed`
+and nowhere else. Every other deed references it. This is the owner’s
+ruling of 2026-09-04, verbatim: "it should be referrring to the chora".
 
-A praxis deed names the vocabulary it reads via `:beholding-chora <uuid>`. A
-repo chora names its estate via `:beholding-estate <uuid>`. Both take a UUID,
-never a bare filename — a bare filename resolves against nothing.
+Both praxis deeds and repo choras name that vocabulary via
+`:beholding-chora <uuid>`. The value is a UUID5, never a bare filename.
 
 This rule exists because the first draft declared its own parallel type
-universe in a tool deed, and the dependency then ran backwards: a lattice was
-declared in the tool and consumed by the chora, while every repo beheld the
-chora. Two universes with no precedence between them is not a layering
-problem, it is an ambiguity.
+universe in a tool deed, and the dependency then ran backwards: a lattice
+was declared in the tool and consumed by the chora, while every repo
+beheld the chora. Two universes with no precedence between them is not a
+layering problem, it is an ambiguity.
+
+[WARNING]
+====
+v0.1 draft used `:beholding-estate` for repos and `:beholding-chora` for
+praxis. Those cannot both stand without a written distinction. This
+revision uses `:beholding-chora` for *every* non-estate deed, because
+there is one declaration site and it is the chora. Owner: confirm or
+restore the split with definitions.
+====
 
 === The chora is not a layer
 
-....
+----
         estate_chora.deed             THE VOCABULARY (noun, estate-wide)
         types · tropes · lattice · universal invariants
                  |
@@ -338,7 +448,7 @@ problem, it is an ambiguity.
    |                                                     |
    v                                                     v
  TOOL PRAXIS DEEDS                        REPO CHORAS
- <tool>_praxis.deed                       repo_chora.deed
+ <tool>_praxis.deed                       *_chora.deed
  rules: guard -> action                   local facts, history, names
    |                                        ^
    |  the cadastre reads every repo chora -->|
@@ -348,231 +458,264 @@ problem, it is an ambiguity.
    |
    v
  OPERATIONAL TOOLS  — read the MAPS; they do not re-parse repo choras
-....
+----
 
-[#uuid-semantics]
 === UUID semantics — state the claim honestly
 
 `#u5"…"` is a UUIDv5: SHA-1 over a public namespace and a public name. Any
-cloner can recompute it correctly. It therefore *cannot* establish that a
+cloner can recompute it correctly. It therefore cannot establish that a
 document is unfalsified, and no rule may claim that it does.
 
-What it does establish is real and worth checking: a clone that copied a deed
-verbatim without re-running repo initialisation will carry the *parent's*
-UUID, which will not match its own name. That is lazy copy-paste, and this
-catches it. The check is named `enforce-uuid-provenance` for that reason and
-MUST NOT be named or described as an unfalsifiability guarantee.
+What it does establish is real and worth checking: a clone that copied a
+deed verbatim without re-running repo initialisation will carry the
+parent’s UUID, which will not match its own name. That is lazy copy-paste,
+and this catches it. The check is named `enforce-uuid-provenance` for that
+reason and MUST NOT be named or described as an unfalsifiability
+guarantee.
 
 == Semantics: identity, and the self-assertion rule
 
-[#identity]
 === Identity maps onto BaseRecord
 
-A deed's identity is not a new invention. It is the already-typed
-`BaseVocab.BaseRecord`, whose required fields are `id`, `sourceSpan`, `hash`
-(`sha256:` + 64 lowercase hex), `provenance` (`author`, `tool` as `name@version`,
-`kind` ∈ {`human`,`ai`,`mechanical`}, optional `agent`), `timestamp` (RFC 3339
-UTC) and `artefactRef`. `canonicalNode`, `agent` and `profileDecl` are optional
-and do not affect base validity.
+A deed’s identity is not a new invention. It is the already-typed
+`BaseVocab.BaseRecord`, whose required fields are `id`, `sourceSpan`,
+`hash` (`sha256:` + 64 lowercase hex), `provenance` (author, tool as
+`name@version`, kind ∈ `{human,ai,mechanical}`, optional agent),
+`timestamp` (RFC 3339 UTC) and `artefactRef`. `canonicalNode`, `agent` and
+`profileDecl` are optional and do not affect base validity.
 
-In the deed surface, a document is *identified* when it carries:
+The *surface* keywords that carry that identity are the following. This
+table is the conformance list for v0.1 validators. (Mapping each column
+onto a `BaseRecord` field is the typed-core bridge, not a parse rule.)
 
-[cols="1,3"]
+[cols="1,2,2"]
 |===
-| `:schema-version STRING` | *REQUIRED on every deed* — RULED by the owner 2026-09-08; see <<version-field>>. Note this is a *change to existing files*, not a description of them: the owner's source text carried `:schema-version` on `estate-deed`, `:registry-version` on `estate-atlas-deed`, and nothing on `repo-deed`. `:registry-version` is a DISTINCT field (it versions registry contents, not the format) and survives as optional on the atlas.
-| `:canonical-name STRING` or an explicit identity keyword | REQUIRED.
-| `:estate-uuid` / `:repo-uuid` UUID5 | REQUIRED on chora forms.
+| Head | Required identity | Required reference
+
+| `estate-deed`
+| `:canonical-name` STRING, `:estate-uuid` UUID5
+| — (this file *is* the vocabulary)
+
+| `repo-deed`
+| `:canonical-name` STRING, `:repo-uuid` UUID5
+| `:beholding-chora` UUID5
+
+| `praxis-deed`
+| `:canonical-name` STRING
+| `:beholding-chora` UUID5
+
+| `estate-atlas-deed`
+| `:canonical-name` STRING
+| `:beholding-chora` UUID5; `:registry-version` STRING optional
 |===
 
-The head symbol (`estate-deed`, `repo-deed`, `estate-atlas-deed`, `praxis-deed`) is itself
-identifying: a file whose first form is one of the four declared heads is a
-deed of that kind, and a validator MAY treat the head as satisfying the
-structural half of identity.
+Plus, on every head: `:schema-version` STRING, structurally first.
 
-[#self-assertion]
+The head symbol itself is identifying: a file whose first form is one of
+the four declared heads is a deed of that kind, and a validator MAY treat
+the head as satisfying the *structural* half of identity. It does not
+excuse a missing `:canonical-name`.
+
+[WARNING]
+====
+Confirm this table. v0.1 §6.1 said `:estate-uuid / :repo-uuid` “on chora
+forms” without defining atlas/praxis. v0.1 §8.2 matched
+`:estate-authority` and `:agent-id`, which are *not* in this table and
+MUST NOT be accepted as identity until they are defined here.
+====
+
 === A self-declaration is an input, never a conclusion
 
-This is the load-bearing semantic rule of the whole format, and it generalises
-a specific defect found in the first draft.
+This is the load-bearing semantic rule of the whole format, and it
+generalises a specific defect found in the first draft.
 
 That draft had a repo declare `:p-falsifying #f :p-misbinding #f
-:p-conflating #f`, and had the enforcing rule read those same fields back to
-decide whether the repo was deceptive. *A liar declares `#f`.* The rule was
-vacuous — it could only ever confirm what it was told.
+:p-conflating #f`, and had the enforcing rule read those same fields back
+to decide whether the repo was deceptive. A liar declares `#f`. The rule
+was vacuous — it could only ever confirm what it was told.
 
 The general rule:
 
 [NOTE]
 ====
-*A deed's self-assertions are INPUTS to an audit. They are never its
-conclusions.* Any derived judgement about a repo MUST be computed by an
+A deed’s self-assertions are INPUTS to an audit. They are never its
+conclusions. Any derived judgement about a repo MUST be computed by an
 external observer from observed state, MUST be recorded in a distinct
-`:derived-state` position, and MUST carry a witness naming the deriving tool.
-A rule that reads a self-assertion and emits a judgement of the same
-proposition is ill-formed and MUST be rejected by the linter.
+`:derived-state` position, and MUST carry a witness naming the deriving
+tool. A rule that reads a self-assertion and emits a judgement of the
+same proposition is ill-formed and MUST be rejected by the linter.
 ====
 
-Consequently a repo states a `warrant` (<<four-type-systems>> — the owner's own term,
-replacing the coinage `veracity-claim`); it does not state a
-veracity *state*. The cadastre derives the state and emits a witness. A
-bare symbol that a repo writes about itself is not a witness.
+Consequently a repo states a *warrant* (see <<typechecking>> — the
+owner’s own term, replacing the coinage `veracity-claim`); it does not
+state a veracity state. The cadastre derives the state and emits a
+witness. A bare symbol that a repo writes about itself is not a witness.
 
-[#typechecking]
 == Typechecking — PROPOSED, pending the typed core
 
 [IMPORTANT]
 ====
-Everything in this section is PROPOSED. It is recorded so the design is not
-lost, not because it is settled. `TypedCore.idr` currently types the *prose*
-document model (sections, refs, figures) and has no record/deed node. Bridging
-it is real work, not a rename.
+Everything in this section is PROPOSED. It is recorded so the design is
+not lost, not because it is settled. `TypedCore.idr` currently types the
+prose document model (sections, refs, figures) and has no record/deed
+node. Bridging it is real work, not a rename. *No new ABNF production is
+required by anything below.*
 ====
 
 === What already exists and is total
 
-`BaseVocab` provides `baseValidB : BaseRecord -> Bool`, the proposition
+`BaseVocab` provides `baseValidB : BaseRecord → Bool`, the proposition
 `BaseValid r = baseValidB r = True`, a decision procedure
-`baseValidDec : (r : BaseRecord) -> Dec (BaseValid r)`, and structured
+`baseValidDec : (r : BaseRecord) → Dec (BaseValid r)`, and structured
 diagnostics `baseRecordIssues` enumerating errors first and the
-`AiMissingAgent` advisory last. This is the model to follow for every deed
-check: a decidable Boolean, a proposition, a decision procedure, and a
-*structured* issue list rather than a string.
+`AiMissingAgent` advisory last. This is the model to follow for every
+deed check: a decidable Boolean, a proposition, a decision procedure, and
+a structured issue list rather than a string.
 
-[#four-type-systems]
 === Four type systems, measured against what the estate already proves
 
-The owner asked whether tropical, choreographic, echo or epistemic typing can
-be incorporated usefully into `.deed`, and if necessary into k9. These are not
-textbook theories to be imported: all four are mechanised in the owner's own
-`_TYPES _SET/` repos. Each verdict below says which layer it touches —
-*grammar*, *semantics*, or *k9* — because most of them touch no grammar at all.
+The owner asked whether tropical, choreographic, echo or epistemic typing
+can be incorporated usefully into `.deed`, and if necessary into k9.
+These are not textbook theories to be imported: all four are mechanised
+in the owner’s own `_TYPES _SET/` repos. Each verdict below says which
+layer it touches — grammar, semantics, or k9 — because most of them
+touch no grammar at all.
 
-The honest summary: *one changes a name, one is a k9 proposal, two are naming
-for shapes this spec already has.* None requires a new production.
+The honest summary: one changes a name, one is a k9 proposal, two are
+naming for shapes this spec already has. None requires a new production.
 
 ==== Epistemic — adopt the vocabulary, change nothing else
 
-`_TYPES _SET/epistemic-types` (Agda, MPL-2.0) builds a modality spectrum in
-which `FactiveModality` carries `reflect : E κ A -> A` (knowledge implies
-truth) and `BeliefModality` *intentionally omits* `reflect`. That omission is
-<<self-assertion>> stated formally: a repo's declaration
-inhabits a non-factive modality, so no rule can extract truth from it. The
-distinction is proved structural, not asserted by a linter.
+`_TYPES _SET/epistemic-types` (Agda, MPL-2.0) builds a modality spectrum
+in which `FactiveModality` carries `reflect : E κ A → A` (knowledge
+implies truth) and `BeliefModality` intentionally omits `reflect`. That
+omission is <<self-assertion>> stated formally: a repo’s declaration
+inhabits a non-factive modality, so no rule can extract truth from it.
+The distinction is proved structural, not asserted by a linter.
 
 It also already has the word this draft coined. The repo defines
-`Warrant κ A` as "the type of evidence tokens for `A`", explicitly recording
-"the *type of evidence* for a claim without assuming the evidence is valid",
-and separates "I have a receipt for A" from "A is true" — with `SoundWarrant`
-as a *separate* interface adding `evidence -> A`, not assumed by default.
+`Warrant κ A` as "the type of evidence tokens for A", explicitly
+recording "the type of evidence for a claim without assuming the evidence
+is valid", and separates "I have a receipt for A" from "A is true" — with
+`SoundWarrant` as a separate interface adding `evidence → A`, not assumed
+by default.
 
-*Ruling proposed:* withdraw the coinage `veracity-claim` from the open rulings
-and use *warrant* for a repo's non-authoritative self-assertion, and *receipt*
-for a claim transported across a repo boundary. The owner already has the
-terms, mechanised, with the exact semantics this format needs. Coining a rival
-word would repeat the `tool-praxis-deed` error in vocabulary rather than syntax.
+*Ruling proposed:* withdraw the coinage `veracity-claim` from the open
+rulings and use *warrant* for a repo’s non-authoritative self-assertion,
+and *receipt* for a claim transported across a repo boundary. The owner
+already has the terms, mechanised, with the exact semantics this format
+needs. Coining a rival word would repeat the `tool-praxis-deed` error in
+vocabulary rather than syntax.
 
 *Layer:* semantics and naming. No grammar change. No new field.
 
 ==== Tropical — the only one that belongs in k9, and it has a consumer
 
 `_TYPES _SET/tropical-types` formalises the max-plus semiring over
-`ℕ ∪ {-∞}` in `Tropical.thy` (Isabelle 2025-1, `comm_semiring_1` proved
+ℕ ∪ {-∞} in `Tropical.thy` (Isabelle 2025-1, `comm_semiring_1` proved
 through a seven-step typeclass chain, dioid proved separately), and
-`TropicalSessionTypes.lean` proves that a static tropical grade equals the
-dynamic wall-clock span, with a QTT refinement showing the tropical grade
-bounds sequential billing.
+`TropicalSessionTypes.lean` proves that a static tropical grade equals
+the dynamic wall-clock span, with a QTT refinement showing the tropical
+grade bounds sequential billing.
 
-The discriminator for "useful" is whether anything declares a budget today.
-*Measured across both canonical trees:* `timeout_seconds | Number | default =
-300` occurs in *133* Nickel files across *63 repos* — but those files carry
-only three basenames (`_base.ncl` x68, `trust.ncl` x60, `echidnabot.ncl` x5),
-so this is *one shared contractile-runner template stamped estate-wide*, not
-133 independent decisions. `_base.ncl` is the base imported by every verb
-runner and the field sits in its `run_defaults`. Alongside it,
-`timeout_honouring = 'strict` occurs in *48* files, and `'timeout` is one of
-nine declared failure classes (175 occurrences).
+The discriminator for "useful" is whether anything declares a budget
+today. Measured across both canonical trees: `timeout_seconds | Number |
+default = 300` occurs in 133 Nickel files across 63 repos — but those
+files carry only three basenames (`_base.ncl` ×68, `trust.ncl` ×60,
+`echidnabot.ncl` ×5), so this is one shared contractile-runner template
+stamped estate-wide, not 133 independent decisions. `_base.ncl` is the
+base imported by every verb runner and the field sits in its
+`run_defaults`. Alongside it, `timeout_honouring = 'strict` occurs in 48
+files, and `'timeout` is one of nine declared failure classes (175
+occurrences).
 
-That the template is shared is what makes this tractable: a per-step bound is
-already declared in one place for the whole estate. What does not exist
-anywhere is a rule for *composing* those bounds. A pipeline of six steps each
-bounded at 300s has no declared total, so a runner cannot say in advance
-whether the pipeline can finish inside its own bound.
+That the template is shared is what makes this tractable: a per-step
+bound is already declared in one place for the whole estate. What does
+not exist anywhere is a rule for composing those bounds. A pipeline of
+six steps each bounded at 300s has no declared total, so a runner cannot
+say in advance whether the pipeline can finish inside its own bound.
 
-That composition rule is exactly the tropical semiring: sequential composition
-is ⊗ (addition of grades), a parallel or alternative fan-out is ⊕ (max of
-grades, giving the span). The Lean result is the soundness story — the
-statically computed grade *is* the wall-clock span. Note the direction of the
-claim when it is applied here: `timeout_seconds` declares a *bound*, not a
-measured duration, so the composed value *bounds* the pipeline's span rather
-than equalling it. That is still enough for a runner to refuse a pipeline
-whose composed bound exceeds its own.
+That composition rule is exactly the tropical semiring: sequential
+composition is ⊗ (addition of grades), a parallel or alternative fan-out
+is ⊕ (max of grades, giving the span). The Lean result is the soundness
+story — the statically computed grade is the wall-clock span. Note the
+direction of the claim when it is applied here: `timeout_seconds`
+declares a *bound*, not a measured duration, so the composed value bounds
+the pipeline’s span rather than equalling it. That is still enough for a
+runner to refuse a pipeline whose composed bound exceeds its own.
 
-*Ruling proposed:* this belongs in the *Nickel runner layer*, never in
-`.deed`. Be precise about where that is: of the *147* `.ncl` files declaring
-`timeout_seconds`, *141* sit in the contractile-runner layer — *133* of those
-under just three basenames (`_base.ncl`, `trust.ncl`, `echidnabot.ncl`), the
-other 8 miscellaneous — and *6* are k9 configs
-(`fleet-config.k9.ncl`, `mcp-server-config-schema.k9.ncl`). *No `.k9` file
-declares it at all* — 250 exist and none carry the field — so "k9 already has
-timeouts" is true of `*.k9.ncl` Nickel configs, not of the `.k9` surface.
-Propose a composed bound in the runner base alongside the existing per-step
-field, so a pipeline's declared total is checkable against its parts. This is
-task #76 (the must/intend/trust/adjust/bust/dust runners), not a grammar task.
+*Ruling proposed:* this belongs in the Nickel runner layer, never in
+`.deed`. Be precise about where that is: of the 147 `.ncl` files
+declaring `timeout_seconds`, 141 sit in the contractile-runner layer —
+133 of those under just three basenames (`_base.ncl`, `trust.ncl`,
+`echidnabot.ncl`), the other 8 miscellaneous — and 6 are k9 configs
+(`fleet-config.k9.ncl`, `mcp-server-config-schema.k9.ncl`). No `.k9` file
+declares it at all — 250 exist and none carry the field — so "k9 already
+has timeouts" is true of `*.k9.ncl` Nickel configs, not of the `.k9`
+surface (and not of `coordination.k9`). Propose a composed bound in the
+runner base alongside the existing per-step field, so a pipeline’s
+declared total is checkable against its parts. This is task #76 (the
+must/intend/trust/adjust/bust/dust runners), not a grammar task.
 
-*Do not* add a `:budget` field to `.deed`. Nothing reads it. A field no tool
-consumes is how the TOML speciation started.
+Do *not* add a `:budget` field to `.deed`. Nothing reads it. A field no
+tool consumes is how the TOML speciation started.
 
-*Layer:* the Nickel runner layer only (task #76). No grammar change, no new `.deed` field.
+*Layer:* the Nickel runner layer only (task #76). No grammar change, no
+new `.deed` field.
 
 ==== Echo — the name for what ANCHOR is
 
-`_TYPES _SET/echo-types` (Agda, `--safe --without-K`, no postulates) proves
-the fiber laws for `Echo f` and the total-space equivalence
-`A ≃ Σ B (Echo f)`. Read against this format: a deed is a *projection* of a
-repo's actual state; the fiber over a declaration is everything the projection
-lost. The equivalence then says the declaration plus its fiber recovers the
-repo — which is the precise statement of what ANCHOR is for (task #22, ruled
-2026-09-08 to be *both* descriptile and contractile, the is/ought join).
-Declared state is the projection; observed drift is the fiber; ANCHOR is the
-point where the two are forced back together.
+`_TYPES _SET/echo-types` (Agda, `--safe --without-K`, no postulates)
+proves the fiber laws for `Echo f` and the total-space equivalence
+`A ≃ Σ B (Echo f)`. Read against this format: a deed is a projection of
+a repo’s actual state; the fiber over a declaration is everything the
+projection lost. The equivalence then says the declaration plus its fiber
+recovers the repo — which is the precise statement of what ANCHOR is for
+(task #22, ruled 2026-09-08 to be both descriptile and contractile, the
+is/ought join). Declared state is the projection; observed drift is the
+fiber; ANCHOR is the point where the two are forced back together.
 
 Two caveats carried verbatim from the repo, because they bound the claim.
-The equivalence "is not novel" — it is the standard HoTT total-space-of-fibers
-result — and "the repo's contribution is the *emphasis*", treating it as the
-foundation for a structured-loss account. And the factorization is
-*domain-replacement*, not image factorization; the repo admits
-`EchoImageFactorization` is a misnomer and gives a weak factorization system,
-with orthogonality (unique diagonal fills) *not yet proved*.
+The equivalence "is not novel" — it is the standard HoTT
+total-space-of-fibers result — and "the repo’s contribution is the
+emphasis", treating it as the foundation for a structured-loss account.
+And the factorization is domain-replacement, not image factorization; the
+repo admits `EchoImageFactorization` is a misnomer and gives a weak
+factorization system, with orthogonality (unique diagonal fills) not yet
+proved.
 
-*Ruling proposed:* adopt echo as the vocabulary for the ANCHOR spec —
-projection, fiber, structured loss — and cite it as naming a shape, not as
-machinery that computes anything. Nothing here validates a file.
+*Ruling proposed:* adopt *echo* as the vocabulary for the ANCHOR spec —
+projection, fiber, structured loss — and cite it as naming a shape, not
+as machinery that computes anything. Nothing here validates a file.
 
 *Layer:* semantics, and the ANCHOR spec (#22). No grammar change.
 
 ==== Choreographic — already the estate/repo split, but its keystone is open
 
 `_TYPES _SET/choreographic-types` is not a fourth independent system: it
-*fuses* the previous two. A global choreographic type `G` is read as a partial
-causal order and projected to local types by endpoint projection, with each
-edge graded by an echo loss-grade and an epistemic standpoint-warrant. A *cut*
-is a consistent frontier (antichain) across that order.
+fuses the previous two. A global choreographic type `G` is read as a
+partial causal order and projected to local types by endpoint projection,
+with each edge graded by an echo loss-grade and an epistemic
+standpoint-warrant. A cut is a consistent frontier (antichain) across
+that order.
 
-That is the topology this spec already describes. `estate_chora.deed` is the
-global type; `repo_chora.deed` is its endpoint projection; the
-one-declaration-site rule (<<one-declaration-site>>) is the projection discipline —
-vocabulary is declared once globally and projected, never re-declared locally.
-Naming it as endpoint projection turns "an operational tool does not read a
-source it is not a party to" from a prose invariant into a statable property.
+That is the topology this spec already describes. `estate_chora.deed` is
+the global type; `repo_chora.deed` is its endpoint projection; the
+one-declaration-site rule is the projection discipline — vocabulary is
+declared once globally and projected, never re-declared locally. Naming
+it as endpoint projection turns "an operational tool does not read a
+source it is not a party to" from a prose invariant into a statable
+property.
 
-*The load-bearing caveat:* the repo's central artefact, K-CUT — "the
+The load-bearing caveat: the repo’s central artefact, K-CUT — "the
 conjecture that grading and transport commute with projection across a
-consistent frontier" — is described by the repo itself as *open*. This spec
+consistent frontier" — is described by the repo itself as open. This spec
 must not depend on it. Use the vocabulary; do not claim the theorem.
 
-*Ruling proposed:* adopt choreography/endpoint-projection as the description
-of the estate/repo relation in <<document-forms>>. Record K-CUT as an open dependency
-if any future rule is ever derived from commuting projection.
+*Ruling proposed:* adopt choreography/endpoint-projection as the
+description of the estate/repo relation in the four document forms.
+Record K-CUT as an open dependency if any future rule is ever derived
+from commuting projection.
 
 *Layer:* semantics and terminology. No grammar change.
 
@@ -582,109 +725,148 @@ if any future rule is ever derived from commuting projection.
 
 [cols="1,3"]
 |===
-| `lax`      | Structure only. Identity and version absent are warnings.
-| `strict`   | Identity and version absent are ERRORS. Unknown clauses are errors.
-| `attested` | strict, plus every derived judgement must carry a witness.
+| Mode | Meaning
+
+| `lax`
+| Structure only. Identity and version absent are warnings.
+
+| `strict`
+| Identity and version absent are ERRORS. Unknown clauses are errors.
+
+| `attested`
+| `strict`, plus every derived judgement must carry a witness.
 |===
 
-*For `.deed` files, `strict` is the DEFAULT and `lax` MUST be opt-in.*
+For `.deed` files, `strict` is the DEFAULT and `lax` MUST be opt-in.
 
-This inverts current behaviour and is deliberate. Today, identity and version
-are `report_issue "warning"`, so a file with no identity at all scores
-rc=0 and prints "validation passed" unless `INPUT_STRICT=true` is set. Any CI
-job citing the validator without that variable is a formality, not a gate.
-That default is how the speciation regenerated unnoticed, and it must not
-carry over to `.deed`.
+This inverts current behaviour and is deliberate. Today, identity and
+version are `report_issue "warning"`, so a file with no identity at all
+scores `rc=0` and prints "validation passed" unless `INPUT_STRICT=true`
+is set. Any CI job citing the validator without that variable is a
+formality, not a gate. That default is how the speciation regenerated
+unnoticed, and it must not carry over to `.deed`.
 
-[#validator-change]
+A `.deed` file in `strict` mode MUST:
+
+. Parse completely against `abnf/deed.abnf` (full input consumed).
+. Have a filename that dispatches to a head matching `DocHead`.
+. Carry the required identity fields in the table in <<identity>>.
+. Not use `_` in any symbol, `#T`/`#F` as booleans, or unknown escapes.
+
 === The single change the validator needs
 
 Add a fifth identity form — the s-expression head — and accept hyphenated
-keyword versions:
+keyword versions. Match only keywords defined in <<identity>>:
 
-[source,bash]
 ----
 # identity: accept a deed document head
 || [[ "$line" =~ ^[[:space:]]*\((estate-deed|repo-deed|estate-atlas-deed|praxis-deed)([[:space:]]|$) ]]
-# identity: accept keyword-style identity fields
-|| [[ "$line" =~ ^[[:space:]]*:(canonical-name|estate-authority|agent-id)[[:space:]] ]]
+# identity: accept keyword-style identity fields (hyphenated, leading colon)
+|| [[ "$line" =~ ^[[:space:]]*:(canonical-name|estate-uuid|repo-uuid|beholding-chora)[[:space:]] ]]
 
 # version: accept hyphenated keyword form alongside version/schema_version
 || [[ "$line" =~ ^[[:space:]]*:schema-version[[:space:]] ]]
 || [[ "$line" =~ ^[[:space:]]*:registry-version[[:space:]] ]]
 ----
 
-A SECOND, separate gap was measured in the same script. Version detection reads:
+A SECOND, separate gap was measured in the same script. Version detection
+reads:
 
-[source,bash]
 ----
 if [[ "$line" =~ ^[[:space:]]*(version|schema_version)[[:space:]]*[=:] ]]; then
     has_version=true
 ----
 
-That pattern requires the field name at the start of the line with no leading
-colon, and spells it with an underscore. The deed surface writes
-`:schema-version` — leading colon, hyphen. Verified by direct test: the line
-`  :schema-version "1.0.0"` does NOT match, while `  schema_version = "1.0"`
-does. So a conforming deed fails BOTH the identity check and the version check,
-for two independent reasons. Both must be patched together or the fix is half a
-fix.
+That pattern requires the field name at the start of the line with no
+leading colon, and spells it with an underscore. The deed surface writes
+`:schema-version` — leading colon, hyphen. Verified by direct test: the
+line `:schema-version "1.0.0"` does NOT match, while
+`schema_version = "1.0"` does. So a conforming deed fails BOTH the
+identity check and the version check, for two independent reasons. Both
+must be patched together or the fix is half a fix.
 
+The patterns are anchored to optional leading whitespace only, so an
+indented field still matches. This matters: the owner’s own
+`estate_chora.deed` indents its fields, and a form anchored to column
+zero would reject it. The *head* itself has no separator between `(` and
+the symbol, so `(estate-deed` is always column-adjacent.
 
-Note the patterns are anchored to optional *leading whitespace only*, so an
-indented head still matches. This matters: the owner's own `estate_chora.deed`
-indents its fields, and a form anchored to column zero would reject it.
+Do *not* match `:estate-authority` or `:agent-id` until they are in the
+identity table.
 
 === Exemptions carry over unchanged
 
-The existing identity exemptions remain: basenames containing `AI-MANIFEST`;
-`AI.a2ml` (and its successor `AI.deed`); any basename containing `template`;
-any file with unfilled placeholders; and any path under a configured design
-tree. These exist because a template legitimately has no identity of its own.
+The existing identity exemptions remain: basenames containing
+`AI-MANIFEST`; `AI.a2ml` (and its successor `AI.deed`); any basename
+containing `template`; any file with unfilled placeholders; and any path
+under a configured design tree. These exist because a template
+legitimately has no identity of its own.
 
 == Rulings settled, and rulings still open
 
 === Settled by the owner, 2026-09-08
 
-. *The record dialect — SUPERSEDED.* `RECORD-DIALECT-SPEC.adoc` (v1.0.0,
-  Draft, in `hyperpolymath/a2ml`) specified `[section]` + `key = value`. That
-  is the TOML-family surface the owner's own instruction targets ("many AIs
-  have speciated the a2ml/k9s into json type and toml type … I did not ask for
-  it"), and measurement over all 35,884 `.a2ml` files found the grammar has no
-  `=` form. *Ruled:* keep the file as history, stamped SUPERSEDED with a
-  `superseded-by` pointer to this document. It is no longer live guidance.
+*The record dialect — SUPERSEDED.* `RECORD-DIALECT-SPEC.adoc` (v1.0.0,
+Draft, in `hyperpolymath/a2ml`) specified `[section]` + `key = value`.
+That is the TOML-family surface the owner’s own instruction targets
+("many AIs have speciated the a2ml/k9s into json type and toml type … I
+did not ask for it"), and measurement over all 35,884 `.a2ml` files found
+the grammar has no `=` form. Ruled: keep the file as history, stamped
+SUPERSEDED with a superseded-by pointer to this document. It is no
+longer live guidance.
 
-. *A praxis deed gets its own head — `praxis-deed`.* See
-  <<document-forms>>. Four heads, not three. `estate-atlas-deed` remains the
-  head for the registry specifically; `praxis-deed` is the general tool form.
+*A praxis deed gets its own head — `praxis-deed`.* Four heads, not three.
+`estate-atlas-deed` remains the head for the registry specifically;
+`praxis-deed` is the general tool form.
 
-. *Version field — `:schema-version`, required everywhere.* See
-  <<version-field>>. `:registry-version` survives as an optional additional
-  field on the atlas only.
+*Version field — `:schema-version`, required everywhere,* structurally
+first. `:registry-version` survives as an optional additional field on
+the atlas only.
 
 === Still open
 
-. *Echo typing — ANSWERED, ratification needed.* <<four-type-systems>> gives a
-  reading grounded in `_TYPES _SET/echo-types`: a deed is a projection, the
-  fiber over it is the drift, and `A ≃ Σ B (Echo f)` is why ANCHOR (#22) is the
-  point that rejoins them. *Ratify or reject that reading* — and note the repo
-  itself calls the equivalence non-novel and has not proved orthogonality.
+*Identity field table* — v0.2 proposed `:beholding-chora` for every
+non-estate deed, `:estate-uuid` / `:repo-uuid` for own identity, and
+dropped `:estate-authority` / `:agent-id` / `:beholding-estate` until
+defined. Ratify or restore the split.
 
-. *The warrant/receipt swap — proposed, unratified.* <<four-type-systems>>
-  withdraws the coinage `veracity-claim` in favour of *warrant* (evidence
-  recorded without assuming soundness) and *receipt* (a claim transported
-  across a boundary), both already mechanised in
-  `_TYPES _SET/epistemic-types`. Confirm the swap.
+*Echo typing — ANSWERED, ratification needed.* The four-type-systems
+section gives a reading grounded in `_TYPES _SET/echo-types`: a deed is a
+projection, the fiber over it is the drift, and `A ≃ Σ B (Echo f)` is why
+ANCHOR (#22) is the point that rejoins them. Ratify or reject that
+reading — and note the repo itself calls the equivalence non-novel and
+has not proved orthogonality.
 
-. *Where pillar-specific vocabulary lives.* One-declaration-site removes the
-  duplicate universe; it does not decide where genuinely tool-specific types
-  belong. Two options: put them in the universal chora (bloats it with
-  vocabulary only one tool matches on), or add an explicit
-  `(extends-vocabulary :base <chora-uuid> …)` form in the praxis deed —
-  subordinate by construction, so it cannot recreate the two-universe defect.
+*The warrant/receipt swap — proposed, unratified.* Withdraw the coinage
+`veracity-claim` in favour of *warrant* (evidence recorded without
+assuming soundness) and *receipt* (a claim transported across a
+boundary), both already mechanised in `_TYPES _SET/epistemic-types`.
+Confirm the swap.
 
-. *Slot/assembly vocabulary has no declaration site at all.* A downstream
-  consumer wanting to express a multi-slot assembly as a deed cannot do so
-  today, and under one-declaration-site it may not invent the vocabulary
-  locally. Either the estate chora gains it, or `extends-vocabulary` lands.
-  (Task #75.)
+*Where pillar-specific vocabulary lives.* One-declaration-site removes
+the duplicate universe; it does not decide where genuinely tool-specific
+types belong. Two options: put them in the universal chora (bloats it
+with vocabulary only one tool matches on), or add an explicit
+`(extends-vocabulary :base <chora-uuid> …)` form in the praxis deed —
+subordinate by construction, so it cannot recreate the two-universe
+defect.
+
+*Slot/assembly vocabulary has no declaration site at all.* A downstream
+consumer wanting to express a multi-slot assembly as a deed cannot do so
+today, and under one-declaration-site it may not invent the vocabulary
+locally. Either the estate chora gains it, or `extends-vocabulary` lands.
+(Task #75.)
+
+== References
+
+* link:../abnf/deed.abnf[DEED ABNF]
+* link:https://www.rfc-editor.org/rfc/rfc7405[RFC 7405] (case-sensitive ABNF strings)
+* link:https://www.rfc-editor.org/rfc/rfc4122[RFC 4122] §4.3 (UUID v5)
+* link:../specs/K9-COORDINATION-SPEC.adoc[K9 Coordination File Specification]
+  (operational surface; not this grammar)
+
+== License
+
+This specification is licensed under CC-BY-SA-4.0.
+
+Implementations may use any OSI-approved license.

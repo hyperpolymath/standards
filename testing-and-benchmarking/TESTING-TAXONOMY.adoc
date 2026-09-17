@@ -69,6 +69,31 @@ fact, is worse than no test — it is read as evidence. If no honest test exists
 for a category yet, mark it N/A with justification, as Scope requires above.
 That is a truthful state; a passing-but-vacuous test is not.
 
+=== Choosing how to satisfy a category: the elegant arm is the default
+
+Every category below can be satisfied in more than one way, and the cheapest way is
+rarely the most correct. Where a choice exists — adapt the proven Idris2 test or write
+a quick local one; fix the code under test or weaken the assertion; fix the generator
+or add a special case for this repo — the *most elegant and correct long-term* option
+is the default arm, and it must be named as such whenever the choice is put to the
+owner.
+
+Judge elegance on long-run grounds only: correctness, absence of deferred breakage, no
+special cases, and a fix at the generator rather than at the instance. Never on how
+quickly a category can be marked satisfied. Where the other arm is taken, record both
+arms and the reason for departing — in the `Debtfile` where a shortfall is being
+tolerated, using the required `taxonomy-choice`, `taxonomy-default-arm`,
+`taxonomy-non-default-arm`, and `taxonomy-departure-reason` encoding defined in
+link:../docs/DEBTFILE-SPEC.adoc#testing-taxonomy-choice[Debtfile Specification:
+Testing-taxonomy choice encoding]; or in the N/A justification where the category
+is being declined. An unlabelled choice between a sound test and a convenient one is
+how a suite quietly becomes evidence for something nobody checked.
+
+This is the proposed estate doctrine _elegance by default_ applied to testing; it
+remains provisional until the ratification record in
+link:../RSR-PHILOSOPHY.adoc[`RSR-PHILOSOPHY.adoc`] has an owner decision, dissent
+record, and effective version or hash.
+
 == Part I: Test Categories
 
 === 1. Unit Tests
@@ -259,6 +284,61 @@ Can the new API serve old clients?
 **Tools:** `coqc`, `idris2 --check`, `lean --run`, `agda --safe`, integrated into CI.
 
 **Applies to:** Every repo with formal proofs.
+
+=== 17. Type-Safe Tests
+
+**Definition:** Verify that a property is enforced by the *type system* rather than by a
+runtime assertion — the test is that the ill-typed program does not compile. The canonical
+form is a negative witness: a deliberately wrong expression inside a compiler-checked
+`failing` block that pins the expected error text, so the rejection cannot be satisfied by
+an unrelated error such as a typo or a scope mistake.
+
+**Purpose:** A runtime check can be skipped, mocked, compiled out, or simply never reached.
+A type-level obligation cannot. Category 17 records the properties a repo has moved from
+the first class to the second, and prevents a later refactor from silently demoting one.
+
+**Subcategories** (nine, as implemented in `proven-tests-and-benches`): Tropical,
+Epistemic, Choreographic, Dependent, Effects, Decorative, Ceremonial, Dyadic, EchoTypes.
+
+**Tools:** Idris2 `failing` blocks, Rust `compile_fail` doctests and `trybuild`, Haskell
+`ShouldNotTypecheck`, Scala `illTyped`, TypeScript `@ts-expect-error`, Lean `#guard_msgs`.
+
+**Applies to:** Any repo in a language with a type system strong enough to carry the
+property. Required from CRG C+ where the repo claims type-level guarantees in its README.
+
+**⚠ Pin the error text, not merely the failure.** A negative test that asserts only "this
+does not compile" passes for every reason including the wrong one, and is a fake gate.
+
+=== 18. Coupling / Drift-freedom Tests
+
+**Definition:** Verify that two or more artefacts which must agree *do* agree, where
+nothing in the build already forces them to. The artefacts are independently editable and
+their agreement is maintained by discipline alone: mirror enums, a hand-written list that
+is supposed to enumerate a type, a serde implementation beside a custom `Display`, a
+redundant parser, a count asserted in both code and documentation, a lockfile beside the
+manifest it pins.
+
+**Purpose:** Drift between two copies of one fact is silent by construction — each copy is
+internally consistent, the build is green, and the disagreement surfaces only when a reader
+trusts the stale one. This is the failure mode least likely to be caught by any other
+category, because every other category tests one artefact against its own specification.
+
+**Tools:** Generated-vs-committed diffs (generate the second copy at test time and compare),
+exhaustiveness proofs linking a list literal to its enum (Idris2 `Data.List.Elem`, Rust
+`strum::EnumIter`, Haskell `Bounded`/`Enum`), schema round-trip properties, and
+manifest-derived fixtures shared by both sides.
+
+**Applies to:** Every repo holding the same fact in two editable places. In practice this is
+nearly all of them, which is why the category exists.
+
+**Relationship to Part VI.** CR-1 (mirror-enum drift), CR-2 (foreign-enum exhaustive-match
+lint) and CR-9 (schema-surface drift detector) are the *cross-repo* instances of this
+category; Category 18 is its repo-local form. A repo may satisfy 18 internally and still
+fail CR-1 against an upstream.
+
+**⚠ The strongest form deletes rather than reconciles.** Where one of the two copies has no
+consumers, the correct repair is to remove it and let the type system carry the fact once.
+A drift test over a duplicate that did not need to exist institutionalises the duplication.
 
 == Part II: Aspect Test Dimensions
 
@@ -747,10 +827,15 @@ with a `fixtures/` or `corpora/` directory.
 Recorded at the same time as the cross-repo ideas above, things that feel
 under-specified in this document itself:
 
-- **No "coupling test" category.** Tests that assert drift-freedom between
-  two independent artefacts (mirror enums, redundant parsers, serde + custom
-  Display, etc.) don't fit cleanly into the 16 categories. Proposal: add
-  Category 17 "Coupling / Drift-freedom" in v1.1.
+- ✅ **RESOLVED 2026-09-14 — "coupling test" category added as Category 18.**
+  The original note read: *"Tests that assert drift-freedom between two independent
+  artefacts (mirror enums, redundant parsers, serde + custom Display, etc.) don't fit
+  cleanly into the 16 categories. Proposal: add Category 17 'Coupling / Drift-freedom'
+  in v1.1."* The proposal is adopted and promoted to a full normative section, but
+  numbered **18**, not 17: `TypeSafeTest` had already shipped as Category 17 in
+  `proven-tests-and-benches` before this proposal was ratified, and is itself now
+  ratified here as § 17. Appending at 18 renumbers no shipped code and changes the
+  meaning of no already-serialised artefact.
 - **Proof-regression is single-prover.** Category 16 catches "Coq no longer
   accepts proof P" but not "Coq and Lean give different counterexamples for
   the same formula". Cross-prover regression deserves its own sub-category.
@@ -797,6 +882,8 @@ under-specified in this document itself:
 | Chaos/Resilience | CHS | B+ (if applicable)
 | Compatibility | CMP | B+ (if applicable)
 | Proof Regression | PRF | C+ (if proofs exist)
+| Type-Safe | TSF | C+ (if the language carries the property)
+| Coupling/Drift-freedom | CDF | C+
 |===
 
 == Appendix B: Aspect Quick Reference
@@ -827,6 +914,8 @@ The **K9 Coordination Protocol** (`standards/k9-coordination-protocol/`) serves 
 reference implementation for this taxonomy. It demonstrates:
 
 - **Full blitz assessment** against all 16 test categories and 14 aspect dimensions
+  that existed at the time of assessment (Categories 17 and 18 were ratified later,
+  on 2026-09-14, and K9 has not yet been reassessed against them)
 - **79 tests** across 8 test files covering 9 applicable categories (7 N/A with justification)
 - **Mutation testing** with 15 mutations (9 killed, 6 documented equivalents, 100% applicable score)
 - **Six Sigma benchmarks** baselined on real hardware

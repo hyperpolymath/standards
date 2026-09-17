@@ -1,0 +1,144 @@
+; SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+; SPDX-License-Identifier: MPL-2.0
+; SPDX-License-Identifier: CC-BY-SA-4.0
+;
+; DEED grammar, v1.0.0
+; Normative for parsing. Prose and rationale: ../DEED-GRAMMAR-SPEC.adoc
+;
+; Requires RFC 7405 (%s"..." case-sensitive string literals).
+;
+; NOTE: there is no "key = value" production and no "[section]" production.
+; The only bracket is "(". A file using "=" as a field separator is not a deed.
+; ("=" MAY appear INSIDE a symbol, e.g., a comparison operator.)
+;
+; CHANGELOG (v0.1.0 → v1.0.0):
+;   - Added %s prefix for all case-sensitive literals (RFC 7405)
+;   - Added _ to symbol continuation set
+;   - Changed token-sep from WSP to SP (tabs INVALID, consistent with K9)
+;   - Made version-field order-free (moved into field/clause repetition)
+;   - Added EOF enforcement note
+;   - Added semantic constraint notes for filename↔doc-head matching
+;   - Added UUID v4 exclusion note
+;   - Clarified boolean case sensitivity
+
+deed          = header [token-sep] form [token-sep]
+                ; IMPLEMENTATION NOTE: A conforming parser MUST verify
+                ; that the entire input is consumed by this production.
+                ; Trailing non-whitespace content after the closing ")"
+                ; is a parse error.
+
+header        = 1*spdx-line
+spdx-line     = ";;" SP %s"SPDX-" 1*text-char line-end
+
+form          = "(" doc-head 1*(token-sep (field / clause)) [token-sep] ")"
+                ; SEMANTIC: Exactly one field MUST have the keyword
+                ; ":schema-version" with a string value. A conforming
+                ; validator MUST reject forms lacking this field.
+                ; Order of fields and clauses is otherwise not semantic.
+
+doc-head      = %s"estate-deed"
+              / %s"repo-deed"
+              / %s"estate-atlas-deed"
+              / %s"praxis-deed"
+                ; SEMANTIC CONSTRAINT: The doc-head MUST match the
+                ; filename dispatch (see deed-filename below).
+                ; estate_chora.deed → estate-deed
+                ; ATLAS.deed        → estate-atlas-deed
+                ; *_praxis.deed     → praxis-deed
+                ; *_chora.deed      → repo-deed
+                ; A mismatch is a validation error.
+
+; --- Filename dispatch -------------------------------------------------
+; The document form is selected by the filename STEM before parsing begins.
+; This production grammars the NAME, not the contents.
+;
+; IMPLEMENTATION NOTE: The stem is everything before the final suffix
+; ("_chora.deed", "_praxis.deed", etc.). Do NOT split on "." — the
+; stem may contain dots (e.g., "my.project_chora.deed" → stem "my.project").
+
+deed-filename = estate-file / atlas-file / praxis-file / repo-file
+estate-file   = %s"estate_chora.deed"     ; -> estate-deed
+atlas-file    = %s"ATLAS.deed"            ; -> estate-atlas-deed
+praxis-file   = stem %s"_praxis.deed"     ; -> praxis-deed
+repo-file     = stem %s"_chora.deed"      ; -> repo-deed
+stem          = 1*( ALPHA / DIGIT / "-" / "." / "_" )
+
+; SIDE CONDITION (normative, NOT expressible in ABNF):
+; In repo-file, <stem> MUST NOT be the exact string "estate".
+; The literal "estate_chora.deed" also matches repo-file, so a conforming
+; implementation MUST test estate-file BEFORE repo-file and MUST NOT parse
+; estate_chora.deed as a repo-deed. Dispatch is exact-stem-first.
+; See ../DEED-GRAMMAR-SPEC.adoc#chora-dispatch-exclusion.
+; RULED 2026-09-08 by the owner on standards#752.
+
+field         = keyword token-sep value
+clause        = "(" symbol *(token-sep (field / clause)) [token-sep] ")"
+
+keyword       = ":" symbol
+value         = string / symbol / integer / boolean / uuid5 / quoted / list
+list          = "(" [value *(token-sep value)] [token-sep] ")"
+quoted        = "'" ( symbol / list )
+                ; NOTE: Only symbols and lists may be quoted.
+                ; Quoting integers, strings, or booleans is a parse error.
+
+symbol        = ALPHA *( ALPHA / DIGIT / "." / "*" / "/" / "<" / ">"
+                       / "=" / "!" / "?" / "+" / "-" / "_" )
+                ; "." is STRUCTURAL: Type.Software.Library is ONE symbol
+                ; whose dotted segments are meaningful to the type resolver.
+                ; "=" may appear INSIDE a symbol (e.g., a comparison operator);
+                ; it is never a field separator.
+                ; "_" is permitted for compatibility with common identifier
+                ; conventions, though hyphens are preferred in DEED keywords.
+
+string        = DQUOTE *( str-char / escape ) DQUOTE
+str-char      = %x20-21 / %x23-5B / %x5D-7E / UTF8-2 / UTF8-3 / UTF8-4
+                                                    ; any char except " and \
+escape        = "\" ( DQUOTE / "\" / %s"n" / %s"t" )
+                ; Exactly four escapes: \" \\ \n \t
+                ; \r, \uXXXX, and other escapes are INVALID.
+                ; Embed non-ASCII characters directly as UTF-8.
+
+UTF8-2        = %xC2-DF UTF8-tail
+UTF8-3        = %xE0 %xA0-BF UTF8-tail / %xE1-EC 2UTF8-tail
+                / %xED %x80-9F UTF8-tail / %xEE-EF 2UTF8-tail
+UTF8-4        = %xF0 %x90-BF 2UTF8-tail / %xF1-F3 3UTF8-tail
+                / %xF4 %x80-8F 2UTF8-tail
+UTF8-tail     = %x80-BF
+
+; Comments and SPDX payloads are UTF-8, NOT ASCII. The lexical section of the
+; spec says "a deed is a sequence of UTF-8 bytes", and the header the spec
+; MANDATES carries "©" (%xC2 %xA9) — which VCHAR (%x21-7E) rejects. Before
+; this rule, the normative grammar rejected the specification's own example.
+text-char     = VCHAR / SP / UTF8-2 / UTF8-3 / UTF8-4
+
+integer       = [ "-" ] 1*DIGIT
+                ; NOTE: Leading zeros are permitted (e.g., 007).
+                ; Implementations MUST NOT interpret leading zeros as octal.
+
+boolean       = %s"#t" / %s"#f"
+                ; Strict lowercase only. #T and #F are INVALID.
+                ; Never "true", "false", "yes", "no", "1", "0".
+
+uuid5         = %s"#u5" string
+                ; Body is the NAME input to RFC 4122 §4.3 under the
+                ; estate namespace.
+                ; NOTE: Only UUID v5 (name-based, deterministic) is supported.
+                ; UUID v4 (random) is intentionally excluded — all DEED
+                ; identifiers MUST be reproducible from their inputs.
+
+token-sep     = 1*(SP / line-end / comment)
+                ; Tabs (HTAB) are INVALID separators (consistent with K9).
+                ; Use SP (0x20) for horizontal whitespace.
+
+line-end      = CRLF / LF
+comment       = ";" *text-char line-end
+                ; Single ";" starts a comment (including ";;" — the second
+                ; ";" is part of the comment text). Comment runs to line-end.
+
+; Order of fields and clauses is not semantic. A canonical ordering is a
+; lint convention for diffability, never a parse rule. Where precedence
+; matters (rules in a praxis deed) it is carried by an explicit :priority
+; INTEGER field, never by file position.
+;
+; The sole exception is :schema-version, which MUST be present exactly once
+; in every form (enforced by the validator, not by grammar position).
