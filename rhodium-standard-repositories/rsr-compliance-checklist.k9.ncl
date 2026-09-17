@@ -26,7 +26,7 @@ rsr_standards = {
     required_files = [
       { path = "LICENSE", description = "SPDX-compatible license (PMPL-1.0-or-later recommended)" },
       { path = "README.adoc", description = "AsciiDoc README with project overview" },
-      { path = "SECURITY.md", description = "Security policy and vulnerability reporting" },
+      { path = "3-practice/SECURITY.md", description = "Security policy and vulnerability reporting" },
       { path = "CONTRIBUTING.md", description = "Contribution guidelines" },
       { path = "STATE.scm", description = "Current project state (Scheme format)" },
       { path = "ECOSYSTEM.scm", description = "Ecosystem relationships (Scheme format)" },

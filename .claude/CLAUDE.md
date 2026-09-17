@@ -18,7 +18,7 @@
 | **2. The 007 repo** | All Rights Reserved (ARR) | `hyperpolymath/007` specifically. Out-of-scope for any normalisation, scanning, or labelling. Surface to owner only. |
 | **3. Shared with son (Joshua)** | `AGPL-3.0-or-later` | Repos with son as co-author/maintainer. Examples: `idaptik`, `paint-type`. Permanent. |
 | **4. Third-party / forks** | DO NOT TOUCH | Whatever upstream chose. Never sweep, never normalise. Flag as out-of-scope if it surfaces in an audit. |
-| **5. Palimpsest register** | `PMPL-1.0-or-later` | **Only repos named in the register** in `LICENCE-POLICY.adoc` Rule 2 — currently five: `palimpsest-license`, `palimpsest-plasma`, `metadatastician/consent-aware-web` (prospectively only — don't flip existing content), `insolvency-tycoon`, `sim-public-relations`. The cap of three was lifted 2026-08-26 as the Palimpsest family develops; the register is a growing **allowlist**, so PMPL in an unlisted repo is still drift. `LICENCE-POLICY.adoc` is authoritative — do not duplicate the list's contents here. |
+| **5. Palimpsest register** | `PMPL-1.0-or-later` | **Only repos named in the register** in `3-practice/LICENCE-POLICY.adoc` Rule 2 — currently five: `palimpsest-license`, `palimpsest-plasma`, `metadatastician/consent-aware-web` (prospectively only — don't flip existing content), `insolvency-tycoon`, `sim-public-relations`. The cap of three was lifted 2026-08-26 as the Palimpsest family develops; the register is a growing **allowlist**, so PMPL in an unlisted repo is still drift. `3-practice/LICENCE-POLICY.adoc` is authoritative — do not duplicate the list's contents here. |
 
 ### Hard rules for agents
 
@@ -106,15 +106,15 @@ for the canonical statement.
 
 > **Corrected 2026-08-07.** This section previously listed **Bun** as banned
 > with **Deno** as its replacement, and described Deno as "replaces Node/npm/bun".
-> That inverted `LANGUAGE-POLICY.adoc` §1, which has ruled Bun > Deno > pnpm > npm
+> That inverted `3-practice/LANGUAGE-POLICY.adoc` §1, which has ruled Bun > Deno > pnpm > npm
 > since 2026-07-29. Because this file is what agents read first, the recorded
 > ruling and agent behaviour had diverged: agents were being instructed to migrate
 > *away* from the estate's first-choice runtime.
 >
 > **RESOLVED 2026-08-25 — this file governs.** The contradiction previously
 > flagged here (this table bans TypeScript in favour of AffineScript, while
-> `LANGUAGE-POLICY.adoc` §1.2 stated "TypeScript is *permitted under Bun*") has
-> been ruled by the owner: **AffineScript governs.** `LANGUAGE-POLICY.adoc` §1.2
+> `3-practice/LANGUAGE-POLICY.adoc` §1.2 stated "TypeScript is *permitted under Bun*") has
+> been ruled by the owner: **AffineScript governs.** `3-practice/LANGUAGE-POLICY.adoc` §1.2
 > was the error and has been rewritten to match.
 >
 > The distinction that keeps both documents coherent: **Bun is the runtime, tier 1
@@ -225,7 +225,7 @@ Both are FOSS with independent governance (no Big Tech).
 ### Documentation Format
 
 - All docs must be `.adoc` (AsciiDoc), **including `README.adoc`** — this is the estate default. GitHub renders AsciiDoc natively on the repo page, so the README, its community-health view, and the file-list tab bar all display correctly.
-- GitHub-required `.md` (must be Markdown): SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md. (README is **not** in this list — see the README rule below.)
+- GitHub-required `.md` (must be Markdown): 3-practice/SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md. (README is **not** in this list — see the README rule below.)
 - **README is `.adoc` by default, with exactly two `.md` exceptions:**
   * `hyperpolymath/hyperpolymath` — the GitHub **profile** repo; profile READMEs render *only* `README.md`, never `.adoc`.
   * `hyperpolymath/boj-server` — surfaced in external MCP directories (Glama), which show AsciiDoc as raw markup.

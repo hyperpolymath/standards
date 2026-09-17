@@ -33,7 +33,7 @@ impl ComplianceCheck for ContributingCheck {
     }
 
     async fn check_local(&self, path: &Path) -> Result<CheckResult> {
-        let files = ["CONTRIBUTING.md", "CONTRIBUTING.adoc", "CONTRIBUTING.rst", ".github/CONTRIBUTING.md"];
+        let files = ["CONTRIBUTING.md", "3-practice/CONTRIBUTING.adoc", "CONTRIBUTING.rst", ".github/CONTRIBUTING.md"];
 
         for name in files {
             let file_path = path.join(name);
@@ -347,7 +347,7 @@ impl ComplianceCheck for CiConfigCheck {
     }
 }
 
-/// Check for SECURITY.md
+/// Check for 3-practice/SECURITY.md
 pub struct SecurityPolicyCheck;
 
 #[async_trait::async_trait]
@@ -365,7 +365,7 @@ impl ComplianceCheck for SecurityPolicyCheck {
     }
 
     async fn check_local(&self, path: &Path) -> Result<CheckResult> {
-        let files = ["SECURITY.md", ".github/SECURITY.md"];
+        let files = ["3-practice/SECURITY.md", ".github/SECURITY.md"];
 
         for name in files {
             let file_path = path.join(name);
@@ -389,8 +389,8 @@ impl ComplianceCheck for SecurityPolicyCheck {
             name: self.name().to_string(),
             tier: self.tier(),
             passed: false,
-            message: "No SECURITY.md found".to_string(),
-            details: Some("Add SECURITY.md with vulnerability disclosure process".to_string()),
+            message: "No 3-practice/SECURITY.md found".to_string(),
+            details: Some("Add 3-practice/SECURITY.md with vulnerability disclosure process".to_string()),
         })
     }
 
@@ -424,7 +424,7 @@ impl ComplianceCheck for SecurityPolicyCheck {
             name: self.name().to_string(),
             tier: self.tier(),
             passed: false,
-            message: "No SECURITY.md found".to_string(),
+            message: "No 3-practice/SECURITY.md found".to_string(),
             details: None,
         })
     }

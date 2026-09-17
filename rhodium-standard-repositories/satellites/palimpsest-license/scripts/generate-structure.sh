@@ -45,7 +45,7 @@ palimpsest-license/
 ├── CODE_OF_CONDUCT.md           # Community standards
 ├── GOVERNANCE.md                # Decision-making process
 ├── MAINTAINERS.md               # Project maintainers
-├── SECURITY.md                  # Security policy
+├── 3-practice/SECURITY.md                  # Security policy
 ├── FUNDING.md                   # Funding strategy
 ├── CLAUDE.md                    # AI assistant context
 │

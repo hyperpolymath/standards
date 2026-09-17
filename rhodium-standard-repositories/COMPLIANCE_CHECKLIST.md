@@ -57,9 +57,9 @@ Core documentation must exist with exact filenames:
 
 - [ ] `README.md` or `README.adoc`
 - [ ] `LICENSE.txt` (plain text, not `.md`)
-- [ ] `SECURITY.md` (not `.txt` or `.adoc`)
-- [ ] `CODE_OF_CONDUCT.md` or `CODE_OF_CONDUCT.adoc`
-- [ ] `CONTRIBUTING.md` or `CONTRIBUTING.adoc`
+- [ ] `3-practice/SECURITY.md` (not `.txt` or `.adoc`)
+- [ ] `CODE_OF_CONDUCT.md` or `3-practice/CODE_OF_CONDUCT.adoc`
+- [ ] `CONTRIBUTING.md` or `3-practice/CONTRIBUTING.adoc`
 - [ ] `FUNDING.yml` (not `.yaml`)
 - [ ] `0-canon/GOVERNANCE.adoc`
 - [ ] `MAINTAINERS.md`
@@ -513,9 +513,9 @@ Must include:
 - [ ] Perimeter 1 (Core): Maintainers-only access defined
 - [ ] Perimeter 2 (Expert): Trusted contributor pathway defined
 - [ ] Perimeter 3 (Community): Open contribution sandbox defined
-- [ ] `CONTRIBUTING.adoc` documents TPCF
+- [ ] `3-practice/CONTRIBUTING.adoc` documents TPCF
 
-**Automation**: `test -f CONTRIBUTING.adoc && rg "Perimeter" CONTRIBUTING.adoc`
+**Automation**: `test -f 3-practice/CONTRIBUTING.adoc && rg "Perimeter" 3-practice/CONTRIBUTING.adoc`
 
 ---
 
@@ -526,7 +526,7 @@ Must include:
 - [ ] Reporting mechanisms clear
 - [ ] Conflict resolution process
 
-**Automation**: `test -f CODE_OF_CONDUCT.md || test -f CODE_OF_CONDUCT.adoc`
+**Automation**: `test -f CODE_OF_CONDUCT.md || test -f 3-practice/CODE_OF_CONDUCT.adoc`
 
 ---
 

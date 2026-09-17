@@ -5,7 +5,7 @@
 # requires: just >= 1.19.0   (import? optional-import support)
 # Enforced by the `tooling-version-integrity` must-check, not self-
 # enforcing: import? fails at parse time before any recipe can guard it.
-# See TOOLING-VERSION-INTEGRITY-POLICY.adoc (root cause: burble#39).
+# See 3-practice/TOOLING-VERSION-INTEGRITY-POLICY.adoc (root cause: burble#39).
 
 default:
     @just --list

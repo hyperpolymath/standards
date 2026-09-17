@@ -284,8 +284,8 @@ impl ComplianceCheck for ThreatModelCheck {
             }
         }
 
-        // Check SECURITY.md for threat model section
-        let security_path = path.join("SECURITY.md");
+        // Check 3-practice/SECURITY.md for threat model section
+        let security_path = path.join("3-practice/SECURITY.md");
         if security_path.exists() {
             if let Ok(content) = std::fs::read_to_string(&security_path) {
                 let content_lower = content.to_lowercase();
@@ -295,7 +295,7 @@ impl ComplianceCheck for ThreatModelCheck {
                         name: self.name().to_string(),
                         tier: self.tier(),
                         passed: true,
-                        message: "Threat model found in SECURITY.md".to_string(),
+                        message: "Threat model found in 3-practice/SECURITY.md".to_string(),
                         details: None,
                     });
                 }
