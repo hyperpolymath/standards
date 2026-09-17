@@ -36,18 +36,32 @@ ok()  { echo "  ✅ $1"; pass=$((pass + 1)); }
 bad() { echo "  ❌ $1"; fail=$((fail + 1)); }
 
 # ── the curl stub ───────────────────────────────────────────────────────────
-# The script calls: curl -sS -o /dev/null -w '%{http_code}' … <url>
-# so the stub simply prints the code the case wants for that URL shape.
+# The script calls: curl -sS -w $'\n%{http_code}' <headers> <url>, so the stub
+# prints the body the case wants, a newline, and then the HTTP code — exactly
+# the real api()'s capture contract (last line = code).
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 url="${!#}"
+code="200"; body=""
+[ -n "${STUB_URLLOG:-}" ] && printf '%s\n' "$url" >> "$STUB_URLLOG"
+pad=""
+# STUB_BIGBODY=1 emits a large PRETTY-PRINTED body (like GitHub's): an early
+# newline (a piped `grep -q` matches and exits at once) followed by >64 KB of
+# payload the stranded printf can then no longer write — EPIPE/SIGPIPE, and
+# under pipefail the branch flips and the whole blob lands in $HTTP.
+[ "${STUB_BIGBODY:-0}" = "1" ] && pad="$(printf '%*s' 150000 '' | tr ' ' x)"
+mkbody() { # mkbody <key> <value> — compact one-liner, or PRETTY + 150 KB pad
+  if [ -n "$pad" ]; then printf '{\n  "%s": "%s",\n  "pad": "%s"\n}' "$1" "$2" "$pad"
+  else printf '{"%s":"%s"}' "$1" "$2"; fi
+}
 case "$url" in
-  */commits/*) code="${STUB_COMMITS:-200}" ;;
-  *)           code="${STUB_REPO:-200}" ;;
+  */compare/*) code="${STUB_COMPARE:-200}"; body="$(mkbody status "${STUB_COMPARE_STATUS:-behind}")" ;;
+  */commits/*) code="${STUB_COMMITS:-200}";  body="$(mkbody sha object)" ;;
+  *)           code="${STUB_REPO:-200}";     body="$(mkbody default_branch "${STUB_BRANCH:-main}")" ;;
 esac
 [ "$code" = "NETFAIL" ] && exit 22
-printf '%s' "$code"
+printf '%s\n%s' "$body" "$code"
 STUB
 chmod +x "$TMP/bin/curl"
 export PATH="$TMP/bin:$PATH"
@@ -65,6 +79,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@${SHA_A}
+YAML
+}
+
+# mk_reusable <dir> <sha> — a target tree with ONE SHA-pinned reusable
+# workflow call, the shape the #782 orphan class requires.
+mk_reusable() {
+  local d="$1" sha="$2"; rm -rf "$d"; mkdir -p "$d/.github/workflows"
+  cat > "$d/.github/workflows/caller.yml" <<YAML
+name: caller
+jobs:
+  scan:
+    uses: hyperpolymath/standards/.github/workflows/secret-scanner-reusable.yml@${sha}
 YAML
 }
 
@@ -134,6 +160,98 @@ STUB_COMMITS=NETFAIL \
 
 STUB_COMMITS=404 STUB_REPO=500 \
   expect "a determinate negative with an unconfirmable repo is indeterminate" 0 "::warning::UNVERIFIED" "$TMP/r"
+
+echo
+echo "== orphan reusable pins — the four #782 witness SHAs =="
+# Measured 2026-09 (estate census of 435 repos x 4 reusable workflows): every
+# one of these answered 200 at the commits endpoint, and every row calling it
+# died at graph resolution — 61 dead rows, zero alive. The four provenances:
+#
+#   7fdc2705…  squash-merge orphan: pin captured the PR head; the squash
+#              discarded it. compare/main = diverged.
+#   892497fe…  deleted unmerged branch; 0 PRs reference it. diverged.
+#   46960521…  reachable from a LIVE remote branch, but not an ancestor of
+#              main. compare/main = ahead.
+#   5b1d0022…  prefix corruption — not an object at all. commits 404.
+#
+# The old predicate passed the first three, which is exactly the class this
+# gate now exists to fail on.
+SHA_W1=7fdc27050000000000000000000000000000000000
+SHA_W2=892497fe0000000000000000000000000000000000
+SHA_W3=4696052100000000000000000000000000000000
+SHA_W4=5b1d00220000000000000000000000000000000000
+SHA_OK=81dbf2dd00000000000000000000000000000000
+
+mk_reusable "$TMP/w1" "$SHA_W1"
+STUB_COMMITS=200 STUB_COMPARE_STATUS=diverged \
+  expect "witness 1 (7fdc2705… squash-merge orphan) fails as NOT-ANCESTOR" 1 "NOT-ANCESTOR" "$TMP/w1"
+
+STUB_COMMITS=200 STUB_COMPARE_STATUS=diverged \
+  expect "witness 1's failure line names the compare verdict" 1 "compare main → diverged" "$TMP/w1"
+
+mk_reusable "$TMP/w2" "$SHA_W2"
+STUB_COMMITS=200 STUB_COMPARE_STATUS=diverged \
+  expect "witness 2 (892497fe… deleted branch) fails as NOT-ANCESTOR" 1 "NOT-ANCESTOR" "$TMP/w2"
+
+mk_reusable "$TMP/w3" "$SHA_W3"
+STUB_COMMITS=200 STUB_COMPARE_STATUS=ahead \
+  expect "witness 3 (46960521… remote-branch-only, compare=ahead) fails as NOT-ANCESTOR" 1 "NOT-ANCESTOR" "$TMP/w3"
+
+mk_reusable "$TMP/w4" "$SHA_W4"
+STUB_COMMITS=404 STUB_REPO=200 \
+  expect "witness 4 (5b1d0022… not an object) is still SHA-NOT-FOUND" 1 "SHA-NOT-FOUND" "$TMP/w4"
+
+STUB_COMMITS=200 STUB_COMPARE=403 \
+  expect "an indeterminate compare probe does NOT fail the build" 0 "::warning::UNVERIFIED" "$TMP/w3"
+
+STUB_COMMITS=200 STUB_COMPARE=403 \
+  expect "an indeterminate compare probe announces itself" 0 "ancestry: compare probe indeterminate" "$TMP/w3"
+
+echo
+echo "== ancestry probe semantics =="
+
+mk_reusable "$TMP/ok" "$SHA_OK"
+STUB_COMMITS=200 STUB_COMPARE_STATUS=behind \
+  expect "a reusable pin that IS an ancestor passes (behind)" 0 "resolve upstream." "$TMP/ok"
+
+STUB_COMMITS=200 STUB_COMPARE_STATUS=identical \
+  expect "a reusable pin AT the default-branch tip passes (identical)" 0 "resolve upstream." "$TMP/ok"
+
+STUB_COMMITS=200 STUB_COMPARE_STATUS=diverged STUB_REPO=404 \
+  expect "an unprobeable default branch is indeterminate, not a verdict" 0 "ancestry: default-branch probe indeterminate" "$TMP/ok"
+
+# The single most important guard against overreach: ordinary ACTION pins are
+# fetched by object id at run time; a non-default-branch action commit works.
+# The ancestry probe must NOT fire on them.
+STUB_COMMITS=200 STUB_COMPARE_STATUS=diverged \
+  expect "an action pin is never ancestry-probed (would false-fail real usage)" 0 "resolve upstream." "$TMP/r"
+
+# …and prove it structurally: with only action pins present, the compare
+# endpoint must not appear in the stub's access log at all.
+: > "$TMP/urllog"
+STUB_URLLOG="$TMP/urllog" STUB_COMMITS=200 \
+  expect "action-only fixture passes" 0 "All 1 verifiable action pin(s) resolve upstream." "$TMP/r"
+if grep -q "compare" "$TMP/urllog" 2>/dev/null; then
+  bad "compare endpoint was called for an action-only fixture"
+else
+  ok "compare endpoint untouched for an action-only fixture"
+fi
+
+echo
+echo "== large response bodies vs pipefail (the SIGPIPE trap) =="
+# api() isolates the HTTP code from a body that can exceed 64 KB. If the
+# isolation uses a `printf | grep -q` pipeline, grep exits on first match,
+# printf dies on SIGPIPE, pipefail flips the branch, and the ENTIRE blob
+# lands in the HTTP variable — making a healthy 200 look like an unknown
+# status. Caught live against a 146 KB codeql-action compare body.
+STUB_BIGBODY=1 STUB_COMMITS=200 \
+  expect "a >64k commits body still parses its status code" 0 "All 1 verifiable action pin(s) resolve upstream." "$TMP/r"
+
+STUB_BIGBODY=1 STUB_COMMITS=200 STUB_COMPARE_STATUS=behind \
+  expect "a >64k compare body still yields its ancestry status" 0 "resolve upstream." "$TMP/ok"
+
+STUB_BIGBODY=1 STUB_COMMITS=200 STUB_COMPARE_STATUS=diverged \
+  expect "a >64k compare body still fails loud as NOT-ANCESTOR" 1 "NOT-ANCESTOR" "$TMP/w1"
 
 echo
 echo "== the happy path =="
