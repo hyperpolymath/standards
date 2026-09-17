@@ -38,13 +38,21 @@ set -eo pipefail
 # not "this is why CI is down". The strong claim is the converse and it holds:
 # every workflow that WAS dead had a drifted entry.
 #
-# Usage:  check-lockfile-drift.sh [REPO_DIR]     (default: .)
-# Output: TSV — repo <TAB> workflow <TAB> requested <TAB> locked
+# Usage:  check-lockfile-drift.sh [REPO_DIR] [REPO_SLUG]
+#           REPO_DIR  default: . — the checkout to inspect
+#           REPO_SLUG default: basename(REPO_DIR) — the identity written to
+#                     column 1. The caller MUST pass this when REPO_DIR is a
+#                     throwaway clone (e.g. `_w`): otherwise every row says
+#                     `_w` and the report is untraceable (issue #708).
+# Output: TSV on stdout — repo <TAB> workflow <TAB> requested <TAB> locked
+#         (all banners/notices go to stderr — stdout is data ONLY, so the
+#         file can be appended straight into the report)
 # Exit:   0 = no drift (or no lockfile — not this script's business)
 #         1 = drift found
 #         2 = usage / environment error
 
 REPO_DIR="${1:-.}"
+REPO_SLUG="${2:-$(basename "$REPO_DIR")}"
 LOCK="$REPO_DIR/.github/workflows/actions.lock"
 WFDIR="$REPO_DIR/.github/workflows"
 
@@ -111,7 +119,7 @@ for wf in "$WFDIR"/*.yml "$WFDIR"/*.yaml; do
       [ "$resolved" = "$ref" ] && continue   # same commit, different notation
     fi
 
-    printf '%s\t%s\t%s\t%s\n' "$(basename "$REPO_DIR")" "$base" "$want" "$have"
+    printf '%s\t%s\t%s\t%s\n' "$REPO_SLUG" "$base" "$want" "$have"
     drift=$((drift + 1))
   done < /tmp/_drift_want.$$
 
@@ -124,5 +132,5 @@ if [ "$drift" -gt 0 ]; then
   exit 1
 fi
 
-echo "[drift] clean — $checked workflow(s) checked in $REPO_DIR"
+echo "[drift] clean — $checked workflow(s) checked in $REPO_DIR" >&2
 exit 0
