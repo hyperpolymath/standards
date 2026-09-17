@@ -22,13 +22,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATES="${RSR_GATES:-$SCRIPT_DIR/../.machine_readable/template-capability-gates.toml}"
 REPO="${1:-.}"
 LIVE_REPOSITORY="${2:-${RSR_REPOSITORY:-}}"
-# The machine tree is `machine-readable/` (canonical since 2026-08). The dotted
-# `.machine_readable/` form is the LEGACY location and is still accepted, because
-# the canon, scaffoldia, the julia variant and ~300 minted repos all still carry
-# it; flipping in one move would strand every one of them on the same day.
-# Remove the legacy branch once the estate migration completes.
-PROFILE="$REPO/machine-readable/rsr-profile.a2ml"
-[ -f "$PROFILE" ] || PROFILE="$REPO/.machine_readable/rsr-profile.a2ml"
+# The machine tree is `.machine_readable/` — canonical estate-wide by owner
+# ruling (2026-09-17), and the spelling this repository has always used.
+#
+# This comment previously called the hyphenated form canonical "since 2026-08"
+# and the dotted form LEGACY. The direction was wrong. The census in
+# rsr-template-repo's docs/governance/TEMPLATE-LINEAGE-AUDIT.adoc records 48
+# repositories on the dotted form against 9 hyphenated at the 2026-08
+# divergence: un-hiding a quarter of one repo did not move the estate, and
+# this file's own tolerance branch was the only evidence ever offered for it.
+#
+# The hyphenated branch is KEPT deliberately. It is not legacy scurf to be
+# deleted once "the migration completes" — roughly 9 repos still carry it, and
+# this checker is shared, so it must resolve both rather than fail either.
+PROFILE="$REPO/.machine_readable/rsr-profile.a2ml"
+[ -f "$PROFILE" ] || PROFILE="$REPO/machine-readable/rsr-profile.a2ml"
 
 [ -f "$GATES" ] || { echo "ERROR: gates file not found: $GATES" >&2; exit 2; }
 [ -f "$PROFILE" ] || { echo "ERROR: no profile at $PROFILE" >&2; exit 2; }
@@ -181,7 +189,7 @@ if [ "$fail" -ne 0 ]; then
 rsr-profile check: FAIL — scaffold does not match declared capabilities.
 Fix one of:
   * remove the vestigial module, OR
-  * declare the capability in machine-readable/rsr-profile.a2ml (with a
+  * declare the capability in .machine_readable/rsr-profile.a2ml (with a
     [rationale] line), OR
   * add the missing module.
 MSG

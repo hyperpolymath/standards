@@ -210,8 +210,8 @@
                         (file-exists? (repo-file ".github/FUNDING.yml")))))
 
   ;; 2.1.7 - Governance
-  (check 2 "2.1.7" "GOVERNANCE.adoc present"
-         (lambda () (or (file-exists? (repo-file "GOVERNANCE.adoc"))
+  (check 2 "2.1.7" "0-canon/GOVERNANCE.adoc present"
+         (lambda () (or (file-exists? (repo-file "0-canon/GOVERNANCE.adoc"))
                         (file-exists? (repo-file "GOVERNANCE.md")))))
 
   ;; 2.1.8 - Maintainers
@@ -350,7 +350,7 @@
 
   ;; Governance
   (check 10 "10.2.1" "GOVERNANCE document present"
-         (lambda () (or (file-exists? (repo-file "GOVERNANCE.adoc"))
+         (lambda () (or (file-exists? (repo-file "0-canon/GOVERNANCE.adoc"))
                         (file-exists? (repo-file "GOVERNANCE.md")))))
 
   ;; TPCF framework

@@ -52,7 +52,7 @@
      (required-files
        "CODE_OF_CONDUCT.md" "CODE_OF_CONDUCT.adoc"
        "CONTRIBUTING.md" "CONTRIBUTING.adoc"
-       "GOVERNANCE.adoc"
+       "0-canon/GOVERNANCE.adoc"
        "MAINTAINERS.md"
        "FUNDING.yml")
      (well-known-files

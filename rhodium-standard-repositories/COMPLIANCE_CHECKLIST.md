@@ -61,7 +61,7 @@ Core documentation must exist with exact filenames:
 - [ ] `CODE_OF_CONDUCT.md` or `CODE_OF_CONDUCT.adoc`
 - [ ] `CONTRIBUTING.md` or `CONTRIBUTING.adoc`
 - [ ] `FUNDING.yml` (not `.yaml`)
-- [ ] `GOVERNANCE.adoc`
+- [ ] `0-canon/GOVERNANCE.adoc`
 - [ ] `MAINTAINERS.md`
 - [ ] `.gitignore` (not `gitignore`)
 - [ ] `.gitattributes`
@@ -532,12 +532,12 @@ Must include:
 
 ### 10.3 Governance Model
 
-- [ ] `GOVERNANCE.adoc` defining decision-making
+- [ ] `0-canon/GOVERNANCE.adoc` defining decision-making
 - [ ] Maintainer succession process
 - [ ] Voting procedures (if applicable)
 - [ ] Financial transparency (if funded)
 
-**Automation**: `test -f GOVERNANCE.adoc`
+**Automation**: `test -f 0-canon/GOVERNANCE.adoc`
 
 ---
 
