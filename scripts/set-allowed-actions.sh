@@ -2,17 +2,39 @@
 # SPDX-License-Identifier: MPL-2.0
 # Apply and verify the canonical GitHub Actions policy (standards#486).
 #
-# Estate default: allowed_actions=all + sha_pinning_required=true. Set
-# ACTIONS_POSTURE=selected for designated high-sensitivity repositories; that
-# mode also installs the canonical selected-actions payload.
+# Estate canon is config/settings/repo.json: allowed_actions=selected +
+# sha_pinning_required=true for EVERY repository, with the allow-list payload in
+# config/settings/actions-allowlist.json. `selected` is therefore the default
+# posture here; ACTIONS_POSTURE=all exists only to relax a single repository
+# deliberately. There is no "designated high-sensitivity" subset — an earlier
+# header claimed one, but no such designation list has ever existed.
+#
+# ORDERING AND ROLLBACK (the reason this script was rewritten):
+#   `selected` with an empty patterns_allowed refuses every third-party action.
+#   Runs then die at startup with jobs.total_count == 0 and NO check run at all,
+#   so a *required* context never reports and the repo looks GREENER than a
+#   healthy one. The previous version flipped allowed_actions=selected FIRST and
+#   installed the payload SECOND, with no rollback — so any failure of the second
+#   call (the /actions/* endpoints have a hidden quota that 403s a contiguous
+#   tail of a batch) left the repository strictly WORSE than before the script
+#   ran. Measured on 239 repositories, 2026-09-14.
+#
+#   GitHub refuses PUT /actions/permissions/selected-actions unless the
+#   repository is ALREADY on the selected posture, so "payload before flip" is
+#   only literally possible when no flip is needed. This script therefore:
+#     * installs the payload FIRST when the target is already `selected`
+#       (monotone — adding patterns only ever grants), and
+#     * when a flip IS required, captures the prior state and RESTORES it if the
+#       payload fails, so a partial run is a no-op rather than an outage.
 #
 # Usage: set-allowed-actions.sh <owner/repo> [allowed-actions.json] [enterprise]
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="${1:?usage: set-allowed-actions.sh <owner/repo> [allowed-actions.json] [enterprise]}"
-CANON="${2:-rhodium-standard-repositories/actions-allowlist/allowed-actions.json}"
+CANON="${2:-$SCRIPT_DIR/../config/settings/actions-allowlist.json}"
 ENTERPRISE="${3:-${ENTERPRISE:-}}"
-POSTURE="${ACTIONS_POSTURE:-all}"
+POSTURE="${ACTIONS_POSTURE:-selected}"
 GH_BIN="${GH_BIN:-gh}"
 OWNER="${REPO%%/*}"
 
@@ -22,50 +44,89 @@ OWNER="${REPO%%/*}"
 }
 [ -f "$CANON" ] || { echo "ERROR: canonical allowlist not found: $CANON" >&2; exit 2; }
 command -v "$GH_BIN" >/dev/null 2>&1 || { echo "ERROR: GitHub CLI not found: $GH_BIN" >&2; exit 2; }
+command -v jq >/dev/null 2>&1 || { echo "ERROR: jq not found" >&2; exit 2; }
 PATTERN_COUNT="$(jq -r '.patterns_allowed | length' "$CANON")"
+
+# The canon file carries documentation keys (version, purpose, pruned_from_*,
+# ...) that are not part of the API schema. Send only the three real fields.
+PAYLOAD="$(mktemp)"
+trap 'rm -f "$PAYLOAD"' EXIT
+jq '{github_owned_allowed, verified_allowed, patterns_allowed}' "$CANON" > "$PAYLOAD" || {
+  echo "ERROR: canonical allowlist is not valid JSON: $CANON" >&2
+  exit 2
+}
+
+governed_higher_up() { grep -qiE 'organization or enterprise level|enterprise level' <<<"$1"; }
+
+# Restore a repository to the posture it had before this script touched it.
+# Best-effort by definition: it is called on a path that is already failing.
+restore_prior() {
+  local label="$1" prefix="$2" prior_allowed="$3" prior_sha="$4" out
+  out="$($GH_BIN api -X PUT "$prefix/actions/permissions" \
+    "${ENABLED_FIELDS[@]}" -f "allowed_actions=$prior_allowed" \
+    -F "sha_pinning_required=$prior_sha" 2>&1)" || {
+    echo "ERROR: $label ROLLBACK FAILED — repository is left on allowed_actions=$POSTURE with an incomplete allow-list and MUST be repaired by hand: $out" >&2
+    return 1
+  }
+  echo "   $label rolled back to allowed_actions=$prior_allowed" >&2
+}
 
 # Return 0=applied+verified, 42=governed at a higher scope, 1=other failure.
 apply_policy() {
   local label="$1" prefix="$2" current enabled_key enabled_value out rc verify
-  local -a fields
+  local prior_allowed prior_sha selected
 
   current="$($GH_BIN api "$prefix/actions/permissions" 2>&1)" || {
     echo "ERROR: cannot read $label Actions permissions: $current" >&2
     return 1
   }
+  prior_allowed="$(jq -r '.allowed_actions // "all"' <<<"$current")"
+  prior_sha="$(jq -r '.sha_pinning_required // false' <<<"$current")"
 
   case "$prefix" in
     repos/*)
       enabled_key=enabled
       enabled_value="$(jq -r '.enabled // true' <<<"$current")"
-      fields=(-F "enabled=$enabled_value")
+      ENABLED_FIELDS=(-F "enabled=$enabled_value")
       ;;
     *)
       enabled_key=enabled_repositories
       enabled_value="$(jq -r '.enabled_repositories // "all"' <<<"$current")"
-      fields=(-f "enabled_repositories=$enabled_value")
+      ENABLED_FIELDS=(-f "enabled_repositories=$enabled_value")
       ;;
   esac
 
+  # PAYLOAD FIRST whenever the repository is already on the selected posture:
+  # adding patterns to a live allow-list only ever grants permission, so there is
+  # no window in which the repository is stricter than either end state.
+  if [ "$POSTURE" = selected ] && [ "$prior_allowed" = selected ]; then
+    out="$($GH_BIN api -X PUT "$prefix/actions/permissions/selected-actions" --input "$PAYLOAD" 2>&1)" || {
+      governed_higher_up "$out" && { echo "   $label selected policy is governed higher up (409) — escalating"; return 42; }
+      echo "ERROR: $label selected-actions update failed: $out" >&2
+      return 1
+    }
+  fi
+
   out="$($GH_BIN api -X PUT "$prefix/actions/permissions" \
-    "${fields[@]}" -f "allowed_actions=$POSTURE" -F sha_pinning_required=true 2>&1)"
+    "${ENABLED_FIELDS[@]}" -f "allowed_actions=$POSTURE" -F sha_pinning_required=true 2>&1)"
   rc=$?
   if [ "$rc" -ne 0 ]; then
-    if grep -qiE 'organization or enterprise level|enterprise level' <<<"$out"; then
-      echo "   $label policy is governed higher up (409) — escalating"
-      return 42
-    fi
+    governed_higher_up "$out" && { echo "   $label policy is governed higher up (409) — escalating"; return 42; }
     echo "ERROR: $label permissions update failed: $out" >&2
     return 1
   fi
 
-  if [ "$POSTURE" = selected ]; then
-    out="$($GH_BIN api -X PUT "$prefix/actions/permissions/selected-actions" --input "$CANON" 2>&1)" || {
-      if grep -qiE 'organization or enterprise level|enterprise level' <<<"$out"; then
+  # A flip WAS required, so the payload could not go first. If it fails now the
+  # repository is disarmed — put it back the way we found it.
+  if [ "$POSTURE" = selected ] && [ "$prior_allowed" != selected ]; then
+    out="$($GH_BIN api -X PUT "$prefix/actions/permissions/selected-actions" --input "$PAYLOAD" 2>&1)" || {
+      if governed_higher_up "$out"; then
+        restore_prior "$label" "$prefix" "$prior_allowed" "$prior_sha"
         echo "   $label selected policy is governed higher up (409) — escalating"
         return 42
       fi
       echo "ERROR: $label selected-actions update failed: $out" >&2
+      restore_prior "$label" "$prefix" "$prior_allowed" "$prior_sha"
       return 1
     }
   fi
@@ -95,6 +156,11 @@ apply_policy() {
       echo "ERROR: selected-actions verification returned fewer than $PATTERN_COUNT patterns" >&2
       return 1
     fi
+    # An empty allow-list is the disarming state this script exists to prevent.
+    if [ "$(jq -r '(.patterns_allowed // []) | length' <<<"$selected")" -eq 0 ]; then
+      echo "ERROR: $label is on allowed_actions=selected with an EMPTY allow-list; refusing success" >&2
+      return 1
+    fi
   fi
 
   echo "OK: $label policy verified (allowed=$POSTURE sha_pinning_required=true)"
@@ -118,4 +184,4 @@ if [ -n "$ENTERPRISE" ]; then
 fi
 
 echo "ERROR: policy is enterprise-governed; provide the enterprise slug" >&2
-exit 3
+exit 1

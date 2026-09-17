@@ -1,0 +1,194 @@
+# SPDX-License-Identifier: MPL-2.0
+# This workflow is managed by gh actions-lock.
+# canon-spine-lockstep — GATE A.
+#
+# The gate that makes `standards` BOUND BY `rsr-template-repo`.
+#
+# The estate already has the right architecture (SCAFFOLD-LIFECYCLE.adoc
+# §Roles: canon -> spine -> composer, measured by the oracle). What it does not
+# have is a mechanical link in EITHER direction: the spine declares its
+# conformance with the free-text string "2.0.0-draft", and nothing fails when
+# this repository's law changes.
+#
+# This workflow closes the canon->spine half. The spine->canon half is
+# `PROVENANCE.a2ml`, written at mint by `just repo-init`.
+#
+# Assertion 4 is a deliberate reversal and is the point of the exercise:
+#
+#     YOU MAY NOT TIGHTEN THE CRITERIA UNTIL THE REFERENCE IMPLEMENTATION
+#     PASSES THEM.
+#
+name: Canon / Spine Lockstep
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'canon.lock'
+      - 'standards-map.toml'
+      - '0-canon/rsr/rsr-criteria-v2.a2ml'
+      - '.machine_readable/template-capability-gates.toml'
+      - 'TEMPLATE-APPLICABILITY-POLICY.adoc'
+      - '0-canon/rsr/SCAFFOLD-LIFECYCLE.adoc'
+      - 'constitution/**'
+      - 'scripts/check-canon-lockstep.sh'
+      - 'scripts/check-standards-map.sh'
+      - '.github/workflows/canon-spine-lockstep.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'canon.lock'
+      - 'standards-map.toml'
+      - '0-canon/rsr/**'
+      - '.machine_readable/**'
+      - 'TEMPLATE-APPLICABILITY-POLICY.adoc'
+      - 'constitution/**'
+      - 'scripts/check-canon-lockstep.sh'
+      - 'scripts/check-standards-map.sh'
+  workflow_dispatch:
+    inputs:
+      strict:
+        description: 'Promote lockstep assertions 3/4/5 from SKIP to FAIL'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Gate A — the canon and the spine are on the same law.
+  # ---------------------------------------------------------------------------
+  lockstep:
+    name: Canon / spine lockstep
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout canon
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: canon
+          # Assertion 2 diffs the canon against its base ref, and assertion 1
+          # hashes directories with `git ls-files -s`, so history must be real.
+          fetch-depth: 0
+
+      - name: Checkout spine
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/rsr-template-repo
+          path: spine
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Determine base ref for the version-bump assertion
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Gate A
+        id: gate
+        env:
+          # Assertion 4 reads the spine's last dogfood-gate conclusion. Without
+          # a token that call is unauthenticated and rate-limited; the script
+          # degrades to SKIP rather than passing silently.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          args=( --canon canon --spine spine --base "${{ steps.base.outputs.ref }}" )
+          if [ "${{ inputs.strict }}" = "true" ]; then args+=( --strict ); fi
+          bash canon/scripts/check-canon-lockstep.sh "${args[@]}" | tee "$RUNNER_TEMP/gate-a.txt"
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## Gate A — Canon / Spine Lockstep"
+            echo ""
+            echo '```'
+            cat "$RUNNER_TEMP/gate-a.txt" 2>/dev/null || echo "(no output)"
+            echo '```'
+            if [ "${{ steps.gate.outputs.rc }}" = "0" ]; then
+              echo ":white_check_mark: The canon and the spine are on the same law."
+            else
+              echo ":x: **Gate A failed.**"
+              echo ""
+              echo "This is not necessarily a bad change. It is very often a change"
+              echo "made in the **wrong order**: \`canon.lock [canon.lockstep].order\`"
+              echo "is \`spine-adopts-then-canon-releases\`. Land the spine's"
+              echo "adoption first, then the canon change becomes a one-line bump."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Gate D — the map of this repository is complete and honest, in BOTH
+  # directions. Bidirectional deliberately: the template's root-allow.txt
+  # learned that "a one-directional allowlist only ever ratchets open" after a
+  # root cleanup left stale permissions behind and the allowlist "quietly
+  # became a licence for the very drift it was written to prevent".
+  # ---------------------------------------------------------------------------
+  map:
+    name: Standards map integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Run Gate D
+        run: |
+          if ! bash scripts/check-standards-map.sh --repo .; then
+            {
+              echo "### Standards map drift"
+              echo ""
+              echo "Every top-level entry must have an \`[[entry]]\` in"
+              echo "\`standards-map.toml\`, and every \`[[entry]]\` must point at a"
+              echo "path that exists. Add or remove the record — do not exempt it."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # The canon's own conformance. Before this change the repository that SHIPS
+  # scripts/check-rsr-profile.sh exited 2 on itself: "no profile at
+  # ./.machine_readable/rsr-profile.a2ml". The law was not subject to the law.
+  # ---------------------------------------------------------------------------
+  self-conformance:
+    name: Canon self-conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Canon is subject to its own gate table
+        run: |
+          if ! bash scripts/check-rsr-profile.sh .; then
+            {
+              echo "### Canon self-conformance failed"
+              echo ""
+              echo "This repository declares \`role = \"canon\"\` and an honest"
+              echo "capability set. Either the scaffold has drifted from the"
+              echo "declaration, or the declaration is wrong."
+              echo ""
+              echo "Do NOT add a vestigial path to \`[canon]\` in the gate table to"
+              echo "silence this — that section exists for law artefacts the"
+              echo "canon carries BY NATURE (the criteria, this gate table, the"
+              echo "reusable gates other repos call, proof artefacts of the"
+              echo "estate), not as an escape hatch."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
