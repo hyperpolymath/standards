@@ -77,8 +77,8 @@ echo "== --check detects a tree change the artefacts do not yet record =="
 # forgets `just registry`. source_hash is sha256 over `git ls-files -s <home>`,
 # which reads the INDEX — so the file must be STAGED for this to bite, which is
 # also why --check belongs after `git add`, never on a dirty worktree.
-printf 'planted registry probe\n' > constitution/zzz-registry-probe.adoc
-git add constitution/zzz-registry-probe.adoc
+printf 'planted registry probe\n' > 0-canon/constitution/zzz-registry-probe.adoc
+git add 0-canon/constitution/zzz-registry-probe.adoc
 out="$(bash scripts/build-registry.sh --check 2>&1)"; rc=$?
 if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -qF "DRIFT:"; then
   ok "a newly-tracked file under a spec home makes the artefacts stale"
@@ -91,8 +91,8 @@ echo "== the gate's scope is the spec homes, not the whole tree =="
 # Worth pinning down so nobody later mistakes this gate for whole-tree coverage:
 # a tracked file outside every declared home legitimately does NOT drift the
 # registry, because no source_hash covers it.
-git rm -q --cached constitution/zzz-registry-probe.adoc >/dev/null 2>&1
-rm -f constitution/zzz-registry-probe.adoc
+git rm -q --cached 0-canon/constitution/zzz-registry-probe.adoc >/dev/null 2>&1
+rm -f 0-canon/constitution/zzz-registry-probe.adoc
 mkdir -p .machine_readable/scorecards
 printf '[metadata]\nname = "zzz-probe"\n' > .machine_readable/scorecards/zzz-registry-probe.scorecard.a2ml
 git add .machine_readable/scorecards/zzz-registry-probe.scorecard.a2ml
@@ -109,8 +109,8 @@ rm -f .machine_readable/scorecards/zzz-registry-probe.scorecard.a2ml
 echo
 echo "== regenerating clears the drift =="
 # Re-plant the in-scope drift, then prove the generator resolves it.
-printf 'planted registry probe\n' > constitution/zzz-registry-probe.adoc
-git add constitution/zzz-registry-probe.adoc
+printf 'planted registry probe\n' > 0-canon/constitution/zzz-registry-probe.adoc
+git add 0-canon/constitution/zzz-registry-probe.adoc
 bash scripts/build-registry.sh >/dev/null 2>&1
 out="$(bash scripts/build-registry.sh --check 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qF "OK:"; then

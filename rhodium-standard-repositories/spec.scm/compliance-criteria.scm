@@ -43,7 +43,7 @@
        ((id . "2.1.4") (name . "coc") (description . "CODE_OF_CONDUCT.md/.adoc"))
        ((id . "2.1.5") (name . "contributing") (description . "CONTRIBUTING.md/.adoc"))
        ((id . "2.1.6") (name . "funding") (description . "FUNDING.yml"))
-       ((id . "2.1.7") (name . "governance") (description . "GOVERNANCE.adoc"))
+       ((id . "2.1.7") (name . "governance") (description . "0-canon/GOVERNANCE.adoc"))
        ((id . "2.1.8") (name . "maintainers") (description . "MAINTAINERS.md"))
        ((id . "2.1.9") (name . "gitignore") (description . ".gitignore"))
        ((id . "2.1.10") (name . "gitattributes") (description . ".gitattributes"))

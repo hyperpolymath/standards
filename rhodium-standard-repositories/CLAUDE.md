@@ -194,7 +194,7 @@ repository-root/
 ├── CODE_OF_CONDUCT.md         # or .adoc
 ├── CONTRIBUTING.md            # or .adoc
 ├── FUNDING.yml                # MUST be .yml
-├── GOVERNANCE.adoc
+├── 0-canon/GOVERNANCE.adoc
 ├── MAINTAINERS.md
 ├── .gitignore                 # NOT "gitignore"
 ├── .gitattributes
@@ -485,7 +485,7 @@ This is **graduated trust without gatekeeping**—everyone can contribute, but s
 - ✅ Conflict resolution process
 
 #### Governance Model
-- ✅ GOVERNANCE.adoc defining decision-making
+- ✅ 0-canon/GOVERNANCE.adoc defining decision-making
 - ✅ Maintainer succession process
 - ✅ Voting procedures if applicable
 - ✅ Financial transparency if funded
