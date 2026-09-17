@@ -99,7 +99,7 @@ hooks-install:
 scorecards:
     @bash scripts/build-scorecards.sh
 
-# Fail if COMPLIANCE-DASHBOARD.adoc has drifted from the scorecards
+# Fail if 0-canon/COMPLIANCE-DASHBOARD.adoc has drifted from the scorecards
 scorecards-check:
     @bash scripts/build-scorecards.sh --check
 

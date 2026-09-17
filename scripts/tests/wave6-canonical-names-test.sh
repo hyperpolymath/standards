@@ -52,8 +52,8 @@ git add "$f" 2>/dev/null
 bash "$CHK" HEAD >/dev/null 2>&1 && ok "canonical names pass" || bad "canonical names wrongly blocked"
 git reset -q "$f" 2>/dev/null; rm -f "$f"
 
-echo "== the guard excludes CANONICAL-NAMES.adoc itself =="
-grep -q 'CANONICAL-NAMES.adoc' "$CHK" && ok "mandate doc is excluded from the guard" || bad "mandate doc not excluded"
+echo "== the guard excludes 0-canon/CANONICAL-NAMES.adoc itself =="
+grep -q '0-canon/CANONICAL-NAMES.adoc' "$CHK" && ok "mandate doc is excluded from the guard" || bad "mandate doc not excluded"
 
 echo
 echo "Wave-6 canonical-names regression: $pass passed, $fail failed"
