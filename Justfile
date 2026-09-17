@@ -118,7 +118,7 @@ verify-claims path="CLAIMS.a2ml":
 
 # DYADT: run the conformance vector suite
 dyadt-conformance:
-    @bash did-you-actually-do-that/spec/conformance/run-conformance.sh
+    @bash 1-formats/sub-specs/did-you-actually-do-that/spec/conformance/run-conformance.sh
 
 # DYADT regression test (confirm/refute/unverifiable + guards)
 dyadt-test:

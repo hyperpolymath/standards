@@ -4,7 +4,7 @@
 // inline-annotations extractor — reference implementation
 //
 // Reads source files, finds @trust/@contract/@grade annotations in comments,
-// emits an A2ML document to stdout (or --out file). See inline-annotations/SPEC.adoc.
+// emits an A2ML document to stdout (or --out file). See 1-formats/sub-specs/inline-annotations/SPEC.adoc.
 
 use std::collections::HashMap;
 use std::env;
