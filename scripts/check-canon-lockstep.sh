@@ -12,11 +12,16 @@
 # ---------------------------------------------------------------------------
 # WHAT IT ENFORCES
 #
+#   HARD (always):
 #   1  every sha256 in canon.lock [canon.artifacts] matches the working tree
 #   2  touching a canon artefact forces a version bump
+#
+#   INFORMATIONAL unless --strict:
 #   3  the spine declares criteria_sha256 == canon.lock's criteria hash
 #   4  the spine is GREEN against those criteria
 #   5  the canon itself scores Gold on its own applicable set
+#
+#   See softfail() for why 3/4/5 must not be hard by default.
 #
 # Assertion 4 is the load-bearing one, and it is a deliberate reversal:
 #
@@ -51,6 +56,7 @@ STRICT=0
 FAILED=0
 PASSED=0
 SKIPPED=0
+NOT_VERIFIED=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -65,9 +71,36 @@ done
 
 pass() { PASSED=$((PASSED + 1)); printf '  \033[32mPASS\033[0m  %s\n' "$*"; }
 fail() { FAILED=$((FAILED + 1)); printf '  \033[31mFAIL\033[0m  %s\n' "$*"; }
+# skip()   — the check could not be RUN (missing tool, missing argument).
+#            Always informational. --strict MUST NOT promote this: an absent
+#            tool is not a lockstep deviation, and promoting it makes --strict
+#            permanently red in any environment without `gh`/`hypatia`, which
+#            trains people to ignore it.
 skip() {
-  if [ "$STRICT" -eq 1 ]; then fail "$* (SKIP promoted to FAIL by --strict)"
-  else SKIPPED=$((SKIPPED + 1)); printf '  \033[33mSKIP\033[0m  %s\n' "$*"; fi
+  SKIPPED=$((SKIPPED + 1))
+  NOT_VERIFIED="$NOT_VERIFIED\n    - $*"
+  printf '  \033[33mSKIP\033[0m  %s\n' "$*"
+}
+
+# Assertions 3, 4 and 5 are INFORMATIONAL unless --strict.
+#
+# This is not leniency, it is the ordering rule made executable. canon.lock
+# [canon.lockstep].order is "spine-adopts-then-canon-releases", but a canon
+# change and the spine's adoption of it CANNOT both be first: the spine's
+# adoption necessarily pins hashes that exist only in the unmerged canon PR.
+# A hard check here therefore renders every canon release unmergeable, which is
+# the opposite of the rule it was meant to enforce.
+#
+# Sequence this enables:
+#   1. land the canon change with 3/4/5 informational  -> releases canon.lock
+#   2. land the spine's adoption against the released hashes
+#   3. turn --strict on, so drift is a hard failure from then on
+# See docs/binding/04-EXECUTION-PLAN.md.
+#
+# softfail() — a REAL deviation. Promoted to a failure by --strict.
+softfail() {
+  if [ "$STRICT" -eq 1 ]; then fail "$*"
+  else SKIPPED=$((SKIPPED + 1)); printf '  \033[33mINFO\033[0m  %s\n' "$*"; fi
 }
 
 LOCK="$CANON/canon.lock"
@@ -152,7 +185,7 @@ echo "[1] canon artefact hashes match the working tree"
 for slot in criteria gates applicability lifecycle constitution; do
   want="$(toml_hash "$slot")"
   path="$(toml_path "$slot")"
-  if [ -z "$want" ] || [ -z "$path" ]; then skip "$slot: not declared in canon.lock"; continue; fi
+  if [ -z "$want" ] || [ -z "$path" ]; then softfail "$slot: declared in [canon.artifacts] with no path/hash, or absent"; continue; fi
   if [ ! -e "$CANON/$path" ]; then
     fail "$slot: declared path does not exist: $path"
     continue
@@ -205,22 +238,23 @@ else
   PROFILE="$SPINE/machine-readable/rsr-profile.a2ml"
   [ -f "$PROFILE" ] || PROFILE="$SPINE/.machine_readable/rsr-profile.a2ml"
   if [ ! -f "$PROFILE" ]; then
-    fail "spine has no rsr-profile.a2ml at either machine-readable/ or .machine_readable/"
+    softfail "spine has no rsr-profile.a2ml at either machine-readable/ or .machine_readable/"
   else
     WANT="$(toml_hash criteria)"
     GOT="$(grep -E '^[[:space:]]*criteria_sha256[[:space:]]*=' "$PROFILE" \
            | grep -oE '[0-9a-f]{64}' | head -1)"
     if [ -z "$GOT" ]; then
-      fail "spine rsr-profile.a2ml has no [canon] criteria_sha256
+      softfail "spine rsr-profile.a2ml has no [canon] criteria_sha256
          -> the spine still declares conformance in free text. The binding
             does not exist until this is a hash."
     elif [ "$WANT" = "$GOT" ]; then
       pass "spine criteria_sha256 == canon.lock criteria ($(echo "$GOT" | cut -c1-12)…)"
     else
-      fail "spine is on a DIFFERENT canon
+      softfail "spine is on a DIFFERENT canon
          canon.lock  $(echo "$WANT" | cut -c1-16)…
          spine       $(echo "$GOT"  | cut -c1-16)…
-         -> land the spine's adoption FIRST, then release the canon."
+         -> land the spine's adoption AFTER this canon release; run with
+            --strict to make this a hard failure once both are on main."
     fi
   fi
 fi
@@ -270,12 +304,12 @@ echo "[5] the canon scores Gold on its own applicable set"
 CANON_PROFILE="$CANON/machine-readable/rsr-profile.a2ml"
 [ -f "$CANON_PROFILE" ] || CANON_PROFILE="$CANON/.machine_readable/rsr-profile.a2ml"
 if [ ! -f "$CANON_PROFILE" ]; then
-  fail "the canon has NO rsr-profile.a2ml — it cannot be scored by the checker
+  softfail "the canon has NO rsr-profile.a2ml — it cannot be scored by the checker
        it ships (scripts/check-rsr-profile.sh exits 2 on this repo).
        -> see artefacts/rsr-profile.canon.a2ml; requires [canon] in the gate table."
 else
   ROLE="$(grep -E '^[[:space:]]*role[[:space:]]*=' "$CANON_PROFILE" | head -1 | grep -oE '"[^"]+"' | tr -d '"')"
-  [ "$ROLE" = "canon" ] || fail "canon rsr-profile role is '${ROLE:-unset}', expected 'canon'"
+  [ "$ROLE" = "canon" ] || softfail "canon rsr-profile role is '${ROLE:-unset}', expected 'canon'"
   [ "$ROLE" = "canon" ] && pass "canon rsr-profile declares role = \"canon\""
 
   if command -v mix >/dev/null 2>&1 && [ -d "$CANON/../hypatia" ]; then
@@ -295,6 +329,10 @@ echo
 # ===========================================================================
 echo "─────────────────────────────────────────────────────────────"
 printf 'passed %d   failed %d   skipped %d\n' "$PASSED" "$FAILED" "$SKIPPED"
+if [ -n "$NOT_VERIFIED" ]; then
+  printf '\n\033[33mNOT VERIFIED\033[0m (these assertions did not run — a green result is NOT a full verification):'
+  printf "$NOT_VERIFIED\n"
+fi
 if [ "$FAILED" -gt 0 ]; then
   echo
   echo "GATE A FAILED — the canon and the spine are not in lockstep."
