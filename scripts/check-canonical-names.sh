@@ -3,7 +3,7 @@
 #
 # check-canonical-names.sh — block REINTRODUCTION of deprecated names.
 #
-# CANONICAL-NAMES.adoc (owner mandate 2026-06-30) deprecates:
+# 0-canon/CANONICAL-NAMES.adoc (owner mandate 2026-06-30) deprecates:
 #   * 6a2                -> descriptiles
 #   * agent_instructions -> bot_directives
 # The bulk migration of existing occurrences is chartered separately; this guard
@@ -30,7 +30,7 @@ declare -A REPL=( ["6a2"]="descriptiles" ["agent_instructions"]="bot_directives"
 # guard, migration/charter docs). Excluded from the check.
 is_excluded() {
   case "$1" in
-    CANONICAL-NAMES.adoc|scripts/check-canonical-names.sh|scripts/tests/*|\
+    0-canon/CANONICAL-NAMES.adoc|scripts/check-canonical-names.sh|scripts/tests/*|\
     *MIGRATION*|*migration*|*CHANGELOG*|\
     standards-update/.machine_readable/6scm-archive/.machine_readable/6a2/*) return 0 ;;
   esac
@@ -48,7 +48,7 @@ while IFS= read -r line; do
       current_file="${line#+++ b/}"
       if ! is_excluded "$current_file" &&
          [[ "/$current_file/" == */.machine_readable/6a2/* ]]; then
-        echo "❌ $current_file: reintroduces deprecated '.machine_readable/6a2/' — use '.machine_readable/descriptiles/' (CANONICAL-NAMES.adoc)"
+        echo "❌ $current_file: reintroduces deprecated '.machine_readable/6a2/' — use '.machine_readable/descriptiles/' (0-canon/CANONICAL-NAMES.adoc)"
         rc=1
       fi
       ;;
@@ -64,7 +64,7 @@ while IFS= read -r line; do
       for tok in "${!REPL[@]}"; do
         # word-ish boundary so e.g. 'v6a2ml' style false hits are limited
         if printf '%s' "$body" | grep -Eq "(^|[^A-Za-z0-9])$tok([^A-Za-z0-9]|$)"; then
-          echo "❌ $current_file: reintroduces deprecated '$tok' — use '${REPL[$tok]}' (CANONICAL-NAMES.adoc)"
+          echo "❌ $current_file: reintroduces deprecated '$tok' — use '${REPL[$tok]}' (0-canon/CANONICAL-NAMES.adoc)"
           echo "   + $body"
           rc=1
         fi

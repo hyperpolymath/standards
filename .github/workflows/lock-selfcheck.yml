@@ -1,0 +1,61 @@
+# This workflow is managed by gh actions-lock.
+# SPDX-License-Identifier: MPL-2.0
+# lock-selfcheck.yml — is THIS commit safe for a caller to pin to?
+#
+# `uses: hyperpolymath/standards/.github/workflows/x.yml@<sha>` is resolved at
+# workflow STARTUP, and GitHub validates the callee against the CALLEE repo's
+# own `.github/workflows/actions.lock` AS IT EXISTS AT THAT SHA. If a reusable
+# here names an action ref that the lock at that SHA does not key, then every
+# caller in the estate pinned at that SHA dies before a single job exists.
+#
+# That death is close to invisible: conclusion `failure` (NOT
+# `startup_failure`), ZERO jobs, run `name` equal to the run `path`, and
+# neither REST nor GraphQL carries a reason — only the run page states one. A
+# required context whose workflow dies this way never reports at all, so the
+# gate reads as ABSENT rather than failing and the branch looks clean.
+#
+# Capability is therefore NOT monotonic in time, and it OSCILLATES: measured
+# across the 84 commits da2c748a..317101e0, 43 were POISON and 41
+# SELF-CONSISTENT, alternating, because Dependabot bumps a `uses:` inside a
+# reusable without regenerating the lock in the same commit. "Pin to HEAD" is
+# the wrong reflex. This gate exists so that a poisoned commit cannot reach
+# main unannounced, and so `main` is a safe thing to pin to by construction.
+#
+# SCOPE: this proves INTERNAL CONSISTENCY of the commit under test. It does
+# NOT prove the commit is reachable at the remote — that is a separate probe.
+name: Lock Self-Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Deliberately NO `paths:` filter. This check is intended to be REQUIRED, and
+# a required check that filters itself off does not report as passing — it
+# does not report at all, which leaves the PR blocked on a context that can
+# never arrive.
+
+permissions:
+  contents: read
+
+jobs:
+  selfcheck:
+    name: Lockfile self-consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the commit under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check this commit validates against its own actions.lock
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          # State the population. A gate that does not say what it examined
+          # cannot report that it examined the wrong thing.
+          echo "Commit under test: $sha"
+          echo "Event: ${{ github.event_name }}"
+          # On `pull_request` this is the MERGE PREVIEW, i.e. the content that
+          # would land on main, which is exactly the content callers will pin.
+          bash scripts/lock-selfcheck.sh "$sha"
