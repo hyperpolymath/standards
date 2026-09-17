@@ -1,0 +1,207 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Mapping spec — `CLADE.a2ml` → `repo-deed`
+Campaign: standards#837 · Frame: link:README.adoc[mappings/README] ·
+Status: PROPOSAL (no translation until owner review; the canonical-grammar
+ruling is also still open, #837)
+
+== 1. Source surface
+
+* Estate instances: `<repo>/.machine_readable/descriptiles/CLADE.a2ml`
+  (or `.machine_readable/CLADE.a2ml` in pre-descriptile-dir repos).
+* Mint source: `rsr-template-repo:build/templates/CLADE.a2ml.in` — the file
+  every new repo is stamped from (carries the `#122` lineage extensions).
+* Registry coupling: `gv-clade-index` (verisim seed + SPEC-clade-verisim-portal
+  §Identity Model). Checks CLADE-003/004/005/006 referenced below are the
+  registry's existing gates.
+
+== 2. Target form
+
+[source]
+----
+<canonical-name>_chora.deed
+----
+
+`repo-deed` head. Stem = the repo's *canonical name* (never `estate` — grammar
+side condition; never the `UNASSIGNED-…` prefixed placeholder either). A repo
+renamed later re-derives this file like any other: the deed is a projection,
+not a rename event.
+
+Head-level scaffolding follows the grammar's required identity table
+(<<identity>> in the grammar spec):
+
+[source]
+----
+;; SPDX-License-Identifier: CC-BY-SA-4.0
+(repo-deed
+  :schema-version  "1.0.0"        ; structurally FIRST
+  :canonical-name  "<repo>"
+  :repo-uuid       #u5"<repo uuid5>"
+  :beholding-chora #u5"<estate chora>"
+  ...)
+----
+
+`:beholding-chora` is *required* and is never invented: the translator
+resolves it from the estate chora's registry entry (gv-clade-index is the
+one declaration site today) and **refuses to emit a deed without it** — a
+bare filename would resolve against nothing (grammar rationale).
+
+== 3. Field table
+
+`→` left: a2ml surface. Right: deed path + type + transform.
+
+[cols="2,3,4"]
+|===
+| a2ml surface | deed path | transform / type
+
+4+| *Head identity*
+
+| `[identity] canonical-name` | `:canonical-name` | verbatim STRING
+| `[identity] uuid` | `:repo-uuid` | **re-derived, never copied** (see §5 P-1) — uuid5 literal `#u5"…"`
+| — (new) | `:beholding-chora` | resolved from registry — uuid5 literal
+
+4+| *Clauses*
+
+| `[identity] primary-forge` | `(identity … :primary-forge github)` | STRING value → SYMBOL
+| `[identity] primary-owner` | `(identity … :owner "…")` | verbatim STRING
+| `[identity] prefixed-name` | `(identity … :prefixed-name "…")` | verbatim STRING
+| `[clade] primary` | `(clade … :primary rm)` | enum → SYMBOL (12-category closed taxonomy carried *verbatim*: fv nl rm gv db ap ix dx pt ax gm sc)
+| `[clade] primary-name` | `(clade … :primary-name "…")` | verbatim STRING (the deliberate redundancy pair with `:primary` is kept — CLADE-006 survives)
+| `[clade] secondary` | `(clade … :secondary (gv))` | list of SYMBOLs
+| `[clade] assigned` | `(clade … :assigned "2026-…")` | verbatim STRING (no date type in the grammar)
+| `[clade] rationale` | `(clade … :rationale "…")` | verbatim STRING
+| `[forges] github/gitlab/bitbucket` | `(forges … :github "o/r" …)` | verbatim STRINGs; empty stays `""`
+| `[lineage] type` | `(lineage … :type standalone)` | enum → SYMBOL — **the full post-#122 taxonomy carried verbatim**: `standalone monorepo monorepo-child inflated deflated hub satellite`
+| `[lineage] parent` | `(lineage … :parent "")` | verbatim STRING (the "monorepo parent, never a description" doctrine travels in the camera's own docs, not the field)
+| `[lineage] born` | `(lineage … :born "…")` | verbatim STRING
+| `[lineage] previous-names` | `(lineage … :previous-names ())` | list of STRINGs
+| `[lineage] instantiated-from` | `(lineage … :instantiated-from "…")` | verbatim STRING
+| `[status] phase` | `(status … :phase active)` | enum → SYMBOL — taxonomy verbatim: `reserved incubating active dormant` \| `merged superseded archived extinct`
+| `[status] since` | `(status … :since "…")` | verbatim STRING
+| `[status] present` | `(status … :present true)` | verbatim BOOLEAN
+| `[status] aliases` | `(status … :aliases ())` | list of STRINGs
+| `[status] merged-into` / `superseded-by` / `ended` | `(status … :merged-into "" …)` | verbatim STRINGs; empty stays `""`
+| `[status] successors` | `(status … :successors ())` | list of STRINGs
+| `[[status.history]]` (0..n) | `(status … (history (entry :phase … :since "…" :note "…") …))` | each entry becomes one nested `(entry …)` clause, field-for-field
+|===
+
+Fields not listed do not exist in the deed era for this family.
+
+== 4. Drop doctrine (what is NOT translated, and why that is right)
+
+* The 12-clade taxonomy comment block, the paint-type/gossamer cautionary
+  tales, the uuid recomputation instructions, and the "REGISTRATION IS NOT
+  DERIVATION" notice: **guidance**, not data. They live on in the mint
+  template's own docs and the registry spec; a per-repo deed is a record,
+  not a manual. (Same doctrine as STATE v2: discard the derivable and the
+  instructional.)
+* `previous-names`, empty `aliases`, empty `successors`: KEPT (explicitly),
+  verbatim — they are the empty *slots* that make the history greppable.
+
+== 5. Provenance & validation
+
+* **P-1 (re-derivation):** for each instance the translator recomputes
+  `uuid = UUIDv5(URL, "github.com/<owner>/<name>")` and *fails closed* on
+  mismatch — never copies a uuid and never emits the one it disagrees with
+  (`enforce-uuid-provenance` doctrine; the check errs on the side of
+  specificity, it is not an unfalsifiability guarantee).
+* **P-2 (source must parse as a2ml first):** a source file that no longer
+  parses as a2ml (e.g. already hand-"translated" halfway, containing `()`)
+  is rejected before any output assignment. A source carrying `=` inside a
+  *string* is fine (strings pass through escaped).
+* **P-3 (output must parse as DEED):** every emitted deed is parsed against
+  the current normative grammar (`deed.anbf` v1.0.0 until the #837 ruling
+  lands): full input consumed, `:schema-version` structurally first, unknown
+  clauses are *errors* (validator §conformance), no `=` anywhere outside a
+  symbol-legal position (grammar: `=` inside a symbol is legal; the field
+  separator `=` is not).
+* **P-4 (dispatch check):** emitted filenames are tested estate-file-first;
+  any repo named `estate` fails closed rather than silently matching
+  `repo-deed` as a stem.
+* **P-5 (registry gates survive):** CLADE-003/004/005/006 semantics are
+  re-expressed over the deed surface before retire-the-checker day — an
+  `UNASSIGNED` clade, a missing `(status …)`, an absent `:repo-uuid`, and a
+  `:primary`/`:primary-name` disagreement must each still fail.
+
+== 6. Worked translation (real instance: `rsr-template-repo`)
+
+Source (post-#122 template instance, abridged to fields):
+
+[source]
+----
+uuid = "a5ea1382-a34c-5334-8a46-a2ebe904c810"
+primary-forge = "github"   primary-owner = "hyperpolymath"
+canonical-name = "rsr-template-repo"   prefixed-name = "rm-rsr-template-repo"
+[clade] primary = "rm"   primary-name = "Repo Management & Tooling"
+secondary = []           assigned = "…"
+[forges] github = "hyperpolymath/rsr-template-repo"
+[lineage] type = "standalone"   parent = ""   born = "2026-03-16"
+[status] phase = "active"   since = "2026-03-16"   present = true
+[[status.history]] phase = "active"   since = "2026-03-16"
+note = "the estate's canonical repository template; in production use"
+----
+
+Emitted `rsr-template-repo_chora.deed`:
+
+[source]
+----
+;; SPDX-License-Identifier: CC-BY-SA-4.0
+(repo-deed
+  :schema-version  "1.0.0"
+  :canonical-name  "rsr-template-repo"
+  :repo-uuid       #u5"a5ea1382-a34c-5334-8a46-a2ebe904c810"
+  :beholding-chora #u5"<estate chora — resolved from gv-clade-index>"
+
+  (identity :primary-forge github
+            :owner          "hyperpolymath"
+            :prefixed-name  "rm-rsr-template-repo")
+
+  (clade    :primary       rm
+            :primary-name  "Repo Management & Tooling"
+            :secondary     (gv)
+            :assigned      "2026-03-16"
+            :rationale     "…")
+
+  (forges   :github    "hyperpolymath/rsr-template-repo"
+            :gitlab    ""
+            :bitbucket "")
+
+  (lineage  :type              standalone
+            :parent            ""
+            :born              "2026-03-16"
+            :previous-names    ()
+            :instantiated-from "rsr-template-repo")
+
+  (status   :phase        active
+            :since        "2026-03-16"
+            :present      true
+            :aliases      ()
+            :merged-into  ""
+            :superseded-by ""
+            :successors   ()
+            :ended        ""
+            (history
+              (entry :phase active
+                     :since "2026-03-16"
+                     :note  "the estate's canonical repository template; in production use"))))
+----
+
+== 7. Acceptance greps (this family is preserved iff, post-campaign)
+
+* Every former CLADE repo has an existing `<canonical-name>_chora.deed` that
+  parses against the normative grammar.
+* `grep -rl ':type hub' --include='*_chora.deed'` returns the eight Stealth
+  Glider-era hubs and `':type satellite'` their members — the #122 enums are
+  verbatim literals, not adapted spellings.
+* No emitted deed contains `=` outside a symbol.
+* `estate_chora.deed` was never produced by this family (dispatch ordering).
+
+== 8. Open questions for the owner (recorded, not decided here)
+
+. Choice of stem: canonical-name (proposed) vs prefixed-name (changes on
+  clade choice). Prefixed-name reads nicer in `ls`; canonical-name is the
+  stable identifier the grammar's identity table already commits.
+. Whether `gv-clade-index`'s own registry migrates to the estate chora in
+  the same wave or stays the external authority point `beholding-chora`
+  resolves from.
+. `:beholding-chora` for PRs minted before the chora exists in the registry
+  — sequential ordering question for the campaign wave.
