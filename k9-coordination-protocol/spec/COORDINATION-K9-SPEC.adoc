@@ -1,0 +1,398 @@
+= K9 Coordination File Specification
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:revdate: 2026-04-09
+:revnumber: 1.1.0
+:description: Schema specification for coordination.k9 files
+:toc:
+
+== Status
+
+*STABLE* — Version 1.1.0
+
+Normative grammar: link:../grammars/k9.abnf[k9.abnf] (v1.1.0).
+If this specification disagrees with the ABNF grammar, the grammar wins.
+
+== Changelog
+
+[cols="1,1,3"]
+|===
+| Version | Date | Changes
+
+| 1.1.0
+| 2026-04-09
+| Aligned with ABNF v1.1.0: case sensitivity, line endings, blank lines,
+  comments, string escapes, bare versions, section ordering. Moved
+  `protected` to Optional (matching grammar). Added `deed_ref` to project.
+  Expanded validation rules.
+
+| 1.0.0
+| 2026-04-03
+| First draft.
+|===
+
+== File Identity
+
+[cols="1,3"]
+|===
+| Filename | `coordination.k9`
+| Location | Repository root
+| K9 Level | Kennel (pure data, no execution)
+| Magic Number | `K9!` (mandatory first line, no leading whitespace)
+| SPDX | `MPL-2.0` or project license (use `LicenseRef-` prefix for custom)
+| Encoding | UTF-8, no BOM
+|===
+
+== Syntax Rules
+
+These rules are enforced by the normative link:../grammars/k9.abnf[ABNF grammar].
+
+1. *Case sensitivity:* All keywords, section names, and the magic number are
+   strictly case-sensitive. `metadata:` is valid; `Metadata:` and `METADATA:`
+   are INVALID. `K9!` is valid; `k9!` is INVALID.
+2. *Magic number:* First line MUST be exactly `K9!` with no leading whitespace.
+3. *SPDX header:* MUST follow the magic line (lines starting with `# SPDX-`).
+4. *Indentation:* MUST be exactly 2 spaces per level. Tabs are INVALID.
+5. *Line endings:* MAY be CRLF (`\r\n`) or LF (`\n`).
+6. *Blank lines:* Permitted between sections. NOT permitted within a section.
+7. *Comments:* Lines starting with `#` are permitted between sections and
+   fields. Inline comments (after a value on the same line) are NOT supported.
+8. *Strings:* Double-quoted (`"..."`). Escape sequences: `\"`, `\\`, `\n`, `\t`.
+9. *Bare values:* Unquoted tokens (`symbol`) and bare version numbers
+   (e.g., `1.0.0`) are valid where the grammar permits.
+10. *Section ordering:* Required sections MUST appear in order: `metadata`,
+    `project`, `invariants`. Optional sections MUST appear in the order listed
+    below; each optional section MAY appear at most once.
+11. *Encoding:* Valid UTF-8. A leading BOM (U+FEFF) is INVALID.
+
+== Schema
+
+=== Required Sections
+
+==== `metadata`
+
+Identity and versioning for the coordination file itself.
+
+[source,yaml]
+----
+metadata:
+  schema: k9-coordination
+  schema_version: 1.0.0
+  generated_by: k9-coordination-generator
+  last_updated: 2026-04-03
+----
+
+*Validation rules:*
+
+* `schema` MUST be the bare token `k9-coordination` (exact, case-sensitive)
+* `schema_version` MUST be valid semver (bare or quoted, e.g., `1.0.0`)
+* `last_updated` MUST be ISO 8601 date (`YYYY-MM-DD`) or RFC 3339 datetime
+
+==== `project`
+
+Core project identity. Tells any arriving agent what this project IS.
+
+[source,yaml]
+----
+project:
+  name: "project-name"
+  description: "One-line description"
+  license: MPL-2.0
+  repo: hyperpolymath/project-name
+  deed_ref: project_chora.deed
+  languages:
+    - ReScript
+    - Rust
+  build_system: just
+  runtime: deno
+----
+
+*Validation rules:*
+
+* `name`, `description`, `license`, `repo` are REQUIRED
+* `name` and `description` MUST be quoted strings
+* `license` MUST be a valid SPDX identifier (bare token)
+* `repo` MAY be bare or quoted
+* `deed_ref` is OPTIONAL but RECOMMENDED; links to a `.deed` file for typed
+  identity (see link:DEED-GRAMMAR-SPEC.adoc[DEED spec])
+* If `deed_ref` is present, the file MUST exist and parse as a valid `repo-deed`
+
+==== `invariants`
+
+Rules that MUST NOT be violated. Each invariant has an id, rule, and reason.
+
+[source,yaml]
+----
+invariants:
+  - id: no-typescript
+    rule: "Do not introduce TypeScript files anywhere in this project"
+    reason: "ReScript is the chosen frontend language — this is deliberate"
+    severity: critical
+
+  - id: custom-tea-runtime
+    rule: "Do not replace the custom TEA runtime in src/tea/"
+    reason: "18-module custom build — rescript-tea was deliberately rejected"
+    severity: critical
+----
+
+*Validation rules:*
+
+* `invariants` section MUST be present but MAY contain zero entries
+* Each entry MUST have `id`, `rule`, `reason`
+* `id` MUST be unique within the file
+* `severity` defaults to `critical` if omitted
+
+Severity levels:
+
+[cols="1,3"]
+|===
+| Level | Meaning
+
+| `critical`
+| NEVER violate. Agent MUST refuse action and alert user.
+
+| `high`
+| Ask user for explicit approval before violating.
+
+| `moderate`
+| Prefer compliance, but may proceed with warning.
+|===
+
+=== Optional Sections
+
+NOTE: Optional sections MUST appear in the order shown below. Each section
+MAY appear at most once. If a section is included, it MUST contain at least
+one entry or sub-key.
+
+==== `protected`
+
+Files and directories that are architecturally significant and must not be
+deleted, reorganised, or replaced without explicit user approval.
+
+[source,yaml]
+----
+protected:
+  - path: src/tea/
+    reason: "Custom TEA runtime — 18 modules"
+  - path: .machine_readable/
+    reason: "Canonical location for all A2ML state files"
+  - path: coordination.k9
+    reason: "This file — source of truth for AI coordination"
+----
+
+*Validation rules:*
+
+* Each entry MUST have `path` and `reason`
+* `path` may be a file or directory (trailing `/` indicates directory)
+
+==== `architecture`
+
+Deliberate architectural decisions that may look wrong to an unfamiliar agent.
+
+[source,yaml]
+----
+architecture:
+  - id: gossamer-not-tauri
+    decision: "Gossamer (Zig + WebKitGTK) is the desktop backend"
+    reason: "Migrated from Tauri 2.0 — this is the intended direction"
+    alternatives_rejected:
+      - "Tauri"
+      - "Electron"
+      - "native GTK"
+
+  - id: deno-npm-hybrid
+    decision: "Deno orchestrates builds but npm used for ReScript compiler"
+    reason: "ReScript compiler requires npm — this is the only exception"
+----
+
+*Validation rules:*
+
+* Each entry MUST have `id`, `decision`, `reason`
+* `alternatives_rejected` is OPTIONAL (list of quoted strings)
+
+==== `do_not_create`
+
+Things that must NOT be introduced. Prevents well-meaning agents from
+creating parallel systems.
+
+[source,yaml]
+----
+do_not_create:
+  - pattern: "**/*.ts"
+    reason: "TypeScript is banned — use ReScript"
+  - pattern: "Dockerfile"
+    reason: "Use Containerfile (Podman, not Docker)"
+  - pattern: "package-lock.json"
+    reason: "npm lock files banned — use deno.lock"
+  - description: "REST API parallel to Groove endpoints"
+    reason: "Groove is the inter-service protocol"
+----
+
+*Validation rules:*
+
+* Each entry MUST have EITHER `pattern` OR `description` (not both, not neither)
+* Each entry MUST have `reason`
+* `pattern` is a glob supporting `*`, `**`, `?`, `[...]`, `{...}`
+
+==== `terminology`
+
+Correct terminology for this project. Prevents agents from using wrong names.
+
+[source,yaml]
+----
+terminology:
+  - correct: panels
+    incorrect:
+      - panes
+      - tabs
+      - windows
+    context: "PanLL UI elements are always called panels"
+----
+
+*Validation rules:*
+
+* Each entry MUST have `correct` (bare symbol or quoted string)
+* `incorrect` is OPTIONAL but RECOMMENDED
+* `context` is OPTIONAL
+
+==== `ecosystem`
+
+How this project relates to others. Helps agents understand what NOT to
+duplicate and where to look for related functionality.
+
+[source,yaml]
+----
+ecosystem:
+  depends_on:
+    - name: gossamer
+      role: "Desktop backend (WebKitGTK + Zig)"
+    - name: verisimdb
+      role: "Persistent storage layer"
+  consumed_by:
+    - name: idaptik
+      role: "Uses PanLL as level editor"
+  related:
+    - name: typell
+      role: "Type intelligence engine — cross-panel type checking"
+----
+
+*Validation rules:*
+
+* At least one subsection (`depends_on`, `consumed_by`, `related`) MUST be
+  present if the `ecosystem` section is included
+* Each entry MUST have `name` and `role`
+
+==== `coordination` (Mutable State)
+
+Active agent work tracking. Updated by agents or tooling. This is the ONLY
+section that is routinely modified by agents or automation.
+
+[source,yaml]
+----
+coordination:
+  active:
+    - agent: claude
+      area: "ABI layer + Groove endpoints"
+      started: 2026-04-03
+      status: in-progress
+    - agent: gemini
+      area: "Test coverage for auth module"
+      started: 2026-04-02
+      status: blocked
+      blocker: "Waiting for upstream API key"
+  completed:
+    - agent: cursor
+      area: "CSS layout refactor"
+      completed: 2026-04-02
+  available:
+    - "Documentation for new API surface"
+    - "Integration tests for Groove handlers"
+----
+
+*Validation rules:*
+
+* At least one subsection (`active`, `completed`, `available`) MUST be
+  present if the `coordination` section is included
+* `active` entries MUST have: `agent`, `area`, `started`, `status`
+* `status` MUST be: `in-progress`, `blocked`, or `paused`
+* If `status: blocked`, `blocker` SHOULD be present
+* `completed` entries MUST have: `agent`, `area`, `completed`
+* `available` is a list of quoted strings
+
+== Validation Rules (Complete)
+
+A conforming `coordination.k9` file MUST satisfy ALL of the following:
+
+=== Syntactic Rules (enforced by parser)
+
+1. *Magic number:* First line is exactly `K9!` (case-sensitive, no leading ws)
+2. *SPDX header:* Present before first section
+3. *Encoding:* Valid UTF-8, no BOM
+4. *Line endings:* CRLF or LF
+5. *Indentation:* Exactly 2 spaces per level; no tabs
+6. *Case sensitivity:* All section names and keywords are case-sensitive
+7. *Section ordering:* Required sections in order; optional sections in
+   documented order, no duplicates
+8. *String format:* Double-quoted; only `\"`, `\\`, `\n`, `\t` escapes
+9. *Required sections present:* `metadata`, `project`, `invariants`
+
+=== Semantic Rules (enforced by validator)
+
+10. *Metadata schema:* `metadata.schema` is exactly `k9-coordination`
+11. *Metadata version:* `metadata.schema_version` is valid semver
+12. *Project identity:* `name`, `description`, `license`, `repo` present
+13. *Invariants:* Each entry has unique `id`, `rule`, `reason`
+14. *Mutual exclusivity:* `do_not_create` entries have `pattern` XOR `description`
+15. *Non-empty optionals:* If `ecosystem` or `coordination` present, ≥1 sub-key
+16. *DEED reference:* If `project.deed_ref` present, file exists and is valid
+
+== Generator Behaviour
+
+The generator reads `coordination.k9` (and optionally the referenced DEED file
+via `deed_ref`) and emits one file per supported AI tool.
+
+NOTE: The generator MUST use a K9-aware parser that validates against
+link:../grammars/k9.abnf[k9.abnf], NOT a generic YAML parser.
+
+All generated files:
+
+1. Start with a comment indicating they were generated from `coordination.k9`
+2. Include a "do not edit directly" warning
+3. Render all sections as markdown appropriate for the target tool
+4. Are idempotent — re-running overwrites with current state
+5. Preserve source attribution (DEED vs K9) when `deed_ref` is present
+
+Generated files SHOULD be committed to the repository so that AI tools
+which read them on startup get the coordination context immediately.
+
+== Relationship to Existing Files
+
+`coordination.k9` does NOT replace:
+
+* `0-AI-MANIFEST.a2ml` — the gateway file still serves as universal entry point
+* `.machine_readable/*.a2ml` — state/meta files remain authoritative
+* `repo_chora.deed` — typed repo identity; K9 REFERENCES it via `deed_ref`
+* `.claude/CLAUDE.md` — can coexist; generated CLAUDE.md merges with existing
+
+The A2ML gateway SHOULD reference `coordination.k9` in its inventory so
+agents following the gatekeeper protocol discover it.
+
+*The handoff:*
+
+----
+0-AI-MANIFEST.a2ml (gateway)
+  → points to coordination.k9 (operational rules)
+    → points to repo_chora.deed (typed identity)
+----
+
+== References
+
+* link:../grammars/k9.abnf[K9 ABNF Grammar] (v1.1.0, normative)
+* link:DEED-GRAMMAR-SPEC.adoc[DEED Grammar Specification]
+* link:https://yaml.org/spec/1.2.2/[YAML 1.2 Specification] (K9 is inspired by, not conformant to)
+* link:https://www.rfc-editor.org/rfc/rfc7405[RFC 7405] (Case-Sensitive String Support in ABNF)
+
+== License
+
+This specification is licensed under CC-BY-SA-4.0.
+
+Implementations may use any OSI-approved license.
