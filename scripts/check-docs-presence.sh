@@ -24,7 +24,14 @@
 # default; GitHub-required community-health files stay Markdown):
 #   README.adoc | README.md
 #   LICENSE | LICENSE.txt | LICENSE.md
-#   CONTRIBUTING.md | 3-practice/CONTRIBUTING.adoc
+#   CONTRIBUTING.md | CONTRIBUTING.adoc | 3-practice/CONTRIBUTING.adoc
+#
+# CONTRIBUTING.adoc at the repo root is accepted because the estate policy named
+# above makes AsciiDoc the default, and it is what the estate actually uses:
+# sampling 40 repos on 2026-09-18 found 32 carrying a root CONTRIBUTING.adoc and
+# no CONTRIBUTING.md, versus 2 genuinely missing the document. Without it this
+# gate failed 94% of the repos it reported as non-compliant, the day the
+# CONTRIBUTING cutoff armed.
 #
 # Usage: check-docs-presence.sh [repo-root]
 #
@@ -83,7 +90,7 @@ grace_missing=""
 have README.adoc README.md      || blocking_missing="$blocking_missing README"
 have LICENSE LICENSE.txt LICENSE.md || blocking_missing="$blocking_missing LICENSE"
 
-if ! have CONTRIBUTING.md 3-practice/CONTRIBUTING.adoc; then
+if ! have CONTRIBUTING.md CONTRIBUTING.adoc 3-practice/CONTRIBUTING.adoc; then
   # String comparison is sound here: YYYY-MM-DD sorts chronologically, and both
   # operands are format-validated above.
   if [[ "$TODAY" < "$ENFORCE_CONTRIBUTING_FROM" ]]; then
