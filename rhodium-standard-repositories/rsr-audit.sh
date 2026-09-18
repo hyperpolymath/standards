@@ -246,7 +246,7 @@ audit_category_2_documentation() {
     fi
 
     check_file_exists "LICENSE.txt" "LICENSE.txt present (must be .txt, not .md)"
-    check_file_exists "SECURITY.md" "SECURITY.md present"
+    check_file_exists "3-practice/SECURITY.md" "3-practice/SECURITY.md present"
     check_file_exists "CODE_OF_CONDUCT.md" "CODE_OF_CONDUCT.md present (or .adoc)"
     check_file_exists "CONTRIBUTING.md" "CONTRIBUTING.md present (or .adoc)"
     check_file_exists "MAINTAINERS.md" "MAINTAINERS.md present"
@@ -269,12 +269,12 @@ audit_category_2_documentation() {
         check_file_contains "README.md" "License" "README.md has License section"
     fi
 
-    # SECURITY.md validation
+    # 3-practice/SECURITY.md validation
     if [[ -f "$REPO_PATH/SECURITY.md" ]]; then
-        check_file_contains "SECURITY.md" "Reporting" "SECURITY.md has vulnerability reporting"
+        check_file_contains "3-practice/SECURITY.md" "Reporting" "3-practice/SECURITY.md has vulnerability reporting"
         # Estate-tolerant: credit any documented response SLA phrasing, not just
         # the literal "24 hours" (repos use "Response Timeline", "business day", etc.)
-        check_file_contains "SECURITY.md" "24 hours\\|48 hours\\|72 hours\\|business day\\|[Rr]esponse [Tt]ime\\|SLA" "SECURITY.md has response timeline"
+        check_file_contains "3-practice/SECURITY.md" "24 hours\\|48 hours\\|72 hours\\|business day\\|[Rr]esponse [Tt]ime\\|SLA" "3-practice/SECURITY.md has response timeline"
     fi
 
     # CONTRIBUTING.md validation (TPCF)

@@ -190,7 +190,7 @@ A repository is Rhodium Standard compliant when it meets the following comprehen
 repository-root/
 ├── README.md                  # or .adoc
 ├── LICENSE.txt                # MUST be .txt (plain text)
-├── SECURITY.md                # MUST be .md
+├── 3-practice/SECURITY.md                # MUST be .md
 ├── CODE_OF_CONDUCT.md         # or .adoc
 ├── CONTRIBUTING.md            # or .adoc
 ├── FUNDING.yml                # MUST be .yml
@@ -583,7 +583,7 @@ This is **graduated trust without gatekeeping**—everyone can contribute, but s
    - Security boundaries (Deno permissions)
 
 5. **Document the fix**
-   - Update SECURITY.md if vulnerability
+   - Update 3-practice/SECURITY.md if vulnerability
    - Add regression test
    - Update CHANGELOG (SemVer)
 

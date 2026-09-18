@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: MPL-2.0
+name: deed-conformance
+
+# Conformance lane for the DEED grammar (standards#837). Three gates:
+# validator self-test → fixture corpus → every committed *.deed file.
+
+on:
+  push:
+    paths:
+      - '**.deed'
+      - '1-formats/deed/**'
+      - '.github/workflows/deed-conformance.yml'
+  pull_request:
+    paths:
+      - '**.deed'
+      - '1-formats/deed/**'
+      - '.github/workflows/deed-conformance.yml'
+
+permissions: {}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
+        with:
+          persist-credentials: false
+      - name: validator self-test
+        run: python3 1-formats/deed/tools/deed_lint.py --self-test
+      - name: fixture corpus (valid must pass, invalid must fail)
+        run: python3 1-formats/deed/tools/deed_lint.py --fixtures 1-formats/deed/tools/fixtures
+      - name: lint every committed deed
+        run: |
+          set -e
+          FILES=$(find . -name '*.deed' -not -path './1-formats/deed/tools/fixtures/invalid/*' -print)
+          if [ -z "$FILES" ]; then
+            echo "no committed .deed files yet — fixtures carry the gate"
+            exit 0
+          fi
+          echo "$FILES" | xargs python3 1-formats/deed/tools/deed_lint.py

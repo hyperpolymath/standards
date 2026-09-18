@@ -66,6 +66,14 @@ jobs:
 
       - name: Identify repositories with .githooks
         id: identify
+        env:
+          # CREDENTIAL (issue #807, root cause 1): the probe below calls the
+          # contents API on target repos. HYPATIA_SCAN_PAT is the estate's
+          # read-only PAT (contents:read across repos) — the same credential
+          # governance-reusable.yml and allowlist-preflight-reusable.yml use
+          # for live repo reads. Without a token every probe fails silently
+          # and every repo is misclassified as hookless.
+          GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
         run: |
           echo "🔍 Identifying repositories that need hook updates..."
           
@@ -75,7 +83,9 @@ jobs:
           # Check if specific repo was requested
           if [ -n "${{ github.event.inputs.target-repo }}" ]; then
             TARGET="${{ github.event.inputs.target-repo }}"
-            REPOS_JSON=$(jq -n --arg repo "$TARGET" '[$repo]')
+            # -c: compact, single-line JSON — a multiline value breaks
+            # $GITHUB_OUTPUT below (same defect class as root cause 2, #807).
+            REPOS_JSON=$(jq -cn --arg repo "$TARGET" '[$repo]')
           else
             # Use a sample list for now - TODO: Query all repos dynamically
             # For production, this should query the GitHub API for all repos
@@ -84,26 +94,58 @@ jobs:
               "hyperpolymath/standards"
             )
             
-            # Filter to only repos that have .githooks directory
+            # Filter to only repos that have .githooks directory.
+            # Three outcomes per repo, not two (issue #807): has-hooks, no-hooks,
+            # and PROBE ERROR. The old code folded error into no-hooks (2>/dev/null
+            # + jq -e on the error object), so a credential failure read as
+            # "nothing to do" — a fake green.
             echo "🔍 Filtering repos with .githooks directory..."
             REPOS_WITH_HOOKS=()
+            DISCOVERY_ERRORS=()
             for repo in "${ALL_REPOS[@]}"; do
-              ORG=$(echo "$repo" | cut -d'/' -f1)
-              REPO_NAME=$(echo "$repo" | cut -d'/' -f2)
-              
-              # Check if .githooks exists in the repo
-              if gh api /repos/$ORG/$REPO_NAME/contents/.githooks \
+              ERR_FILE=$(mktemp)
+              if OUT=$(gh api "/repos/$repo/contents/.githooks" \
                 -H "Accept: application/vnd.github+json" \
-                -H "X-GitHub-Api-Version: 2022-11-28" 2>/dev/null | \
-                jq -e '. | type == "array"' 2>/dev/null; then
-                REPOS_WITH_HOOKS+=("$repo")
-                echo "  ✓ $repo has .githooks"
-              else
+                -H "X-GitHub-Api-Version: 2022-11-28" 2>"$ERR_FILE"); then
+                if jq -e 'type == "array"' >/dev/null <<<"$OUT"; then
+                  REPOS_WITH_HOOKS+=("$repo")
+                  echo "  ✓ $repo has .githooks"
+                else
+                  echo "  ✗ $repo skipped (.githooks exists but is not a directory)"
+                fi
+              elif grep -q "HTTP 404" "$ERR_FILE"; then
                 echo "  ✗ $repo skipped (no .githooks)"
+              else
+                DISCOVERY_ERRORS+=("$repo")
+                echo "  ⚠ $repo: probe errored — NOT counted as hookless: $(head -1 "$ERR_FILE")"
               fi
+              rm -f "$ERR_FILE"
             done
-            
-            REPOS_JSON=$(printf '%s\n' "${REPOS_WITH_HOOKS[@]}" | jq -R . | jq -s .)
+
+            # An erroring probe must fail the job, never propagate blind.
+            if ((${#DISCOVERY_ERRORS[@]})); then
+              echo "::error::Discovery errored for ${#DISCOVERY_ERRORS[@]} repo(s): ${DISCOVERY_ERRORS[*]} — refusing to propagate blind (check the credential on this step)"
+              exit 1
+            fi
+
+            # CANARY (issue #807): hyperpolymath/standards OWNS .githooks — 14
+            # hooks. If the canonical repo classifies as hookless, the classifier
+            # is broken, not the repo. Fail loudly instead of propagating nowhere.
+            CANARY="hyperpolymath/standards"
+            if [[ " ${ALL_REPOS[*]} " == *" $CANARY "* && ! " ${REPOS_WITH_HOOKS[*]} " == *" $CANARY "* ]]; then
+              echo "::error::Discovery canary failed: $CANARY has .githooks yet classified hookless — discovery is broken, refusing to propagate"
+              exit 1
+            fi
+
+            # (issue #807, root cause 2): printf on an EMPTY bash array still
+            # prints one empty line, yielding [""]  — and a multiline value then
+            # breaks $GITHUB_OUTPUT ('Invalid format'). Serialize [] explicitly,
+            # and always compact single-line JSON.
+            if ((${#REPOS_WITH_HOOKS[@]})); then
+              REPOS_JSON=$(printf '%s\n' "${REPOS_WITH_HOOKS[@]}" | jq -R . | jq -cs .)
+            else
+              REPOS_JSON='[]'
+            fi
           fi
           
           echo "repos=$REPOS_JSON" >> $GITHUB_OUTPUT

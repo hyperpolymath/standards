@@ -18,7 +18,7 @@
 | **2. The 007 repo** | All Rights Reserved (ARR) | `hyperpolymath/007` specifically. Out-of-scope for any normalisation, scanning, or labelling. Surface to owner only. |
 | **3. Shared with son (Joshua)** | `AGPL-3.0-or-later` | Repos with son as co-author/maintainer. Examples: `idaptik`, `paint-type`. Permanent. |
 | **4. Third-party / forks** | DO NOT TOUCH | Whatever upstream chose. Never sweep, never normalise. Flag as out-of-scope if it surfaces in an audit. |
-| **5. Palimpsest register** | `PMPL-1.0-or-later` | **Only repos named in the register** in `LICENCE-POLICY.adoc` Rule 2 — currently five: `palimpsest-license`, `palimpsest-plasma`, `metadatastician/consent-aware-web` (prospectively only — don't flip existing content), `insolvency-tycoon`, `sim-public-relations`. The cap of three was lifted 2026-08-26 as the Palimpsest family develops; the register is a growing **allowlist**, so PMPL in an unlisted repo is still drift. `LICENCE-POLICY.adoc` is authoritative — do not duplicate the list's contents here. |
+| **5. Palimpsest register** | `PMPL-1.0-or-later` | **Only repos named in the register** in `3-practice/LICENCE-POLICY.adoc` Rule 2 — currently five: `palimpsest-license`, `palimpsest-plasma`, `metadatastician/consent-aware-web` (prospectively only — don't flip existing content), `insolvency-tycoon`, `sim-public-relations`. The cap of three was lifted 2026-08-26 as the Palimpsest family develops; the register is a growing **allowlist**, so PMPL in an unlisted repo is still drift. `3-practice/LICENCE-POLICY.adoc` is authoritative — do not duplicate the list's contents here. |
 
 ### Hard rules for agents
 
@@ -106,15 +106,15 @@ for the canonical statement.
 
 > **Corrected 2026-08-07.** This section previously listed **Bun** as banned
 > with **Deno** as its replacement, and described Deno as "replaces Node/npm/bun".
-> That inverted `LANGUAGE-POLICY.adoc` §1, which has ruled Bun > Deno > pnpm > npm
+> That inverted `3-practice/LANGUAGE-POLICY.adoc` §1, which has ruled Bun > Deno > pnpm > npm
 > since 2026-07-29. Because this file is what agents read first, the recorded
 > ruling and agent behaviour had diverged: agents were being instructed to migrate
 > *away* from the estate's first-choice runtime.
 >
 > **RESOLVED 2026-08-25 — this file governs.** The contradiction previously
 > flagged here (this table bans TypeScript in favour of AffineScript, while
-> `LANGUAGE-POLICY.adoc` §1.2 stated "TypeScript is *permitted under Bun*") has
-> been ruled by the owner: **AffineScript governs.** `LANGUAGE-POLICY.adoc` §1.2
+> `3-practice/LANGUAGE-POLICY.adoc` §1.2 stated "TypeScript is *permitted under Bun*") has
+> been ruled by the owner: **AffineScript governs.** `3-practice/LANGUAGE-POLICY.adoc` §1.2
 > was the error and has been rewritten to match.
 >
 > The distinction that keeps both documents coherent: **Bun is the runtime, tier 1
@@ -225,7 +225,7 @@ Both are FOSS with independent governance (no Big Tech).
 ### Documentation Format
 
 - All docs must be `.adoc` (AsciiDoc), **including `README.adoc`** — this is the estate default. GitHub renders AsciiDoc natively on the repo page, so the README, its community-health view, and the file-list tab bar all display correctly.
-- GitHub-required `.md` (must be Markdown): SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md. (README is **not** in this list — see the README rule below.)
+- GitHub-required `.md` (must be Markdown): 3-practice/SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md. (README is **not** in this list — see the README rule below.)
 - **README is `.adoc` by default, with exactly two `.md` exceptions:**
   * `hyperpolymath/hyperpolymath` — the GitHub **profile** repo; profile READMEs render *only* `README.md`, never `.adoc`.
   * `hyperpolymath/boj-server` — surfaced in external MCP directories (Glama), which show AsciiDoc as raw markup.
@@ -256,7 +256,7 @@ Existing pre-2026-04-30 `.ts`/`.tsx` outside these carve-outs is grandfathered w
 | `**/deps/**` | vendored package-manager dep | Elixir Mix vendored-dep directory (also adopted by other tools). Exemplar: `tma-mark2/deps/phoenix_live_view/assets/js/phoenix_live_view/*.ts` ships Phoenix LiveView's authored TS. | Never — vendored upstream. |
 | `**/vscode/**` (covers `editors/vscode/`, `extensions/vscode/`, `clients/vscode/`) | editor-host extension | VSCode extension entry points target the `vscode` extension-host API. Five estate repos (`universal-language-server-plugin`, `reposystem`, `proof-burrower`, `phronesis`, `bofj-kitt`) have a single `vscode/extension.ts`. | **Capability SHIPPED, verified 2026-08-28** — `affinescript/stdlib/Vscode.affine` (58 `extern fn`), `VscodeLanguageClient.affine` (4), the JS host shim `packages/affine-vscode/mod.js`, and `affine-vscode-publish.yml`. The remaining blocker is migration effort, not capability. Track under campaign #239; retire this row when the five VSCode extensions are ported. |
 
-Retired 2026-08-31: the `avow-protocol/telegram-bot/**` carve-out (the bot was rewritten in AffineScript — zero `.ts` on main, so the "PERMANENT" rationale no longer described reality); the `affinescript-deno-test/**` + `affinescript-cli/**` bootstrap-shim row (the test harness self-hosted to 100% `.affine` via affinescript#735/#736, and the cli is JS-only — see the npm/JavaScript tables below for its surviving front-door carve-out); and the `**/tsconfig.json` pattern (dead entry — the rule matches `*.ts`, so a `.json` path could never reach the allowlist).
+Retired 2026-08-31: the `2-protocols/avow/telegram-bot/**` carve-out (the bot was rewritten in AffineScript — zero `.ts` on main, so the "PERMANENT" rationale no longer described reality); the `affinescript-deno-test/**` + `affinescript-cli/**` bootstrap-shim row (the test harness self-hosted to 100% `.affine` via affinescript#735/#736, and the cli is JS-only — see the npm/JavaScript tables below for its surviving front-door carve-out); and the `**/tsconfig.json` pattern (dead entry — the rule matches `*.ts`, so a `.json` path could never reach the allowlist).
 
 Adding to this list requires explicit user approval and an unblock condition (except the structural classes above, which are estate-wide policy). The detection rule and its `path_allow_prefixes` field are the single source of truth; this table mirrors that for human readability.
 

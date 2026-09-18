@@ -75,7 +75,7 @@ jobs:
             mv r.tmp repos.txt
           fi
 
-          scanned=0; withlock=0; drifted=0
+          scanned=0; withlock=0; drifted=0; errors=0
           while read -r r; do
             scanned=$((scanned+1))
             # Cheap probe first: skip repos with no lockfile (that is failure
@@ -90,21 +90,35 @@ jobs:
                  "https://x-access-token:${GH_TOKEN}@github.com/hyperpolymath/$r.git" _w 2>/dev/null; then
               continue
             fi
-            if ! bash scripts/check-lockfile-drift.sh _w >> drift-report.tsv 2>/dev/null; then
+            # Exit-code honesty (issue #708): 1 = drift found, 2 = usage/env
+            # error. The old `if !` folded both into 'drifted', so a broken
+            # clone counted as a drifted repo. The slug arg gives column 1 a
+            # real identity; without it every row said `_w`.
+            rc=0
+            bash scripts/check-lockfile-drift.sh _w "$r" >> drift-report.tsv 2>> drift-errors.log || rc=$?
+            if [ "$rc" -eq 1 ]; then
               drifted=$((drifted+1))
+            elif [ "$rc" -ne 0 ]; then
+              errors=$((errors+1))
+              echo "::warning::$r: drift check errored (rc=$rc) — see drift-errors.log"
             fi
             rm -rf _w
           done < repos.txt
 
-          rows=$(( $(wc -l < drift-report.tsv) - 1 ))
+          # Count data rows only: lines bearing a TAB, minus the header.
+          # (wc -l − 1 counted banner lines as drift entries when banners
+          # still leaked into stdout — 67 of 418 'entries' in run 2026-09-15
+          # were `[drift] clean` lines, issue #708.)
+          rows=$(( $(grep -c $'\t' drift-report.tsv || true) - 1 ))
           {
             echo "total=$TOTAL"
             echo "scanned=$scanned"
             echo "withlock=$withlock"
             echo "drifted=$drifted"
+            echo "errors=$errors"
             echo "rows=$rows"
           } >> "$GITHUB_OUTPUT"
-          echo "scanned=$scanned withlock=$withlock drifted=$drifted rows=$rows"
+          echo "scanned=$scanned withlock=$withlock drifted=$drifted errors=$errors rows=$rows"
 
       - name: Upload report
         if: always()
@@ -126,6 +140,7 @@ jobs:
             echo "| scanned | ${{ steps.sweep.outputs.scanned }} |"
             echo "| carrying a lockfile | ${{ steps.sweep.outputs.withlock }} |"
             echo "| **with drift** | **${{ steps.sweep.outputs.drifted }}** |"
+            echo "| check errors (rc≠0,1) | ${{ steps.sweep.outputs.errors }} |"
             echo "| drifted entries | ${{ steps.sweep.outputs.rows }} |"
             echo
             echo '```'
@@ -163,6 +178,7 @@ jobs:
             echo "| scanned | ${{ steps.sweep.outputs.scanned }} |"
             echo "| carrying a lockfile | ${{ steps.sweep.outputs.withlock }} |"
             echo "| **with drift** | **${{ steps.sweep.outputs.drifted }}** |"
+            echo "| check errors (rc≠0,1) | ${{ steps.sweep.outputs.errors }} |"
             echo "| drifted entries | ${{ steps.sweep.outputs.rows }} |"
           } > issue-body.md
           body="$(cat issue-body.md)"

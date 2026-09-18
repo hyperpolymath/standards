@@ -4,8 +4,19 @@
 #
 # Scope:
 #   - lol/proofs/theories/**/*.agda
-#   - a2ml/src/A2ML/Proofs.idr
-#   - avow-protocol/avow-lib/src/abi/*.idr
+#   - 2-protocols/avow/avow-lib/src/abi/*.idr
+#
+# Proof-corpus status (issue #748, updated 2026-09-17): the lol and AVOW
+# corpora are EVICTED from this repo — and their jobs keep the presence
+# Guard from #828 (honest green, no toolchain spend; they verify again
+# unchanged if a corpus ever returns). The A2ML corpus will NEVER return:
+# the a2ml project is OFFICIALLY RETIRED (owner ruling, 2026-09-17), so
+# the idris2-a2ml job is EVICTED, not merely guarded. Verified before
+# evicting: no live ruleset pins its check context (org ruleset
+# Optimus-Branch #23359343 requires only CodeQL, CodeRabbit, SonarCloud,
+# governance/Code-quality+docs, .github/dependabot.yml, uses⊆actions.lock;
+# config/rulesets/*.json pin no proof contexts), so removing it cannot
+# deadlock a PR.
 #
 # Dogfooding: standards repo defines ECHIDNA trust pipeline; this workflow
 # applies that pipeline to the repo's own proofs.
@@ -17,17 +28,16 @@ on:
     branches: [main]
     paths:
       - 'lol/proofs/**'
-      - 'a2ml/src/**/*.idr'
-      - 'a2ml/a2ml-core.ipkg'
-      - 'avow-protocol/avow-lib/src/abi/*.idr'
+      - '2-protocols/avow/avow-lib/src/abi/*.idr'
       - '.github/workflows/echidna-verify.yml'
-  # NO path filter on pull_request, deliberately. `Idris2 - a2ml proofs` is a
-  # REQUIRED context, and a workflow-level path filter means the whole workflow
-  # never triggers for a PR that touches nothing else - so the context never
-  # reports and the PR deadlocks. Filtering moved to job level below: the
-  # workflow always starts, and the expensive jobs skip when no proofs changed.
-  # A job skipped by `if:` still emits a check run whose conclusion GitHub
-  # accepts for a required status check.
+  # NO path filter on pull_request, deliberately. It once existed because
+  # `Idris2 - a2ml proofs` was recorded as a REQUIRED context; that is STALE —
+  # verified 2026-09-17 against the live org ruleset: no ruleset pins any
+  # proof context, and the a2ml job itself is now evicted (retired project).
+  # The always-on shape is kept even so: the surviving jobs are second-level
+  # presence Guards, and this workflow doubles as the repo's proof-hygiene
+  # canary — letting proof-irrelevant PRs skip it would silently un-exercise
+  # the Guards.
   pull_request:
   schedule:
     # Weekly re-verification to catch stale-proof drift
@@ -69,7 +79,7 @@ jobs:
           base="${{ github.event.pull_request.base.sha }}"
           head="${{ github.event.pull_request.head.sha }}"
           changed=$(git diff --name-only "$base" "$head" 2>/dev/null || true)
-          if printf '%s\n' "$changed" | grep -qE '^(lol/proofs/|a2ml/src/.*\.idr$|a2ml/a2ml-core\.ipkg$|avow-protocol/avow-lib/src/abi/.*\.idr$|\.github/workflows/echidna-verify\.yml$)'; then
+          if printf '%s\n' "$changed" | grep -qE '^(lol/proofs/|2-protocols/avow/avow-lib/src/abi/.*\.idr$|\.github/workflows/echidna-verify\.yml$)'; then
             echo "proofs=true" >> "$GITHUB_OUTPUT"
           else
             echo "proofs=false" >> "$GITHUB_OUTPUT"
@@ -87,7 +97,23 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Guard — proofs are evicted from this repo
+        id: guard
+        run: |
+          # Same honesty guard idris2-avow got (see its Type-check step),
+          # placed BEFORE the toolchain install so the weekly cron stops
+          # spending minutes bootstrapping for a directory that does not
+          # exist. lol/proofs moved to the lol repository; if the corpus ever
+          # returns here, this job verifies again, unchanged (issue #748).
+          if [ ! -d lol/proofs ]; then
+            echo "::notice title=Agda proofs::lol/proofs is absent here — proofs were evicted to the lol repository. Nothing to type-check; remaining steps skipped."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Agda
+        if: steps.guard.outputs.present == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y agda agda-stdlib
@@ -95,6 +121,7 @@ jobs:
 
       - name: Type-check proofs
         id: typecheck
+        if: steps.guard.outputs.present == 'true'
         run: |
           set -e
           echo "=== Agda proofs under lol/proofs ==="
@@ -106,6 +133,7 @@ jobs:
           done
 
       - name: Postulate audit
+        if: steps.guard.outputs.present == 'true'
         run: |
           echo "=== Postulate usage in lol/proofs ==="
           grep -rn "postulate" lol/proofs/theories/ || echo "No postulates found"
@@ -116,78 +144,6 @@ jobs:
         with:
           name: agda-verify-log
           path: agda-verify.log
-          if-no-files-found: ignore
-
-  idris2-a2ml:
-    name: Idris2 — a2ml proofs
-    needs: detect-proof-changes
-    if: needs.detect-proof-changes.outputs.proofs == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: recursive
-
-      - name: Cache pack
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4
-        with:
-          path: |
-            ~/.pack
-            ~/.idris2
-          key: ${{ runner.os }}-idris2-pack-${{ hashFiles('**/pack.toml', '**/*.ipkg') }}
-          restore-keys: |
-            ${{ runner.os }}-idris2-pack-
-
-      - name: Install Idris2 via pack
-        run: |
-          set -e
-          if command -v idris2 >/dev/null 2>&1; then
-            echo "idris2 already present: $(idris2 --version)"
-            exit 0
-          fi
-          # Bootstrap: install pack, which installs idris2.
-          sudo apt-get update
-          sudo apt-get install -y build-essential libgmp-dev chezscheme
-          # Clone pack bootstrap
-          git clone --depth 1 https://github.com/stefan-hoeck/idris2-pack.git "$HOME/idris2-pack"
-          cd "$HOME/idris2-pack"
-          # Use the bootstrap script in non-interactive mode
-          # pack's install.bash prompts for the scheme binary; feeding newlines
-          # makes the prompt take its detected default (chezscheme) instead of
-          # hitting EOF (which aborts the bootstrap and leaves pack uninstalled).
-          yes '' | bash install.bash || echo "::warning::pack install had warnings"
-          # pack installs its launcher into ~/.local/bin (newer layout) and/or
-          # ~/.pack/bin (older); add both so `pack` resolves on PATH.
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.pack/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.local/bin:$HOME/.pack/bin:$PATH"
-          # `install-api` is not a pack subcommand; `install-app idris2`
-          # installs the idris2 executable into the pack bin dir so the
-          # subsequent `idris2 --check` resolves. The base library (Prelude,
-          # base, contrib) ships with idris2, so no .ipkg is needed for a
-          # standalone --check.
-          pack install-app idris2
-          idris2 --version
-
-      - name: Type-check normative A2ML core
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/.pack/bin:$PATH"
-          cd a2ml
-          # Use the package target: per-file `--check` can exit successfully
-          # when an imported module is missing and therefore is not a real
-          # gate for the authoritative module set (standards#556).
-          idris2 --version | tee ../idris2-a2ml.log
-          idris2 --typecheck a2ml-core.ipkg 2>&1 | tee -a ../idris2-a2ml.log
-
-      - name: Upload log
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: idris2-a2ml-log
-          path: idris2-a2ml.log
           if-no-files-found: ignore
 
   idris2-avow:
@@ -246,15 +202,15 @@ jobs:
           # The per-file `if [ -f ]` guard below was written to tolerate absent
           # proofs, but the `cd` ahead of it was NOT guarded, so a missing
           # directory killed the step before the guard could ever run. In this
-          # repo avow-protocol/ holds only BINDING.adoc - the proofs live in the
+          # repo 2-protocols/avow/ holds only BINDING.adoc - the proofs live in the
           # avow-protocol repository - so the cd always failed and this job was
           # permanently red. It only became visible once the workflow began
           # running on pull requests.
-          if [ ! -d avow-protocol/avow-lib ]; then
-            echo "::notice title=AVOW proofs::avow-protocol/avow-lib is not present here (this repo carries only the BINDING). Nothing to type-check."
+          if [ ! -d 2-protocols/avow/avow-lib ]; then
+            echo "::notice title=AVOW proofs::2-protocols/avow/avow-lib is not present here (this repo carries only the BINDING). Nothing to type-check."
             exit 0
           fi
-          cd avow-protocol/avow-lib
+          cd 2-protocols/avow/avow-lib
           for f in src/abi/Consent.idr src/abi/Unsubscribe.idr src/abi/Types.idr; do
             if [ -f "$f" ]; then
               echo "--- checking $f ---"
@@ -273,7 +229,7 @@ jobs:
   trust-summary:
     timeout-minutes: 10
     name: Trust pipeline summary
-    needs: [detect-proof-changes, agda-lol, idris2-a2ml, idris2-avow]
+    needs: [detect-proof-changes, agda-lol, idris2-avow]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -284,7 +240,7 @@ jobs:
           echo "| Target | Result |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Agda lol/proofs | ${{ needs.agda-lol.result }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Idris2 a2ml | ${{ needs.idris2-a2ml.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Idris2 a2ml | _evicted — a2ml project officially retired 2026-09-17 |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Idris2 avow | ${{ needs.idris2-avow.result }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "See artefacts for verification logs." >> "$GITHUB_STEP_SUMMARY"
