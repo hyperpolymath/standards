@@ -69,6 +69,20 @@ r=$(mkrepo docs-md README.md LICENSE.txt 3-practice/CONTRIBUTING.adoc)
 assert "alternate extensions accepted" 0 "✅ Core documentation present" \
   env DOCS_TODAY="$AFTER" "$DOCS" "$r"
 
+# Regression: AsciiDoc is the estate default and a root CONTRIBUTING.adoc is the
+# dominant real-world layout (32 of 34 sampled non-compliant repos). This used to
+# fail, so the gate reported 94% false positives once the cutoff armed on
+# 2026-08-21. The "alternate extensions" case above did not catch it because it
+# only ever placed CONTRIBUTING.adoc under 3-practice/.
+r=$(mkrepo docs-adoc-root README.adoc LICENSE CONTRIBUTING.adoc)
+assert "root CONTRIBUTING.adoc accepted (regression: 94% false positives)" 0 \
+  "✅ Core documentation present" \
+  env DOCS_TODAY="$AFTER" "$DOCS" "$r"
+# ...and it must still be the grace-windowed document, not an unconditional pass.
+assert "root CONTRIBUTING.adoc still warns pre-cutoff only when ABSENT" 0 \
+  "NOT YET ENFORCED" \
+  env DOCS_TODAY="$BEFORE" "$DOCS" "$(mkrepo docs-adoc-root-absent README.adoc LICENSE)"
+
 # README/LICENSE are BLOCKING NOW — the grace window must not shelter them.
 r=$(mkrepo docs-no-readme LICENSE CONTRIBUTING.md)
 assert "missing README fails even pre-cutoff" 1 "Missing required documentation: README" \
