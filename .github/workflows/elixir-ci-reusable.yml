@@ -76,10 +76,24 @@ on:
         default: "1.17"
       rebar3-version:
         description: >-
-          rebar3 version for erlef/setup-beam. When set, setup-beam installs
-          rebar3 from GitHub releases instead of letting `mix local.rebar`
-          fetch it from builds.hex.pm — a workaround for the OTP TLS
-          `key_usage_mismatch` cert error on that host. Empty = unchanged.
+          rebar3 version for erlef/setup-beam. ONLY set this when a dependency
+          is rebar-based; `mix` installs the rebar3 it needs on demand, so most
+          Elixir repos should leave this empty. Setting it makes setup-beam
+          resolve the version against api.github.com and download the binary
+          from GitHub releases instead of using `mix local.rebar` — so it
+          REQUIRES `github-token`, because those API calls are unauthenticated
+          otherwise and are rate-limited on the shared GitHub-hosted runner
+          ranges (observed: the setup step fails within ~5s, before any
+          dependency work). Empty = do not install rebar3 explicitly.
+        type: string
+        required: false
+        default: ""
+      github-token:
+        description: >-
+          Optional token forwarded to erlef/setup-beam, used solely to
+          authenticate its api.github.com lookups. Pass the caller's
+          `secrets.GITHUB_TOKEN`. Required in practice when
+          `rebar3-version` is set; harmless when it is empty.
         type: string
         required: false
         default: ""
@@ -163,12 +177,18 @@ jobs:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
 
+      - name: Guard — rebar3 pinning needs an authenticated lookup
+        if: ${{ inputs.rebar3-version != '' && inputs.github-token == '' }}
+        run: |
+          echo "::warning title=rebar3-version set without github-token::setup-beam resolves rebar3-version through unauthenticated api.github.com calls, which are rate-limited on the shared GitHub-hosted runner ranges and can fail this step within seconds. Pass the github-token input (secrets.GITHUB_TOKEN) or drop rebar3-version unless a dependency is rebar-based."
+
       - name: Set up BEAM (OTP + Elixir)
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ inputs.otp-version }}
           elixir-version: ${{ inputs.elixir-version }}
           rebar3-version: ${{ inputs.rebar3-version }}
+          github-token: ${{ inputs.github-token }}
 
       - name: Cache deps
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
