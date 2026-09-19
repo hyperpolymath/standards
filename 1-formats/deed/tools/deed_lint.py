@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""deed-lint — conformance validator for the DEED grammar (deed.anbf v1.0.0).
+"""deed-lint — conformance validator for the DEED grammar (deed.abnf v1.0.0).
 
 Stdlib-only. Implements the normative grammar faithfully:
   * header = 1* spdx-line                 (";;" SP "SPDX-" …)
