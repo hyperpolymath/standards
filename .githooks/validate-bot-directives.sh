@@ -35,7 +35,7 @@ else
   if [ -d "$MACHINE_READABLE" ]; then
     while IFS= read -r file; do
       validate_file "$file"
-    done < <(find "$MACHINE_READABLE" -type f \( -name '*.a2ml' -o -name '*.md' -o -name '*.txt' \) 2>/dev/null || true)
+    done < <(find "$MACHINE_READABLE" -type f \( -name '*.a2ml' -o -name '*.deed' -o -name '*.md' -o -name '*.txt' \) 2>/dev/null || true)
   fi
 fi
 
