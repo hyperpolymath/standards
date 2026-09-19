@@ -176,8 +176,8 @@ git config core.hooksPath .githooks
 
 | Hook | Trigger | Description | Blocking? |
 |------|---------|-------------|-----------|
-| `pre-commit` | Before commit | Language policy, SPDX headers, A2ML/K9 validation, workflow validation, registry drift, canonical names, bot directives | Yes |
-| `pre-push` | Before push | Local Dogfood Gate (full validation: A2ML, K9, SPDX, workflows, secrets scan) | Yes |
+| `pre-commit` | Before commit | Language policy, SPDX headers, K9 validation, workflow validation, registry drift, canonical names, bot directives (the A2ML manifests gate was removed 2026-09-15, owner ruling R-H3: A2ML is retired — DEED is the grammar; a grammar-faithful .deed validator returns per R-H2) | Yes |
+| `pre-push` | Before push | Local Dogfood Gate (full validation: K9, SPDX, workflows, secrets scan — A2ML gate removed per R-H3) | Yes |
 | `commit-msg` | Before commit message saved | Conventional commits format, issue references, subject length, body presence | Yes |
 | `post-merge` | After merge/pull | Auto-deployment, submodule init, environment reminders (virtualenv, node_modules, Cargo.lock) | No |
 | `post-checkout` | After branch checkout | Environment setup reminders, dependency notices, branch protection warnings | No |
