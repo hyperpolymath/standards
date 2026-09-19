@@ -53,6 +53,14 @@ set-allowlist repository posture="selected":
 actions-policy-test:
     @bash scripts/tests/actions-policy-486-test.sh
 
+# Internal-pointer integrity: every asciidoc link:/image: and markdown
+# relative link in the repo must resolve. The September reorg moved files
+# without updating relative links (first measured census 2026-09-19: 194
+# live-canon findings, incl. inside RSR-SPEC-v2.adoc itself); this makes
+# that class a standing check. Usage: just link-rot-guard [ROOT]
+link-rot-guard root="." :
+    @bash scripts/link-rot-guard.sh "{{root}}"
+
 # Wave-0 anti-false-green regression: proves each fixed validator CAN fail
 false-green-test:
     @bash scripts/tests/wave0-false-green-test.sh
