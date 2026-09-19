@@ -129,7 +129,11 @@ PHASES = {"reserved", "incubating", "active", "dormant", "merged", "superseded",
 META_TYPES = {"library", "binary", "service", "website", "monorepo"}
 PKGMGR = {"guix", "cargo", "mix"}
 RELATIONSHIPS = {
-    "standard-source", "build-tooling", "validation-tooling", "signing-tooling", "verification-tooling"
+    "standard-source", "build-tooling", "validation-tooling", "signing-tooling", "verification-tooling",
+    # Owner ruling 2026-09-19 (first estate conversion, marid): legal deed
+    # relationship symbols — minted-from = the rsr-template parent edge every
+    # minted repo carries; registry = the gv-clade-index registration edge.
+    "minted-from", "registry"
 }
 SCAN_DEPTH = {"quick", "standard", "deep"}
 
