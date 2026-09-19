@@ -122,6 +122,16 @@ These workflows only run when manually triggered.
 | `elixir-ci-reusable.yml` | Reusable Elixir CI | standards | Yes |
 | `echidna-verify.yml` | ECHIDNA trust-pipeline proof verification (Agda/Idris2). NOT the smart-contract fuzzer. Corpora are evicted to their own repos; surviving jobs (`agda-lol`, `idris2-avow`) open with a presence Guard and pass green-but-honest ("Nothing to type-check") until a corpus returns (#748/#828). The `idris2-a2ml` job is EVICTED as of 2026-09-17: the a2ml project is officially retired (owner ruling), so dormancy was moot — no ruleset pinned its check context (verified live: org ruleset Optimus-Branch #23359343). | standards | Yes |
 
+**Elixir note — `rebar3-version` is a trap unless you need it.** Leave it empty: `mix`
+installs the rebar3 it needs on demand, and only a rebar-based dependency justifies pinning it.
+Setting it makes `erlef/setup-beam` resolve the version through **unauthenticated** `api.github.com`
+calls, which are rate-limited on the shared GitHub-hosted runner ranges — the setup step then fails
+within seconds, before any dependency work (bofig's Elixir CI sat red from 2026-06-24 to 2026-09 for
+exactly this). If you genuinely need the pin, pass `github-token` too (the caller's
+`secrets.GITHUB_TOKEN`); the reusable now warns when you set one without the other. The original
+motivation for this input — a builds.hex.pm TLS `key_usage_mismatch` — **no longer applies**: that
+host's chain was verified clean on 2026-09-18.
+
 ### Julia
 | Workflow | Description | Source | Reusable? |
 |----------|-------------|--------|----------|
