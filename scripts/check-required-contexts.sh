@@ -18,6 +18,15 @@
 # bare one), and catalogued for the wrapper case in
 # docs/audits/audit-hypatia-pin-orphan-2026-05-27.adoc.
 #
+# LIMIT — READ THIS BEFORE ACTING ON A VERDICT
+# --------------------------------------------
+# A verdict here is derived from the repository's files. GitHub also generates
+# workflows server-side (code scanning default setup and friends) and those
+# publish check names nothing in the repository mentions. A name this script
+# calls unsatisfiable may therefore be reporting on every commit. Confirm any
+# such verdict against the check-run history of the default branch, and never
+# delete a required context on this script's word alone.
+#
 # THE RULE THIS ENCODES
 # ---------------------
 #   * a plain job publishes its `name:` — or `<job id> (<matrix values>)` when it
@@ -239,9 +248,9 @@ run_audit() {
       UNSATISFIABLE)
         unsatisfiable=$((unsatisfiable+1))
         if [ "$STRICT" = 1 ]; then
-          err "required context '$ctx' ($src) is not producible by any workflow here, is not bound to an app integration, and no job publishes a matching name"
+          err "required context '$ctx' ($src) is not producible by any workflow here, is not bound to an app integration, and no job publishes a matching name (candidate only: GitHub-generated workflows publish checks no file mentions — confirm against the check-run history before changing the rule)"
         else
-          warn "required context '$ctx' ($src) is not producible by any workflow here and is not bound to an app integration — unsatisfiable as written"
+          warn "required context '$ctx' ($src) is not producible by any workflow here and is not bound to an app integration — unsatisfiable as written (candidate only: GitHub-generated workflows publish checks no file mentions — confirm against the check-run history before changing the rule)"
         fi
         if [ "$PRINT_COMMANDS" = 1 ]; then
           cat <<EOS
@@ -249,6 +258,10 @@ run_audit() {
     #   a) replace the requirement with a producible name (list above), or
     #   b) implement the check in-repo and publish '$ctx' from a plain job
     #      (a reusable-wrapper caller cannot: it publishes '<caller> / <inner job>').
+    # FIRST, though: confirm the name never reports. Read the check-run history of
+    # the default branch — GitHub-generated workflows publish checks that no file
+    # in this repository mentions, and five such candidates were refuted this way
+    # on 2026-09-20 (docs/audits/audit-ci-context-producibility-2026-09-20.adoc).
 EOS
         fi ;;
       app-owned)   info "app-owned ($src): $ctx" ;;

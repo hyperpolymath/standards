@@ -86,16 +86,38 @@ status checks through legacy branch protection):
 | 4
 | GitHub-app-published names that carry no integration id (`github-advanced-security`, `Dependabot`)
 
-| *unsatisfiable*
-| *5*
-| no workflow here publishes it and no app integration is bound to it
+| unsatisfiable
+| *0*
+| see below — the five candidates this pass flagged were refuted by check-run history
 |===
 
-That is a good result for the estate and a poor one for the five rules: the class
-is rare, which is exactly why it hides. All five carry `integration_id: 15368`
-(GitHub Actions), so they are repository-owned *workflow job names* rather than
-third-party app names — nothing outside the repository could ever publish them.
-The residues, all in auxiliary (`Optimus-Branch`, `Base`) rulesets:
+The file-based pass flagged five required contexts as candidates. **All five were
+refuted** when put to the check-run history on 2026-09-20: each one reports on the
+repository in question, published by a *GitHub-generated* workflow (code scanning
+default setup and friends) that no file in the repository mentions:
+
+[cols="1,1,1,1"]
+|===
+| Repository | Candidate context | Evidence in check-run history | Publisher
+
+| `awesome-gleam` | `Analyze (actions)` | reports on 8 of the last 8 commits, and on PR #12's head | GitHub code scanning (dynamic)
+| `awesome-gleam` | `Adjust Configuration` | reports on `main` (intermittent) | GitHub code scanning (dynamic)
+| `casket-ssg` | `Analyze Code (actions)` | reports on 15 of the last 30 commits | GitHub code scanning (dynamic)
+| `coord-tui` | `CodeQL Analysis (actions, none)` | reports on 5 of the last 8 commits, and on PR #63's head | GitHub code scanning (dynamic)
+| `vext` | `CodeQL Analysis (actions, none)` | reports 12 times across the last 8 commits, and on PR #51's head | GitHub code scanning (dynamic)
+|===
+
+That is the finding this audit exists to publish: **a census over repository files
+cannot see the checks GitHub generates itself.** The rule that follows is
+operational, not cosmetic —
+
+* a file-based pass may only produce *candidates*;
+* an `unsatisfiable` verdict becomes a finding only after the check-run history of
+  the default branch confirms the name never reports;
+* and a required context is never deleted on a file-based verdict alone.
+
+The five entries previously listed here as live defects, in four auxiliary
+(`Optimus-Branch`, `Base`) rulesets, were withdrawn for exactly that reason:
 
 [cols="2,1,2,2"]
 |===
@@ -108,17 +130,16 @@ The residues, all in auxiliary (`Optimus-Branch`, `Base`) rulesets:
 | `hyperpolymath/vext` | Optimus-Branch | `CodeQL Analysis (actions, none)` | stale job-name + matrix tuple
 |===
 
-Each one was re-checked per ruleset on 2026-09-20 and is a live defect, not an
-artefact of evaluating the wrong ref: every carrying ruleset is `active`, every
-one binds `~DEFAULT_BRANCH` (these repositories have a single branch,
-`main`), and every context carries `integration_id: 15368`. Note the naming
-irony in three of them — a ruleset called `Optimus-Branch` guarding the default
-branch.
+The per-ruleset check was correct as far as it went — every carrying ruleset is
+`active`, every one binds `~DEFAULT_BRANCH`, and every context carries
+`integration_id: 15368` — but it answered the wrong question: whether the *rule*
+was live, not whether a *publisher* exists. The publisher is a GitHub-generated
+workflow, invisible to the repository and to this census.
 
-Each one is the same defect as tropical-types#17 in a different costume: the
-requirement names a check that used to exist. The fix is one of the two honest
-options below; the diagnostic is
-`scripts/check-required-contexts.sh --print-commands`.
+The revised method, and the cost of getting it wrong, are the same lesson as
+tropical-types#17: a name that nothing in the repository publishes can still be
+satisfied by the platform, and a name that nothing publishes *anywhere* is a
+blocked pull request nobody can diagnose from the CI board.
 
 == Case study — tropical-types#17
 
