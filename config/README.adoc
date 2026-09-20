@@ -175,20 +175,42 @@ REST API.
   standing push right.
 
 | Integration ids 56611 (codacy), 827041 (gitar-bot), 254 (codecov), 2740 (renovate), 57789 (advanced-security), 1561, 85455, 946600
-| R1/R4 removals, advanced-security needs no bypass. Scanned 2026-09-20: all
-  1,026 rulesets over all 453 repos in both estates. No active ruleset grants bypass to
-  any uninstalled app. 1561, 85455 and 946600 (Codex MCP) each appear exactly once, all
-  on one *disabled* ruleset — `hyperpolymath/anvomidaviser` id 14968878 `Optimus-Branch`,
-  which also still grants `always` bypass to RepositoryRole 2 (maintain) and keeps
-  `code_coverage` / `required_deployments` / `copilot_code_review`, the set §7.3 retired;
-  delete it rather than re-enabling it. O5 closes for 1561/85455 (no such app, no active
-  grant) and stays open for 946600. An earlier draft of this row quoted 96-repo sample
-  counts, including "67 repo rulesets" for 946600, and read this table as if it listed live
-  grants; both are superseded by the scan above.
-  Same scan: the only integration bypasses on *active* repo rulesets are oikosbot (6) and
-  claude (2). Dependabot, github-actions, gitguardian, sonarqubecloud and coderabbitai hold
-  none — so installing CodeRabbit also means adding its bypass actor to the estate ruleset,
-  or its auto-fix and commit-queue pushes cannot reach a protected branch.
+| R1/R4 removals, advanced-security needs no bypass.
+  *This row was wrong twice and is now cut from a complete scan: 1,036 rulesets over all 453
+  repos, every ruleset fetched individually.* `GET /repos/{o}/{r}/rulesets` omits `rules` and
+  `bypass_actors` from the objects it lists, so a list-only sweep reports 1,026 rulesets with
+  empty arrays and finds nothing — which is precisely the "no active ruleset grants bypass to
+  any uninstalled app" sentence that stood here, and it was false. Read per-ruleset instead.
+  *Live, active, 2026-09-20:* *gitar-bot (827041) holds `always` bypass on the
+  `metadatastician` org ruleset `EstateBranching` (id 18225024)*, i.e. on all 43 repos —
+  `always` defeats `required_signatures` and the PR requirement on every default branch, for an
+  app that is not installed. 946600 sits on the same org ruleset plus 13 active repo rulesets
+  (56 in total); 1561 and 85455 on 9 each. RepositoryRole 2 (maintain) with `always` is on 53
+  active rulesets, so "the maintain role is dropped" is not yet true. codecov 254, codacy 56611,
+  renovate 2740 and advanced-security 57789: zero grants — those four are genuinely clear.
+  *Retired constraints still enforced:* `code_coverage` 130 rulesets (120 repos; the
+  `minimum_coverage: 95, max_coverage_drop: 3` gate that keeps pushing repos toward an external
+  coverage uploader), `code_quality` 137, `copilot_code_review` 162, `required_deployments` 78,
+  `update` 430 (only 11 admit the planner's precondition). `code_scanning` is kept: GitHub-native,
+  no third-party app behind it.
+  *Not applied, and not applicable by CI:* ruleset *writes* are refused for this estate's
+  fine-grained PAT — `PATCH`/`PUT` → 404 while `GET` → 200 and `POST`/`DELETE` are accepted
+  (measured on `marches`, `standards`, `anvomidaviser` 2026-09-20; `POST` created a probe
+  ruleset that was deleted again, so treat that capability as real and dangerous). Remediation
+  therefore ships as reviewable PUT bodies, in the shape
+  `scripts/plan-ruleset-constraint-repair.rb` already
+  intends: 96 repo rulesets + the one org ruleset, dry-run validated, each body guarded by a
+  re-read of live state so a concurrent owner edit is skipped rather than overwritten.
+  `anvomidaviser/Optimus-Branch` (14968878) is *disabled*, so it fails that planner's
+  active-only precondition: delete it outright rather than repairing it.
+  *Still unresolved by design:* 1561 / 85455 / 946600 (`/user/installations` → 403, marketplace
+  index → 404, no `GET /apps/{slug}` candidate reproduces them), plus two ids this scan is new
+  to — 262318 and 1658531 — which hold `always` bypass on `EstateBranching`. Unidentified
+  standing push rights on every default branch in the org; resolve in Settings → Applications
+  before assuming they are wanted. O5 stays open for all five.
+  *Keep-list note, still valid:* on active *repo* rulesets the only integration bypasses are
+  oikosbot (6) and claude (2), so installing CodeRabbit also means adding `coderabbitai`
+  (347564) to the estate ruleset or its auto-fix pushes cannot reach a protected branch.
   Note `123` (codecov PR gate) was never a bypass actor — it only ever appears as
   a jtv-lang required-check context, which is the §11.3 hand-typed-context bug.
 |===
