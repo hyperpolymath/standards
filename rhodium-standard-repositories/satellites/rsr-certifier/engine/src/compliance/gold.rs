@@ -145,8 +145,6 @@ impl ComplianceCheck for TestCoverageCheck {
 
         // Check for coverage configuration
         let coverage_configs = [
-            "codecov.yml",
-            ".codecov.yml",
             "coveralls.yml",
             ".coveragerc",
             "coverage.json",
@@ -177,7 +175,7 @@ impl ComplianceCheck for TestCoverageCheck {
                     if let Ok(entries) = std::fs::read_dir(full_path) {
                         for entry in entries.flatten() {
                             if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                                if content.contains("coverage") || content.contains("codecov") {
+                                if content.contains("coverage") {
                                     has_coverage = true;
                                     break;
                                 }
@@ -210,7 +208,7 @@ impl ComplianceCheck for TestCoverageCheck {
                 tier: self.tier(),
                 passed: false,
                 message: "Tests found but no coverage configuration".to_string(),
-                details: Some("Add coverage reporting (codecov, coveralls, etc.)".to_string()),
+                details: Some("Add coverage reporting (tarpaulin, llvm-cov, coverage.py, etc.)".to_string()),
             })
         } else {
             Ok(CheckResult {
@@ -226,7 +224,7 @@ impl ComplianceCheck for TestCoverageCheck {
 
     async fn check_remote(&self, contents: &RepoContents) -> Result<CheckResult> {
         let test_patterns = ["test", "tests", "spec", "__tests__"];
-        let coverage_patterns = ["codecov", "coverage", "coveralls"];
+        let coverage_patterns = ["coverage", "coveralls"];
 
         let has_tests = contents.files.iter().any(|f| {
             let path_lower = f.path.to_lowercase();
