@@ -224,6 +224,56 @@ if [ -n "$spdx_header" ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+# (6) Tree-wide ADVISORY for retired estate licence identifiers in SPDX
+#     headers. The manifest check in (4) only sees the first build manifest;
+#     stray identifiers in ordinary source files are invisible to it — that is
+#     how ipfs-overlay#134 hid: one .ipkg plus three .idr files carried
+#     PMPL-1.0-or-later while the repo's identity is MPL-2.0.
+#
+#     WARN-level by design, per docs/migrations/pmpl-to-mpl-sweep-runbook.adoc:
+#     licence edits are per-file and owner-approval-gated, NEVER a bulk sweep,
+#     so this gate surfaces drift for filing — it never blocks.
+#
+#     False-positive control:
+#       - grep is anchored: a hit must be a comment-line SPDX *header*
+#         (^ optional comment marker, then SPDX-License-Identifier:).
+#         Prose, badges and test fixtures that merely quote the string in
+#         mid-line cannot match.
+#       - estate carve-out repos (palimpsest-license, palimpsest-plasma, 007)
+#         are skipped entirely: PMPL/ARR is correct there (runbook §1, §3).
+#       - licence-exhibit text (LICENSES/, legal/, exhibits/, PMPL-SPEC*) is
+#         excluded (runbook §3).
+# ─────────────────────────────────────────────────────────────────────────────
+repo_id="${GITHUB_REPOSITORY:-}"
+if [ -z "$repo_id" ]; then
+  repo_id=$(git remote get-url origin 2>/dev/null \
+    | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?$#\1#')
+fi
+case "$repo_id" in
+  hyperpolymath/palimpsest-license|hyperpolymath/palimpsest-plasma|hyperpolymath/007)
+    emit OK "Carve-out repo ($repo_id): retired-estate SPDX advisory skipped (sweep runbook §1/§3)."
+    ;;
+  *)
+    # Anchored header pattern: line starts with an optional comment marker.
+    retired_hdr_re='^[[:space:]]*(#[#!]?|--|//|/\*|\(\*|;+|%+|\*+)?[[:space:]]*SPDX-License-Identifier:[[:space:]]*(PMPL-1\.0|MPL-1\.0|MPL-1\.1)'
+    stray=$(grep -rIlE "$retired_hdr_re" . \
+      --exclude-dir=.git --exclude-dir=LICENSES --exclude-dir=legal \
+      --exclude-dir=exhibits --exclude='PMPL-SPEC*' 2>/dev/null | sort)
+    if [ -n "$stray" ]; then
+      emit WARN "Stray retired-estate SPDX header(s) found (PMPL-1.0*/MPL-1.0*/MPL-1.1). Not a gate failure: per-file, owner-approval-gated edits only — see docs/migrations/pmpl-to-mpl-sweep-runbook.adoc. File an issue with acceptance criteria; do NOT bulk-sweep."
+      while IFS= read -r f; do
+        hit=$(grep -m1 -E "$retired_hdr_re" "$f" 2>/dev/null | sed 's/^[[:space:]]*//')
+        emit WARN "  $f: $hit"
+      done <<EOF_STRAY
+$stray
+EOF_STRAY
+    else
+      emit OK "No stray retired-estate SPDX headers (PMPL-1.0*/MPL-1.0*/MPL-1.1) in the tree."
+    fi
+    ;;
+esac
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Summary
 # ─────────────────────────────────────────────────────────────────────────────
 if [ "$failed" -eq 0 ]; then
