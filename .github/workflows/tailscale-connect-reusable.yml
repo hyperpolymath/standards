@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# tailscale-connect-reusable.yml — shared "join the tailnet" step for CI jobs that
+# must reach private endpoints (internal servers, staging DBs, self-hosted
+# registries) from a GitHub-hosted runner.
+#
+# Tailscale has no GitHub App; its GitHub integration is this Action plus a
+# Tailscale OAuth client. The two secrets below must exist on the repo, org or
+# environment that calls this workflow:
+#   TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET   (Tailscale admin -> OAuth clients, scope auth_keys)
+#
+# Callers opt in per job; nothing here changes CI unless a workflow calls it.
+name: Tailscale connect (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      tags:
+        description: 'Tailscale tags to apply to the ephemeral CI node'
+        required: false
+        type: string
+        default: 'tag:ci'
+      ping:
+        description: 'Comma-separated tailnet hosts to ping for readiness'
+        required: false
+        type: string
+        default: ''
+      version:
+        description: 'Tailscale client version pin (empty = action default)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  connect:
+    name: Join tailnet
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Pinned per estate policy (SHA pins everywhere); refresh with actions-lock.
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: ${{ inputs.tags }}
+          version: ${{ inputs.version }}
+          ping: ${{ inputs.ping }}
