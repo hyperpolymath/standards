@@ -9,8 +9,17 @@
 # Tailscale OAuth client. The two secrets below must exist on the repo, org or
 # environment that calls this workflow:
 #   TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET   (Tailscale admin -> OAuth clients, scope auth_keys)
+# Give the client an ACL tag (default `tag:ci`) so runners are an ephemeral,
+# auditable set rather than named machines.
 #
-# Callers opt in per job; nothing here changes CI unless a workflow calls it.
+# Pinned to v4.1.3 (780049a30b6ff5c378a9e7b389d15ece7a204888). The action also publishes a moving `v4`
+# tag; as of 2026-09-20 that tag points at v4.1.2, so `@v4` would resolve to a
+# different commit than the one audited here -- which is the reason estate
+# policy pins 40-hex SHAs and records them in actions.lock.
+#
+# Callers opt in per job. When the secrets are absent the job skips with a
+# warning instead of failing, so adding this to a repo is safe before the
+# credentials land; pass `require: true` to make that case red on purpose.
 name: Tailscale connect (reusable)
 
 on:
@@ -31,6 +40,11 @@ on:
         required: false
         type: string
         default: ''
+      require:
+        description: 'Fail instead of skipping when TS_OAUTH_* are unavailable'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -40,10 +54,34 @@ jobs:
     name: Join tailnet
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      connected: ${{ steps.gate.outputs.ready }}
     steps:
-      # Pinned per estate policy (SHA pins everywhere); refresh with actions-lock.
+      - name: Check tailnet credentials
+        id: gate
+        env:
+          TS_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
+          REQUIRE: ${{ inputs.require }}
+        run: |
+          if [ -n "$TS_ID" ] && [ -n "$TS_SECRET" ]; then
+            printf 'ready=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf 'ready=false\n' >> "$GITHUB_OUTPUT"
+          if [ "$REQUIRE" = "true" ]; then
+            echo "::error::TS_OAUTH_CLIENT_ID / TS_OAUTH_SECRET are not available to this job." \
+              "Set them on the repository, environment or org (Tailscale admin console ->" \
+              "OAuth clients, scope auth_keys), or drop require: true."
+            exit 1
+          fi
+          echo "::warning::No Tailscale credentials available -- skipping the tailnet connect step." \
+            "Any job that depends on tailnet reachability will fail to reach private endpoints."
+
+      # Pinned per estate policy (SHA pins everywhere); refresh with `gh actions-lock`.
       - name: Connect to Tailscale
-        uses: tailscale/github-action@v4
+        if: steps.gate.outputs.ready == 'true'
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
