@@ -1,0 +1,48 @@
+= config/rulesets — canonical protection definitions
+:toc:
+
+These files are the estate's intended ruleset state. `base.json` is the default-branch
+baseline; `Optimus-Extras.json` carries the extras for repos on the Optimus profile;
+`gates-only.json` / `gates.json` describe which workflow files become required contexts;
+`immutable-tags.json` is the tag canon.
+
+== Nothing here is applied automatically
+
+`scripts/apply-tag-ruleset-canon.sh` converges *only* the tag ruleset, and its own header
+records the consequence: after the 2026-09-11 deployment wave the branch-side remediation was
+"manual per-repo `gh api` PUTs, because no committed script in this repository globs
+`config/rulesets/`". That gap is why `Optimus-Extras.json` could keep four constraints §7.3
+retired (`code_coverage`, `code_quality`, `required_deployments`, `copilot_code_review`) and
+re-add them on the next manual convergence, on 120-162 active rulesets estate-wide. The file is
+now trimmed; the propagation mechanism is still missing by design, and this note is the
+reminder that a template fix without an applier is a half fix.
+
+`scripts/plan-ruleset-constraint-repair.rb` is the sanctioned planner: it emits a reviewable PUT
+body for exactly those retired constraints, optionally dropping one integration's bypass once
+GitHub has rejected that app as no longer installed. It never calls GitHub.
+
+== What a repository token can do
+
+Measured 2026-09-20 with the estate's fine-grained PAT:
+
+|===
+| operation | result
+
+| `GET /repos/OWNER/REPO/rulesets`, `GET .../rulesets/ID`
+| 200 — readable, but the list payload omits `rules` and `bypass_actors`; fetch each id
+  individually or you will conclude the estate is clean when it is not.
+
+| `PATCH` / `PUT .../rulesets/ID`
+| 404 — updates refused, so no workflow or PR can converge protection.
+
+| `POST .../rulesets`, `DELETE .../rulesets/ID`
+| accepted. Treat as a live capability: an over-eager applier can drop a ruleset and leave the
+  default branch unprotected in the gap, which is worse than the drift it set out to fix.
+
+| `PATCH /orgs/ORG/rulesets/ID`
+| 404 (no `admin:org`), and org rulesets are not writable through the repo endpoint either —
+  only readable. The `metadatastician` `EstateBranching` fix must be run by an owner session.
+|===
+
+Consequence for any future applier: PUT-by-id against the live object, never
+delete-then-create, and re-read before writing so a concurrent owner edit is skipped.
