@@ -136,11 +136,28 @@ process_repo() { # $1 = repository directory
     return 0
   fi
 
-  # The caller job is the one whose `uses:` names the estate's scan reusable.
-  caller="$(awk '
-    /^[[:space:]]*[A-Za-z0-9_.-]+:[[:space:]]*$/ { key=$1; sub(/:$/, "", key) }
-    /^[[:space:]]+uses:.*hypatia-scan-reusable\.ya?ml@/    { print key; exit }
+  # The caller job is the job whose `uses:` names the estate's scan reusable.
+  # Detect it structurally: the nearest job key — a line indented exactly two
+  # spaces whose value begins with `key:` (an optional trailing comment is
+  # allowed) — above the reusable `uses:` line.
+  #
+  # Why not "the last bare `key:` line above the call": that heuristic mistook a
+  # job-level `permissions:` block for the job key (three live repositories have
+  # one) and rewrote the permissions key itself. It also picked up `jobs:` when
+  # the job key carried a trailing comment. Both shapes now have fixtures.
+  uses_line="$(awk '
+    /^[[:space:]]*uses:.*hypatia-scan-reusable\.ya?ml@/ { print NR; exit }
   ' "$wf")"
+  caller=""; caller_key_line=""
+  if [ -n "$uses_line" ]; then
+    caller_info="$(awk -v upto="$uses_line" '
+      NR < upto && /^  [A-Za-z0-9_.-]+:[[:space:]]*(#.*)?$/ { k=$1; sub(/:$/, "", k); ln=NR }
+      END { if (ln) print ln, k }
+    ' "$wf")"
+    caller_key_line="${caller_info%% *}"
+    caller="${caller_info##* }"
+    [ "$caller_info" = "$caller_key_line" ] && { caller=""; caller_key_line=""; }
+  fi
 
   if [ -z "$caller" ]; then
     printf '%s\t%s\t-\tunchanged-shape\n' "$(basename "$repo")" ".github/workflows/hypatia-scan.yml"
@@ -161,14 +178,52 @@ process_repo() { # $1 = repository directory
   fi
 
   if [ "$verdict" = "stage" ] && [ "$MODE_FIX" = 1 ]; then
-    # Rewrite only the job key line: same indentation, same position.
+    # Rewrite only the detected job key line, in place: same indentation, same
+    # position, any trailing comment preserved. Addressed by line number, so a
+    # nested `permissions:` key, a comment, or any other `scan:`-shaped line
+    # elsewhere in the file cannot be touched by accident.
     local tmp; tmp="$(mktemp)"
-    awk -v from="$caller" -v to="$CANONICAL" '
-      BEGIN { done = 0 }
-      !done && $0 ~ "^[[:space:]]*" from ":[[:space:]]*$" { sub(from ":", to ":"); done = 1 }
+    awk -v n="$caller_key_line" -v to="$CANONICAL" '
+      NR == n {
+        match($0, /^[[:space:]]*/)
+        ind = substr($0, 1, RLENGTH)
+        rest = substr($0, RLENGTH + 1)
+        sub(/^[A-Za-z0-9_.-]+:/, to ":", rest)
+        $0 = ind rest
+      }
       { print }
-    ' "$wf" > "$tmp" && mv "$tmp" "$wf"
-    verdict="staged"
+    ' "$wf" > "$tmp"
+    # Preserve the file's trailing-newline state: a wrapper that ends without a
+    # newline must not gain one, so the diff stays a single-line replacement.
+    if [ -n "$(tail -c 1 "$wf" || true)" ]; then
+      printf '%s' "$(cat "$tmp")" > "$tmp.trimmed" && mv "$tmp.trimmed" "$tmp"
+    fi
+    # Accept only a one-line replacement in place: same number of lines, exactly
+    # one differing line, that line is the detected key line, and it now carries
+    # the canonical id. Anything else is refused and the file is left untouched.
+    report="$(awk -v n="$caller_key_line" -v want="$CANONICAL" '
+      NR == FNR { old[FNR] = $0; nold = FNR; next }
+      { new[FNR] = $0; nnew = FNR }
+      END {
+        if (nold != nnew) { printf "line count %d -> %d", nold, nnew; exit }
+        changed = 0; elsewhere = 0
+        for (i = 1; i <= nnew; i++) {
+          if (old[i] != new[i]) { changed++; if (i != n) elsewhere = 1 }
+        }
+        if (changed != 1) { printf "%d lines changed", changed; exit }
+        if (elsewhere) { printf "the changed line is not the key line"; exit }
+        if (new[n] !~ ("^  " want ":")) { printf "the key line is not canonical"; exit }
+        printf "ok"
+      }
+    ' "$wf" "$tmp")"
+    if [ "$report" = "ok" ]; then
+      mv "$tmp" "$wf"
+      verdict="staged"
+    else
+      rm -f "$tmp"
+      verdict="unchanged-shape"
+      note "$(basename "$repo"): rewrite refused — $report"
+    fi
   fi
 
   printf '%s\t%s\t%s\t%s\n' "$(basename "$repo")" ".github/workflows/hypatia-scan.yml" "$caller" "$verdict"
