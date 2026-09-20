@@ -100,6 +100,90 @@ check "fix-keeps-the-pin" "1" "$(printf '%s\n' "$after_safe" | grep -c '84355587
 check "fix-keeps-secrets-inherit" "1" "$(printf '%s\n' "$after_safe" | grep -c '^[[:space:]]*secrets: inherit$')"
 check "fix-is-idempotent" "canonical" "$(HYPATIA_REQUIRED_JSON="$work/safe.json" bash "$SCRIPT" "$work/fleet" 2>/dev/null | awk -F'\t' '$1=="bbb-needs-rename"{print $4}')"
 
+# --- shapes seen in the live estate, which the first detection missed -------
+
+# ggg: a job-level `permissions:` block inside the caller job. The old
+#      "last bare `key:` line" heuristic reported the caller as `permissions`
+#      and rewrote the permissions key itself.
+mkdir -p "$work/fleet/ggg-job-permissions/.github/workflows"
+cat > "$work/fleet/ggg-job-permissions/.github/workflows/hypatia-scan.yml" <<'EOF'
+name: Hypatia Security Scan
+on:
+  push:
+  pull_request:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  scan:
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@210f14e753c80064ec1bcae72f1d654dd9b0e687
+    secrets: inherit
+EOF
+
+# hhh: the job key carries a trailing comment. The old heuristic skipped it (the
+#      line is not a "bare" key) and picked up `jobs:` instead.
+mkdir -p "$work/fleet/hhh-commented-key/.github/workflows"
+cat > "$work/fleet/hhh-commented-key/.github/workflows/hypatia-scan.yml" <<'EOF'
+name: Hypatia Security Scan
+on: [push]
+
+jobs:
+  scan: # estate scan gate
+    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@210f14e753c80064ec1bcae72f1d654dd9b0e687
+    secrets: inherit
+EOF
+
+# iii: no trailing newline on the last line. The rewrite must still be a
+#      single-line replacement (a `\ No newline at end of file` marker is not
+#      a changed line).
+mkdir -p "$work/fleet/iii-no-newline/.github/workflows"
+printf '%s' 'name: Hypatia Security Scan
+on: [push]
+
+jobs:
+  scan:
+    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@8f2ee50841e216cd8c192eeb68953118190f105c' > "$work/fleet/iii-no-newline/.github/workflows/hypatia-scan.yml"
+
+job_key() { # the job key governing the reusable call, detected structurally
+  local n; n="$(awk '/^[[:space:]]*uses:.*hypatia-scan-reusable\.ya?ml@/ { print NR; exit }' "$1")"
+  awk -v n="$n" 'NR<n && /^  [A-Za-z0-9_.-]+:[[:space:]]*(#.*)?$/ { k=$1; sub(/:$/,"",k) } END { print k }' "$1"
+}
+changed_lines() { diff <(printf '%s\n' "$1") <(printf '%s\n' "$2") | grep -c '^[<>]'; }
+
+before_ggg="$(cat "$work/fleet/ggg-job-permissions/.github/workflows/hypatia-scan.yml")"
+before_hhh="$(cat "$work/fleet/hhh-commented-key/.github/workflows/hypatia-scan.yml")"
+before_iii="$(cat "$work/fleet/iii-no-newline/.github/workflows/hypatia-scan.yml")"
+
+out="$(HYPATIA_REQUIRED_JSON="$work/safe.json" bash "$SCRIPT" --fix "$work/fleet" 2>/dev/null)"
+check "job-level-permissions: the caller is the job key, not permissions" "scan" \
+      "$(printf '%s\n' "$out" | awk -F'\t' '$1=="ggg-job-permissions"{print $3}')"
+check "job-level-permissions: staged" "staged" \
+      "$(printf '%s\n' "$out" | awk -F'\t' '$1=="ggg-job-permissions"{print $4}')"
+check "job-level-permissions: job key renamed" "hypatia" \
+      "$(job_key "$work/fleet/ggg-job-permissions/.github/workflows/hypatia-scan.yml")"
+check "job-level-permissions: nested permissions block untouched" "1" \
+      "$(grep -c '^    permissions:$' "$work/fleet/ggg-job-permissions/.github/workflows/hypatia-scan.yml")"
+check "job-level-permissions: one-line replacement" "2" \
+      "$(changed_lines "$before_ggg" "$(cat "$work/fleet/ggg-job-permissions/.github/workflows/hypatia-scan.yml")")"
+check "commented-key: job key renamed" "hypatia" \
+      "$(job_key "$work/fleet/hhh-commented-key/.github/workflows/hypatia-scan.yml")"
+check "commented-key: trailing comment preserved" "1" \
+      "$(grep -c '^  hypatia: # estate scan gate$' "$work/fleet/hhh-commented-key/.github/workflows/hypatia-scan.yml")"
+check "commented-key: one-line replacement" "2" \
+      "$(changed_lines "$before_hhh" "$(cat "$work/fleet/hhh-commented-key/.github/workflows/hypatia-scan.yml")")"
+check "no-newline: job key renamed" "hypatia" \
+      "$(job_key "$work/fleet/iii-no-newline/.github/workflows/hypatia-scan.yml")"
+check "no-newline: one-line replacement" "2" \
+      "$(changed_lines "$before_iii" "$(cat "$work/fleet/iii-no-newline/.github/workflows/hypatia-scan.yml")")"
+check "fix-is-idempotent-for-the-new-shapes" "canonical" \
+      "$(HYPATIA_REQUIRED_JSON="$work/safe.json" bash "$SCRIPT" "$work/fleet" 2>/dev/null | awk -F'\t' '$1=="ggg-job-permissions"{print $4}')"
+
 # Unreadable requirements: never rename on an unknown requirement set.
 wrapper "$work/fleet/fff-unverified" scan
 out="$(bash "$SCRIPT" --no-network "$work/fleet" 2>/dev/null)"
