@@ -1,0 +1,239 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Audit — required status contexts that nothing can publish
+:toc:
+:toclevels: 2
+
+[abstract]
+GitHub matches a required status check by *string equality* against the name it
+publishes for that check run. It never checks that the name is *producible*. A
+rule requiring a name no publisher can supply is an unsatisfiable requirement:
+every pull request stays `BLOCKED`, the CI board shows green, and nothing on the
+CI side names the cause. This audit defines the class, measures it across the
+estate, records the residues, and ships the gate that keeps it from returning
+(`scripts/check-required-contexts.sh`).
+
+Sibling audits: `audit-hypatia-pin-orphan-2026-05-27.adoc` (the orphan-SHA class
+and the wrapper-prefix mismatch this audit generalises),
+`audit-hypatia-cache-sha-corruption-2026-06-21.adoc` (the false-green cache).
+
+== The rule
+
+[cols="1,2"]
+|===
+| Publisher | Name published
+
+| a plain job
+| its `name:` — or `<job id> (<matrix values>)` when it has a matrix and no `name:` — or the job id alone
+
+| a job that calls a reusable workflow
+| `<caller display name or job id> / <inner job display name or job id>`
+
+| a third-party app (code scanning, CodeRabbit, SonarCloud, …)
+| whatever the app publishes; the repository does not control it
+|===
+
+Two consequences carry the whole class:
+
+. **A wrapper can never publish the reusable's bare inner name.** GitHub always
+  prefixes it with the caller. Requiring the bare name from a wrapped gate is
+  unsatisfiable by construction — this is issue #17 in
+  `hyperpolymath/tropical-types`.
+. **A required name survives the workflow it named.** Rename a job, retire a
+  workflow, or change how a reusable names its jobs, and the requirement silently
+  becomes unsatisfiable while every check that *does* run stays green.
+
+== Method
+
+For every non-archived public repository in `hyperpolymath` (365 on 2026-09-20),
+and for each repository with at least one required status context:
+
+. derive the set of names its workflows can publish — job display names, matrix
+  forms (`<job id> (*)`), and, for reusable callers, `<caller> / <inner job>`
+  resolved from the pinned ref;
+. read the required contexts from every enabled branch ruleset, keeping the
+  `integration_id` GitHub records for each;
+. classify each required context:
+  * *app-owned* — bound to an integration other than GitHub Actions; that app
+    owns the name;
+  * *producible* — some workflow here publishes exactly that name (or a
+    wildcard form of it);
+  * *unsatisfiable* — neither, so no run will ever satisfy it.
+
+App-bound contexts are skipped by design: requiring `CodeRabbit` or
+`SonarCloud Code Analysis` is legitimate, and the repository has no control over
+those names. The audit's subject is the residue the *repository itself* owns.
+
+== Results
+
+337 required contexts across 179 repositories, read from branch rulesets:
+
+[cols="1,1,2"]
+|===
+| Verdict | Count | Meaning
+
+| app-owned
+| 168
+| published by a non-Actions integration; not the repository's to supply
+
+| producible
+| 156
+| a workflow in the repository publishes exactly this name
+
+| app-named
+| 4
+| GitHub-app-published names that carry no integration id (`github-advanced-security`, `Dependabot`)
+
+| *unsatisfiable*
+| *5*
+| no workflow here publishes it and no app integration is bound to it
+|===
+
+That is a good result for the estate and a poor one for the five rules: the class
+is rare, which is exactly why it hides. The residues, all in auxiliary
+(`Optimus-Branch`, `Base`) rulesets:
+
+[cols="2,1,2,2"]
+|===
+| Repository | Ruleset | Required context | Reading
+
+| `hyperpolymath/awesome-gleam` | Base | `Adjust Configuration` | no workflow publishes it; looks like a retired job name
+| `hyperpolymath/awesome-gleam` | Base | `Analyze (actions)` | the CodeQL job here does not publish this form
+| `hyperpolymath/casket-ssg` | Optimus-Branch | `Analyze Code (actions)` | the CodeQL job was renamed; the rule was not
+| `hyperpolymath/coord-tui` | Optimus-Branch | `CodeQL Analysis (actions, none)` | stale job-name + matrix tuple
+| `hyperpolymath/vext` | Optimus-Branch | `CodeQL Analysis (actions, none)` | stale job-name + matrix tuple
+|===
+
+Each one is the same defect as tropical-types#17 in a different costume: the
+requirement names a check that used to exist. The fix is one of the two honest
+options below; the diagnostic is
+`scripts/check-required-contexts.sh --print-commands`.
+
+== Case study — tropical-types#17
+
+* `main`'s rules required the bare `Hypatia Neurosymbolic Analysis`.
+* The repository's wrapper published `scan / Hypatia Neurosymbolic Analysis`
+  (caller job `scan`), and the run-level aggregate `Hypatia` — neither matched.
+* Verified 2026-09-20: legacy branch protection on `main` reported
+  `required_status_checks.enforcement_level = "off"` with an empty `contexts`
+  list, and the `Base` ruleset carried no `required_status_checks` rule, so
+  nothing was blocked *and nothing was enforced*.
+* Fixed in `hyperpolymath/tropical-types` PR #52 (caller job `scan` → `hypatia`,
+  so the canonical string is published; plus a repository-local contract and
+  guard) and PR #53 (the guard job used the secrets context, which Hypatia's
+  RE001 research extension flags; `step-security/harden-runner` is *not* in the
+  actions allowlist, so the job now uses `github.token` and reports what it could
+  not read instead).
+
+The two names the fix made true are visible in the check-run list on that
+repository's main: `hypatia / Hypatia Neurosymbolic Analysis` (wrapper) and
+`Required contexts are producible` (the guard).
+
+== The correct way to satisfy a bare name
+
+`hyperpolymath/defiant` requires the bare `Hypatia Neurosymbolic Analysis`
+(binding `integration_id: 15368` = GitHub Actions) and *satisfies* it — because
+its `.github/workflows/hypatia-scan.yml` is an **inline implementation**, and the
+job itself carries `name: Hypatia Neurosymbolic Analysis`. Nothing is prefixed
+when there is no reusable call.
+
+So the choice is structural, not cosmetic:
+
+. require a *prefixed* name — and let the shared reusable publish it
+  (`hypatia / Hypatia Neurosymbolic Analysis` after naming the caller job
+  `hypatia`); or
+. require a *bare* name — and implement the check in the repository, because a
+  wrapper cannot produce it.
+
+== Naming convention drift (worth a decision)
+
+Across the estate's 208 Hypatia wrappers the caller job id is inconsistent:
+`scan` in 200 repositories, `hypatia` in 8. The published context therefore
+differs per repository (`scan / …` vs `hypatia / …`), and `audit-hypatia-pin-orphan-2026-05-27.adoc`
+already documents `hypatia / Hypatia Neurosymbolic Analysis` as the canonical
+string. Two consequences: the canonical string in that audit is wrong for 200
+repositories, and any bulk re-arm of the context would be wrong for one group or
+the other. One caller id, recorded per repository, removes the ambiguity — the
+gate below reports what each repository actually publishes.
+
+== The gate
+
+`scripts/check-required-contexts.sh` — read-only, `gh` + `jq` + `awk` + `curl`
+only, no new dependency:
+
+[source,sh]
+----
+bash scripts/check-required-contexts.sh [REPO_ROOT]        # advisory
+REQUIRED_CONTEXTS_STRICT=1 bash scripts/check-required-contexts.sh .   # gating
+bash scripts/check-required-contexts.sh . --print-commands # remediation text
+bash scripts/check-required-contexts.sh . --json out.json  # machine-readable
+REUSABLE_CACHE_DIR=… bash scripts/check-required-contexts.sh .  # offline cache
+----
+
+* exit `0` when every required context is satisfiable (or nothing is required);
+* exit `1` on an unsatisfiable context **only** under
+  `REQUIRED_CONTEXTS_STRICT=1` — advisory by default, per the estate rule that a
+  gate which reds nobody yet is a warning, not a red;
+* an API failure (rate limit, missing scope) is reported as *not inspected*, and
+  never as "nothing is required": a gate that fails open on the failure of the
+  call it depends on is worse than no gate;
+* `scripts/tests/check-required-contexts-test.sh` drives the built-in hermetic
+  fixture (synthetic repository, stubbed reusable, JSON required sets) — no
+  network, no token, no API, five branches including a regression case for
+  prefix-versus-exact matching.
+
+=== Recommended wiring (not done here, deliberately)
+
+The check is estate-shaped, so it belongs in `governance-reusable.yml` — but
+adding a job there changes the check surface of every repository pinned to it,
+and this audit has no mandate for that. The shape it should take when the owner
+arms it:
+
+[source,yaml]
+----
+  required-contexts:
+    name: Required contexts are producible
+    runs-on: ${{ inputs.runs-on }}
+    continue-on-error: true          # advisory first; a fleet-wide red is not a gate
+    steps:
+      - uses: actions/checkout@<pin>
+      - env:
+          GH_TOKEN: ${{ github.token }}   # rulesets are readable without admin
+        run: bash .standards-checkout/scripts/check-required-contexts.sh .
+----
+
+== Caveats
+
+* *Legacy branch protection is not covered by this census.* Reading it needs a
+  credential with `Administration: read`, which the audit credential did not
+  have; the script reports that honestly and inspects rulesets only. Re-run it
+  with such a credential before declaring the class discharged.
+* *App-bound contexts are skipped* (`integration_id` present and not GitHub
+  Actions). A mis-configured app binding is therefore out of scope here.
+* *Disabled rulesets are skipped*; a rule that is off cannot block anyone.
+* *Matrix forms are matched as `<job id> (*)`* — the audit cannot know the matrix
+  values without running the workflow, so a matrix job counts as producing the
+  family. Where a required name names one tuple (`CodeQL Analysis (actions,
+  none)`), the job itself is what must match.
+
+== Adjacent finding — RE001 versus the allowlist
+
+Hypatia's `research_extensions: RE001` asks jobs that reference `secrets.*` to
+install `step-security/harden-runner`. That action is absent from
+`rhodium-standard-repositories/actions-allowlist/allowed-actions.json` (89
+patterns, no `step-security/*`), so a repository subject to the allowlist cannot
+satisfy RE001 by the route the rule suggests without an allowlist change. Either
+the rule or the allowlist should move; meanwhile the workable answer is to not
+reference the secrets context (use `github.token`, as tropical-types does) or to
+route the credentialed work through a reusable, where the caller passes
+`secrets: inherit` and no `secrets.*` appears in the job.
+
+== Provenance
+
+* Class origin: `hyperpolymath/tropical-types#17`; remediation PRs #52 and #53.
+* Sibling audits: `audit-hypatia-pin-orphan-2026-05-27.adoc` (wrapper-prefix
+  mismatch), `audit-hypatia-cache-sha-corruption-2026-06-21.adoc` (false green).
+* Gate: `scripts/check-required-contexts.sh`, fixture
+  `scripts/tests/check-required-contexts-test.sh`.
+* Tooling used for the census: GitHub REST API (`/rulesets`, branch protection),
+  raw workflow and reusable sources at their pinned refs.
