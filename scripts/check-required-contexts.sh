@@ -12,8 +12,10 @@
 # rule requiring a name nothing publishes is an unsatisfiable requirement: every
 # pull request stays BLOCKED, the CI board shows green, and nothing on the CI
 # side names the cause. Observed in hyperpolymath/tropical-types#17 (the bare
-# `Hypatia Neurosymbolic Analysis` required while the wrapper publishes
-# `scan / Hypatia Neurosymbolic Analysis`), and catalogued for the wrapper case in
+# `Hypatia Neurosymbolic Analysis` required while the wrapper published
+# `scan / Hypatia Neurosymbolic Analysis`; that repository now publishes the bare
+# name from an inline job and the prefixed name from its wrapper caller), and
+# catalogued for the wrapper case in
 # docs/audits/audit-hypatia-pin-orphan-2026-05-27.adoc.
 #
 # THE RULE THIS ENCODES
