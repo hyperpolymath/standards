@@ -34,8 +34,14 @@
 #
 # Language-policy note: ReScript, V-lang and Deno are BANNED for new code
 # (.claude/CLAUDE.md, owner rulings 2026-04-30 / 2026-04-10 / 2026-08-26).
-# Their jobs exist to serve grandfathered trees still in migration, and each
-# emits a ::warning:: saying so. They are a migration courtesy, not a licence.
+# The ReScript and V jobs serve grandfathered trees still in migration and emit
+# a ::warning:: saying so — a migration courtesy, not a licence.
+#
+# DENO IS DIFFERENT, as of 2026-09-22. Its job no longer lints; it REFUSES,
+# and the only way past it is the central shrink-only ledger
+# `.machine_readable/deno-allow.txt` in `standards`. A ::warning:: cannot fail
+# a job, so the old shape lint-checked — and thereby blessed — the very thing
+# it called banned.
 
 name: CI Pipeline (reusable)
 
@@ -93,6 +99,9 @@ jobs:
       has_v: ${{ steps.scan.outputs.has_v }}
       has_haskell: ${{ steps.scan.outputs.has_haskell }}
       has_deno: ${{ steps.scan.outputs.has_deno }}
+      # The Deno gate REFUSES and names what it found, so it needs the
+      # count itself, not merely the boolean.
+      n_deno: ${{ steps.scan.outputs.n_deno }}
       total: ${{ steps.scan.outputs.total }}
     steps:
       - name: Checkout repository
@@ -132,6 +141,7 @@ jobs:
             echo "has_v=$(bool "$N_V")"
             echo "has_haskell=$(bool "$N_HASKELL")"
             echo "has_deno=$(bool "$N_DENO")"
+            echo "n_deno=$N_DENO"
             echo "total=$TOTAL"
           } >> "$GITHUB_OUTPUT"
 
@@ -349,62 +359,145 @@ jobs:
           exit "$FAILED"
 
   # ───────────────────────────────────────────────────────────────────────
-  # Job 2 — Deno (grandfathered; banned for new code)
+  # Job 2 — Deno REFUSAL gate (BANNED; shrink-only ledger exemption)
   # ───────────────────────────────────────────────────────────────────────
+  #
+  # Owner ruling: "deno is over, we're prioritising bun, and using bunx."
+  # This job used to install a pinned Deno binary and run `deno lint` /
+  # `deno fmt --check`, announcing the ban with a `::warning::`. A
+  # `::warning::` CANNOT fail a job, so that job asserted the opposite of what
+  # it said: it lint-checked, and thereby blessed, the very thing it called
+  # banned. It now REFUSES, and the only way past it is the central
+  # shrink-only ledger `.machine_readable/deno-allow.txt` in `standards`.
+  #
+  # Both outcomes print their denominator. A gate that only ever says yes
+  # proves nothing, and an exemption that reports nothing is a silent pass.
   deno:
-    name: Deno
+    name: Deno (banned)
     needs: detect
     if: ${{ needs.detect.outputs.has_deno == 'true' }}
     runs-on: ${{ inputs.runs-on }}
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Policy notice
-        run: |
-          echo "::warning::Deno is BANNED for new code (owner ruling 2026-08-26: 'deno is to go and bun is the way we are going'). This job serves a grandfathered tree mid-migration. Migrate to Bun; where Bun genuinely cannot be used, document the reason in the repo."
+      # The ledger is CENTRAL: one file in `standards`, not a per-repo opt-out,
+      # so the estate's Deno debt is countable from one place and the ratchet
+      # can forbid its growth. Pinned to an immutable commit for the same
+      # reason as the governance helpers — `github.workflow_sha` resolves to
+      # the CALLER's commit, and following `main` would let an edit in
+      # `standards` change the verdict of every already-pinned caller with no
+      # review in their repositories.
+      - name: Checkout the pinned Standards Deno ledger
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          # 938264d8 is the commit that introduced the ledger. ⚠ BUMP THIS
+          # whenever .machine_readable/deno-allow.txt changes, or the gate goes
+          # on judging callers against a stale list. A stale list is SAFE in
+          # one direction only: a repository that migrated off Deno stops
+          # tracking deno.json, so the job does not run at all and its lingering
+          # exemption never fires. A repository that is ADDED to the ledger
+          # stays red here until this pin moves — which is the correct default,
+          # because the addition needs a Ratchet-exception trailer anyway.
+          ref: 938264d8b0bbc3ca079e3d02efff5c1d423d0329
+          path: .standards-deno-ledger
+          sparse-checkout: |
+            .machine_readable/deno-allow.txt
+          sparse-checkout-cone-mode: false
+        # Not fatal here: the next step names precisely what was missing and
+        # then FAILS CLOSED. A fetch failure must never read as an exemption.
+        continue-on-error: true
 
-      - name: Install Deno (pinned, sha256-verified)
+      - name: Refuse Deno unless this repository is ledgered
         shell: bash
         env:
-          DENO_VERSION: 'v2.9.7'
-          # Computed locally from the release archive.
-          #
-          # Deliberately NOT `denoland/setup-deno`: this repo runs with
-          # allowed_actions=selected, and `denoland/setup-deno@*` is absent
-          # from patterns_allowed (measured 2026-09-21). A job using it cannot
-          # start. A pinned binary needs no allowlist entry and adds no new
-          # third-party action to the supply chain.
-          DENO_SHA256: 'c6527f24f4b16031d3ae4fa9f658d5f11534c8d84ce7dc8502420280919c3490'
+          LEDGER: .standards-deno-ledger/.machine_readable/deno-allow.txt
+          SLUG: ${{ github.repository }}
+          N_DENO: ${{ needs.detect.outputs.n_deno }}
         run: |
+          # LEDGER, SLUG and N_DENO come from the step `env:` map above.
           set -euo pipefail
-          URL="https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip"
-          curl -sSfL --retry 3 -o "$RUNNER_TEMP/deno.zip" "$URL"
-          echo "${DENO_SHA256}  ${RUNNER_TEMP}/deno.zip" | sha256sum -c -
-          unzip -q -o "$RUNNER_TEMP/deno.zip" -d "$RUNNER_TEMP/denobin"
-          chmod +x "$RUNNER_TEMP/denobin/deno"
-          echo "$RUNNER_TEMP/denobin" >> "$GITHUB_PATH"
 
-      - name: Deno lint + format check
-        shell: bash
-        run: |
-          set -euo pipefail
-          deno lint
-          # `fmt --check` reports; bare `deno fmt` would REWRITE tracked files
-          # inside CI. Never use the bare form here.
-          deno fmt --check
+          # FAIL CLOSED. "Could not read the ledger" is not "is exempt".
+          if [ ! -f "$LEDGER" ]; then
+            echo "::error::Deno gate: the central ledger could not be read ($LEDGER). This is NOT an exemption — the gate refuses rather than guess. Check the pinned ref of the 'Checkout the pinned Standards Deno ledger' step."
+            {
+              echo "### Deno (banned)"
+              echo ""
+              echo "**REFUSED: the exemption ledger could not be read.** A gate that cannot"
+              echo "check its exemption list must not pass; this is not an exemption."
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # Strip comments and blanks; this is also the ledger's own denominator.
+          ALLOWED="$(grep -vE '^[[:space:]]*(#|$)' "$LEDGER" || true)"
+          N_ALLOWED="$(printf '%s' "$ALLOWED" | grep -c . || true)"
+
+          # What this repository actually tracks, named rather than counted, so
+          # the migration has a list to work from.
+          CONFIGS="$(git ls-files -- 'deno.json' '*/deno.json' 'deno.jsonc' '*/deno.jsonc')"
+
+          echo "Deno debt: ${N_ALLOWED} ledgered repositories estate-wide."
+          echo "This repository (${SLUG}) tracks ${N_DENO} Deno config file(s):"
+          printf '%s\n' "$CONFIGS" | sed 's/^/  - /'
+
+          if printf '%s\n' "$ALLOWED" | grep -Fxq "$SLUG"; then
+            echo "::notice::${SLUG} is on the Deno exemption ledger (${N_ALLOWED} repositories). Deno remains BANNED: this is grandfathered debt, not a licence. Port the deno.json 'tasks' map to package.json scripts run by 'bun run', delete the config, then delete this repository's line from .machine_readable/deno-allow.txt."
+            {
+              echo "### Deno (banned) — ledgered debt"
+              echo ""
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Repository | \`${SLUG}\` |"
+              echo "| Deno configs tracked here | **${N_DENO}** |"
+              echo "| Ledgered repositories estate-wide | **${N_ALLOWED}** |"
+              echo "| Verdict | exempt (shrink-only ledger) |"
+              echo ""
+              echo "Tracked configs:"
+              echo ""
+              # Backticks below are literal markdown, not command substitution.
+              # shellcheck disable=SC2016
+              printf '%s\n' "$CONFIGS" | sed 's/^/- `/; s/$/`/'
+              echo ""
+              echo "_Exempt is not approved._ Deno is banned estate-wide. The ledger is"
+              echo "SHRINK-ONLY: \`scripts/check-exemption-ratchet.sh\` fails any commit that"
+              echo "adds a line to it without a \`Ratchet-exception\` trailer naming the file."
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "::error::Deno is BANNED (owner ruling: 'deno is over, we're prioritising bun, and using bunx'). ${SLUG} tracks ${N_DENO} Deno config file(s) and is NOT on the exemption ledger (${N_ALLOWED} repositories listed). Migrate to Bun: port the deno.json 'tasks' map to package.json scripts run by 'bun run' — 'bun run' does not read a deno.json tasks map — and delete the config."
           {
-            echo "### Deno"
+            echo "### Deno (banned) — REFUSED"
             echo ""
-            echo "- \`deno lint\`: pass"
-            echo "- \`deno fmt --check\`: pass"
-            echo "- policy: **banned for new code**, grandfathered pending Bun migration"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Repository | \`${SLUG}\` |"
+            echo "| Deno configs tracked here | **${N_DENO}** |"
+            echo "| Ledgered repositories estate-wide | **${N_ALLOWED}** |"
+            echo "| Verdict | **REFUSED — not ledgered** |"
+            echo ""
+            echo "Tracked configs:"
+            echo ""
+            # Backticks below are literal markdown, not command substitution.
+            # shellcheck disable=SC2016
+            printf '%s\n' "$CONFIGS" | sed 's/^/- `/; s/$/`/'
+            echo ""
+            echo "Deno is banned estate-wide. Migrate to Bun, or — if this is genuinely"
+            echo "grandfathered debt — add \`${SLUG}\` to"
+            echo "\`.machine_readable/deno-allow.txt\` in \`hyperpolymath/standards\` with a"
+            echo "\`Ratchet-exception: .machine_readable/deno-allow.txt — <why>\` commit"
+            echo "trailer, and bump this workflow's ledger pin."
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
-
+          exit 1
   # ───────────────────────────────────────────────────────────────────────
   # Job 2 — ReScript (grandfathered; banned for new code)
   # ───────────────────────────────────────────────────────────────────────
@@ -620,7 +713,7 @@ jobs:
             row "SAST (semgrep)"  "$R_SAST"     "disabled via enable_sast: false"
             row "Rust"            "$R_RUST"     "no Cargo.toml tracked (has_rust=${H_RUST})"
             row "Nickel"          "$R_NICKEL"   "no *.ncl tracked (has_nickel=${H_NICKEL})"
-            row "Deno"            "$R_DENO"     "no deno.json(c) tracked (has_deno=${H_DENO})"
+            row "Deno"            "$R_DENO"     "BANNED — refusal gate; skipped means no deno.json(c) tracked (has_deno=${H_DENO})"
             row "ReScript"        "$R_RESCRIPT" "no rescript.json/bsconfig.json/*.res tracked (has_rescript=${H_RESCRIPT})"
             row "V"               "$R_V"        "no v.mod tracked (has_v=${H_V})"
             row "Haskell"         "$R_HASKELL"  "no *.cabal/stack.yaml/*.hs tracked (has_haskell=${H_HASKELL})"
