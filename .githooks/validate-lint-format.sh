@@ -8,15 +8,18 @@
 # toolchain must never be summoned to lint a Coq development.
 #
 # READ-ONLY. Every command here reports; none rewrites a tracked file.
-# `cargo fmt --check`, `deno fmt --check`, `nickel format --check`,
-# `v fmt -verify`. The bare/`-w`/`--fix` forms are banned in this file.
+# `cargo fmt --check`, `nickel format --check`, `v fmt -verify`. The
+# bare/`-w`/`--fix` forms are banned in this file.
 #
 # TWO FAILURE POLICIES, and the difference is deliberate:
 #
-#   * TOOLCHAIN MISSING, ecosystem toolchain (cargo, deno, nickel, v, bun) →
+#   * TOOLCHAIN MISSING, ecosystem toolchain (cargo, nickel, v, bun) →
 #     FAIL CLOSED. You cannot have authored a .rs without cargo, so "cargo not
 #     found" means a broken environment, not an exempt one. Skipping there
 #     would report success having examined nothing.
+#
+#   * DENO is neither: it is BANNED, so no Deno toolchain is ever summoned.
+#     Its section refuses rather than checks — see it below.
 #
 #   * OPTIONAL LINTER MISSING (hlint, fourmolu) → reported as an explicit
 #     SKIP line, not as a pass, and CI remains the authority. These are add-ons
@@ -102,19 +105,49 @@ else
   LEDGER+=("nickel: not staged")
 fi
 
-# ── Deno (BANNED for new code; grandfathered trees only) ────────────────
-DENO_SRC="$(staged_matching '\.(js|jsx|mjs|cjs)$')"
-if [ -n "$DENO_SRC" ] && tracks 'deno.json' '*/deno.json' 'deno.jsonc' '*/deno.jsonc'; then
-  warn "Deno is BANNED for new code (owner ruling 2026-08-26 — Bun is the estate runtime). Checking a grandfathered tree."
-  note "Deno: $(echo "$DENO_SRC" | grep -c .) staged file(s)"
-  if require_tool deno Deno "https://deno.land"; then
-    # shellcheck disable=SC2086
-    deno fmt --check $DENO_SRC || fail "Deno: sources are not formatted (deno fmt --check)"
-    # shellcheck disable=SC2086
-    deno lint $DENO_SRC        || fail "Deno: deno lint reported problems"
-  fi
+# ── Deno (BANNED — a REFUSAL, not a lint) ───────────────────────────────
+#
+# Owner ruling: "deno is over, we're prioritising bun, and using bunx."
+#
+# This section used to install nothing and run `deno fmt --check` / `deno lint`
+# over staged JS in a tree that tracked a deno.json, behind a `warn`. That
+# lint-checked — and thereby blessed — the very thing the warning called
+# banned, and it summoned a banned toolchain to do it.
+#
+# It now refuses. The question it asks is deliberately NARROWER than CI's:
+#
+#   * CI asks "does this repository still carry Deno debt?", and answers it
+#     against the central shrink-only ledger
+#     `.machine_readable/deno-allow.txt` in `standards`.
+#   * This hook CANNOT ask that — it runs inside a caller's checkout and has
+#     no access to that ledger — and must not fake an answer. It asks instead
+#     "is THIS COMMIT ADDING Deno debt?", which is answerable right here.
+#
+# STAGED is `--diff-filter=ACM`, so a DELETED deno.json never appears: paying
+# the debt down is never blocked, only growing it. That is the same
+# shrink-only direction the central ledger enforces, reached without one.
+DENO_CFG="$(staged_matching '(^|/)deno\.jsonc?$')"
+DENO_TRACKED="$(git ls-files -- 'deno.json' '*/deno.json' 'deno.jsonc' '*/deno.jsonc' | grep -c . || true)"
+if [ -n "$DENO_CFG" ]; then
+  fail "Deno is BANNED (owner ruling 2026-08-26 — Bun is the estate runtime). This commit ADDS or MODIFIES $(echo "$DENO_CFG" | grep -c .) Deno config file(s):"
+  while IFS= read -r cfg; do [ -n "$cfg" ] && echo "          - $cfg" >&2; done <<< "$DENO_CFG"
+  echo "        Port the deno.json 'tasks' map to package.json scripts run by" >&2
+  echo "        'bun run' — 'bun run' does NOT read a deno.json tasks map — and" >&2
+  echo "        delete the config. Deleting a deno.json is never blocked here." >&2
+  echo "        A genuinely grandfathered repository is exempted CENTRALLY, in" >&2
+  echo "        .machine_readable/deno-allow.txt in hyperpolymath/standards, not" >&2
+  echo "        by a local bypass." >&2
 else
-  LEDGER+=("deno: not staged or repo has no deno.json(c)")
+  LEDGER+=("deno: no deno.json(c) added or modified (repo tracks ${DENO_TRACKED}; the ledgered CI gate is the authority on existing debt)")
+fi
+
+# ⚠ Dropping the Deno lint leaves staged `.js`/`.jsx`/`.mjs`/`.cjs` with NO
+# pre-commit gate: the estate has no pinned bun lint/format gate to fall
+# through to. Declared here rather than left silent — an unchecked file type
+# that nobody names reads as a checked one.
+JS_SRC="$(staged_matching '\.(js|jsx|mjs|cjs)$')"
+if [ -n "$JS_SRC" ]; then
+  LEDGER+=("javascript: $(echo "$JS_SRC" | grep -c .) staged file(s) NOT checked — no pinned bun lint/format gate exists. A skip, not a pass.")
 fi
 
 # ── ReScript (BANNED for new code; migrates to AffineScript) ────────────
