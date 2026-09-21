@@ -40,9 +40,40 @@ Measured 2026-09-20 with the estate's fine-grained PAT:
   default branch unprotected in the gap, which is worse than the drift it set out to fix.
 
 | `PATCH /orgs/ORG/rulesets/ID`
-| 404 (no `admin:org`), and org rulesets are not writable through the repo endpoint either —
-  only readable. The `metadatastician` `EstateBranching` fix must be run by an owner session.
+| refused without `admin:org`. With an org-admin token, `PUT` (not `PATCH`) succeeds:
+  `PUT /orgs/ORG/rulesets/ID?dry-run=true` validates and writes nothing, and the same body
+  without `dry-run` applies. Repo-level `PUT .../rulesets/ID` stayed 403 for that same token,
+  so org rulesets are writable and per-repository ones are not — the two need different grants.
 |===
 
-Consequence for any future applier: PUT-by-id against the live object, never
-delete-then-create, and re-read before writing so a concurrent owner edit is skipped.
+== Update the matrix by testing it, not by trusting it
+
+The rows above were written from one token. A second token, granted org admin, turned
+"org rulesets are not writable" into "writable with `PUT`", which is how
+`metadatastician`'s `EstateBranching` was converged on 2026-09-21 without an owner session.
+Two behaviours learned while doing it are worth recording because they generalise:
+
+`PUT bodies must be read back, not reconstructed.::
+A ruleset's `conditions` can carry sibling keys (`ref_name` *and* `repository_name`). A body
+assembled from a summarised snapshot that kept only one of them is rejected with
+`422 Invalid property /conditions: data matches no possible input` — and a snapshot-based
+body that *does* pass can still quietly rewrite fields nobody intended to touch. So: fetch the
+live ruleset, delete the rule types and bypass actors you mean to remove, send the rest verbatim.
+
+`422` naming a bypass actor is a dangling-grant detector.::
+Updating an org ruleset validates every bypass actor against the apps actually installed on that
+organisation. `Actor Linear Code integration must be part of the ruleset source or owner
+organization` therefore proves the grant points at an app that is not installed — dead bypass
+surface that no read endpoint identifies, and it blocks *any* update to that ruleset until the
+actor is removed. Reported, never auto-dropped: an actor that validates cleanly is installed,
+even when nobody has named it yet, and stripping a live app's bypass is a decision.
+
+Applied on 2026-09-21 to `orgs/metadatastician/rulesets/18225024` (`EstateBranching`, active,
+`~DEFAULT_BRANCH` across `~ALL`): rules `code_coverage` and `code_quality` removed, bypass actors
+`827041` (`gitar-bot`) and `1658531` (`Linear Code`, dangling) removed. Because that ruleset is
+inherited, one write retired gitar's bypass on all 43 repositories' default branches; `gitar` now
+has no enforcement surface in either estate. Left in place deliberately: `946600` and `262318`
+(both validated as installed, neither named yet) and `copilot_code_review` (awaiting a ruling).
+
+Consequence for any future applier: PUT the live object minus the removals, re-read before writing
+so a concurrent owner edit is skipped, and dry-run first — never delete-then-create.
