@@ -68,9 +68,6 @@ EXPECTED_ABSENT=(
   # governance-reusable.yml. The cure is to remove the consumer -- port the
   # governance scripts to bun -- not to satisfy it.
   "denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed"
-  # A2ML is dead. security-gate-pr-target.yml still calls its
-  # secrets-check-action; locking it in would connect new machinery to it.
-  "hyperpolymath/a2ml-ecosystem@f7a40a4d5cc82b2e73f861119baa6818d77a448d"
 )
 
 if [ ! -f "$LOCKFILE" ]; then
