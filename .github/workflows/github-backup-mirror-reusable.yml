@@ -1,0 +1,296 @@
+# SPDX-License-Identifier: MPL-2.0
+# This workflow is managed by gh actions-lock.
+# github-backup-mirror-reusable.yml — Reusable GitHub→GitHub backup mirror.
+#
+# `mirror-reusable.yml` covers seven NON-GitHub forges (GitLab, Bitbucket,
+# Codeberg, SourceHut, Disroot, Gitea, Radicle). None of them mirror GitHub to
+# GitHub, which is what a `metadatastician` → `hyperpolymath` backup needs.
+# This reusable fills exactly that gap and copies the house idiom job-for-job.
+#
+# THREE DELIBERATE DEPARTURES FROM THE NAIVE `git clone --mirror` PATTERN
+#
+# 1. No `--mirror`, on either end. `git push --mirror` makes the destination
+#    match the source EXACTLY, which means it DELETES destination refs that the
+#    source does not have. Against a destination that is not already a copy of
+#    the source, that is data loss, not a backup. We push one branch.
+#
+# 2. No `|| true`. The familiar snippet needs it because `git clone --mirror`
+#    drags `refs/pull/*/head` and `refs/pull/*/merge` along, and GitHub then
+#    rejects those with "deny updating a hidden ref" — a non-zero exit even on a
+#    completely successful push. Not cloning `refs/pull/*` removes the reason to
+#    suppress the exit code, so the real failure signal survives. Advisory
+#    behaviour comes from job-level `continue-on-error`, as in mirror-reusable.
+#
+# 3. The destination is PROVEN SAFE BEFORE the push, never after. See the
+#    "Resolve destination and prove it is safe" step.
+#
+# ⚠ `continue-on-error: true` means a refusal below shows a GREEN tick and sends
+#   no notification. Every refusal therefore writes BOTH `::error::` AND a line
+#   to $GITHUB_STEP_SUMMARY, or the guard would be findable only by opening the
+#   log of a run that looks like it passed.
+#
+# Caller example (wrapper):
+#   # SPDX-License-Identifier: MPL-2.0
+#   name: GitHub Backup Mirror
+#   on:
+#     push:
+#       branches: [main]
+#     workflow_dispatch:
+#   permissions:
+#     contents: read
+#   jobs:
+#     backup:
+#       uses: hyperpolymath/standards/.github/workflows/github-backup-mirror-reusable.yml@<sha>
+#       secrets: inherit
+#
+# Required repo configuration:
+#   vars.BACKUP_MIRROR_ENABLED = 'true'      (opt in; off by default)
+#   vars.BACKUP_MIRROR_ORG                          (destination owner)
+#   vars.BACKUP_MIRROR_AUTOCREATE    = 'true'       (optional; see below)
+#   secrets.BACKUP_MIRROR_TOKEN                     (classic PAT)
+#
+# ⚠ BACKUP_MIRROR_TOKEN needs `repo` AND `workflow` scope. Every repo in this
+#   estate contains `.github/workflows/`, and GitHub rejects a push carrying
+#   workflow files outright when the token lacks `workflow` scope. A token with
+#   only `repo` fails at push time with a message that does not obviously say
+#   "scope", so this is worth getting right before the first run.
+
+name: GitHub Backup Mirror (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label for the mirror job
+        type: string
+        required: false
+        default: ubuntu-latest
+      destination-branch:
+        description: Branch name to write on the destination
+        type: string
+        required: false
+        default: main
+    secrets:
+      BACKUP_MIRROR_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  mirror-github:
+    name: Mirror to GitHub backup
+    timeout-minutes: 20
+    runs-on: ${{ inputs.runs-on }}
+    if: vars.BACKUP_MIRROR_ENABLED == 'true'
+    # Advisory mirror: a backup failure must not redden an otherwise good build.
+    # The safety checks below still fail closed — they refuse to push.
+    continue-on-error: true
+    # Map the secret to env so step `if:`s can gate on its presence: the
+    # `secrets` context is NOT available in `if:` (using it is an
+    # "Unrecognized named-value: 'secrets'" startup failure that kills the whole
+    # workflow before any job runs — `instant-sync.yml` in this very repo still
+    # carries that bug). `env` IS available in step `if:`, and secrets are valid
+    # in job-level `env`.
+    env:
+      MIRROR_TOKEN: ${{ secrets.BACKUP_MIRROR_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # persist-credentials: false is LOAD-BEARING, not hygiene.
+          # actions/checkout writes the job GITHUB_TOKEN into the local git
+          # config as `http.https://github.com/.extraheader`. That header
+          # applies to EVERY github.com remote, including the backup
+          # destination — where that token has no write access. An
+          # extraheader beats credentials in a remote URL, so leaving it in
+          # place makes the push below fail with a 403 that reads like a
+          # problem with the PAT. Do not re-enable without unsetting it.
+          persist-credentials: false
+          # Full history: a shallow clone cannot answer "is the destination an
+          # ancestor of what I am about to push?", which is the whole safety
+          # argument below.
+          fetch-depth: 0
+
+      - name: Skipped (BACKUP_MIRROR_TOKEN not configured)
+        if: ${{ env.MIRROR_TOKEN == '' }}
+        run: |
+          set -euo pipefail
+          echo "::notice::BACKUP_MIRROR_ENABLED=true but secrets.BACKUP_MIRROR_TOKEN is empty. Skipping GitHub backup mirror."
+          {
+            echo "### GitHub backup mirror: skipped"
+            echo ""
+            echo "\`BACKUP_MIRROR_ENABLED\` is \`true\` but \`BACKUP_MIRROR_TOKEN\` is empty."
+            echo "A skip is not a pass: nothing was mirrored."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve destination and prove it is safe
+        id: resolve
+        if: ${{ env.MIRROR_TOKEN != '' }}
+        env:
+          MIRROR_ORG: ${{ vars.BACKUP_MIRROR_ORG || vars.MIRROR_ORG }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          SRC_OWNER: ${{ github.repository_owner }}
+          AUTOCREATE: ${{ vars.BACKUP_MIRROR_AUTOCREATE }}
+          DEST_BRANCH: ${{ inputs.destination-branch }}
+          GH_TOKEN: ${{ secrets.BACKUP_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          refuse() {
+            # A refusal under continue-on-error is invisible unless it is
+            # written in both places. Say it twice, deliberately.
+            echo "::error::$1"
+            {
+              echo "### GitHub backup mirror: REFUSED"
+              echo ""
+              echo "$1"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+
+          if [ -z "$MIRROR_ORG" ]; then
+            refuse "No destination owner. Set vars.BACKUP_MIRROR_ORG (or vars.MIRROR_ORG)."
+          fi
+
+          # ── Hard denylist ────────────────────────────────────────────────
+          # `.github` is the community-health repo, and the two estate copies
+          # are UNRELATED repositories that merely share a name:
+          # hyperpolymath/.github and metadatastician/.github differ in size,
+          # content and creation date, with no common history. Mirroring by
+          # name would overwrite one with the other and destroy real content.
+          # This is not configurable, because no configuration makes it safe.
+          case "$REPO_NAME" in
+            .github)
+              refuse "Refusing to mirror '.github': the estate copies are unrelated repositories sharing a name. Mirroring by name would destroy the destination."
+              ;;
+          esac
+
+          if [ "$MIRROR_ORG" = "$SRC_OWNER" ]; then
+            refuse "Destination owner equals source owner ($SRC_OWNER); that would mirror a repository onto itself."
+          fi
+
+          DEST_SLUG="${MIRROR_ORG}/${REPO_NAME}"
+          echo "Destination: $DEST_SLUG (branch $DEST_BRANCH)"
+
+          # ── Does the destination exist? ──────────────────────────────────
+          # Discriminate on the HTTP STATUS, not on whether the command
+          # failed. GitHub deliberately returns 404 for a private repository
+          # you are not allowed to see, so "absent" and "exists but forbidden"
+          # are the SAME failure from `gh repo view`. Reading a 403 as
+          # "absent" would send us down the create path against a repository
+          # that already exists. `gh api -i` prints the status line, which is
+          # the only thing that tells them apart.
+          gh api -i "repos/${DEST_SLUG}" > "$RUNNER_TEMP/dest.http" 2>&1 || true
+          CODE="$(awk 'NR==1 {print $2; exit}' "$RUNNER_TEMP/dest.http")"
+
+          if [[ ! "$CODE" =~ ^[0-9]{3}$ ]]; then
+            refuse "Could not parse an HTTP status from the destination probe for $DEST_SLUG. Refusing to guess whether it exists."
+          fi
+
+          case "$CODE" in
+            200) DEST_EXISTS=true ;;
+            404) DEST_EXISTS=false ;;
+            401|403)
+              refuse "Destination probe for $DEST_SLUG returned HTTP $CODE. The token is missing, expired, or lacks scope on the destination owner. A 403 is NOT an absent repository: not creating, not pushing."
+              ;;
+            *)
+              refuse "Destination probe for $DEST_SLUG returned HTTP $CODE. Unexpected; refusing to act on an unclassified response."
+              ;;
+          esac
+          echo "destination $DEST_SLUG probe: HTTP $CODE"
+
+          if [ "$DEST_EXISTS" = false ]; then
+            if [ "$AUTOCREATE" != "true" ]; then
+              # Creating repositories is a side effect nobody asked for. Across
+              # this estate 46 of 49 source repos have no same-named
+              # destination, so a default-on autocreate would silently spawn 46
+              # repositories on the first run. Opt in deliberately or not at all.
+              refuse "Destination $DEST_SLUG does not exist and vars.BACKUP_MIRROR_AUTOCREATE is not 'true'. Create it manually, or set BACKUP_MIRROR_AUTOCREATE=true to allow this workflow to create it private."
+            fi
+            echo "::notice::Creating private destination $DEST_SLUG"
+            gh repo create "$DEST_SLUG" --private \
+              --description "Backup mirror of ${SRC_OWNER}/${REPO_NAME}. Managed by github-backup-mirror-reusable.yml."
+            # A freshly created repo is empty. Empty is SAFE, not divergent:
+            # there is nothing there to lose.
+            echo "safe_reason=destination created empty" >> "$GITHUB_OUTPUT"
+            echo "dest_slug=$DEST_SLUG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # ── Destination exists: prove we are not about to clobber it ─────
+          # Embed the token in the fetch URL. `secrets.BACKUP_MIRROR_TOKEN`
+          # arrives through the secrets context, so Actions masks it in logs;
+          # a base64 extraheader would NOT be masked, which is why the plain
+          # form is the safer one here.
+          DEST_URL="https://x-access-token:${MIRROR_TOKEN}@github.com/${DEST_SLUG}.git"
+          git remote add backup "$DEST_URL" 2>/dev/null || git remote set-url backup "$DEST_URL"
+
+          if ! git fetch --no-tags backup "refs/heads/${DEST_BRANCH}:refs/remotes/backup/${DEST_BRANCH}" 2>/dev/null; then
+            # The branch does not exist on the destination. That is what a
+            # fresh `gh repo create` leaves behind, and it is SAFE — a failed
+            # fetch here means "nothing to overwrite", NOT "conflict". Reading
+            # this failure as divergence would refuse every first-run mirror.
+            echo "::notice::Destination $DEST_SLUG has no '$DEST_BRANCH' branch yet; nothing to overwrite."
+            echo "safe_reason=destination has no $DEST_BRANCH branch" >> "$GITHUB_OUTPUT"
+            echo "dest_slug=$DEST_SLUG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # An ancestry proof over a TRUNCATED history is vacuous. With a
+          # shallow clone `git merge-base --is-ancestor` can answer "no"
+          # purely because the common ancestor was never fetched, and it can
+          # answer "yes" only within the fetched window. checkout above asks
+          # for fetch-depth: 0, but a caller override or a grafted repo would
+          # silently defeat that — so assert it rather than assume it.
+          if [ "$(git rev-parse --is-shallow-repository)" != "false" ]; then
+            refuse "Repository is shallow; an ancestry proof over a truncated history proves nothing. Set fetch-depth: 0 on the checkout. Not pushing."
+          fi
+
+          DEST_HEAD="$(git rev-parse "refs/remotes/backup/${DEST_BRANCH}")"
+          SRC_HEAD="$(git rev-parse HEAD)"
+          echo "Destination HEAD: $DEST_HEAD"
+          echo "Source HEAD:      $SRC_HEAD"
+
+          if [ "$DEST_HEAD" = "$SRC_HEAD" ]; then
+            echo "safe_reason=already up to date" >> "$GITHUB_OUTPUT"
+            echo "dest_slug=$DEST_SLUG" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The ONLY other safe case: everything the destination has is already
+          # contained in what we are about to push. Anything else means the
+          # destination holds commits that a force-push would destroy.
+          if ! git merge-base --is-ancestor "$DEST_HEAD" "$SRC_HEAD"; then
+            AHEAD="$(git rev-list --count "^${SRC_HEAD}" "${DEST_HEAD}" 2>/dev/null || echo '?')"
+            refuse "Destination $DEST_SLUG has DIVERGED: $DEST_HEAD is not an ancestor of $SRC_HEAD ($AHEAD commit(s) exist only on the destination). Refusing to force-push; reconcile the histories by hand. This is the case the naive 'git push --mirror || true' pattern silently destroys."
+          fi
+
+          echo "safe_reason=destination is a strict ancestor (fast-forward)" >> "$GITHUB_OUTPUT"
+          echo "dest_slug=$DEST_SLUG" >> "$GITHUB_OUTPUT"
+
+      - name: Push to backup mirror
+        if: ${{ env.MIRROR_TOKEN != '' && steps.resolve.outputs.dest_slug != '' }}
+        env:
+          DEST_SLUG: ${{ steps.resolve.outputs.dest_slug }}
+          SAFE_REASON: ${{ steps.resolve.outputs.safe_reason }}
+          DEST_BRANCH: ${{ inputs.destination-branch }}
+        run: |
+          set -euo pipefail
+          DEST_URL="https://x-access-token:${MIRROR_TOKEN}@github.com/${DEST_SLUG}.git"
+          git remote add backup "$DEST_URL" 2>/dev/null || git remote set-url backup "$DEST_URL"
+
+          # HEAD:refs/heads/<branch> rather than a bare branch name: the local
+          # branch is not guaranteed to be checked out under every trigger, and
+          # this form pushes exactly the commit that was verified above.
+          git push --force backup "HEAD:refs/heads/${DEST_BRANCH}"
+
+          {
+            echo "### GitHub backup mirror: pushed"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Destination | \`${DEST_SLUG}\` |"
+            echo "| Branch | \`${DEST_BRANCH}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Safety | ${SAFE_REASON} |"
+          } >> "$GITHUB_STEP_SUMMARY"
