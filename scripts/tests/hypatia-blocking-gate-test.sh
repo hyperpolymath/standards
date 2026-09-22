@@ -43,7 +43,7 @@ check() {
   fi
   printf 'PASS: %s\n' "$name"
 }
-check 'empty findings are valid' 0 '[]'
+check 'empty findings refuse (fail-closed)' 2 '[]'
 check 'low and informational findings pass' 0 '[{"severity":"low"},{"severity":"info"}]'
 check 'high finding blocks' 1 '[{"severity":"high"}]'
 check 'critical finding blocks' 1 '[{"severity":"critical"}]'
