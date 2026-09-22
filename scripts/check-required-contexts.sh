@@ -130,7 +130,7 @@ fetch_reusable() { # owner/repo/workflow@ref -> path on stdout, or empty
     cache="$(mktemp)"; TMP_FILES="${TMP_FILES:-} $cache"
   fi
   [ "$OFFLINE" = 1 ] && return 1
-  if curl -fsSL "$url" -o "$cache" 2>/dev/null; then
+  if curl -fsSL --proto '=https' "$url" -o "$cache" 2>/dev/null; then
     printf '%s\n' "$cache"
   else
     rm -f "$cache"; return 1
