@@ -35,7 +35,7 @@ CHECKED=0
 is_source_file() {
   case "$1" in
     *.rs|*.res|*.js|*.ts|*.sh|*.bash|*.zig|*.ex|*.exs|*.gleam|\
-    *.ml|*.mli|*.adb|*.ads|*.ncl|*.toml|*.yaml|*.yml) return 0 ;;
+    *.ml|*.mli|*.adb|*.ads|*.ncl|*.toml|*.yaml|*.yml|*.scm) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -71,7 +71,14 @@ for file in $FILES_TO_CHECK; do
   # Still a HEADER check, deliberately: the marker must open the line. A bare
   # `SPDX-License-Identifier:` anywhere in the first 10 lines would match
   # prose, and a licence mentioned in a docstring is not a licence grant.
-  if ! head -10 "$file" | grep -qE '^[[:space:]]*(#|//|--|\(\*|/\*|\*)[[:space:]]*SPDX-License-Identifier:'; then
+  # The expression itself is validated, not just the marker: an empty
+  # identifier or trailing junk (`MPL-2.0; copyright`) passes a prefix
+  # check but fails SPDX tooling. Require a non-empty expression (bare id
+  # or OR/AND/WITH compound) occupying the rest of the line, with only
+  # the applicable comment terminator (`*)`, `*/`) after it. Copyright
+  # data belongs on its own SPDX-FileCopyrightText line. `;` is Scheme's
+  # comment marker (*.scm).
+  if ! head -10 "$file" | grep -qE '^[[:space:]]*(#|//|--|;+|\(\*|/\*|\*)[[:space:]]*SPDX-License-Identifier:[[:space:]]*[A-Za-z0-9][A-Za-z0-9_.+:-]*([[:space:]]+(OR|AND|WITH)[[:space:]]+[A-Za-z0-9][A-Za-z0-9_.+:-]*)*[[:space:]]*(\*\)|\*/)?[[:space:]]*$'; then
     echo "[validate-spdx] ERROR: $file missing SPDX header" >&2
     ERRORS=$((ERRORS + 1))
   fi

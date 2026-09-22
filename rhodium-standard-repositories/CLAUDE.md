@@ -538,7 +538,7 @@ This is **graduated trust without gatekeeping**—everyone can contribute, but s
 
 ❌ **Deno**: Banned 2026-09-22
 - Replace with: Bun. Owner ruling: *"deno is over, we're prioritising bun, and using bunx."*
-- Bun is Node-compatible and reads `package.json` + `bun.lock`. ⚠ `bun run` does **not** read a `deno.json` `tasks` map - those become Justfile recipes.
+- Bun is Node-compatible and reads `package.json` + `bun.lock`. ⚠ `bun run` does **not** read a `deno.json` `tasks` map - those task definitions must be ported to `package.json` scripts (invoked via `bun run`), per LANGUAGE-POLICY §1.
 
 ❌ **JavaScript**: Actively being eliminated
 - Replace with: AffineScript → typed-wasm, run under Bun. TypeScript is NOT a fallback.
@@ -856,7 +856,7 @@ end Process_Data;
 
 ### Technologies
 - **Nickel**: https://nickel-lang.org/
-- **AffineScript**: https://github.com/hyperpolymath/affinescript
+- **AffineScript** (canonical location TBD — this guide is never-GitHub, and no public GitLab project exists yet, so no link until one is established)
 - **Bun**: https://bun.sh/
 - **CRDTs**: https://crdt.tech/
 - **SPARK**: https://www.adacore.com/about-spark

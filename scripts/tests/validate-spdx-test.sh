@@ -68,5 +68,22 @@ cp "$T/README.md" "$T/parity/README.md"
 cp "$T/good.sh"   "$T/parity/good.sh"
 ck_scan "PARITY: full-scan mode ignores the same non-source files" 0 "parity"
 
+# RSR COVERAGE: .scm files carry `;;`-style headers and must be checked
+# (previously the extension list skipped them, so a staged RSR seed file
+# passed without its required header). Empty identifiers and trailing junk
+# must fail: they pass a prefix check but fail SPDX tooling.
+printf ';; SPDX-License-Identifier: MPL-2.0\n(display 1)\n' > "$T/good.scm"
+printf ';;; SPDX-License-Identifier: MPL-2.0\n;;; banner\n' > "$T/banner.scm"
+printf '(display 1)\n' > "$T/bad.scm"
+printf ';; SPDX-License-Identifier:\n(display 1)\n' > "$T/empty.scm"
+printf '# SPDX-License-Identifier: MPL-2.0; copyright me\necho\n' > "$T/junk.sh"
+printf '(* SPDX-License-Identifier: MIT *)\n' > "$T/good.ml"
+ck "scm with ;; header must PASS" 0 "good.scm"
+ck "scm with ;;; banner header must PASS" 0 "banner.scm"
+ck "headerless .scm must FAIL" 1 "bad.scm"
+ck "empty SPDX identifier must FAIL" 1 "empty.scm"
+ck "trailing junk after expression must FAIL" 1 "junk.sh"
+ck "OCaml (* *) terminator must PASS" 0 "good.ml"
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1

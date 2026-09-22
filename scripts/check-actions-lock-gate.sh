@@ -12,10 +12,19 @@
 #   lockfile absent,   → RED: an unpinned `uses:` is a violation today, lock or
 #   unpinned refs        no lock.
 #   lockfile absent,   → grace window: `::warning` + "NOT YET ENFORCED" and exit
-#   all SHA-pinned       0 until ENFORCE_ACTIONS_LOCK_FROM; `::error` + exit 1
+#   all SHA-pinned       0 until ENFORCE_ACTIONS_LOCK_FROM; `::error` + exit 3
 #                        from that date. The sweep (spec §10 step 5) lands the
 #                        lockfiles before the date; the date makes the gate
 #                        real without red-flooding 300 repos on day one.
+#
+# Exit contract (consumed by governance-reusable.yml's ledger exemption):
+#   0 = pass (verified lock, or lockless+pinned inside the grace window)
+#   1 = LIVE VIOLATION (unpinned refs, or verifier-rejected lock) — never exempt
+#   2 = infrastructure failure (no workflows dir, no verifier) — never exempt
+#   3 = missing-lock debt ONLY (lockless, every ref pinned, grace window
+#       closed) — the single state the shrink-only ledger may excuse.
+# Collapsing 3 into 1 would let the ledger wave unpinned refs and corrupt
+# locks through with the debt it was built to excuse.
 #
 # Test seams (used by scripts/tests/check-actions-lock-gate-test.sh):
 #   LOCK_TODAY                 override today's date (YYYY-MM-DD)
@@ -70,5 +79,5 @@ if [[ "$TODAY" < "$ENFORCE_FROM" ]]; then
   exit 0
 fi
 
-echo "::error::actions-lock gate: no $WF_DIR/actions.lock and the grace window closed on $ENFORCE_FROM (today is $TODAY). Run scripts/update-actions-lock.sh and commit the lockfile."
-exit 1
+echo "::error::actions-lock gate: no $WF_DIR/actions.lock and the grace window closed on $ENFORCE_FROM (today is $TODAY). MISSING-LOCK DEBT (exit 3): run scripts/update-actions-lock.sh and commit the lockfile."
+exit 3
