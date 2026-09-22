@@ -349,16 +349,18 @@ while IFS= read -r R; do
     || { emit "$R" "UNKNOWN" "rulesets GET failed"; continue; }
   jq -r '.[]|select(.target=="branch" and .enforcement=="active")
          |[(.source_type // "MISSING"), (.id|tostring)]|@tsv' "$WORK/rs.json" > "$WORK/active"
-  command grep -P '^Repository\t'              "$WORK/active" | cut -f2 > "$WORK/ids"
-  command grep -vP '^(Repository|MISSING)\t'   "$WORK/active" | cut -f2 > "$WORK/inherited"
-  NMISS=$(command grep -cP '^MISSING\t' "$WORK/active" || true)
+  # awk, not grep -P: -P is a GNU extension and this script must not depend on
+  # which grep the runner ships.
+  awk -F'\t' '$1=="Repository"{print $2}'                "$WORK/active" > "$WORK/ids"
+  awk -F'\t' '$1!="Repository" && $1!="MISSING"{print $2}' "$WORK/active" > "$WORK/inherited"
+  NMISS=$(awk -F'\t' '$1=="MISSING"{c++} END{print c+0}'  "$WORK/active")
   NIDS=$(wc -l < "$WORK/ids")
   NINH=$(wc -l < "$WORK/inherited")
 
   # An absent discriminator REFUSES; it never defaults to the writable arm.
   [ "${NMISS:-0}" -gt 0 ] && { emit "$R" "UNKNOWN" "$DETAIL — $NMISS active branch ruleset(s) carry no .source_type; cannot tell repo-level from org-inherited, refusing to guess"; continue; }
   if [ "$NIDS" -eq 0 ] && [ "$NINH" -gt 0 ]; then
-    emit "$R" "ORG-INHERITED" "$DETAIL — the only active branch ruleset(s) here are org-level ($(paste -sd, "$WORK/inherited")); writable ONLY at /orgs/{org}/rulesets/{id}, cured once at the org, never per repo"
+    emit "$R" "ORG-INHERITED" "$DETAIL — the only active branch ruleset(s) here are org-level ($(paste -sd, "$WORK/inherited")); writable ONLY at /orgs/{org}/rulesets/{id} with an admin:org credential (a repo token reads it and cannot write it), cured once at the org, never per repo"
     continue
   fi
   [ "$NIDS" -eq 0 ] && { emit "$R" "NORULESET" "$DETAIL — no active branch ruleset; this script never creates one"; continue; }
