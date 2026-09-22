@@ -35,6 +35,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # check-lock-gate-pin-freshness.sh compares the lock gate's pinned
+          # commit against the base ref. A depth-1 clone has neither object, and
+          # that guard fails rather than skipping on an unresolvable pin, so the
+          # history is a requirement and not an optimisation.
+          fetch-depth: 0
 
       # PyYAML is required by the secret-scanner canary. The scorecard
       # grounding tests execute the same checks as registry-verify, including
@@ -47,3 +53,17 @@ jobs:
 
       - name: Run tests/*.sh and scripts/tests/*.sh
         run: bash scripts/run-shell-test-suite.sh
+
+      # Not part of the offline suite: this one needs real git history, so it
+      # cannot live in scripts/tests/*.sh where a contributor runs it on a
+      # shallow or detached tree. On a pull request the comparison is the base
+      # SHA, so a PR that edits a helper is not asked to pin to its own
+      # unborn merge commit; on main it is HEAD, so the bump owed after such a
+      # PR lands shows up immediately instead of rotting silently.
+      - name: Lock-gate pin is not stale
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          COMPARE="${BASE_SHA:-$GITHUB_SHA}"
+          bash scripts/check-lock-gate-pin-freshness.sh "$COMPARE"
