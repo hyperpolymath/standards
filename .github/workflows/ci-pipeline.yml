@@ -338,7 +338,7 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://github.com/tweag/nickel/releases/download/${NICKEL_VERSION}/nickel-x86_64-linux"
-          curl -sSfL --retry 3 -o "$RUNNER_TEMP/nickel" "$URL"
+          curl -sSfL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -o "$RUNNER_TEMP/nickel" "$URL"
           echo "${NICKEL_SHA256}  ${RUNNER_TEMP}/nickel" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/nickel"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
@@ -536,9 +536,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # ReScript's compiler binary arrives via a postinstall script, so
-          # --ignore-scripts would leave nothing to run.
-          bun install
+          # An npm lifecycle script is arbitrary code execution at CI
+          # privilege, so scripts stay off. MEASURED 2026-09-22 against the
+          # registry: rescript 11.1.4 declares postinstall
+          # 'node scripts/rescript_postinstall.js', but 12.3.1 declares NO
+          # postinstall at all -- it ships the compiler as per-platform
+          # optionalDependencies. So the flag only costs anything on the
+          # superseded major, and ReScript is a banned language here in any
+          # case: this job exists to lint grandfathered sources, not to make
+          # legacy installs convenient.
+          #
+          # --frozen-lockfile is the other half: without it bun may resolve a
+          # floating range, and CI would then be testing a compiler the repo
+          # does not pin.
+          bun install --frozen-lockfile --ignore-scripts
+
+          # A missing binary after that install must be an ERROR, not a
+          # silent fall-through to a build step that cannot run. A skip is
+          # not a pass.
+          if ! bunx --no-install rescript -h >/dev/null 2>&1; then
+            echo "::error::rescript is not present after a --frozen-lockfile --ignore-scripts install. Upgrade to rescript >= 12, which needs no lifecycle script, or add the compiler to the lockfile. Lifecycle scripts are deliberately not enabled in this workflow."
+            exit 1
+          fi
 
       - name: ReScript build (warnings are errors) + format check
         shell: bash
@@ -549,14 +568,14 @@ jobs:
           # A compile IS the lint for ReScript; -warn-error +a promotes every
           # warning. This writes to lib/, which is compiler output and not a
           # tracked source file.
-          bunx rescript build -with-deps -warn-error +a || FAILED=1
+          bunx --no-install rescript build -with-deps -warn-error +a || FAILED=1
 
           # `rescript format` gained -check at different points in different
           # majors. Probe for the capability rather than assume it: a gate that
           # fails because the flag does not exist tells you nothing about the
           # code, and one that silently passes tells you less.
-          if bunx rescript format --help 2>&1 | grep -q -- '-check'; then
-            bunx rescript format -all -check || { echo "::error::ReScript sources are not formatted"; FAILED=1; }
+          if bunx --no-install rescript format --help 2>&1 | grep -q -- '-check'; then
+            bunx --no-install rescript format -all -check || { echo "::error::ReScript sources are not formatted"; FAILED=1; }
             FMT='checked'
           else
             echo "::warning::The installed rescript CLI has no 'format -check'; the format gate did NOT run. This is a skip, not a pass."
@@ -601,7 +620,7 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://github.com/vlang/v/releases/download/${V_VERSION}/v_linux.zip"
-          curl -sSfL --retry 3 -o "$RUNNER_TEMP/v_linux.zip" "$URL"
+          curl -sSfL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -o "$RUNNER_TEMP/v_linux.zip" "$URL"
           echo "${V_SHA256}  ${RUNNER_TEMP}/v_linux.zip" | sha256sum -c -
           unzip -q "$RUNNER_TEMP/v_linux.zip" -d "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/v" >> "$GITHUB_PATH"
