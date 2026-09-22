@@ -85,7 +85,7 @@ The Citadel is where RSR meets CCCP—the actual implementation pattern that emb
 ┌─────────────────┐       ┌─────────────────┐           ┌─────────────────────┐
 │  Haskell        │       │  Nickel Config  │           │  Podman Compose     │
 │  Registry       │       │  (Infra as Code)│           │  (Elixir, Ada,      │
-│  (Validation)   │       │                 │           │   Rust, ReScript)   │
+│  (Validation)   │       │                 │           │  Rust, AffineScript)│
 └─────────┬───────┘       └─────────┬───────┘           └──────────┬──────────┘
           │                         │                              │
           ▼                         ▼                              ▼
@@ -93,13 +93,13 @@ The Citadel is where RSR meets CCCP—the actual implementation pattern that emb
 │  🚀 POST-JAVASCRIPT STACK (Podman Orchestration)                              │
 │                                                                               │
 │  ┌──────────────────────────────────────────────────────────────────┐        │
-│  │  Frontend: ReScript → WASM (OCaml soundness)                     │        │
+│  │  Frontend: AffineScript → typed-wasm (affine/linear)             │        │
 │  └────────────────────────────────┬─────────────────────────────────┘        │
 │                                   │                                          │
 │  ┌──────────────────────────────────────────────────────────────────┐        │
-│  │  Router: CADRE (ReScript + Deno + CRDTs)                         │        │
-│  │  - OCaml type safety                                             │        │
-│  │  - Deno security perimeters                                      │        │
+│  │  Router: CADRE (AffineScript + Bun + CRDTs)                      │        │
+│  │  - Affine/linear type safety                                     │        │
+│  │  - Sandboxed at the typed-wasm boundary                          │        │
 │  │  - Conflict-free distributed state                               │        │
 │  └────────────────────────────────┬─────────────────────────────────┘        │
 │                                   │                                          │
@@ -146,15 +146,15 @@ The Citadel is where RSR meets CCCP—the actual implementation pattern that emb
 
 #### Robot Vacuum Cleaner (RVC)
 - **Automated repository tidying and optimization**
-- Only Python allowed in RSR repos (grudgingly, will be eliminated)
+- Rust or Elixir only. Python is FULLY banned - its "SaltStack only" exception was removed 2026-01-03
 - Triggered by Git hooks (pre-commit, pre-push)
 - Operates during offline work, before push
 - Preventive maintenance—keeps repos clean without manual intervention
 
 #### CADRE Router
 - **Replaces traditional HTTP servers (including Bandit)**
-- ReScript compilation (OCaml → JS, 10-100x faster than TypeScript)
-- Deno runtime (explicit, granular, auditable permissions)
+- AffineScript compilation (affine/linear types → typed-wasm)
+- Bun runtime (tier 1; `bunx <tool>` for one-off tooling)
 - CRDTs for conflict-free distributed state
 - No databases + locks + cache invalidation complexity
 
@@ -180,7 +180,7 @@ A repository is Rhodium Standard compliant when it meets the following comprehen
 - ✅ Git hooks triggering local automation
 - ✅ **RVC** for automated tidying
 - ✅ **SaltRover** for offline-first repository management
-- ✅ Salt states for configuration management (temporary—migrating away from Python)
+- ✅ Nickel configs + Bash for configuration management (the Salt/Python exception was removed 2026-01-03)
 
 ### 2. Documentation Standards
 
@@ -231,13 +231,13 @@ repository-root/
 ### 3. Security Architecture (10+ Dimensions)
 
 #### Type Safety
-- ✅ **ReScript** (OCaml soundness) for frontend
+- ✅ **AffineScript** (affine/linear types, compiles to typed-wasm) for frontend
 - ✅ **Rust** for systems programming
 - ✅ **Ada + SPARK** for safety-critical paths
 - ✅ **Elixir** (Erlang VM) for fault-tolerant services
 - ✅ **Haskell** for pure functional validation
-- ❌ **No TypeScript** (unsound gradual typing)
-- ❌ **No Python** (except SaltStack, temporary)
+- ❌ **No TypeScript** (unsound gradual typing) - use AffineScript. Not a fallback tier.
+- ❌ **No Python** (fully banned; the SaltStack exception was removed 2026-01-03)
 - ❌ **No JavaScript** (actively being eliminated)
 
 #### Memory Safety
@@ -251,13 +251,17 @@ repository-root/
 - ✅ No distributed locking
 - ✅ No cache invalidation issues
 - ✅ Offline-first by design
-- ✅ Deno KV for persistent CRDT storage
+- ✅ An embedded KV store for persistent CRDT state (Bun ships a built-in SQLite driver)
 
 #### Process Security
-- ✅ **Deno permissions model**: Explicit, granular, auditable
-  - No file access by default
-  - No network access by default
-  - No environment variable access by default
+- ✅ **Capability boundaries enforced OUTSIDE the runtime**: no file, network or
+  environment access beyond what the deployment grants
+  - ⚠ This replaced the Deno permission model when Deno was banned (2026-09-22).
+    Bun is the estate runtime and has **no granular permission flags**, so the
+    boundary cannot live in the runtime any more. Do not read "Bun" as a
+    drop-in for `--allow-net` / `--allow-read`; it has no such thing.
+  - The boundary is therefore the typed-wasm sandbox (AffineScript compiles to
+    it), the rootless Podman container, and the SDP network perimeter below.
 - ✅ Podman rootless containers
 - ✅ **Software-Defined Perimeter (SDP)** for network access
 - ✅ Zero Trust architecture
@@ -465,7 +469,7 @@ Cross-Origin-Resource-Policy: same-origin
 - **Rationale**: Architectural integrity > open contribution here
 
 **🧠 Perimeter 2: Expert Extensions (Trusted Contributors)**
-- **Languages**: Rust, Nickel, Bash, controlled Python
+- **Languages**: Rust, Nickel, Bash
 - **Scope**: Protocol extensions, shell plugins, compliance validators
 - **Contribution**: Apply via issue template → review → merge under `extensions/` or `emit/`
 - **Requirements**: Unit tests, docs, examples, SPDX headers
@@ -507,20 +511,46 @@ This is **graduated trust without gatekeeping**—everyone can contribute, but s
 
 ## Language Policy
 
+> **Updated 2026-09-22.** This section is the seed copy of the estate language
+> policy; its canonical source is `spec/LANGUAGE-POLICY.adoc` (rev 1.6.0) and its
+> machine-readable twin is `spec.scm/language-policy.scm` (MODULE-VERSION 2.0.0).
+> Where they disagree, the `.adoc` wins and this file is the defect. Four bans
+> ratified after this document was written were missing from it entirely, so it
+> was still recommending ReScript and Deno as destinations:
+>
+> | Banned | On | Replacement |
+> |---|---|---|
+> | Python (incl. the "SaltStack only" exception) | 2026-01-03 | AffineScript / Rust / Julia |
+> | ReScript | 2026-04-30 | AffineScript (directly - not via ReScript) |
+> | TypeScript | 2026-08-27 | AffineScript. Not a fallback tier. |
+> | Deno | 2026-09-22 | Bun (tier 1; `bunx` for one-off tooling) |
+
 ### Prohibited Languages
 
+❌ **ReScript**: Banned 2026-04-30
+- Replace with: AffineScript. Migrate `.res` directly to `.affine` - do not route new work through ReScript.
+
+❌ **TypeScript**: Banned 2026-08-27
+- Replace with: AffineScript. Owner ruling: *"no typescript ... that should not exist at all."*
+- It is **not** a fallback tier. Carve-outs are limited to `**/*.d.ts`, `**/bindings/ts/**` and `**/vscode/**`.
+
+❌ **Deno**: Banned 2026-09-22
+- Replace with: Bun. Owner ruling: *"deno is over, we're prioritising bun, and using bunx."*
+- Bun is Node-compatible and reads `package.json` + `bun.lock`. ⚠ `bun run` does **not** read a `deno.json` `tasks` map - those become Justfile recipes.
+
 ❌ **JavaScript**: Actively being eliminated
-- Replace with: ReScript → WASM, Deno (TypeScript if unavoidable)
+- Replace with: AffineScript → typed-wasm, run under Bun. TypeScript is NOT a fallback.
 - Build tools: Use Rust alternatives (rspack, turbopack)
 - npm scripts: Replace with Justfile commands
 
-❌ **Python**: Only in SaltStack (temporary)
+❌ **Python**: Fully banned (the SaltStack exception was removed 2026-01-03)
 - RVC rewrite in progress: Target is Rust or Elixir
 - SaltStack replacement: Nickel configs → Bash scripts directly
 
 ### Approved Languages
 
-✅ **ReScript** (OCaml soundness) - Frontend, type-safe web
+✅ **AffineScript** (affine/linear types) - Frontend, compiles to typed-wasm
+✅ **Bun** - JS runtime & package management (tier 1). `package.json` + `bun.lock`; `bunx <tool>` for one-off tooling
 ✅ **Rust** - Systems programming, memory safety
 ✅ **Julia** - Scientific computing, CLI tools, high-performance
 ✅ **Ada + SPARK** - Safety-critical, formal verification
@@ -580,7 +610,7 @@ This is **graduated trust without gatekeeping**—everyone can contribute, but s
 4. **Test thoroughly**
    - Offline mode
    - Concurrent operations (CRDT conflicts)
-   - Security boundaries (Deno permissions)
+   - Security boundaries (container + typed-wasm sandbox)
 
 5. **Document the fix**
    - Update 3-practice/SECURITY.md if vulnerability
@@ -600,7 +630,7 @@ This is **graduated trust without gatekeeping**—everyone can contribute, but s
    - Offline-first considerations
 
 3. **Then dive into specific details**
-   - Type safety guarantees (ReScript/Rust/Ada)
+   - Type safety guarantees (AffineScript/Rust/Ada)
    - CRDT operations if applicable
    - Supervision tree structure if Elixir
 
@@ -627,9 +657,9 @@ This is **graduated trust without gatekeeping**—everyone can contribute, but s
    - Offline-first violations
 
 3. **Suggest improvements for clarity**
-   - Type annotations (ReScript/Rust/Haskell)
+   - Type annotations (AffineScript/Rust/Haskell)
    - Error handling (Elixir supervision, Rust Result)
-   - Security boundaries (Deno permissions)
+   - Security boundaries (container + typed-wasm sandbox)
 
 4. **Verify documentation is complete**
    - DocGementer compliance
@@ -724,26 +754,26 @@ just check-offline    # Offline-first capability
 
 ### Migrating from JavaScript/Python
 
-#### JavaScript → ReScript/Rust
+#### JavaScript → AffineScript/Rust
 ```bash
 # 1. Identify JS files
 fd -e js -e jsx
 
-# 2. For frontend: Convert to ReScript
-# (Provides OCaml type safety, 10-100x faster compilation than TS)
+# 2. For frontend: Convert to AffineScript
+# (Affine/linear types; compiles to typed-wasm)
 
-# 3. For Node scripts: Convert to Deno or Justfile tasks
-# Deno provides secure-by-default runtime
+# 3. For Node scripts: Convert to Bun or Justfile tasks
+# Bun is Node-compatible: run the code, drop the runtime
 
 # 4. For build tools: Replace with Rust alternatives
 # webpack → rspack
 # esbuild → turbopack
 ```
 
-#### Python → Rust/Elixir/Nickel
+#### Python → AffineScript/Rust/Elixir/Julia/Nickel
 ```bash
-# 1. Identify Python files (exclude Salt states temporarily)
-fd -e py | grep -v salt
+# 1. Identify Python files (no exclusions - Python is fully banned)
+fd -e py
 
 # 2. For scripts: Convert to Nickel or Bash
 # Nickel for configuration/validation
@@ -774,18 +804,25 @@ defmodule MyApp.CRDTServer do
 end
 ```
 
-### Setting Up Deno Permissions
+### Setting Up Runtime Capability Boundaries
 
-```typescript
-// CADRE router with explicit permissions
-// deno run --allow-net=:8000 --allow-read=/public server.ts
+```javascript
+// CADRE router under Bun.
+// bun run server.js
+//
+// ⚠ Bun has NO per-process permission flags. There is no `--allow-net`
+// equivalent, so the boundary is declared by the deployment, not the command:
+//   - bind only the port you serve on
+//   - mount only the paths you read (rootless Podman, read-only volumes)
+//   - pass only the environment variables you need
+// Application logic that must be sandboxed compiles to typed-wasm instead.
 
-import { serve } from "https://deno.land/std/http/server.ts";
-
-// No file access except /public
-// No network access except port 8000
-// No environment variable access
-// All explicit, auditable
+Bun.serve({
+  port: 8000,
+  fetch(req) {
+    return new Response("ok");
+  },
+});
 ```
 
 ### Writing SPARK Proofs (Ada)
@@ -813,8 +850,8 @@ end Process_Data;
 
 ### Technologies
 - **Nickel**: https://nickel-lang.org/
-- **ReScript**: https://rescript-lang.org/
-- **Deno**: https://deno.land/
+- **AffineScript**: https://github.com/hyperpolymath/affinescript
+- **Bun**: https://bun.sh/
 - **CRDTs**: https://crdt.tech/
 - **SPARK**: https://www.adacore.com/about-spark
 - **Chainguard Wolfi**: https://chainguard.dev/unchained/introducing-wolfi-the-first-linux-un-distro
@@ -835,7 +872,7 @@ end Process_Data;
 2. **Offline-First**: Intermittent connectivity never blocks work
 3. **Formally Verified**: Correctness is care, use SPARK/Coq where critical
 4. **Community Over Ego**: TPCF graduated trust model
-5. **Post-JavaScript**: Eliminate JS/Python, use ReScript/Rust/Elixir/Ada/Haskell
+5. **Post-JavaScript**: Eliminate JS/Python, use AffineScript/Rust/Elixir/Ada/Haskell
 6. **Holistic Lifecycle**: Consider upstream dependencies to downstream human impact
 7. **Maximum Principal Reduction**: Only necessary processing, minimal exposure
 8. **Mutually Assured Accountability**: MAA framework embedded in architecture
@@ -851,14 +888,14 @@ end Process_Data;
 - ✅ Which TPCF perimeter does this affect?
 
 ### Never Do
-- ❌ Add JavaScript/Python without explicit justification
+- ❌ Add Python, TypeScript, ReScript or Deno at all - all four are banned outright
 - ❌ Use Docker (always Podman)
 - ❌ Use GitHub (always GitLab)
 - ❌ Add dependencies without vendoring/pinning
 - ❌ Create online-only features
 - ❌ Skip SPDX headers
 - ❌ Ignore accessibility
-- ❌ Bypass Deno permissions
+- ❌ Bypass the sandbox or capability boundary
 
 ### When in Doubt
 - Ask for clarification (don't assume)
