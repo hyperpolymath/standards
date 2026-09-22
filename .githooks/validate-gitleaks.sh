@@ -47,11 +47,28 @@ if ! command -v gitleaks >/dev/null 2>&1; then
   exit 1
 fi
 
-# `protect --staged` is the correct call for gitleaks 8.x. Verified on the
-# installed binary: it exposes `detect` and `protect` only — there is no
-# `gitleaks git` subcommand, and calling one would exit non-zero as "unknown
-# command", LOOKING fail-closed while having scanned nothing.
-if gitleaks git --staged --verbose --redact; then
+# Gitleaks moved staged scanning between major versions: 8.x exposes
+# `protect --staged`, and newer releases expose `git --staged` while hiding
+# `protect`. PROBE for the subcommand instead of assuming either one.
+#
+# ⚠ Do not hard-code `gitleaks git` here. MEASURED 2026-09-22 on the installed
+# binary, whose subcommands are exactly: completion, detect, help, protect,
+# version. `gitleaks git` exits 1 as an unknown command — and because the
+# failure branch below treats ANY non-zero exit as a finding, that reports
+# "SECRET DETECTED" and refuses every commit while having scanned NOTHING.
+# A gate that has scanned nothing must never be able to look like either a
+# pass or a finding.
+if gitleaks git --help >/dev/null 2>&1; then
+  GITLEAKS_STAGED=(gitleaks git --staged --verbose --redact)
+elif gitleaks protect --help >/dev/null 2>&1; then
+  GITLEAKS_STAGED=(gitleaks protect --staged --verbose --redact)
+else
+  echo -e "${RED}[gitleaks] installed gitleaks exposes neither 'git --staged' nor" >&2
+  echo -e "  'protect --staged'. Refusing to report a pass from a scan that cannot run.${NC}" >&2
+  exit 1
+fi
+
+if "${GITLEAKS_STAGED[@]}"; then
   echo -e "${GREEN}[gitleaks] no secrets detected in ${STAGED_COUNT} staged file(s).${NC}"
   exit 0
 fi

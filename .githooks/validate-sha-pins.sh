@@ -44,11 +44,18 @@ is_vendored() { case "$1" in *"${VENDORED_MARK}"*) return 0 ;; *) return 1 ;; es
 # this repo's own composite actions and `docker://` refs are container images, not
 # actions -- neither is modelled by actions.lock, which keys actions only.
 UNPINNED_FILTER() {
-  grep -nE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]+[A-Za-z0-9]' \
-    | grep -vE 'uses:[[:space:]]+[./]' \
-    | grep -vE 'uses:[[:space:]]+docker://' \
-    | grep -vE 'uses:[[:space:]]+[^[:space:]@]+@[0-9a-f]{40}([^0-9a-f]|$)' \
-    || true
+  # `$/...` is NOT valid `uses:` syntax (GitHub Actions has no such thing) —
+  # `gh actions-lock` REWRITE MODE once invented `uses: $/.github/actions/...`
+  # and every workflow carrying it died at startup. The alnum-first selector
+  # below would silently skip such lines, so they are flagged explicitly:
+  # waving that corruption through is the exact failure this gate exists to
+  # catch. (Zero matches tree-wide today; this arm is purely prospective.)
+  { grep -nE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]+[A-Za-z0-9]' \
+      | grep -vE 'uses:[[:space:]]+[./]' \
+      | grep -vE 'uses:[[:space:]]+docker://' \
+      | grep -vE 'uses:[[:space:]]+[^[:space:]@]+@[0-9a-f]{40}([^0-9a-f]|$)' \
+      || true;
+    grep -nE 'uses:[[:space:]]+\$/' || true; }
 }
 
 validate_file() {
