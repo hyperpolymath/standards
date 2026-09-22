@@ -234,6 +234,62 @@ else
   ok "empty target list: refused"
 fi
 
+
+# ================================================================ CASE 7
+# THE FAIL-OPEN REFUSAL: a derivation fetch that FAILS must never be read as
+# "this workflow contributes no contexts". Measured 2026-09-22 on
+# hyperpolymath/standards: a swallowed error dropped 2 of 18 required
+# contexts and the run still reported GATED. A short gate is a weak gate,
+# and nothing in the output said so.
+#
+# Fixture shape: governance.yml resolves and yields jobs; codeql.yml resolves
+# to run 22 but its JOBS fixture is ABSENT, so the shim exits non-zero --
+# exactly a transient API failure.
+reset_fix
+R=acme/flaky
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"},{"name":"codeql.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":22}]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
+# NOTE: no fixture for run 22's jobs -- the shim will exit 1.
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+
+OUT=$(run_applier "$R" --apply)
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "REFUSED" ] && ok "flaky derive: state is REFUSED" || bad "flaky derive: state=$S (want REFUSED)"
+case "$D" in *"derive_failed=["*"codeql.yml"*) ok "flaky derive: the failed workflow is NAMED, not silently absent" ;; *) bad "flaky derive: failure not reported — $D" ;; esac
+[ -s "$FIX/PUTS.log" ] && bad "flaky derive: PUT a gate built from an incomplete read" || ok "flaky derive: no PUT even with --apply"
+
+# ---- MUTANT C: delete the incomplete-read refusal. The suite MUST go red. ----
+# This is the mutant that matters: without it the applier does not error, it
+# writes a SHORTER gate and calls it success.
+MUTC="$WORK/mutant-c.sh"
+sed 's|if \[ -n "\$DERIVEFAIL" \]; then|if false; then|' "$APPLIER" > "$MUTC"
+reset_fix
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"},{"name":"codeql.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":22}]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+OUT=$(MUTANT="$MUTC" run_applier "$R" --apply)
+if [ "$(state_of "$OUT")" = "REFUSED" ]; then
+  bad "MUTANT C SURVIVED: refusal removed yet still REFUSED — the control is decorative"
+else
+  ok "mutant C killed: without the refusal it becomes $(state_of "$OUT") and PUTs $(wc -l < "$FIX/PUTS.log") time(s)"
+fi
+if [ -r "$FIX/LAST_PUT.json" ] &&
+   [ "$(jq '[.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks|length]|add // 0' "$FIX/LAST_PUT.json")" = "1" ]; then
+  ok "mutant C wrote the SHORTENED gate (1 context, not 2) — the silent weakening being guarded"
+else
+  bad "mutant C: expected a 1-context gate from the incomplete read"
+fi
+
 echo
 echo "passed=$pass failed=$fail"
 [ "$fail" -eq 0 ]

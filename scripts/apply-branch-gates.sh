@@ -210,14 +210,28 @@ while IFS= read -r R; do
   done < "$WORK/gatewf"
 
   # ---- 2. DERIVE contexts from real runs --------------------------------
-  : > "$WORK/ctx"; NORUN=''
+  # FAIL CLOSED.  A swallowed API error here raises nothing -- it silently
+  # SHORTENS the list, and the gate is written weaker than intended while
+  # every other line of output still reports success.  (Measured 2026-09-22:
+  # this dropped 2 of 18 required contexts on standards/main.)  So capture
+  # the exit status of every fetch and refuse to write if any one failed.
+  : > "$WORK/ctx"; NORUN=''; DERIVEFAIL=''
   while IFS= read -r WFN; do
     [ -n "$WFN" ] || continue
-    RID=$(gh api "repos/$R/actions/workflows/$WFN/runs?branch=$DEF&per_page=1" \
-            --jq '.workflow_runs[0].id // empty' 2>/dev/null)
+    if ! RID=$(gh api "repos/$R/actions/workflows/$WFN/runs?branch=$DEF&per_page=1" \
+                 --jq '.workflow_runs[0].id // empty'); then
+      DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(runs-query-failed)"; continue
+    fi
     if [ -z "$RID" ]; then NORUN="${NORUN:+$NORUN,}$WFN"; continue; fi
-    gh api "repos/$R/actions/runs/$RID/jobs?per_page=100" --paginate \
-      --jq '.jobs[]?|.name' 2>/dev/null >> "$WORK/ctx"
+    if ! gh api "repos/$R/actions/runs/$RID/jobs?per_page=100" --paginate \
+           --jq '.jobs[]?|.name' > "$WORK/jobs1"; then
+      DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(jobs-query-failed)"; continue
+    fi
+    # a run that EXISTS but reports zero jobs is a failed read, not an empty gate
+    if [ ! -s "$WORK/jobs1" ]; then
+      DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(run $RID returned zero jobs)"; continue
+    fi
+    cat "$WORK/jobs1" >> "$WORK/ctx"
   done < "$WORK/gatewf2"
 
   sort -u "$WORK/ctx" -o "$WORK/ctx"
@@ -229,20 +243,26 @@ while IFS= read -r R; do
   done < "$WORK/ctx"
 
   # ---- optional: keep only contexts that are RELIABLY green ------------
+  # The same rule in the other direction: an UNREAD run cannot prove a
+  # context green, so a failed fetch here must refuse, never silently admit.
   NOTGREEN=''
   if [ "$REQUIRE_GREEN" -gt 0 ] 2>/dev/null; then
     : > "$WORK/bad"
     while IFS= read -r WFN; do
       [ -n "$WFN" ] || continue
-      gh api "repos/$R/actions/workflows/$WFN/runs?branch=$DEF&per_page=$REQUIRE_GREEN" \
-        --jq '.workflow_runs[]?.id' 2>/dev/null > "$WORK/rids"
+      if ! gh api "repos/$R/actions/workflows/$WFN/runs?branch=$DEF&per_page=$REQUIRE_GREEN" \
+             --jq '.workflow_runs[]?.id' > "$WORK/rids"; then
+        DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(green-runs-query-failed)"; continue
+      fi
       while IFS= read -r RID2; do
         [ -n "$RID2" ] || continue
         # a job is acceptable when success/skipped/neutral, or still running
-        gh api "repos/$R/actions/runs/$RID2/jobs?per_page=100" --paginate \
-          --jq '.jobs[]? | select((.conclusion // "pending") as $c
-                 | ["success","skipped","neutral","pending"] | index($c) | not) | .name' \
-          2>/dev/null >> "$WORK/bad"
+        if ! gh api "repos/$R/actions/runs/$RID2/jobs?per_page=100" --paginate \
+               --jq '.jobs[]? | select((.conclusion // "pending") as $c
+                     | ["success","skipped","neutral","pending"] | index($c) | not) | .name' \
+               >> "$WORK/bad"; then
+          DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(run $RID2 green-check-failed)"
+        fi
       done < "$WORK/rids"
     done < "$WORK/gatewf2"
     sort -u "$WORK/bad" -o "$WORK/bad"
@@ -260,6 +280,15 @@ while IFS= read -r R; do
   [ -n "$NOTGREEN" ] && DETAIL="$DETAIL not_green=[$NOTGREEN]"
   [ -n "$NORUN" ]   && DETAIL="$DETAIL no_run=[$NORUN]"
   [ -n "$EXCLUDED" ] && DETAIL="$DETAIL excluded=[$EXCLUDED]"
+
+  # ---- THE OTHER REFUSAL: a gate derived from an incomplete read --------
+  # An unread run is not an absent context.  Writing here would produce a
+  # real, plausible, permanent ruleset that is simply WEAKER than intended,
+  # reported as success, with nothing anywhere to say so.
+  if [ -n "$DERIVEFAIL" ]; then
+    emit "$R" "REFUSED" "$DETAIL derive_failed=[$DERIVEFAIL] — refusing to write a gate derived from an incomplete read"
+    continue
+  fi
 
   # ---- THE REFUSAL: a rule with an empty list is a vacuous gate ---------
   if [ "$NCTX" -eq 0 ]; then
