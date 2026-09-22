@@ -1,0 +1,758 @@
+# SPDX-License-Identifier: MPL-2.0
+#
+# CI Pipeline (reusable) — secrets, SAST, per-ecosystem lint/format, coverage.
+#
+# Consumed by both @hyperpolymath and @metadatastician repos through a thin
+# caller. Everything here is READ-ONLY verification: no `--fix`, no bare `fmt`,
+# no command that rewrites a tracked file. A CI run must never author a diff.
+#
+# Three design decisions worth reading before editing:
+#
+#   1. DETECTION IS PER-REPO, AND THE DENOMINATOR IS PRINTED.
+#      Each ecosystem job is gated on files this repo actually tracks. A repo
+#      with no recognised ecosystem FAILS `detect` rather than sailing through
+#      green having checked nothing — a gate pointed at zero files is not a
+#      pass. `detect` prints the count it matched per ecosystem, so the
+#      denominator is always visible, never inferred.
+#
+#   2. RUST DELEGATES; IT IS NOT REIMPLEMENTED.
+#      `rust-ci-reusable.yml` already runs `cargo check --locked`,
+#      `cargo fmt --all -- --check` and `cargo clippy --locked -D warnings`,
+#      and already does coverage via cargo-llvm-cov against a ratchet floor,
+#      writing to $GITHUB_STEP_SUMMARY with no external service. Duplicating it
+#      here would create a second, drifting copy. Nested reusable refs are
+#      fully qualified (never `./`) because `./` resolution inside a nested
+#      reusable called from another repo is not worth a startup failure.
+#
+#   3. SAST FINDINGS ARE ADVISORY; SAST VACUITY IS FATAL.
+#      Owner standing ruling: a NEW scanner finding does not block a merge, it
+#      becomes an issue with acceptance criteria. So semgrep findings are
+#      reported, not thrown — unless `sast_blocking: true`. What IS fatal, and
+#      unconditionally so, is semgrep scanning ZERO files: `p/default` has thin
+#      Rust coverage, and a 0-file scan would otherwise report a cheerful green
+#      having examined nothing at all.
+#
+# Language-policy note: ReScript, V-lang and Deno are BANNED for new code
+# (.claude/CLAUDE.md, owner rulings 2026-04-30 / 2026-04-10 / 2026-08-26).
+# The ReScript and V jobs serve grandfathered trees still in migration and emit
+# a ::warning:: saying so — a migration courtesy, not a licence.
+#
+# DENO IS DIFFERENT, as of 2026-09-22. Its job no longer lints; it REFUSES,
+# and the only way past it is the central shrink-only ledger
+# `.machine_readable/deno-allow.txt` in `standards`. A ::warning:: cannot fail
+# a job, so the old shape lint-checked — and thereby blessed — the very thing
+# it called banned.
+
+name: CI Pipeline (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: Runner label for every job in this pipeline.
+        type: string
+        default: ubuntu-latest
+      enable_sast:
+        description: Run the semgrep SAST job.
+        type: boolean
+        default: true
+      sast_blocking:
+        description: >-
+          Fail the build on semgrep findings. Default false per the owner's
+          standing ruling that a new scanner finding is an issue, not a
+          blocker. The zero-files-scanned check is fatal regardless.
+        type: boolean
+        default: false
+      enable_coverage:
+        description: Pass through to rust-ci-reusable.yml.
+        type: boolean
+        default: true
+      coverage_floor:
+        description: >-
+          Minimum coverage percentage. Ratchet upward, never lower.
+        type: string
+        default: '0'
+      fail_on_no_ecosystem:
+        description: >-
+          Fail `detect` when no known ecosystem is found. Leave true: this is
+          the guard against a pipeline that passes by matching nothing.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────
+  # detect — the denominator
+  # ───────────────────────────────────────────────────────────────────────
+  detect:
+    name: Detect ecosystems
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      has_rust: ${{ steps.scan.outputs.has_rust }}
+      has_nickel: ${{ steps.scan.outputs.has_nickel }}
+      has_rescript: ${{ steps.scan.outputs.has_rescript }}
+      has_v: ${{ steps.scan.outputs.has_v }}
+      has_haskell: ${{ steps.scan.outputs.has_haskell }}
+      has_deno: ${{ steps.scan.outputs.has_deno }}
+      # The Deno gate REFUSES and names what it found, so it needs the
+      # count itself, not merely the boolean.
+      n_deno: ${{ steps.scan.outputs.n_deno }}
+      total: ${{ steps.scan.outputs.total }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Scan tracked files for ecosystem markers
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # `git ls-files` lists TRACKED files only. `find` would descend into
+          # vendored trees (node_modules/, deps/, target/) and report an
+          # ecosystem this repo does not own.
+          count() {
+            git ls-files -z -- "$@" | tr -cd '\0' | wc -c
+          }
+
+          N_RUST=$(count 'Cargo.toml' '*/Cargo.toml')
+          N_NICKEL=$(count '*.ncl')
+          N_RESCRIPT=$(count 'rescript.json' '*/rescript.json' 'bsconfig.json' '*/bsconfig.json' '*.res')
+          # V is gated on `v.mod` ALONE. The `.v` extension is shared with Coq
+          # proof scripts and Verilog sources, so globbing `*.v` would install
+          # a V toolchain to lint a Coq development.
+          N_V=$(count 'v.mod' '*/v.mod')
+          N_HASKELL=$(count '*.cabal' 'stack.yaml' '*/stack.yaml' '*.hs')
+          N_DENO=$(count 'deno.json' '*/deno.json' 'deno.jsonc' '*/deno.jsonc')
+
+          TOTAL=$(( N_RUST + N_NICKEL + N_RESCRIPT + N_V + N_HASKELL + N_DENO ))
+
+          bool() { [ "$1" -gt 0 ] && echo true || echo false; }
+
+          {
+            echo "has_rust=$(bool "$N_RUST")"
+            echo "has_nickel=$(bool "$N_NICKEL")"
+            echo "has_rescript=$(bool "$N_RESCRIPT")"
+            echo "has_v=$(bool "$N_V")"
+            echo "has_haskell=$(bool "$N_HASKELL")"
+            echo "has_deno=$(bool "$N_DENO")"
+            echo "n_deno=$N_DENO"
+            echo "total=$TOTAL"
+          } >> "$GITHUB_OUTPUT"
+
+          # Print the denominator. A gate that never shows what it measured
+          # cannot be distinguished from a gate that measured nothing.
+          {
+            echo "### Ecosystem detection"
+            echo ""
+            echo "| Ecosystem | Marker | Tracked files matched |"
+            echo "|---|---|---|"
+            echo "| Rust | \`Cargo.toml\` | ${N_RUST} |"
+            echo "| Nickel | \`*.ncl\` | ${N_NICKEL} |"
+            echo "| ReScript | \`rescript.json\`, \`bsconfig.json\`, \`*.res\` | ${N_RESCRIPT} |"
+            echo "| V | \`v.mod\` only | ${N_V} |"
+            echo "| Haskell | \`*.cabal\`, \`stack.yaml\`, \`*.hs\` | ${N_HASKELL} |"
+            echo "| Deno | \`deno.json(c)\` | ${N_DENO} |"
+            echo "| **Total** | | **${TOTAL}** |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$TOTAL" -eq 0 ]; then
+            if [ "${{ inputs.fail_on_no_ecosystem }}" = "true" ]; then
+              echo "::error::No known ecosystem detected (denominator = 0). Every lint and format gate would be vacuous, so this pipeline refuses to report success. Add the ecosystem's marker file, or call this workflow with fail_on_no_ecosystem: false and say why."
+              echo "**REFUSED: denominator is zero — no ecosystem matched, so nothing could be checked.**" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            echo "::warning::No known ecosystem detected; fail_on_no_ecosystem is false, so continuing with nothing to check."
+          fi
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 1a — secret scanning (delegated: pinned, sha256-verified gitleaks)
+  # ───────────────────────────────────────────────────────────────────────
+  secret-scan:
+    name: Secret scanning
+    # Deliberately NOT gated on `detect`: a repo with no recognised ecosystem
+    # can still be leaking credentials.
+    uses: hyperpolymath/standards/.github/workflows/secret-scanner-reusable.yml@571cc734cd69fb846032ec77a662aa8ee4fc32cd
+    with:
+      runs-on: ${{ inputs.runs-on }}
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 1b — SAST (semgrep OSS rulesets, no account, no telemetry)
+  # ───────────────────────────────────────────────────────────────────────
+  sast:
+    name: SAST (semgrep)
+    if: ${{ inputs.enable_sast }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run semgrep (p/default + p/security-audit)
+        id: semgrep
+        shell: bash
+        env:
+          # Digest resolved from the Docker Hub registry, not copied from a
+          # tag. A tag is mutable; this is the image or nothing.
+          SEMGREP_IMAGE: semgrep/semgrep@sha256:10301f060aacf84078f9704fb1ba3a321df4ac46b009fd29c1c66880d1db8e77
+        run: |
+          set -uo pipefail
+
+          # Run through `docker run` rather than a job-level `container:` so
+          # that checkout and the jq post-processing happen on the runner,
+          # where jq is preinstalled. The semgrep image's own tooling is not
+          # relied upon for anything but semgrep itself.
+          #
+          # --metrics off: OSS rulesets, no account, nothing phoned home.
+          # A config that fails to resolve makes semgrep exit non-zero, so
+          # "the ruleset did not download" cannot masquerade as "clean".
+          set +e
+          docker run --rm \
+            -v "${PWD}:/src" -w /src \
+            "$SEMGREP_IMAGE" \
+            semgrep scan \
+              --config p/default \
+              --config p/security-audit \
+              --metrics off \
+              --disable-version-check \
+              --json --output /src/semgrep.json \
+            2> "$RUNNER_TEMP/semgrep.err"
+          SEMGREP_RC=$?
+          set -e
+
+          echo "semgrep exit code: $SEMGREP_RC"
+          echo "--- semgrep stderr (rule loading and scan totals) ---"
+          cat "$RUNNER_TEMP/semgrep.err" || true
+          echo "-----------------------------------------------------"
+
+          if [ ! -s semgrep.json ]; then
+            echo "::error::semgrep produced no JSON report (exit $SEMGREP_RC). Treating as a scan failure, not as a clean result."
+            echo "### SAST (semgrep): FAILED — no report produced" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # A report can exist and still be PARTIAL: semgrep exits non-zero on
+          # rule-loading and scan errors while still writing what it managed to
+          # collect. Reading only the JSON would report that truncated scan as a
+          # clean tree. The exit code is the only signal that separates them.
+          if [ "$SEMGREP_RC" -ne 0 ]; then
+            echo "::error::semgrep exited $SEMGREP_RC. A partial report is not a clean result."
+            echo "### SAST (semgrep): FAILED — scanner exited $SEMGREP_RC" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          SCANNED=$(jq '(.paths.scanned // []) | length' semgrep.json)
+          FINDINGS=$(jq '(.results // []) | length' semgrep.json)
+          RULES_FIRED=$(jq '[(.results // [])[].check_id] | unique | length' semgrep.json)
+          ERRORS=$(jq '(.errors // []) | length' semgrep.json)
+
+          {
+            echo "### SAST (semgrep)"
+            echo ""
+            echo "| Measure | Value |"
+            echo "|---|---|"
+            echo "| Files scanned | ${SCANNED} |"
+            echo "| Findings | ${FINDINGS} |"
+            echo "| Distinct rules fired | ${RULES_FIRED} |"
+            echo "| Scan errors | ${ERRORS} |"
+            echo "| Rulesets | \`p/default\`, \`p/security-audit\` |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # THE LOAD-BEARING ASSERTION. Zero files scanned means every rule in
+          # both rulesets was applied to nothing, which produces exactly the
+          # same green tick as a genuinely clean tree.
+          if [ "$SCANNED" -eq 0 ]; then
+            echo "::error::semgrep scanned 0 files. Zero findings over zero files is not a clean result — it is no result. Failing rather than reporting a vacuous pass."
+            echo "**REFUSED: 0 files scanned — a vacuous pass, not a clean tree.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if [ "$FINDINGS" -gt 0 ]; then
+            {
+              echo "| Severity | Rule | File | Line |"
+              echo "|---|---|---|---|"
+              jq -r '(.results // [])[:100][]
+                | "| \(.extra.severity // "INFO") | `\(.check_id)` | `\(.path)` | \(.start.line) |"' \
+                semgrep.json
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            if [ "${{ inputs.sast_blocking }}" = "true" ]; then
+              echo "::error::semgrep reported ${FINDINGS} finding(s) and sast_blocking is true."
+              exit 1
+            fi
+            # Advisory by owner ruling: a new scanner finding is an issue with
+            # acceptance criteria, not a merge blocker. The findings are in the
+            # step summary above, so this is visible rather than swallowed.
+            echo "::warning::semgrep reported ${FINDINGS} finding(s). Advisory by standing ruling — raise an issue with acceptance criteria. Set sast_blocking: true to gate on these."
+          fi
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 2/3 — Rust: lint, format, build, test, coverage (delegated)
+  # ───────────────────────────────────────────────────────────────────────
+  rust:
+    name: Rust
+    needs: detect
+    if: ${{ needs.detect.outputs.has_rust == 'true' }}
+    uses: hyperpolymath/standards/.github/workflows/rust-ci-reusable.yml@571cc734cd69fb846032ec77a662aa8ee4fc32cd
+    with:
+      runs-on: ${{ inputs.runs-on }}
+      enable_coverage: ${{ inputs.enable_coverage }}
+      coverage_floor: ${{ inputs.coverage_floor }}
+      # Read-only. `-D warnings` promotes every warning to an error, which is
+      # the "fail on warnings" the spec asked for.
+      clippy_args: '--all-targets -- -D warnings'
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 2 — Nickel
+  # ───────────────────────────────────────────────────────────────────────
+  nickel:
+    name: Nickel
+    needs: detect
+    if: ${{ needs.detect.outputs.has_nickel == 'true' }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Nickel (pinned, sha256-verified)
+        shell: bash
+        env:
+          NICKEL_VERSION: '1.18.0'
+          # Computed locally from the release asset, not transcribed from a
+          # web page. Same discipline as secret-scanner-reusable.yml's gitleaks
+          # pin: a download whose bytes are not checked is not a pin.
+          NICKEL_SHA256: '9cba4dd65ae9915ec61f73033aafcff307a377665a83fd8f530df086763318cb'
+        run: |
+          set -euo pipefail
+          URL="https://github.com/tweag/nickel/releases/download/${NICKEL_VERSION}/nickel-x86_64-linux"
+          curl -sSfL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -o "$RUNNER_TEMP/nickel" "$URL"
+          echo "${NICKEL_SHA256}  ${RUNNER_TEMP}/nickel" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/nickel"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Nickel format check + typecheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' FILES < <(git ls-files -z -- '*.ncl')
+          echo "Nickel files: ${#FILES[@]}"
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::detect said Nickel was present but zero .ncl files are tracked here. Refusing to report a pass over an empty set."
+            exit 1
+          fi
+          FAILED=0
+          for f in "${FILES[@]}"; do
+            # --check is read-only: it reports, it does not rewrite the file.
+            nickel format --check "$f" || { echo "::error file=$f::not formatted (nickel format --check)"; FAILED=1; }
+            nickel typecheck "$f" || { echo "::error file=$f::failed nickel typecheck"; FAILED=1; }
+          done
+          {
+            echo "### Nickel"
+            echo ""
+            echo "- files checked: **${#FILES[@]}**"
+            echo "- result: $( [ "$FAILED" -eq 0 ] && echo 'pass' || echo '**FAIL**' )"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$FAILED"
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 2 — Deno REFUSAL gate (BANNED; shrink-only ledger exemption)
+  # ───────────────────────────────────────────────────────────────────────
+  #
+  # Owner ruling: "deno is over, we're prioritising bun, and using bunx."
+  # This job used to install a pinned Deno binary and run `deno lint` /
+  # `deno fmt --check`, announcing the ban with a `::warning::`. A
+  # `::warning::` CANNOT fail a job, so that job asserted the opposite of what
+  # it said: it lint-checked, and thereby blessed, the very thing it called
+  # banned. It now REFUSES, and the only way past it is the central
+  # shrink-only ledger `.machine_readable/deno-allow.txt` in `standards`.
+  #
+  # Both outcomes print their denominator. A gate that only ever says yes
+  # proves nothing, and an exemption that reports nothing is a silent pass.
+  deno:
+    name: Deno (banned)
+    needs: detect
+    if: ${{ needs.detect.outputs.has_deno == 'true' }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The ledger is CENTRAL: one file in `standards`, not a per-repo opt-out,
+      # so the estate's Deno debt is countable from one place and the ratchet
+      # can forbid its growth. Pinned to an immutable commit for the same
+      # reason as the governance helpers — `github.workflow_sha` resolves to
+      # the CALLER's commit, and following `main` would let an edit in
+      # `standards` change the verdict of every already-pinned caller with no
+      # review in their repositories.
+      - name: Checkout the pinned Standards Deno ledger
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          # 938264d8 is the commit that introduced the ledger. ⚠ BUMP THIS
+          # whenever .machine_readable/deno-allow.txt changes, or the gate goes
+          # on judging callers against a stale list. A stale list is SAFE in
+          # one direction only: a repository that migrated off Deno stops
+          # tracking deno.json, so the job does not run at all and its lingering
+          # exemption never fires. A repository that is ADDED to the ledger
+          # stays red here until this pin moves — which is the correct default,
+          # because the addition needs a Ratchet-exception trailer anyway.
+          ref: 938264d8b0bbc3ca079e3d02efff5c1d423d0329
+          path: .standards-deno-ledger
+          sparse-checkout: |
+            .machine_readable/deno-allow.txt
+          sparse-checkout-cone-mode: false
+        # Not fatal here: the next step names precisely what was missing and
+        # then FAILS CLOSED. A fetch failure must never read as an exemption.
+        continue-on-error: true
+
+      - name: Refuse Deno unless this repository is ledgered
+        shell: bash
+        env:
+          LEDGER: .standards-deno-ledger/.machine_readable/deno-allow.txt
+          SLUG: ${{ github.repository }}
+          N_DENO: ${{ needs.detect.outputs.n_deno }}
+        run: |
+          # LEDGER, SLUG and N_DENO come from the step `env:` map above.
+          set -euo pipefail
+
+          # FAIL CLOSED. "Could not read the ledger" is not "is exempt".
+          if [ ! -f "$LEDGER" ]; then
+            echo "::error::Deno gate: the central ledger could not be read ($LEDGER). This is NOT an exemption — the gate refuses rather than guess. Check the pinned ref of the 'Checkout the pinned Standards Deno ledger' step."
+            {
+              echo "### Deno (banned)"
+              echo ""
+              echo "**REFUSED: the exemption ledger could not be read.** A gate that cannot"
+              echo "check its exemption list must not pass; this is not an exemption."
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # Strip comments and blanks; this is also the ledger's own denominator.
+          ALLOWED="$(grep -vE '^[[:space:]]*(#|$)' "$LEDGER" || true)"
+          N_ALLOWED="$(printf '%s' "$ALLOWED" | grep -c . || true)"
+
+          # What this repository actually tracks, named rather than counted, so
+          # the migration has a list to work from.
+          CONFIGS="$(git ls-files -- 'deno.json' '*/deno.json' 'deno.jsonc' '*/deno.jsonc')"
+
+          echo "Deno debt: ${N_ALLOWED} ledgered repositories estate-wide."
+          echo "This repository (${SLUG}) tracks ${N_DENO} Deno config file(s):"
+          printf '%s\n' "$CONFIGS" | sed 's/^/  - /'
+
+          if printf '%s\n' "$ALLOWED" | grep -Fxq "$SLUG"; then
+            echo "::notice::${SLUG} is on the Deno exemption ledger (${N_ALLOWED} repositories). Deno remains BANNED: this is grandfathered debt, not a licence. Port the deno.json 'tasks' map to package.json scripts run by 'bun run', delete the config, then delete this repository's line from .machine_readable/deno-allow.txt."
+            {
+              echo "### Deno (banned) — ledgered debt"
+              echo ""
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Repository | \`${SLUG}\` |"
+              echo "| Deno configs tracked here | **${N_DENO}** |"
+              echo "| Ledgered repositories estate-wide | **${N_ALLOWED}** |"
+              echo "| Verdict | exempt (shrink-only ledger) |"
+              echo ""
+              echo "Tracked configs:"
+              echo ""
+              # Backticks below are literal markdown, not command substitution.
+              # shellcheck disable=SC2016
+              printf '%s\n' "$CONFIGS" | sed 's/^/- `/; s/$/`/'
+              echo ""
+              echo "_Exempt is not approved._ Deno is banned estate-wide. The ledger is"
+              echo "SHRINK-ONLY: \`scripts/check-exemption-ratchet.sh\` fails any commit that"
+              echo "adds a line to it without a \`Ratchet-exception\` trailer naming the file."
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "::error::Deno is BANNED (owner ruling: 'deno is over, we're prioritising bun, and using bunx'). ${SLUG} tracks ${N_DENO} Deno config file(s) and is NOT on the exemption ledger (${N_ALLOWED} repositories listed). Migrate to Bun: port the deno.json 'tasks' map to package.json scripts run by 'bun run' — 'bun run' does not read a deno.json tasks map — and delete the config."
+          {
+            echo "### Deno (banned) — REFUSED"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Repository | \`${SLUG}\` |"
+            echo "| Deno configs tracked here | **${N_DENO}** |"
+            echo "| Ledgered repositories estate-wide | **${N_ALLOWED}** |"
+            echo "| Verdict | **REFUSED — not ledgered** |"
+            echo ""
+            echo "Tracked configs:"
+            echo ""
+            # Backticks below are literal markdown, not command substitution.
+            # shellcheck disable=SC2016
+            printf '%s\n' "$CONFIGS" | sed 's/^/- `/; s/$/`/'
+            echo ""
+            echo "Deno is banned estate-wide. Migrate to Bun, or — if this is genuinely"
+            echo "grandfathered debt — add \`${SLUG}\` to"
+            echo "\`.machine_readable/deno-allow.txt\` in \`hyperpolymath/standards\` with a"
+            echo "\`Ratchet-exception: .machine_readable/deno-allow.txt — <why>\` commit"
+            echo "trailer, and bump this workflow's ledger pin."
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 2 — ReScript (grandfathered; banned for new code)
+  # ───────────────────────────────────────────────────────────────────────
+  rescript:
+    name: ReScript
+    needs: detect
+    if: ${{ needs.detect.outputs.has_rescript == 'true' }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Policy notice
+        run: |
+          echo "::warning::ReScript is BANNED for new code (owner ruling 2026-04-30). Existing .res migrates to .affine directly — AffineScript, not TypeScript. This job serves a grandfathered tree mid-migration."
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # An npm lifecycle script is arbitrary code execution at CI
+          # privilege, so scripts stay off. MEASURED 2026-09-22 against the
+          # registry: rescript 11.1.4 declares postinstall
+          # 'node scripts/rescript_postinstall.js', but 12.3.1 declares NO
+          # postinstall at all -- it ships the compiler as per-platform
+          # optionalDependencies. So the flag only costs anything on the
+          # superseded major, and ReScript is a banned language here in any
+          # case: this job exists to lint grandfathered sources, not to make
+          # legacy installs convenient.
+          #
+          # --frozen-lockfile is the other half: without it bun may resolve a
+          # floating range, and CI would then be testing a compiler the repo
+          # does not pin.
+          bun install --frozen-lockfile --ignore-scripts
+
+          # A missing binary after that install must be an ERROR, not a
+          # silent fall-through to a build step that cannot run. A skip is
+          # not a pass.
+          if ! bunx --no-install rescript -h >/dev/null 2>&1; then
+            echo "::error::rescript is not present after a --frozen-lockfile --ignore-scripts install. Upgrade to rescript >= 12, which needs no lifecycle script, or add the compiler to the lockfile. Lifecycle scripts are deliberately not enabled in this workflow."
+            exit 1
+          fi
+
+      - name: ReScript build (warnings are errors) + format check
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAILED=0
+
+          # A compile IS the lint for ReScript; -warn-error +a promotes every
+          # warning. This writes to lib/, which is compiler output and not a
+          # tracked source file.
+          bunx --no-install rescript build -with-deps -warn-error +a || FAILED=1
+
+          # `rescript format` gained -check at different points in different
+          # majors. Probe for the capability rather than assume it: a gate that
+          # fails because the flag does not exist tells you nothing about the
+          # code, and one that silently passes tells you less.
+          if bunx --no-install rescript format --help 2>&1 | grep -q -- '-check'; then
+            bunx --no-install rescript format -all -check || { echo "::error::ReScript sources are not formatted"; FAILED=1; }
+            FMT='checked'
+          else
+            echo "::warning::The installed rescript CLI has no 'format -check'; the format gate did NOT run. This is a skip, not a pass."
+            FMT='**SKIPPED — CLI lacks -check**'
+          fi
+
+          {
+            echo "### ReScript"
+            echo ""
+            echo "- \`rescript build -warn-error +a\`: $( [ "$FAILED" -eq 0 ] && echo 'pass' || echo '**FAIL**' )"
+            echo "- format check: ${FMT}"
+            echo "- policy: **banned for new code**, migrates to AffineScript"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$FAILED"
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 2 — V (grandfathered; banned, migration to Zig completed 2026-05-28)
+  # ───────────────────────────────────────────────────────────────────────
+  v-lang:
+    name: V
+    needs: detect
+    if: ${{ needs.detect.outputs.has_v == 'true' }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Policy notice
+        run: |
+          echo "::warning::V-lang is BANNED (owner ruling 2026-04-10; estate migration to Zig COMPLETED 2026-05-28 across 16 PRs). A v.mod here means either a carve-out (v-cartridge / v-adapter / v-bindings / v-client, asdf-vlang, archived polystack/) or a regression. Confirm which."
+
+      - name: Install V (pinned, sha256-verified)
+        shell: bash
+        env:
+          V_VERSION: '0.5.2'
+          # Computed locally from the release archive.
+          V_SHA256: '86caf9e70c3342d48ef19eb4f6c47b709f18c90ae86255520d5c29df6b482e23'
+        run: |
+          set -euo pipefail
+          URL="https://github.com/vlang/v/releases/download/${V_VERSION}/v_linux.zip"
+          curl -sSfL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -o "$RUNNER_TEMP/v_linux.zip" "$URL"
+          echo "${V_SHA256}  ${RUNNER_TEMP}/v_linux.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/v_linux.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/v" >> "$GITHUB_PATH"
+
+      - name: V vet + format verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAILED=0
+          # ⚠ MEASURED on v 0.5.2: `v fmt -verify <FILE>` prints
+          # "<file> is not vfmt'ed / Encountered a total of: 1 formatting
+          # errors." and then EXITS 0 — a fake green. Only the DIRECTORY form
+          # exits 1. Do not "simplify" this into a per-file loop: it would go
+          # on printing the same errors and stop failing on them.
+          # `v fmt -w` is the destructive form and must never appear in CI.
+          v fmt -verify . || { echo "::error::V sources are not formatted (v fmt -verify)"; FAILED=1; }
+          v vet . || { echo "::error::v vet reported problems"; FAILED=1; }
+          {
+            echo "### V"
+            echo ""
+            echo "- \`v fmt -verify\` + \`v vet\`: $( [ "$FAILED" -eq 0 ] && echo 'pass' || echo '**FAIL**' )"
+            echo "- policy: **banned**; migration to Zig completed 2026-05-28"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$FAILED"
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Job 2 — Haskell
+  # ───────────────────────────────────────────────────────────────────────
+  haskell:
+    name: Haskell
+    needs: detect
+    if: ${{ needs.detect.outputs.has_haskell == 'true' }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install GHC and Cabal
+        uses: haskell-actions/setup@6037f33647c3f17758a2356c80fc4a53d7e0685d # v2.12.0
+        with:
+          enable-stack: false
+
+      - name: Build with warnings as errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Haskell's lint IS the compiler here. hlint/fourmolu would each need
+          # a `cabal install` costing several minutes, and neither is pinned
+          # anywhere in the estate — an unpinned toolchain install is a worse
+          # trade than a narrower gate. -Wall -Werror is the spec's "fail on
+          # warnings" and is read-only with respect to tracked files.
+          cabal update
+          cabal build all --ghc-options='-Wall -Werror'
+          {
+            echo "### Haskell"
+            echo ""
+            echo "- \`cabal build all --ghc-options='-Wall -Werror'\`: pass"
+            echo "- note: format gate not run — no pinned fourmolu/hlint in the estate"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────
+  # report — make every skip legible
+  # ───────────────────────────────────────────────────────────────────────
+  report:
+    name: Pipeline report
+    needs: [detect, secret-scan, sast, rust, nickel, deno, rescript, v-lang, haskell]
+    if: ${{ always() }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Write skip ledger
+        shell: bash
+        env:
+          R_DETECT: ${{ needs.detect.result }}
+          R_SECRET: ${{ needs.secret-scan.result }}
+          R_SAST: ${{ needs.sast.result }}
+          R_RUST: ${{ needs.rust.result }}
+          R_NICKEL: ${{ needs.nickel.result }}
+          R_DENO: ${{ needs.deno.result }}
+          R_RESCRIPT: ${{ needs.rescript.result }}
+          R_V: ${{ needs.v-lang.result }}
+          R_HASKELL: ${{ needs.haskell.result }}
+          H_RUST: ${{ needs.detect.outputs.has_rust }}
+          H_NICKEL: ${{ needs.detect.outputs.has_nickel }}
+          H_DENO: ${{ needs.detect.outputs.has_deno }}
+          H_RESCRIPT: ${{ needs.detect.outputs.has_rescript }}
+          H_V: ${{ needs.detect.outputs.has_v }}
+          H_HASKELL: ${{ needs.detect.outputs.has_haskell }}
+        run: |
+          set -euo pipefail
+
+          # A skipped job renders as a grey tick that reads, at a glance, like
+          # a pass. Spell out which gates did NOT run and why, so nobody reads
+          # an absent check as a satisfied one.
+          row() {
+            local name="$1" result="$2" reason="$3"
+            case "$result" in
+              skipped) echo "| ${name} | skipped | ${reason} |" ;;
+              success) echo "| ${name} | pass | ran |" ;;
+              failure) echo "| ${name} | **FAIL** | ran |" ;;
+              *)       echo "| ${name} | ${result} | ran |" ;;
+            esac
+          }
+
+          {
+            echo "### Pipeline report"
+            echo ""
+            echo "| Gate | Result | Note |"
+            echo "|---|---|---|"
+            row "Detect"          "$R_DETECT"   "n/a"
+            row "Secret scanning" "$R_SECRET"   "n/a"
+            row "SAST (semgrep)"  "$R_SAST"     "disabled via enable_sast: false"
+            row "Rust"            "$R_RUST"     "no Cargo.toml tracked (has_rust=${H_RUST})"
+            row "Nickel"          "$R_NICKEL"   "no *.ncl tracked (has_nickel=${H_NICKEL})"
+            row "Deno"            "$R_DENO"     "BANNED — refusal gate; skipped means no deno.json(c) tracked (has_deno=${H_DENO})"
+            row "ReScript"        "$R_RESCRIPT" "no rescript.json/bsconfig.json/*.res tracked (has_rescript=${H_RESCRIPT})"
+            row "V"               "$R_V"        "no v.mod tracked (has_v=${H_V})"
+            row "Haskell"         "$R_HASKELL"  "no *.cabal/stack.yaml/*.hs tracked (has_haskell=${H_HASKELL})"
+            echo ""
+            echo "_A skipped gate examined nothing. It is not a pass._"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if any gate failed
+        if: ${{ contains(needs.*.result, 'failure') }}
+        run: |
+          echo "::error::At least one pipeline gate failed. See the report table in the step summary."
+          exit 1

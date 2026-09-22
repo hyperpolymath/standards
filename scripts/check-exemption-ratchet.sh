@@ -129,6 +129,8 @@ LEDGERS=(
   ".hypatia-ignore"
   ".gitleaks.toml"
   ".machine_readable/root-allow.txt"
+  ".machine_readable/lock-allow.txt"
+  ".machine_readable/deno-allow.txt"
 )
 
 echo "Exemption ratchet — comparing against ${BASE_REF}"

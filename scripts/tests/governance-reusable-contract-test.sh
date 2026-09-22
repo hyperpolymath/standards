@@ -15,7 +15,13 @@ fail() {
   exit 1
 }
 
-helper_checkout="$(grep -F -A 18 -- '- name: Checkout the pinned Standards policy helpers' "$GOVERNANCE")"
+# `set -e` + a command substitution is a silence trap: when the grep matches
+# nothing it exits 1 and the assignment terminates the script BEFORE `fail()`
+# can name the missing assertion — a contract test that cannot say why it
+# failed is the same vacuous class it exists to catch. Capture, then assert.
+helper_checkout="$(grep -F -A 18 -- '- name: Checkout the pinned Standards policy helpers' "$GOVERNANCE" || true)"
+[ -n "$helper_checkout" ] ||
+  fail "governance workflow has no step named 'Checkout the pinned Standards policy helpers'"
 # GitHub expression is an asserted literal.
 # shellcheck disable=SC2016
 printf '%s\n' "$helper_checkout" | grep -Eq 'ref: [0-9a-f]{40}$' ||

@@ -59,8 +59,8 @@ echo "=== no lockfile ==="
 d=$(mkwf c pinned)
 assert "no lock, pinned, before cutoff → 0 NOT YET ENFORCED" 0 "NOT YET ENFORCED" env LOCK_TODAY="$BEFORE" bash "$GATE" "$d"
 assert "no lock, pinned, before cutoff emits ::warning"      0 "::warning::"      env LOCK_TODAY="$BEFORE" bash "$GATE" "$d"
-assert "no lock, pinned, on cutoff → 1"                      1 "grace window closed" env LOCK_TODAY="$AFTER" bash "$GATE" "$d"
-assert "no lock, pinned, custom cutoff honoured → 1"         1 "::error::"        env LOCK_TODAY="2026-09-03" ENFORCE_ACTIONS_LOCK_FROM="2026-09-02" bash "$GATE" "$d"
+assert "no lock, pinned, on cutoff → 3 (ledgerable debt)"     3 "MISSING-LOCK DEBT" env LOCK_TODAY="$AFTER" bash "$GATE" "$d"
+assert "no lock, pinned, custom cutoff honoured → 3"         3 "::error::"        env LOCK_TODAY="2026-09-03" ENFORCE_ACTIONS_LOCK_FROM="2026-09-02" bash "$GATE" "$d"
 d=$(mkwf e unpinned)
 assert "no lock, unpinned, before cutoff → 1 (no grace for unpinned)" 1 "not SHA-pinned" env LOCK_TODAY="$BEFORE" bash "$GATE" "$d"
 assert "no lock, unpinned, after cutoff → 1"                          1 "not SHA-pinned" env LOCK_TODAY="$AFTER"  bash "$GATE" "$d"
