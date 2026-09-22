@@ -7,7 +7,6 @@
 # pedigree `policy.capabilities` grant. Capabilities are checked by the leash
 # (leash.ncl) before any Hunt-level action: an action that needs a capability
 # not present in the grant is refused, even at Hunt level.
-
 {
   # ─────────────────────────────────────────────────────────────
   # The closed CORE capability set
@@ -17,14 +16,14 @@
   # removing a core capability is a BREAKING change to the K9 spec (MAJOR bump).
   # Each name is "<resource>.<verb>".
   core = [
-    "fs.read",         # read named filesystem paths
-    "fs.write",        # write named filesystem paths
-    "net.fetch",       # outbound network fetch to named hosts
-    "process.spawn",   # spawn a child process
-    "container.run",   # run a container image
-    "secret.read",     # read a named secret
-    "deploy.apply",    # apply a deployment
-    "rollback.apply",  # apply a rollback
+    "fs.read", # read named filesystem paths
+    "fs.write", # write named filesystem paths
+    "net.fetch", # outbound network fetch to named hosts
+    "process.spawn", # spawn a child process
+    "container.run", # run a container image
+    "secret.read", # read a named secret
+    "deploy.apply", # apply a deployment
+    "rollback.apply", # apply a rollback
   ],
 
   # ─────────────────────────────────────────────────────────────
@@ -51,8 +50,10 @@
   #
   # A single capability name is valid iff it is a core name or a well-formed
   # extension name.
-  Capability = std.contract.from_predicate (fun name =>
-    is_core name || is_extension name),
+  Capability =
+    std.contract.from_predicate (fun name =>
+      is_core name || is_extension name
+    ),
 
   # A grant is an explicit allow-list of capability names. DEFAULT-DENY is
   # expressed by the empty grant: it permits nothing.

@@ -18,7 +18,6 @@
 #   * The contractiles family is  must / trust / dust / intend
 #       (a different estate concept; NOT part of K9).
 # "must" appears in both but means different things; never conflate them.
-
 let SecurityLevel = [| 'Kennel, 'Yard, 'Hunt |] in
 let Architecture = [| 'Linux, 'Minix, 'MacOS, 'Android, 'PC, 'ASIC, 'Unknown |] in
 
