@@ -100,6 +100,10 @@ jobs:
       has_v: ${{ steps.scan.outputs.has_v }}
       has_haskell: ${{ steps.scan.outputs.has_haskell }}
       has_deno: ${{ steps.scan.outputs.has_deno }}
+      # Ecosystems this pipeline can DETECT but has no job to CHECK. Reported
+      # separately from `total` on purpose — see the scan step's comment.
+      n_unsupported: ${{ steps.scan.outputs.n_unsupported }}
+      unsupported: ${{ steps.scan.outputs.unsupported }}
       # The Deno gate REFUSES and names what it found, so it needs the
       # count itself, not merely the boolean.
       n_deno: ${{ steps.scan.outputs.n_deno }}
@@ -121,6 +125,9 @@ jobs:
             git ls-files -z -- "$@" | tr -cd '\0' | wc -c
           }
 
+          # ── SUPPORTED ecosystems ────────────────────────────────────────
+          # Every probe here has a CONSUMING job later in this file. That is
+          # the entry requirement for this list, not a coincidence.
           N_RUST=$(count 'Cargo.toml' '*/Cargo.toml')
           N_NICKEL=$(count '*.ncl')
           N_RESCRIPT=$(count 'rescript.json' '*/rescript.json' 'bsconfig.json' '*/bsconfig.json' '*.res')
@@ -129,9 +136,70 @@ jobs:
           # a V toolchain to lint a Coq development.
           N_V=$(count 'v.mod' '*/v.mod')
           N_HASKELL=$(count '*.cabal' 'stack.yaml' '*/stack.yaml' '*.hs')
+          # ⚠ DO NOT REMOVE THE DENO PROBE. It does not exist to lint Deno —
+          # it is the trigger for the REFUSAL job `deno` below, i.e. the teeth
+          # of the estate's standing no-Deno ruling, with slugs still live in
+          # `.machine_readable/deno-allow.txt`. Deleting the probe would not
+          # "drop support"; it would silently un-enforce a ban, because the
+          # refusal simply stops firing and the repo goes green.
           N_DENO=$(count 'deno.json' '*/deno.json' 'deno.jsonc' '*/deno.jsonc')
 
+          # TOTAL counts ONLY ecosystems some job in this file actually
+          # examines. Deno counts: a refusal IS a check.
           TOTAL=$(( N_RUST + N_NICKEL + N_RESCRIPT + N_V + N_HASKELL + N_DENO ))
+
+          # ── DETECTED BUT UNSUPPORTED ────────────────────────────────────
+          # These have NO lint or format job in this file. They are counted
+          # SEPARATELY and deliberately DO NOT enter TOTAL.
+          #
+          # ⚠ THAT SEPARATION IS THE ENTIRE POINT OF THIS SECTION. Folding
+          # them into TOTAL would lift it above zero and SILENCE the
+          # zero-denominator refusal below while nothing whatsoever had been
+          # checked. That is a vacuous gate, and a vacuous gate is worse than
+          # an honest blind spot: the blind spot reports nothing, the vacuous
+          # gate reports success. A probe moves from this list to the one
+          # above ONLY in the same commit that adds its consuming job.
+          #
+          # Keyed on MANIFESTS, not extensions, for the reason `v.mod` already
+          # is: an extension is shared between languages, a manifest is not.
+          UNSUPPORTED=""
+          N_UNSUPPORTED=0
+          probe() {
+            local name="$1"; shift
+            local n
+            n=$(count "$@")
+            if [ "$n" -gt 0 ]; then
+              UNSUPPORTED="${UNSUPPORTED:+${UNSUPPORTED}, }${name} (${n})"
+              N_UNSUPPORTED=$(( N_UNSUPPORTED + n ))
+            fi
+          }
+
+          probe 'Julia'    'Project.toml' '*/Project.toml'
+          probe 'Zig'      'build.zig' '*/build.zig' 'build.zig.zon' '*/build.zig.zon'
+          probe 'Idris2'   '*.ipkg'
+          probe 'Elixir'   'mix.exs' '*/mix.exs'
+          probe 'Lean'     'lakefile.toml' '*/lakefile.toml' 'lakefile.lean' '*/lakefile.lean' 'lean-toolchain' '*/lean-toolchain'
+          probe 'Agda'     '*.agda-lib'
+          probe 'Ada'      'alire.toml' '*/alire.toml' '*.gpr'
+          probe 'Ruby'     'Gemfile' '*/Gemfile' '*.gemspec'
+          probe 'PHP'      'composer.json' '*/composer.json'
+          probe 'Gleam'    'gleam.toml' '*/gleam.toml'
+          # ⚠ `ROOT` is an unusually generic filename and this probe is the
+          # most likely of the set to produce a FALSE POSITIVE. It is tolerable
+          # only because a false positive here cannot bless anything: it can
+          # only move a repo from "nothing detected" to "detected, unchecked",
+          # and both refuse. It must NOT be promoted to the supported list on
+          # this evidence alone.
+          probe 'Isabelle' 'ROOT' '*/ROOT'
+          # Bun. `bun.lock*` and `bunfig.toml` are positive identification.
+          # ⚠ `package.json` ALONE is an ASSUMPTION, stated here rather than
+          # hidden: the estate's standing ruling is bun-only, with Node and
+          # Deno banned, so a bare package.json in this estate is presumed to
+          # be a Bun manifest. That assumption is safe while Bun sits in THIS
+          # list — it yields a refusal, never a pass. Re-examine it on the day
+          # a Bun lint job is added, because then it would start selecting
+          # which repositories get linted.
+          probe 'Bun'      'bun.lock' '*/bun.lock' 'bun.lockb' '*/bun.lockb' 'bunfig.toml' '*/bunfig.toml' 'package.json' '*/package.json'
 
           bool() { [ "$1" -gt 0 ] && echo true || echo false; }
 
@@ -144,6 +212,8 @@ jobs:
             echo "has_deno=$(bool "$N_DENO")"
             echo "n_deno=$N_DENO"
             echo "total=$TOTAL"
+            echo "n_unsupported=$N_UNSUPPORTED"
+            echo "unsupported=$UNSUPPORTED"
           } >> "$GITHUB_OUTPUT"
 
           # Print the denominator. A gate that never shows what it measured
@@ -159,17 +229,36 @@ jobs:
             echo "| V | \`v.mod\` only | ${N_V} |"
             echo "| Haskell | \`*.cabal\`, \`stack.yaml\`, \`*.hs\` | ${N_HASKELL} |"
             echo "| Deno | \`deno.json(c)\` | ${N_DENO} |"
-            echo "| **Total** | | **${TOTAL}** |"
+            echo "| **Total checkable** | | **${TOTAL}** |"
             echo ""
+            if [ "$N_UNSUPPORTED" -gt 0 ]; then
+              echo "#### Detected, but this pipeline has no gate for it"
+              echo ""
+              echo "${UNSUPPORTED}"
+              echo ""
+              echo "_These files were found and **not checked**. They are excluded from the"
+              echo "total above on purpose: counting them would hide the fact that nothing"
+              echo "examined them. Tracked as hyperpolymath/standards#967._"
+              echo ""
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$TOTAL" -eq 0 ]; then
+            # Same switch, two different truths. Telling them apart is what
+            # makes the adoption ledger measure real debt instead of detector
+            # blindness: "we have no gate for Julia" and "we could not
+            # recognise this repository at all" need different cures.
+            if [ "$N_UNSUPPORTED" -gt 0 ]; then
+              MSG="Detected ${UNSUPPORTED}, but this pipeline has no lint or format job for any of them, so NOTHING was checked. This is measured debt, not an unrecognised repository — see hyperpolymath/standards#967."
+            else
+              MSG="No known ecosystem detected (denominator = 0). Every lint and format gate would be vacuous, so this pipeline refuses to report success. Add the ecosystem's marker file, or call this workflow with fail_on_no_ecosystem: false and say why."
+            fi
             if [ "${{ inputs.fail_on_no_ecosystem }}" = "true" ]; then
-              echo "::error::No known ecosystem detected (denominator = 0). Every lint and format gate would be vacuous, so this pipeline refuses to report success. Add the ecosystem's marker file, or call this workflow with fail_on_no_ecosystem: false and say why."
-              echo "**REFUSED: denominator is zero — no ecosystem matched, so nothing could be checked.**" >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::${MSG}"
+              echo "**REFUSED: nothing could be checked.** ${MSG}" >> "$GITHUB_STEP_SUMMARY"
               exit 1
             fi
-            echo "::warning::No known ecosystem detected; fail_on_no_ecosystem is false, so continuing with nothing to check."
+            echo "::warning::${MSG} fail_on_no_ecosystem is false, so continuing with nothing checked."
           fi
 
   # ───────────────────────────────────────────────────────────────────────
@@ -717,6 +806,8 @@ jobs:
           H_RESCRIPT: ${{ needs.detect.outputs.has_rescript }}
           H_V: ${{ needs.detect.outputs.has_v }}
           H_HASKELL: ${{ needs.detect.outputs.has_haskell }}
+          N_UNSUP: ${{ needs.detect.outputs.n_unsupported }}
+          UNSUP: ${{ needs.detect.outputs.unsupported }}
         run: |
           set -euo pipefail
 
@@ -749,6 +840,18 @@ jobs:
             row "Haskell"         "$R_HASKELL"  "no *.cabal/stack.yaml/*.hs tracked (has_haskell=${H_HASKELL})"
             echo ""
             echo "_A skipped gate examined nothing. It is not a pass._"
+            echo ""
+            # ⚠ NOT a row(). These ecosystems have no job, so they have no
+            # `needs.*.result` to report — and row()'s catch-all branch prints
+            # the word "ran" for an unset result, which would assert the exact
+            # opposite of the truth here. Say it in prose instead.
+            if [ "${N_UNSUP:-0}" -gt 0 ] 2>/dev/null; then
+              echo "> **Detected with no gate at all:** ${UNSUP}"
+              echo ">"
+              echo "> No job in this pipeline examines these. They are absent from the table"
+              echo "> above because there is no result to report, not because they passed."
+              echo "> Tracked as hyperpolymath/standards#967."
+            fi
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
