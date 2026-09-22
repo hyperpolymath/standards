@@ -69,6 +69,22 @@ workflow_references_reusable_dependency() {
   ' "$workflow"
 }
 
+is_advisory_category() {
+  # Advisory findings never affect the tool's own `valid` bit: a tree whose
+  # only findings are `sha-as-ref` reports `"valid": true` (measured
+  # 2026-09-22 on metadatastician/burble -- 7 sha-as-ref findings, valid true,
+  # process exit 1). They must therefore not block on the `valid:false` path
+  # either.
+  #
+  # Discriminate by CATEGORY, never by severity. gh-actions-lock v0.1.6 labels
+  # every finding `"severity": "warning"`, `stale` included, so a severity test
+  # would swallow real desyncs and turn this gate vacuous.
+  case "$1" in
+    sha-as-ref) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 verify_lock_coverage() {
   # gh-actions-lock v0.1.6 does not recognise reusable-workflow `uses:`
   # paths. GitHub's startup enforcement nevertheless requires callers to
@@ -106,8 +122,11 @@ verify_lock_coverage() {
 
   remaining=0
   accepted=0
+  advisory=0
   while IFS=$'\t' read -r category workflow dependency; do
-    if [[ "$category" = stale ]] &&
+    if is_advisory_category "$category"; then
+      advisory=$((advisory + 1))
+    elif [[ "$category" = stale ]] &&
        workflow_references_reusable_dependency "$workflow" "$dependency"; then
       echo "Accepted reusable-workflow lock coverage: $workflow -> $dependency"
       accepted=$((accepted + 1))
@@ -116,9 +135,14 @@ verify_lock_coverage() {
     fi
   done < <(printf '%s' "$result" | jq -r '.findings[] | [.category, .workflow, .dependency] | @tsv')
 
+  if [[ "$advisory" -gt 0 ]]; then
+    echo "actions-lock: $advisory advisory finding(s) recorded, not blocking"
+  fi
+
   # `valid:false` with no findings is contradictory and cannot be explained by
   # the one known reusable-workflow false positive. Fail closed rather than
-  # turning an empty/malformed diagnostic into approval.
+  # turning an empty/malformed diagnostic into approval. Advisory findings do
+  # not explain it either, so they never satisfy this guard on their own.
   if [[ "$remaining" -ne 0 || "$accepted" -eq 0 ]]; then
     printf '%s\n' "$result"
     return 1

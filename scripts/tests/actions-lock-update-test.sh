@@ -49,6 +49,18 @@ if [ "${2:-}" = "--verify-local" ]; then
       printf '%s\n' '{"valid":true,"findings":[{"workflow":".github/workflows/ci.yml","category":"sha-as-ref","severity":"warning","dependency":"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"}]}'
       exit 1
       ;;
+    invalid-advisory-and-reusable)
+      printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/ci.yml","category":"sha-as-ref","severity":"warning","dependency":"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"},{"workflow":".github/workflows/reusable.yml","category":"stale","severity":"warning","dependency":"hyperpolymath/standards@abc123"}]}'
+      exit 1
+      ;;
+    invalid-advisory-and-real-stale)
+      printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/ci.yml","category":"sha-as-ref","severity":"warning","dependency":"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"},{"workflow":".github/workflows/ci.yml","category":"stale","severity":"warning","dependency":"actions/upload-artifact@v4"}]}'
+      exit 1
+      ;;
+    invalid-advisory-only)
+      printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/ci.yml","category":"sha-as-ref","severity":"warning","dependency":"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"}]}'
+      exit 1
+      ;;
     invalid-empty)
       printf '%s\n' '{"valid":false,"findings":[]}'
       exit 1
@@ -144,6 +156,32 @@ if FAKE_VERIFY_FINDING=invalid-empty GH_BIN="$WORK/bin/fake-gh" \
   exit 1
 fi
 echo "PASS: invalid result with no explainable findings fails closed"
+
+# An advisory finding alongside the accepted reusable-workflow false positive
+# must not block. Until 2026-09-22 every `sha-as-ref` became fatal the moment
+# one real finding flipped `valid` to false, which held metadatastician/burble
+# red on 7 advisories and skipped the secret-baseline controls behind it.
+mixed_output="$(FAKE_VERIFY_FINDING=invalid-advisory-and-reusable GH_BIN="$WORK/bin/fake-gh" \
+  bash "$UPDATE" --verify-local .github/workflows)"
+printf '%s\n' "$mixed_output" | grep -q 'Accepted reusable-workflow lock coverage'
+printf '%s\n' "$mixed_output" | grep -q 'advisory finding(s) recorded, not blocking'
+echo "PASS: advisory finding alongside an accepted reusable false positive does not block"
+
+# The exemption must key on CATEGORY, not severity: v0.1.6 marks `stale`
+# `severity: warning` too, so a severity-based exemption would pass vacuously.
+if FAKE_VERIFY_FINDING=invalid-advisory-and-real-stale GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: a real stale finding was hidden by the advisory exemption" >&2
+  exit 1
+fi
+echo "PASS: a real stale finding still blocks alongside advisory findings"
+
+if FAKE_VERIFY_FINDING=invalid-advisory-only GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: advisory findings alone were accepted as explaining valid:false" >&2
+  exit 1
+fi
+echo "PASS: advisory findings alone cannot explain an invalid result"
 
 if FAKE_VERIFY_FINDING=malformed-success GH_BIN="$WORK/bin/fake-gh" \
    bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
