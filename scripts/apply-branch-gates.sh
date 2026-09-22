@@ -256,13 +256,30 @@ while IFS= read -r R; do
       fi
       while IFS= read -r RID2; do
         [ -n "$RID2" ] || continue
-        # a job is acceptable when success/skipped/neutral, or still running
+        # Ask for NAME + CONCLUSION of every job and classify locally.
+        # Asking the API only for the NON-green jobs cannot tell "this run is
+        # all green" apart from "this run was not read": both return ZERO
+        # lines, and zero lines is read as greenness. That is the same
+        # fail-open as the derivation loop above, pointing the other way --
+        # there it SHORTENS the gate, here it ADMITS a context that was never
+        # shown to be green. An unread run proves nothing in either direction.
         if ! gh api "repos/$R/actions/runs/$RID2/jobs?per_page=100" --paginate \
-               --jq '.jobs[]? | select((.conclusion // "pending") as $c
-                     | ["success","skipped","neutral","pending"] | index($c) | not) | .name' \
-               >> "$WORK/bad"; then
-          DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(run $RID2 green-check-failed)"
+               --jq '.jobs[]? | [.name, (.conclusion // "pending")] | @tsv' \
+               > "$WORK/jobs2"; then
+          DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(run $RID2 green-check-failed)"; continue
         fi
+        # a run that EXISTS but reports zero jobs is a failed read, not a green run
+        if [ ! -s "$WORK/jobs2" ]; then
+          DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(run $RID2 returned zero jobs)"; continue
+        fi
+        # a job is acceptable when success/skipped/neutral, or still running
+        while IFS=$'\t' read -r JN JC; do
+          [ -n "$JN" ] || continue
+          case "$JC" in
+            success|skipped|neutral|pending) ;;
+            *) printf '%s\n' "$JN" >> "$WORK/bad" ;;
+          esac
+        done < "$WORK/jobs2"
       done < "$WORK/rids"
     done < "$WORK/gatewf2"
     sort -u "$WORK/bad" -o "$WORK/bad"

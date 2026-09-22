@@ -235,7 +235,7 @@ else
 fi
 
 
-# ================================================================ CASE 7
+# ================================================================ CASE 8
 # THE FAIL-OPEN REFUSAL: a derivation fetch that FAILS must never be read as
 # "this workflow contributes no contexts". Measured 2026-09-22 on
 # hyperpolymath/standards: a swallowed error dropped 2 of 18 required
@@ -288,6 +288,67 @@ if [ -r "$FIX/LAST_PUT.json" ] &&
   ok "mutant C wrote the SHORTENED gate (1 context, not 2) — the silent weakening being guarded"
 else
   bad "mutant C: expected a 1-context gate from the incomplete read"
+fi
+
+# ================================================================ CASE 9
+# THE SAME FAIL-OPEN, POINTING THE OTHER WAY: --require-green asked the API
+# only for the NON-green jobs, so "this run is entirely green" and "this run
+# was not read" were the SAME observation -- zero lines -- and zero lines was
+# read as greenness. There it does not shorten the gate; it ADMITS a context
+# that was never shown to be green, which is how a red check ends up required
+# and every PR blocks on it.
+#
+# Fixture shape: derive (per_page=1) resolves run 11, which has jobs. The
+# greenness probe (per_page=3) additionally resolves run 12, whose jobs
+# fixture EXISTS and is EMPTY -- a successful read of nothing, which the
+# missing-fixture trick cannot simulate.
+reset_fix
+R=acme/zerojobs
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[{"id":11},{"id":12}]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
+mkfix "repos/$R/actions/runs/12/jobs?per_page=100" '{"jobs":[]}'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+
+OUT=$(run_applier "$R" --apply --require-green 3)
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "REFUSED" ] && ok "zero-job green probe: state is REFUSED" || bad "zero-job green probe: state=$S (want REFUSED)"
+case "$D" in *"returned zero jobs"*) ok "zero-job green probe: the unread run is NAMED, not counted as green" ;; *) bad "zero-job green probe: not reported — $D" ;; esac
+[ -s "$FIX/PUTS.log" ] && bad "zero-job green probe: PUT a gate whose greenness was never read" || ok "zero-job green probe: no PUT even with --apply"
+
+# ---- MUTANT D: delete the zero-jobs guard from the GREENNESS probe only. ----
+# Keyed on jobs2 so it cannot touch the derivation loop's jobs1 guard.
+MUTD="$WORK/mutant-d.sh"
+sed 's|if \[ ! -s "\$WORK/jobs2" \]; then|if false; then|' "$APPLIER" > "$MUTD"
+if ! cmp -s "$MUTD" "$APPLIER"; then
+  reset_fix
+  mkfix "repos/$R" '{"default_branch":"main"}'
+  mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
+  mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+  mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+  mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[{"id":11},{"id":12}]}'
+  mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
+  mkfix "repos/$R/actions/runs/12/jobs?per_page=100" '{"jobs":[]}'
+  mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+  mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+  OUT=$(MUTANT="$MUTD" run_applier "$R" --apply --require-green 3)
+  if [ "$(state_of "$OUT")" = "REFUSED" ]; then
+    bad "MUTANT D SURVIVED: zero-jobs guard removed yet still REFUSED — the control is decorative"
+  else
+    ok "mutant D killed: without the guard it becomes $(state_of "$OUT") and PUTs $(wc -l < "$FIX/PUTS.log") time(s)"
+  fi
+  if [ -r "$FIX/LAST_PUT.json" ] &&
+     [ "$(jq -r '[.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]|join(",")' "$FIX/LAST_PUT.json")" = "governance / Governance" ]; then
+    ok "mutant D REQUIRED a context whose greenness was never read — the silent admission being guarded"
+  else
+    bad "mutant D: expected the unverified context to be required anyway"
+  fi
+else
+  bad "mutant D was not applied — the sed pattern no longer matches the applier"
 fi
 
 echo
