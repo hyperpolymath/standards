@@ -188,7 +188,7 @@ verifier = "command-transcript"'
 [[ "$(reason_of "$TMP/lic.a2ml" C1)" == unverifiable*manual-only ]] && ok "licence-in-statement -> manual-only" || bad "licence-in-statement auto-confirmed"
 
 echo "== conformance suite =="
-bash "$ROOT/did-you-actually-do-that/spec/conformance/run-conformance.sh" >/dev/null 2>&1 && ok "conformance vectors pass" || bad "conformance vectors failed"
+bash "$ROOT/1-formats/sub-specs/did-you-actually-do-that/spec/conformance/run-conformance.sh" >/dev/null 2>&1 && ok "conformance vectors pass" || bad "conformance vectors failed"
 
 echo
 echo "Wave-4 DYADT regression: $pass passed, $fail failed"

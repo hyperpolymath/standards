@@ -82,7 +82,11 @@ echo "$BASELINE_JSON" | jq -e 'type == "array"' >/dev/null || {
 SCHEMA_ERRORS="$(jq -r '
   def known: ["severity","rule_module","type","file","file_pattern",
               "severity_override","expires_at","note","tracking_issue"];
-  def sevs: ["critical","high","medium","low","info"];
+  # Scanner vocabulary, mirroring the hypatia-scan-reusable validator: the
+  # research rules emit `warn` (ranked with medium) and some rules emit
+  # `informational`. Without these, research findings can never be
+  # acknowledged and the baseline gate can never go green on them.
+  def sevs: ["critical","high","medium","warn","low","info","informational"];
   [ to_entries[] | .key as $i | .value as $e |
     if ($e|type) != "object" then "entry[\($i)]: not an object"
     else (
