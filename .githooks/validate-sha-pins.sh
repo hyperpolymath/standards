@@ -44,18 +44,32 @@ is_vendored() { case "$1" in *"${VENDORED_MARK}"*) return 0 ;; *) return 1 ;; es
 # this repo's own composite actions and `docker://` refs are container images, not
 # actions -- neither is modelled by actions.lock, which keys actions only.
 UNPINNED_FILTER() {
-  # `$/...` is NOT valid `uses:` syntax (GitHub Actions has no such thing) —
-  # `gh actions-lock` REWRITE MODE once invented `uses: $/.github/actions/...`
-  # and every workflow carrying it died at startup. The alnum-first selector
-  # below would silently skip such lines, so they are flagged explicitly:
-  # waving that corruption through is the exact failure this gate exists to
-  # catch. (Zero matches tree-wide today; this arm is purely prospective.)
-  { grep -nE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]+[A-Za-z0-9]' \
-      | grep -vE 'uses:[[:space:]]+[./]' \
-      | grep -vE 'uses:[[:space:]]+docker://' \
-      | grep -vE 'uses:[[:space:]]+[^[:space:]@]+@[0-9a-f]{40}([^0-9a-f]|$)' \
-      || true;
-    grep -nE 'uses:[[:space:]]+\$/' || true; }
+  # ONE pipeline, and the first selector matches any NON-BLANK ref.
+  #
+  # Two defects are cured here, and the second hid the first.
+  #
+  # 1. The selector used to demand `[A-Za-z0-9]`, so a ref that is not
+  #    alphanumeric was dropped before any later arm saw it. `gh actions-lock`
+  #    REWRITE MODE emits `uses: $/.github/actions/...` (measured; it also
+  #    de-pinned 24 SHAs). `$` is not alphanumeric, so that corruption was
+  #    never reported and a workflow that dies at STARTUP scanned CLEAN.
+  #
+  # 2. The cure attempted for (1) was a SECOND grep in the same brace group:
+  #    `{ grep A ... ; grep B ; } < "$file"`. Both greps share one stdin, the
+  #    first reads it to EOF, and the second is handed an exhausted stream. It
+  #    matched in isolation and emitted nothing in place — dead code that made
+  #    the gate look fixed. Its comment claimed "zero matches tree-wide today;
+  #    this arm is purely prospective", which was false: signed-push-smoke.yml
+  #    carried a live `$/` ref the whole time. A second reader of one stdin is
+  #    never a second chance.
+  #
+  # An unknown-shaped ref must be REPORTED, never skipped. The exemptions below
+  # are the only way out, and each one is explicit.
+  grep -nE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]+[^[:space:]]' \
+    | grep -vE 'uses:[[:space:]]+[./]' \
+    | grep -vE 'uses:[[:space:]]+docker://' \
+    | grep -vE 'uses:[[:space:]]+[^[:space:]@]+@[0-9a-f]{40}([^0-9a-f]|$)' \
+    || true
 }
 
 validate_file() {
@@ -66,8 +80,21 @@ validate_file() {
     body="${rec#*:}"
     body="${body#"${body%%[![:space:]]*}"}"
     echo "[validate-sha-pins] ERROR: $file:$lineno: ${body}" >&2
-    echo "    unpinned ref: canon rule 10 wants owner/repo@<40-hex> plus a '# <version>' comment," >&2
-    echo "    and a matching key in .github/workflows/actions.lock" >&2
+    case "$body" in
+      *'uses:'*'$/'*)
+        # Name the real fault. `$/...` is not an unpinned ref, it is not valid
+        # `uses:` syntax at all, so the workflow dies at STARTUP and no job of
+        # it ever runs. Reporting it as "unpinned" sends the reader hunting a
+        # SHA that was never the problem.
+        echo "    invalid ref: a '\$/'-leading ref is not valid uses: syntax and kills the" >&2
+        echo "    workflow at startup. This is the gh actions-lock rewrite-mode corruption;" >&2
+        echo "    a local action is written 'uses: ./.github/actions/<name>'." >&2
+        ;;
+      *)
+        echo "    unpinned ref: canon rule 10 wants owner/repo@<40-hex> plus a '# <version>' comment," >&2
+        echo "    and a matching key in .github/workflows/actions.lock" >&2
+        ;;
+    esac
     ERRORS=$((ERRORS + 1))
   done < <(UNPINNED_FILTER < "$file")
 }
