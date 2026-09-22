@@ -996,8 +996,97 @@ jobs:
           # CONTRIBUTING (54/412 missing) warns until the cutoff baked into the
           # script, then blocks. See scripts/check-docs-presence.sh.
           cp .standards-checkout/scripts/check-docs-presence.sh "$RUNNER_TEMP/"
+          # The launcher-standard currency gate (standards#960 AC4) is copied
+          # out here too, because this step deletes the checkout. Prefer the
+          # CALLER's own copy when present (self-lint: standards validating
+          # itself must run the tree under test, not main's copy -- a gate fix
+          # in flight would otherwise be judged by the version it replaces).
+          # Callers without the script keep the main-pinned fallback.
+          if [ -f scripts/check-launcher-standard-currency.sh ]; then
+            cp scripts/check-launcher-standard-currency.sh "$RUNNER_TEMP/"
+          else
+            cp .standards-checkout/scripts/check-launcher-standard-currency.sh "$RUNNER_TEMP/"
+          fi
           rm -rf .standards-checkout
           bash "$RUNNER_TEMP/check-docs-presence.sh" .
+
+      - name: Check launcher-standard currency
+        run: |
+          set -eo pipefail
+          # Arming policy, and the evidence it rests on: standards#991.
+          #
+          #   retired-filename -> BLOCKS. A STABLE predicate:
+          #   the retired `.a2ml` spelling of the launcher standard was
+          #   deleted upstream on 2026-09-22
+          #   (standards#952) and stays deleted, so a caller that is clean
+          #   today cannot become defective without editing the citation
+          #   itself. Measured 2026-09-22 over EVERY clone in the estate --
+          #   595 scanned, 553 carrying an origin/main. 432 reference this
+          #   reusable workflow, but only 12 do so at a MUTABLE ref (@main),
+          #   and a new step reaches ONLY those 12: a caller pinned at a SHA
+          #   freezes this whole file, this step included, so it can never
+          #   receive the step at all. The real gate was run against all 12:
+          #   12/12 rc=0, retired=0. Five slugs do carry the retired literal
+          #   (tma-mark2, canonical-ums, the-nash-equilibrium,
+          #   launch-scaffolder, trigger) and their overlap with the armed 12
+          #   is ZERO -- so arming this tier reds ZERO live callers. A
+          #   known-answer positive control fired (rc=1) on three of those
+          #   defective repos through the identical harness, so the twelve
+          #   zeros are a real measurement and not a broken probe.
+          #
+          #   stale-version -> WARNS, and does not block. A TIME-DEPENDENT
+          #   predicate: the gate compares against its own CURRENT_VERSION, so
+          #   every correctly-citing caller flips to defect the moment the
+          #   standard bumps, having done nothing. A baked-in cutoff DATE does
+          #   not cure that -- the #505 split above can use one because its
+          #   missing-CONTRIBUTING population is static, while this population
+          #   is regenerated at every bump. Each CURRENT_VERSION bump is a
+          #   measure-then-arm event, not a date.
+          #
+          # Deliberately no --standard / --expect-version: the gate arrives
+          # from the standard's own tree, so its CURRENT_VERSION is current by
+          # construction. Pointing it at a caller's vendored copy of the deed
+          # would red that caller for citing an older canon.
+          rc=0
+          bash "$RUNNER_TEMP/check-launcher-standard-currency.sh" --root . \
+            >"$RUNNER_TEMP/launcher-currency.out" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/launcher-currency.out"
+
+          # rc=2 is a usage error OR a seeded self-test mutant that survived. A broken
+          # invocation must never read as a clean pass, so it fails before the tier split.
+          if [ "$rc" -eq 2 ]; then
+            echo "::error::check-launcher-standard-currency exited 2: usage error, or a seeded self-test mutant survived. A broken invocation is a failure, not a pass."
+            exit 1
+          fi
+
+          # The tiers are split on the gate's own typed stdout lines, not on its exit
+          # code -- rc=1 means "some defect", and the two classes are armed differently.
+          retired=0
+          if grep -q '^DEFECT retired-filename' "$RUNNER_TEMP/launcher-currency.out"; then retired=1; fi
+          stale=0
+          if grep -q '^DEFECT stale-version' "$RUNNER_TEMP/launcher-currency.out"; then stale=1; fi
+
+          if [ "$retired" -eq 1 ]; then
+            # ⚠ Do NOT name the retired filename literally here. This workflow
+            # is part of the caller's scanned tree, so the gate reads its own
+            # error message and reports it as a defect -- measured: two
+            # defects on this file, from a comment and from this very echo.
+            # Nothing is lost by staying general: the gate has already printed
+            # both the offending file:line and its own cure text above.
+            echo "::error::This repository names the retired .a2ml spelling of the launcher standard, deleted upstream on 2026-09-22 (standards#952). The offending file:line and the cure are printed above."
+            exit 1
+          fi
+
+          if [ "$stale" -eq 1 ]; then
+            echo "::warning::This repository cites a launcher-standard version that is no longer current. NOT blocking, by policy (standards#991): the expected version moves with the standard, so a correct citation goes stale with no action of yours. Refresh it when convenient."
+          fi
+
+          # Any other non-zero rc is the gate failing in a way this wrapper does not
+          # classify; fail rather than guess.
+          if [ "$rc" -ne 0 ] && [ "$retired" -eq 0 ] && [ "$stale" -eq 0 ]; then
+            echo "::error::check-launcher-standard-currency exited $rc but emitted no recognised DEFECT line. Failing closed."
+            exit 1
+          fi
 
   wellknown:
     name: Well-Known (RFC 9116 + RSR)
