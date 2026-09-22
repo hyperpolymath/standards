@@ -1,0 +1,182 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Quality, Security, Coverage and Mirroring Pipeline — File Summary
+:toc: macro
+:toclevels: 2
+
+toc::[]
+
+== What this is
+
+The closing deliverable of the zero-cost quality / security / coverage /
+mirroring pipeline: a single inventory of *every generated hook and workflow
+file*, what each one actually checks, and how to switch the local hooks on.
+
+It is a *description of what is on disk*, not a specification of what ought to
+be. Where a file's behaviour differs from the original brief, the difference is
+stated rather than smoothed over.
+
+== Part 1 — Local pre-commit hooks (`.githooks/`)
+
+Eighteen files, all committed mode `100755`.
+
+NOTE: Mode matters. A hook or validator committed `100644` passes every local
+run — because `bash <script>` ignores the mode — and dies in CI at *exit 126*
+before a single check executes.
+
+=== Entry-point hooks
+
+[cols="1,3",options="header"]
+|===
+| File | What it does
+
+| `pre-commit`
+| The main gate. Runs the staged-secret scan and the ecosystem lint/format check
+  as *required* validators, then eight further validators as advisory.
+
+| `pre-push`
+| Re-runs seven whole-tree validators (K9, SPDX, workflow SPDX, SHA-pinning,
+  permissions, CodeQL config, bot directives) plus a credential-pattern sweep
+  over the pushed files.
+
+| `commit-msg`
+| Four checks: non-empty; Conventional Commits form; issue reference (warning
+  only); subject length ≤ 72 characters.
+
+| `post-checkout`, `post-merge`, `pre-rebase`
+| Housekeeping and guard hooks around branch movement.
+
+| `install.sh` / `uninstall.sh`
+| Set and unset `core.hooksPath`, and verify the result.
+|===
+
+=== Validators invoked by those hooks
+
+[cols="1,2,1",options="header"]
+|===
+| Validator | Checks | Required at commit?
+
+| `validate-gitleaks.sh`
+| Secret scan of the *staged* content — `gitleaks protect --staged --verbose`.
+| *Yes*
+
+| `validate-lint-format.sh`
+| Per-ecosystem native linters and native formatters in their *check* form.
+| *Yes*
+
+| `validate-k9.sh`          | K9 contractile declarations.                 | advisory
+| `validate-spdx.sh`        | SPDX headers on source files.                | advisory
+| `validate-spdx-workflows.sh` | SPDX headers on workflow files.           | advisory
+| `validate-sha-pins.sh`    | Every `uses:` is a 40-hex SHA with a version comment. | advisory
+| `validate-actions-lock.sh`| Every `uses:` is covered by `actions.lock`.  | advisory
+| `validate-permissions.sh` | Workflow `permissions:` blocks are least-privilege. | advisory
+| `validate-codeql.sh`      | CodeQL configuration is well-formed.         | advisory
+| `validate-bot-directives.sh` | Bot directive comments are valid.         | advisory
+|===
+
+=== Linting and formatting are ecosystem-scoped
+
+`validate-lint-format.sh` selects tools by the ecosystem it detects in the
+staged set — Rust tooling only for Rust, V tooling only for V, and so on. It
+never applies one language's linter to another's sources.
+
+=== How to enable the hooks locally
+
+Run this once per clone:
+
+[source,console]
+----
+git config core.hooksPath .githooks
+----
+
+Or equivalently `./.githooks/install.sh`, which sets exactly that value and then
+verifies it. `./.githooks/uninstall.sh` reverts it.
+
+== Part 2 — `.github/workflows/ci-pipeline.yml`
+
+A `workflow_call` reusable workflow with top-level `permissions: contents: read`.
+Its jobs, in file order:
+
+[cols="1,3",options="header"]
+|===
+| Job | Purpose
+
+| `detect`      | Detects which ecosystems are present. *Refuses* — reports `REFUSED`, not a pass — when it finds nothing it could check.
+| `secret-scan` | *Brief job 1a.* Secret scanning (gitleaks).
+| `sast`        | *Brief job 1b.* Static analysis (semgrep).
+| `rust`        | Rust lint + format check.
+| `nickel`      | Nickel typecheck + `nickel format --check`.
+| `deno`        | Deno **banned** gate — the estate runtime is Bun/`bunx`; this job exists to keep Deno out, not to run it.
+| `rescript`    | ReScript lint + format check.
+| `v-lang`      | V lint + format check.
+| `haskell`     | Haskell lint + format check.
+| `report`      | *Brief job 3.* Builds a Markdown table and appends it to `$GITHUB_STEP_SUMMARY`.
+|===
+
+The per-ecosystem jobs (`rust` … `haskell`) together constitute *brief job 2*,
+code quality / native linting. They were split per ecosystem rather than kept as
+one job so that a repo with no Rust does not carry a Rust gate.
+
+=== Job 3 — coverage reporting, and an honest limitation
+
+`report` writes a `| Gate | Result | Note |` table directly to
+`$GITHUB_STEP_SUMMARY`. *No third-party coverage service is used*, which was the
+brief's requirement.
+
+[WARNING]
+====
+Because nothing is uploaded to GitHub, a *`code_coverage` ruleset rule can never
+be satisfied by this pipeline*. A `code_coverage` rule demanding e.g.
+`minimum_coverage: 95` against these repos is unreachable **by design** — the
+mirror image of a vacuous gate: a gate that can never say yes. `code_coverage`
+is one of the four rule types the estate treats as retired.
+====
+
+=== Part 2, job 4 — repository mirroring
+
+Mirroring lives in its own reusable workflow rather than inside
+`ci-pipeline.yml`:
+
+* `.github/workflows/github-backup-mirror-reusable.yml` — GitHub backup mirror
+* `.github/workflows/mirror-reusable.yml` / `mirror.yml` — the forge mirrors
+
+The backup mirror authenticates with `${{ secrets.BACKUP_MIRROR_TOKEN }}`,
+referenced only through the secrets context and never interpolated into a `run:`
+body. The token requires both `repo` *and* `workflow` scope. When
+`BACKUP_MIRROR_ENABLED` is true but the secret is empty, the workflow emits a
+`::notice::` and skips — it does not silently report success.
+
+NOTE: A secret that does not exist resolves to the *empty string* silently.
+"The workflow is green" is therefore not evidence that mirroring authenticated.
+
+== Part 3 — Safety and execution rules, as implemented
+
+[cols="2,3",options="header"]
+|===
+| Rule | How it is honoured
+
+| All checks non-destructive (read-only verification)
+| Every CI formatter runs in its `--check` form. No CI step writes to the
+  working tree.
+
+| No auto-fixing flags in CI
+| No `--fix`, and no `fmt`/`format` without `--check`, appears in any CI step.
+  Running a formatter *locally* to produce a reviewable commit is a separate act
+  and remains permitted.
+
+| Credentials by reference only
+| Secrets appear solely as `${{ secrets.NAME }}` in `env:`/`with:` and are never
+  inlined into a `run:` body. This document names secrets only; it reproduces no
+  credential value.
+
+| Never `--no-verify`
+| The hooks are the gate; bypassing them is not a supported workflow.
+|===
+
+== Known gaps
+
+* The estate's `code_coverage` ruleset rule is unsatisfiable against this
+  pipeline (see above) and is treated as retired.
+* Hook enablement is *per clone*. `core.hooksPath` is local configuration; a
+  fresh clone has no hooks until the command above is run. CI is the only
+  enforcement that cannot be skipped by forgetting a setup step.
