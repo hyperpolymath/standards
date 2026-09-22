@@ -83,6 +83,40 @@ assert "root CONTRIBUTING.adoc still warns pre-cutoff only when ABSENT" 0 \
   "NOT YET ENFORCED" \
   env DOCS_TODAY="$BEFORE" "$DOCS" "$(mkrepo docs-adoc-root-absent README.adoc LICENSE)"
 
+# Regression: GitHub auto-discovers a community-health file under .github/ or
+# docs/, and estate repos have been deliberately relocating theirs there
+# (launch-scaffolder d426ea4d). The gate looked only at the repo root, so it
+# reported those repos "missing" a file that is present and discoverable — a
+# guard asking a different question than its consumer. A 516-clone census on
+# 2026-09-22 found 19 such repos. Each of the four new paths gets its own case:
+# a single .github/CONTRIBUTING.md case would pass even if only that one path
+# had been added to the candidate list.
+r=$(mkrepo docs-github-md README.adoc LICENSE .github/CONTRIBUTING.md)
+assert ".github/CONTRIBUTING.md accepted (regression: launch-scaffolder#37)" 0 \
+  "✅ Core documentation present" \
+  env DOCS_TODAY="$AFTER" "$DOCS" "$r"
+
+r=$(mkrepo docs-github-adoc README.adoc LICENSE .github/CONTRIBUTING.adoc)
+assert ".github/CONTRIBUTING.adoc accepted" 0 "✅ Core documentation present" \
+  env DOCS_TODAY="$AFTER" "$DOCS" "$r"
+
+r=$(mkrepo docs-docsdir-md README.adoc LICENSE docs/CONTRIBUTING.md)
+assert "docs/CONTRIBUTING.md accepted" 0 "✅ Core documentation present" \
+  env DOCS_TODAY="$AFTER" "$DOCS" "$r"
+
+r=$(mkrepo docs-docsdir-adoc README.adoc LICENSE docs/CONTRIBUTING.adoc)
+assert "docs/CONTRIBUTING.adoc accepted" 0 "✅ Core documentation present" \
+  env DOCS_TODAY="$AFTER" "$DOCS" "$r"
+
+# Anti-overreach: widening WHERE the gate looks must not widen WHAT it asks.
+# A CONTRIBUTING at an arbitrary depth is NOT discoverable by GitHub and must
+# still block. Without this case the four above could be "satisfied" by a
+# recursive find, which would silently pass the 94 genuinely-missing repos.
+r=$(mkrepo docs-deep-nested README.adoc LICENSE src/internal/CONTRIBUTING.md)
+assert "CONTRIBUTING at an undiscoverable path still BLOCKS" 1 \
+  "Missing required documentation: CONTRIBUTING" \
+  env DOCS_TODAY="$AFTER" "$DOCS" "$r"
+
 # README/LICENSE are BLOCKING NOW — the grace window must not shelter them.
 r=$(mkrepo docs-no-readme LICENSE CONTRIBUTING.md)
 assert "missing README fails even pre-cutoff" 1 "Missing required documentation: README" \
