@@ -897,6 +897,12 @@ jobs:
         shell: bash
         env:
           R_DETECT: ${{ needs.detect.result }}
+          # `detect` no longer exits 1 on a refusal, so R_DETECT is `success`
+          # even when the scan found nothing to check. Without this the Detect
+          # row below would print "pass", which is the precise opposite of what
+          # happened. The verdict travels as data; so must its rendering.
+          REFUSED: ${{ needs.detect.outputs.refused }}
+          REASON: ${{ needs.detect.outputs.refusal_reason }}
           R_SECRET: ${{ needs.secret-scan.result }}
           R_SAST: ${{ needs.sast.result }}
           R_RUST: ${{ needs.rust.result }}
@@ -934,7 +940,16 @@ jobs:
             echo ""
             echo "| Gate | Result | Note |"
             echo "|---|---|---|"
-            row "Detect"          "$R_DETECT"   "n/a"
+            # ⚠ NOT a plain row(). `detect` succeeds as a JOB even when it
+            # refuses, because the refusal is an output rather than an exit
+            # code (see the refusal branch in that job). row() would map that
+            # `success` to the word "pass" and assert that the repository was
+            # examined. It was not.
+            if [ "${REFUSED:-false}" = "true" ]; then
+              echo "| Detect | **REFUSED** | ran, and found nothing it could check — ${REASON} |"
+            else
+              row "Detect"          "$R_DETECT"   "n/a"
+            fi
             row "Secret scanning" "$R_SECRET"   "n/a"
             row "SAST (semgrep)"  "$R_SAST"     "disabled via enable_sast: false"
             row "Rust"            "$R_RUST"     "no Cargo.toml tracked (has_rust=${H_RUST})"
@@ -1035,6 +1050,10 @@ jobs:
           LEDGER_SHA: ${{ job.workflow_sha }}
           REFUSED: ${{ needs.detect.outputs.refused }}
           REASON: ${{ needs.detect.outputs.refusal_reason }}
+          # `secret-scan` and `sast` carry no `needs: detect`, so they run and
+          # can fail on a repository that ALSO refused. Both debts are real at
+          # once and the message below must be able to say so.
+          ANY_FAILED: ${{ contains(needs.*.result, 'failure') }}
         run: |
           # Every name above comes from the step `env:` map.
           set -euo pipefail
@@ -1071,7 +1090,18 @@ jobs:
           # and failed is fixable in this repository; a refusal means no gate
           # exists for what this repository is written in, which nothing done
           # here can cure.
-          if [ "${REFUSED:-false}" = "true" ]; then
+          #
+          # ⚠ These are not mutually exclusive. `secret-scan` and `sast` have no
+          # `needs: detect`, so they run on every repository including one that
+          # refused. Treating this as an either/or would print "NOTHING WAS
+          # CHECKED" over a secret-scan that ran and failed — understating a
+          # real finding to describe a missing gate. Say both when both hold.
+          REF="${REFUSED:-false}"
+          FAILED="${ANY_FAILED:-false}"
+          if [ "$REF" = "true" ] && [ "$FAILED" = "true" ]; then
+            DEBT="TWO debts at once: no ecosystem gate could run (${REASON}), AND at least one gate that does not depend on detection REALLY FAILED"
+            FIX="Fix what the report table names, and add a gate for the ecosystems named above (see hyperpolymath/standards#967)."
+          elif [ "$REF" = "true" ]; then
             DEBT="NOTHING WAS CHECKED — ${REASON}"
             FIX="Add a gate for the ecosystems named above (see hyperpolymath/standards#967). Until one exists this repository cannot be made green by fixing its own code."
           else
