@@ -1,0 +1,366 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Mapping spec — `launcher-standard.a2ml` → `praxis-deed`
+Campaign: standards#837 · Frame: link:README.adoc[mappings/README] ·
+Status: **RULED AND TRANSLATED** — owner ruling D73-C (standards#787,
+2026-09-22): "convert `launcher-standard` to `.deed`". Unlike the other specs
+in this directory, this one is not a proposal: the translation it authorises
+has been emitted, validated and committed in the same change.
+
+This is the campaign's first *executed* family, and it is deliberately a small
+one — a single file with a single machine consumer — chosen so the frame is
+proved on something whose blast radius can be enumerated rather than on the
+222-file estate corpus.
+
+== 1. Source surface
+
+* **Canonical instance:** `launcher/launcher-standard.a2ml` in
+  `hyperpolymath/standards` — 268 lines, 11,863 B, 18 sections, `version =
+  "0.3.0"`. Exactly one instance estate-wide; this family has no per-repo
+  fan-out, which is why it is a safe first cut.
+* **Prose counterpart:** `docs/UX-standards/launcher-standard.adoc`, bound to
+  the machine-readable file by `.github/workflows/launcher-standard-lockstep.yml`,
+  which fails the build if one changes without the other.
+* **🪤 Vendored second source (NOT the mapping input):**
+  `launch-scaffolder/standards/launcher-standard.a2ml` — 5,272 B, `version =
+  "0.2.0"`, baked into the binary via `include_str!()`. It is **missing the
+  entire `[resolution]` section**, so the binary ships a standard predating the
+  fix that removed hard-coded `/var/mnt/eclipse/...` paths. The mapping input is
+  the standards copy; the vendored copy is a *consumer* obligation (§7), not a
+  second surface to translate. Translating both would mint two deeds that
+  disagree.
+
+== 2. Target deed form
+
+[source]
+----
+launcher-standard_praxis.deed
+----
+
+`praxis-deed` head, by the `<stem>_praxis.deed` dispatch row.
+
+[NOTE]
+====
+**There is no such file as `launcher-standard.deed`.** DEED filenames are a
+closed dispatch set of four shapes, and the in-file head must match the
+filename. A file named `launcher-standard.deed` matches no row and is rejected
+by `deed_lint.py` **at line 1** — verified by mutant, not read off the spec.
+"Convert X to `.deed`" therefore never produces `X.deed`.
+====
+
+=== Why `praxis-deed` and not `repo-deed`
+
+`repo-deed` records what a repository *is*. This document records what a
+conforming launcher *does* — and, decisively, it is **almost entirely
+first-match-wins ladders**: six resolution paths, five standard-search paths,
+three fallback stages, four browser commands per platform, four GUI dialog
+commands, two startup-command paths.
+
+The grammar's §"Order is not semantic — except `:schema-version`" makes that
+decisive rather than stylistic:
+
+[quote]
+____
+Where precedence genuinely matters — the rules inside a praxis deed — it is
+carried by an explicit `:priority` INTEGER, never by file position.
+____
+
+with the rationale:
+
+[quote]
+____
+with first-match-wins, a broad rule inserted above a narrow one silently
+shadows it. No error is raised; the narrow rule simply stops firing.
+____
+
+A `repo-deed` rendering would have put those ladders in bare DEED lists, and a
+DEED list carries **no ordering**. The ordering that makes
+`desktop-tools-search` correct would have been discarded silently, with the
+file still validating. `praxis-deed` + `:priority` is the only form in which
+this standard survives translation intact.
+
+=== Head
+
+[source]
+----
+(praxis-deed
+  :schema-version   "1.0.0"                 ; REQUIRED, structurally FIRST
+  :canonical-name   "launcher-standard"     ; REQUIRED
+  :beholding-chora  #u5"estate/chora"       ; REQUIRED — a UUID, never a bare filename
+  :standard-version "0.4.0"
+  :standard-date    "2026-09-22"
+  :compliance       (...))
+----
+
+Three fields are required by the grammar's §"The praxis-deed form"; the
+remainder are domain payload. Payload clauses on a head are established
+practice, not an invention: the conformance fixture
+`tools/fixtures/valid/rsr-template-repo_chora.deed` carries ~12 rich nested
+domain clauses and **passes**. The v0.1 WARNING in the grammar spec — that
+inventing fields "is precisely the failure this document exists to stop" —
+governs inventing required *grammar* fields, not domain payload, and is
+therefore not engaged here.
+
+=== ⚠ Three version numbers meet in this file
+
+|===
+| number | what it versions | value
+
+| `:schema-version` | the DEED format itself | `"1.0.0"` — fixed by the grammar
+| `:standard-version` | the launcher standard's own contract | `0.3.0` → **`0.4.0`**
+| the prose adoc's `:revnumber:` | the human document | tracked separately
+|===
+
+`:standard-version` is bumped because the resolution ladders now name the
+`.deed` file. That is **consumer-visible**: a launcher searching for
+`launcher-standard.a2ml` will not find this standard. It is a breaking change
+to the search surface, not a re-encoding.
+
+== 3. Field table
+
+`→` left: a2ml surface. Right: deed path + type + transform.
+
+[cols="2,3,4"]
+|===
+| a2ml surface | deed path | transform / type
+
+4+| *Head*
+
+| `[spec] version` | `:standard-version` | STRING, **bumped `0.3.0` → `0.4.0`** (see above) — the one value that is not carried verbatim
+| `[spec] date` | `:standard-date` | STRING (no date type in the grammar)
+| `[spec] compliance` | `:compliance (...)` | list of STRINGs — a *set*, unordered, so **no `:priority`**
+| — (new) | `:schema-version` | STRING `"1.0.0"`, structurally first
+| — (new) | `:canonical-name` | STRING `"launcher-standard"`
+| — (new) | `:beholding-chora` | `#u5` literal; body is the NAME input, never hex
+
+4+| *Ordered ladders — `:priority`-bearing clauses*
+
+| `[resolution] desktop-tools-search` (6) | `(resolution (desktop-tools-search (path :priority 10 :value "…" :note "…") …))` | array → one `(path …)` clause each, `:priority` 10,20,30… **in source order**
+| `[resolution] standard-search` (5) | `(resolution (standard-search (path :priority N :value "…") …))` | as above; ⚠ every `:value` is **rewritten** `…/launcher-standard.a2ml` → `…/launcher-standard_praxis.deed`
+| `[fallback-ladder] stages` (3) | `(fallback-ladder (stage :priority N :name gui …) …)` | array of inline tables → `(stage …)` clauses; `name`/`colour`/`on-failure`/`behaviour` values are closed enums → SYMBOLs
+| `[browser-launch] linux` (4) | `(browser-launch (linux (command :priority N :value "…") …))` | array of STRINGs → `(command …)` clauses. The platform key becomes a **nested clause**, not a field, because its value is a ladder
+| `[browser-launch] macos` / `windows` (1 each) | `(browser-launch (macos (command :priority 10 :value "open")) …)` | same shape at length 1 — uniformity beats brevity; a one-element ladder still grows
+| `[error-visibility] gui-dialog-chain` (4) | `(error-visibility (gui-dialog-chain (command :priority N :value "…") …))` | as above
+| `[runtime] startup-command-search` (2) | `(runtime (startup-command-search (path :priority N :value "…") …))` | as above
+| `[integrity] fallback-paths` (1) | `(integrity (fallback-paths (path :priority 10 :deprecated #t :value "…")))` | ladder shape retained; the legacy eclipse literal carries `:deprecated #t`
+
+4+| *Unordered sets — bare lists, deliberately NO `:priority`*
+
+| `[required-modes] runtime` / `integration` / `meta` | `(required-modes :runtime ("--start" …) …)` | lists of STRINGs. A launcher must accept **all** of them; there is no first match, so ordering is not semantic and must not be faked
+| `[optional-modes] developer` | `(optional-modes :developer (…))` | list of STRINGs
+| `[disinteg] remove` | `(disinteg :remove (desktop-file …))` | closed vocabulary → list of SYMBOLs
+| `[disinteg] preserve` | `(disinteg :preserve ("…" …))` | paths stay STRINGs
+| `[a2ml-metadata-block] required-fields` | `(metadata-block :required-fields (…))` | list of STRINGs — **and the clause is renamed**, see §4
+
+4+| *Scalar clauses, verbatim*
+
+| `[fallback-ladder]` 6 scalars | `(fallback-ladder :wrapper "…" …)` | STRINGs; `banner-visibility = "loud"` → SYMBOL `loud` (closed enum)
+| `[version-output]` 5 keys | `(version-output :first-line-format "…" :exit-code 0 :machine-greppable #t)` | STRING / INTEGER / BOOLEAN — `true` → **`#t`** (`true` is a parse error in DEED)
+| `[aliases]` 2 keys | `(aliases (alias :from "--browser" :to "--auto") …)` | ⚠ key→value table → explicit `(alias …)` clauses. **Both halves stay STRINGs**: a DEED symbol cannot begin with `-`
+| `[default-mode] mode` | `(default-mode :mode "--auto")` | STRING, same reason
+| `[runtime]` 8 keys | `(runtime :background nohup :pid-file-pattern "…" …)` | `background` → SYMBOL; patterns and env-var names STRINGs; timeouts INTEGERs
+| `[browser-launch]` 3 scalars | `(browser-launch :env-var-override "…" …)` | STRINGs
+| `[error-visibility]` 3 scalars | `(error-visibility :reference-impl "…" :always-also-to-stderr #t …)` | STRING / BOOLEAN
+| `[integration.linux]` 8 keys | `(integration (linux :apps-dir "…" :desktop-file-permissions 444 …))` | the dotted TOML section becomes a **nested clause**; `444` stays an INTEGER (it is a mode, and DEED has no octal literal — the source did not write `0444` either)
+| `[integration.macos]` 5 / `[integration.windows]` 5 | `(integration (macos …) (windows …))` | as above; `bat-fallback = true` → `#t`
+| `[integrity]` 3 scalars | `(integrity :verification-tool "…" :fatal-on-failure #f)` | STRING / BOOLEAN
+| `[soft-attach] reference-impl` | `(soft-attach :reference-impl "…")` | STRING
+| `[soft-attach] tools` (3) | `(soft-attach (tool :name feedback-o-tron :style event :trigger on-start-failed …) …)` | array of inline tables → `(tool …)` clauses. `name`/`style`/`trigger` are closed enums → SYMBOLs; `event`/`command` are free text → STRINGs. **No `:priority`** — these are independent hooks on the same trigger, not a ladder
+|===
+
+Fields not listed do not exist in the deed era for this family. The translation
+is total over the source: all 18 sections are accounted for.
+
+== 4. Drop doctrine (what is NOT translated, and why that is right)
+
+* **`[a2ml-metadata-block]` is renamed to `(metadata-block …)`.** Its *content*
+  is carried in full; only the format name in the clause name is dropped. A2ML
+  is a dead format name — the owner's doctrine is "do not push it around, leave
+  it in place, build on it, or connect anything new to it" — and carrying
+  `a2ml` forward in a live DEED clause name is connecting something new to it.
+  ⚠ This is the one **renamed** identifier in the translation; a consumer
+  grepping for `a2ml-metadata-block` will not find it, by design.
+* **Instructional comments are split, not dropped wholesale.** The source
+  carries two kinds of comment and they are treated differently:
+** *Load-bearing caveats* survive as `;;` comments, because deleting them would
+   lose a warning no field encodes — the `deployed-symlink` DEPRECATED notice,
+   the "intentionally ugly — visibility beats aesthetics" rationale for `loud`,
+   the note that `XDG_DATA_HOME` defaults to `$HOME/.local/share`, and the
+   `[resolution]`-resolved markers on `deployed-name` / `tool-name`. Several are
+   promoted from comments to real `:note` fields on the `(path …)` clauses,
+   where they become greppable rather than incidental.
+** *Tutorial prose* is dropped: the multi-line explanations of what
+   `keepopen.sh` is for, the three `hp_soft_attach_*` primitive signatures, the
+   "Downstream launchers SHOULD source this" advice. These are **guidance, not
+   data**; they live on in `docs/UX-standards/launcher-standard.adoc` and in
+   `launcher/soft-attach.sh` itself, which the deed names by path. A deed is a
+   record, not a manual — the same doctrine the CLADE and STATE specs apply.
+* **The `trigger` vocabulary comment is dropped as a comment and preserved as
+  fact**: the source lists four legal triggers of which only
+  `on-start-failed` is used. The unused three are not emitted — a deed records
+  what is, not what is permitted. The vocabulary is the prose document's job.
+* **Nothing is dropped for being empty.** This family has no empty-slot fields
+  of the kind CLADE deliberately preserves, so the question does not arise.
+
+== 5. Provenance & validation
+
+* **P-1 (source must parse first):** the `.a2ml` is TOML-shaped and is read with
+  a TOML reader, never grepped — the estate's own rule, and the reason the
+  `[aliases]` quoted keys and the inline-table arrays were encoded correctly
+  rather than line-scraped.
+* **P-2 (output must parse as DEED):** the emitted deed is validated by
+  `1-formats/deed/tools/deed_lint.py`, the estate's own conformance tool —
+  stdlib-only, and the same one `deed-conformance.yml` runs over every committed
+  `*.deed`. **Result: `OK`**, with `--self-test` (14-case corpus) and
+  `--fixtures` green in the same run as positive controls, so a pass is
+  attributable to the file and not to a broken validator.
+* **P-3 (a passing validator proves nothing until a mutant dies).** Seven
+  controls, six mutants and one negative:
++
+|===
+| mutant | expected | result
+
+| M1 — file renamed `launcher-standard.deed` | rejected by dispatch | **DIED** rc=1, line 1
+| M2 — one `key = value` line (a2ml habit) | no `=` outside a symbol | **DIED** rc=1, line 25
+| M3 — a tab used as a separator | tabs invalid everywhere (K9-consistent) | **DIED** rc=1, line 19, "HTAB"
+| M4 — bare `true` for `#t` | only `#t`/`#f` are booleans | **DIED** rc=1, line 119, "boole…"
+| M5 — `:schema-version` removed | required on every head | **DIED** rc=1, line 261
+| M6 — trailing content after the final `)` | full input must be consumed | **DIED** rc=1, line 263, "trail…"
+| NEG — untouched copy | passes | **PASSES** (correct)
+|===
++
+M1 is the load-bearing one: it is the *only* direct evidence that
+`launcher-standard.deed` is not a legal name, and it was run because the spec
+said so — reading the dispatch table is not the same as testing it.
+* **P-4 (dispatch check):** the stem is everything before the **final** suffix,
+  and dispatch is **exact-stem-first** — `estate_chora.deed` is tested before
+  `*_chora.deed`. This file's stem is `launcher-standard_praxis`, matching the
+  `<stem>_praxis.deed` row, and the in-file head `(praxis-deed` agrees.
+* **P-5 (`a2ml_to_deed.py` was NOT used, deliberately):** the estate's
+  translator **fails closed on untabled fields** by design, and
+  `launcher-standard` is not in its table. This translation is hand-encoded
+  against this spec. ⚠ Adding a table entry that made the generic translator
+  emit this file would be a *second* authority for the same output; if the
+  translator is ever taught this family, this spec is the input to that work
+  and the generated output must be diffed byte-for-byte against the committed
+  deed.
+* **P-6 (the lockstep gate survives the rename):** the workflow names the source
+  file in **two** places — the `on: pull_request: paths:` filter *and* the
+  in-job `declare -a GROUP=(…)` array. Updating only the filter leaves the gate
+  asserting a file that no longer exists; updating only the array leaves the
+  gate never firing. Both are updated in the same change, and the transition PR
+  itself satisfies the gate because it touches the deed *and* the prose adoc.
+
+* **P-7 (the source is removed, and stays recoverable):** per the owner's
+  standing A2ML doctrine — *"Do not push it around, leave it in place, build on
+  it, or connect anything new to it"* — `launcher/launcher-standard.a2ml` is
+  **deleted** in the same change, not left beside the deed. Leaving it would
+  recreate the dual-source defect this spec exists to close, and a `[section]`
+  file is the `toml-like` surface the owner ruled superseded on 2026-09-08.
+  The mapping input remains addressable for the life of the repository as git
+  blob **`adc283013cc50cff78f8c1ad0bf7846fc617d71e`** (11,863 B); recover it
+  with `git show adc28301`. ⚠ The byte count in §1 was wrong on first writing
+  (11,886) and was corrected against `git show HEAD:<path> | wc -c`. Two other
+  counts in §1 were checked in the same pass and were right: 268 lines, 18
+  `[section]` headers, and the vendored copy's 5,272 B.
+
+== 6. Acceptance greps (this family is preserved iff, post-translation)
+
+[source,bash]
+----
+# 1. The deed exists and validates under the estate's own tool.
+python3 1-formats/deed/tools/deed_lint.py launcher/launcher-standard_praxis.deed   # ⇒ OK
+
+# 2. The a2ml source is GONE, not moved aside (A2ML doctrine: do not push it around).
+test ! -e launcher/launcher-standard.a2ml
+
+# 3. No LIVE consumer still names the dead file. Three classes of mention are
+#    legitimate, and are excluded BY NAME rather than by luck:
+#      a. docs/audits/launcher-standard-review-2026-05-26.{adoc,a2ml} — a dated
+#         historical record of a 2026-05-26 review, correct as written;
+#      b. this mapping spec — the authority MUST name its source surface;
+#      c. launcher-standard_praxis.deed line 7 — a `;;` provenance comment
+#         recording what the deed was translated from. Wanted, not residue.
+#    ⚠ The path filter is DELIBERATELY UNANCHORED. GNU grep prefixes each
+#    result with `./`; ugrep — the estate's interactive default, a shell
+#    function wrapping ugrep 7.8.4 — does not. So a filter written
+#    `^\./docs/audits/` is INERT under ugrep and the check then FAILS in the
+#    correct end state. Verified against both readers: each returns the same
+#    4 files, in different path shapes.
+grep -rl 'launcher-standard\.a2ml' --exclude-dir=.git . \
+  | grep -vE 'docs/audits/|launcher-standard-to-praxis-deed\.adoc|launcher-standard_praxis\.deed'
+# ⇒ empty
+
+# 4. Every ordered ladder carries :priority. ⚠ Exclude `;;` comment lines:
+#    a bare count returns 32, five of which are the prose explaining the rule.
+grep -vE '^\s*;;' launcher/launcher-standard_praxis.deed | grep -c ':priority'      # ⇒ 27
+#    27 = 6 desktop-tools + 5 standard-search + 3 stages + 4+1+1 browser
+#       + 4 gui-dialog + 2 startup-command + 1 integrity-fallback.
+
+# 5. The unordered sets did NOT acquire a spurious :priority.
+sed -n '/(required-modes/,/(optional-modes/p' launcher/launcher-standard_praxis.deed \
+  | grep -c ':priority'                                                             # ⇒ 0
+
+# 6. No tabs anywhere.
+grep -nP '\t' launcher/launcher-standard_praxis.deed                                # ⇒ empty
+
+# 6b. Bare `true`/`false` used as a BOOLEAN: delegated to the validator (check 1),
+#     NOT to grep. ⚠ This one resists grepping and the failed attempts are worth
+#     recording, because both look right:
+#       grep -E '\b(true|false)\b'            → 1 hit
+#       grep -E ':[a-z-]+ +(true|false)\b'     → 1 hit
+#     Both match the same line, and it is CLEAN:
+#       :trust-command "gio set {file} metadata::trusted true"
+#     The word sits inside a STRING carried verbatim from the source, and the
+#     second pattern is fooled a second time because `::trusted ` inside that
+#     string re-supplies the `:keyword ` shape. Only a parser knows a value
+#     position from a string interior. `deed_lint.py` does; mutant M4 proves it
+#     does. A grep count is not a residue count.
+
+# 7. The lockstep gate names the new file in BOTH of its two FUNCTIONAL sites
+#    — the `on: paths:` filter and the in-job GROUP array — plus the header
+#    comment that explains the pairing. Updating only the filter leaves the
+#    gate asserting a file that no longer exists; only the array leaves it
+#    never firing.
+W=.github/workflows/launcher-standard-lockstep.yml
+grep -c 'launcher-standard_praxis\.deed' "$W"    # ⇒ 3 (filter + GROUP + header prose)
+grep -c 'a2ml' "$W"                              # ⇒ 0 (error text says "deed", not "a2ml")
+grep -n 'uses:' "$W"                             # unchanged — so NO actions.lock edit is due
+----
+
+== 7. Consumer transition (recorded here; executed on its own track)
+
+The deed is the authority the moment it lands, but two consumers read the old
+surface and must follow. They are listed so that "the translation is done" is
+never mistaken for "the consumers are done" — `implemented` does not imply
+`wired` (AGENTS.md §6).
+
+. **`launch-scaffolder`** — `crates/launcher-common/src/standard.rs` parses the
+  standard with `toml::from_str` and bakes a vendored copy via `include_str!()`.
+  ⚠ **There is no Rust `.deed` parser in the estate.** `deed-ecosystem/rs` is
+  the unmigrated A2ML markdown crate (`[package] name = "a2ml"`, with
+  `Block::Heading` / `Block::Paragraph`) and is not a starting point. The work
+  is a purpose-built recursive-descent parser in `launcher-common`; the
+  acceptance test is that the old TOML and the new deed parse to an **equal**
+  `Standard` value, and the vendored copy is made byte-identical to the
+  committed deed with a drift test asserting it. `[resolution]` joins the
+  required-section set — the vendored copy's omission of it is the live defect
+  this closes.
+. **`trigger`** — `scripts/trigger-launcher.sh`, `dev-notes/HANDOVER.adoc`,
+  `docs/IMPLEMENTATION-STATUS.adoc` name the standard. Textual.
+
+Out of scope, recorded so it is not lost: **10 downstream `*.launcher.a2ml`
+files** under `metadatastician/` and `_ESOTERIC_GROUP _SET/`. These are
+per-application *instances* of the metadata block, a different family from this
+standard, and they need their own spec before anything touches them.
+
+== 8. What this spec does not claim
+
+* That the `praxis-deed` head is the only defensible choice. `repo-deed` would
+  have validated. The argument for `praxis-deed` is §2's — a `repo-deed`
+  rendering would have had to discard ordering or fake it, and the grammar
+  names that exact failure.
+* That the `:priority` step of 10 is meaningful. It is insertion headroom and
+  nothing else; only the relative order is semantic.
+* That the vendored `launch-scaffolder` copy is now correct. It is not: it is
+  still v0.2.0, still missing `[resolution]`, and still `.a2ml`. That is §7
+  item 1 and it is not done.

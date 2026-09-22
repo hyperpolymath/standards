@@ -1,0 +1,262 @@
+;; SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+;; SPDX-License-Identifier: MPL-2.0
+;;
+;; launcher-standard_praxis.deed — canonical declarative description of a
+;; hyperpolymath-compliant desktop launcher.
+;;
+;; Translated from launcher/launcher-standard.a2ml under the authority of
+;; 1-formats/deed/mappings/launcher-standard-to-praxis-deed.adoc (standards#837,
+;; owner ruling D73-C). The praxis head is correct because this document states
+;; what a tool DOES: it is almost entirely first-match-wins ladders, and DEED
+;; carries precedence in an explicit :priority integer, never in file position.
+;;
+;; Prose counterparts:
+;;   docs/UX-standards/launcher-standard.adoc
+;;   docs/UX-standards/LM-LA-LIFECYCLE-STANDARD.adoc
+;;   0-canon/rsr/LANGUAGE-POLICY.adoc
+(praxis-deed
+  :schema-version   "1.0.0"
+  :canonical-name   "launcher-standard"
+  :beholding-chora  #u5"estate/chora"
+
+  ;; The standard's OWN version, distinct from :schema-version (the DEED
+  ;; format). Bumped 0.3.0 -> 0.4.0 because the resolution ladders below now
+  ;; name the .deed file, which is consumer-visible.
+  :standard-version "0.4.0"
+  :standard-date    "2026-09-22"
+  :compliance ("launcher-standard.adoc"
+               "LM-LA-LIFECYCLE-STANDARD.adoc"
+               "cross-platform-system-integration-modes"
+               "fallback-ladder-keepopen")
+
+  ;; ---------------------------------------------------------------- resolution
+  ;; Path-resolution ladders. Consumers (launch-scaffolder, downstream
+  ;; launchers, the integrity verifier) MUST consult each ladder in ASCENDING
+  ;; :priority order; the first existing path wins. This replaces single
+  ;; hard-coded /var/mnt/eclipse/... paths that broke the standard on hosts
+  ;; that do not use the eclipse-mount layout.
+  ;;
+  ;; .desktop files MUST embed the RESOLVED ABSOLUTE PATH at install time --
+  ;; the freedesktop spec does not expand environment variables in Exec=
+  ;; lines, so the launcher's --integ mode performs the resolution and writes
+  ;; the literal path into the .desktop file.
+  ;;
+  ;; Reference implementation: launcher/resolve-desktop-tools.sh
+  (resolution
+    (desktop-tools-search
+      (path :priority 10 :value "$HP_DESKTOP_TOOLS"
+            :note "explicit override")
+      (path :priority 20 :value "$HP_ESTATE_ROOT/.desktop-tools"
+            :note "estate-root convention")
+      (path :priority 30 :value "$XDG_DATA_HOME/hyperpolymath/.desktop-tools"
+            :note "XDG default; XDG_DATA_HOME defaults to $HOME/.local/share")
+      (path :priority 40 :value "/var/mnt/eclipse/repos/.desktop-tools"
+            :note "legacy eclipse-mount layout")
+      (path :priority 50 :value "$HOME/developer/repos/.desktop-tools"
+            :note "alt: $HOME/developer/repos")
+      (path :priority 60 :value "$HOME/dev/repos/.desktop-tools"
+            :note "alt: $HOME/dev/repos"))
+    ;; Same ladder shape for locating this file itself, consumed by
+    ;; launch-scaffolder when neither --standard <path> nor
+    ;; $LAUNCH_SCAFFOLDER_STANDARD is set.
+    (standard-search
+      (path :priority 10 :value "$HP_ESTATE_ROOT/standards/launcher/launcher-standard_praxis.deed")
+      (path :priority 20 :value "$XDG_DATA_HOME/hyperpolymath/standards/launcher/launcher-standard_praxis.deed")
+      (path :priority 30 :value "/var/mnt/eclipse/repos/standards/launcher/launcher-standard_praxis.deed")
+      (path :priority 40 :value "$HOME/developer/repos/standards/launcher/launcher-standard_praxis.deed")
+      (path :priority 50 :value "$HOME/dev/repos/standards/launcher/launcher-standard_praxis.deed")))
+
+  ;; ----------------------------------------------------------- fallback-ladder
+  ;; keepopen.sh wraps every primary desktop-file Exec line. It turns launcher
+  ;; failures from invisible flashes into loud, labelled banners, and lands the
+  ;; user in an interactive shell at the repo root if everything fails.
+  (fallback-ladder
+    :wrapper            "keepopen.sh"
+    :canonical-path     "developer-ecosystem/standards/launcher/keepopen.sh"
+    :deployed-name      "keepopen.sh"
+    ;; DEPRECATED legacy literal, kept for pre-resolution consumers.
+    ;; New code MUST use the (resolution) ladders above.
+    :deployed-symlink   "/var/mnt/eclipse/repos/.desktop-tools/keepopen.sh"
+    :calling-convention "keepopen.sh APP_NAME REPO_DIR \"GUI_CMD\" \"TUI_CMD\" [LOG_FILE]"
+    ;; Intentionally ugly -- visibility beats aesthetics.
+    :banner-visibility  loud
+    :final-shell        "bash -l at REPO_DIR (never 'press enter to close')"
+    (stage :priority 10 :name gui   :colour yellow
+           :on-failure show-banner-then-try-tui)
+    (stage :priority 20 :name tui   :colour red
+           :on-failure show-banner-then-drop-to-shell)
+    (stage :priority 30 :name shell :colour green
+           :behaviour exec-bash-login-at-repo-dir))
+
+  ;; ------------------------------------------------------------ required-modes
+  ;; Modes every compliant launcher MUST implement. Aliases are accepted
+  ;; inputs, not independent obligations, and are listed separately below.
+  ;; These are sets, not ladders: no :priority, order carries no meaning.
+  (required-modes
+    :runtime     ("--start" "--stop" "--status" "--auto")
+    :integration ("--integ" "--disinteg")
+    :meta        ("--help" "--version"))
+
+  (optional-modes :developer ("--debug" "--logs" "--tail"))
+  (default-mode :mode "--auto")
+
+  ;; Documented mode aliases. Launchers MUST accept these and route them to
+  ;; the canonical mode. A DEED symbol cannot begin with "-", so both halves
+  ;; stay strings.
+  (aliases
+    (alias :from "--browser" :to "--auto")
+    (alias :from "--web"     :to "--auto"))
+
+  ;; ------------------------------------------------------------ version-output
+  ;; Required format for --version. The first line MUST be machine-greppable
+  ;; so field bug reports can quote it verbatim; further lines MAY follow.
+  ;; Rationale: a launcher with no --version produces unactionable bug
+  ;; reports -- "it's broken on my machine" with no way to tell which build.
+  (version-output
+    :first-line-format  "{app-name} {version} ({build-sha-short}) [{platform}]"
+    :example            "aerie-launcher 0.4.2 (a1b2c3d) [linux-x86_64]"
+    :exit-code          0
+    :machine-greppable  #t)
+
+  ;; ------------------------------------------------------------------- runtime
+  (runtime
+    :background nohup
+    ;; PID files live in the user's runtime-state dir -- wiped on logout,
+    ;; user-scoped (mode 0700 per XDG), no symlink-attack target.
+    :pid-file-pattern "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/{app-name}-server.pid"
+    ;; Logs go to XDG_STATE_HOME. Per-user, survives reboot, not
+    ;; world-writable; the {app-name} subdir isolates each launcher's logs.
+    :log-file-pattern "${XDG_STATE_HOME:-$HOME/.local/state}/{app-name}/server.log"
+    ;; URL-readiness polling after start. All three timing values are env-var
+    ;; overridable so operators can tune without re-minting the launcher.
+    :wait-for-url-timeout-seconds       15
+    :wait-for-url-timeout-env-var       "WAIT_FOR_URL_TIMEOUT_SECONDS"
+    :wait-for-url-poll-interval-seconds 1
+    :wait-for-url-poll-interval-env-var "WAIT_FOR_URL_POLL_INTERVAL"
+    ;; Per-request timeout: cap each individual probe so a hung server does
+    ;; not eat the entire poll budget on a single request.
+    :wait-for-url-per-request-timeout-seconds 2
+    (startup-command-search
+      (path :priority 10 :value "{repo-dir}/scripts/run.sh")
+      (path :priority 20 :value "{repo-dir}/dev.sh")))
+
+  ;; ------------------------------------------------------------ browser-launch
+  ;; How open_browser() resolves which command to invoke. Implementations
+  ;; MUST honour the env-var override first (de-facto $BROWSER convention),
+  ;; then fall back to the platform ladder. Platform is detected via
+  ;; `uname -s`; on Linux, additionally probe /proc/version for "microsoft"
+  ;; to detect WSL -- under WSL wslview is preferred so the URL opens in the
+  ;; Windows-side default browser (Linux-side browsers either land in WSLg
+  ;; or fail).
+  (browser-launch
+    :env-var-override  "BROWSER"
+    :linux-wsl-detect  "/proc/version contains 'microsoft' (case-insensitive)"
+    :fallback          "log 'Open manually: <URL>'"
+    (linux
+      (command :priority 10 :value "wslview")
+      (command :priority 20 :value "xdg-open")
+      (command :priority 30 :value "firefox")
+      (command :priority 40 :value "chromium"))
+    (macos
+      (command :priority 10 :value "open"))
+    (windows
+      ;; cmd builtin; works under Git Bash / MSYS / Cygwin
+      (command :priority 10 :value "start")))
+
+  ;; ----------------------------------------------------------- error-visibility
+  ;; In a GUI context (no tty + DISPLAY/WAYLAND_DISPLAY set) errors must reach
+  ;; the user via a GUI dialog, not only stderr. Downstream launchers SHOULD
+  ;; source the reference implementation rather than re-implement the ladder,
+  ;; so the spec stays consistent across the estate.
+  (error-visibility
+    :reference-impl        "launcher/gui-error.sh"
+    :always-also-to-stderr #t
+    ;; NO_GUI_ERROR=1 suppresses the dialog attempt; stderr still gets the
+    ;; message. Useful in CI / scripted invocation.
+    :suppress-env-var      "NO_GUI_ERROR"
+    (gui-dialog-chain
+      (command :priority 10 :value "kdialog")
+      (command :priority 20 :value "zenity")
+      (command :priority 30 :value "notify-send")
+      (command :priority 40 :value "xmessage")))
+
+  ;; --------------------------------------------------------------- integration
+  (integration
+    (linux
+      :apps-dir                 "$HOME/.local/share/applications"
+      :icon-dir                 "$HOME/.local/share/icons/hicolor/256x256/apps"
+      :desktop-shortcut-dir     "$HOME/Desktop"
+      :bin-dir                  "$HOME/.local/bin"
+      :desktop-file-permissions 444
+      ;; Freedesktop named icon used when no custom icon is available.
+      :icon-fallback            "package-x-generic"
+      :refresh-command          "update-desktop-database"
+      :trust-command            "gio set {file} metadata::trusted true")
+    (macos
+      :apps-dir             "$HOME/Applications"
+      :desktop-shortcut-dir "$HOME/Desktop"
+      :bin-dir              "$HOME/.local/bin"
+      :bundle-pattern       "{app-display}.app"
+      :shortcut-pattern     "{app-display}.command")
+    (windows
+      :start-menu-dir       "$APPDATA/Microsoft/Windows/Start Menu/Programs"
+      :desktop-shortcut-dir "$HOME/Desktop"
+      :bin-dir              "$HOME/.local/bin"
+      :shortcut-pattern     "{app-display}.lnk"
+      ;; Fallback when PowerShell is not reachable under Git Bash / WSL.
+      :bat-fallback         #t))
+
+  ;; ----------------------------------------------------------------- integrity
+  ;; Per LM-LA-LIFECYCLE §LM/LA-INSTALL: after --integ completes, generate
+  ;; integrity hashes via an external tool. The tool is located via
+  ;; (resolution desktop-tools-search) plus :tool-name -- new consumers MUST
+  ;; use that ladder. (fallback-paths) is kept only for pre-resolution
+  ;; consumers and is itself a legacy literal.
+  (integrity
+    :verification-tool "verify-desktop-integrity.sh"
+    :tool-name         "verify-desktop-integrity.sh"
+    ;; A missing verifier is a log line, not an error.
+    :fatal-on-failure  #f
+    (fallback-paths
+      (path :priority 10 :deprecated #t
+            :value "/var/mnt/eclipse/repos/.desktop-tools/verify-desktop-integrity.sh")))
+
+  ;; ------------------------------------------------------------------ disinteg
+  ;; What --disinteg removes, and what it deliberately leaves alone.
+  ;; Both are sets: no ordering, so no :priority.
+  (disinteg
+    :remove   (desktop-file desktop-shortcut icon launcher-binary
+               start-menu-entry bat-fallback-shortcuts pid-file)
+    :preserve ("$HOME/.config/{app-name}/"
+               "${XDG_STATE_HOME:-$HOME/.local/state}/{app-name}/"
+               "{repo-dir}"))
+
+  ;; --------------------------------------------------------------- soft-attach
+  ;; Optional ecosystem integrations -- called if present, silently skipped if
+  ;; absent. Each tool carries an explicit :trigger naming the hook point at
+  ;; which the launcher should invoke it. Downstream launchers SHOULD source
+  ;; the reference implementation rather than re-implement its three
+  ;; primitives (hp_soft_attach_present / _run / _event).
+  ;;
+  ;; Triggers are a closed set today: on-start-failed, on-start-succeeded,
+  ;; on-integ-failed, on-user-request. More may be added as the lifecycle
+  ;; grows. These are independent hooks, not a ladder -- every matching tool
+  ;; fires, so there is no precedence to carry and no :priority.
+  (soft-attach
+    :reference-impl "launcher/soft-attach.sh"
+    (tool :name feedback-o-tron :style event   :trigger on-start-failed
+          :event "launcher:start_failed")
+    (tool :name hypatia         :style command :trigger on-start-failed
+          :command "hypatia diagnose --app {app-name} --log {log-file}")
+    (tool :name panic-attack    :style command :trigger on-start-failed
+          :command "panic-attack assail {repo-dir}"))
+
+  ;; ------------------------------------------------------------ metadata-block
+  ;; Every generated launcher must carry this metadata block in its header so
+  ;; it can be re-parsed by `launch-scaffolder config` and `realign`.
+  ;; Renamed from [a2ml-metadata-block]: A2ML is a dead format name and the
+  ;; deed era does not carry it forward. A set, not a ladder.
+  (metadata-block
+    :required-fields ("id" "type" "version" "app-name" "app-display" "app-url"
+                      "standards-compliance" "modes" "platforms"
+                      "lifecycle-phases-covered" "lifecycle-phases-deferred")))
