@@ -24,7 +24,7 @@ permissions:
 jobs:
   workflow-staleness:
     name: Check Workflow Staleness
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 10
     outputs:
       has_baseline: ${{ steps.check.outputs.has_baseline }}
@@ -180,7 +180,7 @@ jobs:
     # repo without a baseline blocked forever, by construction. The job now
     # always runs; the EXPENSIVE steps are guarded individually, so it still
     # costs nothing when there is no baseline to validate.
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 15
     steps:
       - name: Checkout caller repository
@@ -1082,9 +1082,6 @@ jobs:
           path: .standards-dupkey
           sparse-checkout: |
             scripts/check-workflow-duplicate-keys.sh
-            scripts/update-actions-lock.sh
-            scripts/check-actions-lock-gate.sh
-            .machine_readable/lock-allow.txt
           sparse-checkout-cone-mode: false
         # ⚠ Not fatal if a file is absent, and the next step names precisely
         # which one was missing. Formerly this followed `main`, so a rename of
@@ -1121,46 +1118,9 @@ jobs:
             exit 1
           fi
           cp "$SCRIPT" "$RUNNER_TEMP/dupkeys.sh"
-          # The lockfile gate below runs in a consumer checkout, where the
-          # standards helper is not present. Preserve the canonical helper
-          # before removing this sparse standards checkout.
-          LOCK_SCRIPT=".standards-dupkey/scripts/update-actions-lock.sh"
-          if [ ! -f "$LOCK_SCRIPT" ] && [ -f scripts/update-actions-lock.sh ]; then
-            LOCK_SCRIPT="scripts/update-actions-lock.sh"
-            echo "Using this repository's own actions-lock verifier (standards self-lint)."
-          fi
-          if [ ! -f "$LOCK_SCRIPT" ]; then
-            echo "::error::actions-lock verifier not found — neither fetched from" \
-                 "standards@main nor present locally."
-            exit 1
-          fi
-          cp "$LOCK_SCRIPT" "$RUNNER_TEMP/update-actions-lock.sh"
-          # The actions-lock GATE and its exemption ledger, same idiom: preserve
-          # them before this sparse standards checkout leaves the workspace.
-          GATE_SCRIPT=".standards-dupkey/scripts/check-actions-lock-gate.sh"
-          if [ ! -f "$GATE_SCRIPT" ] && [ -f scripts/check-actions-lock-gate.sh ]; then
-            GATE_SCRIPT="scripts/check-actions-lock-gate.sh"
-            echo "Using this repository's own actions-lock gate (standards self-lint)."
-          fi
-          if [ ! -f "$GATE_SCRIPT" ]; then
-            echo "::error::actions-lock gate not found — neither fetched from the" \
-                 "pinned standards helpers nor present locally."
-            exit 1
-          fi
-          cp "$GATE_SCRIPT" "$RUNNER_TEMP/check-actions-lock-gate.sh"
-          LEDGER=".standards-dupkey/.machine_readable/lock-allow.txt"
-          if [ ! -f "$LEDGER" ] && [ -f .machine_readable/lock-allow.txt ]; then
-            LEDGER=".machine_readable/lock-allow.txt"
-          fi
-          # A MISSING ledger must not silently exempt everyone, nor silently
-          # exempt no one. Stage an empty file and let the gate step print the
-          # denominator it actually read — a skip is not a pass.
-          if [ -f "$LEDGER" ]; then
-            cp "$LEDGER" "$RUNNER_TEMP/lock-allow.txt"
-          else
-            echo "::warning::actions-lock exemption ledger not found; treating it as EMPTY (no repo is exempt)."
-            : > "$RUNNER_TEMP/lock-allow.txt"
-          fi
+          # NOTE: the actions-lock gate used to be staged here too. It is its
+          # own job now (`actions-lock-verify`, its own required context per
+          # the 2026-09-02 regularisation spec §6.2) — see that job below.
           rm -rf .standards-dupkey
           bash "$RUNNER_TEMP/dupkeys.sh" .github/workflows
 
@@ -1192,17 +1152,114 @@ jobs:
           done
           [ $failed -eq 1 ] && { echo "Add SPDX header + permissions:"; exit 1; }
           echo "All workflows have SPDX headers + permissions"
+      # The actions-lock-verify job proves a pin has the right SHAPE. It cannot
+      # prove the SHA EXISTS — a fabricated 40-hex string passes it.
+      # Measured 2026-07-28:
+      # 112 of 613 unique estate pins (18%) do not resolve, in 876 committed
+      # files. An unresolvable `uses:` yields NO check run, so those repos look
+      # green while the job never ran. This step closes that gap.
+      - name: Checkout standards for the pin-existence gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          # Immutable pin, for the same reason as the policy-helper checkout
+          # above: following `main` lets one standards push change the
+          # behaviour of every already-pinned caller with no review.
+          ref: 317101e03b8fe642589498f4bdb84541ab466062
+          path: .standards-checkout
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+          sparse-checkout-cone-mode: false
+      - name: Check action pins resolve upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Copy out and delete the checkout before scanning, so the standards
+          # tree is never part of the caller's workspace (same idiom as the
+          # allowlist preflight above).
+          cp .standards-checkout/scripts/check-action-pins-resolve.sh "$RUNNER_TEMP/"
+          rm -rf .standards-checkout
+          bash "$RUNNER_TEMP/check-action-pins-resolve.sh" .
+      - name: Check for duplicate workflows
+        run: |
+          if [ -f .github/workflows/codeql.yml ] && [ -f .github/workflows/codeql-analysis.yml ]; then
+            echo "ERROR: Duplicate CodeQL workflows found"; exit 1
+          fi
+          echo "No critical duplicates found"
+
+  actions-lock-verify:
+    name: Actions lockfile verify
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+      - name: Checkout standards for the lock gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          # ⚠ BUMP THIS whenever scripts/check-actions-lock-gate.sh,
+          # scripts/update-actions-lock.sh or .machine_readable/lock-allow.txt
+          # changes, or callers are judged against a stale gate. Pinned to an
+          # immutable commit for the same reason as the dupkey helpers in
+          # workflow-lint: following `main` would let an edit in standards
+          # change the verdict of every already-pinned caller with no review
+          # in their repositories.
+          ref: 4f7f02ca528212c578fd56379a202d219d01abe0
+          path: .standards-lock
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/check-actions-lock-gate.sh
+            scripts/update-actions-lock.sh
+            .machine_readable/lock-allow.txt
+          sparse-checkout-cone-mode: false
       - name: Check locked or SHA-pinned actions
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
+          # Stage the gate, the verifier and the exemption ledger. When THIS
+          # repository is standards, its own working tree already holds all
+          # three (self-lint); every other caller uses the pinned checkout.
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
+            SRC=scripts
+            LEDGERSRC=.machine_readable
+            echo "Using this repository's own gate + verifier + ledger (standards self-lint)."
+          else
+            SRC=.standards-lock/scripts
+            LEDGERSRC=.standards-lock/.machine_readable
+          fi
+          for f in check-actions-lock-gate.sh update-actions-lock.sh; do
+            if [ ! -f "$SRC/$f" ]; then
+              echo "::error::actions-lock gate: $f not found in $SRC (pinned standards checkout failed?)"
+              exit 1
+            fi
+            cp "$SRC/$f" "$RUNNER_TEMP/$f"
+          done
+          # A MISSING ledger must not silently exempt everyone, nor silently
+          # exempt no one. Stage an empty file and let the gate below print
+          # the denominator it actually read — a skip is not a pass.
+          if [ -f "$LEDGERSRC/lock-allow.txt" ]; then
+            cp "$LEDGERSRC/lock-allow.txt" "$RUNNER_TEMP/lock-allow.txt"
+          else
+            echo "::warning::actions-lock exemption ledger not found; treating it as EMPTY (no repo is exempt)."
+            : > "$RUNNER_TEMP/lock-allow.txt"
+          fi
+          rm -rf .standards-lock
+
           # ONE implementation of the lock/pin predicate, not two.
           #
-          # This step used to carry its own inline copy of the logic. That copy
-          # matched `^[[:space:]]+uses:` — with no `-?` — so it never saw
-          # `- uses: foo@v1`, the commonest step form, and its green was
-          # therefore partly vacuous. scripts/check-actions-lock-gate.sh uses
+          # The gate used to live inside workflow-lint with its own inline copy
+          # of the logic. That copy matched `^[[:space:]]+uses:` — with no
+          # `-?` — so it never saw `- uses: foo@v1`, the commonest step form,
+          # and its green was therefore partly vacuous.
+          # scripts/check-actions-lock-gate.sh uses
           # `^[[:space:]]+-?[[:space:]]*uses:` and is the tested implementation
           # (scripts/tests/check-actions-lock-gate-test.sh, 11/11).
           #
@@ -1219,8 +1276,7 @@ jobs:
           fi
 
           # The gate delegates lockfile verification to the authoritative
-          # verifier. Both were staged into RUNNER_TEMP by the duplicate-key
-          # step, before its sparse standards checkout left the workspace.
+          # verifier, staged into RUNNER_TEMP above.
           export ACTIONS_LOCK_VERIFIER="$RUNNER_TEMP/update-actions-lock.sh"
           bash "$RUNNER_TEMP/check-actions-lock-gate.sh"
           rc=$?
@@ -1256,40 +1312,6 @@ jobs:
           # Never a silent pass: state the denominator even when clean.
           echo "lock debt: $total ledgered repositories; $GITHUB_REPOSITORY is NOT among them."
           exit "$rc"
-      # The step above proves a pin has the right SHAPE. It cannot prove the
-      # SHA EXISTS — a fabricated 40-hex string passes it. Measured 2026-07-28:
-      # 112 of 613 unique estate pins (18%) do not resolve, in 876 committed
-      # files. An unresolvable `uses:` yields NO check run, so those repos look
-      # green while the job never ran. This step closes that gap.
-      - name: Checkout standards for the pin-existence gate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: hyperpolymath/standards
-          # Immutable pin, for the same reason as the policy-helper checkout
-          # above: following `main` lets one standards push change the
-          # behaviour of every already-pinned caller with no review.
-          ref: 317101e03b8fe642589498f4bdb84541ab466062
-          path: .standards-checkout
-          persist-credentials: false
-          sparse-checkout: |
-            scripts
-          sparse-checkout-cone-mode: false
-      - name: Check action pins resolve upstream
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Copy out and delete the checkout before scanning, so the standards
-          # tree is never part of the caller's workspace (same idiom as the
-          # allowlist preflight above).
-          cp .standards-checkout/scripts/check-action-pins-resolve.sh "$RUNNER_TEMP/"
-          rm -rf .standards-checkout
-          bash "$RUNNER_TEMP/check-action-pins-resolve.sh" .
-      - name: Check for duplicate workflows
-        run: |
-          if [ -f .github/workflows/codeql.yml ] && [ -f .github/workflows/codeql-analysis.yml ]; then
-            echo "ERROR: Duplicate CodeQL workflows found"; exit 1
-          fi
-          echo "No critical duplicates found"
 
   trusted-base:
     name: Trusted-base reduction policy

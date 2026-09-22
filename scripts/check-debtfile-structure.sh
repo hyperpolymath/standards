@@ -104,6 +104,17 @@ validate() {
     if [ -n "$taxonomy_default" ] && [ "$taxonomy_default" = "$taxonomy_non_default" ]; then
       bad "'$name' taxonomy-default-arm and taxonomy-non-default-arm must name different arms"
     fi
+    # Stable-identifier grammar per DEBTFILE-SPEC §Fields: [a-z0-9][a-z0-9._-]*.
+    if [ -n "$taxonomy_default" ]; then
+      case "$taxonomy_default" in
+        *[!a-z0-9._-]*|[^a-z0-9]*) bad "'$name' taxonomy-default-arm '$taxonomy_default' is not a stable identifier ([a-z0-9][a-z0-9._-]*)" ;;
+      esac
+    fi
+    if [ -n "$taxonomy_non_default" ]; then
+      case "$taxonomy_non_default" in
+        *[!a-z0-9._-]*|[^a-z0-9]*) bad "'$name' taxonomy-non-default-arm '$taxonomy_non_default' is not a stable identifier ([a-z0-9][a-z0-9._-]*)" ;;
+      esac
+    fi
   fi
 
   if [ -n "$accepted" ]; then
