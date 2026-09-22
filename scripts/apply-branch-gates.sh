@@ -66,7 +66,9 @@
 #   --gates-file F     default config/rulesets/gates.json
 #   --strip-retired    also remove the 4 retired rule types. Off by default.
 #   --require-green N  drop any derived context that is not green across the
-#                      last N default-branch runs of its workflow. Off (0) by
+#                      last N default-branch runs of its workflow, and REFUSE
+#                      the repo outright if any of those runs cannot be read.
+#                      Off (0) by
 #                      default. Owner ruling on #956: "require the reliably-
 #                      green set" -- a required context that is currently red
 #                      blocks the branch the moment it is required, so gating
@@ -215,7 +217,7 @@ while IFS= read -r R; do
   # every other line of output still reports success.  (Measured 2026-09-22:
   # this dropped 2 of 18 required contexts on standards/main.)  So capture
   # the exit status of every fetch and refuse to write if any one failed.
-  : > "$WORK/ctx"; NORUN=''; DERIVEFAIL=''
+  : > "$WORK/ctx"; : > "$WORK/gatewf3"; NORUN=''; DERIVEFAIL=''
   while IFS= read -r WFN; do
     [ -n "$WFN" ] || continue
     if ! RID=$(gh api "repos/$R/actions/workflows/$WFN/runs?branch=$DEF&per_page=1" \
@@ -232,6 +234,10 @@ while IFS= read -r R; do
       DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(run $RID returned zero jobs)"; continue
     fi
     cat "$WORK/jobs1" >> "$WORK/ctx"
+    # Record the workflows that actually CONTRIBUTED contexts.  The greenness
+    # probe below must iterate these, not gatewf2: gatewf2 still holds every
+    # NORUN workflow, for which an empty runs query is the LEGITIMATE state.
+    printf '%s\n' "$WFN" >> "$WORK/gatewf3"
   done < "$WORK/gatewf2"
 
   sort -u "$WORK/ctx" -o "$WORK/ctx"
@@ -253,6 +259,14 @@ while IFS= read -r R; do
       if ! gh api "repos/$R/actions/workflows/$WFN/runs?branch=$DEF&per_page=$REQUIRE_GREEN" \
              --jq '.workflow_runs[]?.id' > "$WORK/rids"; then
         DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(green-runs-query-failed)"; continue
+      fi
+      # Third instance of the same class.  A runs query that SUCCEEDS with an
+      # empty list leaves rids empty, the loop below never runs, nothing lands
+      # in "bad", and every context this workflow contributed is admitted as
+      # green.  We are iterating gatewf3 -- workflows that DID contribute
+      # contexts, hence had a run -- so zero runs here is a failed read.
+      if [ ! -s "$WORK/rids" ]; then
+        DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(green-runs-query-returned-none)"; continue
       fi
       while IFS= read -r RID2; do
         [ -n "$RID2" ] || continue
@@ -281,7 +295,7 @@ while IFS= read -r R; do
           esac
         done < "$WORK/jobs2"
       done < "$WORK/rids"
-    done < "$WORK/gatewf2"
+    done < "$WORK/gatewf3"
     sort -u "$WORK/bad" -o "$WORK/bad"
     : > "$WORK/ctx3"
     while IFS= read -r C; do
