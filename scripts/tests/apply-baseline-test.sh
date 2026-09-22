@@ -130,6 +130,134 @@ assert_invalid_option() {
     fail=$((fail + 1))
   fi
 }
+# ═══════════════════════════════════════════════════════════════════════
+# List-valued `rule_module` (standards#966)
+#
+# ONE DEFECT CAN BE EMITTED BY TWO RULE MODULES. Hypatia raises
+# `invalid_actions_lock` from BOTH `workflow_audit` and `workflow_hardening`
+# for a single desynced lockfile. Under the old exact-string equality an
+# acknowledgement could only name one of them, so the other stayed
+# unsuppressed and went on blocking `main` — while the entry looked correct
+# in every visible respect: right file, right severity, right type.
+# ═══════════════════════════════════════════════════════════════════════
+
+# The real-world reproduction. Two findings, one defect, ONE entry.
+cat > "$WORK/findings-2mod.json" <<'EOF'
+[{"severity":"high","rule_module":"workflow_audit","type":"invalid_actions_lock","file":".github/workflows/actions.lock"},
+ {"severity":"high","rule_module":"workflow_hardening","type":"invalid_actions_lock","file":".github/workflows/actions.lock"}]
+EOF
+cat > "$WORK/baseline-2mod.json" <<'EOF'
+[{"severity":"high","rule_module":["workflow_audit","workflow_hardening"],"type":"invalid_actions_lock","file_pattern":"**actions.lock"}]
+EOF
+assert_status "one list entry suppresses BOTH emitting modules" \
+  "$WORK/findings-2mod.json" "$WORK/baseline-2mod.json" "2,0"
+
+# Each member individually. A list that only ever matched its first element
+# would pass the case above by luck if the findings were ordered kindly.
+cat > "$WORK/findings-mod2only.json" <<'EOF'
+[{"severity":"high","rule_module":"workflow_hardening","type":"invalid_actions_lock","file":".github/workflows/actions.lock"}]
+EOF
+assert_status "list matches a NON-FIRST member" \
+  "$WORK/findings-mod2only.json" "$WORK/baseline-2mod.json" "1,0"
+
+# The over-match control. A list must not become a wildcard.
+cat > "$WORK/findings-3rd.json" <<'EOF'
+[{"severity":"high","rule_module":"cicd_rules","type":"invalid_actions_lock","file":".github/workflows/actions.lock"}]
+EOF
+assert_status "list does NOT suppress a module it omits" \
+  "$WORK/findings-3rd.json" "$WORK/baseline-2mod.json" "0,1"
+
+# A one-element list must behave exactly like the bare string.
+cat > "$WORK/baseline-1list.json" <<'EOF'
+[{"severity":"high","rule_module":["workflow_audit"],"type":"invalid_actions_lock","file_pattern":"**actions.lock"}]
+EOF
+assert_status "single-element list == the string form (matches)" \
+  "$WORK/findings-mod2only.json" "$WORK/baseline-1list.json" "0,1"
+cat > "$WORK/findings-mod1only.json" <<'EOF'
+[{"severity":"high","rule_module":"workflow_audit","type":"invalid_actions_lock","file":".github/workflows/actions.lock"}]
+EOF
+assert_status "single-element list == the string form (rejects)" \
+  "$WORK/findings-mod1only.json" "$WORK/baseline-1list.json" "1,0"
+
+# The string form must be untouched. This is the compatibility control for
+# all 212 existing entries, every one of which uses a bare string.
+cat > "$WORK/baseline-str.json" <<'EOF'
+[{"severity":"high","rule_module":"workflow_audit","type":"invalid_actions_lock","file_pattern":"**actions.lock"}]
+EOF
+assert_status "bare string form still matches" \
+  "$WORK/findings-mod1only.json" "$WORK/baseline-str.json" "1,0"
+assert_status "bare string form still rejects the other module" \
+  "$WORK/findings-mod2only.json" "$WORK/baseline-str.json" "0,1"
+
+# ── MUTANT ────────────────────────────────────────────────────────────
+# Restore the exact-equality comparison and assert the two-module case
+# REGRESSES to half-suppressed. Without this, every assertion above would
+# pass identically against an implementation that ignored the list entirely
+# and matched on severity+type+file alone.
+MUTANT="$WORK/apply-baseline-mutant.sh"
+# Mutate the membership test to "first element only". This is the most
+# plausible wrong implementation of a list match, and it is invisible to any
+# assertion that happens to put the matching module first.
+sed 's/| any(\. == \$finding\.rule_module)/| .[0] == $finding.rule_module/' \
+  "$APPLY" > "$MUTANT"
+chmod +x "$MUTANT"
+
+if ! grep -q '\.\[0\] == \$finding\.rule_module' "$MUTANT"; then
+  echo "FAIL: MUTANT was not applied — the sed anchor no longer matches apply-baseline.sh"
+  fail=$((fail + 1))
+elif ! bash -n "$MUTANT" 2>/dev/null; then
+  echo "FAIL: MUTANT is not valid bash; the regression control did not execute"
+  fail=$((fail + 1))
+else
+  # Non-first member must now be MISSED.
+  mutant_got=$(bash "$MUTANT" "$WORK/findings-mod2only.json" "$WORK/baseline-2mod.json" advisory \
+    | jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"')
+  if [ "$mutant_got" = "0,1" ]; then
+    echo "PASS: MUTANT (first element only) misses the non-first module — any() IS load-bearing"
+    pass=$((pass + 1))
+  else
+    echo "FAIL: MUTANT expected 0,1 got $mutant_got — the list assertions do not depend on any()"
+    fail=$((fail + 1))
+  fi
+  # And the two-module case must regress to half-suppressed: exactly the
+  # #966 symptom, reproduced on demand.
+  mutant_both=$(bash "$MUTANT" "$WORK/findings-2mod.json" "$WORK/baseline-2mod.json" advisory \
+    | jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"')
+  if [ "$mutant_both" = "1,1" ]; then
+    echo "PASS: MUTANT reproduces the #966 symptom (half-suppressed, entry looks correct)"
+    pass=$((pass + 1))
+  else
+    echo "FAIL: MUTANT expected 1,1 got $mutant_both"
+    fail=$((fail + 1))
+  fi
+fi
+
+# A list member that is not a valid module name must be REJECTED, not
+# silently ignored. The validator is a gate, so it needs its own negative.
+cat > "$WORK/baseline-badmember.json" <<'EOF'
+[{"severity":"high","rule_module":["workflow_audit","Workflow-Hardening"],"type":"invalid_actions_lock","file_pattern":"**actions.lock"}]
+EOF
+if bash "$APPLY" "$WORK/findings-mod1only.json" "$WORK/baseline-badmember.json" advisory >/dev/null 2>&1; then
+  echo "FAIL: a malformed rule_module list member was accepted"
+  fail=$((fail + 1))
+else
+  echo "PASS: malformed rule_module list member rejected"
+  pass=$((pass + 1))
+fi
+
+# An empty list names no module, so it can match nothing. Accepting it would
+# create an entry that silently never applies.
+cat > "$WORK/baseline-emptylist.json" <<'EOF'
+[{"severity":"high","rule_module":[],"type":"invalid_actions_lock","file_pattern":"**actions.lock"}]
+EOF
+if bash "$APPLY" "$WORK/findings-mod1only.json" "$WORK/baseline-emptylist.json" advisory >/dev/null 2>&1; then
+  echo "FAIL: an empty rule_module list was accepted"
+  fail=$((fail + 1))
+else
+  echo "PASS: empty rule_module list rejected"
+  pass=$((pass + 1))
+fi
+
 assert_invalid_option "invalid mode" bypass high
 assert_invalid_option "invalid threshold" blocking nonsense
 

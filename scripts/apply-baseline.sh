@@ -90,9 +90,25 @@ SCHEMA_ERRORS="$(jq -r '
   [ to_entries[] | .key as $i | .value as $e |
     if ($e|type) != "object" then "entry[\($i)]: not an object"
     else (
-      (["severity","rule_module","type"][]
+      (["severity","type"][]
         | select(($e[.]|type) != "string")
         | "entry[\($i)]: required key \(.) missing or not a string"),
+      # `rule_module` is the one key that admits a LIST as well as a string
+      # (standards#966: one defect, two emitting modules, one acknowledgement).
+      # Validated separately rather than being dropped from the required set —
+      # a key that is merely absent from every check is not validated, it is
+      # unchecked.
+      (if ($e.rule_module|type) as $t | $t != "string" and $t != "array"
+       then "entry[\($i)]: required key rule_module missing or not a string/array"
+       else empty end),
+      (if ($e.rule_module|type) == "array" and ($e.rule_module|length) == 0
+       then "entry[\($i)]: rule_module list is empty — an entry that names no module matches nothing"
+       else empty end),
+      (if ($e.rule_module|type) == "array"
+       then ($e.rule_module[]
+             | select(type != "string")
+             | "entry[\($i)]: rule_module list member is not a string: \(tojson)")
+       else empty end),
       (if (($e|has("file")) == ($e|has("file_pattern")))
        then "entry[\($i)]: exactly one of file / file_pattern is required"
        else empty end),
@@ -101,6 +117,12 @@ SCHEMA_ERRORS="$(jq -r '
         | "entry[\($i)]: unknown key \(.)"),
       (if ($e.severity|type) == "string" and ((sevs|index($e.severity))|not)
        then "entry[\($i)]: invalid severity \($e.severity)" else empty end),
+      (if ($e.rule_module|type) == "array"
+       then ($e.rule_module[]
+             | select(type == "string")
+             | select((test("^[a-z][a-z0-9_]*$"))|not)
+             | "entry[\($i)]: rule_module list member fails pattern: \(.)")
+       else empty end),
       (if ($e.rule_module|type) == "string"
           and (($e.rule_module|test("^[a-z][a-z0-9_]*$"))|not)
        then "entry[\($i)]: rule_module fails pattern: \($e.rule_module)"
@@ -189,7 +211,25 @@ ANNOTATED="$(jq -n \
     | $baseline
     | map(select(
         .severity == $finding.severity
-        and .rule_module == $finding.rule_module
+        # `rule_module` is a string OR a list of strings.
+        #
+        # ⚠ THE LIST FORM EXISTS BECAUSE ONE DEFECT CAN BE EMITTED BY TWO
+        # MODULES. Hypatia raises `invalid_actions_lock` from BOTH
+        # `workflow_audit` and `workflow_hardening` for a single desynced
+        # lockfile. Under exact string equality an acknowledgement could
+        # only ever name one of them, so the other stayed unsuppressed and
+        # went on blocking — and it did, on `main`. The symptom is
+        # especially misleading: the entry looks correct, the file matches,
+        # the severity matches, and the finding is still kept.
+        #
+        # Normalising to a list here rather than duplicating the entry keeps
+        # ONE acknowledgement per defect, which is what `expires_at` and
+        # `tracking_issue` are actually about. Two entries for one defect
+        # means two expiry dates for one decision.
+        and (
+          (.rule_module | if type == "array" then . else [.] end)
+          | any(. == $finding.rule_module)
+        )
         and .type == $finding.type
         and (
           (.file? // null) == $finding.file
