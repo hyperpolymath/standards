@@ -51,7 +51,21 @@ fi
 
 [ -z "$FILES_TO_CHECK" ] && exit 0
 
-for file in $FILES_TO_CHECK; do
+# ⚠ NEWLINE-DELIMITED, NOT WORD-SPLIT. This was `for file in $FILES_TO_CHECK`,
+# which splits on $IFS — so a path containing a space became two paths, each
+# of which then failed `[ -f "$file" ]` and was skipped by the `continue`
+# below. Silently: no error, and the file never counted toward $CHECKED, so
+# the denominator under-reported too.
+#
+# That is not hypothetical here. The estate contains a literal-space directory
+# `_RSR _SET`, so EVERY source file beneath it passed this validator without
+# ever being read. A validator that skips what it cannot name is worse than no
+# validator, because it reports a pass.
+#
+# `<<<` keeps the loop in the CURRENT shell; a `... | while read` pipeline
+# would run it in a subshell and discard $ERRORS and $CHECKED.
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
   [ -f "$file" ] || continue
   is_source_file "$file" || continue
 
@@ -82,7 +96,7 @@ for file in $FILES_TO_CHECK; do
     echo "[validate-spdx] ERROR: $file missing SPDX header" >&2
     ERRORS=$((ERRORS + 1))
   fi
-done
+done <<< "$FILES_TO_CHECK"
 
 # Always print the denominator: "0 errors" out of 0 files examined is a
 # vacuous pass, and it must not read the same as a real one.
