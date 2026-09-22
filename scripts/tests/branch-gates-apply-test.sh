@@ -515,7 +515,7 @@ S=$(state_of "$OUT")
 # ---- MUTANT F: delete the source_type filter, restoring the original defect. --
 # The pre-fix line selected every active branch ruleset regardless of ownership.
 MUTF="$WORK/mutant-f.sh"
-sed 's|^  command grep -P .\^Repository.*> "\$WORK/ids"$|  cut -f2 "$WORK/active" > "$WORK/ids"|' "$APPLIER" > "$MUTF"
+sed 's|^  awk -F.\\t. ..1=="Repository".*> "\$WORK/ids"$|  cut -f2 "$WORK/active" > "$WORK/ids"|' "$APPLIER" > "$MUTF"
 chmod +x "$MUTF"
 if ! cmp -s "$MUTF" "$APPLIER" && bash -n "$MUTF" 2>/dev/null; then
   reset_fix
