@@ -124,7 +124,9 @@ is_allowlisted() {
   return 1
 }
 
-# Scan a tree. Prints one defect per line; returns 1 if any were found.
+# Scan $1 recursively for retired filenames and document-version claims that
+# differ from $2. Allowlisted paths and DEED grammar/schema versions are ignored.
+# Prints one typed record per defect; returns 0 when clean and 1 otherwise.
 scan() {
   local root="$1" expect="$2" defects=0 hit file lineno text rel found gap gaplc
 
