@@ -350,6 +350,7 @@ repository-root/
 ### 5. Web Standards & Protocols
 
 #### .well-known/ Directory
+
 ```
 .well-known/
 ├── security.txt          # Security contact, PGP keys
@@ -374,6 +375,7 @@ repository-root/
 - ✅ Certificate transparency monitoring
 
 #### HTTP Security Headers (Mandatory)
+
 ```http
 Content-Security-Policy: default-src 'self'; script-src 'none'
 X-Frame-Options: DENY
@@ -755,6 +757,7 @@ just check-offline    # Offline-first capability
 ### Migrating from JavaScript/Python
 
 #### JavaScript → AffineScript/Rust
+
 ```bash
 # 1. Identify JS files
 fd -e js -e jsx
@@ -768,9 +771,11 @@ fd -e js -e jsx
 # 4. For build tools: Replace with Rust alternatives
 # webpack → rspack
 # esbuild → turbopack
+
 ```
 
 #### Python → AffineScript/Rust/Elixir/Julia/Nickel
+
 ```bash
 # 1. Identify Python files (no exclusions - Python is fully banned)
 fd -e py
@@ -784,6 +789,7 @@ fd -e py
 
 # 4. For performance-critical: Convert to Rust
 # Memory safety, no GC pauses
+
 ```
 
 ### Implementing CRDT State

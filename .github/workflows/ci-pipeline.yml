@@ -239,6 +239,16 @@ jobs:
             exit 1
           fi
 
+          # A report can exist and still be PARTIAL: semgrep exits non-zero on
+          # rule-loading and scan errors while still writing what it managed to
+          # collect. Reading only the JSON would report that truncated scan as a
+          # clean tree. The exit code is the only signal that separates them.
+          if [ "$SEMGREP_RC" -ne 0 ]; then
+            echo "::error::semgrep exited $SEMGREP_RC. A partial report is not a clean result."
+            echo "### SAST (semgrep): FAILED — scanner exited $SEMGREP_RC" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
           SCANNED=$(jq '(.paths.scanned // []) | length' semgrep.json)
           FINDINGS=$(jq '(.results // []) | length' semgrep.json)
           RULES_FIRED=$(jq '[(.results // [])[].check_id] | unique | length' semgrep.json)
@@ -270,9 +280,9 @@ jobs:
             {
               echo "| Severity | Rule | File | Line |"
               echo "|---|---|---|---|"
-              jq -r '(.results // [])[]
+              jq -r '(.results // [])[:100][]
                 | "| \(.extra.severity // "INFO") | `\(.check_id)` | `\(.path)` | \(.start.line) |"' \
-                semgrep.json | head -100
+                semgrep.json
               echo ""
             } >> "$GITHUB_STEP_SUMMARY"
 

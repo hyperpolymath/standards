@@ -212,6 +212,7 @@ jobs:
               --description "Backup mirror of ${SRC_OWNER}/${REPO_NAME}. Managed by github-backup-mirror-reusable.yml."
             # A freshly created repo is empty. Empty is SAFE, not divergent:
             # there is nothing there to lose.
+            echo "expected_dest_head=" >> "$GITHUB_OUTPUT"
             echo "safe_reason=destination created empty" >> "$GITHUB_OUTPUT"
             echo "dest_slug=$DEST_SLUG" >> "$GITHUB_OUTPUT"
             exit 0
@@ -225,15 +226,26 @@ jobs:
           DEST_URL="https://x-access-token:${MIRROR_TOKEN}@github.com/${DEST_SLUG}.git"
           git remote add backup "$DEST_URL" 2>/dev/null || git remote set-url backup "$DEST_URL"
 
-          if ! git fetch --no-tags backup "refs/heads/${DEST_BRANCH}:refs/remotes/backup/${DEST_BRANCH}" 2>/dev/null; then
-            # The branch does not exist on the destination. That is what a
-            # fresh `gh repo create` leaves behind, and it is SAFE — a failed
-            # fetch here means "nothing to overwrite", NOT "conflict". Reading
-            # this failure as divergence would refuse every first-run mirror.
+          # `git fetch` returns non-zero for BOTH "no such branch" and "the
+          # fetch failed" (transport, auth, server). Reading that one code as
+          # absence lets any outage bypass the ancestry proof below and fall
+          # straight through to a force push. `ls-remote` separates them:
+          # rc != 0 is a real failure, empty output is a genuinely absent branch.
+          if ! LS_OUT="$(git ls-remote --heads backup "refs/heads/${DEST_BRANCH}" 2>&1)"; then
+            refuse "Cannot reach $DEST_SLUG to check for '$DEST_BRANCH'. A failed lookup is NOT proof the branch is absent, so this run refuses rather than force-pushing over a destination it could not read."
+          fi
+
+          if [ -z "$LS_OUT" ]; then
             echo "::notice::Destination $DEST_SLUG has no '$DEST_BRANCH' branch yet; nothing to overwrite."
+            echo "expected_dest_head=" >> "$GITHUB_OUTPUT"
             echo "safe_reason=destination has no $DEST_BRANCH branch" >> "$GITHUB_OUTPUT"
             echo "dest_slug=$DEST_SLUG" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          # The branch DOES exist, so a fetch failure here is a real failure.
+          if ! git fetch --no-tags backup "refs/heads/${DEST_BRANCH}:refs/remotes/backup/${DEST_BRANCH}"; then
+            refuse "Destination branch '$DEST_BRANCH' exists on $DEST_SLUG but could not be fetched. Refusing to push over a destination whose state could not be read."
           fi
 
           # An ancestry proof over a TRUNCATED history is vacuous. With a
@@ -252,6 +264,7 @@ jobs:
           echo "Source HEAD:      $SRC_HEAD"
 
           if [ "$DEST_HEAD" = "$SRC_HEAD" ]; then
+            echo "expected_dest_head=$DEST_HEAD" >> "$GITHUB_OUTPUT"
             echo "safe_reason=already up to date" >> "$GITHUB_OUTPUT"
             echo "dest_slug=$DEST_SLUG" >> "$GITHUB_OUTPUT"
             exit 0
@@ -265,6 +278,7 @@ jobs:
             refuse "Destination $DEST_SLUG has DIVERGED: $DEST_HEAD is not an ancestor of $SRC_HEAD ($AHEAD commit(s) exist only on the destination). Refusing to force-push; reconcile the histories by hand. This is the case the naive 'git push --mirror || true' pattern silently destroys."
           fi
 
+          echo "expected_dest_head=$DEST_HEAD" >> "$GITHUB_OUTPUT"
           echo "safe_reason=destination is a strict ancestor (fast-forward)" >> "$GITHUB_OUTPUT"
           echo "dest_slug=$DEST_SLUG" >> "$GITHUB_OUTPUT"
 
@@ -273,6 +287,7 @@ jobs:
         env:
           DEST_SLUG: ${{ steps.resolve.outputs.dest_slug }}
           SAFE_REASON: ${{ steps.resolve.outputs.safe_reason }}
+          EXPECTED_DEST_HEAD: ${{ steps.resolve.outputs.expected_dest_head }}
           DEST_BRANCH: ${{ inputs.destination-branch }}
         run: |
           set -euo pipefail
@@ -282,7 +297,20 @@ jobs:
           # HEAD:refs/heads/<branch> rather than a bare branch name: the local
           # branch is not guaranteed to be checked out under every trigger, and
           # this form pushes exactly the commit that was verified above.
-          git push --force backup "HEAD:refs/heads/${DEST_BRANCH}"
+          # The ancestry proof was taken in an EARLIER step. The destination can
+          # advance in the window between that step and this one, and a bare
+          # `--force` would destroy whatever arrived in it. The lease binds this
+          # push to the exact SHA that was verified: if the destination moved,
+          # the push is rejected instead of overwriting an unseen commit.
+          if [ -z "${EXPECTED_DEST_HEAD:-}" ]; then
+            # Nothing existed to verify, so creating the branch needs no force.
+            # If it appeared in the meantime this push fails, which is correct.
+            git push backup "HEAD:refs/heads/${DEST_BRANCH}"
+          else
+            git push \
+              --force-with-lease="refs/heads/${DEST_BRANCH}:${EXPECTED_DEST_HEAD}" \
+              backup "HEAD:refs/heads/${DEST_BRANCH}"
+          fi
 
           {
             echo "### GitHub backup mirror: pushed"

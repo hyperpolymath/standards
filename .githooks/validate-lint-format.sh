@@ -52,6 +52,15 @@ staged_matching() {
   echo "$STAGED" | grep -E "$1" || true
 }
 
+# Files ADDED by this commit, as distinct from modified. A language ban is a ban
+# on NEW sources: grandfathered files must still lint, but a newly added one is
+# exactly the regression the ban exists to stop, so the two populations need
+# different verdicts. A warning cannot stop a commit; only `fail` can.
+# NOTE: reads git directly — INPUT_STAGED_FILES carries names but not statuses.
+added_matching() {
+  git diff --cached --name-only --diff-filter=A 2>/dev/null | grep -E "$1" || true
+}
+
 # Does this repo TRACK a marker file? Distinct from "is a file staged":
 # `v.mod` is what makes a `.v` a V source rather than a Coq proof script.
 tracks() {
@@ -98,6 +107,10 @@ if [ -n "$NCL" ]; then
     while IFS= read -r f; do
       [ -z "$f" ] && continue
       nickel format --check "$f" || fail "Nickel: $f is not formatted"
+      # Only these generated artefacts may be missing at commit time. Matching
+      # every "could not find import" instead would let a TYPO in a new import
+      # pass the gate as though it were a generated file.
+      NCL_GENERATED_IMPORTS='claude-md-data\.json'
       # A Nickel file may `import` a build-time artefact that is GITIGNORED and
       # generated — here machine-readable/arrival-pack/arrival-pack.ncl imports
       # claude-md-data.json, which extract.sh produces during generate.sh. A
@@ -107,8 +120,9 @@ if [ -n "$NCL" ]; then
       # still fails, so this narrows the gate rather than disabling it.
       if tc_out="$(nickel typecheck "$f" 2>&1)"; then
         :
-      elif printf '%s' "$tc_out" | grep -q 'could not find import'; then
-        warn "Nickel: $f NOT typechecked — unresolved generated import. A SKIP, not a pass."
+      elif printf '%s' "$tc_out" | grep -q 'could not find import' \
+        && printf '%s' "$tc_out" | grep -qE "$NCL_GENERATED_IMPORTS"; then
+        warn "Nickel: $f NOT typechecked — unresolved GENERATED import. A SKIP, not a pass."
       else
         printf '%s\n' "$tc_out" >&2
         fail "Nickel: $f failed typecheck"
@@ -171,6 +185,10 @@ RES="$(staged_matching '\.resi?$')"
 if [ -n "$RES" ] && tracks 'rescript.json' '*/rescript.json' 'bsconfig.json' '*/bsconfig.json'; then
   warn "ReScript is BANNED for new code (owner ruling 2026-04-30). Existing .res migrates to .affine — AffineScript, not TypeScript."
   note "ReScript: $(echo "$RES" | grep -c .) staged file(s)"
+  RES_ADDED="$(added_matching '\.resi?$')"
+  if [ -n "$RES_ADDED" ]; then
+    fail "ReScript is BANNED for new code: $(echo "$RES_ADDED" | grep -c .) NEWLY ADDED .res/.resi file(s). Migrate to AffineScript (.affine). Modified grandfathered files are still linted below."
+  fi
   if require_tool bunx ReScript "https://bun.sh"; then
     if bunx rescript format --help 2>&1 | grep -q -- '-check'; then
       bunx rescript format -all -check || fail "ReScript: sources are not formatted"
@@ -189,6 +207,10 @@ if [ -n "$V_SRC" ]; then
   if tracks 'v.mod' '*/v.mod'; then
     warn "V-lang is BANNED (owner ruling 2026-04-10; estate migration to Zig COMPLETED 2026-05-28). A v.mod here means a carve-out or a regression — confirm which."
     note "V: $(echo "$V_SRC" | grep -c .) staged file(s)"
+    V_ADDED="$(added_matching '\.v$')"
+    if [ -n "$V_ADDED" ]; then
+      fail "V is BANNED: $(echo "$V_ADDED" | grep -c .) NEWLY ADDED .v file(s). The estate completed its Zig migration on 2026-05-28. Modified carve-out files are still linted below."
+    fi
     if require_tool v V "https://github.com/vlang/v/releases"; then
       # ⚠ MEASURED on v 0.5.2: `v fmt -verify <FILE>` prints its findings and
       # then EXITS 0 — a fake green. Only the DIRECTORY form exits 1. Do not
