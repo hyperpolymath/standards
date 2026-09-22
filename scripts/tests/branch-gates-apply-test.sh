@@ -234,6 +234,216 @@ else
   ok "empty target list: refused"
 fi
 
+
+# ================================================================ CASE 8
+# THE FAIL-OPEN REFUSAL: a derivation fetch that FAILS must never be read as
+# "this workflow contributes no contexts". Measured 2026-09-22 on
+# hyperpolymath/standards: a swallowed error dropped 2 of 18 required
+# contexts and the run still reported GATED. A short gate is a weak gate,
+# and nothing in the output said so.
+#
+# Fixture shape: governance.yml resolves and yields jobs; codeql.yml resolves
+# to run 22 but its JOBS fixture is ABSENT, so the shim exits non-zero --
+# exactly a transient API failure.
+reset_fix
+R=acme/flaky
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"},{"name":"codeql.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":22}]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
+# NOTE: no fixture for run 22's jobs -- the shim will exit 1.
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+
+OUT=$(run_applier "$R" --apply)
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "REFUSED" ] && ok "flaky derive: state is REFUSED" || bad "flaky derive: state=$S (want REFUSED)"
+case "$D" in *"derive_failed=["*"codeql.yml"*) ok "flaky derive: the failed workflow is NAMED, not silently absent" ;; *) bad "flaky derive: failure not reported — $D" ;; esac
+[ -s "$FIX/PUTS.log" ] && bad "flaky derive: PUT a gate built from an incomplete read" || ok "flaky derive: no PUT even with --apply"
+
+# ---- MUTANT C: delete the incomplete-read refusal. The suite MUST go red. ----
+# This is the mutant that matters: without it the applier does not error, it
+# writes a SHORTER gate and calls it success.
+MUTC="$WORK/mutant-c.sh"
+sed 's|if \[ -n "\$DERIVEFAIL" \]; then|if false; then|' "$APPLIER" > "$MUTC"
+reset_fix
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"},{"name":"codeql.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":22}]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+OUT=$(MUTANT="$MUTC" run_applier "$R" --apply)
+if [ "$(state_of "$OUT")" = "REFUSED" ]; then
+  bad "MUTANT C SURVIVED: refusal removed yet still REFUSED — the control is decorative"
+else
+  ok "mutant C killed: without the refusal it becomes $(state_of "$OUT") and PUTs $(wc -l < "$FIX/PUTS.log") time(s)"
+fi
+if [ -r "$FIX/LAST_PUT.json" ] &&
+   [ "$(jq '[.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks|length]|add // 0' "$FIX/LAST_PUT.json")" = "1" ]; then
+  ok "mutant C wrote the SHORTENED gate (1 context, not 2) — the silent weakening being guarded"
+else
+  bad "mutant C: expected a 1-context gate from the incomplete read"
+fi
+
+# ================================================================ CASE 9
+# THE SAME FAIL-OPEN, POINTING THE OTHER WAY: --require-green asked the API
+# only for the NON-green jobs, so "this run is entirely green" and "this run
+# was not read" were the SAME observation -- zero lines -- and zero lines was
+# read as greenness. There it does not shorten the gate; it ADMITS a context
+# that was never shown to be green, which is how a red check ends up required
+# and every PR blocks on it.
+#
+# Fixture shape: derive (per_page=1) resolves run 11, which has jobs. The
+# greenness probe (per_page=3) additionally resolves run 12, whose jobs
+# fixture EXISTS and is EMPTY -- a successful read of nothing, which the
+# missing-fixture trick cannot simulate.
+reset_fix
+R=acme/zerojobs
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[{"id":11},{"id":12}]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
+mkfix "repos/$R/actions/runs/12/jobs?per_page=100" '{"jobs":[]}'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+
+OUT=$(run_applier "$R" --apply --require-green 3)
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "REFUSED" ] && ok "zero-job green probe: state is REFUSED" || bad "zero-job green probe: state=$S (want REFUSED)"
+case "$D" in *"returned zero jobs"*) ok "zero-job green probe: the unread run is NAMED, not counted as green" ;; *) bad "zero-job green probe: not reported — $D" ;; esac
+[ -s "$FIX/PUTS.log" ] && bad "zero-job green probe: PUT a gate whose greenness was never read" || ok "zero-job green probe: no PUT even with --apply"
+
+# ---- MUTANT D: delete the zero-jobs guard from the GREENNESS probe only. ----
+# Keyed on jobs2 so it cannot touch the derivation loop's jobs1 guard.
+MUTD="$WORK/mutant-d.sh"
+sed 's|if \[ ! -s "\$WORK/jobs2" \]; then|if false; then|' "$APPLIER" > "$MUTD"
+if ! cmp -s "$MUTD" "$APPLIER"; then
+  reset_fix
+  mkfix "repos/$R" '{"default_branch":"main"}'
+  mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
+  mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+  mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+  mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[{"id":11},{"id":12}]}'
+  mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
+  mkfix "repos/$R/actions/runs/12/jobs?per_page=100" '{"jobs":[]}'
+  mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+  mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+  OUT=$(MUTANT="$MUTD" run_applier "$R" --apply --require-green 3)
+  if [ "$(state_of "$OUT")" = "REFUSED" ]; then
+    bad "MUTANT D SURVIVED: zero-jobs guard removed yet still REFUSED — the control is decorative"
+  else
+    ok "mutant D killed: without the guard it becomes $(state_of "$OUT") and PUTs $(wc -l < "$FIX/PUTS.log") time(s)"
+  fi
+  if [ -r "$FIX/LAST_PUT.json" ] &&
+     [ "$(jq -r '[.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]|join(",")' "$FIX/LAST_PUT.json")" = "governance / Governance" ]; then
+    ok "mutant D REQUIRED a context whose greenness was never read — the silent admission being guarded"
+  else
+    bad "mutant D: expected the unverified context to be required anyway"
+  fi
+else
+  bad "mutant D was not applied — the sed pattern no longer matches the applier"
+fi
+
+# =============================================================== CASE 10
+# THE THIRD INSTANCE OF THE SAME CLASS, three lines above CASE 9's.  The
+# greenness probe's RUNS query has the identical shape: a query that succeeds
+# with {"workflow_runs":[]} leaves rids empty, so the per-run loop never
+# executes, nothing is ever appended to "bad", and every context the workflow
+# contributed is admitted as green.  Zero runs and zero BAD runs were the same
+# observation.  Since the probe now iterates gatewf3 -- the workflows that DID
+# contribute contexts, and therefore DID have a run -- an empty runs list here
+# can only be a failed read.
+reset_fix
+R=acme/zeroruns
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+
+OUT=$(run_applier "$R" --apply --require-green 3)
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "REFUSED" ] && ok "zero-run green probe: state is REFUSED" \
+  || bad "zero-run green probe: expected REFUSED, got '$S' ($D)"
+case "$D" in
+  *"green-runs-query-returned-none"*) ok "zero-run green probe: the unread workflow is NAMED, not counted as green" ;;
+  *) bad "zero-run green probe: detail does not name the unread workflow: $D" ;;
+esac
+[ -s "$FIX/PUTS.log" ] && bad "zero-run green probe: PUT a gate whose greenness was never read" \
+  || ok "zero-run green probe: no PUT even with --apply"
+
+# =============================================================== CASE 11
+# THE REGRESSION THE NAIVE FIX WOULD CAUSE, and the reason the probe iterates
+# gatewf3 rather than gatewf2.  gatewf2 still holds every NORUN workflow, for
+# which an empty runs list is the LEGITIMATE state, not a failed read.  A bare
+# `[ -s rids ]` check over gatewf2 would turn every repo owning one run-less
+# gate workflow into REFUSED under --require-green.  Note that NO per_page=3
+# fixture exists for the NORUN workflow: the shim exits 1 on a missing fixture,
+# so if the probe ever asks about it this case goes REFUSED and fails.
+reset_fix
+R=acme/norun-beside-good
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"},{"name":"codeql.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[{"id":11},{"id":12}]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
+mkfix "repos/$R/actions/runs/12/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
+mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[]}'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+
+OUT=$(run_applier "$R" --require-green 3)
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" != "REFUSED" ] && ok "NORUN beside a good workflow: not REFUSED (state=$S) — the run-less workflow is not a failed read" \
+  || bad "NORUN beside a good workflow: REFUSED ($D) — the rids guard is scoped to gatewf2, not gatewf3"
+case "$D" in
+  *codeql.yml*) ok "NORUN beside a good workflow: the run-less workflow is reported by name" ;;
+  *) bad "NORUN beside a good workflow: detail does not name codeql.yml: $D" ;;
+esac
+
+# ---- MUTANT E: delete the empty-runs guard from the greenness probe only. ----
+# Keyed on rids so it cannot touch either jobs guard.
+MUTE="$WORK/mutant-e.sh"
+sed 's|if \[ ! -s "\$WORK/rids" \]; then|if false; then|' "$APPLIER" > "$MUTE"
+chmod +x "$MUTE"
+if ! cmp -s "$MUTE" "$APPLIER"; then
+  reset_fix
+  R=acme/zeroruns
+  mkfix "repos/$R" '{"default_branch":"main"}'
+  mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
+  mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+  mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+  mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[]}'
+  mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
+  mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+  mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+  OUT=$(MUTANT="$MUTE" run_applier "$R" --apply --require-green 3)
+  if [ "$(state_of "$OUT")" = "REFUSED" ]; then
+    bad "MUTANT E SURVIVED: empty-runs guard removed yet still REFUSED — the control is decorative"
+  else
+    ok "mutant E killed: without the guard it becomes $(state_of "$OUT") and PUTs $(wc -l < "$FIX/PUTS.log") time(s)"
+  fi
+  if [ -r "$FIX/LAST_PUT.json" ] &&
+     [ "$(jq -r '[.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]|join(",")' "$FIX/LAST_PUT.json")" = "governance / Governance" ]; then
+    ok "mutant E REQUIRED a context across ZERO examined runs — the silent admission being guarded"
+  else
+    bad "mutant E: expected the unverified context to be required anyway"
+  fi
+else
+  bad "mutant E was not applied — the sed pattern no longer matches the applier"
+fi
+
 echo
 echo "passed=$pass failed=$fail"
 [ "$fail" -eq 0 ]
