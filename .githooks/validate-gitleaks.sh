@@ -51,7 +51,7 @@ fi
 # installed binary: it exposes `detect` and `protect` only — there is no
 # `gitleaks git` subcommand, and calling one would exit non-zero as "unknown
 # command", LOOKING fail-closed while having scanned nothing.
-if gitleaks protect --staged --verbose --redact; then
+if gitleaks git --staged --verbose --redact; then
   echo -e "${GREEN}[gitleaks] no secrets detected in ${STAGED_COUNT} staged file(s).${NC}"
   exit 0
 fi
