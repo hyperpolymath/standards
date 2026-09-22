@@ -3,7 +3,6 @@
 #
 # Generates OS-specific MIME type registration based on target environment.
 # Used by: just register
-
 let OS = [| 'Linux, 'Minix, 'MacOS |] in
 
 {
@@ -70,7 +69,7 @@ let OS = [| 'Linux, 'Minix, 'MacOS |] in
       },
       Minix = {
         dest = "/etc/mime.types.d/k9.xml",
-        update_cmd = "true",  # Minix uses static mapping
+        update_cmd = "true", # Minix uses static mapping
         user_dest = "~/.mime/k9.xml",
         user_update = "true",
       },

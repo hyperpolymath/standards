@@ -5,7 +5,6 @@
 #   'Kennel - Pure data, no execution, safe anywhere
 #   'Yard   - Nickel evaluation only, no I/O side effects
 #   'Hunt   - Full triad execution, requires cryptographic handshake
-
 let SecurityLevel = [| 'Kennel, 'Yard, 'Hunt |] in
 
 {
@@ -111,14 +110,20 @@ let SecurityLevel = [| 'Kennel, 'Yard, 'Hunt |] in
 
   # Detect required security level from component content
   detect_level = fun component =>
-    let has_recipes = std.record.has_field "recipes" component
-      && component.recipes != {} in
-    let has_network = std.record.has_field "security" component
+    let has_recipes =
+      std.record.has_field "recipes" component
+      && component.recipes != {}
+    in
+    let has_network =
+      std.record.has_field "security" component
       && std.record.has_field "allow_network" component.security
-      && component.security.allow_network == true in
-    let has_fs_write = std.record.has_field "security" component
+      && component.security.allow_network == true
+    in
+    let has_fs_write =
+      std.record.has_field "security" component
       && std.record.has_field "allow_filesystem_write" component.security
-      && component.security.allow_filesystem_write == true in
+      && component.security.allow_filesystem_write == true
+    in
 
     if has_network || has_fs_write || has_recipes then
       'Hunt
@@ -131,9 +136,12 @@ let SecurityLevel = [| 'Kennel, 'Yard, 'Hunt |] in
   check_level = fun component requested_level =>
     let detected = detect_level component in
     let level_order = fun l =>
-      if l == 'Kennel then 0
-      else if l == 'Yard then 1
-      else 2
+      if l == 'Kennel then
+        0
+      else if l == 'Yard then
+        1
+      else
+        2
     in
     let detected_ord = level_order detected in
     let requested_ord = level_order requested_level in
@@ -215,7 +223,8 @@ let SecurityLevel = [| 'Kennel, 'Yard, 'Hunt |] in
       {
         permitted = false,
         enforced_level = 'Yard,
-        reason = "Hunt requires all five preconditions; unmet: "
+        reason =
+          "Hunt requires all five preconditions; unmet: "
           ++ std.string.join ", " unmet,
         unmet_preconditions = unmet,
       },
