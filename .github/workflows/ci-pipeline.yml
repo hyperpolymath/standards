@@ -1,3 +1,4 @@
+# This workflow is managed by gh actions-lock.
 # SPDX-License-Identifier: MPL-2.0
 #
 # CI Pipeline (reusable) — secrets, SAST, per-ecosystem lint/format, coverage.
@@ -751,8 +752,103 @@ jobs:
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Fail if any gate failed
+      # ── The pipeline adoption ratchet ────────────────────────────────
+      #
+      # Both steps below run ONLY when a gate has already failed. A green
+      # repository never reads the ledger, never pays for the checkout, and
+      # cannot be affected by the ledger being stale, empty or unreachable.
+      #
+      # That is what makes the pin harmless: on the failure path an unreadable
+      # ledger and an empty ledger give the SAME verdict — blocked. The gate
+      # therefore fails closed for free, and "could not read the ledger" can
+      # never be mistaken for "is exempt".
+      - name: Checkout the pinned Standards pipeline ledger
         if: ${{ contains(needs.*.result, 'failure') }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          # ⚠ This ref DELIBERATELY PREDATES the ledger it reads. At a2ff696a
+          # `.machine_readable/pipeline-allow.txt` does not exist, so the next
+          # step fails closed — which is exactly the verdict the empty ledger
+          # would give anyway. The pin and the first entry move in the SAME
+          # commit: whoever adds a slug must bump this ref to the commit that
+          # carries it, or their own exemption will not be read.
+          #
+          # Following `main` here instead is not an option, for the same reason
+          # the Deno ledger does not: an edit in `standards` would change the
+          # verdict of every already-pinned caller with no review in their
+          # repositories.
+          ref: a2ff696a
+          path: .standards-pipeline-ledger
+          sparse-checkout: |
+            .machine_readable/pipeline-allow.txt
+          sparse-checkout-cone-mode: false
+        # Not fatal: the next step names what was missing and then FAILS CLOSED.
+        continue-on-error: true
+
+      - name: Verdict — block unless this repository is ledgered
+        if: ${{ contains(needs.*.result, 'failure') }}
+        shell: bash
+        env:
+          LEDGER: .standards-pipeline-ledger/.machine_readable/pipeline-allow.txt
+          SLUG: ${{ github.repository }}
         run: |
-          echo "::error::At least one pipeline gate failed. See the report table in the step summary."
+          # LEDGER and SLUG come from the step `env:` map above.
+          set -euo pipefail
+
+          # Strip comments and blanks; this is also the ledger's own
+          # denominator. A missing file yields an empty list and N=0, which is
+          # the fail-closed path: nothing can match an empty list.
+          if [ -f "$LEDGER" ]; then
+            ALLOWED="$(grep -vE '^[[:space:]]*(#|$)' "$LEDGER" || true)"
+          else
+            ALLOWED=""
+            echo "::warning::Pipeline ledger not readable ($LEDGER). Treating as EMPTY, which blocks. This is not an exemption."
+          fi
+          N_ALLOWED="$(printf '%s' "$ALLOWED" | grep -c . || true)"
+
+          # ALWAYS print the denominator, on both paths. A gate that only ever
+          # says yes proves nothing, and a `::warning::` cannot fail a job.
+          echo "pipeline debt: ${N_ALLOWED} repos"
+
+          if printf '%s\n' "$ALLOWED" | grep -Fxq "$SLUG"; then
+            echo "::notice::${SLUG} is on the pipeline exemption ledger (pipeline debt: ${N_ALLOWED} repos). The gates below REALLY FAILED — this is grandfathered debt, not a pass. Fix what the report table names, then delete this repository's line from .machine_readable/pipeline-allow.txt."
+            {
+              echo "### Pipeline verdict — ledgered debt"
+              echo ""
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Repository | \`${SLUG}\` |"
+              echo "| Verdict | **exempt** (shrink-only ledger) |"
+              echo "| pipeline debt | **${N_ALLOWED} repos** |"
+              echo ""
+              echo "**At least one gate above really failed.** An exemption is not a pass;"
+              echo "it is debt that someone agreed to carry. The report table names every"
+              echo "failing gate. Fix them, then DELETE this repository's line from"
+              echo "\`.machine_readable/pipeline-allow.txt\` in \`hyperpolymath/standards\` —"
+              echo "deletion needs no \`Ratchet-exception\` trailer, because shrinking is"
+              echo "the point."
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "::error::At least one pipeline gate failed, and ${SLUG} is not on the exemption ledger (pipeline debt: ${N_ALLOWED} repos). See the report table in the step summary."
+          {
+            echo "### Pipeline verdict — BLOCKED"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Repository | \`${SLUG}\` |"
+            echo "| Verdict | **blocked** (not ledgered) |"
+            echo "| pipeline debt | **${N_ALLOWED} repos** |"
+            echo ""
+            echo "The report table above names every gate that failed. Fix them, or — if"
+            echo "this is debt the estate has agreed to carry — add \`${SLUG}\` to"
+            echo "\`.machine_readable/pipeline-allow.txt\` in \`hyperpolymath/standards\`,"
+            echo "bumping the ledger pin in the same commit, with a"
+            echo "\`Ratchet-exception: .machine_readable/pipeline-allow.txt — <why>\`"
+            echo "trailer in column 0."
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
           exit 1

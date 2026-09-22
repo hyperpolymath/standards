@@ -395,7 +395,10 @@ def _fixtures(d):
     for sub, expect in (("valid", True), ("invalid", False)):
         for f in sorted(glob.glob(os.path.join(d, sub, "*.deed"))):
             try:
-                validate(open(f, encoding="utf-8").read(), filename=f)
+                # NOSONAR pythonsecurity:S8707 — local CLI linter: paths come
+                # from the operator's argv / a fixed fixtures dir, not a trust
+                # boundary (CI passes only hardcoded repo paths).
+                validate(open(f, encoding="utf-8").read(), filename=f)  # NOSONAR
                 got, err = True, ""
             except LintError as e:
                 got, err = False, str(e)
@@ -421,7 +424,8 @@ def main(argv):
     bad = 0
     for f in files:
         try:
-            with open(f, encoding="utf-8") as fh:
+            # NOSONAR pythonsecurity:S8707 — see _fixtures above: operator argv.
+            with open(f, encoding="utf-8") as fh:  # NOSONAR
                 validate(fh.read(), filename=f)
             print(f"OK   {f}")
         except LintError as e:

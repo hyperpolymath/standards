@@ -41,8 +41,9 @@ expect 0 "a complete taxonomy choice is valid" <<'EOF'
 - ceiling: 1
 - severity: high
 - policy: remediable
+- taxonomy-choice: non-default
 - taxonomy-default-arm: adapt-proven-idris2-test
-- taxonomy-selected-arm: write-local-test
+- taxonomy-non-default-arm: write-local-test
 - taxonomy-departure-reason: the host API is not supported by the proven suite
 - accepted-until: 2030-01-01
 EOF
@@ -55,8 +56,9 @@ expect 1 "a partial taxonomy choice is rejected" <<'EOF'
 - ceiling: 1
 - severity: high
 - policy: remediable
+- taxonomy-choice: non-default
 - taxonomy-default-arm: adapt-proven-idris2-test
-- taxonomy-selected-arm: write-local-test
+- taxonomy-non-default-arm: write-local-test
 - accepted-until: 2030-01-01
 EOF
 
@@ -68,8 +70,9 @@ expect 1 "an empty taxonomy-choice encoding is rejected" <<'EOF'
 - ceiling: 1
 - severity: high
 - policy: remediable
+- taxonomy-choice: non-default
 - taxonomy-default-arm:
-- taxonomy-selected-arm:
+- taxonomy-non-default-arm:
 - taxonomy-departure-reason:
 - accepted-until: 2030-01-01
 EOF
@@ -82,8 +85,9 @@ expect 1 "a taxonomy choice must select the non-default arm" <<'EOF'
 - ceiling: 1
 - severity: high
 - policy: remediable
+- taxonomy-choice: non-default
 - taxonomy-default-arm: adapt-proven-idris2-test
-- taxonomy-selected-arm: adapt-proven-idris2-test
+- taxonomy-non-default-arm: adapt-proven-idris2-test
 - taxonomy-departure-reason: no departure actually recorded
 - accepted-until: 2030-01-01
 EOF
@@ -96,8 +100,9 @@ expect 1 "taxonomy arm identifiers use the stable-id grammar" <<'EOF'
 - ceiling: 1
 - severity: high
 - policy: remediable
+- taxonomy-choice: non-default
 - taxonomy-default-arm: Adapt proven test
-- taxonomy-selected-arm: write-local-test
+- taxonomy-non-default-arm: write-local-test
 - taxonomy-departure-reason: the host API is not supported by the proven suite
 - accepted-until: 2030-01-01
 EOF
@@ -153,8 +158,8 @@ expect 0 "a complete testing-taxonomy departure records both arms and its reason
 - severity: high
 - policy: remediable
 - taxonomy-choice: non-default
-- taxonomy-default-arm: adapt the proven Idris2 test
-- taxonomy-non-default-arm: retain the temporary local test
+- taxonomy-default-arm: adapt-proven-idris2-test
+- taxonomy-non-default-arm: retain-temporary-local-test
 - taxonomy-departure-reason: upstream fixture is gated on the next release
 - accepted-until: 2030-01-01
 EOF

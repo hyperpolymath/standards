@@ -29,10 +29,11 @@ on:
   repository_dispatch:
     types: [refresh-githooks]
 
+# Least privilege (WH002/S8233): only the `propagate` job pushes, so only it
+# carries `contents: write` (job level). `pull-requests: write` and
+# `actions: read` were dead — no step opens a PR or calls the Actions API.
 permissions:
-  contents: write  # Required to push hook updates to target repos
-  pull-requests: write
-  actions: read
+  contents: read
 
 # Only run one instance at a time
 concurrency:
@@ -165,6 +166,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: identify-repos
     timeout-minutes: 60
+    permissions:
+      # Required to push hook updates to target repos. Job level replaces
+      # the top level; `contents: write` implies read, so this is sufficient.
+      contents: write
     strategy:
       matrix:
         repo: ${{ fromJson(needs.identify-repos.outputs.repos) }}
@@ -312,6 +317,7 @@ jobs:
   summary:
     name: Propagation Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [identify-repos, propagate]
     if: always()
 

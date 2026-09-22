@@ -9,10 +9,11 @@ on:
     branches: [main, master]
     types: [opened, synchronize, reopened, ready_for_review]
 
+# Least privilege: only the fork-PR job comments, so only it carries
+# `pull-requests: write` (job level). `security-events: read` was dead —
+# no step reads code-scanning alerts.
 permissions:
   contents: read
-  pull-requests: write
-  security-events: read
 
 # Critical: This runs in the BASE repository context, not the PR fork
 # This allows safe scanning of untrusted code from forks
@@ -21,10 +22,18 @@ jobs:
     name: Security Checks for Fork PRs
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      # Job level replaces the top level — restate the checkout read grant
+      # alongside the PR-comment grant this job's github-script step needs.
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout base repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # NOSONAR githubactions:S7631 — this IS the remediated shape: the
+        # workflow checks out the BASE branch (never the fork's code) and
+        # only statically scans the PR diff; nothing from the fork executes.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 NOSONAR
         with:
           # Explicitly checkout the base branch, not the PR branch
           ref: ${{ github.base_ref }}
@@ -214,6 +223,7 @@ jobs:
   final-summary:
     name: Security Gate Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [security-check-fork-pr, security-check-regular-pr]
     if: always()
 
