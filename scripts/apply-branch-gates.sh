@@ -50,10 +50,22 @@
 #     --strip-retired to opt in, one repo at a time.
 #   * It never emits a retired rule type itself. The exactness guard makes that
 #     structurally impossible, not merely intended.
-#   * Two active branch rulesets => AMBIGUOUS, fail closed. Rulesets are
-#     ADDITIVE (see apply-tag-ruleset-canon.sh): writing one of a pair leaves
-#     the other enforcing, and the repo stays blocked by a rule nothing
+#   * Two active REPO-LEVEL branch rulesets => AMBIGUOUS, fail closed. Rulesets
+#     are ADDITIVE (see apply-tag-ruleset-canon.sh): writing one of a pair
+#     leaves the other enforcing, and the repo stays blocked by a rule nothing
 #     announced. Guessing which to fill is how that happens silently.
+#   * It never tries to write an ORG-INHERITED ruleset. repos/{r}/rulesets
+#     RETURNS the org's rulesets alongside the repo's own, and one of them is
+#     readable IN FULL at repos/{r}/rulesets/{id} -- so every read succeeds and
+#     nothing warns you. The PUT to that same path 404s. That was measured 67
+#     times, once for every metadatastician repo reached by the org-level
+#     EstateBranching (18225024). The cure for an inherited ruleset is at
+#     /orgs/{org}/rulesets/{id}, applied ONCE, not per repo -- so this script
+#     reports ORG-INHERITED and stops rather than issuing 67 doomed writes.
+#     The discriminator is .source_type, which the LIST endpoint does return
+#     (verified against the live API: every entry carries it). An entry WITHOUT
+#     it is reported UNKNOWN, never assumed repo-level: writability is exactly
+#     what that field decides, and guessing it wrong is a silent 404.
 #
 # Inputs (environment):
 #   GH_TOKEN       required for writes; needs administration:write on targets.
@@ -327,14 +339,33 @@ while IFS= read -r R; do
     continue
   fi
 
-  # ---- 3. locate the one active branch ruleset --------------------------
+  # ---- 3. locate the one active REPO-LEVEL branch ruleset ----------------
+  # This listing includes the ORG's rulesets as well as the repo's own, and an
+  # inherited one reads back in full at repos/{r}/rulesets/{id} while the PUT
+  # to that same path 404s. Fetch the population and classify LOCALLY -- a
+  # server-side select whose empty result is also its success result cannot
+  # fail closed.
   gh api "repos/$R/rulesets" > "$WORK/rs.json" 2>"$WORK/e" \
     || { emit "$R" "UNKNOWN" "rulesets GET failed"; continue; }
-  jq -r '.[]|select(.target=="branch" and .enforcement=="active")|.id' "$WORK/rs.json" > "$WORK/ids"
+  jq -r '.[]|select(.target=="branch" and .enforcement=="active")
+         |[(.source_type // "MISSING"), (.id|tostring)]|@tsv' "$WORK/rs.json" > "$WORK/active"
+  command grep -P '^Repository\t'              "$WORK/active" | cut -f2 > "$WORK/ids"
+  command grep -vP '^(Repository|MISSING)\t'   "$WORK/active" | cut -f2 > "$WORK/inherited"
+  NMISS=$(command grep -cP '^MISSING\t' "$WORK/active" || true)
   NIDS=$(wc -l < "$WORK/ids")
+  NINH=$(wc -l < "$WORK/inherited")
+
+  # An absent discriminator REFUSES; it never defaults to the writable arm.
+  [ "${NMISS:-0}" -gt 0 ] && { emit "$R" "UNKNOWN" "$DETAIL — $NMISS active branch ruleset(s) carry no .source_type; cannot tell repo-level from org-inherited, refusing to guess"; continue; }
+  if [ "$NIDS" -eq 0 ] && [ "$NINH" -gt 0 ]; then
+    emit "$R" "ORG-INHERITED" "$DETAIL — the only active branch ruleset(s) here are org-level ($(paste -sd, "$WORK/inherited")); writable ONLY at /orgs/{org}/rulesets/{id}, cured once at the org, never per repo"
+    continue
+  fi
   [ "$NIDS" -eq 0 ] && { emit "$R" "NORULESET" "$DETAIL — no active branch ruleset; this script never creates one"; continue; }
-  [ "$NIDS" -gt 1 ] && { emit "$R" "AMBIGUOUS" "$DETAIL — $NIDS active branch rulesets ($(tr '\n' ',' < "$WORK/ids")); rulesets are additive, refusing to guess"; continue; }
+  [ "$NIDS" -gt 1 ] && { emit "$R" "AMBIGUOUS" "$DETAIL — $NIDS active repo-level branch rulesets ($(paste -sd, "$WORK/ids")); rulesets are additive, refusing to guess"; continue; }
   ID=$(cat "$WORK/ids")
+  # Additive: an inherited ruleset still enforces alongside the one being filled.
+  [ "$NINH" -gt 0 ] && DETAIL="$DETAIL org_inherited=[$(paste -sd, "$WORK/inherited")]"
 
   gh api "repos/$R/rulesets/$ID" > "$WORK/live.json" 2>/dev/null \
     || { emit "$R" "UNKNOWN" "ruleset $ID GET failed"; continue; }

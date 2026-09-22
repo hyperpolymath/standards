@@ -94,7 +94,7 @@ mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{
 mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":22}]}'
 mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"},{"name":"governance / Code quality + docs"},{"name":"Allowlist Preflight"}]}'
 mkfix "repos/$R/actions/runs/22/jobs?per_page=100" '{"jobs":[{"name":"CodeQL Security Analysis"}]}'
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"},{"id":8,"target":"tag","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"},{"id":8,"target":"tag","enforcement":"active","source_type":"Repository"}]'
 mkfix "repos/$R/rulesets/9" '{"id":9,"name":"Base","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"pull_request"}],"rules":[{"type":"deletion"},{"type":"required_signatures"}]}'
 
 OUT=$(run_applier "$R")
@@ -120,7 +120,7 @@ mkfix "repos/$R" '{"default_branch":"main"}'
 mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
 mkfix "repos/$R/contents" '[{"name":"README.md"}]'
 mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[]}'
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
 mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
 
 OUT=$(run_applier "$R" --apply)
@@ -137,7 +137,7 @@ mkfix "repos/$R" '{"default_branch":"main"}'
 mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
 mkfix "repos/$R/contents" '[{"name":"README.md"}]'
 mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[]}'
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
 mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
 OUT=$(MUTANT="$MUT" run_applier "$R" --apply)
 if [ "$(state_of "$OUT")" = "UNGATED" ]; then
@@ -159,7 +159,7 @@ mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
 mkfix "repos/$R/contents" '[{"name":"README.md"}]'
 mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
 mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
 mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"pull_request"}],"rules":[{"type":"deletion"},{"type":"required_signatures"}]}'
 
 # MUTANT B: the body-builder also drops required_signatures.
@@ -192,7 +192,7 @@ mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
 mkfix "repos/$R/contents" '[{"name":"README.md"}]'
 mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
 mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"},{"id":10,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"},{"id":10,"target":"branch","enforcement":"active","source_type":"Repository"}]'
 OUT=$(run_applier "$R" --apply)
 [ "$(state_of "$OUT")" = "AMBIGUOUS" ] && ok "two active branch rulesets: AMBIGUOUS, fail closed" || bad "two rulesets: state=$(state_of "$OUT") (want AMBIGUOUS)"
 [ -s "$FIX/PUTS.log" ] && bad "two rulesets: wrote anyway" || ok "two rulesets: no PUT"
@@ -206,7 +206,7 @@ mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
 mkfix "repos/$R/contents" '[{"name":"README.md"}]'
 mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
 mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
-mkfix "repos/$R/rulesets" '[{"id":8,"target":"tag","enforcement":"active"},{"id":7,"target":"branch","enforcement":"disabled"}]'
+mkfix "repos/$R/rulesets" '[{"id":8,"target":"tag","enforcement":"active","source_type":"Repository"},{"id":7,"target":"branch","enforcement":"disabled","source_type":"Repository"}]'
 OUT=$(run_applier "$R" --apply)
 [ "$(state_of "$OUT")" = "NORULESET" ] && ok "no active branch ruleset: NORULESET, nothing created" || bad "no ruleset: state=$(state_of "$OUT")"
 
@@ -221,7 +221,7 @@ mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{
 mkfix "repos/$R/actions/workflows/ada-ci.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":33}]}'
 mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
 mkfix "repos/$R/actions/runs/33/jobs?per_page=100" '{"jobs":[{"name":"Ada Build"}]}'
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
 mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
 OUT=$(run_applier "$R")
 case "$(detail_of "$OUT")" in *"Ada Build"*) ok "profile detect: *.gpr glob activated the ada profile" ;; *) bad "profile detect: ada gate missing — $(detail_of "$OUT")" ;; esac
@@ -254,7 +254,7 @@ mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{
 mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":22}]}'
 mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
 # NOTE: no fixture for run 22's jobs -- the shim will exit 1.
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
 mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
 
 OUT=$(run_applier "$R" --apply)
@@ -275,7 +275,7 @@ mkfix "repos/$R/contents" '[{"name":"README.md"}]'
 mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
 mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":22}]}'
 mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
 mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
 OUT=$(MUTANT="$MUTC" run_applier "$R" --apply)
 if [ "$(state_of "$OUT")" = "REFUSED" ]; then
@@ -311,7 +311,7 @@ mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{
 mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[{"id":11},{"id":12}]}'
 mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
 mkfix "repos/$R/actions/runs/12/jobs?per_page=100" '{"jobs":[]}'
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
 mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
 
 OUT=$(run_applier "$R" --apply --require-green 3)
@@ -333,7 +333,7 @@ if ! cmp -s "$MUTD" "$APPLIER"; then
   mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[{"id":11},{"id":12}]}'
   mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
   mkfix "repos/$R/actions/runs/12/jobs?per_page=100" '{"jobs":[]}'
-  mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+  mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
   mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
   OUT=$(MUTANT="$MUTD" run_applier "$R" --apply --require-green 3)
   if [ "$(state_of "$OUT")" = "REFUSED" ]; then
@@ -368,7 +368,7 @@ mkfix "repos/$R/contents" '[{"name":"README.md"}]'
 mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
 mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[]}'
 mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
 mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
 
 OUT=$(run_applier "$R" --apply --require-green 3)
@@ -400,7 +400,7 @@ mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{
 mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
 mkfix "repos/$R/actions/runs/12/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
 mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[]}'
-mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
 mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
 
 OUT=$(run_applier "$R" --require-green 3)
@@ -426,7 +426,7 @@ if ! cmp -s "$MUTE" "$APPLIER"; then
   mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
   mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=3" '{"workflow_runs":[]}'
   mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance","conclusion":"success"}]}'
-  mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+  mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
   mkfix "repos/$R/rulesets/9" '{"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
   OUT=$(MUTANT="$MUTE" run_applier "$R" --apply --require-green 3)
   if [ "$(state_of "$OUT")" = "REFUSED" ]; then
@@ -442,6 +442,106 @@ if ! cmp -s "$MUTE" "$APPLIER"; then
   fi
 else
   bad "mutant E was not applied — the sed pattern no longer matches the applier"
+fi
+
+# =============================================================== CASE 12
+# THE ORG-INHERITED TRAP.  repos/{r}/rulesets RETURNS the org's rulesets
+# alongside the repo's own.  An inherited one reads back IN FULL at
+# repos/{r}/rulesets/{id} -- so every GET succeeds and nothing warns you --
+# while the PUT to that same path 404s.  Measured 67 times on this estate, once
+# per metadatastician repo reached by the org-level EstateBranching (18225024).
+# The cure is at /orgs/{org}/rulesets/{id}, applied ONCE; issuing 67 doomed
+# per-repo writes is not a smaller version of it.
+# NOTE there is deliberately NO fixture for repos/$R/rulesets/18225024: the shim
+# exits 1 on a missing fixture, so if the applier ever READS the inherited
+# ruleset this case fails.  That absence is a free assertion.
+reset_fix
+R=acme/org-inherited
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
+mkfix "repos/$R/rulesets" '[{"id":18225024,"name":"EstateBranching","target":"branch","enforcement":"active","source_type":"Organization","source":"metadatastician"}]'
+
+OUT=$(run_applier "$R" --apply)
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "ORG-INHERITED" ] && ok "org-inherited: state is ORG-INHERITED" || bad "org-inherited: state=$S (want ORG-INHERITED) — an inherited ruleset was treated as writable"
+case "$D" in *18225024*) ok "org-inherited: the inherited ruleset id is NAMED so the org-level cure is actionable" ;; *) bad "org-inherited: id not reported — $D" ;; esac
+case "$D" in *"/orgs/"*) ok "org-inherited: the detail says WHERE the cure lives" ;; *) bad "org-inherited: detail does not point at the org endpoint — $D" ;; esac
+[ -s "$FIX/PUTS.log" ] && bad "org-inherited: PUT issued despite --apply — this is the 404 being guarded" || ok "org-inherited: no PUT even with --apply"
+
+# =============================================================== CASE 13
+# THE REGRESSION THE NAIVE FIX WOULD CAUSE.  Rulesets are ADDITIVE, so a repo
+# legitimately carries an inherited ruleset BESIDE its own.  Counting both as
+# candidates turns that ordinary repo into AMBIGUOUS and it never gets gated.
+# The repo-level one must be selected, and the inherited one REPORTED (it still
+# enforces) rather than silently ignored.
+# Again: no fixture for rulesets/18225024 -- reading it fails the case.
+reset_fix
+R=acme/org-plus-own
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
+mkfix "repos/$R/rulesets" '[{"id":18225024,"name":"EstateBranching","target":"branch","enforcement":"active","source_type":"Organization"},{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
+mkfix "repos/$R/rulesets/9" '{"id":9,"name":"Base","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+
+OUT=$(run_applier "$R")
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "WOULD-GATE" ] && ok "org beside own: state is WOULD-GATE — the repo-level ruleset was selected" || bad "org beside own: state=$S (want WOULD-GATE) — an additive inherited ruleset made an ordinary repo unreachable"
+case "$D" in *"ruleset=9"*) ok "org beside own: the REPO-LEVEL id was chosen, not the org id" ;; *) bad "org beside own: wrong ruleset selected — $D" ;; esac
+case "$D" in *"org_inherited=[18225024]"*) ok "org beside own: the inherited ruleset is still REPORTED — it enforces regardless" ;; *) bad "org beside own: inherited ruleset went unreported — $D" ;; esac
+
+# =============================================================== CASE 14
+# AN ABSENT DISCRIMINATOR REFUSES.  Writability is exactly what .source_type
+# decides; defaulting a missing field to the writable arm is a silent 404.
+reset_fix
+R=acme/no-source-type
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active"}]'
+mkfix "repos/$R/rulesets/9" '{"id":9,"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+
+OUT=$(run_applier "$R" --apply)
+S=$(state_of "$OUT")
+[ "$S" = "UNKNOWN" ] && ok "absent source_type: state is UNKNOWN — refuses rather than assuming repo-level" || bad "absent source_type: state=$S (want UNKNOWN)"
+[ -s "$FIX/PUTS.log" ] && bad "absent source_type: PUT issued on an unclassifiable ruleset" || ok "absent source_type: no PUT even with --apply"
+
+# ---- MUTANT F: delete the source_type filter, restoring the original defect. --
+# The pre-fix line selected every active branch ruleset regardless of ownership.
+MUTF="$WORK/mutant-f.sh"
+sed 's|^  command grep -P .\^Repository.*> "\$WORK/ids"$|  cut -f2 "$WORK/active" > "$WORK/ids"|' "$APPLIER" > "$MUTF"
+chmod +x "$MUTF"
+if ! cmp -s "$MUTF" "$APPLIER" && bash -n "$MUTF" 2>/dev/null; then
+  reset_fix
+  R=acme/org-inherited
+  mkfix "repos/$R" '{"default_branch":"main"}'
+  mkfix "repos/$R/contents/.github/workflows" '[{"name":"governance.yml"}]'
+  mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+  mkfix "repos/$R/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+  mkfix "repos/$R/actions/runs/11/jobs?per_page=100" '{"jobs":[{"name":"governance / Governance"}]}'
+  mkfix "repos/$R/rulesets" '[{"id":18225024,"name":"EstateBranching","target":"branch","enforcement":"active","source_type":"Organization"}]'
+  # the mutant WILL read the inherited ruleset, so it needs a fixture the fixed
+  # applier must never ask for.
+  mkfix "repos/$R/rulesets/18225024" '{"id":18225024,"name":"EstateBranching","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+  OUT=$(MUTANT="$MUTF" run_applier "$R" --apply)
+  if [ "$(state_of "$OUT")" = "ORG-INHERITED" ]; then
+    bad "MUTANT F SURVIVED: source_type filter removed yet still ORG-INHERITED — the control is decorative"
+  else
+    ok "mutant F killed: without the filter it becomes $(state_of "$OUT") and PUTs $(wc -l < "$FIX/PUTS.log") time(s)"
+  fi
+  if command grep -qxF "repos/$R/rulesets/18225024" "$FIX/PUTS.log" 2>/dev/null; then
+    ok "mutant F PUT to the INHERITED ruleset's repo path — the 404 measured 67 times, reproduced"
+  else
+    bad "mutant F: expected a PUT to repos/$R/rulesets/18225024"
+  fi
+else
+  bad "mutant F was not applied — the sed pattern no longer matches the applier"
 fi
 
 echo
