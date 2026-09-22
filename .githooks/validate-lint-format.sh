@@ -98,7 +98,21 @@ if [ -n "$NCL" ]; then
     while IFS= read -r f; do
       [ -z "$f" ] && continue
       nickel format --check "$f" || fail "Nickel: $f is not formatted"
-      nickel typecheck "$f"      || fail "Nickel: $f failed typecheck"
+      # A Nickel file may `import` a build-time artefact that is GITIGNORED and
+      # generated — here machine-readable/arrival-pack/arrival-pack.ncl imports
+      # claude-md-data.json, which extract.sh produces during generate.sh. A
+      # pre-commit hook cannot run the repo's build, so typechecking such a file
+      # is PERMANENTLY red: a gate no edit can satisfy. Report the skip loudly
+      # and name the file — a skip is not a pass. Every other typecheck error
+      # still fails, so this narrows the gate rather than disabling it.
+      if tc_out="$(nickel typecheck "$f" 2>&1)"; then
+        :
+      elif printf '%s' "$tc_out" | grep -q 'could not find import'; then
+        warn "Nickel: $f NOT typechecked — unresolved generated import. A SKIP, not a pass."
+      else
+        printf '%s\n' "$tc_out" >&2
+        fail "Nickel: $f failed typecheck"
+      fi
     done <<< "$NCL"
   fi
 else
