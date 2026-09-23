@@ -283,8 +283,9 @@ echo "== mutants (each MUST make the suite go red, for the RIGHT reason) =="
 # file, and dies with FATAL before ANY guard runs -- so all four "reds" would measure a
 # broken path rather than the defect. The mutant therefore lives in the real scripts/ dir,
 # and every mutant run is asserted to have produced real output first.
-MUT="$ROOT/scripts/.protection-floor-mutant.tmp.sh"
-trap 'rm -rf "$WORK"; rm -f "$MUT"' EXIT
+MUTROOT="$WORK/mutroot"; mkdir -p "$MUTROOT/scripts" "$MUTROOT/config/rulesets"
+cp "$ROOT"/config/rulesets/*.json "$ROOT/config/rulesets/gcrypt-vault-class.txt" "$MUTROOT/config/rulesets/"
+MUT="$MUTROOT/scripts/apply-protection-floor.sh"
 
 # Run a named mutation and assert the expected state change or write.
 mutant() { # name  sed-expr  assertion-kind(wrote|state)  arg  [repos-file]
