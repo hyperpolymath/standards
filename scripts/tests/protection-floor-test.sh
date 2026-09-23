@@ -73,6 +73,8 @@ hyperpolymath/bypassed-twin
 hyperpolymath/archived-repo
 hyperpolymath/private-repo
 hyperpolymath/nosourcetype-repo
+metadatastician/org-covered-repo
+metadatastician/org-halffloor-repo
 EOF
 
 build_fixtures() {  # $1 = "with-vault" to give the vault a complete, writable fixture set
@@ -141,6 +143,34 @@ J
   mkrepo hyperpolymath/nosourcetype-repo main false
   echo '[{"id":40,"target":"branch","enforcement":"active"}]' \
       > "$FIX/repos_hyperpolymath_nosourcetype-repo_rulesets"
+
+  # An ORG-inherited ruleset that CARRIES the whole floor. It is not writable per repo,
+  # so the only correct answer is ORG-INHERITED -- never a per-repo duplicate.
+  mkrepo metadatastician/org-covered-repo main false
+  echo '[{"id":60,"source_type":"Organization","target":"branch","enforcement":"active"}]' \
+      > "$FIX/repos_metadatastician_org-covered-repo_rulesets"
+  cat > "$FIX/repos_metadatastician_org-covered-repo_rulesets_60" <<'J'
+{"id":60,"rules":[{"type":"deletion"},{"type":"non_fast_forward"},{"type":"required_signatures"}],
+ "conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[]}
+J
+  # Writable on purpose: a mutant that drops the org union must produce a REAL duplicate
+  # POST here, not die on a missing fixture (the false-green trap this suite already hit).
+  echo '{"id":9060}' > "$FIX/POST_repos_metadatastician_org-covered-repo_rulesets"
+  echo '[{"type":"deletion"},{"type":"non_fast_forward"}]' \
+      > "$FIX/repos_metadatastician_org-covered-repo_rules_branches_main"
+
+  # The real EstateBranching shape: an org ruleset carrying HALF the floor (deletion, no
+  # non_fast_forward). A half cover is NOT a cover; this repo must still be WOULD-CREATE.
+  mkrepo metadatastician/org-halffloor-repo main false
+  echo '[{"id":61,"source_type":"Organization","target":"branch","enforcement":"active"}]' \
+      > "$FIX/repos_metadatastician_org-halffloor-repo_rulesets"
+  cat > "$FIX/repos_metadatastician_org-halffloor-repo_rulesets_61" <<'J'
+{"id":61,"rules":[{"type":"deletion"},{"type":"pull_request"}],
+ "conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[{"actor_id":1}]}
+J
+  echo '{"id":9061}' > "$FIX/POST_repos_metadatastician_org-halffloor-repo_rulesets"
+  echo '[{"type":"deletion"},{"type":"non_fast_forward"}]' \
+      > "$FIX/repos_metadatastician_org-halffloor-repo_rules_branches_main"
 }
 
 echo "== report mode (no --apply) =="
@@ -154,16 +184,22 @@ check "bypassed twin is NOT converged"   "COVERED-BY-RICHER" "$(state "$OUT" hyp
 check "archived is ARCHIVED"             "ARCHIVED"          "$(state "$OUT" hyperpolymath/archived-repo)"
 check "403 is PLAN-EXCLUDED"             "PLAN-EXCLUDED"     "$(state "$OUT" hyperpolymath/private-repo)"
 check "no source_type is REFUSED"        "REFUSED"           "$(state "$OUT" hyperpolymath/nosourcetype-repo)"
+check "complete org cover is ORG-INHERITED" "ORG-INHERITED"   "$(state "$OUT" metadatastician/org-covered-repo)"
+check "HALF org cover is not a cover"    "WOULD-CREATE"      "$(state "$OUT" metadatastician/org-halffloor-repo)"
 check "report mode writes nothing"       "0"                 "$(wc -l < "$FIX/PUTS.log" | tr -d ' ')"
 
 echo "== apply mode =="
 build_fixtures
 OUT="$(run "$SUT" --repos "$REPOS" --apply)"
 check "bare repo is CREATED"             "CREATED"           "$(state "$OUT" hyperpolymath/plain-repo)"
-check "exactly one write"                "1"                 "$(wc -l < "$FIX/PUTS.log" | tr -d ' ')"
-check "the write is a POST"              "POST"              "$(cut -f1 "$FIX/PUTS.log")"
-check "the write targets plain-repo"     "repos/hyperpolymath/plain-repo/rulesets" "$(cut -f2 "$FIX/PUTS.log")"
-POSTED="$(cut -f3 "$FIX/PUTS.log" | jq -S -c .)"
+check "half org cover still CREATED"     "CREATED"           "$(state "$OUT" metadatastician/org-halffloor-repo)"
+# Exactly two repos lack a floor in force: the bare one and the HALF-org-covered one.
+# Every other fixture must be left alone, so the count is an assertion in both directions.
+check "exactly two writes"               "2"                 "$(wc -l < "$FIX/PUTS.log" | tr -d ' ')"
+check "every write is a POST"            "POST"              "$(cut -f1 "$FIX/PUTS.log" | sort -u)"
+check "one write targets plain-repo"     "1"                 "$(command grep -c 'repos/hyperpolymath/plain-repo/rulesets' "$FIX/PUTS.log")"
+check "one write targets half-org repo"  "1"                 "$(command grep -c 'repos/metadatastician/org-halffloor-repo/rulesets' "$FIX/PUTS.log")"
+POSTED="$(command grep 'plain-repo' "$FIX/PUTS.log" | cut -f3 | jq -S -c .)"
 CANONJ="$(jq -S -c . "$ROOT/config/rulesets/branch-floor.json")"
 check "POST body equals the canon file"  "$CANONJ"           "$POSTED"
 check "posted bypass_actors is empty"    "0"                 "$(printf '%s' "$POSTED" | jq '.bypass_actors | length')"
@@ -224,6 +260,8 @@ check "vault stays EXCLUDED even when writable" "EXCLUDED-D50" "$(state "$OUTV" 
 check "vault receives no POST when writable"    "0"            "$(command grep -c 'memory-vault' "$FIX/PUTS.log")"
 check "archived stays ARCHIVED when writable"  "ARCHIVED"     "$(state "$OUTV" hyperpolymath/archived-repo)"
 check "archived receives no POST when writable" "0"           "$(command grep -c 'archived-repo' "$FIX/PUTS.log")"
+check "org-covered stays ORG-INHERITED"        "ORG-INHERITED" "$(state "$OUTV" metadatastician/org-covered-repo)"
+check "org-covered receives no duplicate POST" "0"             "$(command grep -c 'org-covered-repo' "$FIX/PUTS.log")"
 
 mutant "D50 vault guard removed" \
   's/^  if is_vault "\$repo"; then$/  if false; then/' \
@@ -240,6 +278,13 @@ mutant "bypass dropped from the shape test" \
 # Removing the converged early-return does NOT reach a write: the covered-by-richer check
 # catches it next. That second line of defence is the point, so this mutant is asserted on
 # the STATE it corrupts, not on a POST that correctly never happens.
+# The bug this suite was extended for: org rulesets were COUNTED (org_n) but their rule
+# types never entered the cover set, so ORG-INHERITED was unreachable and 67 org-covered
+# repos reported WOULD-CREATE. Under --apply that is 67 duplicate rulesets.
+mutant "org cover dropped from the union" \
+  's/",\$union,\$union_org,"/",$union,"/' \
+  wrote "org-covered-repo"
+
 mutant "converged early-return removed" \
   's/^  if \[ "\$exact_n" -eq 1 \]; then$/  if false; then/' \
   state "hyperpolymath/converged-repo=COVERED-BY-RICHER"

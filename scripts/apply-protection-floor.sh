@@ -78,7 +78,10 @@ REPOS_FILE=""
 FLOOR_EVEN_IF_COVERED=0
 
 TMPDIR_ERR="$(mktemp -t protfloor-err.XXXXXX)"
-cleanup() { rm -f "$TMPDIR_ERR"; }
+# Org rulesets are IDENTICAL across every repo in the org, so their bodies are fetched
+# once and cached by ruleset id rather than re-read per repo.
+ORG_CACHE="$(mktemp -d -t protfloor-org.XXXXXX)"
+cleanup() { rm -f "$TMPDIR_ERR"; rm -rf "$ORG_CACHE"; }
 trap cleanup EXIT
 
 die() { printf 'FATAL: %s\n' "$*" >&2; exit 2; }
@@ -168,6 +171,7 @@ printf '%s\n' "$TARGETS" | while IFS= read -r repo; do
 
   org_n="$(printf '%s' "$listing" | jq "[.[]? | select(.source_type==\"Organization\" and .target==\"$TARGET\" and .enforcement==\"active\")] | length")"
   repo_ids="$(printf '%s' "$listing" | jq -r ".[]? | select(.source_type==\"Repository\" and .target==\"$TARGET\" and .enforcement==\"active\") | .id")"
+  org_ids="$(printf '%s' "$listing" | jq -r ".[]? | select(.source_type==\"Organization\" and .target==\"$TARGET\" and .enforcement==\"active\") | .id")"
 
   # 5. Walk the active repo-level rulesets of this target and classify.
   exact_n=0; exact_ids=""; union=""
@@ -204,6 +208,31 @@ EOF
     continue
   fi
 
+  # 5b. Org-inherited rulesets of this target also put rules IN FORCE. They are never
+  # writable per repo, so they are kept in their OWN union: a repo-level cover can be
+  # cured here, an org-level cover must be cured once at the org. Omitting this union
+  # is what made ORG-INHERITED unreachable and reported 67 covered repos as WOULD-CREATE.
+  union_org=""; org_byp_max=0; org_read_ok=1
+  if [ -n "$org_ids" ]; then
+    while IFS= read -r rid; do
+      [ -n "$rid" ] || continue
+      cache="$ORG_CACHE/$rid"
+      if [ ! -s "$cache" ]; then
+        gh api "repos/$repo/rulesets/$rid" > "$cache" 2>/dev/null || :
+      fi
+      if [ ! -s "$cache" ]; then org_read_ok=0; break; fi
+      union_org="$union_org,$(jq -r '[.rules[].type] | sort | join(",")' "$cache")"
+      b="$(jq -r '[.bypass_actors[]?] | length' "$cache")"
+      [ "$b" -gt "$org_byp_max" ] && org_byp_max="$b"
+    done <<EOF
+$org_ids
+EOF
+  fi
+  if [ "$org_read_ok" -eq 0 ]; then
+    report "$repo" "UNKNOWN" "an org ruleset body read was throttled; skipped rather than recorded"
+    continue
+  fi
+
   # 6. Is the floor nevertheless in force, from something richer?
   covered=1
   printf '%s\n' "$FLOOR_TYPES" | tr ',' '\n' | while IFS= read -r t; do
@@ -211,13 +240,21 @@ EOF
     printf '%s' ",$union," | command grep -q ",$t," || exit 7
   done || covered=0
 
+  covered_org=1
+  printf '%s\n' "$FLOOR_TYPES" | tr ',' '\n' | while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    printf '%s' ",$union,$union_org," | command grep -q ",$t," || exit 7
+  done || covered_org=0
+
   if [ "$covered" -eq 1 ] && [ -n "$union" ] && [ "$FLOOR_EVEN_IF_COVERED" -eq 0 ]; then
     report "$repo" "COVERED-BY-RICHER" "both floor rules in force from a richer active ruleset; cover ends if it is ever disabled. --floor-even-if-covered adds a standalone floor"
     continue
   fi
 
-  if [ "$org_n" -gt 0 ] && [ "$covered" -eq 1 ]; then
-    report "$repo" "ORG-INHERITED" "covered by $org_n active org ruleset(s); cure once at the org, never per repo"
+  # Org cover is reported even under --floor-even-if-covered: a per-repo duplicate of a
+  # rule already in force org-wide is noise, and the cure belongs at the org either way.
+  if [ "$org_n" -gt 0 ] && [ "$covered_org" -eq 1 ]; then
+    report "$repo" "ORG-INHERITED" "covered by $org_n active org ruleset(s) (max bypass_actors=$org_byp_max); cure once at the org, never per repo"
     continue
   fi
 
