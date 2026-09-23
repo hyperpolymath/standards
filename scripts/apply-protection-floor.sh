@@ -135,6 +135,7 @@ TARGETS="$(command grep -vE '^[[:space:]]*(#|$)' "$REPOS_FILE" | tr -d ' \t' | s
 # plan without rulesets returns. Only the body text separates them, so throttling must
 # be classified FIRST: matching *403* alone records a throttled repo as PLAN-EXCLUDED
 # ("private repo / plan limit"), which silently UNDER-REPORTS the protection gap.
+# Return success when an API error message identifies throttling.
 is_throttled() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
     *"rate limit"*|*"rate-limit"*|*"abuse"*|*"retry-after"*|*"http 429"*) return 0 ;;
@@ -149,7 +150,8 @@ is_throttled() {
 # succeeds clears it.
 THROTTLE_LIMIT=3
 throttled=0
-note_throttled() { # repo  what-was-read
+# Report a throttled operation and exit with status 3 at the consecutive-throttle limit.
+note_throttled() { # repo  operation
   throttled=$((throttled + 1))
   repo_throttled=1
   report "$1" "UNKNOWN" "$2 throttled; skipped rather than recorded"
