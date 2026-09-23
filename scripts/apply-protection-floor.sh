@@ -156,6 +156,7 @@ printf '%s\n' "$TARGETS" | while IFS= read -r repo; do
   if ! listing="$(gh api "repos/$repo/rulesets" 2>"$TMPDIR_ERR")"; then
     err="$(cat "$TMPDIR_ERR" 2>/dev/null)"
     case "$err" in
+      *"rate limit"*|*"abuse"*) report "$repo" "UNKNOWN"       "rulesets list throttled: ${err%%$'\n'*}" ;;
       *403*|*422*|*"upgrade"*) report "$repo" "PLAN-EXCLUDED" "rulesets endpoint refused: ${err%%$'\n'*}" ;;
       *)                       report "$repo" "UNKNOWN"       "rulesets list failed: ${err%%$'\n'*}" ;;
     esac
