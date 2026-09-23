@@ -227,9 +227,13 @@ printf '%s\n' "$TARGETS" | while IFS= read -r repo; do
       fi
       types="$(printf '%s' "$body" | jq -r '[.rules[].type] | sort | join(",")')"
       inc="$(printf '%s' "$body" | jq -c '.conditions.ref_name.include')"
+      exc="$(printf '%s' "$body" | jq -c '[.conditions.ref_name.exclude[]?] | length')"
       byp="$(printf '%s' "$body" | jq -c '[.bypass_actors[]?] | length')"
-      union="$union,$types"
-      if [ "$types" = "$FLOOR_TYPES" ] && [ "$inc" = "$WANT_INCLUDE" ] && [ "$byp" = "0" ]; then
+      if [ "$exc" = "0" ] && printf '%s' "$body" | jq -e --argjson w "$WANT_INCLUDE" \
+           'any(.conditions.ref_name.include[]?; . == $w[0])' >/dev/null 2>&1; then
+        union="$union,$types"
+      fi
+      if [ "$types" = "$FLOOR_TYPES" ] && [ "$inc" = "$WANT_INCLUDE" ] && [ "$exc" = "0" ] && [ "$byp" = "0" ]; then
         exact_n=$((exact_n + 1)); exact_ids="$exact_ids $rid"
       fi
     done <<EOF
