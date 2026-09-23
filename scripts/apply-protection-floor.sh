@@ -279,7 +279,12 @@ EOF
           printf '%s' "$org_body" > "$cache"
         else
           err="$(cat "$TMPDIR_ERR" 2>/dev/null)"
-          if is_throttled "$err"; then note_throttled "$repo" "org ruleset $rid"; fi
+      if [ ! -s "$cache" ]; then
+        if tmpb="$(gh api "repos/$repo/rulesets/$rid" 2>"$TMPDIR_ERR")" \
+           && printf '%s' "$tmpb" | jq -e '.rules | type == "array"' >/dev/null 2>&1; then
+          printf '%s' "$tmpb" > "$cache"
+        elif is_throttled "$(cat "$TMPDIR_ERR" 2>/dev/null)"; then
+          note_throttled "$repo" "org ruleset $rid"; org_read_ok=0; break
         fi
       fi
       if [ ! -s "$cache" ]; then org_read_ok=0; break; fi
