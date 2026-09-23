@@ -2,7 +2,7 @@
 = Exemption mechanisms in the hyperpolymath estate
 :toc:
 
-Three concentric exemption layers exist in the estate. Each addresses a
+Five exemption layers exist in the estate. Each addresses a
 different question and lives in a different file. Mixing them up is the
 single most common cause of "I added an ignore file but CI still fails"
 confusion.
@@ -20,6 +20,11 @@ pre-existing finding?
 
 Are you trying to make a finding GO AWAY for one specific PR only?
   -> currently unsupported. See "per-PR exemptions" below.
+
+Are you looking at a workflow file that is NOT at the repository root
+(a vendored stub, satellite or scaffolding skeleton)?
+  -> it never executes and is out of census scope. See "Layer 5" below.
+     Do NOT re-pin it; do NOT hide it from the census either.
 
 Are you trying to record that a shortfall EXISTS, is tolerated for now,
 and must never grow?
@@ -274,6 +279,102 @@ sufficient. Most repos will pick one or the other.
   run against both implementations first and gave identical verdicts on
   every case.
 
+== Layer 5: Census scope
+
+The four layers above all answer "this finding is real, and we are choosing
+not to act on it". Layer 5 answers a different question: *"is this file in
+scope at all?"*
+
+An estate census walks paths, not runtimes. When a repository vendors a
+complete project skeleton into a subdirectory — a stub, a satellite, a
+scaffolding template — the skeleton's `.github/workflows/*.yml` files are
+ordinary files in the tree, and every path-based census finds them. They are
+not workflows. GitHub Actions dispatches a workflow only from
+`.github/workflows/` at the *repository root*; a file at
+`stubs/cpt/.github/workflows/scorecard.yml` is never registered and never runs.
+
+=== The standing population
+
+Measured 2026-09-23: *23 vendored workflow copies across 5 repositories*, all
+carrying a `github/codeql-action` pin that the pin census flags.
+
+[cols="2,3,1",options="header"]
+|===
+| Repository | Vendoring prefixes | Copies
+
+| `hyperpolymath/ssg-collection`
+| `stubs/{cpt,dei,reliquary,tiamat,tripos,tyrano,ultimatum,vladik}/`,
+  `ssg-fixes/jtv-playground/`, `variants/befunge/`
+| 10
+
+| `hyperpolymath/polystack`
+| `poly-ssg/satellites/{cpt,dei,reliquary,tiamat,tripos,tyrano,ultimatum,vladik}-ssg/`
+| 8
+
+| `hyperpolymath/wordpress-tools`
+| `journal-theme/` (2), `resurrect/`
+| 3
+
+| `hyperpolymath/jtv-lang`
+| `playground/`
+| 1
+
+| `hyperpolymath/reposystem`
+| `total-upgrade/`
+| 1
+|===
+
+*Basis: non-execution, and nothing else.* Of the 23 paths, *0 sit at a
+repository root and 23 sit under a directory prefix*. None is registered as a
+workflow, so none can be dispatched, so a stale pin in one cannot produce a
+`startup_failure`, cannot pull a vulnerable action, and cannot consume a
+runner. Repairing them is churn against files that cannot run.
+
+[WARNING]
+====
+*This exemption is conditional on the vendored directory staying vendored,
+and that condition is not hypothetical.* `stubs/` and `satellites/` exist
+precisely so a skeleton can be promoted into a repository of its own. The
+moment one is — extracted, split out, or made the root of a new repo — its
+`.github/workflows/` becomes live, and every pin that this exemption excused
+becomes a real defect, silently, with no gate firing and no census entry
+changing.
+
+So the re-check trigger is *promotion*, not a calendar date. Any PR that
+extracts a vendored skeleton into its own repository must re-pin that
+skeleton's workflows as part of the extraction, and the extraction is not
+complete until it has. A promoted skeleton carrying an excused pin is the
+failure mode this warning exists to prevent.
+====
+
+[NOTE]
+====
+*Retracted rationale.* An earlier statement of this exemption also claimed
+that some of these copies are "compared byte-for-byte by tests", implying a
+second, independent reason to leave them untouched. *That claim is false and
+is withdrawn.* `ssg-collection/tests` contains only `fuzz/`; no byte-for-byte
+comparison of the vendored workflow copies exists anywhere in the estate. Had
+it been true it would have been a reason *not* to re-pin them; it is not true,
+so the exemption rests on non-execution alone, and re-pinning them would be
+merely pointless rather than actively breaking.
+
+Recorded because the difference matters to whoever revisits this: the
+exemption is narrow and evidence-backed, not doubly justified.
+====
+
+=== What Layer 5 is not
+
+* It is *not* a reason to skip a census. The census should still find these
+  paths — an exemption you cannot see is an exemption you cannot audit. The
+  right output is "23 found, 23 out of scope, here is why", never "0 found".
+* It is *not* transferable to a file that merely looks inert. A disabled
+  workflow at the repository root (`if: false`, no triggers, `.yml.disabled`)
+  is still registered, or one edit away from being registered, and is *in*
+  scope. The discriminator is the path, and only the path.
+* It is *not* a licence to let the copies drift arbitrarily. They are the seed
+  of future repositories; a skeleton that seeds a broken repository is a
+  defect deferred, not avoided. See the promotion warning above.
+
 == Cross-references
 
 * `docs/HYPATIA-BASELINE-FORMAT.adoc` — the baseline file format.
@@ -284,4 +385,6 @@ sufficient. Most repos will pick one or the other.
 * `scripts/tests/check-ts-allowlist-test.sh` — the 18-case regression
   corpus that pins its behaviour.
 * `hyperpolymath/standards#????` — proposal that landed this consumer.
+* `hyperpolymath/standards#1005` — the codeql-action re-pin campaign whose
+  census surfaced the Layer 5 population.
 * `hyperpolymath/hypatia` — the scanner that emits findings.
