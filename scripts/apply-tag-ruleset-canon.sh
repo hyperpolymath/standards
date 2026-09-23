@@ -47,6 +47,9 @@
 #   --repo OWNER/NAME        process exactly one repository (repeatable).
 #   --reconcile-duplicates   delete zero-bypass rival tag rulesets where a
 #                            healthy sibling exists. Off by default.
+#   --revive-disabled        allow a PUT to a ruleset whose enforcement is
+#                            `disabled`, which RE-ENABLES it. Off by default:
+#                            disabled is a deliberate human act, not drift.
 #   --no-verify              skip the real-tag-ref verification probe.
 #   --skip-user              do not enumerate user/repos; use only ESTATE_ORGS.
 #                            An App installation token is scoped to ONE owner, so
@@ -73,13 +76,14 @@ set -euo pipefail
 
 CANON_FILE="${CANON_FILE:-config/rulesets/immutable-tags.json}"
 ESTATE_ORGS="${ESTATE_ORGS:-metadatastician}"
-APPLY=0 RECONCILE=0 VERIFY=1 LIMIT=0 SKIP_USER=0
+APPLY=0 RECONCILE=0 VERIFY=1 LIMIT=0 SKIP_USER=0 REVIVE_DISABLED=0
 declare -a ONLY_REPOS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply)                APPLY=1 ;;
     --reconcile-duplicates) RECONCILE=1 ;;
+    --revive-disabled)      REVIVE_DISABLED=1 ;;
     --no-verify)            VERIFY=0 ;;
     --skip-user)            SKIP_USER=0; SKIP_USER=1 ;;
     --limit)                LIMIT="${2:?--limit needs a number}"; shift ;;
@@ -334,6 +338,23 @@ while read -r repo; do
     if [ "$actors" = "$CANON_ACTORS" ] && [ "$rules" = "$CANON_RULES" ] && [ "$enf" = "active" ]; then
       report "$repo" "CONVERGED" "id=$id"
       continue
+    fi
+
+    # DISABLED IS A DECISION, NOT DRIFT.
+    # The identity rule is target+conditions; it deliberately ignores `name`,
+    # and it also does not look at enforcement -- so a ruleset somebody
+    # switched OFF still matches, and the canon body carries
+    # "enforcement": "active". Without this guard the next scheduled run
+    # silently switches it back on, and the only trace is a new version in
+    # rulesets/{id}/history that nobody reads. That is not hypothetical: 375
+    # branch rulesets across this estate were disabled on purpose on
+    # 2026-09-22, and a tag-side applier with this shape would have undone the
+    # equivalent decision without ever reporting that it had.
+    # Repairing the SHAPE of a disabled ruleset is fine in principle; flipping
+    # the ENFORCEMENT field is an owner decision, so it takes an explicit flag.
+    if [ "$enf" != "active" ] && [ "$REVIVE_DISABLED" -eq 0 ]; then
+      report "$repo" "DISABLED-NOT-REVIVED" "id=$id enforcement=$enf; the canon body would set it back to active. Pass --revive-disabled if that is intended."
+      rc=2; continue
     fi
     # A PUT REPLACES bypass_actors. Where a repo carries MORE actors than canon,
     # flattening it would silently revoke bypass from apps we did not audit —
