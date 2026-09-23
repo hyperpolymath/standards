@@ -130,6 +130,18 @@ VAULTS="$(command grep -vE '^[[:space:]]*(#|$)' "$VAULT_CLASS" | tr -d ' \t')"
 TARGETS="$(command grep -vE '^[[:space:]]*(#|$)' "$REPOS_FILE" | tr -d ' \t' | sort -u)"
 [ -n "$TARGETS" ] || die "refusing to report a clean sweep over nothing: $REPOS_FILE yielded no repos"
 
+# A THROTTLED READ IS NOT A PLAN EXCLUSION. GitHub answers a primary rate limit, a
+# secondary limit and an abuse trip all with 403 -- the same status a private repo on a
+# plan without rulesets returns. Only the body text separates them, so throttling must
+# be classified FIRST: matching *403* alone records a throttled repo as PLAN-EXCLUDED
+# ("private repo / plan limit"), which silently UNDER-REPORTS the protection gap.
+is_throttled() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    *"rate limit"*|*"rate-limit"*|*"abuse"*|*"retry-after"*|*"http 429"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Return success when the repository is an explicitly listed gcrypt vault.
 is_vault() {
   printf '%s\n' "$VAULTS" | command grep -qxF "$1"
@@ -156,11 +168,14 @@ printf '%s\n' "$TARGETS" | while IFS= read -r repo; do
   fi
   default_branch="$(printf '%s' "$meta" | jq -r '.default_branch // empty')"
 
-  # 3. List rulesets. 403/422 here is the private-repo / plan-limit arm.
+  # 3. List rulesets. A 403 is ambiguous: throttle first, THEN the private-repo / plan arm.
   if ! listing="$(gh api "repos/$repo/rulesets" 2>"$TMPDIR_ERR")"; then
     err="$(cat "$TMPDIR_ERR" 2>/dev/null)"
+    if is_throttled "$err"; then
+      report "$repo" "UNKNOWN" "rulesets list throttled; skipped rather than recorded: ${err%%$'\n'*}"
+      continue
+    fi
     case "$err" in
-      *"rate limit"*|*"abuse"*) report "$repo" "UNKNOWN"       "rulesets list throttled: ${err%%$'\n'*}" ;;
       *403*|*422*|*"upgrade"*) report "$repo" "PLAN-EXCLUDED" "rulesets endpoint refused: ${err%%$'\n'*}" ;;
       *)                       report "$repo" "UNKNOWN"       "rulesets list failed: ${err%%$'\n'*}" ;;
     esac

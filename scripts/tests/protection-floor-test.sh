@@ -66,7 +66,7 @@ state() { printf '%s\n' "$1" | awk -F'\t' -v r="$2" '$1==r{print $2}'; }
 reset_fix() { rm -rf "$FIX"; mkdir -p "$FIX"; : > "$FIX/PUTS.log"; }
 
 # Write repository metadata from a name, default branch, and archived flag.
-mkrepo() {
+mkrepo() { # name  default-branch  archived
   printf '{"archived":%s,"default_branch":"%s"}\n' "$3" "$2" > "$FIX/repos_$(printf '%s' "$1" | tr '/' '_')"
 }
 
@@ -79,13 +79,15 @@ hyperpolymath/richer-repo
 hyperpolymath/bypassed-twin
 hyperpolymath/archived-repo
 hyperpolymath/private-repo
+hyperpolymath/throttled-repo
+hyperpolymath/secondary-throttled-repo
 hyperpolymath/nosourcetype-repo
 metadatastician/org-covered-repo
 metadatastician/org-halffloor-repo
 EOF
 
 # Rebuild fixtures, optionally making excluded repositories fully writable.
-build_fixtures() {
+build_fixtures() { # $1 = "with-vault" to give the vault a complete, writable fixture set
   reset_fix
   # By default memory-vault gets NO fixtures at all. The D50 guard must return before any
   # read, so every missing fixture here asserts that nothing was queried.
@@ -148,6 +150,19 @@ J
       > "$FIX/repos_hyperpolymath_private-repo_rulesets"
   echo 1 > "$FIX/repos_hyperpolymath_private-repo_rulesets.rc"
 
+  # A THROTTLE ALSO ANSWERS 403, with the SAME status as the plan refusal above.
+  # These two exist so the discriminator cannot go back to matching *403* alone:
+  # that recorded a throttled repo as PLAN-EXCLUDED and under-reported the gap.
+  mkrepo hyperpolymath/throttled-repo   main  false
+  printf 'HTTP 403: API rate limit exceeded for user ID 12345. (https://api.github.com/repos/hyperpolymath/throttled-repo/rulesets)\n' \
+      > "$FIX/repos_hyperpolymath_throttled-repo_rulesets"
+  echo 1 > "$FIX/repos_hyperpolymath_throttled-repo_rulesets.rc"
+
+  mkrepo hyperpolymath/secondary-throttled-repo main false
+  printf 'HTTP 403: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.\n' \
+      > "$FIX/repos_hyperpolymath_secondary-throttled-repo_rulesets"
+  echo 1 > "$FIX/repos_hyperpolymath_secondary-throttled-repo_rulesets.rc"
+
   mkrepo hyperpolymath/nosourcetype-repo main false
   echo '[{"id":40,"target":"branch","enforcement":"active"}]' \
       > "$FIX/repos_hyperpolymath_nosourcetype-repo_rulesets"
@@ -191,6 +206,10 @@ check "richer cover is COVERED-BY-RICHER" "COVERED-BY-RICHER" "$(state "$OUT" hy
 check "bypassed twin is NOT converged"   "COVERED-BY-RICHER" "$(state "$OUT" hyperpolymath/bypassed-twin)"
 check "archived is ARCHIVED"             "ARCHIVED"          "$(state "$OUT" hyperpolymath/archived-repo)"
 check "403 is PLAN-EXCLUDED"             "PLAN-EXCLUDED"     "$(state "$OUT" hyperpolymath/private-repo)"
+# The plan arm above is the NEGATIVE CONTROL: it proves the throttle arm below did not
+# simply swallow every 403. A throttled read is UNKNOWN -- skipped, never recorded.
+check "rate-limit 403 is UNKNOWN"       "UNKNOWN"           "$(state "$OUT" hyperpolymath/throttled-repo)"
+check "secondary-limit 403 is UNKNOWN"  "UNKNOWN"           "$(state "$OUT" hyperpolymath/secondary-throttled-repo)"
 check "no source_type is REFUSED"        "REFUSED"           "$(state "$OUT" hyperpolymath/nosourcetype-repo)"
 check "complete org cover is ORG-INHERITED" "ORG-INHERITED"   "$(state "$OUT" metadatastician/org-covered-repo)"
 check "HALF org cover is not a cover"    "WOULD-CREATE"      "$(state "$OUT" metadatastician/org-halffloor-repo)"
@@ -237,7 +256,7 @@ MUT="$ROOT/scripts/.protection-floor-mutant.tmp.sh"
 trap 'rm -rf "$WORK"; rm -f "$MUT"' EXIT
 
 # Run a named mutation and assert the expected state change or write.
-mutant() {
+mutant() { # name  sed-expr  assertion-kind(wrote|state)  arg
   local name="$1" expr="$2" kind="$3" arg="$4" o got
   sed "$expr" "$SUT" > "$MUT"
   if ! bash -n "$MUT" 2>/dev/null; then
@@ -275,6 +294,13 @@ check "org-covered receives no duplicate POST" "0"             "$(command grep -
 mutant "D50 vault guard removed" \
   's/^  if is_vault "\$repo"; then$/  if false; then/' \
   wrote "memory-vault"
+
+# The pending-fix defect: any 403 mapped to PLAN-EXCLUDED, so a rate-limit refusal was
+# filed as "private repo / plan limit". It writes nothing either way, so the tell is the
+# STATE, not a POST -- a mutant that silences the throttle arm must flip it back.
+mutant "throttle arm removed from the 403 split" \
+  's/^    if is_throttled "\$err"; then$/    if false; then/' \
+  state "hyperpolymath/throttled-repo=PLAN-EXCLUDED"
 
 mutant "archived guard removed" \
   's/^  if \[ "\$(printf .%s. "\$meta" | jq -r ..archived.)" = "true" \]; then$/  if false; then/' \
