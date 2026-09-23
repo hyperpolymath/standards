@@ -6,7 +6,13 @@ baseline; `Optimus-Extras.json` carries the extras for repos on the Optimus prof
 `gates-only.json` / `gates.json` describe which workflow files become required contexts;
 `immutable-tags.json` is the tag canon.
 
-== Nothing here is applied automatically
+`branch-floor.json` and `tag-floor.json` are the *base protection floor* — deliberately
+**not** named `base*.json`, because `base.json` is the richer tier and the collision would
+mislead every future reader. The floor is `deletion` + `non_fast_forward` with
+`bypass_actors: []`; branch target scopes to `~DEFAULT_BRANCH`, tag target to `~ALL`.
+`gcrypt-vault-class.txt` is the D50 exclusion class for that floor (see below).
+
+== The floor IS applied by a committed script; the richer tiers still are not
 
 `scripts/apply-tag-ruleset-canon.sh` converges *only* the tag ruleset, and its own header
 records the consequence: after the 2026-09-11 deployment wave the branch-side remediation was
@@ -14,8 +20,50 @@ records the consequence: after the 2026-09-11 deployment wave the branch-side re
 `config/rulesets/`". That gap is why `Optimus-Extras.json` could keep four constraints §7.3
 retired (`code_coverage`, `code_quality`, `required_deployments`, `copilot_code_review`) and
 re-add them on the next manual convergence, on 120-162 active rulesets estate-wide. The file is
-now trimmed; the propagation mechanism is still missing by design, and this note is the
+now trimmed; that propagation gap is still open for the richer tiers, and this note is the
 reminder that a template fix without an applier is a half fix.
+
+`scripts/apply-branch-gates.sh` (required-status-check gates) and
+`scripts/apply-protection-floor.sh` (the base floor) close the gap for their own scopes.
+Both default to **report-only**; writes need `--apply`, never the inverse.
+
+=== Reading a floor requires `bypass_actors`, not just the rule list
+
+A ruleset's rules say what it forbids; `bypass_actors` says whom it forbids it to. A floor
+read without the second column is not a floor. Measured 2026-09-23: `metadatastician`'s
+`EstateTagging` carries every floor rule and **three actors that bypass it `always`**, and
+`EstateBranching` carries **nine** bypass actors — so "add the missing field to
+`EstateBranching`" would have shipped a floor nine actors could walk through. The cure is a
+**standalone** zero-bypass ruleset alongside (`Branch-Floor` 23868655, `Tag-Floor` 23868851),
+never an edit to a richer ruleset: a floor that lives inside a richer ruleset dies the day
+that ruleset is disabled, as 375 rulesets were on 2026-09-22.
+
+=== Org cover is a distinct state from repo cover
+
+`GET /repos/{o}/{r}/rulesets` returns org-inherited rulesets too, discriminated by
+`.source_type`. They put rules **in force** but cannot be written per repo, so the applier
+keeps them in a separate cover set and reports `ORG-INHERITED` rather than
+`COVERED-BY-RICHER`. Conflating the two in either direction is a real defect: counting org
+rulesets without unioning their rule types made `ORG-INHERITED` unreachable and reported 67
+already-covered repos as needing a write. An **absent** `.source_type` is a REFUSAL, never a
+default to the writable arm.
+
+=== A half cover is not a cover
+
+`EstateBranching` carries `deletion` and not `non_fast_forward`. A repo covered only by it is
+`WOULD-CREATE`, not covered. The regression suite pins this with a fixture of exactly that
+shape.
+
+=== 🚨 The gcrypt vault class must be excluded, by explicit list
+
+`hyperpolymath/dev-notes-vault` and `hyperpolymath/memory-vault` carry a deliberately
+`deletion`-only `Gcrypt-Vault-Guard` (**D50**): git-remote-gcrypt **force-pushes on every
+sync**, so `non_fast_forward` would silently stop the hourly backup at the next timer fire.
+Any logic reading *"has `deletion`, lacks `non_fast_forward` ⇒ complete the floor"* writes
+exactly that rule. Membership is the explicit list in `gcrypt-vault-class.txt` and **never a
+name regex** — `reasonably-good-token-vault` and `befunge93-vault-cracker` match `/vault/`
+and genuinely need the floor. A missing class file is a hard refusal, because an absent
+exclusion list is indistinguishable from an empty one.
 
 `scripts/plan-ruleset-constraint-repair.rb` is the sanctioned planner: it emits a reviewable PUT
 body for exactly those retired constraints, optionally dropping one integration's bypass once
