@@ -49,6 +49,8 @@ if [ "$method" != "GET" ]; then
   printf '%s\t%s\t%s\n' "$method" "$path" "$stdin_body" >> "$GH_FIX/PUTS.log"
   F="$GH_FIX/${method}_${KEY}"
   [ -r "$F" ] || { echo "no fixture for $method $path" >&2; exit 1; }
+  # A write can be throttled while every GET still succeeds -- the dominant wall shape.
+  if [ -r "$F.rc" ]; then cat "$F" >&2; exit "$(cat "$F.rc")"; fi
   cat "$F"; exit 0
 fi
 F="$GH_FIX/$KEY"
@@ -79,6 +81,17 @@ cat > "$THR" <<'EOF'
 hyperpolymath/aaa-throttle-1
 hyperpolymath/aaa-throttle-2
 hyperpolymath/aaa-throttle-3
+hyperpolymath/plain-repo
+EOF
+
+# A THIRD list: the wall shape that actually happened. Both GETs succeed and only the
+# POST is refused (87 of the 111 UNKNOWN rows on 2026-09-23), so a streak that resets on
+# any successful read never reaches the limit and the backoff is decorative.
+THRP="$WORK/post-throttle-repos.txt"
+cat > "$THRP" <<'EOF'
+hyperpolymath/aab-postthrottle-1
+hyperpolymath/aab-postthrottle-2
+hyperpolymath/aab-postthrottle-3
 hyperpolymath/plain-repo
 EOF
 cat > "$REPOS" <<'EOF'
@@ -184,6 +197,20 @@ J
   echo 1 > "$FIX/repos_hyperpolymath_aaa-throttle-2.rc"
   echo 1 > "$FIX/repos_hyperpolymath_aaa-throttle-3.rc"
 
+  # The POST-throttle triple: full, healthy GET fixtures, and only the write refused.
+  mkrepo hyperpolymath/aab-postthrottle-1 main false
+  mkrepo hyperpolymath/aab-postthrottle-2 main false
+  mkrepo hyperpolymath/aab-postthrottle-3 main false
+  echo '[]' > "$FIX/repos_hyperpolymath_aab-postthrottle-1_rulesets"
+  echo '[]' > "$FIX/repos_hyperpolymath_aab-postthrottle-2_rulesets"
+  echo '[]' > "$FIX/repos_hyperpolymath_aab-postthrottle-3_rulesets"
+  printf 'HTTP 403: You have exceeded a secondary rate limit.\n' > "$FIX/POST_repos_hyperpolymath_aab-postthrottle-1_rulesets"
+  printf 'HTTP 403: You have exceeded a secondary rate limit.\n' > "$FIX/POST_repos_hyperpolymath_aab-postthrottle-2_rulesets"
+  printf 'HTTP 403: You have exceeded a secondary rate limit.\n' > "$FIX/POST_repos_hyperpolymath_aab-postthrottle-3_rulesets"
+  echo 1 > "$FIX/POST_repos_hyperpolymath_aab-postthrottle-1_rulesets.rc"
+  echo 1 > "$FIX/POST_repos_hyperpolymath_aab-postthrottle-2_rulesets.rc"
+  echo 1 > "$FIX/POST_repos_hyperpolymath_aab-postthrottle-3_rulesets.rc"
+
   mkrepo hyperpolymath/nosourcetype-repo main false
   echo '[{"id":40,"target":"branch","enforcement":"active"}]' \
       > "$FIX/repos_hyperpolymath_nosourcetype-repo_rulesets"
@@ -263,6 +290,15 @@ OUTT="$(run "$SUT" --repos "$THR" --apply)"
 check "third consecutive throttle aborts"        "ABORTED"  "$(state "$OUTT" -)"
 check "the repo beyond the wall is not reported" ""         "$(state "$OUTT" hyperpolymath/plain-repo)"
 check "an aborted sweep writes nothing"          "0"        "$(wc -l < "$FIX/PUTS.log" | tr -d ' ')"
+
+# The same wall, POST-side. The shim logs a write attempt BEFORE it consults the
+# fixture, so "wrote nothing" cannot be a line count here: assert instead that the repo
+# beyond the wall was never reached at all.
+build_fixtures
+OUTP="$(run "$SUT" --repos "$THRP" --apply)"
+check "third consecutive POST throttle aborts"    "ABORTED"  "$(state "$OUTP" -)"
+check "no repo beyond a POST wall is reported"    ""         "$(state "$OUTP" hyperpolymath/plain-repo)"
+check "no write reached the repo beyond the wall" "0"        "$(command grep -c 'plain-repo' "$FIX/PUTS.log")"
 
 echo "== refusals =="
 build_fixtures
@@ -361,6 +397,13 @@ mutant "converged early-return removed" \
 mutant "throttle backoff removed" \
   's/^    exit 3$/    throttled=0/' \
   wrote "plain-repo" "$THR"
+
+# The reset-placement defect, verbatim: clearing the streak on any successful read means
+# a repo whose GETs pass and whose POST is refused never accumulates one. Silencing
+# repo_throttled reinstates exactly that, and the sweep grinds past the wall.
+mutant "throttle streak counts calls, not repos" \
+  's/^  repo_throttled=1$/  :/' \
+  wrote "plain-repo" "$THRP"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

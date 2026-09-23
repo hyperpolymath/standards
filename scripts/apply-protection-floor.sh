@@ -151,6 +151,7 @@ THROTTLE_LIMIT=3
 throttled=0
 note_throttled() { # repo  what-was-read
   throttled=$((throttled + 1))
+  repo_throttled=1
   report "$1" "UNKNOWN" "$2 throttled; skipped rather than recorded"
   if [ "$throttled" -ge "$THROTTLE_LIMIT" ]; then
     report "-" "ABORTED" "$THROTTLE_LIMIT consecutive throttled reads: the quota window is spent, so every remaining repo would report UNKNOWN. Re-run after the reset -- trust the X-RateLimit-Reset header, not gh api rate_limit, which has reported 5000 remaining against a header saying 0."
@@ -169,6 +170,14 @@ printf 'repo\tstate\tdetail\n'
 printf '%s\n' "$TARGETS" | while IFS= read -r repo; do
   [ -n "$repo" ] || continue
 
+  # The streak counts consecutive REPOS, not consecutive CALLS. At the wall a repo's GETs
+  # can still succeed while only its POST is refused -- 87 of the 111 UNKNOWN rows in the
+  # 2026-09-23 run were exactly that shape -- so resetting on any successful read pins the
+  # count at 1 forever and the guard never fires. Reset only when the PREVIOUS repo
+  # completed without being throttled at all.
+  if [ "${repo_throttled:-0}" -eq 0 ]; then throttled=0; fi
+  repo_throttled=0
+
   # 1. D50 FIRST, before any read. A vault must not even be a candidate.
   if is_vault "$repo"; then
     report "$repo" "EXCLUDED-D50" "gcrypt vault: force-pushes every sync; non_fast_forward would stop the backup"
@@ -182,7 +191,6 @@ printf '%s\n' "$TARGETS" | while IFS= read -r repo; do
     report "$repo" "UNKNOWN" "repos/$repo read failed: ${err%%$'\n'*}"
     continue
   fi
-  throttled=0   # a read got through; the window is not the problem
   [ -n "$meta" ] || { report "$repo" "UNKNOWN" "repos/$repo returned empty"; continue; }
   if [ "$(printf '%s' "$meta" | jq -r '.archived')" = "true" ]; then
     report "$repo" "ARCHIVED" "ruleset POST 403s on an archived repo; unarchive/write/re-archive is a separate, explicit act"
