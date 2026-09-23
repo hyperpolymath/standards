@@ -2,7 +2,6 @@
 # Nickel configuration for reproducible infrastructure-as-code
 # Version: 0.4.0
 # SPDX-License-Identifier: Palimpsest-0.4 OR MIT
-
 {
   # ============================================================================
   # PROJECT METADATA
@@ -37,7 +36,7 @@
 
   build = {
     # Build system selector
-    system = "just",  # Primary: just, Secondary: nix, make
+    system = "just", # Primary: just, Secondary: nix, make
 
     # Build targets
     targets = {
@@ -53,7 +52,7 @@
         command = "just test",
         description = "Run comprehensive test suite",
         dependencies = ["test-haskell", "test-rescript", "test-integration"],
-        coverage_threshold = 80,  # Target for Silver RSR
+        coverage_threshold = 80, # Target for Silver RSR
       },
 
       build = {
@@ -61,7 +60,7 @@
         description = "Build all components",
         dependencies = ["build-styles", "build-haskell", "build-rescript"],
         reproducible = true,
-        hermetic = false,  # TODO: Enable for Silver RSR
+        hermetic = false, # TODO: Enable for Silver RSR
       },
 
       deploy = {
@@ -81,8 +80,8 @@
       # Environment variables
       env_vars = {
         NODE_ENV = "production",
-        SOURCE_DATE_EPOCH = "1609459200",  # 2021-01-01 for reproducibility
-        LANG = "en_GB.UTF-8",  # British English
+        SOURCE_DATE_EPOCH = "1609459200", # 2021-01-01 for reproducibility
+        LANG = "en_GB.UTF-8", # British English
       },
     },
 
@@ -93,7 +92,7 @@
         source = "styles/scss/",
         output = "styles/css/",
         format = "compressed",
-        source_maps = false,  # Disable for reproducibility
+        source_maps = false, # Disable for reproducibility
       },
 
       # Haskell binaries
@@ -129,7 +128,7 @@
       schedule = "weekly",
       tools = ["npm audit", "cabal outdated"],
       fail_on = ["critical", "high"],
-      auto_fix = false,  # Manual review required
+      auto_fix = false, # Manual review required
     },
 
     # SPDX license validation
@@ -169,7 +168,7 @@
 
     # Code signing
     signing = {
-      enabled = false,  # TODO: Enable for production
+      enabled = false, # TODO: Enable for production
       gpg_key_id = "",
       sign_commits = false,
       sign_tags = true,
@@ -184,7 +183,7 @@
     # Offline-first compliance
     offline_first = {
       enabled = true,
-      allow_network = false,  # Build must succeed without network
+      allow_network = false, # Build must succeed without network
       cache_dependencies = true,
     },
 
@@ -192,7 +191,7 @@
     cdn = {
       provider = "cloudflare",
       domains = ["cdn.palimpsest.license"],
-      cache_ttl = 86400,  # 24 hours
+      cache_ttl = 86400, # 24 hours
       compress = true,
     },
 
@@ -339,7 +338,7 @@
   dependencies = {
     # Node.js dependencies
     npm = {
-      production = [],  # Documentation project, no production deps
+      production = [], # Documentation project, no production deps
       development = [
         { name = "eslint", version = "^8.0.0" },
         { name = "prettier", version = "^3.0.0" },
@@ -381,9 +380,9 @@
     # SBOM generation
     sbom = {
       enabled = true,
-      format = "cyclonedx",  # or "spdx"
+      format = "cyclonedx", # or "spdx"
       output = "sbom.json",
-      include = ["npm", "cabal", "nix"],
+      "include" = ["npm", "cabal", "nix"],
     },
   },
 
@@ -420,7 +419,7 @@
 
     # End-to-end tests
     e2e = {
-      enabled = false,  # Not applicable for documentation project
+      enabled = false, # Not applicable for documentation project
     },
 
     # Performance tests
@@ -461,7 +460,7 @@
 
     # Container registry
     container_registry = {
-      provider = "ghcr.io",  # GitHub Container Registry
+      provider = "ghcr.io", # GitHub Container Registry
       namespace = "palimpsest-license",
       repository = "palimpsest-license",
       tags = ["latest", "v0.4.0"],
@@ -486,7 +485,7 @@
       ],
       checksum_algorithm = "sha256",
       signing = {
-        enabled = false,  # TODO: Enable for production
+        enabled = false, # TODO: Enable for production
         method = "gpg",
       },
     },
@@ -499,7 +498,7 @@
   compliance = {
     # RSR (Rhodium Standard Repository) compliance
     rsr = {
-      tier = "bronze",  # Current: Bronze, Target: Silver
+      tier = "bronze", # Current: Bronze, Target: Silver
       categories = {
         documentation = { score = 10, max = 10 },
         well_known = { score = 10, max = 10 },
@@ -533,9 +532,9 @@
       term_length = "2 years",
       staggered_terms = true,
       voting_threshold = {
-        minor_changes = 4,  # 4/7 votes
-        major_changes = 5,  # 5/7 votes
-        constitutional = 6,  # 6/7 votes
+        minor_changes = 4, # 4/7 votes
+        major_changes = 5, # 5/7 votes
+        constitutional = 6, # 6/7 votes
       },
     },
   },
@@ -554,12 +553,12 @@
 
     # Metrics
     metrics = {
-      enabled = false,  # Not applicable for static site
+      enabled = false, # Not applicable for static site
     },
 
     # Error tracking
     error_tracking = {
-      enabled = false,  # Not applicable for documentation
+      enabled = false, # Not applicable for documentation
     },
 
     # Uptime monitoring

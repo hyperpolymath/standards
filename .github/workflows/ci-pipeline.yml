@@ -108,6 +108,11 @@ jobs:
       # count itself, not merely the boolean.
       n_deno: ${{ steps.scan.outputs.n_deno }}
       total: ${{ steps.scan.outputs.total }}
+      # The refusal VERDICT, carried as data rather than as an exit code.
+      # `detect` measures; `report` is the single judge that can fail the run.
+      # See the refusal branch at the end of the scan step for why.
+      refused: ${{ steps.scan.outputs.refused }}
+      refusal_reason: ${{ steps.scan.outputs.refusal_reason }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -129,7 +134,14 @@ jobs:
           # Every probe here has a CONSUMING job later in this file. That is
           # the entry requirement for this list, not a coincidence.
           N_RUST=$(count 'Cargo.toml' '*/Cargo.toml')
-          N_NICKEL=$(count '*.ncl')
+          # A suffix is not a format. `*.k9.ncl` files open with a `K9!` sentinel on
+          # line 1 and are k9 contracts, not Nickel source — `nickel typecheck` dies
+          # at 1:3 on the `!`. They are excluded here so `has_nickel` cannot go true
+          # on a repo holding no Nickel at all, and excluded by the SAME pathspec in
+          # the `nickel` job: a guard that counts a different set than its consumer
+          # checks is how a gate comes to fail over files the repo cannot fix.
+          N_NICKEL=$(count '*.ncl' ':!*.k9.ncl')
+          N_K9=$(count '*.k9.ncl')
           N_RESCRIPT=$(count 'rescript.json' '*/rescript.json' 'bsconfig.json' '*/bsconfig.json' '*.res')
           # V is gated on `v.mod` ALONE. The `.v` extension is shared with Coq
           # proof scripts and Verilog sources, so globbing `*.v` would install
@@ -176,7 +188,14 @@ jobs:
 
           probe 'Julia'    'Project.toml' '*/Project.toml'
           probe 'Zig'      'build.zig' '*/build.zig' 'build.zig.zon' '*/build.zig.zon'
-          probe 'Idris2'   '*.ipkg'
+          # `*.idr` as well as the manifest, because Idris2 sources routinely
+          # ship without an `.ipkg` (ddraig-ssg tracks 4 `.idr` files and no
+          # package file). Extension-keyed probes are the exception here, not
+          # the rule — `.v` is deliberately NOT one, because it is also Coq and
+          # Verilog — but `.idr` is unambiguous, exactly like the `*.hs` and
+          # `*.res` probes above. This moves such a repository from detector
+          # BLINDNESS to honest measured debt; it does not make it green.
+          probe 'Idris2'   '*.ipkg' '*.idr'
           probe 'Elixir'   'mix.exs' '*/mix.exs'
           probe 'Lean'     'lakefile.toml' '*/lakefile.toml' 'lakefile.lean' '*/lakefile.lean' 'lean-toolchain' '*/lean-toolchain'
           probe 'Agda'     '*.agda-lib'
@@ -224,13 +243,17 @@ jobs:
             echo "| Ecosystem | Marker | Tracked files matched |"
             echo "|---|---|---|"
             echo "| Rust | \`Cargo.toml\` | ${N_RUST} |"
-            echo "| Nickel | \`*.ncl\` | ${N_NICKEL} |"
+            echo "| Nickel | \`*.ncl\` excluding \`*.k9.ncl\` | ${N_NICKEL} |"
             echo "| ReScript | \`rescript.json\`, \`bsconfig.json\`, \`*.res\` | ${N_RESCRIPT} |"
             echo "| V | \`v.mod\` only | ${N_V} |"
             echo "| Haskell | \`*.cabal\`, \`stack.yaml\`, \`*.hs\` | ${N_HASKELL} |"
             echo "| Deno | \`deno.json(c)\` | ${N_DENO} |"
             echo "| **Total checkable** | | **${TOTAL}** |"
             echo ""
+            if [ "$N_K9" -gt 0 ]; then
+              echo "> **${N_K9} \`*.k9.ncl\` excluded.** These are k9 contracts (a \`K9!\` sentinel on line 1), not Nickel source. They are neither typechecked nor counted above, and they cannot raise the Total."
+              echo ""
+            fi
             if [ "$N_UNSUPPORTED" -gt 0 ]; then
               echo "#### Detected, but this pipeline has no gate for it"
               echo ""
@@ -243,6 +266,21 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+          # A refusal is a VERDICT, not an exit code.
+          #
+          # This block used to `exit 1` here, which quietly made `detect` a
+          # SECOND judge. The exemption ledger in the `report` job could spare
+          # only `report`'s own `exit 1`, so a ledgered repository still went
+          # red on this job and could never actually go green. That is the
+          # vacuous gate's mirror image: a ledger that can never grant the
+          # thing it promises.
+          #
+          # So the verdict travels to `report` as an output and this job stays
+          # green. Nothing is weakened. `report` runs `if: always()`, reads this
+          # output in its own `if:`, and fails closed when the repository is not
+          # on the ledger — an unreadable or empty ledger still blocks.
+          REFUSED=false
+          MSG=""
           if [ "$TOTAL" -eq 0 ]; then
             # Same switch, two different truths. Telling them apart is what
             # makes the adoption ledger measure real debt instead of detector
@@ -256,10 +294,23 @@ jobs:
             if [ "${{ inputs.fail_on_no_ecosystem }}" = "true" ]; then
               echo "::error::${MSG}"
               echo "**REFUSED: nothing could be checked.** ${MSG}" >> "$GITHUB_STEP_SUMMARY"
-              exit 1
+              REFUSED=true
+            else
+              # ⚠ This escape hatch is warning-only, and a `::warning::` cannot
+              # fail a job. It is therefore NOT a route to green for estate
+              # adoption: it is unratcheted, invisible to the exemption
+              # denominator, and indistinguishable from a pass. Repositories
+              # with no gate belong on the ledger, where the debt is counted.
+              echo "::warning::${MSG} fail_on_no_ecosystem is false, so continuing with nothing checked."
             fi
-            echo "::warning::${MSG} fail_on_no_ecosystem is false, so continuing with nothing checked."
           fi
+
+          # Written on BOTH paths, so a consumer can never confuse "did not
+          # refuse" with "the output was never set".
+          {
+            echo "refused=${REFUSED}"
+            echo "refusal_reason=${MSG}"
+          } >> "$GITHUB_OUTPUT"
 
   # ───────────────────────────────────────────────────────────────────────
   # Job 1a — secret scanning (delegated: pinned, sha256-verified gitleaks)
@@ -437,25 +488,79 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -d '' FILES < <(git ls-files -z -- '*.ncl')
-          echo "Nickel files: ${#FILES[@]}"
+
+          # Same pathspec as `detect`. k9 contracts are a DIFFERENT format that
+          # merely shares the suffix; typechecking them reports a parse error the
+          # repo has no way to fix.
+          mapfile -d '' FILES < <(git ls-files -z -- '*.ncl' ':!*.k9.ncl')
+          N_K9=$(git ls-files -z -- '*.k9.ncl' | tr -cd '\0' | wc -c)
+
+          echo "Nickel files: ${#FILES[@]} (k9 contracts excluded: ${N_K9})"
           if [ "${#FILES[@]}" -eq 0 ]; then
-            echo "::error::detect said Nickel was present but zero .ncl files are tracked here. Refusing to report a pass over an empty set."
+            echo "::error::detect said Nickel was present but zero Nickel files are tracked here (${N_K9} *.k9.ncl were excluded as k9 contracts). Refusing to report a pass over an empty set."
             exit 1
           fi
+
           FAILED=0
+          TYPECHECKED=0
+          SKIPPED=()
+
           for f in "${FILES[@]}"; do
             # --check is read-only: it reports, it does not rewrite the file.
+            # Format is checked over EVERY genuine Nickel file, with no exemption.
             nickel format --check "$f" || { echo "::error file=$f::not formatted (nickel format --check)"; FAILED=1; }
+
+            # A file importing a build artefact cannot be typechecked standalone:
+            # the input is generated immediately before use and is correctly
+            # uncommitted. Detect that by asking git whether the import target is
+            # tracked, and DISCLOSE every skip by name. A skip is not a pass.
+            MISSING=""
+            while IFS= read -r imp; do
+              [ -n "$imp" ] || continue
+              cand="$(dirname "$f")/$imp"
+              cand="$(realpath -m --relative-to=. "$cand" 2>/dev/null || echo "$cand")"
+              git ls-files --error-unmatch -- "$cand" >/dev/null 2>&1 \
+                || MISSING="${MISSING}${MISSING:+, }${imp}"
+              # Comments are stripped first: `_base.ncl` documents its own usage
+              # in a `#` comment containing a literal `import "../_base.ncl"`, and
+              # matching that would skip a file that typechecks perfectly well.
+            done < <(sed 's/#.*//' "$f" | grep -oE 'import[[:space:]]+"[^"]+"' | sed -E 's/.*"([^"]+)".*/\1/' || true)
+
+            if [ -n "$MISSING" ]; then
+              echo "::notice file=$f::nickel typecheck skipped - import target not tracked in git: ${MISSING}"
+              SKIPPED+=("$f (${MISSING})")
+              continue
+            fi
+
             nickel typecheck "$f" || { echo "::error file=$f::failed nickel typecheck"; FAILED=1; }
+            TYPECHECKED=$((TYPECHECKED + 1))
           done
+
+          # Narrowing a file set must never be able to manufacture a pass.
+          if [ "$TYPECHECKED" -eq 0 ]; then
+            echo "::error::all ${#FILES[@]} Nickel files were skipped for untracked imports, so nothing was typechecked. Refusing to report a pass over an empty set."
+            FAILED=1
+          fi
+
           {
             echo "### Nickel"
             echo ""
-            echo "- files checked: **${#FILES[@]}**"
+            echo "- format checked: **${#FILES[@]}**"
+            echo "- typechecked: **${TYPECHECKED}**"
+            echo "- typecheck skipped (untracked import): **${#SKIPPED[@]}**"
+            echo "- k9 contracts excluded (\`*.k9.ncl\`, not Nickel): **${N_K9}**"
+            if [ "${#SKIPPED[@]}" -gt 0 ]; then
+              echo ""
+              echo "Skipped, and why:"
+              echo ""
+              for s in "${SKIPPED[@]}"; do echo "- \`${s}\`"; done
+            fi
+            echo ""
             echo "- result: $( [ "$FAILED" -eq 0 ] && echo 'pass' || echo '**FAIL**' )"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$FAILED"
           exit "$FAILED"
 
   # ───────────────────────────────────────────────────────────────────────
@@ -792,6 +897,12 @@ jobs:
         shell: bash
         env:
           R_DETECT: ${{ needs.detect.result }}
+          # `detect` no longer exits 1 on a refusal, so R_DETECT is `success`
+          # even when the scan found nothing to check. Without this the Detect
+          # row below would print "pass", which is the precise opposite of what
+          # happened. The verdict travels as data; so must its rendering.
+          REFUSED: ${{ needs.detect.outputs.refused }}
+          REASON: ${{ needs.detect.outputs.refusal_reason }}
           R_SECRET: ${{ needs.secret-scan.result }}
           R_SAST: ${{ needs.sast.result }}
           R_RUST: ${{ needs.rust.result }}
@@ -829,11 +940,20 @@ jobs:
             echo ""
             echo "| Gate | Result | Note |"
             echo "|---|---|---|"
-            row "Detect"          "$R_DETECT"   "n/a"
+            # ⚠ NOT a plain row(). `detect` succeeds as a JOB even when it
+            # refuses, because the refusal is an output rather than an exit
+            # code (see the refusal branch in that job). row() would map that
+            # `success` to the word "pass" and assert that the repository was
+            # examined. It was not.
+            if [ "${REFUSED:-false}" = "true" ]; then
+              echo "| Detect | **REFUSED** | ran, and found nothing it could check — ${REASON} |"
+            else
+              row "Detect"          "$R_DETECT"   "n/a"
+            fi
             row "Secret scanning" "$R_SECRET"   "n/a"
             row "SAST (semgrep)"  "$R_SAST"     "disabled via enable_sast: false"
             row "Rust"            "$R_RUST"     "no Cargo.toml tracked (has_rust=${H_RUST})"
-            row "Nickel"          "$R_NICKEL"   "no *.ncl tracked (has_nickel=${H_NICKEL})"
+            row "Nickel"          "$R_NICKEL"   "no Nickel tracked, *.k9.ncl excluded (has_nickel=${H_NICKEL})"
             row "Deno"            "$R_DENO"     "BANNED — refusal gate; skipped means no deno.json(c) tracked (has_deno=${H_DENO})"
             row "ReScript"        "$R_RESCRIPT" "no rescript.json/bsconfig.json/*.res tracked (has_rescript=${H_RESCRIPT})"
             row "V"               "$R_V"        "no v.mod tracked (has_v=${H_V})"
@@ -857,31 +977,61 @@ jobs:
 
       # ── The pipeline adoption ratchet ────────────────────────────────
       #
-      # Both steps below run ONLY when a gate has already failed. A green
-      # repository never reads the ledger, never pays for the checkout, and
-      # cannot be affected by the ledger being stale, empty or unreachable.
+      # Both steps below run ONLY when a gate has already failed, OR when
+      # `detect` refused because this pipeline has no gate for anything this
+      # repository is written in. A green repository never reads the ledger,
+      # never pays for the checkout, and cannot be affected by the ledger being
+      # stale, empty or unreachable.
       #
-      # That is what makes the pin harmless: on the failure path an unreadable
-      # ledger and an empty ledger give the SAME verdict — blocked. The gate
-      # therefore fails closed for free, and "could not read the ledger" can
-      # never be mistaken for "is exempt".
+      # That is what makes this fail closed for free: on the failure path an
+      # unreadable ledger and an empty ledger give the SAME verdict — blocked.
+      # "Could not read the ledger" can never be mistaken for "is exempt".
       - name: Checkout the pinned Standards pipeline ledger
-        if: ${{ contains(needs.*.result, 'failure') }}
+        if: ${{ contains(needs.*.result, 'failure') || needs.detect.outputs.refused == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          # ⚠ This ref DELIBERATELY PREDATES the ledger it reads. At a2ff696a
-          # `.machine_readable/pipeline-allow.txt` does not exist, so the next
-          # step fails closed — which is exactly the verdict the empty ledger
-          # would give anyway. The pin and the first entry move in the SAME
-          # commit: whoever adds a slug must bump this ref to the commit that
-          # carries it, or their own exemption will not be read.
+          # Read the ledger from THIS workflow file's own commit.
           #
-          # Following `main` here instead is not an option, for the same reason
-          # the Deno ledger does not: an edit in `standards` would change the
-          # verdict of every already-pinned caller with no review in their
-          # repositories.
-          ref: a2ff696a
+          # `job.workflow_sha` is "the commit SHA of the workflow file that
+          # defines the current job". This job is defined in THIS file, so when
+          # a caller invokes this reusable workflow the value is precisely the
+          # SHA that caller pinned in its `uses:`.
+          #
+          # ⚠ It is NOT `github.workflow_sha`, which inside a called reusable
+          # workflow is the CALLER's workflow file; that would look for the
+          # ledger in the caller's repository and find nothing.
+          #
+          # ⚠ Nor is it `github.job_workflow_sha`, which DOES NOT EXIST — the
+          # plausible-looking name is in the OIDC token claim set, not in the
+          # `github` context. actionlint rejects it, and github/docs confirms
+          # the `github` context has no such property. The workflow identity
+          # properties live on the `job` context: `workflow_sha`,
+          # `workflow_ref`, `workflow_repository`, `workflow_file_path`. The
+          # `job` context is available in `steps.*.with` and `steps.*.env`,
+          # which is all this file uses it for.
+          #
+          # ⚠ These four are unavailable on GitHub Enterprise Server. This
+          # estate is github.com; a GHES port would need a different key.
+          #
+          # This preserves in full the property the hand-written pin existed
+          # for: an edit to `main` in `standards` still cannot change the
+          # verdict of an already-pinned caller, because that caller goes on
+          # executing this commit. What it removes is the manual bump — and it
+          # makes the old comment's promise, "the pin and the first entry move
+          # in the SAME commit", literally true rather than aspirational, since
+          # the ledger and this line are now necessarily the same commit.
+          #
+          # It also repairs a real defect. This read `ref: a2ff696a`, an
+          # ABBREVIATED object id, and the git wire protocol cannot fetch one:
+          # `git fetch origin a2ff696a` fails with "couldn't find remote ref"
+          # where the full 40-hex succeeds. So the checkout ALWAYS failed. The
+          # `continue-on-error` below meant the verdict stayed correct
+          # (unreadable == empty == blocked) and nothing looked broken — but
+          # every exemption ever added would have been silently vacuous.
+          # ⚠ `git cat-file -t a2ff696a` answers `commit` locally, so a local
+          # probe CANNOT falsify a claim about remote fetchability.
+          ref: ${{ job.workflow_sha }}
           path: .standards-pipeline-ledger
           sparse-checkout: |
             .machine_readable/pipeline-allow.txt
@@ -890,13 +1040,22 @@ jobs:
         continue-on-error: true
 
       - name: Verdict — block unless this repository is ledgered
-        if: ${{ contains(needs.*.result, 'failure') }}
+        if: ${{ contains(needs.*.result, 'failure') || needs.detect.outputs.refused == 'true' }}
         shell: bash
         env:
           LEDGER: .standards-pipeline-ledger/.machine_readable/pipeline-allow.txt
           SLUG: ${{ github.repository }}
+          # The ledger is read at this commit; printed below so that an empty
+          # context resolves VISIBLY rather than as a silent closed failure.
+          LEDGER_SHA: ${{ job.workflow_sha }}
+          REFUSED: ${{ needs.detect.outputs.refused }}
+          REASON: ${{ needs.detect.outputs.refusal_reason }}
+          # `secret-scan` and `sast` carry no `needs: detect`, so they run and
+          # can fail on a repository that ALSO refused. Both debts are real at
+          # once and the message below must be able to say so.
+          ANY_FAILED: ${{ contains(needs.*.result, 'failure') }}
         run: |
-          # LEDGER and SLUG come from the step `env:` map above.
+          # Every name above comes from the step `env:` map.
           set -euo pipefail
 
           # Strip comments and blanks; this is also the ledger's own
@@ -912,10 +1071,46 @@ jobs:
 
           # ALWAYS print the denominator, on both paths. A gate that only ever
           # says yes proves nothing, and a `::warning::` cannot fail a job.
-          echo "pipeline debt: ${N_ALLOWED} repos"
+          # Naming the commit matters: if `job_workflow_sha` were ever empty
+          # the checkout would fail and this would print an empty SHA, making
+          # the cause legible instead of leaving a bare fail-closed verdict.
+          echo "pipeline debt: ${N_ALLOWED} repos (ledger read at '${LEDGER_SHA}')"
+
+          # A fail-closed verdict with no explanation is exactly how the
+          # abbreviated-SHA defect stayed invisible: the answer was right, so
+          # nobody asked why. If this is empty the checkout above cannot have
+          # succeeded, and the block below would be an artefact of the harness
+          # rather than a statement about this repository. Say so loudly.
+          if [ -z "${LEDGER_SHA:-}" ]; then
+            echo "::error::job.workflow_sha resolved EMPTY, so the exemption ledger could not be fetched and NOTHING can be exempt here. This is a pipeline defect, not a verdict about ${SLUG}. Note the job workflow-identity properties are unavailable on GitHub Enterprise Server."
+          fi
+
+          # Two DIFFERENT debts arrive here and calling them the same thing
+          # would make the notice below assert something false. A gate that ran
+          # and failed is fixable in this repository; a refusal means no gate
+          # exists for what this repository is written in, which nothing done
+          # here can cure.
+          #
+          # ⚠ These are not mutually exclusive. `secret-scan` and `sast` have no
+          # `needs: detect`, so they run on every repository including one that
+          # refused. Treating this as an either/or would print "NOTHING WAS
+          # CHECKED" over a secret-scan that ran and failed — understating a
+          # real finding to describe a missing gate. Say both when both hold.
+          REF="${REFUSED:-false}"
+          FAILED="${ANY_FAILED:-false}"
+          if [ "$REF" = "true" ] && [ "$FAILED" = "true" ]; then
+            DEBT="TWO debts at once: no ecosystem gate could run (${REASON}), AND at least one gate that does not depend on detection REALLY FAILED"
+            FIX="Fix what the report table names, and add a gate for the ecosystems named above (see hyperpolymath/standards#967)."
+          elif [ "$REF" = "true" ]; then
+            DEBT="NOTHING WAS CHECKED — ${REASON}"
+            FIX="Add a gate for the ecosystems named above (see hyperpolymath/standards#967). Until one exists this repository cannot be made green by fixing its own code."
+          else
+            DEBT="at least one gate above REALLY FAILED — this is grandfathered debt, not a pass"
+            FIX="Fix what the report table names."
+          fi
 
           if printf '%s\n' "$ALLOWED" | grep -Fxq "$SLUG"; then
-            echo "::notice::${SLUG} is on the pipeline exemption ledger (pipeline debt: ${N_ALLOWED} repos). The gates below REALLY FAILED — this is grandfathered debt, not a pass. Fix what the report table names, then delete this repository's line from .machine_readable/pipeline-allow.txt."
+            echo "::notice::${SLUG} is on the pipeline exemption ledger (pipeline debt: ${N_ALLOWED} repos). ${DEBT}. ${FIX} Then delete this repository's line from .machine_readable/pipeline-allow.txt."
             {
               echo "### Pipeline verdict — ledgered debt"
               echo ""
@@ -925,9 +1120,12 @@ jobs:
               echo "| Verdict | **exempt** (shrink-only ledger) |"
               echo "| pipeline debt | **${N_ALLOWED} repos** |"
               echo ""
-              echo "**At least one gate above really failed.** An exemption is not a pass;"
-              echo "it is debt that someone agreed to carry. The report table names every"
-              echo "failing gate. Fix them, then DELETE this repository's line from"
+              echo "| Debt | ${DEBT} |"
+              echo ""
+              echo "**An exemption is not a pass;** it is debt that someone agreed to"
+              echo "carry. ${FIX}"
+              echo ""
+              echo "Then DELETE this repository's line from"
               echo "\`.machine_readable/pipeline-allow.txt\` in \`hyperpolymath/standards\` —"
               echo "deletion needs no \`Ratchet-exception\` trailer, because shrinking is"
               echo "the point."
@@ -936,7 +1134,7 @@ jobs:
             exit 0
           fi
 
-          echo "::error::At least one pipeline gate failed, and ${SLUG} is not on the exemption ledger (pipeline debt: ${N_ALLOWED} repos). See the report table in the step summary."
+          echo "::error::${DEBT}, and ${SLUG} is not on the exemption ledger (pipeline debt: ${N_ALLOWED} repos). See the report table in the step summary."
           {
             echo "### Pipeline verdict — BLOCKED"
             echo ""
@@ -944,6 +1142,7 @@ jobs:
             echo "|---|---|"
             echo "| Repository | \`${SLUG}\` |"
             echo "| Verdict | **blocked** (not ledgered) |"
+            echo "| Debt | ${DEBT} |"
             echo "| pipeline debt | **${N_ALLOWED} repos** |"
             echo ""
             echo "The report table above names every gate that failed. Fix them, or — if"

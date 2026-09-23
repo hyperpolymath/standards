@@ -69,6 +69,16 @@ run_fixture() {
   RC="$(sed -n 's/^__RC__=//p' <<< "$OUT" | tail -1)"
   T="$(sed -n 's/^total=//p' <<< "$OUT" | tail -1)"
   U="$(sed -n 's/^n_unsupported=//p' <<< "$OUT" | tail -1)"
+  # The refusal VERDICT. It used to be RC: `detect` exited 1 and the job went
+  # red. That made `detect` a SECOND judge alongside `report`, so the exemption
+  # ledger — which can only spare `report`'s own exit — could never actually
+  # grant a repository the green it promises. The verdict is now an OUTPUT and
+  # the job stays green; `report` is the single judge.
+  #
+  # ⚠ So RC no longer discriminates a refusal from a pass, and every assertion
+  # below that used to read RC now reads this. Leaving them on RC would not
+  # have failed — it would have passed VACUOUSLY, asserting 0 == 0 forever.
+  R="$(sed -n 's/^refused=//p' <<< "$OUT" | tail -1)"
 }
 
 check() {
@@ -81,7 +91,8 @@ echo "== Fixture 1: empty repo, fail_on_no_ecosystem=true =="
 run_fixture true '' 
 check "total"                    "$T"   "0"
 check "n_unsupported"            "$U"   "0"
-check "exit code"                "$RC"  "1"
+check "REFUSES (verdict)"        "$R"   "true"
+check "job still exits 0"        "$RC"  "0"
 check "names the UNRECOGNISED case" "$(grep -qF 'No known ecosystem detected' <<< "$OUT" && echo y || echo n)" "y"
 check "does NOT claim unsupported"   "$(grep -qF 'no lint or format job for any of them' <<< "$OUT" && echo y || echo n)" "n"
 
@@ -90,6 +101,7 @@ run_fixture true '' Cargo.toml
 check "total"                    "$T"   "1"
 check "n_unsupported"            "$U"   "0"
 check "exit code (green)"        "$RC"  "0"
+check "verdict written FALSE"    "$R"   "false"
 check "no refusal text"          "$(grep -qF 'REFUSED' <<< "$OUT" && echo y || echo n)" "n"
 
 echo "== Fixture 3: Project.toml only (DETECTED, UNSUPPORTED) =="
@@ -97,7 +109,8 @@ echo "   the load-bearing case: Julia must NOT lift total above zero"
 run_fixture true '' Project.toml
 check "total STAYS zero"         "$T"   "0"
 check "n_unsupported"            "$U"   "1"
-check "still REFUSES"            "$RC"  "1"
+check "still REFUSES (verdict)"  "$R"   "true"
+check "job still exits 0"        "$RC"  "0"
 check "names Julia"              "$(grep -qF 'Julia (1)' <<< "$OUT" && echo y || echo n)" "y"
 check "uses the DEBT message"    "$(grep -qF 'no lint or format job for any of them' <<< "$OUT" && echo y || echo n)" "y"
 check "cites #967"               "$(grep -qF 'standards#967' <<< "$OUT" && echo y || echo n)" "y"
@@ -106,6 +119,9 @@ check "NOT the unrecognised msg" "$(grep -qF 'No known ecosystem detected' <<< "
 echo "== Fixture 3b: same, fail_on_no_ecosystem=false =="
 run_fixture false '' Project.toml
 check "warns, does not fail"     "$RC"  "0"
+# The warning-only escape hatch must NOT set the verdict, or `report` would
+# block a repository the caller deliberately chose not to fail.
+check "verdict FALSE when warn-only" "$R" "false"
 check "warning names Julia"      "$(grep -qF '::warning::Detected Julia (1)' <<< "$OUT" && echo y || echo n)" "y"
 
 echo "== Fixture 4: both Cargo.toml and Project.toml =="
@@ -113,13 +129,15 @@ run_fixture true '' Cargo.toml Project.toml
 check "total counts ONLY rust"   "$T"   "1"
 check "unsupported counts julia" "$U"   "1"
 check "green (something checked)" "$RC" "0"
+check "verdict written FALSE"    "$R"   "false"
 
 echo "== Fixture 5: Bun markers =="
 run_fixture true '' package.json bunfig.toml
 check "total"                    "$T"   "0"
 check "n_unsupported"            "$U"   "2"
 check "names Bun"                "$(grep -qF 'Bun (2)' <<< "$OUT" && echo y || echo n)" "y"
-check "refuses"                  "$RC"  "1"
+check "refuses (verdict)"        "$R"   "true"
+check "job still exits 0"        "$RC"  "0"
 
 echo "== Fixture 6: deno.json still trips the BAN probe =="
 run_fixture true '' deno.json
@@ -143,7 +161,7 @@ echo "   mutant still refuses, the separation is not what makes it refuse."
 # plausibly be written by someone "tidying up" the two accumulators into one.
 run_fixture true 's|^bool() {|TOTAL=$(( TOTAL + N_UNSUPPORTED ))\nbool() {|' Project.toml
 check "mutant2: total wrongly non-zero" "$T"  "1"
-check "mutant2: refusal SILENCED (rc=0)" "$RC" "0"
+check "mutant2: refusal SILENCED"       "$R"  "false"
 
 echo ""
 echo "detect-ecosystem-test: $PASS passed, $FAIL failed"
