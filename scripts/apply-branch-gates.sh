@@ -41,19 +41,28 @@
 #   Without this, one jq slip silently strips required_signatures estate-wide.
 #
 # WHAT IT DELIBERATELY DOES NOT DO
-#   * It never CREATES a ruleset. A repo with no active branch ruleset is
-#     reported NORULESET. Creating branch protection where none exists is a
-#     policy act, not a gate-fill.
+#   * It never CREATES a ruleset unless --create-gates is passed, and then only
+#     from the committed canon body (--gates-only-file, guarded for shape).
+#     Without the flag a repo with no repo-level branch ruleset is reported
+#     NORULESET or ORG-INHERITED. Creating branch protection where none exists
+#     is a policy act, not a gate-fill; owner decision O6 (standards#787 row
+#     D17) IS that policy, so creating THAT ONE body implements a ruling.
 #   * It never DELETES or rewrites another rule. Repos carrying the retired
 #     types (update, required_deployments, code_quality, code_coverage) are
 #     REPORTED, not repaired: the estate census was ruled report-only. Pass
 #     --strip-retired to opt in, one repo at a time.
 #   * It never emits a retired rule type itself. The exactness guard makes that
 #     structurally impossible, not merely intended.
-#   * Two active REPO-LEVEL branch rulesets => AMBIGUOUS, fail closed. Rulesets
-#     are ADDITIVE (see apply-tag-ruleset-canon.sh): writing one of a pair
-#     leaves the other enforcing, and the repo stays blocked by a rule nothing
-#     announced. Guessing which to fill is how that happens silently.
+#   * Two active REPO-LEVEL branch rulesets are resolved BY SHAPE, and only by
+#     shape: the gates ruleset is the one whose only rule is
+#     required_status_checks. That pair is the EXPECTED O6 steady state, so a
+#     flat refusal would make the applier unable to maintain the very shape the
+#     ruling prescribes. If shape does not single one out => AMBIGUOUS, fail
+#     closed. Rulesets are ADDITIVE (see apply-tag-ruleset-canon.sh): writing
+#     one of a pair leaves the other enforcing, and the repo stays blocked by a
+#     rule nothing announced. Guessing which to fill is how that happens
+#     silently -- and NAME never discriminates, as the tag applier proved with
+#     372 blocked repos and 26 healthy ones sharing one name.
 #   * It never tries to write an ORG-INHERITED ruleset. repos/{r}/rulesets
 #     RETURNS the org's rulesets alongside the repo's own, and one of them is
 #     readable IN FULL at repos/{r}/rulesets/{id} -- so every read succeeds and
@@ -66,6 +75,10 @@
 #     (verified against the live API: every entry carries it). An entry WITHOUT
 #     it is reported UNKNOWN, never assumed repo-level: writability is exactly
 #     what that field decides, and guessing it wrong is a silent 404.
+#     ⚠ --create-gates does NOT change that: an org-inherited ruleset is still
+#     never written. It creates a SECOND, repo-level checks-only ruleset beside
+#     it, which is what O6 prescribes -- filling the inherited one would be a
+#     fake gate regardless of writability, because bypass binds a RULESET.
 #
 # Inputs (environment):
 #   GH_TOKEN       required for writes; needs administration:write on targets.
@@ -88,6 +101,29 @@
 #                      `skipped` and `neutral` COUNT AS GREEN: GitHub treats
 #                      both as satisfying a required status check.
 #   --skip-user        do not enumerate user/repos; use only ESTATE_ORGS.
+#   --create-gates     when a repo has NO repo-level branch ruleset, CREATE the
+#                      O6 checks-only one from --gates-only-file instead of
+#                      reporting and stopping. Off by default: creating branch
+#                      protection where none exists is a policy act. Owner
+#                      decision O6 (standards#787 row D17) IS that policy and
+#                      config/rulesets/gates-only.json is its committed body,
+#                      so creating THAT ONE body implements a ruling rather
+#                      than making one. The body is guarded for canon shape
+#                      and this script fills its context list; it is never
+#                      hand-written and never read from an arbitrary file.
+#   --gates-only-file F  default config/rulesets/gates-only.json
+#   --no-integration-bypass
+#                      strip every Integration actor from the CREATED ruleset's
+#                      bypass list, so the AI actors (claude, dependabot,
+#                      github-actions, oikosbot) are genuinely bound by the
+#                      gates from day one. Requires --create-gates: the update
+#                      path may not touch bypass_actors at all (the exactness
+#                      guard and the post-write DRIFT check both forbid it).
+#                      ⚠ This DIVERGES from the committed canon body. It refuses
+#                      to leave the bypass list empty -- a branch ruleset with
+#                      zero bypass actors is the shape of the 2026-09-11 tag
+#                      outage, and with require_code_owner_review upstream it
+#                      would deadlock the repository outright.
 #
 # Output: TSV on stdout  repo <TAB> state <TAB> detail
 #         per-class summary on stderr.
@@ -99,6 +135,8 @@ RETIRED_TYPES='update required_deployments code_quality code_coverage'
 ACTIONS_INTEGRATION_ID=15368
 
 APPLY=0 LIMIT=0 STRIP_RETIRED=0 SKIP_USER=0 REQUIRE_GREEN=0
+CREATE_GATES=0 NO_INTEGRATION_BYPASS=0
+GATES_ONLY_FILE='config/rulesets/gates-only.json'
 GATES_FILE='config/rulesets/gates.json'
 REPOS_EXPLICIT=()
 
@@ -113,6 +151,9 @@ while [ $# -gt 0 ]; do
     --strip-retired) STRIP_RETIRED=1 ;;
     --require-green) shift; [ $# -gt 0 ] || die 'usage: --require-green N'; REQUIRE_GREEN="$1" ;;
     --skip-user)     SKIP_USER=1 ;;
+    --create-gates)  CREATE_GATES=1 ;;
+    --gates-only-file) shift; [ $# -gt 0 ] || die 'usage: --gates-only-file PATH'; GATES_ONLY_FILE="$1" ;;
+    --no-integration-bypass) NO_INTEGRATION_BYPASS=1 ;;
     -h|--help)       sed -n '2,70p' "$0"; exit 0 ;;
     *)               die "unknown flag: $1" ;;
   esac
@@ -120,6 +161,8 @@ while [ $# -gt 0 ]; do
 done
 
 [ -r "$GATES_FILE" ] || die "gates file not readable: $GATES_FILE"
+[ "$NO_INTEGRATION_BYPASS" = 1 ] && [ "$CREATE_GATES" = 0 ] \
+  && die '--no-integration-bypass applies to the CREATED ruleset only; pass --create-gates (the update path may not alter bypass_actors)'
 command -v gh >/dev/null || die 'gh is required'
 command -v jq >/dev/null || die 'jq is required'
 
@@ -339,6 +382,12 @@ while IFS= read -r R; do
     continue
   fi
 
+  # ---- build the checks payload ONCE, before the ruleset is located ------
+  # Both downstream paths need it: the PUT body filled into an existing rule,
+  # and the POST body created from the canon checks-only file.
+  jq -R -s --argjson iid "$ACTIONS_INTEGRATION_ID" \
+    'split("\n")|map(select(length>0))|map({context:., integration_id:$iid})' "$WORK/ctx2" > "$WORK/checks.json"
+
   # ---- 3. locate the one active REPO-LEVEL branch ruleset ----------------
   # This listing includes the ORG's rulesets as well as the repo's own, and an
   # inherited one reads back in full at repos/{r}/rulesets/{id} while the PUT
@@ -359,12 +408,115 @@ while IFS= read -r R; do
 
   # An absent discriminator REFUSES; it never defaults to the writable arm.
   [ "${NMISS:-0}" -gt 0 ] && { emit "$R" "UNKNOWN" "$DETAIL — $NMISS active branch ruleset(s) carry no .source_type; cannot tell repo-level from org-inherited, refusing to guess"; continue; }
-  if [ "$NIDS" -eq 0 ] && [ "$NINH" -gt 0 ]; then
-    emit "$R" "ORG-INHERITED" "$DETAIL — the only active branch ruleset(s) here are org-level ($(paste -sd, "$WORK/inherited")); writable ONLY at /orgs/{org}/rulesets/{id} with an admin:org credential (a repo token reads it and cannot write it), cured once at the org, never per repo"
+  if [ "$NIDS" -eq 0 ]; then
+    # ---- 3a. nothing repo-level to fill: REPORT, or CREATE under the flag --
+    # Creating branch protection where none exists is a policy act, which is
+    # why this script refused to do it at all. Owner decision O6 (#787 D17) IS
+    # that policy and config/rulesets/gates-only.json is its committed body, so
+    # creating THAT ONE body implements a ruling rather than making one. It
+    # stays behind an explicit flag and is never the default.
+    #
+    # An org-inherited ruleset does NOT satisfy O6 and must not be filled in
+    # its place: bypass binds a RULESET, never a rule, so required_status_checks
+    # added to EstateBranching (whose bypass list is long and deliberate) would
+    # be a fake gate -- indistinguishable from a real one in every summary view.
+    # O6's whole content is that the checks live in their own object with their
+    # own short bypass list. So the cure here is a SECOND, repo-level ruleset
+    # alongside the inherited one, not a write to the inherited one.
+    if [ "$CREATE_GATES" = 0 ]; then
+      if [ "$NINH" -gt 0 ]; then
+        emit "$R" "ORG-INHERITED" "$DETAIL — the only active branch ruleset(s) here are org-level ($(paste -sd, "$WORK/inherited")); writable ONLY at /orgs/{org}/rulesets/{id} with an admin:org credential (a repo token reads it and cannot write it), cured once at the org, never per repo — and filling one would be a fake gate anyway, since bypass binds a ruleset; pass --create-gates to add the O6 repo-level checks-only ruleset from $GATES_ONLY_FILE"
+      else
+        emit "$R" "NORULESET" "$DETAIL — no active branch ruleset; pass --create-gates to create the O6 checks-only ruleset from $GATES_ONLY_FILE"
+      fi
+      continue
+    fi
+    [ -r "$GATES_ONLY_FILE" ] \
+      || { emit "$R" "REFUSED" "$DETAIL — --create-gates needs a readable $GATES_ONLY_FILE"; continue; }
+    # CANON-SHAPE GUARD. Never hand-write a ruleset body, and never create one
+    # from a file that is not the canon body: it must target branches, be
+    # active, carry required_status_checks as its ONLY rule, and arrive with an
+    # EMPTY context list -- this script is what fills it. A committed non-empty
+    # list would be a TYPED context, which is the one thing gates.json forbids.
+    if [ "$(jq -cS '[.rules[]?.type]|unique' "$GATES_ONLY_FILE")" != '["required_status_checks"]' ] \
+       || [ "$(jq -r '.target // ""' "$GATES_ONLY_FILE")" != 'branch' ] \
+       || [ "$(jq -r '.enforcement // ""' "$GATES_ONLY_FILE")" != 'active' ] \
+       || [ "$(jq -r '[.rules[]?|select(.type=="required_status_checks")|.parameters.required_status_checks[]?]|length' "$GATES_ONLY_FILE")" != '0' ]; then
+      emit "$R" "REFUSED" "$DETAIL — $GATES_ONLY_FILE is not the canon checks-only body (target/enforcement/sole-rule/empty-contexts)"
+      continue
+    fi
+    jq --slurpfile ck "$WORK/checks.json" '
+        .rules = [{ type:"required_status_checks",
+                    parameters:{ strict_required_status_checks_policy:false,
+                                 do_not_enforce_on_create:false,
+                                 required_status_checks:$ck[0] } }]
+      ' "$GATES_ONLY_FILE" > "$WORK/create.json"
+
+    if [ "$NO_INTEGRATION_BYPASS" = 1 ]; then
+      jq '.bypass_actors = [(.bypass_actors // [])[] | select(.actor_type != "Integration")]' \
+        "$WORK/create.json" > "$WORK/c2" && mv "$WORK/c2" "$WORK/create.json"
+      # A branch ruleset with ZERO bypass actors is the shape of the 2026-09-11
+      # tag outage, and where an org ruleset upstream sets
+      # require_code_owner_review with a CODEOWNERS the sole contributor cannot
+      # self-approve, it deadlocks the repository outright. Refuse, never warn.
+      [ "$(jq '[.bypass_actors[]?]|length' "$WORK/create.json")" -gt 0 ] \
+        || { emit "$R" "REFUSED" "$DETAIL — --no-integration-bypass would leave $GATES_ONLY_FILE with an EMPTY bypass list; a zero-bypass ruleset is an outage, not a strict gate"; continue; }
+      DETAIL="$DETAIL bypass=no_integrations"
+    fi
+
+    if [ "$APPLY" = 0 ]; then
+      emit "$R" "WOULD-CREATE" "$DETAIL ruleset=<new from $GATES_ONLY_FILE> :: $(tr '\n' '|' < "$WORK/ctx2")"
+      continue
+    fi
+    if ! gh api -X POST "repos/$R/rulesets" --input "$WORK/create.json" > "$WORK/created.json" 2>"$WORK/e"; then
+      emit "$R" "FAILED" "$DETAIL — POST: $(head -c 160 "$WORK/e" | tr -d '\n')"; continue
+    fi
+    NEWID=$(jq -r '.id // empty' "$WORK/created.json")
+    [ -n "$NEWID" ] || { emit "$R" "WROTE-UNVERIFIED" "$DETAIL — POST returned no id"; continue; }
+    gh api "repos/$R/rulesets/$NEWID" > "$WORK/after.json" 2>/dev/null \
+      || { emit "$R" "WROTE-UNVERIFIED" "$DETAIL — re-GET of new ruleset $NEWID failed"; continue; }
+    WANT=$(jq -cS '[.rules[]?|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]|sort' "$WORK/create.json")
+    GOT=$(jq  -cS '[.rules[]?|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]|sort' "$WORK/after.json")
+    [ "$WANT" = "$GOT" ] \
+      || { emit "$R" "DRIFT" "$DETAIL — contexts after create != planned (ruleset $NEWID)"; continue; }
+    # The bypass list is the whole point of a checks-only ruleset, so verify it
+    # landed as sent -- a server-side default here would silently restore the
+    # actors --no-integration-bypass exists to remove.
+    WANT_BY=$(jq -cS '[.bypass_actors[]?|{actor_id,actor_type,bypass_mode}]|sort' "$WORK/create.json")
+    GOT_BY=$(jq  -cS '[.bypass_actors[]?|{actor_id,actor_type,bypass_mode}]|sort' "$WORK/after.json")
+    [ "$WANT_BY" = "$GOT_BY" ] \
+      || { emit "$R" "DRIFT" "$DETAIL — bypass_actors after create != planned (ruleset $NEWID)"; continue; }
+    emit "$R" "CREATED" "$DETAIL ruleset=$NEWID :: $(tr '\n' '|' < "$WORK/ctx2")"
     continue
   fi
-  [ "$NIDS" -eq 0 ] && { emit "$R" "NORULESET" "$DETAIL — no active branch ruleset; this script never creates one"; continue; }
-  [ "$NIDS" -gt 1 ] && { emit "$R" "AMBIGUOUS" "$DETAIL — $NIDS active repo-level branch rulesets ($(paste -sd, "$WORK/ids")); rulesets are additive, refusing to guess"; continue; }
+
+  # TWO repo-level branch rulesets is the EXPECTED steady state after owner
+  # decision O6 (#787 row D17): a baseline ruleset carrying the review and
+  # signature rules, plus a second checks-only ruleset whose short bypass list
+  # is the entire point -- bypass binds a RULESET, never a rule, so status
+  # checks must live in their own object to have any teeth. Returning
+  # AMBIGUOUS there makes the applier permanently unable to maintain the very
+  # shape O6 prescribes.
+  # SHAPE is the discriminator: the gates ruleset is the one whose ONLY rule is
+  # required_status_checks. Name classifies nothing -- the tag applier proved
+  # that estate-wide, where 372 blocked repos and 26 healthy ones shared a name.
+  # NOTE: the LIST endpoint omits .rules, so this needs a by-id GET. That same
+  # omission is what turned every PUT into a POST in the 2026-09-11 outage.
+  if [ "$NIDS" -gt 1 ]; then
+    : > "$WORK/shaped"
+    while IFS= read -r CAND; do
+      [ -n "$CAND" ] || continue
+      gh api "repos/$R/rulesets/$CAND" > "$WORK/cand.json" 2>/dev/null || continue
+      if [ "$(jq -cS '[.rules[]?.type]|unique' "$WORK/cand.json")" = '["required_status_checks"]' ]; then
+        printf '%s\n' "$CAND" >> "$WORK/shaped"
+      fi
+    done < "$WORK/ids"
+    if [ "$(wc -l < "$WORK/shaped")" -eq 1 ]; then
+      cp "$WORK/shaped" "$WORK/ids"; NIDS=1
+      DETAIL="$DETAIL picked_by=shape"
+    fi
+  fi
+  [ "$NIDS" -gt 1 ] && { emit "$R" "AMBIGUOUS" "$DETAIL — $NIDS active repo-level branch rulesets ($(paste -sd, "$WORK/ids")) and none is uniquely checks-only; rulesets are additive, refusing to guess"; continue; }
   ID=$(cat "$WORK/ids")
   # Additive: an inherited ruleset still enforces alongside the one being filled.
   [ "$NINH" -gt 0 ] && DETAIL="$DETAIL org_inherited=[$(paste -sd, "$WORK/inherited")]"
@@ -377,8 +529,6 @@ while IFS= read -r R; do
   [ -n "$FOUND_RETIRED" ] && DETAIL="$DETAIL retired_present=[$FOUND_RETIRED]"
 
   # ---- 4. build the PUT body -------------------------------------------
-  jq -R -s --argjson iid "$ACTIONS_INTEGRATION_ID" \
-    'split("\n")|map(select(length>0))|map({context:., integration_id:$iid})' "$WORK/ctx2" > "$WORK/checks.json"
 
   jq --slurpfile ck "$WORK/checks.json" '
       {name,target,enforcement,conditions,bypass_actors,rules}
