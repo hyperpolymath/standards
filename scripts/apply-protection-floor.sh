@@ -142,6 +142,22 @@ is_throttled() {
   esac
 }
 
+# A throttle is a property of the CREDENTIAL, not of the repo: once the hourly window is
+# spent every remaining repo fails identically, so grinding on turns a 267-repo sweep into
+# 267 UNKNOWN rows -- measured twice on 2026-09-23. Stop once the wall is CONFIRMED, but
+# tolerate a single secondary-limit blip: the count is CONSECUTIVE and any read that
+# succeeds clears it.
+THROTTLE_LIMIT=3
+throttled=0
+note_throttled() { # repo  what-was-read
+  throttled=$((throttled + 1))
+  report "$1" "UNKNOWN" "$2 throttled; skipped rather than recorded"
+  if [ "$throttled" -ge "$THROTTLE_LIMIT" ]; then
+    report "-" "ABORTED" "$THROTTLE_LIMIT consecutive throttled reads: the quota window is spent, so every remaining repo would report UNKNOWN. Re-run after the reset -- trust the X-RateLimit-Reset header, not gh api rate_limit, which has reported 5000 remaining against a header saying 0."
+    exit 3
+  fi
+}
+
 # Return success when the repository is an explicitly listed gcrypt vault.
 is_vault() {
   printf '%s\n' "$VAULTS" | command grep -qxF "$1"
@@ -160,7 +176,13 @@ printf '%s\n' "$TARGETS" | while IFS= read -r repo; do
   fi
 
   # 2. Archived repos 403 on a ruleset write while every GET succeeds.
-  meta="$(gh api "repos/$repo" 2>/dev/null)" || { report "$repo" "UNKNOWN" "repos/$repo read failed"; continue; }
+  if ! meta="$(gh api "repos/$repo" 2>"$TMPDIR_ERR")"; then
+    err="$(cat "$TMPDIR_ERR" 2>/dev/null)"
+    if is_throttled "$err"; then note_throttled "$repo" "repos/$repo"; continue; fi
+    report "$repo" "UNKNOWN" "repos/$repo read failed: ${err%%$'\n'*}"
+    continue
+  fi
+  throttled=0   # a read got through; the window is not the problem
   [ -n "$meta" ] || { report "$repo" "UNKNOWN" "repos/$repo returned empty"; continue; }
   if [ "$(printf '%s' "$meta" | jq -r '.archived')" = "true" ]; then
     report "$repo" "ARCHIVED" "ruleset POST 403s on an archived repo; unarchive/write/re-archive is a separate, explicit act"
@@ -172,7 +194,7 @@ printf '%s\n' "$TARGETS" | while IFS= read -r repo; do
   if ! listing="$(gh api "repos/$repo/rulesets" 2>"$TMPDIR_ERR")"; then
     err="$(cat "$TMPDIR_ERR" 2>/dev/null)"
     if is_throttled "$err"; then
-      report "$repo" "UNKNOWN" "rulesets list throttled; skipped rather than recorded: ${err%%$'\n'*}"
+      note_throttled "$repo" "rulesets list"
       continue
     fi
     case "$err" in
@@ -285,7 +307,9 @@ EOF
   fi
 
   if ! created="$(printf '%s' "$CANON_BODY" | gh api --method POST "repos/$repo/rulesets" --input - 2>"$TMPDIR_ERR")"; then
-    report "$repo" "UNKNOWN" "POST failed: $(head -1 "$TMPDIR_ERR" 2>/dev/null)"
+    err="$(cat "$TMPDIR_ERR" 2>/dev/null)"
+    if is_throttled "$err"; then note_throttled "$repo" "ruleset POST"; continue; fi
+    report "$repo" "UNKNOWN" "POST failed: ${err%%$'\n'*}"
     continue
   fi
   new_id="$(printf '%s' "$created" | jq -r '.id // empty')"

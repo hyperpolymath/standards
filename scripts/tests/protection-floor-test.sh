@@ -71,6 +71,16 @@ mkrepo() { # name  default-branch  archived
 }
 
 REPOS="$WORK/repos.txt"
+# A SECOND target list for the backoff section. The applier sorts its targets, so the
+# three throttled repos are named to sort FIRST and plain-repo to sort after them:
+# the assertion is that the sweep never reaches it.
+THR="$WORK/throttle-repos.txt"
+cat > "$THR" <<'EOF'
+hyperpolymath/aaa-throttle-1
+hyperpolymath/aaa-throttle-2
+hyperpolymath/aaa-throttle-3
+hyperpolymath/plain-repo
+EOF
 cat > "$REPOS" <<'EOF'
 hyperpolymath/memory-vault
 hyperpolymath/plain-repo
@@ -163,6 +173,17 @@ J
       > "$FIX/repos_hyperpolymath_secondary-throttled-repo_rulesets"
   echo 1 > "$FIX/repos_hyperpolymath_secondary-throttled-repo_rulesets.rc"
 
+  # The wall shows on the FIRST read of a repo, before any ruleset endpoint is touched.
+  mkrepo hyperpolymath/aaa-throttle-1 main false
+  mkrepo hyperpolymath/aaa-throttle-2 main false
+  mkrepo hyperpolymath/aaa-throttle-3 main false
+  printf 'HTTP 403: API rate limit exceeded for user ID 12345.\n' > "$FIX/repos_hyperpolymath_aaa-throttle-1"
+  printf 'HTTP 403: API rate limit exceeded for user ID 12345.\n' > "$FIX/repos_hyperpolymath_aaa-throttle-2"
+  printf 'HTTP 403: API rate limit exceeded for user ID 12345.\n' > "$FIX/repos_hyperpolymath_aaa-throttle-3"
+  echo 1 > "$FIX/repos_hyperpolymath_aaa-throttle-1.rc"
+  echo 1 > "$FIX/repos_hyperpolymath_aaa-throttle-2.rc"
+  echo 1 > "$FIX/repos_hyperpolymath_aaa-throttle-3.rc"
+
   mkrepo hyperpolymath/nosourcetype-repo main false
   echo '[{"id":40,"target":"branch","enforcement":"active"}]' \
       > "$FIX/repos_hyperpolymath_nosourcetype-repo_rulesets"
@@ -233,6 +254,16 @@ check "posted bypass_actors is empty"    "0"                 "$(printf '%s' "$PO
 check "no write touched the vault"       "0"                 "$(command grep -c 'memory-vault' "$FIX/PUTS.log")"
 check "no write touched the archived"    "0"                 "$(command grep -c 'archived-repo' "$FIX/PUTS.log")"
 
+echo "== throttle backoff =="
+# A throttle is not a per-repo property. Three consecutive throttled reads mean the
+# window is spent, so the sweep must ABORT: grinding on filed 267 repos as UNKNOWN twice
+# on 2026-09-23, which READS as \"measured and unknowable\" when it means \"never looked\".
+build_fixtures
+OUTT="$(run "$SUT" --repos "$THR" --apply)"
+check "third consecutive throttle aborts"        "ABORTED"  "$(state "$OUTT" -)"
+check "the repo beyond the wall is not reported" ""         "$(state "$OUTT" hyperpolymath/plain-repo)"
+check "an aborted sweep writes nothing"          "0"        "$(wc -l < "$FIX/PUTS.log" | tr -d ' ')"
+
 echo "== refusals =="
 build_fixtures
 OUT2="$(GH_FIX="$FIX" PATH="$BIN:$PATH" bash "$SUT" --repos /dev/null 2>&1)"
@@ -256,8 +287,8 @@ MUT="$ROOT/scripts/.protection-floor-mutant.tmp.sh"
 trap 'rm -rf "$WORK"; rm -f "$MUT"' EXIT
 
 # Run a named mutation and assert the expected state change or write.
-mutant() { # name  sed-expr  assertion-kind(wrote|state)  arg
-  local name="$1" expr="$2" kind="$3" arg="$4" o got
+mutant() { # name  sed-expr  assertion-kind(wrote|state)  arg  [repos-file]
+  local name="$1" expr="$2" kind="$3" arg="$4" repos="${5:-$REPOS}" o got
   sed "$expr" "$SUT" > "$MUT"
   if ! bash -n "$MUT" 2>/dev/null; then
     bad "mutant '$name'" "parses" "parse error -- red would measure the parser"; return
@@ -266,7 +297,7 @@ mutant() { # name  sed-expr  assertion-kind(wrote|state)  arg
     bad "mutant '$name'" "sed changes the script" "sed matched nothing -- the mutant is the original"; return
   fi
   build_fixtures with-vault
-  o="$(GH_FIX="$FIX" PATH="$BIN:$PATH" bash "$MUT" --repos "$REPOS" --apply 2>/dev/null)"
+  o="$(GH_FIX="$FIX" PATH="$BIN:$PATH" bash "$MUT" --repos "$repos" --apply 2>/dev/null)"
   # the mutant must still RUN; a FATAL would make every check vacuous
   if [ "$(printf '%s\n' "$o" | wc -l)" -lt 3 ]; then
     bad "mutant '$name'" "runs and reports" "produced no report -- it died early, red is meaningless"; return
@@ -323,6 +354,12 @@ mutant "org cover dropped from the union" \
 mutant "converged early-return removed" \
   's/^  if \[ "\$exact_n" -eq 1 \]; then$/  if false; then/' \
   state "hyperpolymath/converged-repo=COVERED-BY-RICHER"
+
+# Without the abort the sweep grinds through the whole list against a spent window, so the
+# repo beyond the wall is REACHED and written -- the 267-UNKNOWN failure, in miniature.
+mutant "throttle backoff removed" \
+  's/^    exit 3$/    throttled=0/' \
+  wrote "plain-repo" "$THR"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
