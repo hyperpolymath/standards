@@ -274,10 +274,20 @@ EOF
       [ -n "$rid" ] || continue
       cache="$ORG_CACHE/$rid"
       if [ ! -s "$cache" ]; then
-        gh api "repos/$repo/rulesets/$rid" > "$cache" 2>/dev/null || :
+        if org_body="$(gh api "repos/$repo/rulesets/$rid" 2>"$TMPDIR_ERR")" &&
+           printf '%s' "$org_body" | jq -e '.rules | type == "array"' >/dev/null 2>&1; then
+          printf '%s' "$org_body" > "$cache"
+        else
+          err="$(cat "$TMPDIR_ERR" 2>/dev/null)"
+          if is_throttled "$err"; then note_throttled "$repo" "org ruleset $rid"; fi
+        fi
       fi
       if [ ! -s "$cache" ]; then org_read_ok=0; break; fi
-      union_org="$union_org,$(jq -r '[.rules[].type] | sort | join(",")' "$cache")"
+      if jq -e --argjson w "$WANT_INCLUDE" \
+           '([.conditions.ref_name.exclude[]?] | length) == 0 and
+            any(.conditions.ref_name.include[]?; . == $w[0])' "$cache" >/dev/null 2>&1; then
+        union_org="$union_org,$(jq -r '[.rules[].type] | sort | join(",")' "$cache")"
+      fi
       b="$(jq -r '[.bypass_actors[]?] | length' "$cache")"
       [ "$b" -gt "$org_byp_max" ] && org_byp_max="$b"
     done <<EOF
@@ -285,7 +295,9 @@ $org_ids
 EOF
   fi
   if [ "$org_read_ok" -eq 0 ]; then
-    report "$repo" "UNKNOWN" "an org ruleset body read was throttled; skipped rather than recorded"
+    if [ "$repo_throttled" -eq 0 ]; then
+      report "$repo" "UNKNOWN" "an org ruleset body read failed; skipped rather than recorded"
+    fi
     continue
   fi
 

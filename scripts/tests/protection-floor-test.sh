@@ -64,6 +64,8 @@ chmod 755 "$BIN/gh"
 run() { GH_FIX="$FIX" PATH="$BIN:$PATH" bash "$1" "${@:2}" 2>/dev/null; }
 # Extract one repository's state from tab-separated report output.
 state() { printf '%s\n' "$1" | awk -F'\t' -v r="$2" '$1==r{print $2}'; }
+# Count the report rows for one repository.
+rows() { printf '%s\n' "$1" | awk -F'\t' -v r="$2" '$1==r{n++} END{print n+0}'; }
 # Recreate the fixture directory and initialize an empty write log.
 reset_fix() { rm -rf "$FIX"; mkdir -p "$FIX"; : > "$FIX/PUTS.log"; }
 
@@ -93,6 +95,13 @@ hyperpolymath/aab-postthrottle-1
 hyperpolymath/aab-postthrottle-2
 hyperpolymath/aab-postthrottle-3
 hyperpolymath/plain-repo
+EOF
+ORG_EDGE="$WORK/org-edge-repos.txt"
+cat > "$ORG_EDGE" <<'EOF'
+metadatastician/org-cache-invalid-a
+metadatastician/org-cache-retry-b
+metadatastician/org-release-only
+metadatastician/org-throttled
 EOF
 cat > "$REPOS" <<'EOF'
 hyperpolymath/memory-vault
@@ -242,6 +251,38 @@ J
   echo '{"id":9061}' > "$FIX/POST_repos_metadatastician_org-halffloor-repo_rulesets"
   echo '[{"type":"deletion"},{"type":"non_fast_forward"}]' \
       > "$FIX/repos_metadatastician_org-halffloor-repo_rules_branches_main"
+
+  # A successful response without a rules array must not poison the org cache. The next
+  # repo inherits the same org ruleset id and must retry the read rather than reuse it.
+  mkrepo metadatastician/org-cache-invalid-a main false
+  mkrepo metadatastician/org-cache-retry-b main false
+  echo '[{"id":62,"source_type":"Organization","target":"branch","enforcement":"active"}]' \
+      > "$FIX/repos_metadatastician_org-cache-invalid-a_rulesets"
+  cp "$FIX/repos_metadatastician_org-cache-invalid-a_rulesets" \
+      "$FIX/repos_metadatastician_org-cache-retry-b_rulesets"
+  echo '{"id":62,"message":"rules temporarily unavailable"}' \
+      > "$FIX/repos_metadatastician_org-cache-invalid-a_rulesets_62"
+  cat > "$FIX/repos_metadatastician_org-cache-retry-b_rulesets_62" <<'J'
+{"id":62,"rules":[{"type":"deletion"},{"type":"non_fast_forward"}],
+ "conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[]}
+J
+
+  # Both floor rules on release branches do not cover the default branch.
+  mkrepo metadatastician/org-release-only main false
+  echo '[{"id":63,"source_type":"Organization","target":"branch","enforcement":"active"}]' \
+      > "$FIX/repos_metadatastician_org-release-only_rulesets"
+  cat > "$FIX/repos_metadatastician_org-release-only_rulesets_63" <<'J'
+{"id":63,"rules":[{"type":"deletion"},{"type":"non_fast_forward"}],
+ "conditions":{"ref_name":{"include":["refs/heads/release/*"],"exclude":[]}},"bypass_actors":[]}
+J
+
+  # A throttled org-body read is classified by note_throttled and reported once.
+  mkrepo metadatastician/org-throttled main false
+  echo '[{"id":64,"source_type":"Organization","target":"branch","enforcement":"active"}]' \
+      > "$FIX/repos_metadatastician_org-throttled_rulesets"
+  printf 'HTTP 403: API rate limit exceeded for user ID 12345.\n' \
+      > "$FIX/repos_metadatastician_org-throttled_rulesets_64"
+  echo 1 > "$FIX/repos_metadatastician_org-throttled_rulesets_64.rc"
 }
 
 echo "== report mode (no --apply) =="
@@ -262,6 +303,15 @@ check "no source_type is REFUSED"        "REFUSED"           "$(state "$OUT" hyp
 check "complete org cover is ORG-INHERITED" "ORG-INHERITED"   "$(state "$OUT" metadatastician/org-covered-repo)"
 check "HALF org cover is not a cover"    "WOULD-CREATE"      "$(state "$OUT" metadatastician/org-halffloor-repo)"
 check "report mode writes nothing"       "0"                 "$(wc -l < "$FIX/PUTS.log" | tr -d ' ')"
+
+echo "== org cache and scope edges =="
+build_fixtures
+OUTE="$(run "$SUT" --repos "$ORG_EDGE")"
+check "invalid org body is UNKNOWN"      "UNKNOWN"       "$(state "$OUTE" metadatastician/org-cache-invalid-a)"
+check "invalid org body is not cached"   "ORG-INHERITED" "$(state "$OUTE" metadatastician/org-cache-retry-b)"
+check "release-only org floor does not cover default" "WOULD-CREATE" "$(state "$OUTE" metadatastician/org-release-only)"
+check "throttled org body is UNKNOWN"    "UNKNOWN"       "$(state "$OUTE" metadatastician/org-throttled)"
+check "throttled org body is reported once" "1"          "$(rows "$OUTE" metadatastician/org-throttled)"
 
 echo "== apply mode =="
 build_fixtures
