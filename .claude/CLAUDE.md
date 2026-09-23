@@ -156,9 +156,9 @@ for the canonical statement.
 | TypeScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
 | ReScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
 | **ReScript** | AffineScript | Banned in new code as of 2026-04-30. Existing `.res` files migrate to `.affine` directly (do not pass through ReScript). |
-| **Deno** | Bun | **Being removed.** Owner ruling 2026-08-26: *"deno is to go and bun is the way we are going, put it first everywhere unless not possible and explain why if not."* Existing Deno projects must migrate to Bun; where Bun genuinely cannot be used, the reason must be documented in the repo. Assessment of all 30 remaining `deno.json` locations: #658. |
+| **Deno** | Bun | **Banned 2026-09-22.** Owner ruling: *"deno is over, we're prioritising bun, and using bunx."* `deno.json` task definitions must be ported to `package.json` scripts. Shrink-only ledger: `.machine_readable/deno-allow.txt`. |
 | Node.js | Bun | Bun is Node-compatible; run the code, drop the runtime. |
-| npm | Bun | npm is tier 4 — *permitted, never preferred*, not banned. `package-lock.json` must still not be tracked (standards#67). |
+| npm | Bun | npm is tier 3 — *permitted, never preferred*, not banned. `package-lock.json` must still not be tracked (standards#67). |
 | yarn | Bun | yarn is not in the tier list at all. |
 | Go | Rust/SPARK | |
 | **Python** | AffineScript/Rust/SPARK/Julia | Fully banned, no exceptions (SaltStack exception removed 2026-01-03) |

@@ -6,6 +6,7 @@ set -euo pipefail
 SCAN_PATH="${INPUT_PATH:-.}"
 STAGED_FILES="${INPUT_STAGED_FILES:-}"
 ERRORS=0
+CHECKED=0
 
 # The single authority for "does this path need an SPDX header".
 #
@@ -25,10 +26,16 @@ ERRORS=0
 #
 # Keep ONE list. If a mode ever needs a different rule, that is a new function
 # with a name saying so, never a second copy of these patterns.
+#
+# ⚠ *.json is NOT here and must never be re-added. JSON has no comment syntax
+# at all, so a JSON file cannot carry an inline SPDX header in any form. The
+# 58 tracked .json files were therefore failing a check no edit could satisfy.
+# REUSE covers them with a sidecar `<file>.license`, which is a different
+# check and belongs in a differently-named function.
 is_source_file() {
   case "$1" in
     *.rs|*.res|*.js|*.ts|*.sh|*.bash|*.zig|*.ex|*.exs|*.gleam|\
-    *.ml|*.mli|*.adb|*.ads|*.ncl|*.toml|*.json|*.yaml|*.yml) return 0 ;;
+    *.ml|*.mli|*.adb|*.ads|*.ncl|*.toml|*.yaml|*.yml|*.scm) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -44,17 +51,58 @@ fi
 
 [ -z "$FILES_TO_CHECK" ] && exit 0
 
-for file in $FILES_TO_CHECK; do
+# ⚠ NEWLINE-DELIMITED, NOT WORD-SPLIT. This was `for file in $FILES_TO_CHECK`,
+# which splits on $IFS — so a path containing a space became two paths, each
+# of which then failed `[ -f "$file" ]` and was skipped by the `continue`
+# below. Silently: no error, and the file never counted toward $CHECKED, so
+# the denominator under-reported too.
+#
+# That is not hypothetical here. The estate contains a literal-space directory
+# `_RSR _SET`, so EVERY source file beneath it passed this validator without
+# ever being read. A validator that skips what it cannot name is worse than no
+# validator, because it reports a pass.
+#
+# `<<<` keeps the loop in the CURRENT shell; a `... | while read` pipeline
+# would run it in a subshell and discard $ERRORS and $CHECKED.
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
   [ -f "$file" ] || continue
   is_source_file "$file" || continue
 
-  # Check for SPDX header in first 10 lines
-  if ! head -10 "$file" | grep -qE '^# SPDX-License-Identifier:'; then
+  CHECKED=$((CHECKED + 1))
+
+  # Check for an SPDX header in the first 10 lines, in ANY of the comment
+  # syntaxes the extension list above actually admits.
+  #
+  # ⚠ This used to test `^# SPDX-License-Identifier:` alone, which is a
+  # question most of the listed languages cannot answer: Rust, JS, TS, Zig,
+  # ReScript and Gleam comment with `//`, OCaml with `(* *)`, Ada with `--`.
+  # Measured on this repository at the time of the fix, 39 files ALREADY
+  # carried a correct SPDX header in their own syntax and were being reported
+  # as violations — .zig 15/15, .ml 6/6, .js 11/15, .ads 1/1, .adb 1/2, .rs
+  # 5/41. The gate was not merely impossible for them, it was inverted.
+  #
+  # Still a HEADER check, deliberately: the marker must open the line. A bare
+  # `SPDX-License-Identifier:` anywhere in the first 10 lines would match
+  # prose, and a licence mentioned in a docstring is not a licence grant.
+  # The expression itself is validated, not just the marker: an empty
+  # identifier or trailing junk (`MPL-2.0; copyright`) passes a prefix
+  # check but fails SPDX tooling. Require a non-empty expression (bare id
+  # or OR/AND/WITH compound) occupying the rest of the line, with only
+  # the applicable comment terminator (`*)`, `*/`) after it. Copyright
+  # data belongs on its own SPDX-FileCopyrightText line. `;` is Scheme's
+  # comment marker (*.scm).
+  if ! head -10 "$file" | grep -qE '^[[:space:]]*(#|//|--|;+|\(\*|/\*|\*)[[:space:]]*SPDX-License-Identifier:[[:space:]]*[A-Za-z0-9][A-Za-z0-9_.+:-]*([[:space:]]+(OR|AND|WITH)[[:space:]]+[A-Za-z0-9][A-Za-z0-9_.+:-]*)*[[:space:]]*(\*\)|\*/)?[[:space:]]*$'; then
     echo "[validate-spdx] ERROR: $file missing SPDX header" >&2
     ERRORS=$((ERRORS + 1))
   fi
-done
+done <<< "$FILES_TO_CHECK"
 
-[ $ERRORS -gt 0 ] && exit 1
-echo "[validate-spdx] ✅ All source files have SPDX headers"
+# Always print the denominator: "0 errors" out of 0 files examined is a
+# vacuous pass, and it must not read the same as a real one.
+if [ $ERRORS -gt 0 ]; then
+  echo "[validate-spdx] $ERRORS of $CHECKED source files are missing an SPDX header" >&2
+  exit 1
+fi
+echo "[validate-spdx] ✅ All $CHECKED source files have SPDX headers"
 exit 0

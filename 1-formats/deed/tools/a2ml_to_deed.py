@@ -83,7 +83,10 @@ def val(v, what="value", closed=None):
 
 def spdx_of(path, profile=None):
     headers = []
-    with open(path, encoding="utf-8") as fh:
+    # NOSONAR pythonsecurity:S8707 — local CLI converter: `path` is an
+    # operator-supplied filepath, not a trust boundary (CI passes only
+    # hardcoded repo paths; see deed-conformance.yml).
+    with open(path, encoding="utf-8") as fh:  # NOSONAR
         for line in fh:
             m = re.match(r"^;;?\s*(SPDX-\S.*)$", line.rstrip("\n")) or re.match(
                 r"^#\s*(SPDX-\S.*)$", line.rstrip("\n")
@@ -98,7 +101,8 @@ def spdx_of(path, profile=None):
 
 
 def parse_a2ml(path):
-    src = open(path, encoding="utf-8").read()
+    # NOSONAR pythonsecurity:S8707 — see spdx_of above: operator-owned CLI path.
+    src = open(path, encoding="utf-8").read()  # NOSONAR
     prof = re.findall(r"^\s*@profile\(\s*id\s*=\s*([^\s)]+)\s*\)", src, flags=re.M)
     body = re.sub(r"^\s*@profile\([^\n]*\)\s*\n", "", src, flags=re.M)
     try:
@@ -307,10 +311,7 @@ def emit_ecosystem_clause(data, canonical_name):
         if unknown:
             raise TranslateError(f"ecosystem: related-projects entry untabled key(s) {sorted(unknown)}")
         L.append(f"             (related :name {esc(r['name'])} :relationship {sym(r['relationship'], 'relationship', RELATIONSHIPS)} :notes {esc(r['notes'])})")
-    if rp["projects"]:
-        L[-1] = L[-1] + ")"
-    else:
-        L[-1] = L[-1] + ")"
+    L[-1] = L[-1] + ")"
     return "\n".join(L)
 
 
@@ -540,7 +541,9 @@ def main(argv):
                 cname = a.canonical_name
         text, fname = compose_deed(headers, a.canonical_name, a.beholding_chora, clauses, out_name=a.out)
         if a.out:
-            with open(a.out, "w", encoding="utf-8") as fh:
+            # NOSONAR pythonsecurity:S8707 — see spdx_of above: operator-owned
+            # CLI --out path; the tool writes where its operator tells it to.
+            with open(a.out, "w", encoding="utf-8") as fh:  # NOSONAR
                 fh.write(text)
             print(f"EMITTED {a.out} (validated by deed_lint, dispatch {fname})")
         else:

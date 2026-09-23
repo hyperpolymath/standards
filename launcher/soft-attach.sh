@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # soft-attach.sh — reference implementation of [soft-attach] from
-# launcher/launcher-standard.a2ml.
+# launcher/launcher-standard_praxis.deed.
 #
 # Soft-attach = optional ecosystem integrations that the launcher invokes
 # IF they are installed, and silently skips otherwise. Downstream

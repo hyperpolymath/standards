@@ -52,11 +52,39 @@ Hypatia finding, plus optional metadata.
 
 == Required fields
 
-`severity`:: One of `critical`, `high`, `medium`, `low`, `info`. Must
+`severity`:: One of `critical`, `high`, `medium`, `warn`, `low`, `info`,
+`informational` — the scanner's full vocabulary (`warn` is what the research
+rules emit; it ranks with `medium`). Must
 match the finding's reported severity exactly for the entry to apply.
 
 `rule_module`:: Hypatia rule module (e.g. `cicd_rules`, `code_safety`,
-`migration_rules`).
+`migration_rules`) — **a string, or a list of strings**. A list matches when
+**any** member equals the finding's `rule_module`.
++
+Use the list form when **one defect is reported by more than one module**.
+Hypatia raises `invalid_actions_lock` from both `workflow_audit` *and*
+`workflow_hardening` for a single desynced lockfile, so a string-only entry
+could acknowledge only one of them and the other went on blocking — while
+looking entirely correct: right file, right severity, right type
+(standards#966).
++
+Prefer one list entry over two near-identical entries. Two entries for one
+defect means two `expires_at` dates and two `tracking_issue` links for a
+single decision, and they drift apart.
++
+[source,json]
+----
+{
+  "severity": "high",
+  "rule_module": ["workflow_audit", "workflow_hardening"],
+  "type": "invalid_actions_lock",
+  "file_pattern": "**actions.lock"
+}
+----
++
+An empty list is rejected: an entry naming no module matches nothing, and a
+rule that can never apply is worse than an absent one because it reads as
+coverage.
 
 `type`:: Finding type within the rule module (e.g. `banned_language_file`,
 `obj_magic`, `deprecated_api`).
@@ -90,7 +118,8 @@ in the gate's run summary as a link.
 A finding is acknowledged by a baseline entry iff:
 
 . `severity` matches exactly, AND
-. `rule_module` matches exactly, AND
+. `rule_module` matches — exactly if it is a string, or by membership if it
+  is a list, AND
 . `type` matches exactly, AND
 . either:
 .. `file` is set and equals the finding's `file`, OR

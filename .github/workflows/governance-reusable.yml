@@ -24,7 +24,7 @@ permissions:
 jobs:
   workflow-staleness:
     name: Check Workflow Staleness
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 10
     outputs:
       has_baseline: ${{ steps.check.outputs.has_baseline }}
@@ -180,7 +180,7 @@ jobs:
     # repo without a baseline blocked forever, by construction. The job now
     # always runs; the EXPENSIVE steps are guarded individually, so it still
     # costs nothing when there is no baseline to validate.
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 15
     steps:
       - name: Checkout caller repository
@@ -273,7 +273,17 @@ jobs:
           # checked out to get apply-baseline.sh) is itself scanned, and
           # standards' own files get reported as the caller's findings (a banned
           # `.ts`, `shell_download` bootstrap.sh scripts, etc.).
-          cp .standards-checkout/scripts/apply-baseline.sh "$RUNNER_TEMP/apply-baseline.sh"
+          # Prefer the CALLER's own scripts/apply-baseline.sh when present
+          # (self-lint: standards validating itself must run the tree under
+          # test, not main's copy — a new baseline severity the main-pinned
+          # script doesn't know would fail closed here while passing
+          # everywhere else). Consumers without the script keep the
+          # main-pinned fallback.
+          if [ -f scripts/apply-baseline.sh ]; then
+            cp scripts/apply-baseline.sh "$RUNNER_TEMP/apply-baseline.sh"
+          else
+            cp .standards-checkout/scripts/apply-baseline.sh "$RUNNER_TEMP/apply-baseline.sh"
+          fi
           rm -rf .standards-checkout
           # hypatia's `scan` exits non-zero whenever it finds anything — that is
           # by design, and under `bash -e` it would abort this step at this line,
@@ -339,29 +349,28 @@ jobs:
       # Language Policy; SaltStack exception removed 2026-01-03). The
       # previous in-line `python3 << PYEOF` heredoc made this very gate a
       # self-referential violation — same structural class as the CSA001
-      # self-loop fixed in hypatia#328. Eradicated by porting the logic
-      # to a Deno script that lives in this standards repo.
+      # self-loop fixed in hypatia#328. Eradicated by porting the logic to
+      # a script that lives in this standards repo.
       #
       # Implementation note: a reusable workflow only auto-checks-out its
       # YAML, not sibling files in its repo. So we explicitly check out
       # this repo into `.standards-checkout/`, then run the script from
-      # there. We pin to `main` because `github.workflow_sha` resolves to
-      # the caller repo's commit SHA (not standards'), which makes the
-      # fetch fail with exit 128 ("No commit found for SHA"). Caller
-      # repos already pin the reusable's YAML by SHA, so the bounded
-      # drift is just whatever's on standards/main between the reusable
-      # version and the script version — acceptable since scripts here
-      # are read-only governance checks.
-      - name: Set up Deno
-        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
-        with:
-          deno-version: v2.x
-
-      - name: Check out standards repo for shared scripts
+      # there.
+      #
+      # The checkout is pinned to an immutable standards commit, not `main`.
+      # `github.workflow_sha` cannot serve: it resolves to the caller repo's
+      # commit SHA (not standards'), so the fetch fails with exit 128
+      # ("No commit found for SHA"). Hence a literal SHA, bumped in the same
+      # PR as any helper change. scripts/tests/governance-reusable-contract-
+      # test.sh asserts exactly this with `ref: [0-9a-f]{40}`: following
+      # moving `main` would let one standards push silently change the
+      # behaviour of every already-pinned caller, with no review in their
+      # repos.
+      - name: Checkout the pinned Standards policy helpers
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: 317101e03b8fe642589498f4bdb84541ab466062
           path: .standards-checkout
           # Sparse-checkout only the scripts dir to keep this fast.
           sparse-checkout: |
@@ -370,45 +379,21 @@ jobs:
 
       - name: Check for TypeScript
         # Read-only execution; never writes outside the runner workspace.
-        # `--no-lock` so an empty / stale / missing `deno.lock` doesn't fail
-        # `deno run` before the file-walker even starts — the script does not
-        # import anything, so the lockfile is irrelevant to its execution.
-        # See standards#294.
         #
-        # Runs the AffineScript-compiled `.deno.js` (source of truth:
-        # `scripts/check-ts-allowlist.affine`). The .ts archetype is kept
-        # alongside for the regression suite (`scripts/tests/check-ts-
-        # allowlist-test.sh`) and for parallel-validation during the
-        # TS→AffineScript migration (standards#239 / #241). Retirement of
-        # the .ts is a separate follow-up after the dual-target window.
-        run: deno run --allow-read --no-lock .standards-checkout/scripts/check-ts-allowlist.deno.js
-
-      - name: check-ts-allowlist source/compile drift (informational)
-        # Non-blocking — informational until the AffineScript compiler
-        # output is hash-pinned per compiler version. The compiler header
-        # currently stamps "Generated by AffineScript compiler" which is
-        # a moving target as the codegen evolves, so spurious diff =
-        # "compiler bumped" vs real diff = "someone edited .affine
-        # without recompiling". Promotion to blocking is gated on a
-        # compiler-version pin landing (see standards#312).
-        continue-on-error: true
-        run: |
-          if ! command -v affinescript >/dev/null 2>&1; then
-            echo "::notice::affinescript compiler unavailable on runner — skipping drift check"
-            exit 0
-          fi
-          tmp="$(mktemp /tmp/check-ts-allowlist-drift.XXXXXX.deno.js)"
-          if ! affinescript compile --deno-esm -o "$tmp" .standards-checkout/scripts/check-ts-allowlist.affine; then
-            echo "::warning::affinescript compile failed — drift check skipped"
-            rm -f "$tmp"
-            exit 0
-          fi
-          if diff -u .standards-checkout/scripts/check-ts-allowlist.deno.js "$tmp"; then
-            echo "✅ check-ts-allowlist .affine source and .deno.js compiled output are in sync"
-          else
-            echo "::warning::check-ts-allowlist.deno.js drifted from check-ts-allowlist.affine — re-run \`just check-ts-allowlist-drift\` locally and recommit the .deno.js"
-          fi
-          rm -f "$tmp"
+        # Runs `scripts/check-ts-allowlist.sh`, replacing the
+        # AffineScript-compiled `check-ts-allowlist.deno.js`. That artefact
+        # existed only to be fed to `deno run`, which forced a
+        # `denoland/setup-deno` install onto a REQUIRED context in every
+        # estate repo. The shell implementation is behaviourally equivalent
+        # (scripts/tests/check-ts-allowlist-test.sh, 18/18) and needs no
+        # runtime installed at all. Estate policy retires Deno in favour of
+        # bun — see LANGUAGE-POLICY.adoc §1.
+        #
+        # The source/compile drift check that used to sit here was removed
+        # with the .deno.js it compared against: `affinescript compile` is
+        # unavailable on the runner, so the step could only ever emit
+        # `::warning::`, which cannot fail a job — a vacuous gate.
+        run: bash .standards-checkout/scripts/check-ts-allowlist.sh
 
       # Shared escape hatch for the banned-language-file checks below.
       # Honours three exemption mechanisms (see
@@ -1011,8 +996,97 @@ jobs:
           # CONTRIBUTING (54/412 missing) warns until the cutoff baked into the
           # script, then blocks. See scripts/check-docs-presence.sh.
           cp .standards-checkout/scripts/check-docs-presence.sh "$RUNNER_TEMP/"
+          # The launcher-standard currency gate (standards#960 AC4) is copied
+          # out here too, because this step deletes the checkout. Prefer the
+          # CALLER's own copy when present (self-lint: standards validating
+          # itself must run the tree under test, not main's copy -- a gate fix
+          # in flight would otherwise be judged by the version it replaces).
+          # Callers without the script keep the main-pinned fallback.
+          if [ -f scripts/check-launcher-standard-currency.sh ]; then
+            cp scripts/check-launcher-standard-currency.sh "$RUNNER_TEMP/"
+          else
+            cp .standards-checkout/scripts/check-launcher-standard-currency.sh "$RUNNER_TEMP/"
+          fi
           rm -rf .standards-checkout
           bash "$RUNNER_TEMP/check-docs-presence.sh" .
+
+      - name: Check launcher-standard currency
+        run: |
+          set -eo pipefail
+          # Arming policy, and the evidence it rests on: standards#991.
+          #
+          #   retired-filename -> BLOCKS. A STABLE predicate:
+          #   the retired `.a2ml` spelling of the launcher standard was
+          #   deleted upstream on 2026-09-22
+          #   (standards#952) and stays deleted, so a caller that is clean
+          #   today cannot become defective without editing the citation
+          #   itself. Measured 2026-09-22 over EVERY clone in the estate --
+          #   595 scanned, 553 carrying an origin/main. 432 reference this
+          #   reusable workflow, but only 12 do so at a MUTABLE ref (@main),
+          #   and a new step reaches ONLY those 12: a caller pinned at a SHA
+          #   freezes this whole file, this step included, so it can never
+          #   receive the step at all. The real gate was run against all 12:
+          #   12/12 rc=0, retired=0. Five slugs do carry the retired literal
+          #   (tma-mark2, canonical-ums, the-nash-equilibrium,
+          #   launch-scaffolder, trigger) and their overlap with the armed 12
+          #   is ZERO -- so arming this tier reds ZERO live callers. A
+          #   known-answer positive control fired (rc=1) on three of those
+          #   defective repos through the identical harness, so the twelve
+          #   zeros are a real measurement and not a broken probe.
+          #
+          #   stale-version -> WARNS, and does not block. A TIME-DEPENDENT
+          #   predicate: the gate compares against its own CURRENT_VERSION, so
+          #   every correctly-citing caller flips to defect the moment the
+          #   standard bumps, having done nothing. A baked-in cutoff DATE does
+          #   not cure that -- the #505 split above can use one because its
+          #   missing-CONTRIBUTING population is static, while this population
+          #   is regenerated at every bump. Each CURRENT_VERSION bump is a
+          #   measure-then-arm event, not a date.
+          #
+          # Deliberately no --standard / --expect-version: the gate arrives
+          # from the standard's own tree, so its CURRENT_VERSION is current by
+          # construction. Pointing it at a caller's vendored copy of the deed
+          # would red that caller for citing an older canon.
+          rc=0
+          bash "$RUNNER_TEMP/check-launcher-standard-currency.sh" --root . \
+            >"$RUNNER_TEMP/launcher-currency.out" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/launcher-currency.out"
+
+          # rc=2 is a usage error OR a seeded self-test mutant that survived. A broken
+          # invocation must never read as a clean pass, so it fails before the tier split.
+          if [ "$rc" -eq 2 ]; then
+            echo "::error::check-launcher-standard-currency exited 2: usage error, or a seeded self-test mutant survived. A broken invocation is a failure, not a pass."
+            exit 1
+          fi
+
+          # The tiers are split on the gate's own typed stdout lines, not on its exit
+          # code -- rc=1 means "some defect", and the two classes are armed differently.
+          retired=0
+          if grep -q '^DEFECT retired-filename' "$RUNNER_TEMP/launcher-currency.out"; then retired=1; fi
+          stale=0
+          if grep -q '^DEFECT stale-version' "$RUNNER_TEMP/launcher-currency.out"; then stale=1; fi
+
+          if [ "$retired" -eq 1 ]; then
+            # ⚠ Do NOT name the retired filename literally here. This workflow
+            # is part of the caller's scanned tree, so the gate reads its own
+            # error message and reports it as a defect -- measured: two
+            # defects on this file, from a comment and from this very echo.
+            # Nothing is lost by staying general: the gate has already printed
+            # both the offending file:line and its own cure text above.
+            echo "::error::This repository names the retired .a2ml spelling of the launcher standard, deleted upstream on 2026-09-22 (standards#952). The offending file:line and the cure are printed above."
+            exit 1
+          fi
+
+          if [ "$stale" -eq 1 ]; then
+            echo "::warning::This repository cites a launcher-standard version that is no longer current. NOT blocking, by policy (standards#991): the expected version moves with the standard, so a correct citation goes stale with no action of yours. Refresh it when convenient."
+          fi
+
+          # Any other non-zero rc is the gate failing in a way this wrapper does not
+          # classify; fail rather than guess.
+          if [ "$rc" -ne 0 ] && [ "$retired" -eq 0 ] && [ "$stale" -eq 0 ]; then
+            echo "::error::check-launcher-standard-currency exited $rc but emitted no recognised DEFECT line. Failing closed."
+            exit 1
+          fi
 
   wellknown:
     name: Well-Known (RFC 9116 + RSR)
@@ -1099,22 +1173,22 @@ jobs:
           # governance jobs on every PR estate-wide. github.sha resolves to the
           # same merge commit but is always fetchable.
           ref: ${{ github.sha }}
-      - name: Checkout standards for the duplicate-key check
+      - name: Checkout the pinned Standards policy helpers
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: 317101e03b8fe642589498f4bdb84541ab466062
           path: .standards-dupkey
           sparse-checkout: |
             scripts/check-workflow-duplicate-keys.sh
-            scripts/update-actions-lock.sh
           sparse-checkout-cone-mode: false
-        # ⚠ Not fatal if the file is absent. This checkout is pinned to
-        # standards@main, so during a rename of the script the fetch finds
-        # nothing — the new name does not exist on main until the renaming pull
-        # request merges. Without this, the RENAME ITSELF fails the linter, on
-        # the one pull request that cannot possibly be at fault. See the
-        # fallback in the next step.
+        # ⚠ Not fatal if a file is absent, and the next step names precisely
+        # which one was missing. Formerly this followed `main`, so a rename of
+        # any helper failed the linter on the one pull request that could not
+        # possibly be at fault — the new name does not exist on main until that
+        # very PR merges. An immutable pin removes the race entirely: the names
+        # at this SHA are fixed. The self-lint fallback in the next step still
+        # covers standards' own tree, where a rename lands before the bump.
         continue-on-error: true
 
       - name: Duplicate YAML keys in workflows
@@ -1143,20 +1217,9 @@ jobs:
             exit 1
           fi
           cp "$SCRIPT" "$RUNNER_TEMP/dupkeys.sh"
-          # The lockfile gate below runs in a consumer checkout, where the
-          # standards helper is not present. Preserve the canonical helper
-          # before removing this sparse standards checkout.
-          LOCK_SCRIPT=".standards-dupkey/scripts/update-actions-lock.sh"
-          if [ ! -f "$LOCK_SCRIPT" ] && [ -f scripts/update-actions-lock.sh ]; then
-            LOCK_SCRIPT="scripts/update-actions-lock.sh"
-            echo "Using this repository's own actions-lock verifier (standards self-lint)."
-          fi
-          if [ ! -f "$LOCK_SCRIPT" ]; then
-            echo "::error::actions-lock verifier not found — neither fetched from" \
-                 "standards@main nor present locally."
-            exit 1
-          fi
-          cp "$LOCK_SCRIPT" "$RUNNER_TEMP/update-actions-lock.sh"
+          # NOTE: the actions-lock gate used to be staged here too. It is its
+          # own job now (`actions-lock-verify`, its own required context per
+          # the 2026-09-02 regularisation spec §6.2) — see that job below.
           rm -rf .standards-dupkey
           bash "$RUNNER_TEMP/dupkeys.sh" .github/workflows
 
@@ -1188,40 +1251,9 @@ jobs:
           done
           [ $failed -eq 1 ] && { echo "Add SPDX header + permissions:"; exit 1; }
           echo "All workflows have SPDX headers + permissions"
-      - name: Check locked or SHA-pinned actions
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ -f .github/workflows/actions.lock ]; then
-            # actions.lock is the authoritative immutable resolution for both
-            # direct actions and their transitive dependencies. Do not also
-            # rewrite direct refs to raw SHAs: gh actions-lock omits refs that
-            # no tag or branch contains, and GitHub then rejects the workflow
-            # at startup. Measured in oikosbot PR #78 on 2026-08-29: five
-            # previously executable workflows became startup_failure after the
-            # redundant direct-SHA conversion; restoring their locked version
-            # refs made GitHub's native resolver accept them again.
-            gh extension install github/gh-actions-lock
-            bash "$RUNNER_TEMP/update-actions-lock.sh" --verify-local
-            echo "Immutable direct and transitive lockfile coverage verified"
-          else
-            unpinned=$(grep -rnE --include='*.yml' --include='*.yaml' \
-              "^[[:space:]]+uses:" .github/workflows/ | \
-              grep -v "@[a-f0-9]\{40\}" | \
-              grep -v "uses: \./\|uses: docker://\|uses: actions/github-script\|uses: hyperpolymath/standards/" || true)
-            if [ -n "$unpinned" ]; then
-              echo "ERROR: no .github/workflows/actions.lock in THIS TREE, and these refs are not SHA-pinned."
-            echo "  Prefer \`gh actions-lock\` — it also locks the transitive dependencies"
-            echo "  of composite actions, which an inline SHA cannot express."
-            echo "  Do NOT do both: gh actions-lock refuses a ref no tag or branch contains,"
-            echo "  so inline pinning REMOVES actions from the lockfile."
-              echo "$unpinned"
-              exit 1
-            fi
-            echo "All actions are SHA-pinned"
-          fi
-      # The step above proves a pin has the right SHAPE. It cannot prove the
-      # SHA EXISTS — a fabricated 40-hex string passes it. Measured 2026-07-28:
+      # The actions-lock-verify job proves a pin has the right SHAPE. It cannot
+      # prove the SHA EXISTS — a fabricated 40-hex string passes it.
+      # Measured 2026-07-28:
       # 112 of 613 unique estate pins (18%) do not resolve, in 876 committed
       # files. An unresolvable `uses:` yields NO check run, so those repos look
       # green while the job never ran. This step closes that gap.
@@ -1229,7 +1261,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          # Immutable pin, for the same reason as the policy-helper checkout
+          # above: following `main` lets one standards push change the
+          # behaviour of every already-pinned caller with no review.
+          ref: 317101e03b8fe642589498f4bdb84541ab466062
           path: .standards-checkout
           persist-credentials: false
           sparse-checkout: |
@@ -1251,6 +1286,136 @@ jobs:
             echo "ERROR: Duplicate CodeQL workflows found"; exit 1
           fi
           echo "No critical duplicates found"
+
+  actions-lock-verify:
+    name: Actions lockfile verify
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+      - name: Checkout standards for the lock gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          # ⚠ ENFORCED, no longer a request: scripts/check-lock-gate-pin-freshness.sh
+          # fails Self Test unless this commit already contains everything on
+          # main across the sparse-checkout list below. Change one of those
+          # files and the NEXT pull request must bump this line — it cannot be
+          # this PR's own merge commit, which does not exist yet, so the pin is
+          # one change behind by construction and that is the intended shape.
+          # Pinned to an immutable commit for the same reason as the dupkey
+          # helpers in workflow-lint: following `main` would let an edit in
+          # standards change the verdict of every already-pinned caller with no
+          # review in their repositories. This pin is invisible to the caller's
+          # `uses:` ref and to actions.lock — it is a third, independent pin,
+          # which is precisely how it went stale across standards#946.
+          ref: 9c256b67486b4b30c757730e1b65b2c2d2af935b
+          path: .standards-lock
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/check-actions-lock-gate.sh
+            scripts/update-actions-lock.sh
+            .machine_readable/lock-allow.txt
+          sparse-checkout-cone-mode: false
+      - name: Check locked or SHA-pinned actions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # Stage the gate, the verifier and the exemption ledger. When THIS
+          # repository is standards, its own working tree already holds all
+          # three (self-lint); every other caller uses the pinned checkout.
+          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
+            SRC=scripts
+            LEDGERSRC=.machine_readable
+            echo "Using this repository's own gate + verifier + ledger (standards self-lint)."
+          else
+            SRC=.standards-lock/scripts
+            LEDGERSRC=.standards-lock/.machine_readable
+          fi
+          for f in check-actions-lock-gate.sh update-actions-lock.sh; do
+            if [ ! -f "$SRC/$f" ]; then
+              echo "::error::actions-lock gate: $f not found in $SRC (pinned standards checkout failed?)"
+              exit 1
+            fi
+            cp "$SRC/$f" "$RUNNER_TEMP/$f"
+          done
+          # A MISSING ledger must not silently exempt everyone, nor silently
+          # exempt no one. Stage an empty file and let the gate below print
+          # the denominator it actually read — a skip is not a pass.
+          if [ -f "$LEDGERSRC/lock-allow.txt" ]; then
+            cp "$LEDGERSRC/lock-allow.txt" "$RUNNER_TEMP/lock-allow.txt"
+          else
+            echo "::warning::actions-lock exemption ledger not found; treating it as EMPTY (no repo is exempt)."
+            : > "$RUNNER_TEMP/lock-allow.txt"
+          fi
+          rm -rf .standards-lock
+
+          # ONE implementation of the lock/pin predicate, not two.
+          #
+          # The gate used to live inside workflow-lint with its own inline copy
+          # of the logic. That copy matched `^[[:space:]]+uses:` — with no
+          # `-?` — so it never saw `- uses: foo@v1`, the commonest step form,
+          # and its green was therefore partly vacuous.
+          # scripts/check-actions-lock-gate.sh uses
+          # `^[[:space:]]+-?[[:space:]]*uses:` and is the tested implementation
+          # (scripts/tests/check-actions-lock-gate-test.sh, 11/11).
+          #
+          # actions.lock is the authoritative immutable resolution for both
+          # direct actions and their transitive dependencies. Do not also
+          # rewrite direct refs to raw SHAs: gh actions-lock omits refs that
+          # no tag or branch contains, and GitHub then rejects the workflow
+          # at startup. Measured in oikosbot PR #78 on 2026-08-29: five
+          # previously executable workflows became startup_failure after the
+          # redundant direct-SHA conversion; restoring their locked version
+          # refs made GitHub's native resolver accept them again.
+          if [ -f .github/workflows/actions.lock ]; then
+            gh extension install github/gh-actions-lock
+          fi
+
+          # The gate delegates lockfile verification to the authoritative
+          # verifier, staged into RUNNER_TEMP above.
+          export ACTIONS_LOCK_VERIFIER="$RUNNER_TEMP/update-actions-lock.sh"
+          bash "$RUNNER_TEMP/check-actions-lock-gate.sh"
+          rc=$?
+
+          # Shrink-only exemption ledger (.machine_readable/lock-allow.txt in
+          # standards, guarded by scripts/check-exemption-ratchet.sh so it can
+          # never grow without a `Ratchet-exception` trailer).
+          #
+          # Why a ledger and not a later date: the gate compares `date -u +%F`
+          # against ENFORCE_ACTIONS_LOCK_FROM at RUNTIME, inside an artefact
+          # that callers have already pinned by SHA. A date therefore fires
+          # simultaneously across every bumped caller with no human action and
+          # cannot be moved without re-bumping every pin. Measured 2026-09-22
+          # (complete n=368 census of governance callers, `gh api` on default
+          # branches): 200 carry actions.lock, 163 do not, 5 have no workflows
+          # directory. The ledger makes that 163 an explicit, shrinking debt
+          # instead of a cliff.
+          total=$(grep -cve '^[[:space:]]*$' -e '^[[:space:]]*#' "$RUNNER_TEMP/lock-allow.txt" || true)
+          : "${total:=0}"
+          # The ledger excuses missing-lock debt ONLY (gate exit 3: lockless,
+          # every ref pinned, grace window closed). Exit 1 is a LIVE
+          # VIOLATION — unpinned refs or a verifier-rejected lock — and exit
+          # 2 is infrastructure failure; neither is ledgerable, so `-ne 0`
+          # here would wave real findings through with the debt.
+          if [ "$rc" -eq 3 ] && grep -qxF "$GITHUB_REPOSITORY" "$RUNNER_TEMP/lock-allow.txt"; then
+            echo "::notice::actions-lock debt is LEDGERED for $GITHUB_REPOSITORY (missing-lock only, gate exit 3)."
+            echo "lock debt: $GITHUB_REPOSITORY is 1 of $total ledgered repositories."
+            echo "This exemption is shrink-only. Run scripts/update-actions-lock.sh, commit"
+            echo "the lockfile, and delete this repository's line from"
+            echo ".machine_readable/lock-allow.txt in hyperpolymath/standards."
+            exit 0
+          fi
+          # Never a silent pass: state the denominator even when clean.
+          echo "lock debt: $total ledgered repositories; $GITHUB_REPOSITORY is NOT among them."
+          exit "$rc"
 
   trusted-base:
     name: Trusted-base reduction policy

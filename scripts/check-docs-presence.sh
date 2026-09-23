@@ -24,7 +24,22 @@
 # default; GitHub-required community-health files stay Markdown):
 #   README.adoc | README.md
 #   LICENSE | LICENSE.txt | LICENSE.md
-#   CONTRIBUTING.md | CONTRIBUTING.adoc | 3-practice/CONTRIBUTING.adoc
+#   CONTRIBUTING.md | CONTRIBUTING.adoc
+#     | .github/CONTRIBUTING.md | .github/CONTRIBUTING.adoc
+#     | docs/CONTRIBUTING.md    | docs/CONTRIBUTING.adoc
+#     | 3-practice/CONTRIBUTING.adoc
+#
+# .github/ and docs/ are accepted because GitHub itself auto-discovers a
+# community-health file in either location, and repos in this estate have been
+# deliberately relocating theirs there (launch-scaffolder d426ea4d: "the estate
+# canonical location is .github/CONTRIBUTING.md, which GitHub auto-discovers").
+# Before this change the gate asked "is there a CONTRIBUTING at the repo root?"
+# while its consumers had been told to answer "is there a CONTRIBUTING GitHub
+# can find?" -- a guard asking a different question than its consumer. A census
+# of 516 local clones on 2026-09-22 found 19 repos reported missing that in fact
+# carry the file under .github/ or docs/; 94 are genuinely missing it and are
+# unaffected by this change. This strictly widens WHERE the gate looks; it does
+# not weaken WHAT it asks.
 #
 # CONTRIBUTING.adoc at the repo root is accepted because the estate policy named
 # above makes AsciiDoc the default, and it is what the estate actually uses:
@@ -75,7 +90,7 @@ if [ ! -d "$ROOT" ]; then
   exit 1
 fi
 
-# have <name>... -> 0 if any of the candidate filenames exists at the root.
+# have <path>... -> 0 if any of the candidate paths exists, relative to the root.
 have() {
   local f
   for f in "$@"; do
@@ -90,7 +105,10 @@ grace_missing=""
 have README.adoc README.md      || blocking_missing="$blocking_missing README"
 have LICENSE LICENSE.txt LICENSE.md || blocking_missing="$blocking_missing LICENSE"
 
-if ! have CONTRIBUTING.md CONTRIBUTING.adoc 3-practice/CONTRIBUTING.adoc; then
+if ! have CONTRIBUTING.md CONTRIBUTING.adoc \
+          .github/CONTRIBUTING.md .github/CONTRIBUTING.adoc \
+          docs/CONTRIBUTING.md docs/CONTRIBUTING.adoc \
+          3-practice/CONTRIBUTING.adoc; then
   # String comparison is sound here: YYYY-MM-DD sorts chronologically, and both
   # operands are format-validated above.
   if [[ "$TODAY" < "$ENFORCE_CONTRIBUTING_FROM" ]]; then
@@ -111,7 +129,12 @@ if [ -n "$blocking_missing" ]; then
   echo "Required at the repository root (either extension where two are listed):"
   echo "  README.adoc      (or README.md)"
   echo "  LICENSE          (or LICENSE.txt / LICENSE.md)"
-  echo "  CONTRIBUTING.md  (or 3-practice/CONTRIBUTING.adoc)"
+  echo
+  echo "CONTRIBUTING is accepted at any location GitHub auto-discovers:"
+  echo "  CONTRIBUTING.md          (or CONTRIBUTING.adoc)"
+  echo "  .github/CONTRIBUTING.md  (or .github/CONTRIBUTING.adoc)"
+  echo "  docs/CONTRIBUTING.md     (or docs/CONTRIBUTING.adoc)"
+  echo "  3-practice/CONTRIBUTING.adoc"
   echo
   echo "Estate policy: docs are AsciiDoc by default; see hyperpolymath/standards."
   exit 1

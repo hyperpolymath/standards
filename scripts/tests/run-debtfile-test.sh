@@ -34,8 +34,9 @@ entry() { # entry <probe> <count> <ceiling> [accepted-until]
 - ceiling: $3
 - severity: high
 - policy: remediable
+- taxonomy-choice: non-default
 - taxonomy-default-arm: adapt-proven-idris2-test
-- taxonomy-selected-arm: write-local-test
+- taxonomy-non-default-arm: write-local-test
 - taxonomy-departure-reason: the host API is not supported by the proven suite
 - accepted-until: ${4:-2030-01-01}
 EOF
@@ -80,7 +81,7 @@ bash "$SCRIPT" --write Debtfile.a2ml >/dev/null 2>&1 || true
 if grep -q '^- ceiling: 2$' Debtfile.a2ml &&
    grep -q '^- count: 2$' Debtfile.a2ml &&
    grep -q '^- taxonomy-default-arm: adapt-proven-idris2-test$' Debtfile.a2ml &&
-   grep -q '^- taxonomy-selected-arm: write-local-test$' Debtfile.a2ml &&
+   grep -q '^- taxonomy-non-default-arm: write-local-test$' Debtfile.a2ml &&
    grep -q '^- taxonomy-departure-reason: the host API is not supported by the proven suite$' Debtfile.a2ml; then
   pass=$((pass+1)); echo "  ok    --write updates measurements and preserves taxonomy-choice fields"
 else

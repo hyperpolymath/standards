@@ -63,14 +63,10 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 # quietly widen to cover an accident. An entry that stops being used is
 # reported as stale, so it cannot rot either.
 EXPECTED_ABSENT=(
-  # Estate doctrine is bun-only; deno is banned. Keying it would make a
-  # BANNED runtime a required lockfile key for every caller of
-  # governance-reusable.yml. The cure is to remove the consumer -- port the
-  # governance scripts to bun -- not to satisfy it.
-  "denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed"
-  # A2ML is dead. security-gate-pr-target.yml still calls its
-  # secrets-check-action; locking it in would connect new machinery to it.
-  "hyperpolymath/a2ml-ecosystem@f7a40a4d5cc82b2e73f861119baa6818d77a448d"
+  # Empty: the denoland/setup-deno exception was removed 2026-09-22 after
+  # the last consumer went away (the validator itself reported it stale).
+  # Estate doctrine is still bun-only; if a deno ref ever returns, the
+  # cure is to remove the consumer, not to re-add an exception.
 )
 
 if [ ! -f "$LOCKFILE" ]; then
@@ -157,7 +153,7 @@ for ref in "${RAW[@]}"; do
   norm="$(printf '%s/%s@%s' "$owner" "$repo" "$sha" | tr '[:upper:]' '[:lower:]')"
 
   skip=0
-  for ex in "${EXPECTED_ABSENT[@]}"; do
+  for ex in ${EXPECTED_ABSENT[@]+"${EXPECTED_ABSENT[@]}"}; do
     ex_lc="$(printf '%s' "$ex" | tr '[:upper:]' '[:lower:]')"
     if [ "$norm" = "$ex_lc" ]; then
       SEEN_ABSENT+=("$ex_lc")
@@ -177,7 +173,7 @@ done
 
 # A doctrine exception that is no longer used must be removed, or the list
 # becomes a place where real coverage gaps can hide.
-for ex in "${EXPECTED_ABSENT[@]}"; do
+for ex in ${EXPECTED_ABSENT[@]+"${EXPECTED_ABSENT[@]}"}; do
   ex_lc="$(printf '%s' "$ex" | tr '[:upper:]' '[:lower:]')"
   found=0
   for s in ${SEEN_ABSENT[@]+"${SEEN_ABSENT[@]}"}; do

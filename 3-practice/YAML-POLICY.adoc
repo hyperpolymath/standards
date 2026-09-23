@@ -1,0 +1,334 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Hyperpolymath YAML, KYAML and yq Policy
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toc-placement: preamble
+
+Canonical policy for how YAML is *read*, *written* and *authored* across all
+hyperpolymath and metadatastician repositories.
+
+Ruled by the owner on 2026-09-22. This document distinguishes sharply between
+rules that are *in force now* and rules that are *sequenced behind a proof*.
+A rule that is not yet in force must not be cited by a gate, and must not be
+described anywhere as though it were settled.
+
+NOTE: The estate's recurring failure is not the absence of rules. It is rules
+with no tool behind them — see `TRUST-DEFAULTS-POLICY.adoc` and the standing
+"a default is not a gate" finding. Every rule below states explicitly whether
+it is enforceable today, and by what.
+
+== 0. The measurement this rests on
+
+Taken 2026-09-22 over `/home/hyperpolymath/developer` at depth 6, excluding
+`node_modules`, `target`, `.git` and `vendor`:
+
+[cols="6,2,8",options="header"]
+|===
+| Population | Files | Who writes them
+
+| `.github/workflows/**`
+| 9,261
+| *Bots.* Dependabot opens PRs that write plain YAML; `gh actions-lock`
+  rewrites `uses:` lines. The estate is not the sole author.
+
+| `.github/**` excluding workflows
+| 11,238
+| *The estate.* Mostly composite `action.yml`, plus `dependabot.yml` and
+  issue templates. Stable, hand-authored.
+
+| Everything else
+| 2,700
+| *The estate.* `.machine_readable/` descriptors, protocol and config files.
+
+| *Total*
+| *23,199*
+|
+|===
+
+The split between *bot-written* and *estate-written* YAML is the single fact
+that shapes this policy. A style rule imposed on a population your own
+automation rewrites is violated on a schedule, by you, forever.
+
+Tooling present on the estate workstation at the time of ruling: `yq` v4.53.3
+(mikefarah), `actionlint`, `kubectl`.
+
+== 1. Rule Y-1 — gates READ YAML with `yq`, never with `grep`
+
+*Status: IN FORCE. Enforceable today. `yq` is already installed.*
+
+Any gate, check script, audit or census that needs a value out of a YAML file
+MUST obtain it with `yq`. Reading YAML with `grep`, `sed`, `awk` or a regex is
+forbidden in gate code.
+
+.Normative
+[source,bash]
+----
+# CORRECT — ask the parser
+ref="$(yq -r '.jobs.build.steps[0].uses // ""' "$wf")"
+
+# FORBIDDEN in gate code — a grep impersonating a parser
+ref="$(grep -m1 'uses:' "$wf" | sed 's/.*uses: *//')"
+----
+
+=== 1.1 Why this rule exists
+
+This is not hygiene. It is a measured, recurring, estate-wide defect class:
+*a grep-read key is not what the parser sees.* Recorded instances include —
+
+* A `name`/`uuid` pair nested under a `[package]` table read correctly by grep
+  while the real loader returned `name=nothing`. Three candidate blockers were
+  found by reading key names; the actual blocker needed the loader.
+* `gh actions-lock`'s extractor sees *step-level* `uses:` only, so it
+  classified every *job-level* reusable-workflow ref as a fatal orphan pin.
+  71 such refs were added across 14 branches on the strength of that reading,
+  turning a green repository red.
+* Allowlist globs keyed to a path depth that a sparse checkout had changed,
+  so the launcher gate found 16 defects in its own source.
+
+In each case a line-oriented reader gave a confident, well-formed answer about
+a structure it could not actually see. `yq` cannot make that class of error
+because it resolves the document, not the text.
+
+=== 1.2 What this rule does NOT cover
+
+Y-1 governs *reading in gate code*. It does not govern:
+
+* *Human inspection.* `grep` at a terminal to find a file is fine.
+* *Writing.* See Y-2 — writing is explicitly NOT yet covered.
+* *Existence checks.* `test -f`, and "does this file mention X at all" as a
+  cheap pre-filter before a `yq` read, remain acceptable — provided the
+  *verdict* comes from `yq`. A pre-filter that decides the outcome is a grep
+  gate wearing a costume.
+
+=== 1.3 A landed exemplar
+
+`cicd-suite` PR #32 (2026-09-22) is the first gate test written to this rule.
+To prove that a composite action's embedded shell script behaves correctly, it
+extracts that script with
+
+[source,bash]
+----
+yq -r '.runs.steps[0].run' "actions/<name>/action.yml"
+----
+
+and executes the result. A `grep`/`sed` extraction would have had to guess the
+block scalar's indentation, and would have silently produced a *different*
+script from the one GitHub runs — which is precisely the class of error Y-1
+exists to prevent. The defect that test was written for is itself of this
+family: the gate's behaviour depended on a shell flag (`-e`) supplied by the
+*harness* and absent from the file, so reading the file alone gave a confident
+verdict in the wrong direction.
+
+== 2. Rule Y-2 — `yq` for WRITING is deferred behind a comment-preservation proof
+
+*Status: NOT IN FORCE. Sequenced. Do not cite this as a rule.*
+
+The owner's ruling is "go for Y-1 now, Y-2 next, and sort the proof as part of
+this work". Y-2 becomes policy when, and only when, the proof below passes.
+
+=== 2.1 The obstacle: the pin comment is load-bearing
+
+The estate pins actions by full commit SHA with the human-readable tag in a
+trailing comment:
+
+[source,yaml]
+----
+uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+----
+
+That comment is not decoration. Humans read it to know what the SHA *is* —
+a bare 40-hex string is unreviewable — and it is the only place the tag
+survives, because a tag can be moved while a commit SHA cannot. Losing or
+relocating these comments across 9,261 workflows would be a silent,
+large-scale degradation that no parse check would catch: the file still
+parses, still runs, and is no longer reviewable.
+
+=== 2.2 The proof obligation
+
+Before Y-2 is in force, demonstrate on a representative corpus that a `yq`
+read-modify-write round trip:
+
+. preserves every comment,
+. preserves each comment's *association* with its line, not merely its
+  presence somewhere in the file,
+. is idempotent — a second round trip is a no-op (`cmp` clean), and
+. is verified by a *mutant*: deliberately drop one comment and confirm the
+  check goes red naming the right file. A passing check proves nothing until
+  a mutant dies.
+
+Until that proof lands, workflow files are written by the tool that owns them
+(`gh actions-lock`, Dependabot) or by hand. Do not introduce blind `yq -i`
+into gate or migration code.
+
+== 3. Rule Y-3 — KYAML as the target authoring dialect, adopted in sequence
+
+*Status: SEQUENCED. Scope NOT YET DECIDED — the probe in §5 decides it.*
+
+=== 3.1 What KYAML is
+
+KYAML is a strict subset of YAML defined by Kubernetes KEP-5295 and shipped in
+`kubectl` from Kubernetes 1.34 (alpha, `KUBECTL_KYAML=true`; beta and default
+from 1.35). Its rules:
+
+* `{}` for every map and `[]` for every list — flow style throughout;
+* every string *value* double-quoted; keys unquoted where unambiguous;
+* trailing commas permitted;
+* two-space indentation;
+* a `---` document header.
+
+The decisive property is that *KYAML is a subset of YAML, not a new format*.
+KEP-5295: "Since KYAML is a subset of YAML, it should always be accepted as
+input." Adopting it therefore requires **no new parser anywhere** — every
+existing reader, including GitHub's, already handles the syntax in principle.
+
+=== 3.2 Why it is attractive here
+
+Flow style with quoted values removes YAML's implicit typing traps at the
+source rather than defending against them per-consumer:
+
+* the Norway problem — bare `no` coercing to boolean `false`;
+* sexagesimal and octal coercion of unquoted numerics;
+* `1.0` becoming a float and losing its trailing zero as a version string;
+* indentation ambiguity, which is what makes YAML hostile to templating and
+  text patching.
+
+For an estate whose configuration is machine-generated and machine-patched at
+scale, non-whitespace-sensitivity is a real structural win, not a style
+preference.
+
+=== 3.3 The three things that must be true before any mandate
+
+[cols="1,7",options="header"]
+|===
+| # | Precondition
+
+| 1
+| *GitHub Actions must be proven to parse KYAML workflows.* It should, because
+  flow style is valid YAML — but "the parser will surely accept it" is exactly
+  how workflows in this estate die at startup with `jobs=0`, which is a
+  *startup death*, not a failing job, and so does not show up as an honest red
+  square. This must be probed, not assumed. See §5 step 1.
+
+| 2
+| *A formatter or linter must exist.* There is none outside `kubectl -o kyaml`,
+  which emits Kubernetes resources, not arbitrary YAML. A style rule with no
+  tool behind it cannot be gated — only asserted — and an unenforceable rule
+  in this estate has a known outcome.
+
+| 3
+| *Comment handling must be proven.* KEP-5295 is explicit that KYAML *allows*
+  comments when hand-authored, but that automated reformatting is lossy:
+  go-yaml "does not always handle comments properly", so comments may be
+  "formatted wrongly, or lost entirely". This is the *same* obstacle as Y-2 §2.1
+  — see §4.
+|===
+
+=== 3.4 Scope is deliberately undecided
+
+The owner considered mandating KYAML estate-wide including workflows, and
+chose instead to *probe workflows first and decide after*, with estate-wide
+adoption booked as ordered issues. Accordingly this document does **not**
+mandate KYAML anywhere yet. Nothing in the estate is out of compliance with
+Y-3 today, because Y-3 imposes nothing today.
+
+== 4. One proof obligation sits under two rules
+
+The comment-preservation problem in §2.2 and precondition 3 in §3.3 are the
+same problem: *an automated rewrite of YAML risks silently destroying
+semantically load-bearing comments.* It does not matter whether the rewriter
+is `yq -i` or a KYAML formatter.
+
+Therefore the proof is written **once**, against the estate's real pin-comment
+corpus, and satisfies both rules. Whichever of Y-2 or Y-3 reaches it first
+pays for it; the other inherits it. Do not commission two proofs.
+
+This also fixes the acceptance criterion for both: *parse-clean is not the
+bar.* A migration that produces valid, running, comment-stripped workflows has
+failed. The bar is comment-preserving and idempotent, with a dead mutant.
+
+== 5. Adoption order
+
+Each step is a separate issue. The order is a dependency order, not a
+preference: no step may start before its predecessor has landed evidence.
+
+These issues are now booked, in this dependency order:
+
+* Step 1 — `hyperpolymath/standards#1020` — *closed, gate met.* GitHub Actions
+  does parse a KYAML workflow: a two-arm same-commit probe gave `jobs = 1` and
+  an executed-step marker on both the KYAML arm and its plain-YAML control.
+  This settles the *parser* dimension only.
+* Step 2 — `hyperpolymath/standards#1021` — comment-preservation proof.
+* Step 3 — `hyperpolymath/standards#1022` — formatter/linter for arbitrary YAML.
+* Step 4 — `hyperpolymath/standards#1023` — owner ruling on scope.
+* Step 5 — `hyperpolymath/standards#1024` — migrate non-bot estate YAML.
+* Step 6 — `hyperpolymath/standards#1025` — workflows, if step 4 rules them in.
+
+Step 1 closing does *not* advance the scope question. Step 4 remains an owner
+ruling and §5 explicitly forbids inferring scope from the probe.
+
+[cols="1,6,6",options="header"]
+|===
+| Step | Work | Gate to pass
+
+| 1
+| Probe whether GitHub Actions parses a KYAML workflow.
+| One real workflow converted to KYAML on a scratch branch spawns `jobs >= 1`
+  and completes. `jobs=0` is a *failure of the probe*, not a flaky run.
+
+| 2
+| Comment-preservation proof (§4), shared by Y-2 and Y-3.
+| Round trip preserves every comment and its line association; idempotent
+  under `cmp`; a dropped-comment mutant dies.
+
+| 3
+| A KYAML formatter/linter for arbitrary YAML, or an adopted third-party one.
+| Formats and *checks* a file without `kubectl`; passes step 2's proof.
+
+| 4
+| Decide KYAML scope on the evidence from steps 1–3.
+| An owner ruling recorded as a decision row. Not an inference from the probe.
+
+| 5
+| Migrate estate-authored, non-bot YAML (the 11,238 + 2,700 populations).
+| Gate green per step 3; no comment loss; reversible in one revert.
+
+| 6
+| Workflows (9,261) — only if step 4 ruled them in scope.
+| Additionally: Dependabot and `gh actions-lock` either emit KYAML or their
+  drift is explicitly accepted in writing. Unresolved, this step does not start.
+|===
+
+== 6. What this document does not rule
+
+* It does not ban YAML. KYAML *is* YAML.
+* It does not require reformatting anything today.
+* It does not apply to lockfiles (`pnpm-lock.yaml` and friends), which are
+  tool-owned artefacts and must never be hand-edited or reformatted.
+* It does not change `LANGUAGE-POLICY.adoc`. YAML is a data format here, not a
+  programming language, and no language ranking is affected.
+
+== 7. Sources
+
+* KEP-5295, KYAML — https://www.kubernetes.dev/resources/keps/5295/
+* KYAML reference — https://www.kubernetes.io/docs/reference/encodings/kyaml/
+* "How to Pretty-Print Your Kubernetes YAML as KYAML and Why You'd Want To" —
+  https://kubernetes.io/blog/2026/08/11/how-to-pretty-print-kubernetes-yaml-as-kyaml/
+
+== 8. Change log
+
+[cols="2,2,8",options="header"]
+|===
+| Date | Who | Change
+
+| 2026-09-22
+| Owner ruling
+| Document created. Y-1 in force. Y-2 sequenced behind the comment proof.
+  Y-3 sequenced, scope deferred to the GitHub Actions probe; estate-wide
+  adoption booked as ordered issues per §5.
+
+| 2026-09-22
+| Probe result
+| §5 step 1 discharged: GitHub Actions proven to parse KYAML
+  (standards#1020, closed). Steps 2–6 booked as #1021–#1025 in
+  dependency order and cross-referenced from §5.
+|===

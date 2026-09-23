@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # gui-error.sh — reference implementation of [error-visibility] from
-# launcher/launcher-standard.a2ml.
+# launcher/launcher-standard_praxis.deed.
 #
 # When the launcher runs in a GUI context (no TTY + DISPLAY or
 # WAYLAND_DISPLAY set), errors written only to stderr disappear: the

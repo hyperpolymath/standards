@@ -126,11 +126,16 @@ jobs:
         run: |
           set -euo pipefail
           # Exactly one JSON array of findings, each with a recognised severity.
-          # Missing/truncated output is a scanner error, never an empty clean scan.
+          # Missing/truncated output is a scanner error, never an empty clean
+          # scan: a scanner that emits nothing is indistinguishable from a
+          # crashed/truncated run, so the gate fails closed (science-ci-
+          # security-test.rb pins this too). The #741 `empty findings are
+          # valid` control tested the pre-#771 slurp accident (`[[]]` has
+          # length 1); #771's `length > 0` is the documented intent.
           if [ ! -s hypatia-findings.json ] || ! jq -e '
             type == "array" and length > 0 and all(.[];
               type == "object" and (.severity as $s |
-                ["critical", "high", "medium", "warn", "low", "info", "informational"] | index($s) != null)))
+                ["critical", "high", "medium", "warn", "low", "info", "informational"] | index($s) != null))
           ' hypatia-findings.json >/dev/null; then
             echo "::error::Hypatia did not produce a valid findings array"
             exit 2
@@ -237,7 +242,7 @@ jobs:
         # This flag only tolerates a genuine upload failure (e.g. Advanced
         # Security disabled on a private repo) once the job is actually running.
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v3
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0 (4.38.1 blocked estate-wide; nexia-list#100)
         with:
           sarif_file: hypatia.sarif
           category: hypatia

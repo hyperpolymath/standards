@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
 # resolve-desktop-tools.sh — reference implementation of the path-resolution
-# ladders declared in launcher/launcher-standard.a2ml §[resolution].
+# ladders declared in launcher/launcher-standard_praxis.deed (resolution).
 #
 # Downstream launchers SHOULD `source` this script and call
 # `hp_resolve_desktop_tools` / `hp_resolve_standard` rather than rolling
@@ -16,8 +16,9 @@
 #     whether that is fatal (e.g. missing keepopen.sh wrapper) or recoverable
 #     (e.g. missing optional verify-desktop-integrity.sh).
 #
-# The ladders mirror [resolution].desktop-tools-search and
-# [resolution].standard-search in the a2ml. They MUST stay in sync — see the
+# The ladders mirror (resolution (desktop-tools-search …)) and
+# (resolution (standard-search …)) in the deed, whose :priority integers
+# carry the order — not file position. They MUST stay in sync — see the
 # CI gate referenced in launcher/README.adoc §Sync requirement.
 
 # ---------------------------------------------------------------------------
@@ -52,18 +53,18 @@ hp_resolve_desktop_tools() {
 # ---------------------------------------------------------------------------
 # hp_resolve_standard
 #
-#   Echoes the first existing launcher-standard.a2ml found via the
-#   [resolution].standard-search ladder. Used by launch-scaffolder and any
+#   Echoes the first existing launcher-standard_praxis.deed found via the
+#   (resolution (standard-search …)) ladder. Used by launch-scaffolder and any
 #   other consumer that needs the canonical contract file.
 # ---------------------------------------------------------------------------
 hp_resolve_standard() {
     local -a candidates=(
         "${LAUNCH_SCAFFOLDER_STANDARD:-}"
-        "${HP_ESTATE_ROOT:+${HP_ESTATE_ROOT}/standards/launcher/launcher-standard.a2ml}"
-        "${XDG_DATA_HOME:-${HOME}/.local/share}/hyperpolymath/standards/launcher/launcher-standard.a2ml"
-        "/var/mnt/eclipse/repos/standards/launcher/launcher-standard.a2ml"
-        "${HOME}/developer/repos/standards/launcher/launcher-standard.a2ml"
-        "${HOME}/dev/repos/standards/launcher/launcher-standard.a2ml"
+        "${HP_ESTATE_ROOT:+${HP_ESTATE_ROOT}/standards/launcher/launcher-standard_praxis.deed}"
+        "${XDG_DATA_HOME:-${HOME}/.local/share}/hyperpolymath/standards/launcher/launcher-standard_praxis.deed"
+        "/var/mnt/eclipse/repos/standards/launcher/launcher-standard_praxis.deed"
+        "${HOME}/developer/repos/standards/launcher/launcher-standard_praxis.deed"
+        "${HOME}/dev/repos/standards/launcher/launcher-standard_praxis.deed"
     )
 
     local candidate
