@@ -19,8 +19,11 @@ SUT="$ROOT/scripts/apply-protection-floor.sh"
 [ -r "$SUT" ] || { echo "FATAL: script under test missing: $SUT"; exit 2; }
 
 PASS=0; FAIL=0
+# Record a passing assertion and print its description.
 ok()   { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
+# Record a failing assertion and print its expected and actual values.
 bad()  { FAIL=$((FAIL+1)); printf '  FAIL %s\n     expected: %s\n     actual:   %s\n' "$1" "$2" "$3"; }
+# Compare expected and actual values, then record the assertion result.
 check(){ if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "$2" "$3"; fi; }
 
 WORK="$(mktemp -d -t protfloor-test.XXXXXX)"
@@ -55,11 +58,15 @@ cat "$F"
 SHIM
 chmod 755 "$BIN/gh"
 
+# Run a script with the fixture-backed GitHub CLI shim.
 run() { GH_FIX="$FIX" PATH="$BIN:$PATH" bash "$1" "${@:2}" 2>/dev/null; }
+# Extract one repository's state from tab-separated report output.
 state() { printf '%s\n' "$1" | awk -F'\t' -v r="$2" '$1==r{print $2}'; }
+# Recreate the fixture directory and initialize an empty write log.
 reset_fix() { rm -rf "$FIX"; mkdir -p "$FIX"; : > "$FIX/PUTS.log"; }
 
-mkrepo() { # name default archived
+# Write repository metadata from a name, default branch, and archived flag.
+mkrepo() {
   printf '{"archived":%s,"default_branch":"%s"}\n' "$3" "$2" > "$FIX/repos_$(printf '%s' "$1" | tr '/' '_')"
 }
 
@@ -77,7 +84,8 @@ metadatastician/org-covered-repo
 metadatastician/org-halffloor-repo
 EOF
 
-build_fixtures() {  # $1 = "with-vault" to give the vault a complete, writable fixture set
+# Rebuild fixtures, optionally making excluded repositories fully writable.
+build_fixtures() {
   reset_fix
   # By default memory-vault gets NO fixtures at all. The D50 guard must return before any
   # read, so every missing fixture here asserts that nothing was queried.
@@ -228,7 +236,8 @@ echo "== mutants (each MUST make the suite go red, for the RIGHT reason) =="
 MUT="$ROOT/scripts/.protection-floor-mutant.tmp.sh"
 trap 'rm -rf "$WORK"; rm -f "$MUT"' EXIT
 
-mutant() { # name  sed-expr  assertion-kind  arg
+# Run a named mutation and assert the expected state change or write.
+mutant() {
   local name="$1" expr="$2" kind="$3" arg="$4" o got
   sed "$expr" "$SUT" > "$MUT"
   if ! bash -n "$MUT" 2>/dev/null; then

@@ -81,10 +81,13 @@ TMPDIR_ERR="$(mktemp -t protfloor-err.XXXXXX)"
 # Org rulesets are IDENTICAL across every repo in the org, so their bodies are fetched
 # once and cached by ruleset id rather than re-read per repo.
 ORG_CACHE="$(mktemp -d -t protfloor-org.XXXXXX)"
+# Remove the temporary error file and organization-ruleset cache.
 cleanup() { rm -f "$TMPDIR_ERR"; rm -rf "$ORG_CACHE"; }
 trap cleanup EXIT
 
+# Print a fatal error and exit with the script's refusal status.
 die() { printf 'FATAL: %s\n' "$*" >&2; exit 2; }
+# Emit one tab-separated repository status row.
 report() { printf '%s\t%s\t%s\n' "$1" "$2" "${3:-}"; }
 
 while [ $# -gt 0 ]; do
@@ -127,6 +130,7 @@ VAULTS="$(command grep -vE '^[[:space:]]*(#|$)' "$VAULT_CLASS" | tr -d ' \t')"
 TARGETS="$(command grep -vE '^[[:space:]]*(#|$)' "$REPOS_FILE" | tr -d ' \t' | sort -u)"
 [ -n "$TARGETS" ] || die "refusing to report a clean sweep over nothing: $REPOS_FILE yielded no repos"
 
+# Return success when the repository is an explicitly listed gcrypt vault.
 is_vault() {
   printf '%s\n' "$VAULTS" | command grep -qxF "$1"
 }
