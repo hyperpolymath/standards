@@ -38,6 +38,12 @@
 #   7. WRITES ARE OPT-IN: the applier reports unless `--apply` is passed.
 #   8. CREDENTIAL IS ASSERTED: an absent secret resolves to an empty string in
 #      silence; the applier must exit non-zero before enumerating anything.
+#  13. DISABLED IS NEVER SILENTLY REVIVED: the identity rule is target +
+#      conditions, so a ruleset a human switched OFF still matches it, and the
+#      canon body carries "enforcement": "active". Without a guard the next
+#      scheduled run turns it back on and says nothing. 375 branch rulesets on
+#      this estate were disabled deliberately on 2026-09-22; an applier with
+#      that shape undoes such a decision invisibly.
 #   9. BOTH OWNERS ENUMERATED: `user/repos?affiliation=owner` returns ZERO
 #      organisation repositories. metadatastician is an organisation, and a
 #      census from the user endpoint alone silently missed 212 live repos.
@@ -287,6 +293,48 @@ CTL
     bad "the injection fix dropped an input instead of rerouting it:$missing"
   fi
 fi
+# --- Property 13: a DISABLED ruleset is never silently re-enabled -----------
+# Detector, not a grep-for-a-string: it locates the guard, the PUT and the
+# default, and requires the guard to sit BEFORE the write and to leave the
+# repo alone. A test that only asserted the flag's name would still pass if
+# the guard were moved after the PUT, or made to fall through.
+disabled_guard_holds() {
+  local f="$1" lg lput lcont
+  # default must be OFF -- a guard that defaults to permissive is not a guard
+  grep -qE '^APPLY=0 .*REVIVE_DISABLED=0' "$f" || return 1
+  grep -qE '^ *--revive-disabled\)' "$f"      || return 1
+  lg=$(grep -nE '\[ "\$enf" != "active" \] && \[ "\$REVIVE_DISABLED" -eq 0 \]' "$f" | head -1 | cut -d: -f1)
+  [ -n "$lg" ] || return 1
+  lput=$(grep -nF -- '--method PUT "repos/$repo/rulesets/$id"' "$f" | head -1 | cut -d: -f1)
+  [ -n "$lput" ] || return 1
+  [ "$lg" -lt "$lput" ] || return 1
+  # the guarded arm must actually stop: a `continue` within the next 3 lines
+  lcont=$(sed -n "$((lg+1)),$((lg+3))p" "$f" | grep -c 'continue')
+  [ "$lcont" -ge 1 ] || return 1
+  return 0
+}
+
+if disabled_guard_holds "$APPLIER"; then
+  ok "a disabled ~ALL tag ruleset is reported, not PUT back to active (guard precedes the write, default off)"
+else
+  bad "the applier would PUT the canon body -- enforcement: active -- over a ruleset somebody deliberately disabled"
+fi
+
+# Positive control. The detector above is worthless unless it can say NO.
+MUT_T="$(mktemp)"
+awk '/\[ "\$enf" != "active" \] && \[ "\$REVIVE_DISABLED" -eq 0 \]/{skip=4} skip>0{skip--; next} {print}' \
+  "$APPLIER" > "$MUT_T"
+if cmp -s "$MUT_T" "$APPLIER"; then
+  bad "property 13 mutant was not applied -- the awk pattern no longer matches the applier"
+elif ! bash -n "$MUT_T" 2>/dev/null; then
+  bad "property 13 mutant is not valid bash, so its red measures the parser and not the guard"
+elif disabled_guard_holds "$MUT_T"; then
+  bad "property 13 detector passes an applier with the guard REMOVED -- it asserts nothing"
+else
+  ok "property 13 mutant killed: with the guard stripped the detector refuses"
+fi
+rm -f "$MUT_T"
+
 echo "---"
 echo "passed=$pass failed=$fail"
 [ "$fail" -eq 0 ]

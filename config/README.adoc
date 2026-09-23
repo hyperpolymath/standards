@@ -25,9 +25,10 @@ Tier rules: `docs/CICD-SIGNAL-DISCIPLINE.adoc`, section "Estate canon".
 | Which workflow *files* are 🔴 GATE per profile, and how contexts are derived.
 
 | `rulesets/gates-only.json`
-| Owner decision O6 only: a second ruleset carrying just the status-check rule
-  with a short bypass list, so AI-reviewer apps cannot merge around gates.
-  *Not applied unless O6 is ruled.*
+| Owner decision O6: a second ruleset carrying just the status-check rule with
+  a short bypass list, so AI-reviewer apps cannot merge around gates. O6 IS
+  ruled (#787 row D17); `apply-branch-gates.sh --create-gates` creates this
+  body, and fills its deliberately-empty context list.
 
 | `rulesets/Optimus-Extras.json`
 | The opt-in additive OVERLAY (owner rulings R4/R6). Carries ONLY rules that
@@ -60,6 +61,82 @@ target is `branch` and whose include list is exactly `["~DEFAULT_BRANCH"]`.
 Exactly one such ruleset must exist; zero or two is a verifier failure. The
 same rule for tags with `["~ALL"]`. The `name` field in these files is what a
 fresh POST uses; an existing ruleset is PUT by id and keeps whatever name it has.
+
+=== That rule as written is not sufficient, and both appliers now say so
+
+Two measured gaps. Neither is theoretical: each was found by running the
+applier against a live repository and reading what it selected.
+
+*1. `source_type` is the writability discriminator, and the rule omits it.*
+`repos/{owner}/{repo}/rulesets` returns the ORGANISATION's rulesets alongside
+the repository's own, and an inherited one reads back IN FULL at
+`repos/{owner}/{repo}/rulesets/{id}` — so every read succeeds and nothing warns
+you. The PUT to that same path 404s. Measured 67 times, once per
+`metadatastician` repo reached by org-level `EstateBranching` (18225024). The
+cure for an inherited ruleset lives at `/orgs/{org}/rulesets/{id}` and needs an
+`admin:org` credential; a repo token reads it and cannot write it. It is
+applied ONCE at the org, never per repo, so `apply-branch-gates.sh` reports
+*ORG-INHERITED* and stops rather than issuing 67 doomed writes.
+
+The classification is done LOCALLY, not by a server-side `select`: a filter
+whose empty result is also its success result cannot fail closed. The listing
+is projected to `[(.source_type // "MISSING"), .id]`, then split with `awk`
+— not `grep -P`, which is a GNU extension the runner may not ship. An entry
+carrying no `.source_type` is reported *UNKNOWN* and never assumed repo-level:
+writability is exactly what that field decides, and guessing wrong is a silent
+404. When a repo-level ruleset IS found alongside an inherited one, the
+inherited ids are recorded as `org_inherited=[…]` in the detail column —
+rulesets are additive, so that one still enforces beside the one being filled.
+
+*2. Two repo-level branch rulesets is the EXPECTED steady state, not an error.*
+Owner decision O6 (`hyperpolymath/standards#787` row D17) prescribes a baseline
+ruleset carrying the review and signature rules plus a *second* checks-only
+ruleset whose short bypass list is the entire point. Bypass binds a RULESET,
+never a rule, so status checks must live in their own object to have any teeth.
+A flat "zero or two is a verifier failure" would therefore make the applier
+permanently unable to maintain the shape the ruling prescribes.
+
+*SHAPE* is the discriminator: the gates ruleset is the one whose ONLY rule is
+`required_status_checks`. Name classifies nothing — the tag applier proved that
+estate-wide, where 372 blocked repos and 26 healthy ones shared one name. If
+shape does not single one out, the applier still reports *AMBIGUOUS* and
+refuses. ⚠ The LIST endpoint omits `.rules`, so this needs a by-id GET per
+candidate; that same omission is what turned every PUT into a POST in the
+2026-09-11 outage.
+
+⚠ The canon text above is unchanged on purpose. Propagating these two
+corrections into it — and into the tag side, whose identification rule has the
+identical `source_type` omission — is filed as issue #1032; the applier does
+not decide it.
+
+=== Creating the O6 checks-only ruleset
+
+`apply-branch-gates.sh` fills an existing ruleset. It creates one only under
+`--create-gates`, and then only from the committed canon body
+`rulesets/gates-only.json` (overridable with `--gates-only-file`), which is
+guarded for shape before use: target `branch`, enforcement `active`,
+`required_status_checks` as its SOLE rule, and an EMPTY context list — the
+applier is what fills that list, and a committed non-empty one would be a
+*typed* context, the one thing `gates.json` forbids. Creating branch protection
+where none exists is a policy act; O6 IS that policy, so creating THAT ONE body
+implements a ruling rather than making one.
+
+`--create-gates` fires when there is no repo-*level* branch ruleset, including
+when an org-level one is inherited. It never writes the inherited ruleset:
+adding `required_status_checks` to a ruleset with a long bypass list produces a
+gate that is indistinguishable from a real one in every summary view and binds
+nobody on that list.
+
+`--no-integration-bypass` strips every `Integration` actor from the CREATED
+body, so the AI actors are genuinely held to the gates. It requires
+`--create-gates` — the update path may not touch `bypass_actors` at all, since
+the exactness guard and the post-write DRIFT check both forbid it — and it
+refuses to leave the bypass list EMPTY. A branch ruleset with zero bypass
+actors is the shape of the 2026-09-11 tag outage, and where an org ruleset
+upstream sets `require_code_owner_review` against a CODEOWNERS the sole
+contributor cannot self-approve, it deadlocks the repository outright.
+⚠ Using it DIVERGES from the committed canon body; that divergence is tracked
+on #1032 so a later canon-conformance sweep does not silently revert it.
 
 == Two layers, no duplication
 
