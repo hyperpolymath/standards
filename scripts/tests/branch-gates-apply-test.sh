@@ -10,7 +10,7 @@
 #   nothing at all — strictly worse than having no rule, because it is
 #   indistinguishable from a working one.
 #
-#   A green suite proves nothing about that. So three of the cases below are
+#   A green suite proves nothing about that. So nine of the cases below are
 #   MUTANTS: the applier is copied, the guard under test is deliberately
 #   removed, and the suite must go RED. A mutant that survives means the
 #   corresponding control is decorative.
@@ -37,20 +37,35 @@ cat > "$BIN/gh" <<'SHIM'
 set -uo pipefail
 [ "${1:-}" = api ] || exit 0
 shift
-METHOD=GET; JQF=''; APIPATH=''
+METHOD=GET; JQF=''; APIPATH=''; INPUT=''
 while [ $# -gt 0 ]; do
   case "$1" in
     -X) shift; METHOD="$1" ;;
     --jq) shift; JQF="$1" ;;
-    --input) shift; cp "$1" "$GH_FIX/LAST_PUT.json" ;;
+    --input) shift; INPUT="$1" ;;
     --paginate|--silent) : ;;
     -*) : ;;
     *) [ -n "$APIPATH" ] || APIPATH="$1" ;;
   esac
   shift
 done
+[ -n "$INPUT" ] && cp "$INPUT" "$GH_FIX/LAST_${METHOD}.json"
 KEY=$(printf '%s' "$APIPATH" | tr '/?&=' '____')
 if [ "$METHOD" = PUT ]; then printf '%s\n' "$APIPATH" >> "$GH_FIX/PUTS.log"; echo '{}'; exit 0; fi
+if [ "$METHOD" = POST ]; then
+  printf '%s\n' "$APIPATH" >> "$GH_FIX/POSTS.log"
+  NEWID="${GH_POST_ID:-77}"
+  # Model the server, do not stub it.  A created ruleset reads back at its OWN
+  # path, so the POSTED body is written there as the fixture -- that is what
+  # makes the applier's post-create re-GET a real round trip instead of a
+  # tautology, and it is the seam GH_POST_DRIFT bends to exercise DRIFT.
+  if [ -n "$INPUT" ]; then
+    jq --argjson id "$NEWID" '.id=$id' "$INPUT" | jq "${GH_POST_DRIFT:-.}" \
+      > "$GH_FIX/$(printf '%s' "$APIPATH/$NEWID" | tr '/?&=' '____').json"
+  fi
+  printf '{"id":%s}\n' "$NEWID"
+  exit 0
+fi
 F="$GH_FIX/$KEY.json"
 [ -r "$F" ] || exit 1
 if [ -n "$JQF" ]; then jq -r "$JQF" "$F"; else cat "$F"; fi
@@ -71,7 +86,7 @@ G
 
 mkfix() { printf '%s' "$2" > "$FIX/$(printf '%s' "$1" | tr '/?&=' '____').json"; }
 
-reset_fix() { rm -f "$FIX"/*.json; cp "$GATES" "$WORK/gates.json"; : > "$FIX/PUTS.log"; }
+reset_fix() { rm -f "$FIX"/*.json; cp "$GATES" "$WORK/gates.json"; : > "$FIX/PUTS.log"; : > "$FIX/POSTS.log"; }
 
 run_applier() {           # run_applier <repo> [extra flags...]
   local repo="$1"; shift
@@ -542,6 +557,366 @@ if ! cmp -s "$MUTF" "$APPLIER" && bash -n "$MUTF" 2>/dev/null; then
   fi
 else
   bad "mutant F was not applied — the sed pattern no longer matches the applier"
+fi
+
+# =========================================================================
+#  THE CREATE PATH (--create-gates / --no-integration-bypass)
+#  Everything above this line exercises the UPDATE path against a ruleset
+#  that already exists.  None of it touches the code that BRINGS ONE INTO
+#  BEING, which is the riskier half: an update can only widen or narrow an
+#  object the owner already chose to have, while a create writes a NEW
+#  permanent gate onto a repository from a body this script supplies.
+# =========================================================================
+
+# The five fixture lines CASE 12/13/14 spell out in full, hoisted -- the create
+# cases need them ten times over and the repetition would bury the assertions.
+# Identical calls, identical helper (mkfix); nothing new is being modelled.
+fix_repo() {                      # fix_repo <repo> [job-name]
+  local r="$1" j="${2:-governance / Governance}"
+  mkfix "repos/$r" '{"default_branch":"main"}'
+  mkfix "repos/$r/contents/.github/workflows" '[{"name":"governance.yml"}]'
+  mkfix "repos/$r/contents" '[{"name":"README.md"}]'
+  mkfix "repos/$r/actions/workflows/governance.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":11}]}'
+  mkfix "repos/$r/actions/runs/11/jobs?per_page=100" "$(jq -cn --arg n "$j" '{jobs:[{name:$n}]}')"
+}
+
+# The canon checks-only body, in the shape config/rulesets/gates-only.json
+# commits: ONE rule, an EMPTY context list (this script is what fills it), and
+# a short bypass list whose existence is the entire point of a separate object.
+GO="$WORK/gates-only.json"
+cat > "$GO" <<'GOC'
+{ "name": "Gates", "target": "branch", "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "bypass_actors": [
+    { "actor_id": 5,       "actor_type": "RepositoryRole", "bypass_mode": "pull_request" },
+    { "actor_id": 1236702, "actor_type": "Integration",    "bypass_mode": "pull_request" },
+    { "actor_id": 29110,   "actor_type": "Integration",    "bypass_mode": "pull_request" } ],
+  "rules": [ { "type": "required_status_checks",
+    "parameters": { "strict_required_status_checks_policy": false,
+                    "do_not_enforce_on_create": false,
+                    "required_status_checks": [] } } ] }
+GOC
+
+# A body carrying a HAND-TYPED context.  gates.json's whole doctrine is that a
+# context is derived from an emitted check-run name and never typed, so this
+# body must be refused even though it is otherwise well-formed.
+GO_TYPED="$WORK/gates-only-typed.json"
+jq '.rules[0].parameters.required_status_checks = [{"context":"CI / typed-by-hand","integration_id":15368}]' \
+  "$GO" > "$GO_TYPED"
+
+# A body whose bypass list is Integrations ONLY.  Stripping them empties it.
+GO_INTONLY="$WORK/gates-only-intonly.json"
+jq '.bypass_actors = [(.bypass_actors[] | select(.actor_type == "Integration"))]' "$GO" > "$GO_INTONLY"
+
+# =============================================================== CASE 15
+# ORG-INHERITED must NAME THE CURE.  CASE 12 proves the state and the org
+# endpoint; what is asserted here is that the report tells the operator the one
+# flag that changes the outcome, and names the body it would create from.  A
+# refusal that does not say how to proceed is a dead end, not a guard.
+reset_fix
+R=acme/inherited-needs-cure
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[{"id":18225024,"name":"EstateBranching","target":"branch","enforcement":"active","source_type":"Organization"}]'
+
+OUT=$(run_applier "$R" --gates-only-file "$GO")
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "ORG-INHERITED" ] && ok "create/inherited: still ORG-INHERITED without the flag" || bad "create/inherited: state=$S (want ORG-INHERITED)"
+case "$D" in *--create-gates*) ok "create/inherited: the detail names --create-gates as the cure" ;; *) bad "create/inherited: no cure pointer — $D" ;; esac
+case "$D" in *"$GO"*) ok "create/inherited: the detail names the BODY it would create from" ;; *) bad "create/inherited: body path not named — $D" ;; esac
+[ -s "$FIX/POSTS.log" ] && bad "create/inherited: POST issued without --create-gates" || ok "create/inherited: no POST without the flag"
+
+# =============================================================== CASE 16
+# NORULESET carries the same cure.  This is the arm paint-type is NOT in and
+# the one every unprotected repo in the estate is, so a missing pointer here
+# costs the most.
+reset_fix
+R=acme/bare-repo
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[]'
+
+OUT=$(run_applier "$R" --gates-only-file "$GO")
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "NORULESET" ] && ok "create/bare: state is NORULESET" || bad "create/bare: state=$S (want NORULESET)"
+case "$D" in *--create-gates*) ok "create/bare: the detail names --create-gates as the cure" ;; *) bad "create/bare: no cure pointer — $D" ;; esac
+[ -s "$FIX/POSTS.log" ] && bad "create/bare: POST issued without --create-gates" || ok "create/bare: no POST without the flag"
+
+# =============================================================== CASE 17
+# --create-gates WITHOUT --apply is a dry run, and a dry run that writes is the
+# worst defect this suite can miss: it is invisible in the output and permanent
+# on the server.  Assert the POST log is empty, not merely that the state reads
+# WOULD-CREATE -- a state string is not evidence about network calls.
+reset_fix
+R=acme/would-create
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[]'
+
+OUT=$(run_applier "$R" --create-gates --gates-only-file "$GO")
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "WOULD-CREATE" ] && ok "would-create: state is WOULD-CREATE" || bad "would-create: state=$S (want WOULD-CREATE)"
+case "$D" in *"ruleset=<new from $GO>"*) ok "would-create: the detail says it would create, and from which body" ;; *) bad "would-create: detail does not name the body — $D" ;; esac
+case "$D" in *"governance / Governance"*) ok "would-create: the DERIVED context is shown before anything is written" ;; *) bad "would-create: context not reported — $D" ;; esac
+[ -s "$FIX/POSTS.log" ] && bad "would-create: POST issued WITHOUT --apply — a dry run wrote to the server" || ok "would-create: no POST without --apply"
+
+# =============================================================== CASE 18
+# --apply --create-gates actually creates.  The assertions are on the POSTED
+# BODY, not on the state string: the state is what the script says it did, the
+# body is what the server was actually told.
+reset_fix
+R=acme/creates
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[]'
+
+OUT=$(run_applier "$R" --apply --create-gates --gates-only-file "$GO")
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "CREATED" ] && ok "create: state is CREATED" || bad "create: state=$S (want CREATED) — $D"
+case "$D" in *"ruleset=77"*) ok "create: the NEW id from the POST response is reported" ;; *) bad "create: new id not reported — $D" ;; esac
+command grep -qxF "repos/$R/rulesets" "$FIX/POSTS.log" 2>/dev/null \
+  && ok "create: POST went to the collection endpoint, not to an id" \
+  || bad "create: expected a POST to repos/$R/rulesets, got $(cat "$FIX/POSTS.log" 2>/dev/null)"
+[ -s "$FIX/PUTS.log" ] && bad "create: a PUT was issued on the create path" || ok "create: no PUT on the create path"
+[ "$(jq -r '.name' "$FIX/LAST_POST.json")" = "Gates" ] \
+  && ok "create: the posted body keeps the canon name" \
+  || bad "create: posted name is $(jq -r '.name' "$FIX/LAST_POST.json") (want Gates)"
+[ "$(jq -cS '[.rules[].type]' "$FIX/LAST_POST.json")" = '["required_status_checks"]' ] \
+  && ok "create: required_status_checks is the SOLE rule — the bypass list stays short on purpose" \
+  || bad "create: posted rules are $(jq -cS '[.rules[].type]' "$FIX/LAST_POST.json")"
+[ "$(jq -r '[.rules[0].parameters.required_status_checks[].context]|join(",")' "$FIX/LAST_POST.json")" = "governance / Governance" ] \
+  && ok "create: the posted contexts are the DERIVED ones" \
+  || bad "create: posted contexts are $(jq -c '[.rules[0].parameters.required_status_checks[].context]' "$FIX/LAST_POST.json")"
+[ "$(jq '[.bypass_actors[]]|length' "$FIX/LAST_POST.json")" = 3 ] \
+  && ok "create: without --no-integration-bypass the canon bypass list is posted VERBATIM" \
+  || bad "create: bypass list was altered without the flag — $(jq -c '.bypass_actors' "$FIX/LAST_POST.json")"
+
+# =============================================================== CASE 19
+# --no-integration-bypass is owner ruling Q2, and it is a DIVERGENCE FROM
+# COMMITTED CANON, so it must be visible in the output as well as in the body.
+# RepositoryRole:5 is retained deliberately: it is what keeps the repository
+# recoverable, and dropping it is the 2026-09-11 outage shape.
+reset_fix
+R=acme/no-int-bypass
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[]'
+
+OUT=$(run_applier "$R" --apply --create-gates --no-integration-bypass --gates-only-file "$GO")
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "CREATED" ] && ok "no-int-bypass: state is CREATED" || bad "no-int-bypass: state=$S (want CREATED) — $D"
+case "$D" in *"bypass=no_integrations"*) ok "no-int-bypass: the divergence from canon is DECLARED in the report" ;; *) bad "no-int-bypass: divergence is silent — $D" ;; esac
+[ "$(jq '[.bypass_actors[]|select(.actor_type=="Integration")]|length' "$FIX/LAST_POST.json")" = 0 ] \
+  && ok "no-int-bypass: zero Integration actors in the posted body" \
+  || bad "no-int-bypass: Integrations survived — $(jq -c '.bypass_actors' "$FIX/LAST_POST.json")"
+[ "$(jq '[.bypass_actors[]|select(.actor_type=="RepositoryRole" and .actor_id==5)]|length' "$FIX/LAST_POST.json")" = 1 ] \
+  && ok "no-int-bypass: RepositoryRole:5 is RETAINED — the repo stays recoverable" \
+  || bad "no-int-bypass: RepositoryRole:5 was stripped too — that is the outage shape, not a strict gate"
+
+# =============================================================== CASE 20
+# --no-integration-bypass WITHOUT --create-gates must die at argument parsing.
+# The update path may not touch bypass_actors at all: silently accepting the
+# flag there would read as "the Integrations were stripped" while leaving the
+# live ruleset exactly as it was.
+reset_fix
+R=acme/flag-misuse
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[]'
+
+OUT=$(run_applier "$R" --apply --no-integration-bypass --gates-only-file "$GO"); RC=$?
+[ "$RC" -ne 0 ] && ok "flag misuse: --no-integration-bypass alone exits non-zero ($RC)" || bad "flag misuse: rc=0 — the flag was silently accepted on the update path"
+command grep -q 'create-gates' "$WORK/err" && ok "flag misuse: the error names the flag that would make it valid" || bad "flag misuse: unhelpful error — $(cat "$WORK/err")"
+[ -s "$FIX/POSTS.log" ] && bad "flag misuse: a POST was issued" || ok "flag misuse: no POST"
+[ -s "$FIX/PUTS.log" ] && bad "flag misuse: a PUT was issued" || ok "flag misuse: no PUT"
+
+# =============================================================== CASE 21
+# Stripping Integrations from a body whose bypass list is Integrations ONLY
+# leaves ZERO bypass actors.  A branch ruleset with no bypass, under an org
+# ruleset requiring code-owner review that the sole contributor cannot
+# self-approve, deadlocks the repository outright.  REFUSE, never warn.
+reset_fix
+R=acme/would-empty-bypass
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[]'
+
+OUT=$(run_applier "$R" --apply --create-gates --no-integration-bypass --gates-only-file "$GO_INTONLY")
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "REFUSED" ] && ok "empty bypass: state is REFUSED — a zero-bypass ruleset is an outage, not a strict gate" || bad "empty bypass: state=$S (want REFUSED) — $D"
+case "$D" in *"EMPTY bypass"*) ok "empty bypass: the reason names the empty list" ;; *) bad "empty bypass: reason unclear — $D" ;; esac
+[ -s "$FIX/POSTS.log" ] && bad "empty bypass: a zero-bypass ruleset was POSTED" || ok "empty bypass: nothing was written"
+
+# =============================================================== CASE 22
+# THE CANON-SHAPE GUARD.  A committed body carrying a hand-typed context is the
+# one thing gates.json forbids outright: contexts are derived from emitted
+# check-run names, never typed, because a typed name that no job emits is a
+# permanently unsatisfiable required check.
+reset_fix
+R=acme/typed-body
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[]'
+
+OUT=$(run_applier "$R" --apply --create-gates --gates-only-file "$GO_TYPED")
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "REFUSED" ] && ok "typed body: state is REFUSED by the canon-shape guard" || bad "typed body: state=$S (want REFUSED) — a hand-typed context was accepted as a create body"
+case "$D" in *"canon checks-only body"*) ok "typed body: the reason names the shape that was violated" ;; *) bad "typed body: reason unclear — $D" ;; esac
+[ -s "$FIX/POSTS.log" ] && bad "typed body: a non-canon body was POSTED" || ok "typed body: nothing was written"
+
+# =============================================================== CASE 23
+# TWO repo-level branch rulesets is the EXPECTED steady state after O6, so
+# AMBIGUOUS there would make the applier permanently unable to maintain the
+# very shape O6 prescribes.  SHAPE is the discriminator -- the gates ruleset is
+# the one whose ONLY rule is required_status_checks.  Name classifies nothing.
+reset_fix
+R=acme/two-own-one-shaped
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[{"id":8,"target":"branch","enforcement":"active","source_type":"Repository"},{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
+mkfix "repos/$R/rulesets/8" '{"id":8,"name":"Base","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[],"rules":[{"type":"deletion"},{"type":"required_signatures"}]}'
+mkfix "repos/$R/rulesets/9" '{"id":9,"name":"Gates","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"pull_request"}],"rules":[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":false,"do_not_enforce_on_create":false,"required_status_checks":[]}}]}'
+
+OUT=$(run_applier "$R")
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "WOULD-GATE" ] && ok "two own: the checks-only ruleset was selected by SHAPE" || bad "two own: state=$S (want WOULD-GATE) — the O6 steady state was treated as ambiguous"
+case "$D" in *"picked_by=shape"*) ok "two own: the report says HOW it disambiguated" ;; *) bad "two own: no picked_by in detail — $D" ;; esac
+case "$D" in *"ruleset=9"*) ok "two own: the checks-only id was chosen, not the baseline one" ;; *) bad "two own: wrong ruleset — $D" ;; esac
+
+# ...and when NEITHER is uniquely checks-only, shape cannot decide and the only
+# honest answer is to refuse.  Rulesets are additive; guessing writes a real gate
+# onto the wrong object.
+reset_fix
+R=acme/two-own-none-shaped
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[{"id":8,"target":"branch","enforcement":"active","source_type":"Repository"},{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
+mkfix "repos/$R/rulesets/8" '{"id":8,"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+mkfix "repos/$R/rulesets/9" '{"id":9,"name":"Other","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"non_fast_forward"}]}'
+
+OUT=$(run_applier "$R" --apply)
+S=$(state_of "$OUT")
+[ "$S" = "AMBIGUOUS" ] && ok "two own, none shaped: AMBIGUOUS — refuses to guess" || bad "two own, none shaped: state=$S (want AMBIGUOUS)"
+[ -s "$FIX/PUTS.log" ] && bad "two own, none shaped: a PUT was issued on a guess" || ok "two own, none shaped: no PUT even with --apply"
+
+# =============================================================== CASE 24
+# THE VACUOUS-GATE REFUSAL, ON THE CREATE PATH.  This is the defect the whole
+# suite exists to prevent, and --create-gates is a NEW way to reach it: a
+# required_status_checks rule carrying an empty context list, brought into
+# being rather than written into an existing object.  Zero contexts must not
+# create anything at all.
+reset_fix
+R=acme/create-zero-ctx
+fix_repo "$R" "Allowlist Preflight"          # the only job is never-required
+mkfix "repos/$R/rulesets" '[]'
+
+OUT=$(run_applier "$R" --apply --create-gates --gates-only-file "$GO")
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "UNGATED" ] && ok "create/zero contexts: state is UNGATED — refuses to create a vacuous gate" || bad "create/zero contexts: state=$S (want UNGATED) — an empty rule was about to be created"
+[ -s "$FIX/POSTS.log" ] && bad "create/zero contexts: a VACUOUS ruleset was POSTED" || ok "create/zero contexts: nothing was written"
+
+# =============================================================== CASE 25
+# POST-CREATE VERIFICATION.  rc=0 from a write is not evidence the write took
+# effect -- measured estate-wide, a ruleset PUT returned 200 with an EMPTY BODY
+# and had not applied.  The applier re-GETs and compares; these two arms bend
+# the server's reply so that the comparison is a real round trip and not a
+# tautology.  GH_POST_DRIFT is the seam.
+reset_fix
+R=acme/drift-contexts
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[]'
+export GH_POST_DRIFT='.rules[0].parameters.required_status_checks = []'
+OUT=$(run_applier "$R" --apply --create-gates --gates-only-file "$GO")
+unset GH_POST_DRIFT
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "DRIFT" ] && ok "drift/contexts: a server that dropped the contexts is reported as DRIFT, not as CREATED" || bad "drift/contexts: state=$S (want DRIFT) — the post-create re-GET is a tautology"
+case "$D" in *"contexts after create"*) ok "drift/contexts: the reason names WHICH field drifted" ;; *) bad "drift/contexts: reason unclear — $D" ;; esac
+
+# The bypass list is the whole point of a checks-only ruleset, so a server-side
+# default restoring the actors --no-integration-bypass just removed must not be
+# reported as success.
+reset_fix
+R=acme/drift-bypass
+fix_repo "$R"
+mkfix "repos/$R/rulesets" '[]'
+export GH_POST_DRIFT='.bypass_actors += [{"actor_id":1236702,"actor_type":"Integration","bypass_mode":"pull_request"}]'
+OUT=$(run_applier "$R" --apply --create-gates --no-integration-bypass --gates-only-file "$GO")
+unset GH_POST_DRIFT
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "DRIFT" ] && ok "drift/bypass: a server that restored an Integration is reported as DRIFT" || bad "drift/bypass: state=$S (want DRIFT) — the stripped actor came back unnoticed"
+case "$D" in *"bypass_actors after create"*) ok "drift/bypass: the reason names WHICH field drifted" ;; *) bad "drift/bypass: reason unclear — $D" ;; esac
+
+# ---- MUTANT G: delete the SHAPE discriminator from the two-ruleset arm. ------
+# Without it the O6 steady state (baseline + checks-only) is unreachable: every
+# such repo reports AMBIGUOUS and is never gated again.
+MUTG="$WORK/mutant-g.sh"
+cat > "$WORK/mut-g.sed" <<'SEDG'
+s#^    if \[ "$(wc -l < "$WORK/shaped")" -eq 1 ]; then$#    if false; then#
+SEDG
+sed -f "$WORK/mut-g.sed" "$APPLIER" > "$MUTG"
+chmod +x "$MUTG"
+if ! cmp -s "$MUTG" "$APPLIER" && bash -n "$MUTG" 2>/dev/null; then
+  reset_fix
+  R=acme/two-own-one-shaped
+  fix_repo "$R"
+  mkfix "repos/$R/rulesets" '[{"id":8,"target":"branch","enforcement":"active","source_type":"Repository"},{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
+  mkfix "repos/$R/rulesets/8" '{"id":8,"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[],"rules":[{"type":"deletion"}]}'
+  mkfix "repos/$R/rulesets/9" '{"id":9,"name":"Gates","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"pull_request"}],"rules":[{"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":false,"do_not_enforce_on_create":false,"required_status_checks":[]}}]}'
+  OUT=$(MUTANT="$MUTG" run_applier "$R")
+  if [ "$(state_of "$OUT")" = "AMBIGUOUS" ]; then
+    ok "mutant G killed: without the shape discriminator the O6 steady state becomes AMBIGUOUS"
+  else
+    bad "MUTANT G SURVIVED: shape discriminator removed yet still $(state_of "$OUT") — the control is decorative"
+  fi
+else
+  bad "mutant G was not applied — the sed pattern no longer matches the applier"
+fi
+
+# ---- MUTANT H: neuter the canon-shape guard's EMPTY-CONTEXTS clause. ---------
+# Flipping != to = inverts exactly that one clause: a typed-context body now
+# passes the guard, and the canon body would not.  Only the typed case is run
+# under the mutant, which is the point -- it must go from REFUSED to written.
+MUTH="$WORK/mutant-h.sh"
+cat > "$WORK/mut-h.sed" <<'SEDH'
+s#|length' "$GATES_ONLY_FILE")" != '0'#|length' "$GATES_ONLY_FILE")" = '0'#
+SEDH
+sed -f "$WORK/mut-h.sed" "$APPLIER" > "$MUTH"
+chmod +x "$MUTH"
+if ! cmp -s "$MUTH" "$APPLIER" && bash -n "$MUTH" 2>/dev/null; then
+  reset_fix
+  R=acme/typed-body
+  fix_repo "$R"
+  mkfix "repos/$R/rulesets" '[]'
+  OUT=$(MUTANT="$MUTH" run_applier "$R" --apply --create-gates --gates-only-file "$GO_TYPED")
+  if [ "$(state_of "$OUT")" = "REFUSED" ]; then
+    bad "MUTANT H SURVIVED: canon-shape guard neutered yet a typed-context body was still REFUSED — the guard is not what refuses it"
+  else
+    ok "mutant H killed: without the empty-contexts clause a typed-context body reaches $(state_of "$OUT") and POSTs $(wc -l < "$FIX/POSTS.log") time(s)"
+  fi
+  [ -s "$FIX/POSTS.log" ] && ok "mutant H wrote to the server from a non-canon body — the guard is load-bearing" \
+                          || bad "mutant H: expected a POST from the neutered guard"
+else
+  bad "mutant H was not applied — the sed pattern no longer matches the applier"
+fi
+
+# ---- MUTANT I: neuter the empty-bypass refusal (-gt 0 becomes -ge 0). --------
+# A zero-bypass branch ruleset is the shape of the 2026-09-11 tag outage.  If
+# this control is decorative, --no-integration-bypass becomes a way to deadlock
+# any repo whose canon bypass list happens to be Integrations only.
+MUTI="$WORK/mutant-i.sh"
+cat > "$WORK/mut-i.sed" <<'SEDI'
+s#create.json")" -gt 0 ]#create.json")" -ge 0 ]#
+SEDI
+sed -f "$WORK/mut-i.sed" "$APPLIER" > "$MUTI"
+chmod +x "$MUTI"
+if ! cmp -s "$MUTI" "$APPLIER" && bash -n "$MUTI" 2>/dev/null; then
+  reset_fix
+  R=acme/would-empty-bypass
+  fix_repo "$R"
+  mkfix "repos/$R/rulesets" '[]'
+  OUT=$(MUTANT="$MUTI" run_applier "$R" --apply --create-gates --no-integration-bypass --gates-only-file "$GO_INTONLY")
+  if [ "$(state_of "$OUT")" = "REFUSED" ]; then
+    bad "MUTANT I SURVIVED: empty-bypass refusal neutered yet still REFUSED — the control is decorative"
+  else
+    ok "mutant I killed: without the refusal it reaches $(state_of "$OUT")"
+  fi
+  if [ -s "$FIX/POSTS.log" ] && [ "$(jq '[.bypass_actors[]?]|length' "$FIX/LAST_POST.json")" = 0 ]; then
+    ok "mutant I POSTED a ZERO-BYPASS branch ruleset — the 2026-09-11 outage shape, reproduced"
+  else
+    bad "mutant I: expected a POST carrying an empty bypass_actors list"
+  fi
+else
+  bad "mutant I was not applied — the sed pattern no longer matches the applier"
 fi
 
 echo
