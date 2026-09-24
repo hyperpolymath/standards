@@ -1,0 +1,150 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Judgement Evidence Graph (JEG)
+:toc: macro
+:icons: font
+
+toc::[]
+
+== What it is, and what it is not
+
+A typechecker answers "is this program well-formed under theory T?" and stops
+you if not. The JEG answers "what do we currently believe about each term,
+and why?" and never stops you.
+
+It is *not* gradual typing, *not* soft typing, *not* a linter with a
+different hat, and *not* a log of "dialectical sublations". Those all
+compute a verdict or narrate. The JEG stores *claims with provenance* and
+lets tools compute whatever verdict they like, later — including "no
+verdict, insufficient evidence".
+
+Litmus test for any implementation claiming to be a JEG: *show the code path
+where evaluating `(fact 3)` creates an evidence edge.* If there isn't one, it
+is not a JEG.
+
+== Model
+
+----
+Subject      := node-id | symbol | (subject . path)
+Judgement    := (subject, predicate, args...)
+EvidenceKind := :asserted | :inferred | :observed | :tested | :contradicted
+Evidence     := (kind, provenance, [supports: judgement-id...])
+Provenance   := { :by <agent>, :at <iso8601>, :where <node-id|file:line>, :via <tool> }
+Graph        := Judgement nodes + Evidence edges (judgement -> judgement | judgement -> ground)
+----
+
+* A judgement with *no* incoming evidence is *unsupported*.
+* A judgement with a `:contradicted` edge is *contested*.
+* Evidence kinds are ordered by default strength for *display only*:
+  `:tested` > `:observed` > `:inferred` > `:asserted`.
+* Nothing is deleted during a run. Retraction is a new `:contradicted` edge.
+* Judgements are *hash-consed* on `(subject, predicate, args)`: ten
+  observations of `fact :arity 1` are one judgement with ten evidence edges,
+  not ten judgements.
+
+== Predicate vocabulary (open; these are the ones `ziz0` emits)
+
+[cols="1,2", options="header"]
+|===
+| Predicate | Meaning
+
+| `:callable`              | subject was applied and application proceeded
+| `:arity n`               | subject was applied to `n` args
+| `:returns tag`           | application returned a value with `tag`
+| `:takes i tag`           | argument `i` had `tag` at a call site
+| `:pure`                  | no `set!`, no side-effecting prim, during observed calls
+| `:raised map`            | an error value was produced
+| `:tested-by node-id`     | a test form referenced the subject
+| `:defined-at node-id`    | binding site
+| `:shadowed-by node-id`   | rebinding in an inner scope
+| `:reader sym`            | which reader table produced this node (metaiconic provenance)
+|===
+
+== Surface syntax
+
+----
+(claim fact :arity 1 :evidence :asserted)
+(claim fact :returns :int :evidence :tested :by "examples/fact-test.ziz")
+(claim (node 0x2f1a) :pure :evidence :inferred :via boggs)
+----
+
+`claim` is a special form: its first argument is a *subject expression*
+(symbol, `(node id)`, or a quoted form) and is not evaluated.
+
+== Runtime behaviour in `ziz0`
+
+Each application `(f a b)` under `--jeg=observe` appends, with
+provenance `{:by ziz0 :where <call-site node>}`:
+
+* `(f :callable)`, `(f :arity 2)`, `(f :takes 0 <tag a>)`,
+  `(f :takes 1 <tag b>)`, `(f :returns <tag r>)` — all `:observed`.
+
+Cheap: a hash-cons plus an edge. Off by default until measured.
+
+== Querying
+
+----
+(jeg-query '(?s :returns :int))   ; all subjects observed returning int
+(jeg-support 'fact)                ; every judgement about fact with evidence
+(jeg-unsupported)                  ; judgements nobody has evidence for
+(jeg-contested)                    ; judgements with contradicting evidence
+----
+
+== On-disk format
+
+Sidecar per source file: `foo.ziz` → `foo.jeg.a2ml`. A2ML because it is the
+estate's machine-readable format; schema to be registered in
+`hyperpolymath/standards` under `1-formats/a2ml/` once stable.
+
+----
+# A2ML jeg/0
+[meta]
+source = "examples/fact.ziz"
+source-sha256 = "..."
+grammar = "tree-sitter-ziz@0.0.1"
+
+[[judgement]]
+id = "j0001"
+subject = "sym:fact"
+predicate = "arity"
+args = [1]
+
+[[evidence]]
+for = "j0001"
+kind = "observed"
+by = "ziz0"
+at = "2026-09-24T15:02:11Z"
+where = "examples/fact.ziz:3:1"
+----
+
+== Merge semantics across runs
+
+Union of judgements (by structural id); union of evidence. Node-keyed
+subjects are re-anchored through tree-sitter's edit log; if a node no longer
+exists its judgements are kept and marked `:orphaned` (a judgement about a
+judgement — the graph is reflexive too).
+
+== Interaction with tree-sitter
+
+* Node ids: `(start_byte, end_byte, kind)` hashed with grammar version —
+  stable across whitespace-only edits after re-anchoring.
+* Editor integration: colour a symbol by *strength of evidence* rather than
+  by type. Unsupported = plain; observed = one tone; tested = another;
+  contested = warning. (A display policy. Not a component. Not a "rainbow
+  linter".)
+
+== Distribution (deferred)
+
+If the JEG is ever sharded across Chapel locales, the natural key is
+*source file / subject*, not a flat integer id handed out by a global
+atomic counter. A single `fetchAdd` on every claim would serialise the whole
+cluster on one locale — the one thing PGAS code must not do. Not a milestone
+0–3 concern.
+
+== Open questions (honest list)
+
+* Cost of `--jeg=observe` under deep recursion.
+* Whether `:pure` should be *asserted by default* for lambdas with no `set!`
+  in the body, or left unsupported until observed.
+* Provenance for macro-expanded code: expansion node, origin node, or both
+  with an `:expanded-from` edge? (Leaning: both.)
+* Graph size limits and a compaction policy.

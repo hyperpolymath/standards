@@ -1,0 +1,208 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Žiz — Design
+:toc: macro
+:icons: font
+
+toc::[]
+
+Status: *pre-alpha design.* Everything here is intent until `ziz0` runs it.
+See link:TRIAGE.adoc[TRIAGE.adoc] for what was deliberately left out, and why.
+
+== One-paragraph summary
+
+Žiz is a unityped, homoiconic, reflexive language. There is one value domain,
+programs are values, and the reader, printer, evaluator and environment are
+ordinary values reachable from user code. Žiz has *no typechecker* and never
+rejects a program for classification reasons. Instead every term carries a
+*Judgement Evidence Graph* (JEG) entry: claims about the term, each linked to
+the evidence for it (author assertion, static inference, runtime observation,
+test outcome). Tooling *reads* the JEG; the runtime *appends* to it. The
+first implementation, `ziz0`, is an interpreter written in Chapel.
+
+== What Žiz is *not*
+
+It is not dialectical. Expressions are not triads. There is no boundary
+operator, no simplicial complex, no sheaf, no "Real". The name is a pun and
+the pun is permitted in documentation and error messages; it has no
+semantics. See TRIAGE.adoc §Finding 1.
+
+== Unityped, precisely
+
+Following Harper: a "dynamically typed" language is a statically typed
+language with exactly one type. Every Žiz term has type `V`. "Untyped" is
+the same fact seen from the syntax side (no annotations, no static
+judgement). Runtime tag dispatch is pattern-matching on the single sum
+`V = nil + bool + int + real + str + sym + pair + … + (V → V)`. The classical
+denotational backdrop is Scott's D∞ (`D ≅ [D → D]`); we cite it and do
+nothing further with it.
+
+== Core value domain
+
+[cols="1,2,2", options="header"]
+|===
+| Tag | Payload | Notes
+
+| `nil`     | —                     | the empty list and the false-ish sentinel
+| `bool`    | true / false          |
+| `int`     | arbitrary precision   | `ziz0` uses Chapel `int(64)` for now
+| `real`    | IEEE 754 binary64     |
+| `str`     | UTF-8 byte sequence   | *content* may be any Unicode; *syntax* is ASCII
+| `sym`     | interned name         |
+| `pair`    | car, cdr              | lists are right-nested pairs ending in `nil`
+| `vec`     | contiguous sequence   |
+| `map`     | ordered associative   |
+| `fn`      | params, body, env     | closures
+| `prim`    | host procedure        |
+| `env`     | frame + parent        | first-class
+| `node`    | tree-sitter node id   | anchor into the CST; used by the JEG
+| `claim`   | subject, judgement, evidence | a JEG entry, also a value
+|===
+
+== Homoiconicity
+
+Source text →(reader)→ `V` →(evaluator)→ `V` →(printer)→ source text.
+The reader's output is the AST; the AST is a list. Macros are ordinary
+functions from `V` to `V` marked with `defmacro`.
+
+== Metaiconicity
+
+*Owner's term; this is the working definition pending the owner's own.*
+
+The mapping between text and values is itself a value. Concretely:
+
+* `(reader)` returns the current reader as a `map` of dispatch entries
+  (`char -> fn`). `(set-reader! m)` installs a new one. Reader macros are
+  therefore user code, and the *shape* of the language is data.
+* `(printer)` / `(set-printer! m)` likewise.
+* Both are scoped to the current `env`, so a module can change its own
+  surface syntax without changing anyone else's.
+
+This is what makes the off-side surface and the plain S-expression surface
+*the same language* with two reader tables, rather than two dialects. It is
+also where a one-glyph alias for the evaluator (e.g. a Cyrillic letter) would
+live *if* the owner wants one: as a reader-table entry mapping to an ASCII
+name, never as a lexical primitive.
+
+== Reflexivity
+
+* `(eval v [env])`, `(current-env)`, `(env-parent e)`, `(env-bindings e)`.
+* `(jeg)` returns the live Judgement Evidence Graph for the current program.
+* `(claim subject judgement . evidence)` appends to it.
+* `(node-of v)` returns the CST anchor of a value if it came from source.
+
+Closest existing relative: Kernel (Shutt) — operatives receive unevaluated
+operands and the caller's environment as first-class objects. Žiz's
+`defmacro` + first-class `env` is a conservative version of that; whether to
+go the full fexpr route is an open question.
+
+== Lexical rules (ASCII-only)
+
+The surface syntax uses *only printable ASCII* plus newline and tab.
+Identifiers may not contain non-ASCII. String *contents* may. Rationale:
+grep/diff/review/terminal/keyboard hygiene, and because anything non-ASCII
+that matters can be introduced as a reader alias (§Metaiconicity).
+
+=== `sexp` reader
+
+----
+( ) [ ] { } ' ` , ,@ ; <comment to EOL>
+"string with \" \\ \n escapes"
+integer   ::= -?[0-9]+
+real      ::= -?[0-9]+\.[0-9]+([eE][-+]?[0-9]+)?
+symbol    ::= [A-Za-z_+\-*/<>=!?%&|^~$][A-Za-z0-9_+\-*/<>=!?%&|^~$.:]*
+keyword   ::= :symbol
+----
+
+`[ ]` reads as a `vec`, `{ }` as a `map`.
+
+=== `layout` reader (off-side)
+
+A line with two or more forms is an implicit list. A following block that is
+indented deeper continues that list, one form (or nested implicit list) per
+line. A line with a single form is *not* wrapped. `\` at end of line
+continues. Explicit brackets disable layout inside them.
+
+Implemented as a tree-sitter *external scanner* emitting
+`INDENT` / `DEDENT` / `NEWLINE` from an indent stack — off-side syntax is not
+expressible in a context-free grammar, which is why any "N-rule EBNF" claim
+for a layout language is wrong on its face.
+
+----
+define (fact n)
+  if (= n 0)
+    1
+    * n (fact (- n 1))
+----
+
+reads identically to
+
+----
+(define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
+----
+
+== Special forms
+
+`quote` `quasiquote` `unquote` `unquote-splicing` `if` `define` `set!`
+`lambda` `defmacro` `begin` `let` `claim`. Everything else is a function.
+
+== Evaluation
+
+Eager, left-to-right, lexically scoped, proper tail calls required of any
+conforming implementation (`ziz0` does not have them yet — that fact is a
+JEG entry on `ziz0`, not a lie in this document).
+
+Errors are values. A failed operation returns an `error` map and *records a
+claim* (`(claim node :raised {...} :evidence :runtime)`). Nothing unwinds
+unless the caller asks via `(raise!)`.
+
+== Judgement Evidence Graph
+
+Full model in link:docs/JEG.adoc[docs/JEG.adoc]. Summary:
+
+* *Judgement*: a proposition about a subject (`:callable`, `:arity 2`,
+  `:returns :int`, `:pure`, `:raised`, `:tested-by`, …). Open vocabulary.
+* *Evidence*: why we believe it — *kind* (`:asserted`, `:inferred`,
+  `:observed`, `:tested`, `:contradicted`) and *provenance* (who/what/when).
+* Subjects are CST node ids; the graph survives re-parsing via tree-sitter's
+  incremental edit tracking.
+* Append-only during a run; merged across runs.
+
+A JEG lint reports *unsupported* and *contested* judgements. It never blocks
+a build; a `Mustfile` may make a threshold a gate — project policy, not
+language semantics.
+
+== Toolchain
+
+Names are the owner's: `claudia`, `boggs`, `federici`, `dunayevskaya`,
+`assata`. *Role assignment is undecided.* Two candidate mappings exist
+(this repo's original guess, and Gemini's); the owner picks. Needed roles:
+
+. reader/printer registry (metaiconic tables)
+. evaluator core
+. JEG store / merge / query
+. grammar, CST anchoring, editor integration
+. CLI / REPL / project driver
+. (later) memory / resource management, if not delegated to Chapel
+
+== Bootstrap plan
+
+. `ziz0` (Chapel): `sexp` reader, evaluator, printer, in-memory JEG.
+  Single locale. No FPGA.
+. `ziz0` gains the `layout` reader via the tree-sitter C parser through
+  Chapel's C interop.
+. JEG persisted (`.jeg.a2ml`, see JEG.adoc).
+. Self-hosting: reader/evaluator rewritten in Žiz, run under `ziz0`. A
+  λ-calculus interpreter with the Y combinator is the smoke test.
+. Only then: backends. Chapel-PGAS distribution via `chapeliser` first,
+  because the host is already Chapel. FPGA acceleration lives inside
+  `chapeliser`, behind Chapel; Žiz never sees it.
+
+== Related work (real)
+
+Kernel (Shutt, fexprs + first-class envs) · Refal (structural rewriting) ·
+Scheme R7RS-small (the sexp core) · sweet-expressions / SRFI-110 (layout
+over S-expressions) · Harper, PFPL ch. 22 (unityped) · Scott 1969 (D∞).
+
+== Non-goals for the foreseeable future
+
+Static types. A typechecker under another name. Triads. Kaomoji. Bitstreams.
