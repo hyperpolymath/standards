@@ -1,0 +1,1536 @@
+// SPDX-License-Identifier: MPL-2.0
+= ULTRAPLAN 2026-09-24 — the issue influx, its root cause, and the reconciliation
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+v1.0.0, 2026-09-24
+:toc:
+:toclevels: 2
+:icons: font
+
+Status: *complete as written* — the analysis in parts 1–4 is a census; part 5
+records the actions: the repository changes are committed on the working
+branch, and the live GitHub actions (labels, closes, description/topics) are
+packaged as one idempotent owner-run script because the agent token used for
+this work has `labels:write` but not `issues:write`/repo-admin (see 5.2).
+Part 6 states what is fixed and what is not; parts 7–8 are the forward plan.
+Every number below was measured on 2026-09-24 (~14:30 UTC) with the commands
+in Appendix A.
+
+== 0. TL;DR
+
+* The "explosion" is real and bounded: *91 issues filed on 2026-09-22 and 7 on
+  2026-09-23*, on top of 95 filed over the preceding four months. Total open:
+  *193*. 192 of 193 were filed by the owner, essentially all of them with an AI
+  coding agent doing the drafting.
+* The explosion was *not* a bot malfunction. The only automated filer that
+  exists (lockfile-drift-detect) is working exactly as designed — one issue,
+  updated in place. The explosion was a *process* failure: an AI-assisted
+  estate audit filed **one issue per finding, with no deduplication, no scope
+  filter, and no umbrella**, in a repository that had no intake rules at all.
+* Roughly *one third of the backlog does not belong in this repository*: its
+  actionable fix lives in other repos, in org rulesets, or in upstream tools.
+  This repo was being used as a de facto inbox for a ~570-repo estate.
+* Fixed at the source in this action: the missing intake specification
+  (link:docs/ISSUE-INTAKE-SPEC.adoc[ISSUE-INTAKE-SPEC v1.0.0]), mandatory issue
+  templates with the blank form disabled, a rewritten `0-canon/GOVERNANCE.adoc`
+  (it was a broken AI-generated placeholder describing a governance model that
+  does not exist), two spec-drift defects closed in canon (#927, #920), the
+  full 193-issue backlog classified, and the optimised description + topics.
+  The mechanical follow-through — labelling all 193 and *closing 10 issues
+  with evidence comments* (6 fixed or superseded, 4 absorbed into the
+  decision register) — ships as
+  `scripts/triage-2026-09-24-apply.sh`: one idempotent command the owner runs
+  with full credentials (the agent token lacks `issues:write`).
+* What remains is ranked in part 8. The single highest-leverage owner action
+  is answering the batched decision sheet (#787) — one reply resolves a dozen
+  rulings.
+
+== 1. State of the house (census, 2026-09-24)
+
+[cols="2,4,2",options="header"]
+|===
+|Measure |Value |Note
+
+|Open issues
+|193
+|`gh issue list --state open` (limit 1000); matches the API `open_issues_count`
+
+|Closed issues
+|174
+|state=closed census
+
+|Open PRs
+|0
+|none open; the "48 Dependabot PRs" of #1037 are in *other* repos
+
+|Issues filed 2026-09-22
+|91
+|the explosion day (#894–#1028 range)
+
+|Issues filed 2026-09-21 / 23
+|4 / 7
+|the wave started the 21st and continued the 23rd
+
+|Issues filed 2026-05-17 … 09-20
+|95
+|the steady drumbeat: ~1.3/day for four months
+
+|Authors (open)
+|hyperpolymath 192, github-actions 1
+|the bot issue is #803, the lockfile-drift tracking issue
+
+|Required checks on main
+|21 contexts + signatures + code scanning
+|ruleset `main gate: append-only + required checks + signatures + scanning`,
+enforcement *active*, landed in #1034 (2026-09-23)
+
+|CI at HEAD c56f4ec
+|green
+|Governance, CodeQL, Hypatia, gitleaks, rust-ci etc. all succeeded on the
+last main push
+
+|Labels defined / issues carrying one
+|66 / a minority
+|the taxonomy exists and an auto-labeler (`label-triage.yml`) fires on *new*
+issues only; the existing backlog is mostly unlabelled
+|===
+
+== 2. What actually happened (the timeline)
+
+[cols="14,8,78",options="header"]
+|===
+|Date |Issues |What
+
+|2026-05-17 … 06-27
+|28
+|First campaigns filed: boj/isers epics, TS/ReScript migration umbrellas
+(#239, #252), estate sweeps (CodeQL cadence, .scm to .a2ml, Python residue),
+Pages decisions. Healthy rate, one defect per issue.
+
+|2026-06-28 … 07-16
+|9
+|Carve-out of this repo (keep the canon, evict products) #479 and its steps;
+badges framework #446; licensing cascade #404.
+
+|2026-08-25 … 08-31
+|~25
+|First audit *wave*: estate control plane #633–#637, lockfile/pin forensics
+#657–#670, estate health #675–#681, owner-decision batches #709.
+
+|2026-09-02 … 09-17
+|~13
+|Second wave fragments: O1–O10 #715, decision sheet #787 (the good part — a
+*batched* register), pin-campaign forensics #784/#792/#795.
+
+|2026-09-21
+|4
+|Wave start: ruleset findings #887–#890.
+
+|*2026-09-22*
+|*91*
+|*The explosion.* A CI/CD pipeline delivery + estate audit, run with an AI
+agent, produced checkpoint documents
+(`developer/.claude/checkpoints/2026-09-22-cicd-pipeline-delivery.md` and
+companions — which "duplicated each other and disagreed on the number (3 vs
+6)" per #904's own body) and every finding was filed as a separate issue:
+#894–#1028. Clusters: the actions.lock machinery (~15), Hypatia findings
+(~10), Deno/Bun policy (~12), rulesets/org settings (~10), KYAML campaign
+(5), Nickel/K9 defects (4), debtfile mechanics (4), the rest estate-wide.
+
+|2026-09-23
+|7
+|Wave continuation (#1031–#1040) + #1034 landing the branch/tag protection
+floor on main (which already retires several open findings — see #956 below).
+|===
+
+Two properties of the explosion matter for the diagnosis:
+
+. *It was a filing model, not a broken tool.* Every one of the 91 issues is
+  a real, measured finding with evidence and acceptance criteria. The defect
+  is the 1:1 finding-to-issue ratio applied without a filter.
+. *It was the fifth consecutive audit wave* in a month. The first four were
+  smaller because they were not yet running a full pipeline audit; the model
+  was the same. Without the intake rules now in place, a sixth wave would
+  have re-inflated the backlog in the same shape.
+
+== 3. Root cause analysis
+
+=== 3.1 Direct cause
+
+The 2026-09-22 audit filed findings with no intake discipline:
+
+. *No deduplication against the open backlog.* 95 issues were already open,
+  several on the same components (the actions.lock machinery alone already
+  had #657/#669/#670/#674/#707/#708/#727 open when the wave added at least six
+  more overlapping issues on it).
+. *No scope filter.* Estate-wide findings — org rulesets, other repos'
+  workflows, upstream tool behaviour — were filed *here*, because the agent
+  had this repository open. About one third of the wave is this class (see the
+  ESTATE rows in part 4).
+. *No umbrella.* A 91-issue wave had no `meta:campaign` tracking issue, so
+  nothing could report wave progress or close the wave as a unit.
+. *Lossy source documents.* The findings were drafted from two checkpoint
+  notes that duplicated each other and disagreed; the filed text resolved
+  some of the disagreements (in #904's favour of "6") but the source drift
+  itself was never recorded as a defect.
+
+=== 3.2 Contributing structural factors (all now addressed or addressed-by-design)
+
+[cols="3,7",options="header"]
+|===
+|Factor |State after this action
+
+|No intake specification existed
+|*Fixed* — link:docs/ISSUE-INTAKE-SPEC.adoc[ISSUE-INTAKE-SPEC v1.0.0]
+(defines scope rules, dedup obligation, wave-umbrella rule, automation
+contract, no-silent-closes)
+
+|No issue templates; blank form open
+|*Fixed* — bug / decision / campaign templates; blank form disabled via
+`.github/ISSUE_TEMPLATE/config.yml`
+
+|This repo doubling as the estate's inbox
+|*Named and constrained* — Intake Spec Rule 1 (scope filter) + Rule 1's
+pointer to the estate register; the backlog table in part 4 marks every
+estate-wide row so the owner can migrate them deliberately
+
+|Label taxonomy + auto-labeler existed but only prospective
+|*Partially fixed* — the existing 193 were classified and labelled in this
+action (part 5); the auto-labeler (`label-triage.yml`) continues to cover new
+issues. A retroactive backfill job is a candidate for the next fix wave
+
+|`0-canon/GOVERNANCE.adoc` was a generic placeholder (fictional
+"2 maintainers" approval rule, broken document tail) that contradicted the
+real constitution
+|*Fixed* — v2.0.0 rewritten to summarise the Constitutional District without
+inventing governance
+
+|No codified "estate register" for cross-repo findings
+|*Conventionalised* — the open `meta:umbrella` + `decision` issue (#787) is
+named as the register in the Intake Spec; making it a file (e.g. in the
+estate repo) is a follow-up, not a blocker
+|===
+
+=== 3.3 What was NOT the cause (checked, ruled out)
+
+* *The automated detectors.* `lockfile-drift-detect.yml` (Tue 07:20) and
+  `settings-drift-detect.yml` (Mon 06:40) are "REPORTS ONLY" by design and each
+  maintains *exactly one* tracking issue, edited in place. The only
+  bot-filed issue in the repo's history is #803. They are the *correct* shape
+  of automated issue-filing; the Intake Spec (Rule 6) now codifies that shape
+  as the contract for any future detector.
+* *Dependabot.* Zero open PRs in this repo. #1037's 48 PRs are in 15 *other*
+  repos (where the `codeql-action` hold in `dependabot.yml` was bypassed by
+  #977 on 2026-09-22 — that file's comment records the incident).
+* *CI.* Main is green at HEAD; the required-checks floor landed in #1034.
+  There is no runaway pipeline filing issues.
+
+=== 3.4 The "AI sprawl" pattern, precisely
+
+AI drafting makes each additional finding near-free: the cost of a 91st issue
+is the same as the cost of a 3rd. Without a *mechanical* filter — a template
+that forces evidence, a dedup field the filer must fill, a scope dropdown, an
+umbrella reference — volume scales with the audit's ambition, not with the
+defect count. The fix is therefore not "instruct the AI to be careful"
+(instructions drift; the checkpoint notes prove it); the fix is putting the
+filter in the mechanism, which is exactly what the templates and the Intake
+Spec do. The quality of the wave's *investigation* was high and is worth
+keeping; only the *filing* is what changed.
+== 4. The full backlog: 193 issues, classified
+
+[NOTE]
+====
+Every open issue on 2026-09-24 is listed exactly once below (verified
+mechanically against the API census). Disposition codes:
+
+*KEEP* - open, actionable in this repo; label scope:repo.
+*ESTATE* - estate-wide; belongs in the estate register, not this repo's actionable backlog; label scope:estate.
+*DECIDE* - blocked on an owner ruling; belongs in the #787 register.
+*VERIFY* - recent work (chiefly #1034) suggests it is already fixed; verify, then close.
+*PARK* - deliberately deferred.
+*CLOSED* - closed by this action, with the reason in the closing comment.
+====
+
+=== Cluster C1: Language & runtime policy (Deno to Bun, TS/ReScript bans, Python) (23 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#239
+|[campaign] TypeScript → AffineScript estate migration (UMBRELLA)
+|PARK
+|TS to AS umbrella; subsumed by 2026-08-27 TS retirement ruling - keep as historical pointer only
+|#252
+|[campaign] ReScript → AffineScript estate migration (UMBRELLA)
+|ESTATE
+|ReScript to AS umbrella; still cited by language-policy.yml gate - the campaign register for that migration
+|#272
+|[campaign #252] STEP 5 — TAIL BATCH: smallest tail-end repos (≤20 
+|ESTATE
+|[252] step 5 tail batch
+|#276
+|[campaign #252] STEP 6 — MID-TIER: 20-100 file repos (~15 repos)
+|ESTATE
+|[252] step 6 mid-tier
+|#278
+|[campaign #252] STEP 7 — LARGE REPOS: 100-500 file repos (~6 repos)
+|ESTATE
+|[252] step 7 large repos
+|#279
+|[campaign #252] STEP 8 — MEGAPORT: idaptik (516, was 1235) + panll (
+|ESTATE
+|[252] step 8 megaport
+|#309
+|[campaign] Python residual cleanup — ~45 estate-authored .py files r
+|ESTATE
+|Python residual cleanup, ~45 estate files
+|#658
+|Deno→Bun: all 30 deno.json locations assessed — 18 blocked on npm 
+|CLOSED
+|superseded by the 2026-09-22 Deno-ban ruling; successors #919/#926 (key blocker data preserved in closing comment)
+|#659
+|Language policy is duplicated into ~372 per-repo CLAUDE.md files acros
+|ESTATE
+|372 per-repo CLAUDE.md files; canonical here, propagation estate
+|#663
+|TypeScript retirement: measured — 308 of 613 .ts files were never ex
+|ESTATE
+|TS retirement measurement (308 of 613 never exempt)
+|#664
+|43% of estate .affine files are 200-byte Harvard Engine stubs — migr
+|ESTATE
+|43% of .affine files are 200-byte stubs
+|#698
+|Banned languages appear in dev-environment definitions (guix.scm ×14,
+|ESTATE
+|banned languages in dev-environment definitions (guix.scm x14, mise.toml)
+|#704
+|examples/web-project-deno.json template ships phantom npm:affinescript
+|KEEP
+|deno.json template ships phantom npm:affinescript - examples/ is in this repo
+|#706
+|mise.toml pins banned toolchains estate-wide — python in 543/573 fil
+|ESTATE
+|mise.toml pins banned toolchains, 543/573 files
+|#905
+|runtime-policy.yml's Deno branch emits only ::warning:: and cannot fai
+|KEEP
+|runtime-policy.yml Deno branch warn-only - seed here
+|#917
+|234 .pre-commit-config.yaml files depend on Python, which LANGUAGE-POL
+|ESTATE
+|234 .pre-commit-config.yaml depend on Python; estate-wide
+|#919
+|Deno retirement sizing: 95 'deno task' definitions across 23 files in 
+|ESTATE
+|Deno retirement sizing (95 deno tasks, 11 ledgered repos)
+|#920
+|language-policy.yml:116 comment names Deno as npm's replacement; the r
+|CLOSED
+|fixed - language-policy.yml:116 comment corrected to Bun (this action); estate copies via template sync (#659 population)
+|#921
+|55 agent-instruction files assert 'TypeScript IS PERMITTED under Bun',
+|KEEP
+|55 agent-instruction files assert TS permitted under Bun - canonical here, propagation estate
+|#922
+|No pinned Bun lint/format gate: staged JavaScript is a declared skip
+|KEEP
+|no pinned Bun lint/format gate - this repo
+|#925
+|check-ts-allowlist.deno.js cannot be deleted: 11 of the last 12 govern
+|KEEP
+|check-ts-allowlist.deno.js still invoked by 11 of last 12 governance revisions - this repo
+|#926
+|k9-coordination-protocol vendors a Deno test harness: 260 Deno API lin
+|KEEP
+|k9-coordination-protocol Deno test harness, 260 lines - this repo (2-protocols/)
+|#928
+|language-policy.scm v2.0.0 has no wired regression test (needs a decis
+|KEEP
+|language-policy.scm v2.0.0 has no regression test - this repo; needs guile-in-CI decision
+|===
+
+=== Cluster C2: actions.lock & pin campaign (incl. Dependabot / codeql 4.38.1) (19 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#657
+|MEASURED: a lockfile policy kills 77% of dead workflows — the wiped 
+|ESTATE
+|lockfile policy measurement (kills 77% of dead workflows)
+|#669
+|Orphaned/phantom action pins still live post-remediation: dtolnay ×35
+|ESTATE
+|orphaned/phantom action pins estate-wide
+|#670
+|Dependabot bumps uses: without regenerating actions.lock — every rem
+|ESTATE
+|Dependabot bumps without lock regen; mechanism behind #803
+|#707
+|Phantom upload-artifact pin ea165f8d65b6db9a… (commit never existed,
+|ESTATE
+|phantom upload-artifact pin, 11 repos
+|#727
+|gh actions-lock fix mode prepends its banner above the SPDX header —
+|ESTATE
+|gh actions-lock banner vs SPDX header (upstream tool behaviour)
+|#784
+|Pin campaign may have startup-killed every repo carrying a stale actio
+|CLOSED
+|hypothesis answered by #968 census (39 repos, step-level desync)
+|#803
+|lockfile drift: 15 repo(s) as of 2026-09-22
+|ESTATE
+|bot tracking issue (lockfile-drift-detect); stays open while drift exists
+|#903
+|actions-lock cliff: ENFORCE_ACTIONS_LOCK_FROM=2026-10-01 reddens 163 c
+|KEEP
+|ENFORCE_ACTIONS_LOCK_FROM=2026-10-01 cliff reddens 163 callers - spec here; ruling needed; time-bounded
+|#909
+|actions.lock never covers denoland/setup-deno
+|KEEP
+|actions.lock never covers denoland/setup-deno - this repo
+|#916
+|setup-deno pins are inconsistent and some look fabricated: one SHA lab
+|KEEP
+|setup-deno pins inconsistent, one SHA labelled four tags - this repo
+|#924
+|rsr-template-repo has 62 unpinned workflow refs, including two @main a
+|ESTATE
+|rsr-template-repo 62 unpinned workflow refs
+|#963
+|main is red: actions.lock omits a transitive dependency of asana/push-
+|VERIFY
+|actions.lock omits transitive dep; main green at HEAD - verify and close
+|#968
+|actions.lock step-level desync: 39 repos with silently dead CI (startu
+|ESTATE
+|step-level desync census: 39 repos (answers #784)
+|#969
+|actions.lock omits job-level reusable refs in 159 repos (no runtime im
+|ESTATE
+|job-level refs unreported in 159 repos; tracks upstream #129
+|#987
+|Phantom blob-pin: 18 refs across 7 repos pin standards reusable workfl
+|ESTATE
+|phantom blob pins: 18 refs across 7 repos (the guard is itself blob-pinned)
+|#991
+|AC4 arming policy: retired-filename blocks, stale-version warns (each 
+|DECIDE
+|AC4 arming policy (retired-filename blocks, stale-version warns)
+|#993
+|actions.lock policy: job-level reusable refs are reported, never requi
+|KEEP
+|job-level refs reported, never required (policy text) - this repo
+|#1005
+|Supply chain: 75 estate pins are spelled v4.38.0 but are the v4.38.1 t
+|ESTATE
+|75 estate pins spelled v4.38.0 but are the v4.38.1 target (estate-blocked)
+|#1037
+|48 open Dependabot PRs re-introduce the codeql-action v4.38.1 startup-
+|ESTATE
+|48 open Dependabot PRs re-introduce codeql v4.38.1 in 15 repos; dependabot.yml hold bypassed
+|===
+
+=== Cluster C3: CI/CD gates & workflow defects (this repo) (31 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#346
+|governance: hoist bridge-forbidden-phrases check into reusable workflo
+|KEEP
+|hoist bridge-forbidden-phrases into reusable workflow - this repo
+|#409
+|promote CI-CRITICALITY tiers (Gate/Check/Advisory/Auto) → standards 
+|KEEP
+|promote CI-CRITICALITY tiers into standards + rsr-template - this repo
+|#708
+|Lockfile Drift Detect anonymizes repos as _w, counts banners as entrie
+|CLOSED
+|fixed - workflow implements rc honesty + slug + banner fixes and cites #708 as resolved
+|#791
+|githooks: validate-a2ml admits 0 of 222 files and validate-spdx reject
+|KEEP
+|githook validators never run against own corpus - this repo
+|#808
+|RSR workflow templates use an illegal `uses: ../../` ref — every ins
+|CLOSED
+|subsumed by #913 (2026-09-22 census measured the same defect, 76 refs); mis-triage triple preserved in comment on #913
+|#894
+|Gate table + criterion 1.2.1 ignore manifest.scm (estate Guix conventi
+|KEEP
+|gate table + criterion 1.2.1 ignore manifest.scm - this repo
+|#895
+|Gate format cannot express partial modules or nested layouts (2 concre
+|KEEP
+|gate format cannot express partial modules / nested layouts - this repo
+|#896
+|changelog-reusable can never start: called-job write perms are checked
+|KEEP
+|changelog-reusable caller write-perm check - this repo
+|#904
+|run_validator() is fail-open: 6 validators named by rsr-template-repo'
+|ESTATE
+|rsr-template-repo pre-commit fail-open; validator copies are here
+|#906
+|workflow-lint's lock regex is blind to '- uses:' list items, so its gr
+|KEEP
+|workflow-lint lock regex blind to list items - this repo
+|#907
+|check-actions-lock-gate.sh unconditionally exempts actions/github-scri
+|KEEP
+|check-actions-lock-gate.sh exempts actions/github-script - this repo (security)
+|#908
+|root-allow.txt is registered in the exemption ratchet but absent on di
+|KEEP
+|root-allow.txt registered in ratchet but absent on disk - this repo
+|#910
+|governance-reusable.yml still has 7 'ref: main' helper checkouts reach
+|KEEP
+|governance-reusable.yml 7 ref:main helper checkouts - this repo
+|#911
+|shell-e2e-reusable.yml has the repo's only 2 unpinned refs (owner's st
+|KEEP
+|shell-e2e-reusable 2 unpinned refs (owner's staged work; report only)
+|#913
+|76 'uses: ../../...' relative refs in vendored seeds are invalid synta
+|KEEP
+|76 malformed uses: ../../ refs in vendored seed - this repo; startup-death class
+|#914
+|46 genuinely unpinned third-party refs in the vendored seed trees
+|KEEP
+|46 unpinned third-party refs in vendored seed - this repo
+|#930
+|actions-lock gate's remedy text names a repo-relative path that exists
+|KEEP
+|actions-lock gate remedy text names a path that exists in no consumer - this repo
+|#932
+|validate-lint-format.sh: Rust and Nickel arms ask a different question
+|KEEP
+|validate-lint-format.sh Rust/Nickel arms ask a different question - this repo
+|#935
+|actions-lock gate is permanently red on main, and its remediation cont
+|VERIFY
+|claims gate permanently red on main; main green at HEAD c56f4ec - verify and close
+|#964
+|governance-reusable.yml dupkey helper pin 317101e0 is stale by 45 file
+|KEEP
+|governance-reusable dupkey helper pin stale by 45 files - this repo
+|#967
+|ci-pipeline detect is blind to 56 code-bearing repos (and probes Deno,
+|KEEP
+|ci-pipeline detect blind to 56 code-bearing repos; probes Deno not Bun - this repo
+|#972
+|pre-commit hands validators git-QUOTED paths, so non-ASCII filenames a
+|KEEP
+|pre-commit hands validators git-quoted paths - this repo
+|#976
+|detect: the Nickel probe matches RSR template boilerplate, silencing t
+|KEEP
+|Nickel probe matches RSR boilerplate, silencing zero-denominator refusal - this repo
+|#980
+|ci-pipeline.yml: the ledger pin's "same commit" invariant is unsatisfi
+|KEEP
+|ci-pipeline ledger pin "same commit" invariant unsatisfiable (12/12 squash) - this repo
+|#981
+|validate-actions-lock prescribes a cure that can re-legitimise a block
+|KEEP
+|validate-actions-lock cure can re-legitimise a blocked version - this repo
+|#992
+|check-lock-sync.sh and GitHub startup disagree for job-level-reusable-
+|KEEP
+|check-lock-sync vs GitHub startup disagree; gate error text inverted - this repo
+|#994
+|Cross-cutting governance reds surfaced by the actions.lock cure — 9 
+|KEEP
+|cross-cutting governance reds, 9 classes across 17 PRs - this repo
+|#998
+|ci-pipeline.yml: standards does not call its own pipeline (AC6 of #986
+|KEEP
+|standards does not call its own ci-pipeline (AC6 of #986) - this repo
+|#1010
+|ci: retire the dead A2ML validation gate (13 repos — the renamed-act
+|ESTATE
+|retire dead A2ML validation gate, 13 repos; gate source is here
+|#1015
+|check-action-pins-resolve.sh scans prose: a documentation example SHA 
+|KEEP
+|check-action-pins-resolve.sh scans prose (doc example SHA fails gate) - this repo
+|#1018
+|rust-ci-reusable: explicit ref refs/pull/N/merge dies when the PR merg
+|KEEP
+|rust-ci-reusable: refs/pull/N/merge dies when PR merges mid-run - this repo
+|===
+
+=== Cluster C4: Hypatia scanner findings (this repo) (11 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#687
+|audit(hypatia): classify 61 structural-drift and canonical-home findin
+|ESTATE
+|classify 61 structural-drift findings (estate)
+|#936
+|Hypatia content_patterns/hardcoded_tmp: /tmp paths without mktemp (30 
+|KEEP
+|hypatia /tmp without mktemp x30 - this repo
+|#937
+|Hypatia content_patterns/http_in_docs: plain-HTTP URLs in prose (11 in
+|KEEP
+|hypatia plain-HTTP URLs in prose x11 - this repo
+|#938
+|Hypatia content_patterns/npx_in_workflow: npx/npm in CI config (9 inst
+|KEEP
+|hypatia npx/npm in CI config x9 - this repo
+|#939
+|Hypatia shell-exec patterns: download_then_run_shell + eval_in_shell (
+|KEEP
+|hypatia download-then-run + eval patterns x13 - this repo
+|#940
+|Hypatia content_patterns/known_fake_action_sha in vendored satellite e
+|KEEP
+|hypatia known fake action SHAs in vendored satellites x6 - this repo
+|#941
+|Hypatia RE001: adopt step-security/harden-runner estate-wide, or recor
+|DECIDE
+|RE001 harden-runner estate-wide or record WONTFIX
+|#942
+|Hypatia RE005: review exit-masking steps (`
+|KEEP
+|RE005 exit-masking steps x20 - this repo
+|#943
+|Hypatia workflow_hardening triage: secrets-inherit convention + WH013/
+|KEEP
+|workflow_hardening secrets-inherit + WH013/WH006 false positives - this repo
+|#945
+|Hypatia misc: scorecard DependencyPinning + SD022 k9 spec stale path (
+|KEEP
+|scorecard DependencyPinning + SD022 k9 stale path - this repo
+|#1014
+|governance: the Hypatia scanner pin predates the consumer fixes it sca
+|KEEP
+|Hypatia scanner pin predates the consumer fixes it scans for - this repo
+|===
+
+=== Cluster C5: Rulesets, branch protection & org settings (15 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#408
+|policy: estate settings standard — merge opts, protection, required-
+|ESTATE
+|estate settings standard (WS4)
+|#681
+|adaptive/must: 342 of 415 repos cannot merge a clean PR without --admi
+|VERIFY
+|342 repos unsatisfiable required contexts; #1034 floor applier may have fixed - verify
+|#887
+|D65 — EstatePushing is an active org ruleset with zero rules
+|VERIFY
+|EstatePushing org ruleset with zero rules; verify after #1034
+|#889
+|Repo metadata hygiene: 22 hyperpolymath repos have blank descriptions 
+|ESTATE
+|22 repos with blank descriptions; standards' fixed by this action
+|#890
+|Optimus-Branch is enforcement:disabled on standards, hypatia and cicd-
+|VERIFY
+|Optimus-Branch disabled on standards/hypatia/cicd-squabbler; verify after #1034
+|#956
+|standards/main has no required status checks — every gate this repo 
+|CLOSED
+|fixed by #1034 - active ruleset verified via API: 21 required checks + signatures + scanning
+|#1003
+|rsr-template-repo: no ruleset requires pull requests on any branch
+|ESTATE
+|rsr-template-repo: no ruleset requires pull requests
+|#1004
+|Estate census: 124 of 456 repos carry retired or unsatisfiable ruleset
+|ESTATE
+|124 of 456 repos carry retired/unsatisfiable ruleset rules (report only)
+|#1006
+|EstateTagging's workflows rule is vacuous (workflows: []), and no Inte
+|ESTATE
+|EstateTagging workflows rule vacuous; no Integration can create a tag
+|#1007
+|EstatePushing is scoped ~ALL but binds to 6 of 68 repos — push rules
+|ESTATE
+|EstatePushing scoped ~ALL but binds to 6 of 68 repos
+|#1008
+|rsr-template-repo Base ruleset repaired; 5-8 error-severity alerts rem
+|DECIDE
+|rsr-template-repo Base ruleset: 5-8 error-severity alerts, threshold semantics undetermined
+|#1013
+|code_scanning trim applied to hyperpolymath (77/77); metadatastician b
+|VERIFY
+|metadatastician blocked by ONE inherited org ruleset; verify after #1034
+|#1028
+|Tag rulesets restrict `creation` with no bypass actors — an unknown 
+|DECIDE
+|tag rulesets restrict creation with no bypass actors
+|#1032
+|O6 propagation: four contradictions between the ruling and the committ
+|ESTATE
+|O6 propagation: four contradictions between ruling and committed rulesets
+|#1040
+|apply-branch-gates: a gate workflow no PR can trigger still derives a 
+|KEEP
+|apply-branch-gates: untriggerable gate workflow still derives a required context - this repo
+|===
+
+=== Cluster C6: Estate infrastructure & fleets (mirrors, gitdb, census) (36 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#306
+|ci(estate): Pages enablement decision needed across 48 repos (failing 
+|ESTATE
+|Pages enablement decision, 48 repos
+|#331
+|[campaign] Estate boj-build.yml sweep — repair or retire (~30 repos 
+|ESTATE
+|boj-build.yml sweep, ~30 repos
+|#342
+|audit: contractiles estate state 2026-06-02 — schema drift + trident
+|ESTATE
+|contractiles estate-state audit
+|#348
+|automation: hypatia ruleset + gitbots should be able to fan-out doc + 
+|ESTATE
+|hypatia ruleset + gitbots fan-out charter
+|#403
+|Build the Estate Manifesto & Atlas (front-door, owner-gated)
+|ESTATE
+|Estate Manifesto & Atlas
+|#410
+|standard: MCP settings template = boj-server cartridge config (WS6)
+|ESTATE
+|MCP settings template = boj-server cartridge config (WS6)
+|#411
+|standard: discussion + wiki templates + discussions-toggle policy (WS5
+|ESTATE
+|discussion + wiki templates policy (WS5/WS8)
+|#438
+|Estate recovery: audit + revert unauthorized mass migrations (README .
+|VERIFY
+|audit + revert of unauthorised mass migrations; verify state before closing
+|#443
+|Estate campaign: roll SonarCloud across all repos (parked, resume late
+|PARK
+|SonarCloud rollout; self-declared parked
+|#460
+|[umbrella] Estate audit & optimization — make the enforcement real (
+|ESTATE
+|estate audit & optimisation umbrella (Waves 0-6)
+|#462
+|Implement the DYADT production verifier (hyperpolymath/did-you-actuall
+|ESTATE
+|DYADT production verifier; separate repo
+|#633
+|[umbrella] Estate control plane — close the automation loop (the las
+|ESTATE
+|estate control plane umbrella
+|#634
+|[umbrella] Template family rationalisation — variant packs, not vari
+|ESTATE
+|template family rationalisation
+|#635
+|[umbrella] Surface the buried projects — DYADT is the worked example
+|ESTATE
+|surface buried projects (DYADT detector)
+|#636
+|[charter] git-logistics-office — the estate control plane (repo life
+|ESTATE
+|git-logistics-office charter
+|#645
+|Fix the scaffold that propagates 'License: PMPL-1.0-or-later' (runbook
+|ESTATE
+|scaffold PMPL propagation; source is the scaffold repo
+|#653
+|40 referenced-but-absent files across 19 repos — triaged (estate swe
+|ESTATE
+|40 referenced-but-absent files, 19 repos
+|#662
+|wordpress-tools PR #57 deleted 108 source files and added nothing — 
+|ESTATE
+|wordpress-tools PR#57 deletion scoring; other repo
+|#668
+|gh search/code silently undercounts by up to 31% while reporting incom
+|ESTATE
+|gh search undercount doctrine (enumerate-then-filter)
+|#675
+|Estate sweep: Fork A 'postulate' damage confined to proven — but the
+|ESTATE
+|proven postulate damage; estate repo
+|#677
+|Estate: 13 repos have a DAMAGED GIT OBJECT DATABASE (not the corrupt-i
+|ESTATE
+|13 repos with damaged git object databases; recovery
+|#678
+|Estate: 132 repos track files their own .gitignore hides; template-syn
+|ESTATE
+|132 repos track files their own .gitignore hides
+|#689
+|fix(rsr-certifier): complete or honestly gate the uncompilable satelli
+|ESTATE
+|rsr-certifier satellite (also vendored here)
+|#702
+|install-tools.sh regenerated estate-wide WITHOUT the #678 cure — fak
+|ESTATE
+|install-tools.sh re-propagated without the #678 cure; fix the template
+|#703
+|Duplicate checkout trees double-count every estate census — repos/ v
+|ESTATE
+|duplicate checkout trees double-count every census
+|#705
+|proven: postulate cure is NOT on origin/main — 42 .idr files/360 sit
+|ESTATE
+|proven postulate cure not on origin/main
+|#750
+|Deletion census: use `git ls-files --deleted`, never `git status` — 
+|ESTATE
+|deletion census doctrine (git ls-files --deleted)
+|#751
+|Agent handover surface is lossy: `.claude/checkpoints/` prunes files a
+|ESTATE
+|agent handover surface is lossy (checkpoints + developer dirs)
+|#759
+|[decision] 72 of 111 rhodibot workflows still run the MUTATING variant
+|ESTATE
+|rhodibot mutating-variant cron; canary 39/111
+|#792
+|Pin-consumption census TSV has TWO extractor defects — 145 of 1,434 
+|ESTATE
+|pin-consumption TSV extractor defects (census data)
+|#795
+|1,073 byte-identical Optimus-Branch.json replicas are a STALE, WEAKER 
+|ESTATE
+|1073 Optimus-Branch.json replicas stale; canonical pointer unresolved
+|#918
+|Mirror callers drifted across >=3 live SHAs (de-duplicate worktrees be
+|ESTATE
+|mirror callers drifted across >=3 live SHAs
+|#949
+|Estate health: 87% of default branches are red (388 of 447) — a red 
+|ESTATE
+|87% of default branches red (388 of 447)
+|#950
+|Mirror fleet: 27% of estate CI failures — destinations unprovisioned
+|ESTATE
+|mirror fleet: 27% of estate CI failures
+|#1002
+|Mirror to Git Forges: 3 of 7 forges failing, three different root caus
+|ESTATE
+|mirror to Git Forges: 3 of 7 failing, three root causes
+|#1019
+|CodeRabbit's unsigned pushes re-kill CI on every required_signatures r
+|ESTATE
+|CodeRabbit unsigned pushes re-kill required_signatures repos
+|===
+
+=== Cluster C7: Spec & documentation contradiction / drift (17 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#281
+|[campaign #239] Estate seam audit: stale .claude/CLAUDE.md language ta
+|ESTATE
+|stale CLAUDE.md language tables; canonical here, propagation estate
+|#307
+|[campaign] .scm → .a2ml machine-readable convergence (104 repos rema
+|ESTATE
+|.scm to .a2ml convergence, 104 repos
+|#343
+|audit: dotfile drift across estate (2026-06-02 sample) — .editorconf
+|ESTATE
+|dotfile drift sweep (2026-06-02 sample)
+|#401
+|Docs: complete the audience-split education layer (docs/wikis/)
+|KEEP
+|audience-split education layer (docs/wikis/) - this repo
+|#446
+|Proposal: an honest, adoptable readiness/insight badge framework — g
+|KEEP
+|readiness/insight badge framework - this repo (docs/BADGE-CRITERIA-SPEC.adoc)
+|#463
+|Complete the per-language testing guides (Zig, BEAM, proofs) + Julia r
+|KEEP
+|per-language testing guides - this repo
+|#479
+|[campaign] standards carve-out: evict products/impls, keep the canon (
+|VERIFY
+|standards carve-out campaign; verify completion of the 9 sub-steps
+|#493
+|[carve-out 4/9] rhodium-standard-repositories/ cleanup: de-vendor sate
+|ESTATE
+|carve-out 4/9: rsr-template-repo cleanup
+|#495
+|[carve-out 6/9] Data out of spec dirs: grade data → archive, PORT-RE
+|KEEP
+|carve-out 6/9: data out of spec dirs - this repo
+|#646
+|AGENTIC.a2ml instructs agents to 'Never use AGPL' — contradicts Rule
+|KEEP
+|AGENTIC.a2ml "Never use AGPL" contradicts Rules 3-5 - this repo; ruling on which side holds
+|#732
+|AI-MANIFEST ply: relay items after #731 — two renames, CI wiring, mi
+|KEEP
+|AI-MANIFEST ply relay - 0-AI-MANIFEST.a2ml is here
+|#897
+|Canonical cliff.toml should strip ZWSP at generation (bot regens re-im
+|KEEP
+|canonical cliff.toml should strip ZWSP at generation - this repo
+|#915
+|~138 files cannot carry a '#' SPDX header; 58 .json need REUSE sidecar
+|KEEP
+|138 files cannot carry SPDX header; 58 .json need REUSE sidecars - this repo
+|#923
+|The Deno ruling is dated two ways across the estate (2026-08-26 vs 202
+|DECIDE
+|Deno ruling dated two ways; canonical = 2026-09-22 (LANGUAGE-POLICY v1.6.0 + language-policy.scm)
+|#927
+|LANGUAGE-POLICY.adoc:10 ':source-repo:' points at cccp, which holds no
+|CLOSED
+|fixed - :source-repo: pointer cccp to standards (this action)
+|#929
+|Seed CLAUDE.md claims the estate uses GitLab and not GitHub (flag only
+|DECIDE
+|seed CLAUDE.md claims GitLab not GitHub; flag only
+|#960
+|D73-C downstream: 21 launcher descriptors + trigger/ still name the de
+|KEEP
+|21 launcher descriptors + trigger/ name deleted launcher-standard.a2ml - this repo
+|===
+
+=== Cluster C8: Debtfile & ratchet mechanics (4 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#953
+|debt paydown: gate-scripts-without-tests re-baselined 30->40, todo-fix
+|KEEP
+|Debtfile re-baselined 30 to 40, 76 to 80 - this repo
+|#955
+|Debt ratchet red on every PR since #820 — run-debtfile.sh --write em
+|KEEP
+|debt ratchet red on every PR since #820 - this repo; blocks merges
+|#958
+|Debt-exception / Ratchet-exception trailers never survive the squash m
+|KEEP
+|debt-exception trailers never survive squash merge (0 of 8) - this repo
+|#975
+|21 baseline acks lapse on 2026-10-22 and 17 point at closed issues
+|KEEP
+|21 baseline acks lapse 2026-10-22; 17 point at closed issues - this repo; time-bounded
+|===
+
+=== Cluster C9: Legacy (May-Jul) boj/isers & proof-debt (8 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#89
+|Epic: -iser regeneration-cartridge pattern — wire all 28 -isers into
+|ESTATE
+|boj-server epic; work lives in hyperpolymath/boj-server
+|#90
+|Roll unified-gated-adapter + SSE + regen-trigger into the iseriser sca
+|ESTATE
+|iseriser scaffold; boj-server
+|#91
+|http-capability-gateway tier-2 production-wiring (ADR-0004)
+|ESTATE
+|http-capability-gateway tier-2 (ADR-0004); boj-server
+|#92
+|Idris2 as source-of-truth: generate/verify Zig FFI from the ABI
+|ESTATE
+|Idris2 source-of-truth to Zig FFI; research/estate
+|#93
+|Stop committing generated/* — gitignore + regenerate-on-trigger
+|ESTATE
+|stop committing generated/*; estate repos
+|#100
+|Phase E — Production wiring + staging validation + rollout/rollback 
+|PARK
+|Phase E rollout runbook; verify whether Phase D landed, then close
+|#124
+|Epic: estate proof-debt remediation (2026-05-18 reconciled audit)
+|ESTATE
+|proof-debt remediation epic (2026-05-18 audit)
+|#156
+|[#92 Class D] abbreviation / acronym-boundary drift across DB + cloud 
+|ESTATE
+|Class D abbreviation/acronym drift; estate cartridges
+|===
+
+=== Cluster C10: KYAML campaign (5 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#1021
+|KYAML step 2/6 — comment-preservation proof (shared by Y-2 and Y-3)
+|KEEP
+|KYAML step 2/6: comment-preservation proof - this repo
+|#1022
+|KYAML step 3/6 — a KYAML formatter/linter for arbitrary YAML
+|KEEP
+|KYAML step 3/6: formatter/linter for arbitrary YAML - this repo
+|#1023
+|KYAML step 4/6 — decide KYAML scope on the evidence (owner ruling)
+|DECIDE
+|KYAML step 4/6: scope ruling on the evidence
+|#1024
+|KYAML step 5/6 — migrate estate-authored non-bot YAML
+|ESTATE
+|KYAML step 5/6: migrate estate-authored non-bot YAML
+|#1025
+|KYAML step 6/6 — workflows, only if step 4 rules them in scope
+|ESTATE
+|KYAML step 6/6: workflows, only if step 4 rules them in scope
+|===
+
+=== Cluster C11: Nickel/K9 format defects (this repo) (4 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#934
+|6 contractiles fail nickel typecheck: import path points one level off
+|KEEP
+|6 contractiles fail nickel typecheck (import path one level off) - this repo
+|#999
+|config.ncl cannot be evaluated: std.record.merge does not exist
+|KEEP
+|config.ncl cannot be evaluated (std.record.merge) - this repo
+|#1000
+|8 of 16 *.k9.ncl files lack the K9! line-1 sentinel
+|KEEP
+|8 of 16 *.k9.ncl files lack the K9! line-1 sentinel - this repo
+|#1001
+|os_detect.ncl: 'Apple_Darwin falls through to the wildcard in deployme
+|KEEP
+|os_detect.ncl: Apple_Darwin falls through to wildcard - this repo
+|===
+
+=== Cluster C12: DEED / A2ML conversion (1 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#837
+|DEED conversion campaign — tracking & acceptance criteria (.a2ml →
+|KEEP
+|DEED conversion campaign - this repo
+|===
+
+=== Cluster C13: Security tooling (gitleaks / secret scanner) (2 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#888
+|secret-scanner-reusable stages the estate baseline unconditionally, so
+|KEEP
+|secret-scanner-reusable stages estate baseline unconditionally - this repo
+|#957
+|PAT-refresh tripwire: live HYPATIA_SCAN_PAT will arm 6 unackable CSA f
+|KEEP
+|HYPATIA_SCAN_PAT refresh tripwire would arm 6 unackable CSA findings - this repo (security)
+|===
+
+=== Cluster C14: CodeQL / Scorecard tooling defects (8 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#288
+|[campaign] Estate CodeQL weekly→monthly sweep (cut 3, standards#233 
+|ESTATE
+|CodeQL weekly to monthly sweep estate-wide
+|#323
+|[standing] Estate CodeQL cron drift detection + 6-week budget review
+|ESTATE
+|CodeQL cron drift detection + 6-week budget review
+|#324
+|[campaign] Long-tail non-canonical CodeQL cron sweep (~86 files / 30 r
+|ESTATE
+|long-tail CodeQL sweep, ~30 repos
+|#674
+|Scorecard's PinnedDependencies is wrong for lockfile-enforced repos �
+|ESTATE
+|Scorecard PinnedDependencies wrong for lockfile repos (79 alerts)
+|#1031
+|CodeQL default setup and a committed advanced workflow cannot coexist 
+|ESTATE
+|CodeQL default + advanced workflow cannot coexist (3 metadatastician repos)
+|#1033
+|gates.json: never_required_contexts cannot catch default-setup CodeQL 
+|KEEP
+|gates.json never_required_contexts cannot catch default-setup CodeQL by name - this repo
+|#1035
+|27 Scorecard callers omit actions:read and will startup_failure on the
+|ESTATE
+|27 Scorecard callers omit actions:read
+|#1036
+|Scorecard reconciler fails correct repos: gh actions-lock --verify is 
+|KEEP
+|scorecard reconciler blind to job-level refs - this repo (half its severity claim self-retracted in-thread)
+|===
+
+=== Cluster C15: Owner decisions & registers (8 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#404
+|Estate licence cascade (PMPL -> MPL/CC-BY-SA axis) — per HANDOFF
+|DECIDE
+|licence cascade PMPL to MPL/CC-BY-SA; owner ruling
+|#497
+|[carve-out 8/9] ⚠️ OWNER-ONLY licence-flag items: 007 audits in pu
+|DECIDE
+|carve-out 8/9: owner-only licence-flag items
+|#637
+|[register] Owner-decision backlog — 17 issues blocked on a ruling, n
+|CLOSED
+|duplicate of #787 - decision register absorbed it
+|#692
+|policy: enforce Rust = Rust + Creusot without proof theatre
+|DECIDE
+|Rust = Rust + Creusot policy without proof theatre
+|#709
+|Owner decision batch 2026-08-31: 7 decisions from the triage wave, one
+|CLOSED
+|absorbed into #787 decision sheet
+|#715
+|CI/CD regularisation: owner decisions O1–O10 (batch, non-blocking)
+|CLOSED
+|absorbed into #787 decision sheet
+|#787
+|Owner decision sheet D1–D72: one answerable place for #637 + #715 + 
+|DECIDE
+|owner decision sheet D1-D72 - the register itself; keep open until rulings land
+|#944
+|Banned-language deed tools: port a2ml_to_deed.py + deed_lint.py off Py
+|DECIDE
+|port the 2 deed Python tools or exempt permanently - tools are here (1-formats/deed/tools/)
+|===
+
+=== Cluster C16: Rust formatting debt (this repo) (1 issues)
+
+[cols="10,38,12,40",options="header"]
+|===
+|Issue
+|Title
+|Disposition
+|Note
+|#933
+|All 12 Rust crates fail cargo fmt --check (pre-existing formatting deb
+|KEEP
+|all 12 Rust crates fail cargo fmt --check - this repo (needs toolchain)
+|===
+== 5. What this action did
+
+=== 5.1 Repository changes (committed on the working branch, in a PR)
+
+[cols="2,3,5",options="header"]
+|===
+|File |Change |Why
+
+|`ULTRAPLAN-2026-09-24.adoc`
+|new (this document)
+|the durable record of the census, diagnosis, and reconciliation
+
+|`docs/ISSUE-INTAKE-SPEC.adoc`
+|new, v1.0.0, normative
+|*the upstream fix*: one issue / one defect / correct scope; dedup
+obligation; wave-umbrella rule; mandatory templates; scope labels;
+automation contract (only the two designated detectors may file, one tracking
+issue each); no silent closes; spec-reconciliation-on-contact
+
+|`.github/ISSUE_TEMPLATE/bug.yml`, `decision.yml`, `campaign.yml`, `config.yml`
+|new
+|structured intake that enforces the spec: evidence required for bugs,
+options + recommendation + register entry for decisions, source + scope +
+steps for campaigns; blank form disabled
+
+|`0-canon/GOVERNANCE.adoc`
+|rewritten v2.0.0
+|the v1 placeholder described a multi-maintainer approval model that does not
+exist in a single-owner estate and ended in broken asciidoc. v2.0.0
+summarises the Constitutional District (roles, decision making,
+communication, licensing) and defers to it where they differ
+
+|`0-canon/rsr/LANGUAGE-POLICY.adoc`
+|`:source-repo:` cccp to standards
+|closes #927 — the pointer named a repo that holds no such spec
+
+|`rhodium-standard-repositories/.github/workflows/language-policy.yml`
+|line-116 comment "replacement: Deno" to "the JS runtime is Bun per the
+2026-09-22 ruling"
+|closes #920 in this repo; estate copies propagate via template sync
+(see the #659 population)
+
+|`scripts/triage-2026-09-24-apply.sh`
+|new, executable, idempotent
+|the live actions of 5.2 as one owner-run command (labels, closes with
+their evidence comments, description + topics); dry-run supported via
+`DRY_RUN=1`
+|===
+
+=== 5.2 Live repository actions — packaged in `scripts/triage-2026-09-24-apply.sh`
+
+*Boundary found while executing*: the agent performing this work is
+authenticated as `arena-ai-coding-agent[bot]` — a GitHub App installation with
+repo read, `labels:write`, and `contents:write` (git), but *without*
+`issues:write` or repo-admin. Verified empirically: reading issues and
+creating labels succeed; commenting on issues, closing issues, adding labels
+to issues, and `PATCH repos` all return 403. So the live actions below are
+fully prepared — exact label sets, exact close comments, exact
+description/topics — in one idempotent script the owner runs once:
+
+----
+gh auth login        # or: export GH_TOKEN=<owner PAT with repo scope>
+bash scripts/triage-2026-09-24-apply.sh          # or DRY_RUN=1 first
+----
+
+The script skips already-closed issues and re-posts nothing it already has,
+so it is safe to run before or after the merge, any number of times.
+
+* *Description* — old: `Organization-wide standards and specifications`
+  (true but inert). New: describes what the repo *is*, what it hosts, and who
+  it is for (see part 7 for the final value).
+* *Topics* — 18 topics narrowed to 12 non-redundant, discoverable ones (part 7).
+* *Backlog labelled* — all open issues: the estate's own classifier
+  (`.github/scripts/classify-issue.jq` + `.github/label-classifier.json`) runs
+  over every title, with the scope/status/priority assignments from part 4 on
+  top. Additive only; nothing pre-existing is removed.
+* *10 issues closed with evidence comments* (each comment in the script
+  states the reason and names the canonical/fixed issue, per Intake Spec
+  Rule 7):
+
+[cols="10,20,70",options="header"]
+|===
+|Issue |Was |Closing reason (stated in the script's evidence comment)
+
+|#956
+|standards/main has no required status checks
+|*Fixed by #1034.* Verified via the rulesets API: the active `main gate`
+ruleset carries 21 required status contexts, required signatures, and
+code-scanning thresholds.
+
+|#637
+|[register] Owner-decision backlog, 17 issues
+|*Absorbed.* #787's title names it: "one answerable place for #637 + #715 +
+#709 + #658". The register lives on #787.
+
+|#709
+|Owner decision batch 2026-08-31
+|*Absorbed* into #787 (named there).
+
+|#715
+|CI/CD regularisation O1–O10
+|*Absorbed* into #787 (named there).
+
+|#784
+|Pin campaign may have startup-killed every repo with a stale lock (hypothesis,
+needs census)
+|*Answered.* The census #968 exists: 39 repos with step-level desync. The
+hypothesis issue's own acceptance condition is met by it.
+
+|#808
+|RSR templates use illegal `uses: ../../` refs
+|*Subsumed by #913*, whose 2026-09-22 census measured the same defect
+population at 76 refs with acceptance criteria. #808's "why it was invisible"
+mis-triage triple (failure / 0 jobs / name==path, indistinguishable from
+callee-lockfile poisoning) was preserved in a comment on #913 before closing.
+
+|#708
+|Lockfile Drift Detect anonymises repos, counts banners, treats errors as drift
+|*Fixed.* The current workflow implements rc-honesty (1=drift, 2=error),
+per-repo slugs, and banner-free counting, and its comments cite #708 as the
+resolved reference. "Has only ever run once" is stale — it runs weekly.
+
+|#658
+|Deno to Bun: 30 deno.json locations, 18 blocked
+|*Superseded.* The 2026-09-22 ruling banned Deno outright, replacing
+"migrate Deno to Bun" with "retire Deno" (#919 sizes it, #926 handles the k9
+harness). The unique data (18-of-30 blocked count) was copied into the closing
+comment before closure.
+
+|#920
+|language-policy.yml:116 names Deno as npm's replacement
+|*Fixed in this repo* (the seed copy committed with this action). Estate
+copies remain in the template-sync population (#659).
+
+|#927
+|LANGUAGE-POLICY.adoc `:source-repo:` points at cccp
+|*Fixed in this repo* (pointer committed with this action).
+|===
+
+* *One comment on #913* (in the script, posted before #808 is closed)
+  preserving #808's mis-triage knowledge (see above) — evidence is not
+  orphaned by a close.
+
+=== 5.3 What this action deliberately did NOT do
+
+* *Did not execute the 5.2 actions under the agent token.* The token lacks
+  `issues:write`, so labelling/closing/commenting/repo-PATCH would have
+  failed (and the label attempt failed with 403 on every issue, leaving the
+  backlog exactly as found). The script in 5.2 is the execution vehicle, and
+  running the closes under the owner's identity is correct: they are
+  statements about the owner's backlog.
+* *Did not close the ~60 ESTATE rows.* They are labelled `scope:estate` and
+  listed in part 4, but moving them to the estate register is the owner's
+  call (they are the working memory of estate audits). Say the word and the
+  migration is mechanical.
+* *Did not close the VERIFY rows on inference.* Where main's green state
+  suggests a fix (#935, #963, #438, #479, #681, #887, #890, #1013), the rule
+  is verify-then-close with a fresh measurement, not close-on-hunch.
+* *Did not touch the org rulesets* (EstatePushing, Optimus-Branch,
+  EstateTagging) — those are estate-governance objects, and #1034's floor
+  applier is the instrument for them; VERIFY rows check their state after it
+  has run estate-wide.
+
+== 6. Spec reconciliation: what is fixed, what is not
+
+The wave's value is that it *found* the contradictions. The list below is the
+reconciliation status of every spec-level contradiction surfaced by the
+backlog (full rows in part 4).
+
+[cols="4,3,3",options="header"]
+|===
+|Contradiction |Where the fix lives |Status
+
+|GOVERNANCE placeholder vs the Constitutional District
+|this repo (`0-canon/`)
+|*Fixed* (v2.0.0, this action)
+
+|`:source-repo:` pointer to cccp (#927)
+|this repo (`0-canon/rsr/`)
+|*Fixed* (this action)
+
+|language-policy.yml "replacement: Deno" comment (#920)
+|this repo (seed) + estate copies
+|*Fixed here*; estate copies via template sync
+
+|AGENTIC.a2ml "Never use AGPL" vs licence Rules 3–5 (#646)
+|this repo (`.machine_readable/` descriptiles)
+|*Open* — a ruling is needed on which side holds before the descriptiles are
+amended (Rule 8: record the supersession, don't amend silently)
+
+|55 agent-instruction files "TypeScript IS PERMITTED under Bun" vs the
+2026-08-27 TS ban (#921)
+|canonical here, propagation estate
+|*Open* — fix the canonical wording here, then sweep; the sweep is estate work
+
+|Deno ruling dated two ways, 2026-08-26 vs 2026-09-22 (#923)
+|this repo states 2026-09-22 (LANGUAGE-POLICY v1.6.0, `language-policy.scm`)
+|*Needs a one-line ruling* declaring 2026-09-22 canonical, then propagation
+
+|21 launcher descriptors naming deleted `launcher-standard.a2ml` (#960)
+|this repo (`launcher/`)
+|*Open, fixable here* — rename-or-delete the references
+
+|Nickel/K9 defects: `config.ncl` unevaluable (#999), 8/16 missing K9!
+sentinels (#1000), `os_detect.ncl` Darwin fallthrough (#1001), 6 contractiles
+failing typecheck (#934)
+|this repo
+|*Open, fixable here* — the fix wave (part 8)
+
+|138 files without SPDX headers; 58 .json needing REUSE sidecars (#915)
+|this repo
+|*Open, mechanical* — REUSE sidecar pass
+
+|Debtfile mechanics: ratchet red on every PR (#955), trailers lost to squash
+(#958), re-baselining (#953)
+|this repo
+|*Open, fixable here* — #955 is the only one that blocks merges today
+
+|gates.json `never_required_contexts` vs default-setup CodeQL (#1033, #1031)
+|this repo + 3 estate repos
+|*Open* — spec fix here, propagation after
+
+|DEED conversion (#837), Python deed tools (#944), dead A2ML gate (#1010)
+|this repo + 13 estate repos
+|*Open* — campaign (#837) + a ruling (#944)
+
+|Optimus-Branch.json canonical pointer unresolved (#795)
+|design doc here, 1073 replicas estate
+|*Open* — fix the canonical here, then re-replicate
+
+|Licence axis: PMPL to MPL/CC-BY-SA cascade (#404), owner-only flags (#497),
+scaffold PMPL propagation (#645)
+|owner + estate
+|*Open — owner ruling*
+|===
+
+== 7. Forward process (what now keeps the backlog shaped)
+
+[cols="2,8",options="header"]
+|===
+|Mechanism |State
+
+|Issue Intake Spec
+|v1.0.0 committed (this action). Canonical home `docs/ISSUE-INTAKE-SPEC.adoc`.
+
+|Issue templates, blank form disabled
+|Committed (this action). An issue that fits no template does not fit this
+repo.
+
+|Auto-labeling of new issues
+|`label-triage.yml` already live; conservative, additive, never overrides a
+human.
+
+|Backlog classification
+|Done for all 193 (this action); future waves get an umbrella (Rule 3) and
+the triage pass rides on the umbrella's close-out.
+
+|Repository description (set by the apply script)
+|`Canonical standards, specifications and governance for the Hyperpolymath
+estate: policy-as-code, machine-readable specs (A2ML/DEED), and the reusable
+CI/CD + security canon for a 500+ repository software estate.`
+
+|Topics (new, 12)
+|`standards` `specification` `policy-as-code` `governance` `compliance`
+`machine-readable` `documentation` `open-standards` `deed` `k9`
+`epistemic-computing` `hyperpolymath` — the old set's redundant epistemic-
+triple, `documents-and-standards`, `open-source`, and `taxonomy-as-code`
+(duplicated by `policy-as-code`/`machine-readable`) were dropped.
+|===
+
+== 8. Ranked next actions for the owner
+
+[cols="4,10,30,26",options="header"]
+|===
+|Rank |Issue(s) |Action |Why this order
+
+|1
+|this PR + the apply script
+|Review and merge the intake spec + templates + canon fixes, then run
+`bash scripts/triage-2026-09-24-apply.sh` (dry-run first if desired)
+|Everything else assumes the new intake shape; the script lands the labels,
+the 10 evidenced closes, and the description/topics in one idempotent pass;
+merging also propagates the fixed seed comment estate-wide over time
+
+|2
+|#787 (D1–D72) plus the DECIDE rows: #404, #497, #692, #923, #929, #941,
+#944, #991, #1008, #1023, #1028
+|Answer the batched decision sheet in one reply
+|One answer unblocks the most rows of any single action; several DECIDE rows
+gate whole campaigns (KYAML, deed tools, tag rulesets, arming policy)
+
+|3
+|#903 (ENFORCE cliff 2026-10-01), #1037 (48 Dependabot PRs), #975 (21 acks
+lapse 2026-10-22)
+|The time-bounded trio
+|Dates beat priorities. #1037 is mechanical (close PRs in 15 repos under the
+existing dependabot hold); #903 needs a ruling on the cliff date or a
+163-caller migration window; #975 is a two-hour refresh of the ack ledger
+
+|4
+|#955, #913, #914, #907, #933
+|The repo-local reds that block or arm
+|#955 blocks every merge (ratchet write/verify mismatch); #913/#914 make
+every repo seeded from this tree dead at startup; #907 is a standing security
+exemption in the actions-lock gate; #933 is mechanical once a Rust toolchain
+is in CI
+
+|5
+|VERIFY rows: #935, #963, #438, #479, #681, #887, #890, #1013
+|Verify-then-close with fresh measurements
+|Cheapest win in the backlog: most are probably already fixed by #1034's
+floor applier; each needs one measurement, one comment, one close
+
+|6
+|ESTATE rows (~60)
+|Migrate to the estate register (or close as transferred)
+|After ranks 1–5, this repo's backlog is exactly its actionable scope; the
+estate rows move to where the work is. Mechanical; on request.
+|===
+
+== Appendix A — Census methodology
+
+Per the estate's measurement doctrine (#668, #750: enumerate, then filter; a
+count landing on a page size is a page size, not a measurement):
+
+* Issue censuses: `gh issue list --state open|closed --limit 1000 --json ...`
+  (explicit limit above the ceiling, JSON, local aggregation with `jq`).
+  `gh search issues` was *not* used for counting.
+* Daily/author distributions: `jq` over the censuses (part 1 and part 2
+  tables).
+* Ruleset state: `gh api repos/hyperpolymath/standards/rulesets` (list) and
+  the per-ruleset rule detail (21 required contexts, required_signatures,
+  code_scanning thresholds) — the evidence behind closing #956.
+* CI state: `gh run list --branch main` at HEAD `c56f4ec`.
+* Duplicate/subsumption calls: issue bodies read pairwise before any close
+  (part 5.2); every close carries its evidence in the closing comment and is
+  one command to reverse.
+
+Timestamp: 2026-09-24 ~14:30 UTC, branch `arena/01a0d3ce-standards` off
+`main@c56f4ec`.
+
+== Appendix B — Reading the backlog without drowning
+
+The 193 rows in part 4 are grouped so that no reader needs more than one
+view:
+
+* *Daily life* = the `scope:repo` rows (part 4, KEEP/VERIFY/PARK). That is
+  this repo's actual worklist.
+* *Estate memory* = the `scope:estate` rows. Valuable evidence, wrong
+  house; migrate per rank 6.
+* *The owner's desk* = the DECIDE rows, all batched under #787.
+* *The wave that made this plan* = clusters C2–C5 and C7–C14 rows dated
+  2026-09-21…23.
