@@ -9,6 +9,9 @@ require 'yaml'
 
 module ScorecardActionsLock
   PIN_MESSAGE = /\Ascore is \d+: (?:GitHub-owned |third-party )?GitHubAction not pinned by hash\n/
+  REUSABLE_REF = %r{\A([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/[^@\s]+\.ya?ml@([^\s#]+)\z}
+  SHA_COMMIT = /\Asha1-([0-9a-f]{40})\z/i
+  HEX_SHA = /\A[0-9a-f]{40}\z/i
 
   # Return the one-based line numbers of remote GitHub Action +uses+ entries in
   # the workflow. Local actions, containers and text containing +uses+ are
@@ -28,6 +31,76 @@ module ScorecardActionsLock
     end
     visit.call(Psych.parse_stream(File.read(path)))
     lines
+  end
+
+  # Return normalised `owner/repo@ref` strings for every remote reusable-workflow
+  # `uses: owner/repo/.github/workflows/<file>.y(a)ml@<ref>` in +path+.
+  # `gh actions-lock --verify` (v0.1.6) ignores job-level `uses:` in both
+  # directions (standards#1036): it falsely flags present lock entries as
+  # `stale`, and vacuously passes workflows whose job-level ref is absent from
+  # `actions.lock` (Arm D).
+  def self.reusable_workflow_deps(path)
+    deps = []
+    visit = lambda do |node|
+      if node.is_a?(Psych::Nodes::Mapping)
+        node.children.each_slice(2) do |key, value|
+          if key.is_a?(Psych::Nodes::Scalar) && key.value == 'uses' && value.is_a?(Psych::Nodes::Scalar)
+            match = value.value.strip.match(REUSABLE_REF)
+            deps << "#{match[1]}@#{match[2]}" if match
+          end
+        end
+      end
+      Array(node.children).each { |child| visit.call(child) } if node.respond_to?(:children)
+    end
+    visit.call(Psych.parse_stream(File.read(path)))
+    deps.uniq
+  end
+
+  # Verify that every `owner/repo@ref` in +reusable_deps+ is recorded under
+  # `workflows[relative]` and `dependencies` in `actions.lock` with a valid
+  # immutable commit hash (and matching SHA when +ref+ is a 40-hex SHA).
+  def self.lock_covers_reusable_deps?(lock_path, relative, reusable_deps)
+    return true if reusable_deps.empty?
+
+    lock = YAML.safe_load(File.read(lock_path))
+    return false unless lock.is_a?(Hash)
+
+    wf_entries = lock.dig('workflows', relative)
+    deps_map = lock['dependencies']
+    return false unless wf_entries.is_a?(Array) && deps_map.is_a?(Hash)
+
+    reusable_deps.all? do |dep|
+      next false unless wf_entries.include?(dep)
+      entry = deps_map[dep]
+      next false unless entry.is_a?(Hash)
+      commit_match = entry['commit'].to_s.match(SHA_COMMIT)
+      next false unless commit_match
+      ref = dep.split('@', 2).last
+      !ref.match?(HEX_SHA) || commit_match[1].casecmp?(ref)
+    end
+  end
+
+  def self.verification_accepted?(verification, status, reusable_deps)
+    return false unless verification.is_a?(Hash) && verification['findings'].is_a?(Array)
+    findings = verification['findings']
+
+    if verification['valid'] == true
+      return status.success? if findings.empty?
+      return findings.all? { |f| f.is_a?(Hash) && f['category'] == 'sha-as-ref' }
+    end
+
+    return false unless verification['valid'] == false && !findings.empty?
+
+    accepted_stale = 0
+    findings.each do |f|
+      return false unless f.is_a?(Hash)
+      if f['category'] == 'stale' && reusable_deps.include?(f['dependency'])
+        accepted_stale += 1
+      elsif f['category'] != 'sha-as-ref'
+        return false
+      end
+    end
+    accepted_stale.positive?
   end
 
   # Remove Scorecard action-pin findings only when they identify a remote action
@@ -65,12 +138,19 @@ module ScorecardActionsLock
         next false unless action_lines(path).include?(line)
 
         unless verified.key?(relative)
+          lock_path = File.join(root, '.github/workflows/actions.lock')
+          reusable_deps = reusable_workflow_deps(path)
+          unless lock_covers_reusable_deps?(lock_path, relative, reusable_deps)
+            raise "Native action-lock verification failed for #{relative}: job-level reusable ref absent from actions.lock"
+          end
+
           stdout, stderr, status = Open3.capture3('gh', 'actions-lock', relative,
             '--verify', '--no-interactive', '--json=valid,findings', chdir: root)
           warn stderr unless stderr.empty?
           verification = JSON.parse(stdout)
-          raise "Native action-lock verification failed for #{relative}" unless status.success? &&
-            verification.is_a?(Hash) && verification['valid'] == true && verification['findings'].is_a?(Array)
+          unless verification_accepted?(verification, status, reusable_deps)
+            raise "Native action-lock verification failed for #{relative}"
+          end
           verified[relative] = verification
         end
         audit << { 'file' => relative, 'line' => line, 'rule' => result['ruleId'],

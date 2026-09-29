@@ -65,6 +65,9 @@ if [ "${2:-}" = "--verify-local" ]; then
       printf '%s\n' '{"valid":false,"findings":[]}'
       exit 1
       ;;
+    empty-stdout)
+      exit 1
+      ;;
     *)
       printf '%s\n' '{"valid":true,"findings":[]}'
       exit
@@ -186,6 +189,11 @@ echo "PASS: advisory findings alone cannot explain an invalid result"
 if FAKE_VERIFY_FINDING=malformed-success GH_BIN="$WORK/bin/fake-gh" \
    bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
   echo "FAIL: malformed successful verifier output was accepted" >&2
+  exit 1
+fi
+if FAKE_VERIFY_FINDING=empty-stdout GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: empty verifier stdout was accepted (jq -e empty-input hazard)" >&2
   exit 1
 fi
 echo "PASS: malformed verifier output fails closed"

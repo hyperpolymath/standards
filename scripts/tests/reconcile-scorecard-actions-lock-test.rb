@@ -17,7 +17,7 @@ class ScorecardActionsLockTest < Minitest::Test
       #!/bin/sh
       printf '%s\\n' "$*" >> invocation
       case "$*" in
-        'actions-lock .github/workflows/ci.yml --verify --no-interactive --json=valid,findings') ;;
+        actions-lock\\ .github/workflows/*.yml\\ --verify\\ --no-interactive\\ --json=valid,findings) ;;
         *) exit 97 ;;
       esac
       printf '%s' "$TEST_LOCK_JSON"
@@ -81,5 +81,80 @@ class ScorecardActionsLockTest < Minitest::Test
     _, audit = ScorecardActionsLock.reconcile(document(finding), @root)
     assert_empty audit
     refute File.exist?(File.join(@root, 'invocation'))
+  end
+
+  def test_mixed_workflow_with_job_level_reusable_ref_is_not_rejected_as_stale
+    slsa_sha = 'f7dd8c54c2067bafc12ca7a55595d5ee9b75204a'
+    checkout_sha = '3d3c42e5aac5ba805825da76410c181273ba90b1'
+    File.write(File.join(@root, '.github/workflows/release.yml'), <<~YAML)
+      name: Release
+      on: [push]
+      jobs:
+        build:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@#{checkout_sha}
+        provenance:
+          uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@#{slsa_sha} # v2.1.0
+    YAML
+    File.write(File.join(@root, '.github/workflows/actions.lock'), <<~YAML)
+      version: 'v0.0.2'
+      workflows:
+        '.github/workflows/release.yml':
+          - 'actions/checkout@#{checkout_sha}'
+          - 'slsa-framework/slsa-github-generator@#{slsa_sha}'
+      dependencies:
+        'actions/checkout@#{checkout_sha}':
+          ref: 'v7.0.1'
+          commit: 'sha1-#{checkout_sha}'
+        'slsa-framework/slsa-github-generator@#{slsa_sha}':
+          ref: 'v2.1.0'
+          commit: 'sha1-#{slsa_sha}'
+    YAML
+    ENV['TEST_LOCK_JSON'] = JSON.generate(
+      'valid' => false,
+      'findings' => [
+        {
+          'category' => 'stale',
+          'severity' => 'warning',
+          'workflow' => '.github/workflows/release.yml',
+          'dependency' => "slsa-framework/slsa-github-generator@#{slsa_sha}"
+        }
+      ]
+    )
+    ENV['TEST_LOCK_EXIT'] = '1'
+
+    result, audit = ScorecardActionsLock.reconcile(
+      document(finding(path: '.github/workflows/release.yml', line: 7)),
+      @root
+    )
+    assert_empty result['runs'][0]['results']
+    assert_equal 1, audit.length
+  end
+
+  def test_arm_d_job_level_reusable_ref_absent_from_lock_raises
+    missing_sha = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
+    File.write(File.join(@root, '.github/workflows/scorecard.yml'), <<~YAML)
+      name: Scorecard
+      on: [push]
+      jobs:
+        analysis:
+          uses: hyperpolymath/standards/.github/workflows/scorecard-reusable.yml@#{missing_sha}
+    YAML
+    File.write(File.join(@root, '.github/workflows/actions.lock'), <<~YAML)
+      version: 'v0.0.2'
+      workflows:
+        '.github/workflows/scorecard.yml': []
+      dependencies: {}
+    YAML
+    ENV['TEST_LOCK_JSON'] = '{"valid":true,"findings":[]}'
+    ENV['TEST_LOCK_EXIT'] = '0'
+
+    assert_raises(StandardError) do
+      ScorecardActionsLock.reconcile(
+        document(finding(path: '.github/workflows/scorecard.yml', line: 5)),
+        @root
+      )
+    end
   end
 end

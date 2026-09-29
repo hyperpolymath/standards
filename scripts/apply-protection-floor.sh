@@ -274,12 +274,6 @@ EOF
       [ -n "$rid" ] || continue
       cache="$ORG_CACHE/$rid"
       if [ ! -s "$cache" ]; then
-        if org_body="$(gh api "repos/$repo/rulesets/$rid" 2>"$TMPDIR_ERR")" &&
-           printf '%s' "$org_body" | jq -e '.rules | type == "array"' >/dev/null 2>&1; then
-          printf '%s' "$org_body" > "$cache"
-        else
-          err="$(cat "$TMPDIR_ERR" 2>/dev/null)"
-      if [ ! -s "$cache" ]; then
         if tmpb="$(gh api "repos/$repo/rulesets/$rid" 2>"$TMPDIR_ERR")" \
            && printf '%s' "$tmpb" | jq -e '.rules | type == "array"' >/dev/null 2>&1; then
           printf '%s' "$tmpb" > "$cache"

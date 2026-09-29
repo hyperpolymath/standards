@@ -194,6 +194,161 @@ is_never_ctx() {
   return 1
 }
 
+# Verify that a workflow YAML's uncommented `on:` block triggers on
+# `pull_request` or `pull_request_target` targeting the default branch ($1).
+# Prevents deriving required_status_checks from push/schedule/dispatch-only
+# workflows on $DEF that never fire on pull requests (standards#1040).
+yaml_has_pr_trigger() {
+  local def="$1"
+  awk -v def="$def" '
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      return s
+    }
+    function unquote(s) {
+      s = trim(s)
+      if ((substr(s, 1, 1) == "\"" && substr(s, length(s), 1) == "\"") ||
+          (substr(s, 1, 1) == "\x27" && substr(s, length(s), 1) == "\x27")) {
+        s = substr(s, 2, length(s) - 2)
+      }
+      return s
+    }
+    function branch_matches(pat, b) {
+      pat = unquote(pat)
+      return (pat == b || pat == "*" || pat == "**")
+    }
+    {
+      line = $0
+      sub(/[[:space:]]*#.*/, "", line)
+      if (line ~ /^[[:space:]]*$/) next
+      match(line, /^[[:space:]]*/)
+      ind = RLENGTH
+      rest = substr(line, ind + 1)
+
+      if (in_on && ind <= on_ind) {
+        in_on = 0; in_pr = 0; in_br = 0; in_bi = 0
+      }
+      if (in_pr && ind <= pr_ind) {
+        in_pr = 0; in_br = 0; in_bi = 0
+      }
+      if ((in_br || in_bi) && ind <= br_ind) {
+        in_br = 0; in_bi = 0
+      }
+
+      if (!in_on && ind == 0 && rest ~ /^("on"|\x27on\x27|on)[[:space:]]*:/) {
+        val = rest
+        sub(/^("on"|\x27on\x27|on)[[:space:]]*:[[:space:]]*/, "", val)
+        val = trim(val)
+        if (val != "") {
+          if (val ~ /(^|\[|,|[[:space:]])pull_request(_target)?($|\]|,|[[:space:]])/) {
+            has_pr = 1
+          }
+        } else {
+          in_on = 1
+          on_ind = ind
+        }
+        next
+      }
+
+      if (in_on && !in_pr) {
+        if (rest ~ /^-[[:space:]]*pull_request(_target)?([[:space:]]*$)/) {
+          has_pr = 1
+          next
+        }
+        if (rest ~ /^pull_request(_target)?[[:space:]]*:/) {
+          has_pr = 1
+          in_pr = 1
+          pr_ind = ind
+          next
+        }
+      }
+
+      if (in_pr) {
+        if (rest ~ /^branches[[:space:]]*:/) {
+          has_br_filter = 1
+          val = rest
+          sub(/^branches[[:space:]]*:[[:space:]]*/, "", val)
+          val = trim(val)
+          if (val ~ /^\[.*\]$/) {
+            gsub(/^\[|\]$/, "", val)
+            n = split(val, arr, ",")
+            for (i = 1; i <= n; i++) {
+              if (branch_matches(arr[i], def)) br_matched = 1
+            }
+          } else if (val != "") {
+            if (branch_matches(val, def)) br_matched = 1
+          } else {
+            in_br = 1
+            br_ind = ind
+          }
+          next
+        }
+        if (rest ~ /^branches-ignore[[:space:]]*:/) {
+          val = rest
+          sub(/^branches-ignore[[:space:]]*:[[:space:]]*/, "", val)
+          val = trim(val)
+          if (val ~ /^\[.*\]$/) {
+            gsub(/^\[|\]$/, "", val)
+            n = split(val, arr, ",")
+            for (i = 1; i <= n; i++) {
+              if (unquote(arr[i]) == def) br_ignored = 1
+            }
+          } else if (val != "") {
+            if (unquote(val) == def) br_ignored = 1
+          } else {
+            in_bi = 1
+            br_ind = ind
+          }
+          next
+        }
+        if (in_br && rest ~ /^-[[:space:]]*/) {
+          item = rest
+          sub(/^-[[:space:]]*/, "", item)
+          if (branch_matches(item, def)) br_matched = 1
+          next
+        }
+        if (in_bi && rest ~ /^-[[:space:]]*/) {
+          item = rest
+          sub(/^-[[:space:]]*/, "", item)
+          if (unquote(item) == def) br_ignored = 1
+          next
+        }
+      }
+    }
+    END {
+      if (!has_pr) exit 1
+      if (br_ignored) exit 1
+      if (has_br_filter && !br_matched) exit 1
+      exit 0
+    }
+  '
+}
+
+wf_triggers_on_pr() {
+  local repo="$1" wfn="$2" def="$3" revent="$4" raw decoded pr_rid
+  if raw=$(gh api "repos/$repo/contents/.github/workflows/$wfn" 2>/dev/null) && [ -n "$raw" ]; then
+    if printf '%s' "$raw" | jq -e 'type == "object" and (.content | type == "string")' >/dev/null 2>&1; then
+      decoded=$(printf '%s' "$raw" | jq -r '.content' | tr -d '\n\r ' | base64 -d 2>/dev/null || true)
+    else
+      decoded="$raw"
+    fi
+    printf '%s\n' "$decoded" | yaml_has_pr_trigger "$def"
+    return $?
+  fi
+  case "$revent" in
+    schedule|workflow_dispatch|push)
+      pr_rid=$(gh api "repos/$repo/actions/workflows/$wfn/runs?event=pull_request&per_page=1" \
+                 --jq '.workflow_runs[0].id // empty' 2>/dev/null || true)
+      [ -n "$pr_rid" ]
+      return $?
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 # ---------------------------------------------------------------- repo list
 if [ "${#REPOS_EXPLICIT[@]}" -gt 0 ]; then
   printf '%s\n' "${REPOS_EXPLICIT[@]}" > "$WORK/repos"
@@ -272,14 +427,18 @@ while IFS= read -r R; do
   # every other line of output still reports success.  (Measured 2026-09-22:
   # this dropped 2 of 18 required contexts on standards/main.)  So capture
   # the exit status of every fetch and refuse to write if any one failed.
-  : > "$WORK/ctx"; : > "$WORK/gatewf3"; NORUN=''; DERIVEFAIL=''
+  : > "$WORK/ctx"; : > "$WORK/gatewf3"; NORUN=''; NOPR=''; DERIVEFAIL=''
   while IFS= read -r WFN; do
     [ -n "$WFN" ] || continue
-    if ! RID=$(gh api "repos/$R/actions/workflows/$WFN/runs?branch=$DEF&per_page=1" \
-                 --jq '.workflow_runs[0].id // empty'); then
+    if ! RUN_META=$(gh api "repos/$R/actions/workflows/$WFN/runs?branch=$DEF&per_page=1" \
+                 --jq '.workflow_runs[0] | select(. != null) | "\(.id // "")\t\(.event // "")"'); then
       DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(runs-query-failed)"; continue
     fi
+    IFS=$'\t' read -r RID REVENT <<< "$RUN_META"
     if [ -z "$RID" ]; then NORUN="${NORUN:+$NORUN,}$WFN"; continue; fi
+    if ! wf_triggers_on_pr "$R" "$WFN" "$DEF" "$REVENT"; then
+      NOPR="${NOPR:+$NOPR,}$WFN"; continue
+    fi
     if ! gh api "repos/$R/actions/runs/$RID/jobs?per_page=100" --paginate \
            --jq '.jobs[]?|.name' > "$WORK/jobs1"; then
       DERIVEFAIL="${DERIVEFAIL:+$DERIVEFAIL,}$WFN(jobs-query-failed)"; continue
@@ -364,7 +523,8 @@ while IFS= read -r R; do
   NCTX=$(wc -l < "$WORK/ctx2")
   DETAIL="branch=$DEF gate_files=$(wc -l < "$WORK/gatewf2") contexts=$NCTX"
   [ -n "$NOTGREEN" ] && DETAIL="$DETAIL not_green=[$NOTGREEN]"
-  [ -n "$NORUN" ]   && DETAIL="$DETAIL no_run=[$NORUN]"
+  [ -n "$NORUN" ]    && DETAIL="$DETAIL no_run=[$NORUN]"
+  [ -n "$NOPR" ]     && DETAIL="$DETAIL no_pr_trigger=[$NOPR]"
   [ -n "$EXCLUDED" ] && DETAIL="$DETAIL excluded=[$EXCLUDED]"
 
   # ---- THE OTHER REFUSAL: a gate derived from an incomplete read --------

@@ -47,6 +47,19 @@ jobs:
             echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
             exit 1
           fi
+          # Hold past the 4-commit hyperpolymath/hypatia#869 compile-break window
+          # (4654d7a3d4..4f9874e3f5, unescaped `/` in lib/rules/pin_integrity.ex:56)
+          # on the last compilable main commit (9f2f62f5c9463c79b33a5ebf54372166ce56f349).
+          # As soon as hypatia main advances past 4f9874e3f5, HEAD is used directly.
+          case "$sha" in
+            4654d7a3d49f413f49c00fb7e592db7d026ffca2|\
+            de52a3dabb2c10bf239784e50ab25267a5a6ebbb|\
+            43124f025ab338c26f137927be1e5ca6a84bd8c2|\
+            4f9874e3f589f2e4964f788687266580ccde4507)
+              echo "::warning::Hypatia HEAD $sha hits compile break hyperpolymath/hypatia#869 (standards#1050); holding on 9f2f62f5c9463c79b33a5ebf54372166ce56f349 until upstream advances"
+              sha="9f2f62f5c9463c79b33a5ebf54372166ce56f349"
+              ;;
+          esac
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Resolved hypatia HEAD: $sha"
 
@@ -89,7 +102,14 @@ jobs:
         run: |
           cd "$HOME/hypatia"
           if [ ! -x hypatia ]; then
-            mix deps.get && mix escript.build
+            if ! (mix deps.get && mix escript.build); then
+              echo "::error::Hypatia scanner build failed at commit $(git rev-parse HEAD) — see upstream hyperpolymath/hypatia"
+              exit 1
+            fi
+          fi
+          if [ ! -x hypatia ]; then
+            echo "::error::Hypatia scanner binary is missing after build"
+            exit 1
           fi
 
       - name: Run Hypatia scan
@@ -106,7 +126,8 @@ jobs:
           # code-scanning still works in repos where the PAT isn't present yet.
           GITHUB_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT || secrets.GITHUB_TOKEN }}
         run: |
-          echo "Scanning repository: ${{ github.repository }}"
+          set -euo pipefail
+          echo "Scanning repository: ${GITHUB_REPOSITORY:-}"
           # --exit-zero: hypatia-cli exits 1 when findings exist; under the default
           # `bash -eo pipefail` that aborts this step before the counts/outputs/summary
           # run AND skips the upload, so the gate fails opaquely. Gate on the severity
@@ -120,24 +141,25 @@ jobs:
           # findings fixed in code since the last scan auto-close instead of
           # orphaning as stale open alerts.
           HYPATIA_FORMAT=sarif "$HOME/hypatia/hypatia-cli.sh" scan . --exit-zero > hypatia.sarif
+          if [ ! -s hypatia.sarif ]; then
+            echo "::error::Hypatia did not produce hypatia.sarif"
+            exit 2
+          fi
 
       - name: Validate findings and count severities
         id: scan
         run: |
           set -euo pipefail
           # Exactly one JSON array of findings, each with a recognised severity.
-          # Missing/truncated output is a scanner error, never an empty clean
-          # scan: a scanner that emits nothing is indistinguishable from a
-          # crashed/truncated run, so the gate fails closed (science-ci-
-          # security-test.rb pins this too). The #741 `empty findings are
-          # valid` control tested the pre-#771 slurp accident (`[[]]` has
-          # length 1); #771's `length > 0` is the documented intent.
-          if [ ! -s hypatia-findings.json ] || ! jq -e '
-            type == "array" and length > 0 and all(.[];
+          # Missing/truncated/multi-document output is a scanner error and fails
+          # closed; a single well-formed `[]` is a valid clean scan when the
+          # scanner step succeeded (standards#1054).
+          if [ ! -s hypatia-findings.json ] || ! jq -e -s '
+            length == 1 and (.[0] | type == "array" and all(.[];
               type == "object" and (.severity as $s |
-                ["critical", "high", "medium", "warn", "low", "info", "informational"] | index($s) != null))
+                ["critical", "high", "medium", "warn", "low", "info", "informational"] | index($s) != null)))
           ' hypatia-findings.json >/dev/null; then
-            echo "::error::Hypatia did not produce a valid findings array"
+            echo "::error::Hypatia did not produce one valid findings array"
             exit 2
           fi
 
@@ -166,7 +188,6 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Relativize finding paths
-        if: always()
         run: |
           # Hoisted out of the gate step so the SARIF filter and the gate share
           # ONE definition of a finding's path. code_safety / honest_completion
@@ -204,7 +225,6 @@ jobs:
 
       - name: Filter SARIF through the baseline before upload
         id: filter_baseline
-        if: always()
         run: |
           # ⚠ WITHOUT THIS, ACKNOWLEDGING A FINDING DOES NOT UNBLOCK ANYTHING.
           # A finding travelled two paths that never met: the gate filtered
@@ -233,7 +253,6 @@ jobs:
             bash "$FILTER" hypatia.sarif hypatia-findings.relativized.json .hypatia-baseline.json
 
       - name: Upload SARIF to code scanning
-        if: always()
         # NOTE: this does NOT make under-permissioned callers "skip gracefully".
         # This workflow declares `security-events: write` at the top, so a
         # caller granting only `read` is rejected at startup and NO step of
@@ -258,7 +277,6 @@ jobs:
           fi
 
       - name: Upload findings artifacts
-        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hypatia-scan-findings

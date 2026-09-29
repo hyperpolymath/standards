@@ -39,6 +39,11 @@ Tier rules: `docs/CICD-SIGNAL-DISCIPLINE.adoc`, section "Estate canon".
 | `rulesets/immutable-tags.json`
 | The tag ruleset. Tags are created by an admin or by the estate App only.
 
+| `rulesets/branch-floor.json`, `rulesets/tag-floor.json`, `rulesets/gcrypt-vault-class.txt`
+| The base protection floor (`deletion` + `non_fast_forward`, empty bypass list;
+  owner rulings D94–D96) and its explicit D50 gcrypt-vault exclusion list,
+  applied by `scripts/apply-protection-floor.sh`.
+
 | `settings/repo.json`
 | Repository settings PATCH body plus the Actions-permission endpoints.
 
@@ -49,65 +54,66 @@ Tier rules: `docs/CICD-SIGNAL-DISCIPLINE.adoc`, section "Estate canon".
 | Autolink references per profile; `base` plus language/proof additions.
 |===
 
-== Identity is the target, never the name
+== Identity is the target, `source_type`, and shape — never the name
 
 Live rulesets (2026-09-02) were called `Optimus-Branch` on every sampled repo;
 that name is RETIRED (owner ruling R1, 2026-09-14) and its rival definition
 `rulesets/Optimus-Branch.json` is deleted. The conversion test does not inspect
 the ruleset name: older waves were called `Base`, `Backup`, `Pages-fix`, and
-names drift. The applier
-and the verifier identify *the* branch ruleset as: the active ruleset whose
-target is `branch` and whose include list is exactly `["~DEFAULT_BRANCH"]`.
-Exactly one such ruleset must exist; zero or two is a verifier failure. The
-same rule for tags with `["~ALL"]`. The `name` field in these files is what a
-fresh POST uses; an existing ruleset is PUT by id and keeps whatever name it has.
+names drift. The appliers (`apply-branch-gates.sh`, `apply-protection-floor.sh`,
+`apply-tag-ruleset-canon.sh`) and verifiers identify a repository-writable
+ruleset by three criteria:
 
-=== That rule as written is not sufficient, and both appliers now say so
+. `.source_type == "Repository"` (an entry carrying no `.source_type` fails closed; `.source_type == "Organization"` is reported `ORG-INHERITED` and cured at `/orgs/{org}/rulesets/{id}`, never via a per-repo `PUT`),
+. `target` + `conditions.ref_name.include` (`branch` with `["~DEFAULT_BRANCH"]`, or `tag` with `["~ALL"]`), and
+. *rule shape* where additive layers coexist on the same ref (e.g. the checks-only `gates-only.json` ruleset alongside `base.json`, or the D94 `branch-floor.json` / `tag-floor.json` floor alongside a richer ruleset).
 
-Two measured gaps. Neither is theoretical: each was found by running the
-applier against a live repository and reading what it selected.
+The `name` field in these files is what a fresh POST uses; an existing ruleset is PUT by id and keeps whatever name it has.
 
-*1. `source_type` is the writability discriminator, and the rule omits it.*
+=== Why `source_type` and shape are both required (`#1032`)
+
+Two measured gaps in the original target-only rule — neither theoretical, each
+found by running the appliers against live repositories:
+
+*1. `source_type` is the writability discriminator.*
 `repos/{owner}/{repo}/rulesets` returns the ORGANISATION's rulesets alongside
 the repository's own, and an inherited one reads back IN FULL at
 `repos/{owner}/{repo}/rulesets/{id}` — so every read succeeds and nothing warns
 you. The PUT to that same path 404s. Measured 67 times, once per
-`metadatastician` repo reached by org-level `EstateBranching` (18225024). The
-cure for an inherited ruleset lives at `/orgs/{org}/rulesets/{id}` and needs an
-`admin:org` credential; a repo token reads it and cannot write it. It is
-applied ONCE at the org, never per repo, so `apply-branch-gates.sh` reports
-*ORG-INHERITED* and stops rather than issuing 67 doomed writes.
+`metadatastician` repo reached by org-level `EstateBranching` (18225024), and
+likewise for org-level tag rulesets (`EstateTagging`, `Branch-Floor` 23868655,
+`Tag-Floor` 23868851). The cure for an inherited ruleset lives at
+`/orgs/{org}/rulesets/{id}` and needs an `admin:org` credential; a repo token
+reads it and cannot write it. It is applied ONCE at the org, never per repo, so
+`apply-branch-gates.sh`, `apply-protection-floor.sh`, and
+`apply-tag-ruleset-canon.sh` all report *ORG-INHERITED* and stop rather than
+issuing doomed writes.
 
 The classification is done LOCALLY, not by a server-side `select`: a filter
-whose empty result is also its success result cannot fail closed. The listing
-is projected to `[(.source_type // "MISSING"), .id]`, then split with `awk`
-— not `grep -P`, which is a GNU extension the runner may not ship. An entry
-carrying no `.source_type` is reported *UNKNOWN* and never assumed repo-level:
-writability is exactly what that field decides, and guessing wrong is a silent
-404. When a repo-level ruleset IS found alongside an inherited one, the
-inherited ids are recorded as `org_inherited=[…]` in the detail column —
-rulesets are additive, so that one still enforces beside the one being filled.
+whose empty result is also its success result cannot fail closed. An entry
+carrying no `.source_type` is refused (`UNKNOWN` / `REFUSED` /
+`REFUSED-NO-SOURCE-TYPE`) and never assumed repo-level: writability is exactly
+what that field decides, and guessing wrong is a silent 404. When a repo-level
+ruleset IS found alongside an inherited one, the inherited ids are recorded in
+the detail column — rulesets are additive, so the org ruleset still enforces
+beside the repo-level one.
 
-*2. Two repo-level branch rulesets is the EXPECTED steady state, not an error.*
+*2. Multiple repo-level rulesets on the same target are the EXPECTED steady state when distinguished by shape.*
 Owner decision O6 (`hyperpolymath/standards#787` row D17) prescribes a baseline
 ruleset carrying the review and signature rules plus a *second* checks-only
-ruleset whose short bypass list is the entire point. Bypass binds a RULESET,
-never a rule, so status checks must live in their own object to have any teeth.
-A flat "zero or two is a verifier failure" would therefore make the applier
-permanently unable to maintain the shape the ruling prescribes.
+ruleset whose short bypass list is the entire point, and owner rulings D94–D96
+add standalone zero-bypass floor rulesets (`branch-floor.json`, `tag-floor.json`).
+Bypass binds a RULESET, never a rule, so status checks and zero-bypass floors
+must live in their own objects to have teeth.
 
-*SHAPE* is the discriminator: the gates ruleset is the one whose ONLY rule is
-`required_status_checks`. Name classifies nothing — the tag applier proved that
-estate-wide, where 372 blocked repos and 26 healthy ones shared one name. If
-shape does not single one out, the applier still reports *AMBIGUOUS* and
-refuses. ⚠ The LIST endpoint omits `.rules`, so this needs a by-id GET per
-candidate; that same omission is what turned every PUT into a POST in the
-2026-09-11 outage.
-
-⚠ The canon text above is unchanged on purpose. Propagating these two
-corrections into it — and into the tag side, whose identification rule has the
-identical `source_type` omission — is filed as issue #1032; the applier does
-not decide it.
+*SHAPE* is the discriminator: for `apply-branch-gates.sh`, the gates ruleset is
+the one whose ONLY rule is `required_status_checks`. Name classifies nothing —
+the tag applier proved that estate-wide, where 372 blocked repos and 26 healthy
+ones shared one name. If shape does not single one out, the applier still
+reports *AMBIGUOUS* (`DUPLICATE-FAIL-CLOSED` on the tag side) and refuses.
+⚠ The LIST endpoint omits `.rules`, `.conditions`, and `.bypass_actors`, so
+every applier performs a two-step read (list summary for `.id` and
+`.source_type`, then by-id `GET` for shape).
 
 === Creating the O6 checks-only ruleset
 

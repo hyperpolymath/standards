@@ -230,10 +230,19 @@ jobs:
           # cache step because cache restore happens before the clone, so the key
           # cannot hash a not-yet-cloned tree — it must hash the remote ref.
           sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
-          if [ -z "$sha" ]; then
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
             exit 1
           fi
+          case "$sha" in
+            4654d7a3d49f413f49c00fb7e592db7d026ffca2|\
+            de52a3dabb2c10bf239784e50ab25267a5a6ebbb|\
+            43124f025ab338c26f137927be1e5ca6a84bd8c2|\
+            4f9874e3f589f2e4964f788687266580ccde4507)
+              echo "::warning::Hypatia HEAD $sha hits compile break hyperpolymath/hypatia#869 (standards#1050); holding on 9f2f62f5c9463c79b33a5ebf54372166ce56f349 until upstream advances"
+              sha="9f2f62f5c9463c79b33a5ebf54372166ce56f349"
+              ;;
+          esac
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Resolved hypatia HEAD: $sha"
 
@@ -252,13 +261,24 @@ jobs:
           # ran against a stale ruleset. No restore-keys on purpose — a partial
           # restore would repopulate ~/hypatia and the guards below would skip
           # the rebuild, reintroducing the staleness.
-          key: hypatia-scanner-v3-${{ runner.os }}-${{ steps.hypatia-rev.outputs.sha }}
+          key: hypatia-scanner-v4-${{ runner.os }}-${{ steps.hypatia-rev.outputs.sha }}
 
-      - name: Clone Hypatia
+      - name: Check out resolved Hypatia commit
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
+        env:
+          HYPATIA_SHA: ${{ steps.hypatia-rev.outputs.sha }}
         run: |
+          set -euo pipefail
           if [ ! -d "$HOME/hypatia" ]; then
-            git clone --depth 1 https://github.com/hyperpolymath/hypatia.git "$HOME/hypatia"
+            git init "$HOME/hypatia"
+            git -C "$HOME/hypatia" remote add origin https://github.com/hyperpolymath/hypatia.git
+            git -C "$HOME/hypatia" fetch --depth 1 origin "$HYPATIA_SHA"
+            git -C "$HOME/hypatia" checkout --detach FETCH_HEAD
+          fi
+          ACTUAL_SHA=$(git -C "$HOME/hypatia" rev-parse HEAD)
+          if [ "$ACTUAL_SHA" != "$HYPATIA_SHA" ]; then
+            echo "::error::Hypatia cached source does not match the resolved commit"
+            exit 1
           fi
 
       - name: Build Hypatia scanner
@@ -266,7 +286,14 @@ jobs:
         run: |
           cd "$HOME/hypatia"
           if [ ! -x hypatia ]; then
-            mix deps.get && mix escript.build
+            if ! (mix deps.get && mix escript.build); then
+              echo "::error::Hypatia scanner build failed at commit $(git rev-parse HEAD) — see upstream hyperpolymath/hypatia"
+              exit 1
+            fi
+          fi
+          if [ ! -x hypatia ]; then
+            echo "::error::Hypatia scanner binary is missing after build"
+            exit 1
           fi
 
       # A reusable workflow only auto-checks-out its own YAML, not sibling
