@@ -102,7 +102,7 @@ verify_lock_coverage() {
   status=$?
   set -e
 
-  if ! printf '%s' "$result" | jq -e '.valid != null and (.findings | type == "array")' >/dev/null 2>&1; then
+  if [ -z "$result" ] || ! printf '%s' "$result" | jq -e -s 'length == 1 and (.[0] | type == "object" and .valid != null and (.findings | type == "array"))' >/dev/null 2>&1; then
     printf '%s\n' "$result"
     [[ "$status" -ne 0 ]] && return "$status"
     return 1

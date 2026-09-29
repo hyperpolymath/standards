@@ -79,17 +79,21 @@ jq -e '.enforcement == "active"' "$CANON" >/dev/null 2>&1 \
   && ok "canon enforcement is active" || bad "canon is not actively enforced"
 
 # --- 2. no case-colliding tag-~ALL sibling ----------------------------------
+# Note: config/rulesets/tag-floor.json (ruling D94) is the creation-free base
+# floor (deletion + non_fast_forward only). Immutable-tags canon files restrict
+# `creation`; at most one such file may exist (`Immutable-Tags.json` vs
+# `immutable-tags.json` is the case-collision this check guards against).
 tagfiles=()
 for f in "$RULESET_DIR"/*.json; do
   [ -e "$f" ] || continue
-  if jq -e '.target == "tag" and (.conditions.ref_name.include == ["~ALL"])' "$f" >/dev/null 2>&1; then
+  if jq -e '.target == "tag" and (.conditions.ref_name.include == ["~ALL"]) and ([.rules[].type] | index("creation") != null)' "$f" >/dev/null 2>&1; then
     tagfiles+=("$(basename "$f")")
   fi
 done
 if [ "${#tagfiles[@]}" -eq 1 ]; then
-  ok "exactly one tag/~ALL ruleset file: ${tagfiles[0]}"
+  ok "exactly one immutable-tags (creation-restricting) tag/~ALL ruleset file: ${tagfiles[0]}"
 else
-  bad "${#tagfiles[@]} tag/~ALL ruleset files (${tagfiles[*]-none}) — a case-collision here deployed the wrong body for four days"
+  bad "${#tagfiles[@]} immutable-tags tag/~ALL ruleset files (${tagfiles[*]-none}) — a case-collision here deployed the wrong body for four days"
 fi
 
 # --- 3..9. applier guards ---------------------------------------------------
@@ -334,6 +338,37 @@ else
   ok "property 13 mutant killed: with the guard stripped the detector refuses"
 fi
 rm -f "$MUT_T"
+
+# --- Property 14: .source_type == "Repository" enforced before PUT (#1032) ---
+source_type_guard_holds() {
+  local f="$1" lref lrepo lput
+  lref=$(grep -nF 'REFUSED-NO-SOURCE-TYPE' "$f" | head -1 | cut -d: -f1)
+  lrepo=$(grep -nF '.source_type=="Repository" and .target=="tag"' "$f" | head -1 | cut -d: -f1)
+  lput=$(grep -nF -- '--method PUT "repos/$repo/rulesets/$id"' "$f" | head -1 | cut -d: -f1)
+  [ -n "$lref" ] && [ -n "$lrepo" ] && [ -n "$lput" ] || return 1
+  [ "$lref" -lt "$lrepo" ] && [ "$lrepo" -lt "$lput" ] || return 1
+  grep -qF 'ORG-INHERITED' "$f" || return 1
+  return 0
+}
+
+if source_type_guard_holds "$APPLIER"; then
+  ok "applier checks .source_type == \"Repository\" before PUT and fails closed on missing .source_type (#1032)"
+else
+  bad "applier does not enforce .source_type == \"Repository\" before PUT (#1032)"
+fi
+
+MUT_S="$(mktemp)"
+sed 's/\.source_type=="Repository" and //' "$APPLIER" > "$MUT_S"
+if cmp -s "$MUT_S" "$APPLIER"; then
+  bad "property 14 mutant was not applied"
+elif ! bash -n "$MUT_S" 2>/dev/null; then
+  bad "property 14 mutant is not valid bash"
+elif source_type_guard_holds "$MUT_S"; then
+  bad "property 14 detector passes an applier with .source_type==\"Repository\" stripped"
+else
+  ok "property 14 mutant killed: stripping .source_type==\"Repository\" fails the detector"
+fi
+rm -f "$MUT_S"
 
 echo "---"
 echo "passed=$pass failed=$fail"

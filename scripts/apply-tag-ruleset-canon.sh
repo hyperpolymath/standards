@@ -294,6 +294,24 @@ while read -r repo; do
     continue
   fi
 
+  # FAIL CLOSED ON ABSENT DISCRIMINATOR (#1032). A ruleset summary with no
+  # `.source_type` cannot be classified as repo-level or org-inherited;
+  # defaulting it into the writable arm would send a PUT that 404s.
+  if printf '%s' "$rs" | jq -e 'any(.[]?; has("source_type") | not)' >/dev/null 2>&1; then
+    report "$repo" "REFUSED-NO-SOURCE-TYPE" \
+      "a ruleset carried no .source_type; cannot tell repo-level from org-inherited, failing closed"
+    rc=2
+    continue
+  fi
+
+  # Partition by .source_type BEFORE choosing a write target (#1032).
+  # An org-inherited ruleset (source_type == "Organization") is returned by both
+  # `GET /repos/{o}/{r}/rulesets` and `GET /repos/{o}/{r}/rulesets/{id}`, so the
+  # READ path succeeds; only `PUT /repos/{o}/{r}/rulesets/{id}` 404s, because its
+  # write endpoint is `/orgs/{org}/rulesets/{id}`. Never select an org ruleset
+  # as a per-repo PUT candidate.
+  org_tag_count=$(printf '%s' "$rs" | jq '[.[]? | select(.source_type=="Organization" and .target=="tag" and .enforcement=="active")] | length')
+
   # MUST be two-step. DO NOT "optimise" this into a single filtered list call.
   # The rulesets LIST endpoint returns a summary that omits `conditions`,
   # `rules` and `bypass_actors` entirely, so filtering the list on .conditions
@@ -301,7 +319,7 @@ while read -r repo; do
   # silently turns every PUT into a POST and recreates the very duplicate-ruleset
   # outage this selector exists to prevent. Only GET .../rulesets/{id} carries
   # the shape. (Same finding as git-scripts PR #58.)
-  ids=$(printf '%s' "$rs" | jq -r '.[] | select(.target=="tag") | .id')
+  ids=$(printf '%s' "$rs" | jq -r '.[] | select(.source_type=="Repository" and .target=="tag") | .id')
   matching=()
   for id in $ids; do
     d=$(gh api "repos/$repo/rulesets/$id" 2>/dev/null) || continue
@@ -315,6 +333,11 @@ while read -r repo; do
 
   case "${#matching[@]}" in
   0)
+    if [ "$org_tag_count" -gt 0 ]; then
+      report "$repo" "ORG-INHERITED" \
+        "$org_tag_count active org tag ruleset(s); cure at /orgs/{org}/rulesets/{id}, never per repo (#1032)"
+      continue
+    fi
     # No ruleset matches the identity rule: POST a fresh one. `name` IS sent here.
     if [ "$APPLY" -eq 0 ]; then report "$repo" "WOULD-CREATE" "no ~ALL tag ruleset"; rc=2; continue; fi
     out=$(printf '%s' "$CANON_POST" | gh api --method POST "repos/$repo/rulesets" --input - 2>&1) || {

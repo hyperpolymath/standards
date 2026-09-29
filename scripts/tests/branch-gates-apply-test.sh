@@ -919,6 +919,69 @@ else
   bad "mutant I was not applied — the sed pattern no longer matches the applier"
 fi
 
+# =============================================================== CASE 26
+# PR-REACHABILITY GUARD (standards#1040). A workflow with a green branch=$DEF
+# run whose `on:` block has `# pull_request:` commented out (or is schedule/push
+# only) MUST NOT have its jobs derived into required_status_checks: on a PR it
+# never fires, leaving the required context permanently "Expected — Waiting for
+# status to be reported" (measured on metadatastician/gsd-nerv#45 and
+# hyperpolymath/echidna#52).
+reset_fix
+R=acme/schedule-only
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"codeql.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":22,"event":"schedule"}]}'
+mkfix "repos/$R/actions/runs/22/jobs?per_page=100" '{"jobs":[{"name":"CodeQL Security Analysis"}]}'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
+mkfix "repos/$R/rulesets/9" '{"id":9,"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"pull_request"}],"rules":[{"type":"deletion"}]}'
+OUT=$(run_applier "$R" --apply)
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "UNGATED" ] && ok "pr-reachability (schedule run): state is UNGATED" || bad "pr-reachability (schedule run): state=$S (want UNGATED)"
+case "$D" in *"no_pr_trigger=[codeql.yml]"*) ok "pr-reachability (schedule run): no_pr_trigger=[codeql.yml] reported" ;; *) bad "pr-reachability (schedule run): missing no_pr_trigger — $D" ;; esac
+[ -s "$FIX/PUTS.log" ] && bad "pr-reachability (schedule run): PUT happened despite non-PR workflow" || ok "pr-reachability (schedule run): no PUT performed"
+
+# Exact gsd-nerv#45 / echidna#52 shape: workflow YAML on $DEF has `# pull_request:` commented out.
+reset_fix
+R=acme/commented-pr-trigger
+mkfix "repos/$R" '{"default_branch":"main"}'
+mkfix "repos/$R/contents/.github/workflows" '[{"name":"codeql.yml"}]'
+mkfix "repos/$R/contents" '[{"name":"README.md"}]'
+COMMENTED_WF_B64=$(printf '%s\n' 'name: CodeQL' 'on:' '  push:' '    branches: [main]' '  # pull_request:' '  #   branches: [main]' '  schedule:' '    - cron: "0 0 * * 0"' | base64 | tr -d '\n')
+mkfix "repos/$R/contents/.github/workflows/codeql.yml" "{\"content\":\"$COMMENTED_WF_B64\",\"encoding\":\"base64\"}"
+mkfix "repos/$R/actions/workflows/codeql.yml/runs?branch=main&per_page=1" '{"workflow_runs":[{"id":22,"event":"push"}]}'
+mkfix "repos/$R/actions/runs/22/jobs?per_page=100" '{"jobs":[{"name":"CodeQL / Analyze"}]}'
+mkfix "repos/$R/rulesets" '[{"id":9,"target":"branch","enforcement":"active","source_type":"Repository"}]'
+mkfix "repos/$R/rulesets/9" '{"id":9,"name":"Base","target":"branch","enforcement":"active","conditions":{},"bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"pull_request"}],"rules":[{"type":"deletion"}]}'
+OUT=$(run_applier "$R" --apply)
+S=$(state_of "$OUT"); D=$(detail_of "$OUT")
+[ "$S" = "UNGATED" ] && ok "pr-reachability (commented pull_request YAML): state is UNGATED" || bad "pr-reachability (commented pull_request YAML): state=$S (want UNGATED)"
+case "$D" in *"no_pr_trigger=[codeql.yml]"*) ok "pr-reachability (commented pull_request YAML): no_pr_trigger=[codeql.yml] reported" ;; *) bad "pr-reachability (commented pull_request YAML): missing no_pr_trigger — $D" ;; esac
+[ -s "$FIX/PUTS.log" ] && bad "pr-reachability (commented pull_request YAML): PUT happened" || ok "pr-reachability (commented pull_request YAML): no PUT performed"
+
+# ---- MUTANT J: remove the PR-reachability check (#1040). ---------------------
+# Without wf_triggers_on_pr, a push/schedule-only workflow's job context is
+# derived from its branch=main run and written into required_status_checks,
+# deadlocking every PR.
+MUTJ="$WORK/mutant-j.sh"
+sed 's/if ! wf_triggers_on_pr "\$R" "\$WFN" "\$DEF" "\$REVENT"; then/if false; then/' "$APPLIER" > "$MUTJ"
+chmod +x "$MUTJ"
+if ! cmp -s "$MUTJ" "$APPLIER" && bash -n "$MUTJ" 2>/dev/null; then
+  OUT=$(MUTANT="$MUTJ" run_applier "$R" --apply)
+  if [ "$(state_of "$OUT")" = "UNGATED" ]; then
+    bad "MUTANT J SURVIVED: PR-reachability check removed yet still UNGATED — the control is decorative"
+  else
+    ok "mutant J killed: without wf_triggers_on_pr it becomes $(state_of "$OUT") and writes the deadlocking context"
+  fi
+  if [ -s "$FIX/PUTS.log" ] && command grep -q 'CodeQL / Analyze' "$FIX/LAST_PUT.json" 2>/dev/null; then
+    ok "mutant J wrote the non-PR 'CodeQL / Analyze' context into required_status_checks — #1040 reproduced"
+  else
+    bad "mutant J: expected LAST_PUT.json to carry the deadlocking 'CodeQL / Analyze' context"
+  fi
+else
+  bad "mutant J was not applied — the sed pattern no longer matches the applier"
+fi
+
 echo
 echo "passed=$pass failed=$fail"
 [ "$fail" -eq 0 ]
