@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Commit Signing and Linear History Policy
+:toc:
+:toc-placement: preamble
+
+Every commit that reaches a default branch in the estate is signed. Who signs it
+depends on what wrote it. Owner rulings D215–D218 (2026-09-30) set this policy;
+it supersedes the sequencing in D90.
+
+== Who signs what
+
+|===
+| Writer | Signature | How
+
+| **Apps, bots and workflows** (CI, Dependabot, CodeRabbit, stage5-land, rhodibot,
+  gitbot-fleet, AI tools running unattended)
+| GitHub's web-flow **GPG** key
+| Write through the API so GitHub signs the commit itself: GraphQL
+  `createCommitOnBranch`, the estate
+  link:../.github/actions/signed-push/README.md[`signed-push`] action, or a
+  squash merge of a PR. Never `git push` a locally made commit.
+
+| **Humans and interactive agents** (the owner, collaborators, Claude Code and
+  other agents running on a person's machine)
+| **SSH** signing key registered on the GitHub account as a *signing* key
+| `gpg.format=ssh`, `user.signingkey=<key>.pub`, `commit.gpgsign=true`,
+  `tag.gpgsign=true`. The committer email must be verified on the account that
+  holds the key.
+|===
+
+A signature is only `Verified` when the committer email is verified on the
+account holding the key. That is why an agent that signs under its own vendor
+address (for example `vibe@mistral.ai`, which produced `UNKNOWN_KEY` commits)
+cannot be fixed by registering its key on the owner's account. Such an agent
+must write through the API, or commit under an identity the owner controls.
+
+NOTE: `required_signatures` accepts *any* valid signature. The GPG/SSH split
+above is policy, enforced by how each writer is set up, not by the ruleset.
+
+== Paths that produce unsigned commits
+
+These were each measured on default branches between 2026-07 and 2026-09. Do not use them:
+
+* **Rebase-merge.** It replays the PR's commits *unsigned* under the merger's
+  identity (D89). Rebase-merge is off wherever signatures are required. Use squash
+  instead: GitHub signs the squash commit.
+* **The contents API (`PUT /repos/.../contents`) with a user OAuth token or PAT.**
+  The commit is unsigned. Use `createCommitOnBranch` instead.
+* **`git push` from a workflow** using `GITHUB_TOKEN` or a PAT. The commit is
+  unsigned. Use `signed-push`.
+* **Bots pushing fixes onto PR branches** (CodeRabbit autofix, agent
+  commit-suggestions). Turn that off; the bot suggests, and a human applies.
+* **A second machine or container without signing configured.** Configure it
+  before its first push.
+
+== Enforcement
+
+The ruleset canon is
+link:../config/rulesets/require-signed-commits.json[`require-signed-commits.json`]:
+`required_signatures` on `~DEFAULT_BRANCH` with `bypass_actors: []`. It is a
+**standalone** ruleset, never folded into a richer one. The reason is the one
+given in link:../config/rulesets/README.adoc[the rulesets README]: a floor that
+lives inside a richer ruleset dies when that ruleset is disabled.
+
+Sequencing (D215):
+
+. Repos with no unsigned or invalid-signature landings in the last 30 days get
+  the ruleset immediately.
+. Every other repo gets it once its unsigned producers (listed above) have been
+  converted. The ruleset is never withheld indefinitely. A repo that stays out of
+  it has an open producer, and that producer is a tracked defect.
+
+== Linear history
+
+link:../config/rulesets/require-linear-history.json[`require-linear-history.json`]
+(`required_linear_history`, zero bypass) applies wherever it is not disruptive
+(D216). That means repos whose default branch has no merge commits, or only
+GitHub PR merge commits (committer `noreply@github.com`). Those repos are set to
+**squash-only**: `allow_merge_commit` and `allow_rebase_merge` are both false.
+The merge button then cannot offer a method the ruleset would refuse.
+
+Repos with *local* merge commits on the default branch (`git merge` and then
+push) keep merge commits for now. That is the remaining part of O8 in
+link:REPO-SETTINGS.adoc[REPO-SETTINGS].
+
+== Setting up a new machine or collaborator
+
+[source,bash]
+----
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_signing -C "signing"
+gh ssh-key add ~/.ssh/id_ed25519_signing.pub --type signing --title "$(hostname) signing"
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519_signing.pub
+git config --global commit.gpgsign true
+git config --global tag.gpgsign true
+----
+
+Only the **public** half is ever registered or shared. Never paste private key
+material into a chat, an issue or a PR.
+
+Check it: `git log --show-signature -1` locally, and the commit's `Verified` badge
+on GitHub after pushing.

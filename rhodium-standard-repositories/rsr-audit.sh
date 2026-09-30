@@ -117,11 +117,11 @@ log_section() {
 
 check() {
     local description="$1"
-    local command="$2"
+    shift
 
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
 
-    if eval "$command" > /dev/null 2>&1; then
+    if "$@" > /dev/null 2>&1; then
         PASSED_CHECKS=$((PASSED_CHECKS + 1))
         log_success "$description"
         return 0
@@ -130,6 +130,10 @@ check() {
         return 1
     fi
 }
+
+# not CMD [ARGS...] — negates a command's exit status (eval-free predicate,
+# mirrors `not_contains` in scripts/propagate-workflow-pins.sh's test suite).
+not() { ! "$@"; }
 
 check_file_exists() {
     local file="$1"
@@ -159,7 +163,7 @@ check_file_exists() {
 check_dir_exists() {
     local dir="$1"
     local description="${2:-Directory exists: $dir}"
-    check "$description" "test -d '$REPO_PATH/$dir'"
+    check "$description" test -d "$REPO_PATH/$dir"
 }
 
 check_file_contains() {
@@ -190,7 +194,7 @@ check_file_contains() {
 check_command_exists() {
     local cmd="$1"
     local description="${2:-Command available: $cmd}"
-    check "$description" "command -v $cmd"
+    check "$description" command -v "$cmd"
 }
 
 # =============================================================================
@@ -212,11 +216,14 @@ audit_category_1_infrastructure() {
     check_file_contains "justfile" "validate" "Justfile has validate recipe"
 
     # CI/CD: GitLab CI or GitHub Actions (the estate runs on GitHub; both count)
-    check "CI/CD configuration present" "test -f '$REPO_PATH/.gitlab-ci.yml' || ls '$REPO_PATH'/.github/workflows/*.y*ml >/dev/null 2>&1"
+    has_ci_config() {
+        [[ -f "$REPO_PATH/.gitlab-ci.yml" ]] || ls "$REPO_PATH"/.github/workflows/*.y*ml >/dev/null 2>&1
+    }
+    check "CI/CD configuration present" has_ci_config
     if [[ -f "$REPO_PATH/.gitlab-ci.yml" ]]; then
         check_file_contains ".gitlab-ci.yml" "stages:" "GitLab CI has stages defined"
     else
-        check "CI/CD has workflows defined" "ls '$REPO_PATH'/.github/workflows/*.y*ml >/dev/null 2>&1"
+        check "CI/CD has workflows defined" ls "$REPO_PATH"/.github/workflows/*.y*ml
     fi
 
     # Podman (optional for CLI tools, required for web services)
@@ -317,23 +324,23 @@ audit_category_3_security() {
 
     # Type safety (language detection)
     if [[ -f "$REPO_PATH/Cargo.toml" ]]; then
-        check "Type-safe language: Rust" "true"
+        check "Type-safe language: Rust" true
     elif [[ -f "$REPO_PATH/mix.exs" ]]; then
-        check "Type-safe language: Elixir" "true"
+        check "Type-safe language: Elixir" true
     elif [[ -f "$REPO_PATH/package.json" ]]; then
         check_file_contains "package.json" "rescript" "Type-safe: ReScript (not TypeScript)"
         if grep -q "typescript" "$REPO_PATH/package.json" 2>/dev/null; then
             log_warning "TypeScript detected (unsound gradual typing, prefer ReScript)"
         fi
     elif find "$REPO_PATH" -name "*.adb" -o -name "*.ada" | grep -q .; then
-        check "Type-safe language: Ada" "true"
+        check "Type-safe language: Ada" true
     elif find "$REPO_PATH" -name "*.hs" | grep -q .; then
-        check "Type-safe language: Haskell" "true"
+        check "Type-safe language: Haskell" true
     fi
 
     # Memory safety
     if [[ -f "$REPO_PATH/Cargo.toml" ]]; then
-        check "Memory-safe language: Rust" "true"
+        check "Memory-safe language: Rust" true
 
         # Check for unsafe code blocks
         local unsafe_count
@@ -369,7 +376,7 @@ audit_category_3_security() {
 
     # Security headers configuration (for web projects)
     if [[ -f "$REPO_PATH/nginx.conf" ]] || [[ -f "$REPO_PATH/apache.conf" ]] || grep -rq "Content-Security-Policy" "$REPO_PATH" 2>/dev/null; then
-        check "Security headers configured" "grep -rq 'Content-Security-Policy\\|X-Frame-Options\\|X-Content-Type-Options' '$REPO_PATH'"
+        check "Security headers configured" grep -rq 'Content-Security-Policy\|X-Frame-Options\|X-Content-Type-Options' "$REPO_PATH"
     fi
 
     # .well-known/security.txt validation (RFC 9116)
@@ -388,7 +395,7 @@ audit_category_4_architecture() {
     log_section "Category 4: Architecture Principles"
 
     # Offline-first indicators
-    check "Offline-first: No external API calls in core code" "! grep -rq 'http://\\|https://' '$REPO_PATH/src' 2>/dev/null"
+    check "Offline-first: No external API calls in core code" not grep -rq 'http://\|https://' "$REPO_PATH/src"
 
     # CRDT usage (for distributed systems)
     if grep -rq "CRDT\\|crdt\\|Conflict-free" "$REPO_PATH" 2>/dev/null; then
@@ -398,11 +405,11 @@ audit_category_4_architecture() {
     TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
 
     # Reversibility (Git-based)
-    check "Reversibility: Git repository" "test -d '$REPO_PATH/.git'"
+    check "Reversibility: Git repository" test -d "$REPO_PATH/.git"
 
     # Build reproducibility (Nix)
     if [[ -f "$REPO_PATH/flake.nix" ]]; then
-        check "Reproducible builds: Nix flakes" "true"
+        check "Reproducible builds: Nix flakes" true
     fi
 
     # Documentation of architecture

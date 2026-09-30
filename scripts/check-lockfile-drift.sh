@@ -66,6 +66,10 @@ WFDIR="$REPO_DIR/.github/workflows"
 drift=0
 checked=0
 
+want_tmp="$(mktemp)"
+have_tmp="$(mktemp)"
+trap 'rm -f "$want_tmp" "$have_tmp"' EXIT
+
 for wf in "$WFDIR"/*.yml "$WFDIR"/*.yaml; do
   [ -f "$wf" ] || continue
   base="$(basename "$wf")"
@@ -83,20 +87,20 @@ for wf in "$WFDIR"/*.yml "$WFDIR"/*.yaml; do
     | sed -E 's/uses:[[:space:]]*//' \
     | grep -v '/\.github/workflows/' \
     | sed -E 's#^([^/]+/[^/@]+)(/[^@]*)?@#\1@#' \
-    | sort -u > /tmp/_drift_want.$$ || true
+    | sort -u > "$want_tmp" || true
 
-  [ -s /tmp/_drift_want.$$ ] || { rm -f /tmp/_drift_want.$$; continue; }
+  [ -s "$want_tmp" ] || continue
 
   # Versions the lockfile records for THIS workflow.
   awk -v key="    '.github/workflows/$base':" '
     $0 == key            { on = 1; next }
     on && /^        - / { gsub(/^        - .|.$/, ""); print; next }
     on && NF && $0 !~ /^        / { exit }
-  ' "$LOCK" | sort -u > /tmp/_drift_have.$$ || true
+  ' "$LOCK" | sort -u > "$have_tmp" || true
 
   while read -r want; do
     [ -n "$want" ] || continue
-    grep -qxF "$want" /tmp/_drift_have.$$ && continue
+    grep -qxF "$want" "$have_tmp" && continue
 
     name="${want%@*}"
     ref="${want#*@}"
@@ -104,7 +108,7 @@ for wf in "$WFDIR"/*.yml "$WFDIR"/*.yaml; do
     # Only DRIFT if the lockfile knows this action at a *different* version.
     # Absent entirely is mode 2/3, or a verified-creator action that
     # legitimately needs no entry (e.g. Swatinem/rust-cache) — not drift.
-    have="$(grep -m1 -F "$name@" /tmp/_drift_have.$$)" || continue
+    have="$(grep -m1 -F "$name@" "$have_tmp")" || continue
 
     # A workflow may pin by 40-char SHA while the lockfile records a TAG.
     # That is the same action in two notations, NOT drift. The lockfile
@@ -121,9 +125,7 @@ for wf in "$WFDIR"/*.yml "$WFDIR"/*.yaml; do
 
     printf '%s\t%s\t%s\t%s\n' "$REPO_SLUG" "$base" "$want" "$have"
     drift=$((drift + 1))
-  done < /tmp/_drift_want.$$
-
-  rm -f /tmp/_drift_want.$$ /tmp/_drift_have.$$
+  done < "$want_tmp"
 done
 
 if [ "$drift" -gt 0 ]; then

@@ -8,7 +8,7 @@
 set -eu
 
 ROOT="${1:-.}"
-OUT_DIR="${2:-/tmp/inline-annotations-output}"
+OUT_DIR="${2:-$(mktemp -d "${TMPDIR:-/tmp}/inline-annotations-output.XXXXXX")}"
 EXTRACTOR="$(dirname "$0")/target/release/inline-annotations"
 [ -x "$EXTRACTOR" ] || EXTRACTOR="$(dirname "$0")/target/debug/inline-annotations"
 [ -x "$EXTRACTOR" ] || { echo "inline-annotations binary not found — run cargo build first"; exit 1; }
