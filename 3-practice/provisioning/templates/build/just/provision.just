@@ -95,6 +95,10 @@ lint:
 fmt:
     @{{lib}} lang-run fmt
 
+# Check formatting without rewriting anything (the CI form of fmt)
+fmt-check:
+    @{{lib}} lang-run fmt-check
+
 # Run the project (N/A for libraries)
 run:
     @{{lib}} lang-run run

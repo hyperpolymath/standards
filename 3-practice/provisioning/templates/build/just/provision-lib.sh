@@ -191,6 +191,7 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
     rust:bench)  grep -rqs '\[\[bench\]\]\|criterion\|divan' --include=Cargo.toml . && echo "cargo bench" ;;
     rust:lint)   echo "cargo clippy --all-targets -- -D warnings" ;;
     rust:fmt)    echo "cargo fmt --all" ;;
+    rust:fmt-check) echo "cargo fmt --all -- --check" ;;
     rust:run)    echo "cargo run --release" ;;
 
     idris2:*)
@@ -218,6 +219,7 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
         test)  grep -qs '"test"' "$zb" && echo "${cdz}zig build test" ;;
         bench) grep -qs '"bench"' "$zb" && echo "${cdz}zig build bench -Doptimize=ReleaseFast" ;;
         fmt)   echo "zig fmt $zd" ;;
+        fmt-check) echo "zig fmt --check $zd" ;;
         lint)  echo "zig fmt --check $zd" ;;
         run)   grep -qs '"run"' "$zb" && echo "${cdz}zig build run" ;;
       esac ;;
@@ -228,12 +230,14 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
     elixir:bench) ls bench/*.exs >/dev/null 2>&1 && echo "for f in bench/*.exs; do mix run \"\$f\"; done" ;;
     elixir:lint)  grep -qs ':credo' mix.exs && echo "mix credo --strict" || echo "mix compile --warnings-as-errors" ;;
     elixir:fmt)   echo "mix format" ;;
+    elixir:fmt-check) echo "mix format --check-formatted" ;;
     elixir:run)   echo "mix run --no-halt" ;;
 
     gleam:deps)  echo "gleam deps download" ;;
     gleam:build) echo "gleam build" ;;
     gleam:test)  echo "gleam test" ;;
     gleam:fmt)   echo "gleam format" ;;
+    gleam:fmt-check) echo "gleam format --check" ;;
     gleam:lint)  echo "gleam format --check" ;;
     gleam:run)   echo "gleam run" ;;
 
@@ -241,6 +245,7 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
     ocaml:build) echo "opam exec -- dune build" ;;
     ocaml:test)  echo "opam exec -- dune test" ;;
     ocaml:fmt)   echo "opam exec -- dune fmt" ;;
+    ocaml:fmt-check) echo "opam exec -- dune build @fmt" ;;
 
     haskell:deps)  echo "cabal update && cabal build all --only-dependencies" ;;
     haskell:build) echo "cabal build all" ;;
@@ -256,6 +261,7 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
     bun:bench) grep -qs '"bench"[[:space:]]*:' package.json && echo "bun run bench" ;;
     bun:lint)  grep -qs '"lint"[[:space:]]*:' package.json && echo "bun run lint" ;;
     bun:fmt)   grep -qs '"fmt"[[:space:]]*:' package.json && echo "bun run fmt" ;;
+    bun:fmt-check) grep -qs '"fmt-check"[[:space:]]*:' package.json && echo "bun run fmt-check" ;;
     bun:run)   grep -qs '"start"[[:space:]]*:' package.json && echo "bun run start" ;;
 
     docs:test) have asciidoctor && echo "for f in \$(git ls-files '*.adoc'); do asciidoctor -o /dev/null --failure-level=WARN \"\$f\" || exit 1; done" ;;
