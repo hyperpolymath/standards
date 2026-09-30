@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
 #
-# branch-gates-apply-test.sh — regression test for apply-branch-gates.sh.
+# apply-branch-gates-test.sh — regression test for apply-branch-gates.sh.
 #
 # WHAT THIS PINS, AND WHY A PASSING SUITE WOULD NOT BE ENOUGH
 #   The defect this script exists to prevent is a VACUOUS GATE: a
@@ -15,7 +15,7 @@
 #   removed, and the suite must go RED. A mutant that survives means the
 #   corresponding control is decorative.
 #
-# Run: bash scripts/tests/branch-gates-apply-test.sh
+# Run: bash scripts/tests/apply-branch-gates-test.sh
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
