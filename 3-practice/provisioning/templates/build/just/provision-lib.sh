@@ -54,15 +54,17 @@ REPO_NAME="${REPO_SLUG#*/}"
 ARCHETYPE="$(deed archetype "")"
 
 # ---------------------------------------------------------------------------
-# Language detection. Markers at the root or one level down (workspaces).
+# Language detection. Markers at the root or one level down (workspaces); Idris2
+# and Zig to two levels down, because the estate ABI/FFI pattern puts them at
+# src/abi/*.ipkg and ffi/zig/build.zig (234 build.zig at that depth, 2026-09-30).
 # Order matters only for display. `docs` is reported when nothing else is.
 first() { find . -maxdepth "${2:-2}" -not -path './.git/*' -not -path '*/node_modules/*' -not -path './target/*' -name "$1" -print -quit 2>/dev/null; }
 detect_langs() {
   local out=()
   [ -n "$(first Cargo.toml)" ]          && out+=(rust)
-  [ -n "$(first '*.ipkg')" ]            && out+=(idris2)
+  [ -n "$(first '*.ipkg' 3)" ]          && out+=(idris2)
   [ -n "$(first Project.toml 1)" ]      && out+=(julia)
-  [ -n "$(first build.zig)" ]           && out+=(zig)
+  [ -n "$(first build.zig 3)" ]         && out+=(zig)
   [ -n "$(first mix.exs)" ]             && out+=(elixir)
   [ -n "$(first gleam.toml)" ]          && out+=(gleam)
   [ -n "$(first dune-project)" ]        && out+=(ocaml)
@@ -166,7 +168,7 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
     rust:run)    echo "cargo run --release" ;;
 
     idris2:*)
-      ipkg=$(first '*.ipkg' 1); ipkg=${ipkg#./}; [ -z "$ipkg" ] && ipkg=$(first '*.ipkg'); ipkg=${ipkg#./}
+      ipkg=$(first '*.ipkg' 1); [ -z "$ipkg" ] && ipkg=$(first '*.ipkg'); [ -z "$ipkg" ] && ipkg=$(first '*.ipkg' 3); ipkg=${ipkg#./}
       case "$v" in
         deps)  have pack && echo "pack install-deps $ipkg" ;;
         build) have pack && echo "pack build $ipkg" || echo "idris2 --build $ipkg" ;;
@@ -181,12 +183,18 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
     julia:test)  echo "julia --project=. -e 'using Pkg; Pkg.test()'" ;;
     julia:bench) [ -f benchmark/benchmarks.jl ] && echo "julia --project=benchmark -e 'using Pkg; Pkg.develop(path=\".\"); Pkg.instantiate(); include(\"benchmark/benchmarks.jl\")'" ;;
 
-    zig:build)   echo "zig build" ;;
-    zig:test)    echo "zig build test" ;;
-    zig:bench)   grep -qs '"bench"' build.zig && echo "zig build bench -Doptimize=ReleaseFast" ;;
-    zig:fmt)     echo "zig fmt ." ;;
-    zig:lint)    echo "zig fmt --check ." ;;
-    zig:run)     grep -qs '"run"' build.zig && echo "zig build run" ;;
+    zig:*)
+      # build.zig may sit in ffi/zig/; run there, not at the root.
+      local zb zd; zb=$(first build.zig 1); [ -z "$zb" ] && zb=$(first build.zig); [ -z "$zb" ] && zb=$(first build.zig 3)
+      zd=$(dirname "${zb#./}"); local cdz=""; [ "$zd" != . ] && cdz="cd '$zd' && "
+      case "$v" in
+        build) echo "${cdz}zig build" ;;
+        test)  echo "${cdz}zig build test" ;;
+        bench) grep -qs '"bench"' "$zb" && echo "${cdz}zig build bench -Doptimize=ReleaseFast" ;;
+        fmt)   echo "zig fmt $zd" ;;
+        lint)  echo "zig fmt --check $zd" ;;
+        run)   grep -qs '"run"' "$zb" && echo "${cdz}zig build run" ;;
+      esac ;;
 
     elixir:deps)  echo "mix local.hex --force --if-missing && mix local.rebar --force --if-missing && mix deps.get" ;;
     elixir:build) echo "mix compile --warnings-as-errors" ;;
