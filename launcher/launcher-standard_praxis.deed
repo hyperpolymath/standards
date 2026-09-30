@@ -121,12 +121,18 @@
   ;; ------------------------------------------------------------------- runtime
   (runtime
     :background nohup
-    ;; PID files live in the user's runtime-state dir -- wiped on logout,
-    ;; user-scoped (mode 0700 per XDG), no symlink-attack target.
-    :pid-file-pattern "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/{app-name}-server.pid"
+    ;; PID files live in the user's runtime dir -- wiped on logout, user-scoped
+    ;; (mode 0700 per XDG), no symlink-attack target. The fallback is
+    ;; XDG_STATE_HOME, NEVER TMPDIR or /tmp: a world-writable directory with a
+    ;; name predictable from {app-name} lets another user pre-create the file
+    ;; and choose which PID `stop` kills (CWE-377). mktemp is not an option
+    ;; either -- a pid file must be re-findable by the next invocation.
+    ;; The launch-scaffolder/{app-name} subdir is created 0700 by the launcher.
+    :pid-file-pattern "${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}/launch-scaffolder/{app-name}/server.pid"
     ;; Logs go to XDG_STATE_HOME. Per-user, survives reboot, not
-    ;; world-writable; the {app-name} subdir isolates each launcher's logs.
-    :log-file-pattern "${XDG_STATE_HOME:-$HOME/.local/state}/{app-name}/server.log"
+    ;; world-writable; the launch-scaffolder/{app-name} subdir isolates each
+    ;; launcher's logs and keeps them beside its pid fallback.
+    :log-file-pattern "${XDG_STATE_HOME:-$HOME/.local/state}/launch-scaffolder/{app-name}/server.log"
     ;; URL-readiness polling after start. All three timing values are env-var
     ;; overridable so operators can tune without re-minting the launcher.
     :wait-for-url-timeout-seconds       15
