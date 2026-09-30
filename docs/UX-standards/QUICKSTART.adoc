@@ -48,8 +48,9 @@ APP_NAME="MyApp"              # Your application name
 REPO_DIR="/path/to/repo"       # Repository directory
 COMMAND="cargo run"            # Command to start your app
 URL="http://localhost:3000"     # Web URL (if applicable)
-PID_FILE="/tmp/myapp-server.pid" # Process ID file
-LOG_FILE="/tmp/myapp-server.log" # Log file
+PID_FILE="${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}/launch-scaffolder/myapp/server.pid"
+LOG_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/launch-scaffolder/myapp/server.log"
+# Never /tmp: see launcher-standard.adoc §Best Practices > Security.
 MODE="${1:---auto}"             # Default mode
 ----
 
@@ -137,7 +138,7 @@ chmod +x /path/to/your/repo/scripts/warmup-*.sh
 ----
 # Launcher starts server and opens browser
 start_server() {
-  nohup npm run dev > /tmp/app.log 2>&1 &
+  nohup npm run dev > "$LOG_FILE" 2>&1 &   # LOG_FILE from Step 2 -- never /tmp
   wait_for_server 10
   open_browser
 }
@@ -173,12 +174,13 @@ Terminal=true  # CLI tools need terminal
 [source,bash]
 ----
 # Use nohup for background processes
-nohup /path/to/service > /tmp/service.log 2>&1 &
-echo $! > /tmp/service.pid
+# PID_FILE / LOG_FILE as in Step 2 -- never /tmp (predictable name, shared dir)
+nohup /path/to/service > "$LOG_FILE" 2>&1 &
+echo $! > "$PID_FILE"
 
 # Check if running
 is_running() {
-  [ -f /tmp/service.pid ] && kill -0 $(cat /tmp/service.pid) 2>/dev/null
+  [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
 }
 ----
 
@@ -196,10 +198,10 @@ sudo chmod 444 ~/.local/share/applications/<app-name>.desktop
 ----
 
 === "Server not starting"
-1. Check logs: `tail -50 /tmp/<app-name>.log`
+1. Check logs: `tail -50 "${XDG_STATE_HOME:-$HOME/.local/state}/launch-scaffolder/<app-name>/server.log"`
 2. Run diagnostics: `<app-name>-dustfile.sh --diagnose`
 3. Try repair: `<app-name>-dustfile.sh --repair`
-4. LLM assistance: `hypatia diagnose --app <app-name> --log /tmp/<app-name>.log`
+4. LLM assistance: `hypatia diagnose --app <app-name> --log "${XDG_STATE_HOME:-$HOME/.local/state}/launch-scaffolder/<app-name>/server.log"`
 
 === "Browser not opening"
 1. Check if server is running: `curl -v http://localhost:PORT`
