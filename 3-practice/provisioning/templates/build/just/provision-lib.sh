@@ -25,6 +25,8 @@ ROOT="${PROVISION_ROOT:-$(pwd)}"
 cd "$ROOT" || exit 2
 DEED=".machine_readable/descriptiles/provisioning_praxis.deed"
 MIN_JUST="1.42.0"   # root→module recipe deps (`doctor: provision::doctor`); 1.41 rejects them
+# How to get mise: package managers first; the installer only as download, read, run.
+MISE_INSTALL_HINT="brew install mise | Fedora: dnf copr enable jdxcode/mise, dnf install mise | winget install jdx.mise | others: https://mise.jdx.dev/installing-mise.html — or: curl -fsSLo mise-install.sh https://mise.run, read it, sh mise-install.sh"
 T="timeout 15"      # some --version probes hang (observed 2026-09-30); never probe unbounded
 
 if [ -t 1 ]; then R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; B=$'\033[34m'; Z=$'\033[0m'; else R=; G=; Y=; B=; Z=; fi
@@ -141,7 +143,7 @@ mise_tools() {
 
 lang_remedy() {
   case "$1" in
-    rust)    echo "mise use rust@latest  (or: curl https://sh.rustup.rs | sh)" ;;
+    rust)    echo "mise use rust@latest  (or rustup: https://rustup.rs)" ;;
     idris2)  echo "install pack: https://github.com/stefan-hoeck/idris2-pack#installation, then: pack install-app idris2" ;;
     julia)   echo "mise use julia@latest  (or: https://julialang.org/install/ — juliaup)" ;;
     zig)     echo "mise use zig@latest" ;;
@@ -284,7 +286,7 @@ cmd_doctor() {
       missing=$($T mise ls --current --missing 2>/dev/null | grep -F -e "$here/mise.toml" -e "$here/.mise.toml" -e "$ROOT/mise.toml" | awk '{print $1"@"$2}' | tr '\n' ' ')
       [ -z "${missing// /}" ] && pass "every mise tool is installed" || fail "PV-E03 mise tools not installed: $missing— run: just setup"
     fi
-  else warn "PV-W01 mise not found — tools must then come from Guix or your OS; install: curl https://mise.run | sh"; fi
+  else warn "PV-W01 mise not found — tools must then come from Guix or your OS; install: $MISE_INSTALL_HINT"; fi
   if have guix; then pass "guix $($T guix --version 2>/dev/null | head -1 | awk '{print $NF}') (optional reproducible path)"
   else info "guix not installed — optional; mise is the default path (docs/SETUP.adoc §Guix)"; fi
 
@@ -362,7 +364,7 @@ cmd_setup() {
     $T mise trust -q . 2>/dev/null || true
     mise install || rc=1
   else
-    warn "mise not found. Install it (curl https://mise.run | sh), or enter 'guix shell -m manifest.scm', then re-run: just setup"
+    warn "mise not found. Install it ($MISE_INSTALL_HINT), or enter 'guix shell -m manifest.scm', then re-run: just setup"
   fi
   local l
   for l in "${LANGS[@]}"; do
@@ -373,7 +375,8 @@ cmd_setup() {
     esac
   done
   hdr "Project dependencies"
-  if have mise; then eval "$(mise env -s bash 2>/dev/null)" || true; fi
+  # Put this repo's mise tools on PATH for the dependency step.
+  if have mise; then PATH="$(mise bin-paths 2>/dev/null | paste -sd: -):$PATH"; export PATH; fi
   lang_run deps || rc=1
   local hook=build/just/setup-local.sh
   [ -f "$hook" ] && { hdr "Repo-specific setup ($hook)"; bash "$hook" || rc=1; }

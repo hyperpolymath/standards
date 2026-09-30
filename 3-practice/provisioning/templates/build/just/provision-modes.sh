@@ -43,14 +43,18 @@ hp_ensure_just() {
   command -v just >/dev/null 2>&1 && return 0
   if command -v mise >/dev/null 2>&1; then
     echo "just is not installed — installing it with mise (mise use -g just@latest)..." >&2
-    mise use -g just@latest >&2 && eval "$(mise env -s bash 2>/dev/null)" && command -v just >/dev/null 2>&1 && return 0
+    mise use -g just@latest >&2 && PATH="$(mise bin-paths 2>/dev/null | paste -sd: -):$PATH" && command -v just >/dev/null 2>&1 && return 0
     mise exec just@latest -- true >/dev/null 2>&1 && { just() { mise exec just@latest -- just "$@"; }; return 0; }
   fi
   cat >&2 <<'EOF'
 Neither `just` nor `mise` is installed. Install mise (it then installs everything else):
 
-    curl https://mise.run | sh          # Linux / macOS / WSL
+    brew install mise                    # macOS
+    sudo dnf copr enable jdxcode/mise && sudo dnf install mise   # Fedora
     winget install jdx.mise              # Windows
+    # anything else (Debian/Ubuntu apt, …): https://mise.jdx.dev/installing-mise.html
+    # or download the installer, read it, then run it — never pipe it into a shell:
+    curl -fsSLo mise-install.sh https://mise.run && less mise-install.sh && sh mise-install.sh
 
 then re-run this command. Manual route without mise: docs/SETUP.adoc
 EOF
