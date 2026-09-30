@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Regression suite for scripts/apply-protection-floor.sh
 #
-# House conventions, shared with scripts/tests/branch-gates-apply-test.sh:
+# House conventions, shared with scripts/tests/apply-branch-gates-test.sh:
 #   * a `gh` shim maps an API path to a fixture by KEY=$(tr '/?&=' '____')
 #   * A MISSING FIXTURE IS A FREE ASSERTION that the path is never queried: the shim
 #     exits 1, so any code reaching for an unplanned endpoint fails loudly.
