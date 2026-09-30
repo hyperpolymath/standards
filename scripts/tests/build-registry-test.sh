@@ -41,8 +41,14 @@ cp "$ROOT/scripts/build-registry.sh" scripts/build-registry.sh
 
 REG=".machine_readable/REGISTRY.a2ml"
 TOP="TOPOLOGY.adoc"
+# Carry the proposed artefacts too: a local regeneration must be testable
+# before committing. Stage only in this throwaway clone so the mutation
+# controls below restore these exact inputs with git checkout.
+cp "$ROOT/$REG" "$REG"
+cp "$ROOT/$TOP" "$TOP"
+git add -- "$REG" "$TOP"
 
-echo "== the committed artefacts are in sync with the committed tree =="
+echo "== the proposed artefacts are in sync with the committed source tree =="
 out="$(bash scripts/build-registry.sh --check 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qF "OK:"; then
   ok "--check reports OK on a clean checkout"

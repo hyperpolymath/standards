@@ -29,7 +29,10 @@ ok()  { echo "PASS: $1"; pass=$((pass+1)); }
 bad() { echo "FAIL: $1"; fail=$((fail+1)); }
 
 # job block extractor: lines of job <id> (from "  <id>:" to the next "  <id>:")
-job_block() { awk -v id="$1" '$0=="  "id":" {p=1; print; next} p && /^  [a-z][a-z-]*:$/ {exit} p {print}' "$F"; }
+job_block() { awk -v id="$1" '$0=="  "id":" {p=1; print; next} p && /^  [a-zA-Z_][a-zA-Z0-9_-]*:$/ {exit} p {print}' "$F"; }
+
+# Restrict job discovery to jobs: so workflow_call is not counted as a job.
+job_ids() { sed -n '/^jobs:/,$p' "$F" | grep -oP '^  \K[a-zA-Z_][a-zA-Z0-9_-]*(?=:$)'; }
 
 # 1. context freeze
 FROZEN="Check Workflow Staleness
@@ -46,14 +49,15 @@ Actions lockfile verify
 Trusted-base reduction policy
 Licence consistency
 Exemption ratchet
-Debt ratchet"
+Debt ratchet
+UUID v7 conformance"
 ACTUAL=$(grep -P '^    name: ' "$F" | sed 's/^    name: //')
 if [ "$(printf '%s' "$FROZEN" | sort)" = "$(printf '%s' "$ACTUAL" | sort)" ]; then ok "job names match the frozen context list ($(printf '%s\n' "$ACTUAL" | wc -l) jobs)"
 else bad "job names drifted from the frozen list — renames create phantom contexts estate-wide"; diff <(printf '%s\n' "$FROZEN" | sort) <(printf '%s\n' "$ACTUAL" | sort); fi
 
 # 2. runs-on
 if grep -q 'runs-on: ubuntu-latest' "$F"; then bad "hardcoded runs-on present (inputs.runs-on ignored)"; else ok "every job uses inputs.runs-on"; fi
-njobs=$(grep -cP '^  [a-z][a-z-]*:$' "$F"); nro=$(grep -c 'runs-on: ${{ inputs.runs-on }}' "$F")
+njobs=$(job_ids | wc -l); nro=$(grep -c 'runs-on: ${{ inputs.runs-on }}' "$F")
 [ "$njobs" -eq "$nro" ] && ok "runs-on count ($nro) equals job count ($njobs)" || bad "runs-on count $nro != job count $njobs"
 
 # 3. actions-lock-verify job
@@ -72,7 +76,7 @@ printf '%s' "$W" | grep -q 'LOCK_SCRIPT' && bad "workflow-lint still copies the 
 # 5. continue-on-error allow-list
 ALLOWED="language-policy quality workflow-lint"
 viol=0
-for id in $(grep -oP '^  \K[a-z][a-z-]*(?=:$)' "$F"); do
+for id in $(job_ids); do
   case " $ALLOWED " in *" $id "*) continue;; esac
   if job_block "$id" | grep -q 'continue-on-error: true'; then echo "  continue-on-error in gate job: $id"; viol=1; fi
 done
