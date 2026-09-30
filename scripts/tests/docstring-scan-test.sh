@@ -50,7 +50,13 @@ EOF
 scan() { bash "$SCANNER" "$@" 2>&1; }
 
 echo "== calibration: standards PR #1034 at 1cc72cdc80c9 (CodeRabbit: 13 functions / 2 files / 0.00% / 3 skipped)"
-if git -C "$ROOT" cat-file -e 1cc72cdc80c9 2>/dev/null; then
+# The calibration commit is PR #1034's PRE-SQUASH head: it lives only under refs/pull/1034/head,
+# so no clone of main contains it, however deep. Fetch it by full SHA on a miss. No --depth: in a
+# complete clone that would write .git/shallow and truncate main's history for every later test.
+CALIBRATION=1cc72cdc80c9c60b2a857df7d8753a7dfb7e87fb
+git -C "$ROOT" cat-file -e "$CALIBRATION^{commit}" 2>/dev/null ||
+  git -C "$ROOT" fetch --quiet --no-tags origin "$CALIBRATION" 2>/dev/null || true
+if git -C "$ROOT" cat-file -e "$CALIBRATION^{commit}" 2>/dev/null; then
   out="$(cd "$ROOT" && scan --range 1cc72cdc80c9^..1cc72cdc80c9)"
   check "calibration files"      2      "$(field "$out" files)"
   check "calibration functions"  13     "$(field "$out" functions)"
@@ -58,8 +64,8 @@ if git -C "$ROOT" cat-file -e 1cc72cdc80c9 2>/dev/null; then
   check "calibration skipped"    3      "$(field "$out" skipped)"
   check "calibration coverage"   0.00%  "$(field "$out" coverage)"
 else
-  # A skip is not a pass: a shallow clone must not report the known-answer control as green.
-  bad "calibration commit present (fetch full history)" "1cc72cdc80c9 reachable" "absent"
+  # A skip is not a pass: an unfetchable calibration commit must not report the known-answer control as green.
+  bad "calibration commit present (fetch by SHA from refs/pull/1034/head failed)" "1cc72cdc80c9 reachable" "absent"
 fi
 
 echo "== planted positive: a new undocumented function blocks under --check"
