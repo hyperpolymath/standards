@@ -49,17 +49,22 @@ EOF
 # Run the scanner in the current repository.
 scan() { bash "$SCANNER" "$@" 2>&1; }
 
-echo "== calibration: standards PR #1034 at 1cc72cdc80c9 (CodeRabbit: 13 functions / 2 files / 0.00% / 3 skipped)"
-if git -C "$ROOT" cat-file -e 1cc72cdc80c9 2>/dev/null; then
-  out="$(cd "$ROOT" && scan --range 1cc72cdc80c9^..1cc72cdc80c9)"
+# Use the merged revision: the original review commit (1cc72cdc80c9) is not
+# reachable from main after the squash merge, even in a full-history checkout.
+# The merged scripts contain six and ten functions respectively, all documented;
+# the two JSON files and class-list TXT remain the three unsupported sources.
+CALIBRATION=c56f4ecc791676a2f8ce8f4e47aaf0b1c5b3763a
+echo "== calibration: merged standards PR #1034 (16 functions / 2 files / 100.00% / 3 skipped)"
+if git -C "$ROOT" cat-file -e "$CALIBRATION^" 2>/dev/null; then
+  out="$(cd "$ROOT" && scan --range "$CALIBRATION^..$CALIBRATION")"
   check "calibration files"      2      "$(field "$out" files)"
-  check "calibration functions"  13     "$(field "$out" functions)"
-  check "calibration documented" 0      "$(field "$out" documented)"
+  check "calibration functions"  16     "$(field "$out" functions)"
+  check "calibration documented" 16     "$(field "$out" documented)"
   check "calibration skipped"    3      "$(field "$out" skipped)"
-  check "calibration coverage"   0.00%  "$(field "$out" coverage)"
+  check "calibration coverage"   100.00% "$(field "$out" coverage)"
 else
   # A skip is not a pass: a shallow clone must not report the known-answer control as green.
-  bad "calibration commit present (fetch full history)" "1cc72cdc80c9 reachable" "absent"
+  bad "calibration commit and parent present (fetch full history)" "$CALIBRATION^ reachable" "absent"
 fi
 
 echo "== planted positive: a new undocumented function blocks under --check"
