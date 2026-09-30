@@ -71,25 +71,34 @@ langs:
 search pattern:
     @{{lib}} search {{quote(pattern)}}
 
-# Per-language defaults for the contract verbs (used when the root Justfile
-# has no recipe of its own)
+# Per-language defaults for the contract verbs, reached as `just provision::<verb>`
+# or through a root recipe that delegates (`build: provision::build`). A root
+# recipe with its own body is the repo-specific override.
+
+# Build with every detected language's toolchain
 build:
     @{{lib}} lang-run build
 
+# Run every detected language's tests
 test:
     @{{lib}} lang-run test
 
+# Run every detected language's benchmarks
 bench:
     @{{lib}} lang-run bench
 
+# Lint every detected language
 lint:
     @{{lib}} lang-run lint
 
+# Format every detected language's sources
 fmt:
     @{{lib}} lang-run fmt
 
+# Run the project (N/A for libraries)
 run:
     @{{lib}} lang-run run
 
+# Fetch every detected language's dependencies
 deps:
     @{{lib}} lang-run deps

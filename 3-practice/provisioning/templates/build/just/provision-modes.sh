@@ -27,7 +27,13 @@ hp__deed() { # $1 key, $2 default — flat (key "value") read from provisioning_
 }
 
 hp_archetype() { hp__deed archetype "library"; }
-hp_app_name()  { hp__deed name "$(basename "$REPO_DIR")"; }
+# Without a deed, the origin remote names the repo (a worktree or renamed clone
+# has another directory name); the directory is the last resort.
+hp_app_name()  {
+  local u; u=$(git -C "$REPO_DIR" config --get remote.origin.url 2>/dev/null || true)
+  u=${u%.git}; u=${u##*/}
+  hp__deed name "${u:-$(basename "$REPO_DIR")}"
+}
 
 hp_platform() {
   case "$(uname -s)" in

@@ -215,7 +215,7 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
       zd=$(dirname "${zb#./}"); local cdz=""; [ "$zd" != . ] && cdz="cd '$zd' && "
       case "$v" in
         build) echo "${cdz}zig build" ;;
-        test)  echo "${cdz}zig build test" ;;
+        test)  grep -qs '"test"' "$zb" && echo "${cdz}zig build test" ;;
         bench) grep -qs '"bench"' "$zb" && echo "${cdz}zig build bench -Doptimize=ReleaseFast" ;;
         fmt)   echo "zig fmt $zd" ;;
         lint)  echo "zig fmt --check $zd" ;;
@@ -250,7 +250,9 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
 
     bun:deps)  [ -f bun.lock ] || [ -f bun.lockb ] && echo "bun install --frozen-lockfile" || echo "bun install" ;;
     bun:build) grep -qs '"build"[[:space:]]*:' package.json && echo "bun run build" ;;
-    bun:test)  grep -qs '"test"[[:space:]]*:' package.json && echo "bun run test" || echo "bun test" ;;
+    # `bun test` exits 0 when it finds no test files, so it runs only when some exist.
+    bun:test)  if grep -qs '"test"[[:space:]]*:' package.json; then echo "bun run test"
+               elif git ls-files 2>/dev/null | grep -qE '(\.|_)(test|spec)\.(js|mjs|cjs|jsx)$'; then echo "bun test"; fi ;;
     bun:bench) grep -qs '"bench"[[:space:]]*:' package.json && echo "bun run bench" ;;
     bun:lint)  grep -qs '"lint"[[:space:]]*:' package.json && echo "bun run lint" ;;
     bun:fmt)   grep -qs '"fmt"[[:space:]]*:' package.json && echo "bun run fmt" ;;
@@ -465,8 +467,17 @@ cmd_toolchain_refresh() {
   echo "Commit the diff above (signed) as: chore(toolchain): weekly refresh"
 }
 
+# The sentence people are told to say lives in one place a reader sees: the first
+# listing block of the README's [[ai-install]] section. The deed's ai-say-it and
+# the generic line are fallbacks for a README without that section.
 just_say_it() {
-  local line; line=$(deed ai-say-it "")
+  local line="" r
+  for r in README.adoc README.md; do
+    [ -f "$r" ] || continue
+    line=$(awk '/^\[\[ai-install\]\]/{on=1} on && /^----$/{if (inb) exit; inb=1; next} inb && NF{print; exit}' "$r")
+    [ -n "$line" ] && break
+  done
+  [ -z "$line" ] && line=$(deed ai-say-it "")
   [ -z "$line" ] && line="Set up $REPO_NAME from https://github.com/$REPO_SLUG — follow docs/AI_INSTALLATION_GUIDE.adoc in that repo."
   printf '%s' "$line"
 }
