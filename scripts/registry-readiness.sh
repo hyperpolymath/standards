@@ -116,9 +116,10 @@ fi
 
 say "== 4. Tests (authoritative — paste real result) =="
 if [ -f Project.toml ] && command -v julia >/dev/null 2>&1; then
-  if timeout 560 julia --project=. -e 'using Pkg; Pkg.test()' 2>&1 | tee /tmp/rr_test.$$ | tail -3; then
-    grep -q "Testing .* tests passed" /tmp/rr_test.$$ && ok "Pkg.test() passed" || flag "Pkg.test() did NOT pass — inspect /tmp/rr_test.$$"
-  else flag "Pkg.test() errored — inspect /tmp/rr_test.$$"; fi
+  rr_log="$(mktemp)"
+  if timeout 560 julia --project=. -e 'using Pkg; Pkg.test()' 2>&1 | tee "$rr_log" | tail -3; then
+    grep -q "Testing .* tests passed" "$rr_log" && ok "Pkg.test() passed" || flag "Pkg.test() did NOT pass — inspect $rr_log"
+  else flag "Pkg.test() errored — inspect $rr_log"; fi
 else warn "skipped tests (no Project.toml or julia)"; fi
 
 say "${GRN}== registry-readiness pass complete — review, then commit on this branch ==${NC}"
