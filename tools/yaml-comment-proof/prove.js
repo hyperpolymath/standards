@@ -29,13 +29,20 @@
 //         mutant was not detected, or there was nothing to measure.
 import { compare, comments } from "./oracle.js";
 import { parse } from "yaml";
-import { mkdtempSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const here = dirname(new URL(import.meta.url).pathname);
+const here = dirname(fileURLToPath(import.meta.url));
 const scratch = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "yaml-comment-proof-"));
+process.once("exit", () => rmSync(scratch, { recursive: true, force: true }));
 const die = (msg) => { console.error(`HARNESS INVALID: ${msg}`); process.exit(2); };
+
+function readInput(f) {
+  try { return readFileSync(f, "utf8"); }
+  catch (e) { die(`cannot read input ${f}: ${e.message}`); }
+}
 
 function yq(args, input) {
   const r = Bun.spawnSync(["yq", ...args], { stdin: input === undefined ? "ignore" : Buffer.from(input) });
@@ -57,12 +64,13 @@ const ARMS = {
 const dataOf = (s) => JSON.stringify(parse(s, { version: "1.2" }));
 const blanks = (s) => s.split("\n").filter((l) => l.trim() === "").length;
 
-console.log(`yq: ${yq(["--version"]).trim()}`);
+try { console.log(`yq: ${yq(["--version"]).trim()}`); }
+catch (e) { die(`yq version check failed: ${e.message}`); }
 
 // ── 1. Calibration: the oracle must pass a known-good pair and fail two known-bad ones.
 {
-  const block = readFileSync(join(here, "fixtures/calibration.block.yml"), "utf8");
-  const kyaml = readFileSync(join(here, "fixtures/calibration.kyaml.yml"), "utf8");
+  const block = readInput(join(here, "fixtures/calibration.block.yml"));
+  const kyaml = readInput(join(here, "fixtures/calibration.kyaml.yml"));
   const good = compare(block, kyaml);
   if (good.total < 9 || good.preserved !== good.total) die(`calibration pair not PRESERVED (${good.preserved}/${good.total})`);
   const moved = block.replace("# before-entry comment on jobs\njobs:", "jobs:").replace("permissions:", "# before-entry comment on jobs\npermissions:");
@@ -79,7 +87,7 @@ const files = process.argv.slice(2);
 if (files.length === 0) die("no files given");
 const corpus = [];
 for (const f of files) {
-  const src = readFileSync(f, "utf8");
+  const src = readInput(f);
   try { corpus.push({ f, src, cs: comments(src) }); }
   catch (e) { console.log(`skip (original does not parse): ${f}: ${e.message}`); }
 }
@@ -117,21 +125,22 @@ const losses = [];
 for (const [arm, run] of Object.entries(ARMS)) {
   const t = { total: 0, preserved: 0, moved: 0, dropped: 0, added: 0, drift: 0, idem: 0, data: 0, blank: 0, errors: 0 };
   for (const { f, src } of corpus) {
-    let p1, p2;
-    try { p1 = run(src); p2 = run(p1); } catch (e) { t.errors++; losses.push({ arm, f, error: e.message }); continue; }
-    const r = compare(src, p1);
-    t.total += r.total; t.preserved += r.preserved;
-    t.moved += r.moved.length; t.dropped += r.dropped.length; t.added += r.added.length;
-    const r2 = compare(src, p2);
-    t.drift += r2.moved.length + r2.dropped.length + r2.added.length;
-    for (const x of r2.moved) losses.push({ arm, f, kind: "pass-2 moved", path: `${x.from.path} (${x.from.kind}) -> ${x.to.path} (${x.to.kind})`, text: x.from.text });
-    for (const x of r2.dropped) losses.push({ arm, f, kind: "pass-2 dropped", ...x });
-    if (p1 === p2) t.idem++;
-    if (arm !== "pin-bump" && dataOf(src) === dataOf(p1)) t.data++;
-    t.blank += Math.max(0, blanks(src) - blanks(p1));
-    for (const x of r.dropped) losses.push({ arm, f, kind: "dropped", ...x });
-    for (const x of r.moved) losses.push({ arm, f, kind: "moved", path: `${x.from.path} (${x.from.kind}) -> ${x.to.path} (${x.to.kind})`, text: x.from.text });
-    for (const x of r.added) losses.push({ arm, f, kind: "added", ...x });
+    try {
+      const p1 = run(src), p2 = run(p1);
+      const r = compare(src, p1);
+      t.total += r.total; t.preserved += r.preserved;
+      t.moved += r.moved.length; t.dropped += r.dropped.length; t.added += r.added.length;
+      const r2 = compare(src, p2);
+      t.drift += r2.moved.length + r2.dropped.length + r2.added.length;
+      for (const x of r2.moved) losses.push({ arm, f, kind: "pass-2 moved", path: `${x.from.path} (${x.from.kind}) -> ${x.to.path} (${x.to.kind})`, text: x.from.text });
+      for (const x of r2.dropped) losses.push({ arm, f, kind: "pass-2 dropped", ...x });
+      if (p1 === p2) t.idem++;
+      if (arm !== "pin-bump" && dataOf(src) === dataOf(p1)) t.data++;
+      t.blank += Math.max(0, blanks(src) - blanks(p1));
+      for (const x of r.dropped) losses.push({ arm, f, kind: "dropped", ...x });
+      for (const x of r.moved) losses.push({ arm, f, kind: "moved", path: `${x.from.path} (${x.from.kind}) -> ${x.to.path} (${x.to.kind})`, text: x.from.text });
+      for (const x of r.added) losses.push({ arm, f, kind: "added", ...x });
+    } catch (e) { t.errors++; losses.push({ arm, f, error: e.message }); continue; }
   }
   const ok = t.preserved === t.total && t.added === 0 && t.drift === 0 && t.idem === corpus.length && t.errors === 0;
   if (!ok) red = true;
