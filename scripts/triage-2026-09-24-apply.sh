@@ -28,7 +28,9 @@ set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 REPO=hyperpolymath/standards
 DRY=${DRY_RUN:-0}
-run() { if [ "$DRY" = "1" ]; then echo "[dry-run] $*"; else eval "$@"; fi; }
+run() { if [ "$DRY" = "1" ]; then echo "[dry-run] $*"; else "$@" >/dev/null; fi; }
+TRIAGE_TMP=$(mktemp -d) || exit 1
+trap 'rm -rf "$TRIAGE_TMP"' EXIT
 pause() { [ "$DRY" = "1" ] || sleep 0.15; }
 
 echo "== 0. preflight"
@@ -268,8 +270,8 @@ while IFS='|' read -r num disp; do
   done
   [ ${#want[@]} -eq 0 ] && continue
   json=$(printf '%s\n' "${want[@]}" | jq -R . | jq -s .)
-  printf '{"labels":%s}' "$json" > /tmp/arena-label-body.json
-  if run "gh api -X POST repos/$REPO/issues/$num/labels --input /tmp/arena-label-body.json >/dev/null 2>&1"; then
+  printf '{"labels":%s}' "$json" > "$TRIAGE_TMP/arena-label-body.json"
+  if run gh api -X POST "repos/$REPO/issues/$num/labels" --input "$TRIAGE_TMP/arena-label-body.json" 2>/dev/null; then
     labelled=$((labelled+1))
   else
     echo "  label POST failed on #$num - continuing"
@@ -287,67 +289,67 @@ close_if_open() { # $1=number $2=reason-tag
   local state=$(gh issue view "$n" -R "$REPO" --json state --jq .state 2>/dev/null) || return
   [ "$state" = "OPEN" ] || { echo "  #$n already $state - skipping"; return; }
   if [ "$DRY" = "1" ]; then echo "[dry-run] close #$n"; else
-    gh issue close "$n" -R "$REPO" --comment "$(cat "/tmp/arena-close-$n.md")" >/dev/null \
+    gh issue close "$n" -R "$REPO" --comment "$(cat "$TRIAGE_TMP/arena-close-$n.md")" >/dev/null \
       && echo "  closed #$n" || echo "  close FAILED #$n"
   fi
   pause
 }
 
-cat > /tmp/arena-close-956.md <<'EOF'
+cat > "$TRIAGE_TMP/arena-close-956.md" <<'EOF'
 Closed as fixed by #1034 (2026-09-23). Verified via the rulesets API on 2026-09-24: the active ruleset `main gate: append-only + required checks + signatures + scanning` enforces 21 required status contexts, required signatures, and code-scanning thresholds on the default branch. Every gate this repo ships is now actually required here.
 
 (ULTRAPLAN-2026-09-24.adoc, part 5.2)
 EOF
 
-cat > /tmp/arena-close-637.md <<'EOF'
+cat > "$TRIAGE_TMP/arena-close-637.md" <<'EOF'
 Closed as absorbed: #787 (Owner decision sheet D1-D72) is "one answerable place for #637 + #715 + #709 + #658", so this register is superseded by it. Rulings continue on #787.
 
 (ULTRAPLAN-2026-09-24.adoc, part 5.2)
 EOF
-cp /tmp/arena-close-637.md /tmp/arena-close-709.md
-cp /tmp/arena-close-637.md /tmp/arena-close-715.md
+cp "$TRIAGE_TMP/arena-close-637.md" "$TRIAGE_TMP/arena-close-709.md"
+cp "$TRIAGE_TMP/arena-close-637.md" "$TRIAGE_TMP/arena-close-715.md"
 
-cat > /tmp/arena-close-784.md <<'EOF'
+cat > "$TRIAGE_TMP/arena-close-784.md" <<'EOF'
 Closed as answered: the census this issue was waiting for is #968 - 39 repos with step-level actions.lock desync (plus #969 for the job-level population). The hypothesis is no longer open.
 
 (ULTRAPLAN-2026-09-24.adoc, part 5.2)
 EOF
 
-cat > /tmp/arena-close-808.md <<'EOF'
+cat > "$TRIAGE_TMP/arena-close-808.md" <<'EOF'
 Closed as subsumed by #913: the 2026-09-22 census measured this same defect population at 76 `uses: ../../` refs, with acceptance criteria. The mis-triage knowledge from this issue (failure + 0 jobs + run name == path, indistinguishable from callee-lockfile poisoning) is preserved in a comment on #913 before this close. The fix continues under #913.
 
 (ULTRAPLAN-2026-09-24.adoc, part 5.2)
 EOF
 
-cat > /tmp/arena-close-708.md <<'EOF'
+cat > "$TRIAGE_TMP/arena-close-708.md" <<'EOF'
 Closed as fixed: the current `lockfile-drift-detect.yml` implements rc-honesty (1 = drift, 2 = usage/env error), per-repo slugs (no more anonymised `_w`), and counts tab-delimited data rows only (banner lines no longer counted as drift) - its comments cite this issue as the resolved reference. "Has only ever run once" is stale: the sweep runs weekly.
 
 (ULTRAPLAN-2026-09-24.adoc, part 5.2)
 EOF
 
-cat > /tmp/arena-close-658.md <<'EOF'
+cat > "$TRIAGE_TMP/arena-close-658.md" <<'EOF'
 Closed as superseded by the 2026-09-22 ruling (Deno banned outright; Bun is tier 1). The "migrate Deno to Bun" premise is replaced by Deno retirement: #919 sizes it (95 `deno task` definitions across 23 files in the 11 ledgered repos) and #926 covers the k9-coordination harness. Preserved data from this issue: 30 deno.json locations assessed, of which 18 were blocked on npm packages that do not exist.
 
 (ULTRAPLAN-2026-09-24.adoc, part 5.2)
 EOF
 
-cat > /tmp/arena-close-920.md <<'EOF'
+cat > "$TRIAGE_TMP/arena-close-920.md" <<'EOF'
 Closed as fixed: `rhodium-standard-repositories/.github/workflows/language-policy.yml` line 116 now reads "the JS runtime is Bun per the 2026-09-22 ruling, which banned Deno as well" (committed with the 2026-09-24 intake/canon changes). Remaining estate copies of the old comment sit in the template-sync population tracked under #659.
 
 (ULTRAPLAN-2026-09-24.adoc, part 5.2)
 EOF
 
-cat > /tmp/arena-close-927.md <<'EOF'
+cat > "$TRIAGE_TMP/arena-close-927.md" <<'EOF'
 Closed as fixed: `:source-repo:` now points at https://github.com/hyperpolymath/standards (committed with the 2026-09-24 intake/canon changes).
 
 (ULTRAPLAN-2026-09-24.adoc, part 5.2)
 EOF
 
-cat > /tmp/arena-913-preserve.md <<'EOF'
+cat > "$TRIAGE_TMP/arena-913-preserve.md" <<'EOF'
 Preserved from #808 (subsumed by this issue, closed 2026-09-24): why the malformed `uses: ../../` refs were invisible. A workflow that fails to parse produces the triple `conclusion=failure`, **0 jobs**, and a run `name` equal to its file *path* - the same triple produced by callee-lockfile poisoning. These were repeatedly mis-triaged as lockfile faults; they never parsed. Also: do not use `gh actions-lock` rewrite mode to fix these refs - it previously invented `uses: $/.github/actions/...` refs that fail the same way.
 EOF
 if [ "$(gh issue view 913 -R "$REPO" --json state --jq .state 2>/dev/null)" = "OPEN" ]; then
-  run "gh issue comment 913 -R $REPO --body-file /tmp/arena-913-preserve.md >/dev/null" \
+  run gh issue comment 913 -R "$REPO" --body-file "$TRIAGE_TMP/arena-913-preserve.md" \
     || echo "  (913 preservation comment skipped/failed - continuing)"
 fi
 
@@ -367,7 +369,11 @@ echo "2. closes done"
 # 3. DESCRIPTION + TOPICS (ULTRAPLAN part 7)
 # ---------------------------------------------------------------------------
 DESC='Canonical standards, specifications and governance for the Hyperpolymath estate: policy-as-code, machine-readable specs (A2ML/DEED), and the reusable CI/CD + security canon for a 500+ repository software estate.'
-run "gh api -X PATCH repos/$REPO -f description=\"$DESC\" -f topics[]=standards -f topics[]=specification -f topics[]=\"policy-as-code\" -f topics[]=governance -f topics[]=compliance -f topics[]=\"machine-readable\" -f topics[]=documentation -f topics[]=\"open-standards\" -f topics[]=deed -f topics[]=k9 -f topics[]=\"epistemic-computing\" -f topics[]=hyperpolymath >/dev/null"
+run gh api -X PATCH "repos/$REPO" -f "description=$DESC" \
+  -f 'topics[]=standards' -f 'topics[]=specification' -f 'topics[]=policy-as-code' \
+  -f 'topics[]=governance' -f 'topics[]=compliance' -f 'topics[]=machine-readable' \
+  -f 'topics[]=documentation' -f 'topics[]=open-standards' -f 'topics[]=deed' \
+  -f 'topics[]=k9' -f 'topics[]=epistemic-computing' -f 'topics[]=hyperpolymath'
 echo "3. description + topics set"
 
 echo "done. (DRY_RUN=$DRY)"
