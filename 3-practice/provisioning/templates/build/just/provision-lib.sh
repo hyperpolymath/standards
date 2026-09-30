@@ -15,7 +15,11 @@
 # Usage: provision-lib.sh <verb> [args]
 #   verbs: langs doctor setup heal dev-shell toolchain-refresh ai-setup
 #          ai-warmup <user|dev|maintainer> eval config-show opsm lang-run <verb>
-#          search <pattern> version guix-specs mise-tools
+#          search <pattern> version
+#   facts: guix-specs mise-tools langs guix-dir set-files guix-gaps tool-table
+#          system-deps <adoc|ai>
+#   predicates (print why and exit 1, or exit 0 silently):
+#          guix-stub FILE, mise-lock-gaps, mise-banned
 #
 # Exit: 0 ok | 1 a FAIL was found / a step failed | 2 usage error
 set -uo pipefail
@@ -311,7 +315,116 @@ has_recipe() { have just && just --summary 2>/dev/null | tr " " "\n" | grep -qx 
 version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
 
 # Tools that must never appear in a repo's toolchain (estate language policy).
-BANNED_TOOLS='python|deno|node|nodejs|npm|yarn|pnpm|typescript|rescript|make|black|ruff|pip|poetry|nix'
+BANNED_TOOLS='python|deno|node|nodejs|npm|yarn|pnpm|typescript|rescript|make|black|ruff|pip|poetry|nix|go|golang|java|kotlin'
+
+# ---------------------------------------------------------------------------
+# Shared predicates. doctor and provision-check.sh both call THESE (the check via
+# `provision-lib.sh guix-stub|mise-lock-gaps|mise-banned`): a gate with its own
+# copy of a test passes what doctor warns about.
+
+# The keys of mise.toml [tools], quotes stripped ("cargo:foo" stays cargo:foo).
+mise_toml_tools() {
+  [ -f mise.toml ] || return 0
+  awk '/^\[tools\]/{t=1;next} /^\[/{t=0} t && /=/{sub(/[ \t]*=.*/,""); gsub(/["\x27 ]/,""); print}' mise.toml
+}
+# Banned tools named in mise.toml; a backend prefix does not hide one ("aqua:denoland/deno" is deno).
+mise_banned() {
+  local t base hits=""
+  for t in $(mise_toml_tools); do
+    base=${t##*:}; base=${base%%@*}; base=${base##*/}
+    [[ "$base" =~ ^($BANNED_TOOLS)$ ]] && hits="$hits$t "
+  done
+  printf '%s' "${hits% }"
+}
+# Why mise.lock does not pin mise.toml, or nothing when it does. Presence is not
+# enough: a zero-byte lock pins nothing. Every [tools] key needs its [[tools.<key>]]
+# entry, and the lock must carry checksums.
+mise_lock_gaps() {
+  [ -f mise.toml ] || return 0
+  [ -f mise.lock ] || { echo "mise.lock missing"; return; }
+  [ -s mise.lock ] || { echo "mise.lock is empty"; return; }
+  local t miss=""
+  # A tool is pinned when its [[tools.X]] block carries a concrete version line.
+  for t in $(mise_toml_tools); do
+    awk -v a="[[tools.$t]]" -v b="[[tools.\"$t\"]]" '
+      $0 == a || $0 == b { inb = 1; next }
+      /^\[/ { inb = 0 }
+      inb && /^version = "[^"]+"/ { ok = 1 }
+      END { exit !ok }' mise.lock || miss="$miss$t "
+  done
+  [ -n "$miss" ] && { echo "mise.lock does not pin: ${miss% }"; return; }
+  grep -q '^checksum = "sha256:' mise.lock || echo "mise.lock carries no checksums"
+}
+# Why a Guix file is a stub, or nothing when it is real. The test is positive: a
+# guix.scm must define every field a package needs, not merely avoid known stub
+# shapes; `(package (name "x") (source (local-file ".")))` is a stub.
+guix_stub_reason() {
+  local f=$1 k miss=""
+  [ -f "$f" ] || { echo "missing"; return; }
+  grep -qE '\{\{|__[A-Z][A-Z_]*__' "$f" && { echo "unfilled template slots"; return; }
+  grep -qE '\(inputs \(list\)\)|\(source #f\)' "$f" && { echo "empty inputs or no source"; return; }
+  case "${f##*/}" in
+    manifest.scm) grep -q 'specifications->manifest' "$f" || echo "lists no specifications"; return ;;
+    channels.scm) grep -qE '\(commit "[0-9a-f]{40}"\)' "$f" || echo "pins no commit"; return ;;
+  esac
+  for k in name version source build-system home-page synopsis description license; do
+    grep -qE "\\(${k}[[:space:]]" "$f" || miss="$miss$k "
+  done
+  [ -n "$miss" ] && { echo "no package field: ${miss% }"; return; }
+  if grep -q 'crates\.scm' "$f"; then
+    grep -qs 'define %crate-inputs' build/guix/crates.scm || echo "build/guix/crates.scm is missing or defines no %crate-inputs"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Facts the generator writes into docs/SETUP.adoc and the AI guide. They live here,
+# beside lang_tools and lang_remedy, so no second per-language table exists.
+lang_title() { case "$1" in
+  rust) echo Rust ;; idris2) echo Idris2 ;; julia) echo Julia ;; zig) echo Zig ;; elixir) echo Elixir ;;
+  gleam) echo Gleam ;; ocaml) echo OCaml ;; haskell) echo Haskell ;; bun) echo Bun ;; docs) echo Docs ;; esac; }
+# What a language's route needs from the OS: "fedora|debian|macos command|why", or nothing.
+lang_sysdeps() { case "$1" in
+  rust)    echo "gcc pkgconf-pkg-config|build-essential pkg-config|xcode-select --install|Rust links through the system C toolchain, and pkg-config finds C libraries" ;;
+  idris2)  echo "chez-scheme gmp-devel|chezscheme libgmp-dev|brew install chezscheme gmp|pack builds Idris2 on top of Chez Scheme and GMP" ;;
+  elixir|gleam) echo "gcc gcc-c++ make autoconf ncurses-devel openssl-devel|build-essential autoconf m4 libncurses-dev libssl-dev|brew install autoconf openssl@3|mise builds Erlang/OTP from source (allow ~10 min); the make here is the system tool that build uses, not a Makefile in this repository" ;;
+  ocaml)   echo "gcc make patch unzip bubblewrap|build-essential patch unzip bubblewrap|xcode-select --install|opam compiles OCaml and sandboxes its builds with bubblewrap" ;;
+  haskell) echo "gcc gcc-c++ gmp-devel make ncurses-devel xz perl|build-essential curl libffi-dev libgmp-dev libncurses-dev|xcode-select --install|ghcup installs GHC, which links through the C toolchain and GMP" ;;
+esac; }
+guix_gaps() {
+  local l g gaps=""
+  for l in "${LANGS[@]}"; do g=$(lang_guix_gap "$l"); [ -n "$g" ] && gaps="$gaps${gaps:+, }$g"; done
+  printf '%s\n' "${gaps:-none}"
+}
+tool_table() {
+  local l t base
+  for l in "${LANGS[@]}"; do
+    if [ "$l" = docs ]; then echo "|docs |\`lychee\` |mise use lychee@latest"; continue; fi
+    t=$(lang_tools "$l"); echo "|$l |\`${t// /\`, \`}\` |$(lang_remedy "$l")"
+  done
+  base="$MISE_BASE $(recipe_tools | xargs)"; base=$(echo "$base" | xargs)
+  echo "|(recipes) |\`${base// /\`, \`}\` |mise install, or your OS package manager (e.g. \`dnf install just ShellCheck\`)"
+}
+# shellcheck disable=SC2016  # the backticks are AsciiDoc literals, not command substitution
+system_deps() { # $1 adoc|ai
+  local l d seen="" fed deb mac why any=0
+  [ "$1" = adoc ] && printf '=== System packages\n'
+  for l in "${LANGS[@]}"; do
+    d=$(lang_sysdeps "$l"); [ -z "$d" ] && continue
+    case "$seen" in *"|$d|"*) continue ;; esac; seen="$seen|$d|"; any=1
+    IFS='|' read -r fed deb mac why <<<"$d"
+    if [ "$1" = adoc ]; then
+      printf '\n%s: %s.\n\n* Fedora: `sudo dnf install %s`\n* Debian/Ubuntu: `sudo apt install %s`\n* macOS: `%s`\n' \
+        "$(lang_title "$l")" "$why" "$fed" "$deb" "$mac"
+    else
+      printf '* %s needs OS packages (%s): Fedora `sudo dnf install %s` · Debian/Ubuntu `sudo apt install %s` · macOS `%s`.\n' \
+        "$(lang_title "$l")" "$why" "$fed" "$deb" "$mac"
+    fi
+  done
+  if [ "$1" = adoc ]; then
+    if [ $any -eq 1 ]; then printf '\nThe Guix development shell (`%s`) provides these itself, so inside `just dev-shell` none of them is needed.\n' "$(gpath manifest.scm)"
+    else printf '\nNone beyond git and a shell: every tool this repository needs comes from mise, or from the Guix shell.\n'; fi
+  elif [ $any -eq 0 ]; then printf '* No other OS packages: every tool comes from mise.\n'; fi
+}
 
 cmd_doctor() {
   printf '%s doctor — %s (%s; languages: %s)\n' "$REPO_NAME" "$REPO_SLUG" "$ARCHETYPE" "${LANGS[*]}"
@@ -348,17 +461,19 @@ cmd_doctor() {
 
   hdr "Repository provisioning files"
   [ -f mise.toml ] && pass "mise.toml" || fail "PV-E20 mise.toml missing — the toolchain is undeclared"
-  [ -f mise.lock ] && pass "mise.lock (latest → concrete versions)" || warn "PV-W20 mise.lock missing — run: just toolchain-refresh"
+  local lg; lg=$(mise_lock_gaps)
+  [ -z "$lg" ] && pass "mise.lock pins every mise.toml tool (latest → concrete, checksummed)" || warn "PV-W20 $lg — run: just toolchain-refresh"
   [ -f .mise.toml ] && [ -f mise.toml ] && warn "PV-W21 both mise.toml and .mise.toml — mise merges them; keep only mise.toml"
   [ -f .tool-versions ] && warn "PV-W22 .tool-versions present — a second toolchain source; fold it into mise.toml"
   if [ -f mise.toml ]; then
-    local bad; bad=$(sed -n '/^\[tools\]/,/^\[/p' mise.toml | grep -oE "^[\"']?($BANNED_TOOLS)[\"']?[[:space:]]*=" | tr -d "\"'= " | tr '\n' ' ')
-    [ -z "$bad" ] && pass "mise.toml pins no banned tool" || warn "PV-W23 mise.toml pins banned tool(s): $bad(language policy: bun, no python/deno/node/make)"
+    local bad; bad=$(mise_banned)
+    [ -z "$bad" ] && pass "mise.toml pins no banned tool" || warn "PV-W23 mise.toml pins banned tool(s): $bad (language policy: bun, no python/deno/node/make)"
   fi
   # hypatia guix_not_stub reads guix.scm AND build/guix.scm; an unfilled __PLACEHOLDER__ is a stub too.
-  local g gstub=""
-  for g in guix.scm build/guix.scm manifest.scm; do
-    [ -f "$g" ] && grep -qE '\{\{|\(inputs \(list\)\)|\(source #f\)|__[A-Z][A-Z_]*__' "$g" && gstub="$gstub$g "
+  local g r gstub=""
+  for g in guix.scm build/guix.scm "$(gpath manifest.scm)" "$(gpath channels.scm)"; do
+    [ -f "$g" ] || continue
+    r=$(guix_stub_reason "$g"); [ -n "$r" ] && gstub="$gstub$g ($r) "
   done
   local gs gm; gs=$(gpath guix.scm); gm=$(gpath manifest.scm)
   [ -f guix.scm ] && [ -f build/guix.scm ] && warn "PV-W35 both guix.scm and build/guix.scm exist — two Guix sources; keep one (build/ is used)"
@@ -642,5 +757,12 @@ case "${1:-}" in
   version)            echo "provision-lib $PROVISION_LIB_VERSION" ;;
   guix-dir)           guix_dir ;;
   set-files)          set_files ;;
+  guix-gaps)          guix_gaps ;;
+  tool-table)         tool_table ;;
+  system-deps)        shift; system_deps "${1:-adoc}" ;;
+  # Predicates: print why, exit 1; print nothing, exit 0.
+  guix-stub)          shift; r=$(guix_stub_reason "${1:?usage: guix-stub FILE}"); [ -z "$r" ] || { echo "$r"; exit 1; } ;;
+  mise-lock-gaps)     r=$(mise_lock_gaps); [ -z "$r" ] || { echo "$r"; exit 1; } ;;
+  mise-banned)        r=$(mise_banned); [ -z "$r" ] || { echo "$r"; exit 1; } ;;
   *) sed -n '2,20p' "$0"; exit 2 ;;
 esac

@@ -21,7 +21,6 @@ cd "$REPO" || { echo "provision-check: no such directory: $REPO" >&2; exit 1; }
 
 MIN_JUST="1.42.0"
 VERBS="setup doctor heal dev-shell toolchain-refresh ai-setup ai-warmup eval config-show opsm build test bench lint fmt fmt-check run deps"
-BANNED="python deno node nodejs npm yarn pnpm go golang java kotlin make black ruff"
 # Files the provisioning set owns; residue anywhere else is not ours to judge.
 # The engine scripts under build/just/ are excluded: they name slot syntax in their
 # own comments and code, and realign owns them. README.adoc is scanned only inside
@@ -73,23 +72,15 @@ fi
 echo "[3] mise"
 if [ ! -f mise.toml ]; then bad "mise.toml missing"
 else
-  tools=$(awk '/^\[tools\]/{t=1;next} /^\[/{t=0} t && /=/{sub(/[ \t]*=.*/,""); gsub(/["\x27 ]/,""); print}' mise.toml)
-  hit=""
-  for t in $tools; do
-    base=${t##*:}; base=${base%%@*}; base=${base##*/}   # "aqua:denoland/deno" -> deno
-    for b in $BANNED; do [ "$base" = "$b" ] && hit="$hit$t "; done
-  done
-  if [ -n "$hit" ]; then bad "mise.toml names banned tools: $hit"; else ok "mise.toml names no banned tool"; fi
+  if hit=$(lib mise-banned); then ok "mise.toml names no banned tool"; else bad "mise.toml names banned tools: $hit"; fi
   [ -f .mise.toml ] && bad "both mise.toml and .mise.toml exist"
-  if [ -f mise.lock ]; then ok "mise.lock present"; else bad "mise.lock missing (latest is not concrete; run: mise lock)"; fi
+  if lg=$(lib mise-lock-gaps); then ok "mise.lock pins every mise.toml tool"; else bad "$lg (latest is not concrete; run: mise lock)"; fi
 fi
 
 echo "[4] guix"
-gs=$(gp guix.scm)
-if [ ! -f "$gs" ]; then bad "guix.scm missing (neither guix.scm nor build/guix.scm)"
-elif grep -qE '\{\{|\(inputs \(list\)\)|\(source #f\)' "$gs"; then bad "$gs is a stub"
-else ok "$gs is not a stub"; fi
-for g in "$(gp manifest.scm)" "$(gp channels.scm)"; do [ -f "$g" ] || bad "$g missing"; done
+for g in "$(gp guix.scm)" "$(gp manifest.scm)" "$(gp channels.scm)"; do
+  if r=$(lib guix-stub "$g"); then ok "$g is not a stub"; else bad "$g: $r"; fi
+done
 
 echo "[5] template residue"
 f0=$fails
