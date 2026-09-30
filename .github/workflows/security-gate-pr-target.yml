@@ -92,14 +92,28 @@ jobs:
 
           echo "Checking out PR branch from fork: $FORK_REPO/$PR_BRANCH"
 
-          # Add the fork as a remote temporarily
-          git remote add pr-fork "https://github.com/$FORK_REPO.git" 2>/dev/null || true
+          # Add the fork as a remote. A fresh checkout should never already
+          # have this remote; if this fails we want to know, not guess.
+          git remote add pr-fork "https://github.com/$FORK_REPO.git"
 
-          # Fetch the PR branch
-          git fetch pr-fork -- "$PR_BRANCH" 2>/dev/null || true
+          # Fetch the PR branch. Do NOT swallow failure here: the scans below
+          # only inspect what is actually on disk, so a silently-tolerated
+          # fetch failure would let them run against the base repo's own
+          # tree while still reporting a fork PR as scanned and clean.
+          if ! git fetch pr-fork -- "$PR_BRANCH"; then
+            echo "::error::could not fetch PR branch '$PR_BRANCH' from $FORK_REPO — refusing to run the malicious-content/file-type scans against unverified content."
+            echo "pr_checked_out=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
 
-          # Checkout the PR branch
-          git checkout -f "pr-fork/$PR_BRANCH" 2>/dev/null || git checkout -f "$PR_BRANCH" 2>/dev/null || true
+          # Checkout the fetched PR branch. No fallback to a same-named
+          # branch in the base repo: that would silently scan the wrong
+          # (trusted, non-fork) tree while still reporting success.
+          if ! git checkout -f "pr-fork/$PR_BRANCH"; then
+            echo "::error::could not check out fetched branch 'pr-fork/$PR_BRANCH' — refusing to run the malicious-content/file-type scans against unverified content."
+            echo "pr_checked_out=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
 
           echo "pr_checked_out=true" >> "$GITHUB_OUTPUT"
 
