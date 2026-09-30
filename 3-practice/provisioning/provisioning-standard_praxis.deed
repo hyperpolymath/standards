@@ -1,0 +1,116 @@
+;; SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+;; SPDX-License-Identifier: MPL-2.0
+;;
+;; provisioning-standard_praxis.deed — what every repository carries so that
+;; nobody who clones it has to search for how to set it up, run it, test it,
+;; diagnose it or repair it.
+;;
+;; Prose counterpart: 3-practice/provisioning/PROVISIONING-STANDARD.adoc
+;; Launcher modes:    launcher/launcher-standard_praxis.deed (provisioning-modes)
+;; Templates:         3-practice/provisioning/templates/
+;; Offline checker:   templates/build/just/provision-check.sh
+(praxis-deed
+  :schema-version   "1.0.0"
+  :canonical-name   "provisioning-standard"
+  :beholding-chora  #u5"estate/chora"
+  :standard-version "1.0.0"
+  :standard-date    "2026-09-30"
+  :compliance ("PROVISIONING-STANDARD.adoc" "launcher-standard.adoc"
+               "TRUST-DEFAULTS-POLICY.adoc" "LICENCE-POLICY.adoc")
+
+  ;; ------------------------------------------------------------------ scope
+  (scope
+    :orgs    ("hyperpolymath" "metadatastician")
+    :exclude ("forks" "archived" "007" "dev-notes-vault" "memory-vault"))
+
+  ;; ------------------------------------------------------------ artefact set
+  ;; engine  = identical estate-wide; `provision-set realign` overwrites it.
+  ;; minted  = written once, then owned by the repository; realign creates it
+  ;;           when missing and replaces it only while it is still a stub.
+  ;; merged  = the repository's own content is kept; the canon is added.
+  (artefacts
+    (file :path "launcher.sh"                              :kind engine :mode "100755")
+    (file :path "build/just/provision.just"                :kind engine)
+    (file :path "build/just/provision-lib.sh"              :kind engine :mode "100755")
+    (file :path "build/just/provision-modes.sh"            :kind engine :mode "100755")
+    (file :path "build/just/provision-check.sh"            :kind engine :mode "100755")
+    (file :path "channels.scm"                             :kind engine)
+    (file :path "Justfile"                                 :kind merged)
+    (file :path "mise.toml"                                :kind minted)
+    (file :path "mise.lock"                                :kind minted)
+    (file :path "guix.scm"                                 :kind minted)
+    (file :path "manifest.scm"                             :kind minted)
+    (file :path ".machine_readable/descriptiles/provisioning_praxis.deed" :kind minted)
+    (file :path "docs/SETUP.adoc"                          :kind minted)
+    (file :path "docs/AI_INSTALLATION_GUIDE.adoc"          :kind minted)
+    (file :path "llm-warmup-user.adoc"                     :kind minted)
+    (file :path "llm-warmup-dev.adoc"                      :kind minted)
+    (file :path "llm-warmup-maintainer.adoc"               :kind minted)
+    (section :file "README.adoc" :anchor "ai-install"      :kind merged))
+
+  ;; ------------------------------------------------------------------- verbs
+  ;; Every verb exists both as a root recipe and as provision::<verb>.
+  ;; Launcher modes call the engine directly, so no root recipe can shadow them.
+  (verbs
+    :provisioning ("setup" "doctor" "heal" "dev-shell" "toolchain-refresh")
+    :lifecycle    ("build" "test" "bench" "eval" "lint" "fmt" "run" "deps")
+    :guidance     ("ai-setup" "ai-warmup" "config-show" "opsm"))
+  (launcher-modes
+    (mode :flag "--setup"    :verb "setup")
+    (mode :flag "--doctor"   :verb "doctor")
+    (mode :flag "--heal"     :verb "heal")
+    (mode :flag "--ai-setup" :verb "ai-setup"))
+  ;; A repository's own checks: root recipes <verb>-local, or scripts
+  ;; build/just/<verb>-local.sh. A failing doctor-local is FAIL PV-E50.
+  (local-hooks :verbs ("doctor" "setup" "heal") :suffix "-local")
+  (not-applicable :behaviour "print why and exit 0; never fake a result")
+
+  (archetypes
+    (archetype :name app     :runtime-modes #t)
+    (archetype :name library :runtime-modes #f)
+    (archetype :name tool    :runtime-modes #f)
+    (archetype :name theory  :runtime-modes #f)
+    (archetype :name docs    :runtime-modes #f))
+
+  ;; --------------------------------------------------------------- toolchain
+  (toolchain
+    :mise-versions  "latest"
+    :mise-lockfile  #t
+    :mise-base      ("just" "shellcheck")
+    :js-runtime     "bun"
+    :banned-tools   ("python" "deno" "node" "npm" "yarn" "pnpm" "go" "java" "kotlin" "make")
+    ;; Measured 2026-09-30: a root recipe depending on a module recipe fails on
+    ;; just 1.31, 1.36, 1.40, 1.41 and works from 1.42.
+    :just-floor     "1.42.0"
+    :guix-channels  "channels.scm"
+    :guix-package   (rust "cargo-build-system" other "copy-build-system source package")
+    :guix-gaps      ("idris2" "gleam" "bun" "lychee"))
+
+  ;; ------------------------------------------------------------- slot tiers
+  (slots
+    (tier :name mechanical :pattern "__X__"      :filled-by "provision-set mint"
+          :residue fail)
+    (tier :name specific   :pattern "__SPEC_X__" :filled-by "per-repository specialisation"
+          :residue fail :residue-in-dev-checkout "warn PV-W29"))
+  (pipeline :order ("mint" "specialise" "verify" "pr"))
+
+  ;; ----------------------------------------------------------------- licence
+  ;; Minted files carry SPDX from birth, chosen by the repository's
+  ;; classification in LICENCE-POLICY.adoc. Unclassifiable = refuse to mint.
+  (licence
+    :code-slot      "__LICENSE__"
+    :doc-slot       "__DOC_LICENSE__"
+    :sole           ("MPL-2.0" "CC-BY-SA-4.0")
+    :son-shared     ("AGPL-3.0-or-later" "AGPL-3.0-or-later")
+    :register-only  "PMPL-1.0-or-later"
+    :unclassifiable "refuse and record in the campaign ledger"
+    :existing-headers "never rewritten")
+
+  ;; ----------------------------------------------------------- doctor codes
+  ;; Full table: templates/docs/SETUP.adoc.tmpl §Troubleshooting.
+  (doctor
+    :summary-line "{name}: N PASS, N WARN, N FAIL"
+    :exit         "non-zero iff any FAIL"
+    :fail-codes   ("PV-E01" "PV-E02" "PV-E03" "PV-E10" "PV-E11" "PV-E20" "PV-E27" "PV-E40" "PV-E50")
+    :warn-codes   ("PV-W01" "PV-W20" "PV-W21" "PV-W22" "PV-W23" "PV-W24" "PV-W25" "PV-W26"
+                   "PV-W27" "PV-W28" "PV-W29" "PV-W30" "PV-W31" "PV-W32" "PV-W33" "PV-W34")))

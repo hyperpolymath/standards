@@ -1,0 +1,40 @@
+;; SPDX-License-Identifier: __LICENSE__
+;; SPDX-FileCopyrightText: __YEAR__ __COPYRIGHT_HOLDER__
+;;
+;; guix.scm — __APP_NAME__ as a Guix package.
+;;
+;;   guix build -f guix.scm          # installs the source tree to share/__APP_NAME__
+;;   guix shell -D -f guix.scm       # the full development toolchain
+;;
+;; This is a SOURCE package, and says so: a hermetic compiled build needs this
+;; repository's __LANGS__ dependencies packaged in Guix, which they are not
+;; (Guix builds offline). The toolchain below is real — `guix shell -D -f guix.scm`
+;; then `just setup` gives a working environment. See docs/SETUP.adoc §Guix.
+(use-modules (guix packages) (guix gexp)
+             (guix build-system copy)
+             (gnu packages)
+             ((guix licenses) #:prefix license:))
+
+(define %source-dir (dirname (current-filename)))
+;; A spec may name an output ("rust:cargo"); plain specification->package cannot.
+(define (spec->input spec)
+  (call-with-values (lambda () (specification->package+output spec))
+    (lambda (pkg out) (if (string=? out "out") pkg (list pkg out)))))
+
+(define %ignored
+  '(".git" "target" ".eval" "node_modules" "_build" "deps" "zig-out" ".zig-cache" "dist-newstyle"))
+
+(package
+  (name "__APP_NAME__")
+  (version "__APP_VERSION__")
+  (source (local-file %source-dir "__APP_NAME__-checkout"
+                      #:recursive? #t
+                      #:select? (lambda (file stat)
+                                  (not (member (basename file) %ignored)))))
+  (build-system copy-build-system)
+  (arguments (list #:install-plan #~'(("." "share/__APP_NAME__/"))))
+  (native-inputs (map spec->input (list __GUIX_PKG_SPECS__)))
+  (home-page "https://github.com/__REPO_SLUG__")
+  (synopsis "__SYNOPSIS__")
+  (description "__DESCRIPTION__")
+  (license __GUIX_LICENSE__))

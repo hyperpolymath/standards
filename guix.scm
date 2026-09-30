@@ -17,4 +17,4 @@
   (synopsis "standards")
   (description "standards — part of the hyperpolymath ecosystem.")
   (home-page "https://github.com/hyperpolymath/standards")
-  (license ((@@ (guix licenses) license) "MPL-2.0" "https://github.com/hyperpolymath/palimpsest-license")))
+  (license mpl2.0))

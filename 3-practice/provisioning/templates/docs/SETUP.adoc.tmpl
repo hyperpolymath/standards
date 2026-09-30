@@ -1,0 +1,198 @@
+// SPDX-License-Identifier: __DOC_LICENSE__
+// SPDX-FileCopyrightText: __YEAR__ __COPYRIGHT_HOLDER__
+= Setting up __APP_NAME__ by hand
+:toc:
+:toclevels: 2
+
+This is the complete manual route: every step, in order, with nothing assumed.
+You do not need it if you use `./launcher.sh --setup` (or ask an AI, see
+link:AI_INSTALLATION_GUIDE.adoc[AI_INSTALLATION_GUIDE.adoc]), but those do
+exactly what is written here, so this page is also what to read when they stop.
+
+[horizontal]
+Repository:: https://github.com/__REPO_SLUG__
+Kind:: __ARCHETYPE__ (__LANGS__)
+Toolchain declared in:: `mise.toml` (versions `latest`, made concrete in `mise.lock`), and
+`manifest.scm` / `guix.scm` / `channels.scm` for Guix
+Every command below is also a `just` recipe:: run `just` to list them
+
+[[prerequisites]]
+== 1. Prerequisites
+
+You need three things from your operating system. Everything else is installed
+for you in step 3.
+
+[cols="1,2,3"]
+|===
+|Tool |Why |Install
+
+|git
+|to fetch the repository
+|Fedora `sudo dnf install git` · Debian/Ubuntu `sudo apt install git` · macOS `xcode-select --install` · Windows `winget install Git.Git`
+
+|a C toolchain
+|some language toolchains link native code
+|Fedora `sudo dnf install gcc` · Debian/Ubuntu `sudo apt install build-essential` · macOS (included with the Xcode tools above) · Windows: use WSL2
+
+|mise
+|installs every other tool at the version this repo declares
+|Linux/macOS/WSL `curl https://mise.run \| sh` · Windows `winget install jdx.mise` — then follow the one line it prints to activate it in your shell
+|===
+
+NOTE: On Windows, use WSL2 (`wsl --install`) and follow the Linux steps inside
+it. The launcher detects the platform and says so in `./launcher.sh --version`.
+
+__SYSTEM_DEPS_SECTION__
+
+== 2. Get the code
+
+[source,bash]
+----
+git clone https://github.com/__REPO_SLUG__.git
+cd __APP_NAME__
+----
+
+Or with OPSM, the odds-and-sods package manager (see <<opsm>>):
+`opsm install https://github.com/__REPO_SLUG__.git --registry git`
+
+== 3. Install the toolchain
+
+[source,bash]
+----
+mise trust          # allow this repository's mise.toml
+mise install        # installs everything mise.toml lists, at mise.lock's versions
+----
+
+That installs:
+
+[cols="1,2,3"]
+|===
+|Language |Tools |If mise cannot supply it
+
+__TOOL_TABLE__
+|===
+
+`just` itself is installed by `mise install`. Without mise, install just from your
+OS instead (`dnf install just`, `brew install just`, `cargo install just`); this
+repository needs just 1.42 or newer.
+
+== 4. Set it up
+
+[source,bash]
+----
+just setup
+----
+
+`just setup` repeats step 3 (harmless), fetches this repository's own
+dependencies (__LANGS__), and finishes by running `just doctor`.
+
+== 5. Check it
+
+[source,bash]
+----
+just doctor         # PASS / WARN / FAIL for every requirement, with the fix for each
+----
+
+`just doctor` exits 0 when nothing FAILs. A WARN is advice, not a failure.
+Every code it prints is explained in <<troubleshooting>>.
+
+== 6. Use it
+
+[source,bash]
+----
+just build          # build
+just test           # run the tests
+just bench          # run the benchmarks (says N/A when there are none)
+just eval           # tests + benchmarks with timings, saved under .eval/
+just run            # run it (says N/A for a library)
+just config-show    # where the toolchain and config are declared
+----
+
+Anything that does not apply to a __ARCHETYPE__ says so and exits 0; nothing is faked.
+
+== 7. Keep it current
+
+[source,bash]
+----
+just toolchain-refresh   # mise up --bump, re-lock mise.lock, re-pin channels.scm
+just heal                # re-apply safe fixes if something drifted
+----
+
+[[guix]]
+== The Guix route (alternative to steps 3–4)
+
+With GNU Guix installed you can skip mise for everything Guix packages:
+
+[source,bash]
+----
+guix shell -m manifest.scm                                      # the development shell
+guix time-machine -C channels.scm -- shell -m manifest.scm      # the exact, pinned Guix
+guix build -f guix.scm                                          # the package
+----
+
+Guix does not package __GUIX_GAPS__; the Guix shell includes mise, so inside it run
+`mise install` for those. `just dev-shell` picks Guix when it is present and mise
+when it is not.
+
+[[opsm]]
+== OPSM (odds-and-sods package manager)
+
+[source,bash]
+----
+opsm install https://github.com/__REPO_SLUG__.git --registry git
+----
+
+__APP_NAME__ has no registry package, so OPSM fetches it through its git
+adapter; then provision it with `./launcher.sh --setup`. To get OPSM itself
+(Erlang/OTP 26+ and Elixir 1.16+ required):
+
+[source,bash]
+----
+git clone https://github.com/hyperpolymath/odds-and-sods-package-manager.git
+cd odds-and-sods-package-manager/opsm_ex
+mix deps.get && mix escript.build
+install -m 0755 opsm ~/.local/bin/opsm
+opsm --version
+----
+
+`just opsm` prints the same instructions.
+
+[[troubleshooting]]
+== Troubleshooting
+
+Run `just doctor`, find the code it printed, apply the fix. `just heal` applies
+every fix marked *auto* for you.
+
+[cols="1,3,3,1"]
+|===
+|Code |Meaning |Fix |Auto
+
+|PV-E01 |git is not installed |Install git (step 1) |no
+|PV-E02 |just is missing or older than 1.42 |`mise use -g just@latest` |no
+|PV-E03 |a tool in mise.toml is not installed |`just setup` (or `mise install`) |yes
+|PV-E10 |a language toolchain binary is missing |`just setup`; the doctor line names the manual route |yes, via mise
+|PV-E11 |a system dependency from the provisioning deed is missing |install it from your OS (see <<prerequisites>>) |no
+|PV-E20 |mise.toml is missing |restore it: `git checkout -- mise.toml` |no
+|PV-E27 |launcher.sh is not executable |`chmod +x launcher.sh` |yes
+|PV-E40 |neither Guix nor mise is installed, so there is no dev shell |install mise (step 1) |no
+|PV-E50 |this repository's own `doctor-local` checks failed |read the output above the summary line; the recipe is in the Justfile |no
+|PV-W01 |mise is not installed |install mise (step 1) |no
+|PV-W20 |mise.lock is missing, so `latest` is not concrete |`just toolchain-refresh` |yes
+|PV-W21 |both mise.toml and .mise.toml exist |merge into mise.toml, delete .mise.toml |no
+|PV-W22 |a .tool-versions file competes with mise.toml |fold it into mise.toml |no
+|PV-W23 |mise.toml pins a tool the estate does not use |remove that line |no
+|PV-W24 |a Guix file is an unfilled template |regenerate it (maintainers: `provision-set realign`) |no
+|PV-W25 |guix.scm is missing |as PV-W24 |no
+|PV-W26 |manifest.scm is missing |as PV-W24; mise still works |no
+|PV-W27 |launcher.sh is missing |as PV-W24 |no
+|PV-W28 |a setup document is missing |as PV-W24 |no
+|PV-W29 |a setup document still holds unfilled template slots |replace each `__SPEC_…__` slot with the facts for this repository |no
+|PV-W30 |Deno files remain |the estate runtime is bun; a migration issue tracks it |no
+|PV-W31 |Nix files remain |use Guix |no
+|PV-W32 |a Makefile remains |use the Justfile |no
+|PV-W33 |Python files remain |not an estate language |no
+|PV-W34 |npm/yarn/pnpm/TypeScript files remain |use bun |no
+|===
+
+Still stuck? `just doctor > doctor.txt 2>&1` and open an issue at
+https://github.com/__REPO_SLUG__/issues with that file attached.
