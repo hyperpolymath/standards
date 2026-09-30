@@ -12,7 +12,8 @@ APP_NAME="TemplateApp"
 APP_DIR="/path/to/app"
 APP_PORT=4000
 APP_URL="http://localhost:$APP_PORT"
-LOG_FILE="/tmp/${APP_NAME,,}-launcher.log"
+# Never /tmp (CWE-377: predictable shared path) — see launcher-standard.adoc
+LOG_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/launch-scaffolder/${APP_NAME,,}/launcher.log"
 
 # ============================================================================
 # CORE FUNCTIONS - Standard E-grade functionality
@@ -36,6 +37,7 @@ start_server() {
   
   # Use nohup for reliable background process management
   cd "$APP_DIR"
+  mkdir -p -m 0700 "$(dirname "$LOG_FILE")"
   nohup command_to_start_server >"$LOG_FILE" 2>&1 &
   
   # Wait for server to be ready

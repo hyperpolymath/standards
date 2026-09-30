@@ -64,7 +64,7 @@ hp_soft_attach_event() {
 }
 
 # CLI mode (not sourced): provide a thin wrapper for ad-hoc invocation.
-#   ./soft-attach.sh run "hypatia diagnose --app foo --log /tmp/foo.log"
+#   ./soft-attach.sh run "hypatia diagnose --app foo --log ~/.local/state/launch-scaffolder/foo/server.log"
 #   ./soft-attach.sh event feedback-o-tron launcher:start_failed
 #   ./soft-attach.sh present hypatia
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
