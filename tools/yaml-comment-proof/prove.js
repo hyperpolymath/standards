@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // standards#1021 — comment-preservation proof for YAML rewriters (YAML-POLICY §4).
 //
 //   bun prove.js <file.yml ...>

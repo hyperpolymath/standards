@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 // Comment-association oracle for standards#1021 (YAML-POLICY §4).
 //
 // Every comment is recorded as (node path, position, text) and two documents are
