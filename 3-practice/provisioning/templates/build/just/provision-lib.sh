@@ -153,13 +153,25 @@ guix_specs() {
 # from pack and haskell from ghcup or Guix: neither is a mise tool. The recipes
 # themselves need just and shellcheck, so those two are always declared.
 MISE_BASE="just shellcheck"
+# Tools a repo's own recipes call (e.g. `deps-audit` runs trivy): pinned only where used.
+RECIPE_TOOLS="trivy"
 lang_mise() { case "$1" in
     rust) echo "rust" ;; zig) echo "zig" ;; julia) echo "julia" ;;
     elixir) echo "erlang elixir" ;; gleam) echo "erlang gleam" ;; ocaml) echo "opam" ;;
     bun) echo "bun" ;; docs) echo "lychee" ;; esac; }
+recipe_tools() {
+  local t f body=""
+  for f in Justfile justfile build/just/*.just; do
+    [ -f "$f" ] && body+=$(grep -v '^[[:space:]]*#' "$f")$'\n'
+  done
+  for t in $RECIPE_TOOLS; do
+    [[ "$body" =~ (^|[^[:alnum:]_-])$t([^[:alnum:]_-]|$) ]] && echo "$t"
+  done
+}
+
 mise_tools() {
   local l t seen=" " out=()
-  for t in $MISE_BASE $(for l in "${LANGS[@]}"; do lang_mise "$l"; done); do
+  for t in $MISE_BASE $(for l in "${LANGS[@]}"; do lang_mise "$l"; done) $(recipe_tools); do
     case "$seen" in *" $t "*) ;; *) out+=("$t"); seen="$seen$t " ;; esac
   done
   printf "%s\n" "${out[*]}"
@@ -375,8 +387,30 @@ cmd_doctor() {
   [ $any -eq 0 ] && pass "no deno / nix / make / python / npm leftovers"
 
   local hook=build/just/doctor-local.sh
-  if [ -f "$hook" ]; then hdr "Repo-specific checks ($hook)"; # shellcheck source=/dev/null
-    . "$hook"; fi
+  if [ -f "$hook" ]; then
+    hdr "Repo-specific checks ($hook)"
+    # Sourced so the hook can call pass/warn/fail, but in a subshell so an `exit`
+    # or `set -e` in it cannot end the doctor before the summary. The EXIT trap
+    # hands the hook's tally back; an early exit is itself a FAIL.
+    local tally qtally hp w f rc
+    tally=$(mktemp)
+    printf -v qtally '%q' "$tally"
+    # shellcheck disable=SC2030,SC2031  # the subshell's counts return via $tally
+    ( PASS=0 WARN=0 FAIL=0 hook_done=0
+      # The path is baked in now: when `set -e` trips, bash unwinds this
+      # function's locals before the EXIT trap runs, so $tally is gone by then.
+      # shellcheck disable=SC2064
+      trap "printf '%d %d %d %d\n' \"\$PASS\" \"\$WARN\" \"\$FAIL\" \"\$hook_done\" > $qtally" EXIT
+      # shellcheck source=/dev/null
+      . "$hook"
+      hook_done=1 )
+    rc=$?
+    read -r hp w f hook_done < "$tally" || { hp=0 w=0 f=0 hook_done=0; }
+    rm -f "$tally"
+    # shellcheck disable=SC2031
+    PASS=$((PASS+hp)) WARN=$((WARN+w)) FAIL=$((FAIL+f))
+    [ "$hook_done" = 1 ] || fail "PV-E51 $hook exited (status $rc) before it finished; its later checks did not run"
+  fi
   if has_recipe doctor-local; then
     hdr "Repo-specific checks (just doctor-local)"
     just doctor-local && pass "doctor-local" || fail "PV-E50 the repo-specific doctor-local recipe failed (output above)"

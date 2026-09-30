@@ -49,7 +49,7 @@ ai-setup:
 
 # Print (and copy) the warm-up for an AI session: user, dev or maintainer
 ai-warmup who="user":
-    @{{lib}} ai-warmup {{who}}
+    @{{lib}} ai-warmup {{quote(who)}}
 
 # Run test + bench, time both, and write .eval/<timestamp>.txt
 eval:

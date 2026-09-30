@@ -9,10 +9,11 @@
 #   this and calls hp_launcher_main.
 #   Existing app launchers: add ONE line before their mode switch —
 #
-#       . "$REPO_DIR/build/just/provision-modes.sh" && hp_provision_dispatch "$@" && exit $?
+#       . "$REPO_DIR/build/just/provision-modes.sh" && hp_provision_or_return "$@"
 #
-#   hp_provision_dispatch returns 99 when the mode is not a provisioning
-#   mode, so the app's own switch then handles it.
+#   A provisioning mode runs and the launcher exits with its status (a failed
+#   --setup exits non-zero); any other mode returns, so the app's own switch
+#   handles it. hp_provision_dispatch itself returns 99 for "not mine".
 #
 # Canon: hyperpolymath/standards launcher/launcher-standard_praxis.deed
 #        (archetypes, provisioning-modes) and
@@ -74,6 +75,15 @@ hp_just() { hp_ensure_just || return 1; (cd "$REPO_DIR" && just "$@"); }
 hp_lib() { (cd "$REPO_DIR" && bash build/just/provision-lib.sh "$@"); }
 
 # Returns the mode's exit code, or 99 when "$1" is not a provisioning mode.
+# The one-line hook for existing launchers: exit with a provisioning mode's
+# status, or return (0) so the caller's own mode switch runs.
+hp_provision_or_return() {
+  hp_provision_dispatch "$@"
+  local rc=$?
+  [ "$rc" -eq 99 ] && return 0
+  exit "$rc"
+}
+
 hp_provision_dispatch() {
   case "${1:-}" in
     --setup)    hp_lib setup ;;

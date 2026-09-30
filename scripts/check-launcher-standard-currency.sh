@@ -62,7 +62,7 @@ set -uo pipefail
 
 CANONICAL_FILE="launcher-standard_praxis.deed"
 RETIRED_FILE="launcher-standard.a2ml"
-CURRENT_VERSION="0.4.0"
+CURRENT_VERSION="0.5.0"
 SELF_TEST_TMP=""
 
 # Path globs exempt as historical records. Matched against the repo-relative
