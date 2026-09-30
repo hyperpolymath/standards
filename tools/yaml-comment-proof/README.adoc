@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+= yaml-comment-proof
+:toc: macro
+
+The comment-preservation proof that `3-practice/YAML-POLICY.adoc` §4 requires
+before Y-2 (yq for writing) or Y-3 (KYAML) can come into force. Tracks
+standards#1021.
+
+== Run
+
+[source,bash]
+----
+cd tools/yaml-comment-proof
+bun install --frozen-lockfile
+bun prove.js ../../.github/workflows/*.yml
+----
+
+`prove.js` rewrites *copies* in a temp dir; it never edits its arguments.
+Exit 0 = every arm clean, 1 = a rewriter lost/moved a comment or was not
+idempotent, 2 = the harness itself failed a control (do not read the table).
+
+== What it checks
+
+`oracle.js` records every comment as *(node path, position, text)* using
+`yaml` (eemeli) — deliberately a different parser from go-yaml, which yq and
+kubectl share. Position is taken from source offsets, not AST comment slots,
+because the AST hangs the same comment on different slots in block vs flow
+syntax. A comment whose text survives but whose node changes is *MOVED*, which
+is a failure: parse-clean and "same number of `#` lines" are not the bar.
+
+Before measuring anything the runner proves itself:
+
+* calibration pair (`fixtures/calibration.*`, one comment per position class):
+  block → hand-written KYAML must be PRESERVED;
+* a moved comment and a dropped comment on that pair must go red;
+* on the real corpus, a dropped-pin mutant and a moved-pin mutant must be
+  killed, each naming file and path;
+* zero files or zero comments is exit 2, never a pass.
+
+Arms: `identity` (`yq -i '.'`), `pin-bump` (`yq -i` rewriting every 40-hex
+`uses:` pin), `kyaml` (`yq -o kyaml`). Each is run twice; comments are compared
+original → pass 1 *and* original → pass 2. kubectl's KYAML printer is not
+covered.
+
+== Measured — standards `bd9313a6`, 56 workflows, yq v4.53.3
+
+2186 comments, of which 183 are trailing pin comments on `uses:` (equal to the
+independent grep count — the oracle's positive control).
+
+|===
+| arm | preserved | moved | dropped | pass-2 drift | idempotent | blank lines lost | verdict
+
+| identity | 2186/2186 | 0 | 0 | 10 | 55/56 | 567 | FAIL
+| pin-bump | 2186/2186 | 0 | 0 | 10 | 55/56 | 567 | FAIL
+| kyaml    | 2186/2186 | 0 | 0 | 0  | 56/56 | 813 | PASS
+|===
+
+The only loss: in `tag-ruleset-canon.yml` yq relocates a 10-line comment block
+(the R-14 App-identity rationale) on its *second* run, from before
+`steps/1/name` to before `steps/1/id` — inside the step it used to precede.
+Pass 1 is clean, so a single-run check would have passed it.
+
+Reported, not failed on: blank-line loss; and one data difference
+(`k9-contractile.yml`) that is the two parsers disagreeing about the
+*original* — a `run: |` block scalar at EOF with no final newline — not a
+rewriter defect.
+
+What the kyaml PASS does and does not say:
+
+* It covers block YAML → KYAML *conversion* and KYAML re-emission by
+  `yq -o kyaml`: no comment lost or moved, stable on re-run — including
+  `tag-ruleset-canon.yml`, where block re-emission drifts.
+* It does *not* cover editing a KYAML file with plain `yq -i`, whose default
+  output is block YAML. That Y-2-on-Y-3 case is for #1022/#1023.
+* It is *not* a KEP-5295 conformance verdict on yq's dialect (#1022). Observed:
+  yq's output has no `---` header and pulls an end-of-file comment inside the
+  closing brace.
+
+Status: implemented and tested. Not wired into CI.
