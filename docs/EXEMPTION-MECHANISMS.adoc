@@ -115,11 +115,43 @@ Suppresses matching findings from the gate, downgrades severity if
 * One-off PR-scoped suppression. Baseline edits are merged to main; they
   affect all subsequent PRs. See Layer 3.
 
+=== 2a: `.hypatia-ignore` — scoped scanner suppression
+
+**File:** `.hypatia-ignore` at the calling repo's root.
+
+**Consumers — two, and they match differently:**
+
+1. **The Hypatia scanner** (`hypatia/lib/hypatia/scanner_suppression.ex`).
+   Each line is `<rule_module>/<rule_type>:<path-fragment>`,
+   `<rule_module>/*:<path-fragment>`, or a bare `<path-fragment>` (any
+   rule). The fragment is a **substring** of the repo-relative path.
+2. **The governance gate** (`governance-reusable.yml`, rules
+   `banned_language_file` and `banned_config_file`). It matches the
+   **whole line** `<rule>:<exact-repo-relative-path>` (`grep -qxF`).
+   A directory fragment or bare-path line quiets the scanner but not the
+   gate. That is deliberate: the gate is the stricter reader, and
+   listing each path in full means a newly added banned file still fails.
+
+`<rule_module>` is the string a finding is **emitted** under, which is not
+always the module that defines the rule: content-pattern findings
+(`hardcoded_tmp`, `http_in_docs`, …) are emitted as `content_patterns/…`
+although defined in `CicdRules`. Copy the id from the alert, never from
+the source file; a wrong module string matches nothing, silently.
+
+**Where it sits in the suppression ladder** (prefer the highest rung
+that fits): inline directive at the call site →
+`.hypatia-ignore` (a whole file or directory) →
+`.hypatia-baseline.json` (acknowledged debt, Layer 2).
+
+**Don't use for:** hiding a new finding in freshly-authored code, or
+wildcarding a directory of banned-language files — list each path, so the
+ledger can only shrink.
+
 == Layer 3: Per-PR exemptions (NOT YET IMPLEMENTED)
 
-There is currently no supported per-PR exemption mechanism. PR authors
-attempting one (e.g. by inventing a `.hypatia-ignore` file) will find
-nothing reads it, and the gate will still fail. **Do not invent new
+There is currently no supported per-PR exemption mechanism. `.hypatia-ignore`
+(Layer 2a) is committed to the default branch like any other file, so it
+is not per-PR either. **Do not invent new
 file conventions.** If you need per-PR exemption, file an issue against
 `hyperpolymath/standards` proposing a designed mechanism.
 
@@ -151,11 +183,15 @@ A formal proposal should pick one and document it explicitly.
 
 These have been attempted and should be refused at review:
 
-* `.hypatia-ignore` (any format) — never read by anything. Reject; point
-  the author at `.hypatia-baseline.json`.
-* Adding `pragma: ignore-rule` comments in source. Hypatia scans by AST
-  and ignores comments; suppression has to be data-driven, not
-  source-comment driven.
+* A `.hypatia-ignore` line naming a directory, a wildcard, or a rule
+  module the finding is not emitted under. It either silences more than
+  it says (scanner) or matches nothing (gate). Require one full path per
+  line — see Layer 2a.
+* Invented comment pragmas (`pragma: ignore-rule`, `noqa`, …). Only the
+  documented directives are read: `hypatia: allow <module>/<type> -- reason`
+  (or `hypatia:ignore <type>`) on the same or preceding line, by the
+  scanner; and `hypatia:ignore <rule>` in a file's first 8 lines, by the
+  governance gate. Anything else is ignored silently.
 * Setting `continue-on-error: true` on the governance gate. This makes
   CI lie. Use a baseline entry with `severity_override: advisory`
   instead — keeps the finding visible while unblocking the gate.
