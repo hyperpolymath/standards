@@ -12,6 +12,8 @@
 # for a checkout mid-specialisation. Mechanical residue (__X__) always fails.
 set -uo pipefail
 
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+LIB="$HERE/provision-lib.sh"
 DEV=0
 [ "${1:-}" = "--dev" ] && { DEV=1; shift; }
 REPO="${1:-.}"
@@ -24,10 +26,13 @@ BANNED="python deno node nodejs npm yarn pnpm go golang java kotlin make black r
 # The engine scripts under build/just/ are excluded: they name slot syntax in their
 # own comments and code, and realign owns them. README.adoc is scanned only inside
 # its [[ai-install]] section.
-SET_FILES="launcher.sh Justfile justfile mise.toml guix.scm manifest.scm channels.scm
-  .machine_readable/descriptiles/provisioning_praxis.deed docs/SETUP.adoc
-  docs/AI_INSTALLATION_GUIDE.adoc llm-warmup-user.adoc llm-warmup-dev.adoc
-  llm-warmup-maintainer.adoc"
+# Their locations come from provision-lib.sh (guix-dir, set-files): the engine and
+# this check must never disagree about where the Guix files or warm-ups live.
+[ -f "$LIB" ] || { echo "provision-check: engine missing: $LIB" >&2; exit 1; }
+lib() { PROVISION_ROOT="$PWD" bash "$LIB" "$@"; }
+GDIR=$(lib guix-dir)
+SET_FILES=$(lib set-files)
+gp() { [ "$GDIR" = . ] && echo "$1" || echo "$GDIR/$1"; }
 
 fails=0 warns=0
 ok()   { printf '  ok    %s\n' "$*"; }
@@ -80,10 +85,11 @@ else
 fi
 
 echo "[4] guix"
-if [ ! -f guix.scm ]; then bad "guix.scm missing"
-elif grep -qE '\{\{|\(inputs \(list\)\)|\(source #f\)' guix.scm; then bad "guix.scm is a stub"
-else ok "guix.scm is not a stub"; fi
-for g in manifest.scm channels.scm; do [ -f "$g" ] || bad "$g missing"; done
+gs=$(gp guix.scm)
+if [ ! -f "$gs" ]; then bad "guix.scm missing (neither guix.scm nor build/guix.scm)"
+elif grep -qE '\{\{|\(inputs \(list\)\)|\(source #f\)' "$gs"; then bad "$gs is a stub"
+else ok "$gs is not a stub"; fi
+for g in "$(gp manifest.scm)" "$(gp channels.scm)"; do [ -f "$g" ] || bad "$g missing"; done
 
 echo "[5] template residue"
 f0=$fails

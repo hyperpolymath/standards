@@ -38,6 +38,29 @@ info() { printf '  %sinfo%s  %s\n' "$B" "$Z" "$*"; }
 hdr()  { printf '\n%s== %s ==%s\n' "$B" "$*" "$Z"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Where this repository keeps each part of the set. A file sits at the root only
+# when something needs it there (launcher.sh, Justfile, mise.toml, mise.lock);
+# the Guix trio and the warm-ups follow the layout the repository already has
+# (rsr-template-repo keeps build/guix.scm and docs/onboarding/llm-warmup-*.adoc).
+# This is the ONE answer: provision-check.sh asks it through `guix-dir` and
+# `set-files` rather than keeping its own copy.
+guix_dir()   { if [ -f build/guix.scm ]; then echo build; else echo .; fi; }
+warmup_dir() {
+  local d
+  for d in . docs/onboarding docs; do
+    compgen -G "$d/llm-warmup-*.adoc" >/dev/null && { echo "$d"; return; }
+  done
+  echo .
+}
+gpath() { local d; d=$(guix_dir); [ "$d" = . ] && echo "$1" || echo "$d/$1"; }
+wpath() { local d; d=$(warmup_dir); [ "$d" = . ] && echo "llm-warmup-$1.adoc" || echo "$d/llm-warmup-$1.adoc"; }
+set_files() {
+  printf '%s\n' launcher.sh Justfile justfile mise.toml \
+    "$(gpath guix.scm)" "$(gpath manifest.scm)" "$(gpath channels.scm)" \
+    "$DEED" docs/SETUP.adoc docs/AI_INSTALLATION_GUIDE.adoc \
+    "$(wpath user)" "$(wpath dev)" "$(wpath maintainer)"
+}
+
 # ---------------------------------------------------------------------------
 # Descriptor: flat `:key "value"` reads from provisioning_praxis.deed (s-expression).
 deed() { # $1 key, $2 default
@@ -56,9 +79,10 @@ REPO_NAME="${REPO_SLUG#*/}"
 ARCHETYPE="$(deed archetype "")"
 
 # ---------------------------------------------------------------------------
-# Language detection. Markers at the root or one level down (workspaces); Idris2
-# and Zig to two levels down, because the estate ABI/FFI pattern puts them at
-# src/abi/*.ipkg and ffi/zig/build.zig (234 build.zig at that depth, 2026-09-30).
+# Language detection. Markers at the root or one level down (workspaces). The
+# estate ABI/FFI pattern nests deeper: Idris2 to two levels down (src/abi/*.ipkg),
+# Zig to three (ffi/zig/build.zig, and rsr-template-repo's src/interface/ffi/build.zig:
+# 74 repos have their only build.zig at that depth, measured 2026-09-30).
 # Order matters only for display. `docs` is reported when nothing else is.
 first() { find . -maxdepth "${2:-2}" -not -path './.git/*' -not -path '*/node_modules/*' -not -path './target/*' -name "$1" -print -quit 2>/dev/null; }
 detect_langs() {
@@ -66,7 +90,7 @@ detect_langs() {
   [ -n "$(first Cargo.toml)" ]          && out+=(rust)
   [ -n "$(first '*.ipkg' 3)" ]          && out+=(idris2)
   [ -n "$(first Project.toml 1)" ]      && out+=(julia)
-  [ -n "$(first build.zig 3)" ]         && out+=(zig)
+  [ -n "$(first build.zig 4)" ]         && out+=(zig)
   [ -n "$(first mix.exs)" ]             && out+=(elixir)
   [ -n "$(first gleam.toml)" ]          && out+=(gleam)
   [ -n "$(first dune-project)" ]        && out+=(ocaml)
@@ -150,7 +174,7 @@ lang_remedy() {
     elixir)  echo "mise use erlang@latest elixir@latest  (erlang builds from source: allow ~10 min)" ;;
     gleam)   echo "mise use gleam@latest erlang@latest" ;;
     ocaml)   echo "mise use opam@latest && opam init -y && opam switch create . --deps-only -y" ;;
-    haskell) echo "ghcup: https://www.haskell.org/ghcup/  (or: guix shell -m manifest.scm)" ;;
+    haskell) echo "ghcup: https://www.haskell.org/ghcup/  (or: just dev-shell, which uses Guix)" ;;
     bun)     echo "mise use bun@latest" ;;
   esac
 }
@@ -187,7 +211,7 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
 
     zig:*)
       # build.zig may sit in ffi/zig/; run there, not at the root.
-      local zb zd; zb=$(first build.zig 1); [ -z "$zb" ] && zb=$(first build.zig); [ -z "$zb" ] && zb=$(first build.zig 3)
+      local zb zd; zb=$(first build.zig 1); [ -z "$zb" ] && zb=$(first build.zig); [ -z "$zb" ] && zb=$(first build.zig 3); [ -z "$zb" ] && zb=$(first build.zig 4)
       zd=$(dirname "${zb#./}"); local cdz=""; [ "$zd" != . ] && cdz="cd '$zd' && "
       case "$v" in
         build) echo "${cdz}zig build" ;;
@@ -316,14 +340,16 @@ cmd_doctor() {
   for g in guix.scm build/guix.scm manifest.scm; do
     [ -f "$g" ] && grep -qE '\{\{|\(inputs \(list\)\)|\(source #f\)|__[A-Z][A-Z_]*__' "$g" && gstub="$gstub$g "
   done
-  if [ -f guix.scm ]; then
+  local gs gm; gs=$(gpath guix.scm); gm=$(gpath manifest.scm)
+  [ -f guix.scm ] && [ -f build/guix.scm ] && warn "PV-W35 both guix.scm and build/guix.scm exist — two Guix sources; keep one (build/ is used)"
+  if [ -f "$gs" ]; then
     if [ -n "$gstub" ]; then warn "PV-W24 template stub in: $gstub— the Guix path does not build this repo (just heal cannot fix this; provision-set realign does)"
-    else pass "guix.scm (non-stub)"; fi
+    else pass "$gs (non-stub)"; fi
   else warn "PV-W25 guix.scm missing — no reproducible Guix path"; fi
-  [ -f manifest.scm ] && pass "manifest.scm (guix shell -m manifest.scm)" || warn "PV-W26 manifest.scm missing — 'just dev-shell' falls back to mise"
+  [ -f "$gm" ] && pass "$gm (guix shell -m $gm)" || warn "PV-W26 $gm missing — 'just dev-shell' falls back to mise"
   [ -x launcher.sh ] && pass "launcher.sh (executable)" || { [ -f launcher.sh ] && fail "PV-E27 launcher.sh not executable — run: just heal" || warn "PV-W27 launcher.sh missing"; }
   local d
-  for d in docs/SETUP.adoc docs/AI_INSTALLATION_GUIDE.adoc llm-warmup-user.adoc llm-warmup-dev.adoc llm-warmup-maintainer.adoc; do
+  for d in docs/SETUP.adoc docs/AI_INSTALLATION_GUIDE.adoc "$(wpath user)" "$(wpath dev)" "$(wpath maintainer)"; do
     if [ ! -f "$d" ]; then warn "PV-W28 $d missing"
     elif grep -qE "__[A-Z][A-Z_]*__" "$d"; then warn "PV-W29 $d still has unfilled template slots (__SPEC_…__) — replace each with the facts for this repo"
     else pass "$d"; fi
@@ -364,7 +390,7 @@ cmd_setup() {
     $T mise trust -q . 2>/dev/null || true
     mise install || rc=1
   else
-    warn "mise not found. Install it ($MISE_INSTALL_HINT), or enter 'guix shell -m manifest.scm', then re-run: just setup"
+    warn "mise not found. Install it ($MISE_INSTALL_HINT), or enter the Guix shell with 'just dev-shell', then re-run: just setup"
   fi
   local l
   for l in "${LANGS[@]}"; do
@@ -410,9 +436,10 @@ cmd_heal() {
 }
 
 cmd_dev_shell() {
-  if have guix && [ -f manifest.scm ] && ! grep -q '{{' manifest.scm; then
-    info "entering: guix shell -m manifest.scm  (exit to leave)"
-    exec guix shell -m manifest.scm
+  local gm; gm=$(gpath manifest.scm)
+  if have guix && [ -f "$gm" ] && ! grep -q '{{' "$gm"; then
+    info "entering: guix shell -m $gm  (exit to leave)"
+    exec guix shell -m "$gm"
   elif have mise; then
     info "guix/manifest.scm unavailable — entering the mise environment instead (exit to leave)"
     exec mise exec -- "${SHELL:-bash}"
@@ -426,14 +453,15 @@ cmd_toolchain_refresh() {
   have mise || { fail "mise not found"; return 1; }
   mise up --bump || return 1
   $T mise lock 2>/dev/null || mise lock || return 1
-  if [ -f channels.scm ]; then
+  local ch; ch=$(gpath channels.scm)
+  if [ -f "$ch" ]; then
     hdr "guix: channel pin"
     if have guix; then
-      guix pull --channels=channels.scm --dry-run >/dev/null 2>&1 || true
-      guix describe --format=channels > channels.scm.new 2>/dev/null && mv channels.scm.new channels.scm && info "channels.scm re-pinned to the current guix commit"
-    else info "guix not installed — channels.scm left as-is (CI re-pins it)"; fi
+      guix pull --channels="$ch" --dry-run >/dev/null 2>&1 || true
+      guix describe --format=channels > "$ch.new" 2>/dev/null && mv "$ch.new" "$ch" && info "$ch re-pinned to the current guix commit"
+    else info "guix not installed — $ch left as-is (CI re-pins it)"; fi
   fi
-  git --no-pager diff --stat -- mise.toml mise.lock channels.scm 2>/dev/null
+  git --no-pager diff --stat -- mise.toml mise.lock "$ch" 2>/dev/null
   echo "Commit the diff above (signed) as: chore(toolchain): weekly refresh"
 }
 
@@ -473,7 +501,7 @@ EOF
 cmd_ai_warmup() {
   local who=${1:-user} f
   case "$who" in user|dev|maintainer) ;; *) echo "usage: just ai-warmup <user|dev|maintainer>" >&2; return 2 ;; esac
-  for f in "llm-warmup-$who.adoc" "docs/llm-warmup-$who.adoc"; do
+  for f in "$(wpath "$who")" "llm-warmup-$who.adoc" "docs/onboarding/llm-warmup-$who.adoc" "docs/llm-warmup-$who.adoc"; do
     if [ -f "$f" ]; then
       cat "$f"; clip < "$f" && echo "--- (copied $f to your clipboard — paste it as your first message to any AI)" >&2 || true
       return 0
@@ -511,7 +539,7 @@ cmd_config_show() {
   echo "run:         $(deed run "$(for l in "${LANGS[@]}"; do lang_cmd "$l" run; done | head -1)")"
   echo "ports:       $(deed ports "none")"
   echo "mise:        $([ -f mise.toml ] && echo mise.toml) $([ -f mise.lock ] && echo mise.lock)"
-  echo "guix:        $(for f in guix.scm manifest.scm channels.scm; do [ -f "$f" ] && printf "%s " "$f"; done)"
+  echo "guix:        $(for f in guix.scm manifest.scm channels.scm; do f=$(gpath "$f"); [ -f "$f" ] && printf "%s " "$f"; done)"
   echo "lib:         provision-lib $PROVISION_LIB_VERSION"
 }
 
@@ -561,5 +589,7 @@ case "${1:-}" in
   search)             shift; cmd_search "${1:-}" ;;
   lang-run)           shift; lang_run "${1:?verb}" ;;
   version)            echo "provision-lib $PROVISION_LIB_VERSION" ;;
+  guix-dir)           guix_dir ;;
+  set-files)          set_files ;;
   *) sed -n '2,20p' "$0"; exit 2 ;;
 esac
