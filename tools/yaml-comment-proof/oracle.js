@@ -22,6 +22,7 @@
 //   document-end — no scalar follows.
 import { parseDocument, Parser, isMap, isSeq, isPair, isScalar } from "yaml";
 
+/** Return a lookup from UTF-16 source offsets to zero-based line numbers. */
 function lineIndex(src) {
   const starts = [0];
   for (let i = 0; i < src.length; i++) if (src[i] === "\n") starts.push(i + 1);
@@ -35,7 +36,10 @@ function lineIndex(src) {
   };
 }
 
-/** Every comment token in the CST, as {offset, text}. */
+/**
+ * Return {offset, text} comments in source order, deduplicated by UTF-16 offset.
+ * Text excludes the leading # and surrounding whitespace.
+ */
 function commentTokens(src) {
   const seen = new Map();
   const walk = (x) => {
@@ -50,7 +54,11 @@ function commentTokens(src) {
   return [...seen.entries()].sort((a, b) => a[0] - b[0]).map(([offset, text]) => ({ offset, text }));
 }
 
-/** Every scalar (keys and values) with its path and [start, end) source range. */
+/**
+ * Return ranged keys and non-collection nodes (including aliases) in source order.
+ * Paths join mapping keys and zero-based sequence indices with / without escaping;
+ * a root leaf uses <root>. The [start, end) ranges use UTF-16 source offsets.
+ */
 function scalars(doc) {
   const out = [];
   const walk = (node, path) => {
@@ -74,7 +82,14 @@ function scalars(doc) {
   return out.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
-/** [{path, kind, text}] — one entry per comment. Throws on a parse error. */
+/**
+ * Return {path, kind, text} comments in source order, or [] if there are none.
+ * Text excludes the leading # and surrounding whitespace. A comment is trailing
+ * when a preceding node ends on its line; otherwise it is before the next node,
+ * or document-end at <root> if no node follows. Paths use unescaped / separators
+ * between mapping keys and zero-based sequence indices.
+ * Throws an Error prefixed with "parse:" for the first YAML 1.2 parse error.
+ */
 export function comments(src) {
   const doc = parseDocument(src, { version: "1.2" });
   if (doc.errors.length) throw new Error(`parse: ${doc.errors[0].message}`);
@@ -92,7 +107,14 @@ export function comments(src) {
 
 const key = (c) => `${c.path}\u0000${c.kind}\u0000${c.text}`;
 
-/** Compare two sources: {total, preserved, dropped[], moved[], added[]}. */
+/**
+ * Compare comments in the original and replacement YAML, counting duplicates.
+ * Return {total, preserved, dropped, moved, added}: total counts original comments;
+ * preserved counts matching path, kind and normalised text. Unmatched originals
+ * pair with the first remaining replacement comment of the same text as moved
+ * {from, to} records; unpaired originals are dropped and replacements are added.
+ * Propagates parse errors from comments() for either source.
+ */
 export function compare(origSrc, newSrc) {
   const a = comments(origSrc);
   const b = comments(newSrc);
