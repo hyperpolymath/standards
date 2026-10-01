@@ -1,0 +1,190 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Provisioning Standard
+:toc:
+:toclevels: 2
+:revdate: 2026-09-30
+:revnumber: 1.0.0
+
+*Question this answers:* what must every repository carry so that nobody who
+clones it ever has to search for how to install, configure, run, test, benchmark,
+diagnose or repair it?
+
+Machine-readable counterpart: link:provisioning-standard_praxis.deed[provisioning-standard_praxis.deed].
+Templates: link:templates/[templates/]. Launcher modes: `docs/UX-standards/launcher-standard.adoc`
+§Provisioning modes (v0.6.0).
+
+== 1. The provisioning set
+
+Every repository in `hyperpolymath/*` and `metadatastician/*` carries the files
+below, except forks, archived repositories, `007` and the two vaults
+(`dev-notes-vault`, `memory-vault`).
+
+[cols="3,1,4"]
+|===
+|File |Kind |Purpose
+
+|`launcher.sh` |generated |`--setup`, `--doctor`, `--heal`, `--ai-setup`, plus runtime modes for the `app` archetype
+|`build/just/provision.just` |engine |the `provision::` just module: every verb below
+|`build/just/provision-lib.sh` |engine |the implementation of every verb (bash only, shellcheck-clean)
+|`build/just/provision-modes.sh` |engine |the launcher's provisioning dispatch
+|`channels.scm` |minted |the pinned Guix commit (placed beside `guix.scm`, see below). Copied from the canon at mint, then re-pinned per repository by `toolchain-refresh`, so it is checked for a 40-hex commit pin, never byte-compared with the canon
+|`Justfile` |merged |`mod provision` plus root delegations; the repo's own recipes are kept
+|`mise.toml` + `mise.lock` |minted |the toolchain: `latest` in `mise.toml`, made concrete and checksummed in `mise.lock`
+|`guix.scm`, `manifest.scm` |minted |the Guix package and development shell (at the root, or all three under `build/` where the repository already keeps `build/guix.scm`)
+|`build/guix/crates.scm` |generated |Rust repositories: one Guix origin per registry crate in `Cargo.lock`, and `%crate-inputs` for `guix.scm`. Written by `guix import crate --lockfile` through `provision-lib.sh crates-scm`; never hand-edited
+|`.machine_readable/descriptiles/provisioning_praxis.deed` |minted |this repo's facts: archetype, languages, verb overrides, system deps, ports, config
+|`docs/SETUP.adoc` |minted |the complete manual route, with the doctor-code troubleshooting table
+|`docs/AI_INSTALLATION_GUIDE.adoc` |minted |the steps an AI assistant follows
+|`llm-warmup-{user,dev,maintainer}.adoc` |minted |paste-in context for any AI, one per audience (at the root, or in `docs/onboarding/` or `docs/` where the repository already keeps them)
+|README `\[[ai-install]]` section |inserted |"Just say it": one sentence to give any AI
+|===
+
+*Placement.* A file sits at the root only when something needs it there:
+`launcher.sh`, `Justfile`, `mise.toml` and `mise.lock` are found by the tools that
+read them. The Guix trio and the warm-ups follow the layout the repository already
+has, so `rsr-template-repo` keeps `build/guix.scm` and
+`docs/onboarding/llm-warmup-*.adoc`. One resolver in `provision-lib.sh` decides
+this (`provision-lib.sh guix-dir` and `set-files`), and doctor, `dev-shell`,
+`toolchain-refresh` and `provision-check.sh` all ask it, so no two of them can
+disagree about where a file lives. Both `guix.scm` and `build/guix.scm` present is
+PV-W35.
+
+*Engine* files are identical estate-wide and `provision-set realign` overwrites
+them. The *generated* `launcher.sh` is rendered from the template and the repo's
+deed. Realign re-renders it only when its header carries the `@launcher-deed`
+block, which marks it as generated. A hand-written launcher is kept, and gets
+the provisioning modes by sourcing `build/just/provision-modes.sh`. The template
+renders the launcher for `library`, `tool`, `theory` and `docs`; an `app` launcher,
+which needs its runtime modes, is rendered by `launch-scaffolder mint` from the
+app's own config and sources the same file.
+
+A minted set whose deed `:repo` differs from the checkout's own slug was
+*inherited* (for example from `rsr-template-repo` through GitHub's "Use this
+template"). Realign treats inherited files as stubs and re-mints them, so a
+new repository is never born describing its template. *Minted* files are written once, then owned by the repository: realign
+creates them when missing and replaces them only while they are still stubs
+(doctor PV-W24–W28), never once filled. One exception: a `mise.toml` that names a
+banned tool (PV-W23) is replaced too, and its other `[tools]` entries are carried
+over, because a repository cannot own a toolchain the estate has banned. The Justfile is merged: an existing
+custom `doctor`, `setup` or `heal` recipe is renamed `doctor-local`,
+`setup-local` or `heal-local`, and the canon verbs run it (§3).
+
+== 2. The verbs
+
+`just <verb>` and `just provision::<verb>` are the same. `./launcher.sh --setup`,
+`--doctor`, `--heal` and `--ai-setup` call the engine directly, so a root recipe
+of the same name can never shadow them.
+
+[cols="1,4"]
+|===
+|Verb |Contract
+
+|`setup` |`mise install`, the repo's dependencies per language, `setup-local`, then `doctor`
+|`doctor` |PASS / WARN / FAIL for every requirement, each with a code and its fix; the last line is `<name>: N PASS, N WARN, N FAIL`; exits non-zero if and only if something FAILed
+|`heal` |applies every fix marked *auto*, runs `heal-local`, then `doctor`
+|`dev-shell` |`guix shell -m <guix-dir>/manifest.scm` when Guix is present, otherwise the mise environment
+|`toolchain-refresh` |`mise up --bump`, re-lock `mise.lock`, re-pin only the `guix` channel commit in `channels.scm` (left unchanged, with a WARN, when the current commit cannot be read), regenerate `build/guix/crates.scm` from `Cargo.lock` when `guix.scm` loads it (the TRUST-DEFAULTS-POLICY recipe). The crate file is replaced only when the importer defined every registry crate; otherwise PV-E41 and the old file stays
+|`build`, `test`, `bench`, `lint`, `fmt`, `fmt-check`, `run`, `deps` |the deed's override, else the language default, else an explicit "N/A for this archetype" and exit 0; nothing is faked. A language default runs only when what it needs exists (a `test` step in `build.zig`, test files for `bun test`, which exits 0 on none)
+|`eval` |`test` + `bench` with timings, saved under `.eval/`
+|`config-show` |where the toolchain and configuration are declared
+|`ai-setup` |prints the "Just say it" sentence, read from the first listing block of the README's `\[[ai-install]]` section so it is written in one place, and the guide path
+|`ai-warmup <user\|dev\|maintainer>` |prints that warm-up for pasting into any AI
+|`opsm` |how to fetch this repository with OPSM, and how to get OPSM
+|`langs`, `search`, `version` |discovery helpers
+|===
+
+Archetypes (`app`, `library`, `tool`, `theory`, `docs`) come from the deed. Only
+`app` has runtime modes (start/stop/status); the others say N/A.
+
+== 3. Repository-specific checks
+
+A repository keeps its own checks as root recipes named `doctor-local`,
+`setup-local` and `heal-local`, or as scripts `build/just/{doctor,setup,heal}-local.sh`.
+The canon verbs run both. A failing `doctor-local` is a FAIL (PV-E50), so it turns
+`just doctor`, `./launcher.sh --doctor` and CI red together.
+A `build/just/doctor-local.sh` runs sourced in a subshell, so an `exit` or a
+tripped `set -e` in it cannot end the doctor early; it is reported as FAIL (PV-E51)
+and the checks it did finish still count.
+
+The estate's pre-existing boilerplate doctors (the `rsr-diag` and
+`toolchain-check` families, 326 of 346 measured on 2026-09-30) print `[FAIL]`
+and exit 0; they are replaced by `doctor: provision::doctor`, not renamed.
+
+== 4. Toolchain
+
+* *mise*: tools at `latest`, `[settings] lockfile = true`; `mise.lock` pins each
+  to a version and per-platform checksum. The base set is `just` and `shellcheck`;
+  each detected language adds its own (rust, zig, julia, erlang+elixir,
+  erlang+gleam, opam, bun, lychee for docs). Banned tools (python, deno, node,
+  npm, yarn, go, java, make) never appear.
+* *Guix*: `channels.scm` pins the commit; `manifest.scm` lists the development
+  shell. Rust repositories get a `cargo-build-system` `guix.scm`; every other
+  ecosystem gets a *source* package (`copy-build-system`) that says so, because a
+  hermetic compiled build needs that ecosystem's dependencies packaged in Guix,
+  which they are not. A spec may name an output (`rust:cargo`).
+  At commit ae77aeb Guix does not package idris2, gleam, bun or lychee. For those
+  tools the Guix shell provides mise.
+* *just ≥ 1.42*: a root recipe depending on a module recipe
+  (`doctor: provision::doctor`) fails on 1.31, 1.36, 1.40 and 1.41 and works from
+  1.42 (measured 2026-09-30). Doctor enforces the floor as PV-E02.
+* *bun* is the only JavaScript runtime. Leftover deno, Nix, Makefile, Python or
+  npm files are WARNs (PV-W30–W34), not FAILs. Each deno repository gets one
+  migration issue.
+
+== 5. Template slots
+
+Templates carry two tiers of placeholder:
+
+* `+__X__+`: mechanical, filled by the generator from evidence (name, slug,
+  languages, tools, licence, copyright holder).
+* `+__SPEC_X__+`: repository-specific prose (what it is, the questions to ask,
+  privacy notice, verification, usage, uninstall, architecture, gotchas,
+  release, CI). This is written by reading the repository.
+
+`provision-set check` treats any `+__X__+` residue as a hard failure. `+__SPEC_X__+`
+residue is a hard failure at the pre-PR gate. In a development checkout, doctor
+reports it as PV-W29 instead. AsciiDoc renders a stray `+__X__+` as italics, so
+residue is visible as garbled text.
+
+The pipeline order is fixed: *mint → specialise → verify → PR*.
+
+== 6. Licence of minted files
+
+Minted files carry an SPDX header from birth. That is authoring, not
+relicensing. The header matches the repository's classification in
+`3-practice/LICENCE-POLICY.adoc`:
+
+* code and config (`+__LICENSE__+`) are MPL-2.0 for sole-owner repos, AGPL-3.0-or-later for the son-shared repos, and PMPL-1.0-or-later only for the register;
+* prose docs (`+__DOC_LICENSE__+`) are CC-BY-SA-4.0 in sole-owner repos.
+
+When the generator cannot classify a repository from evidence, it refuses to mint
+and records the repository in the campaign ledger. It never guesses, never
+rewrites an existing header, and never touches forks. The engine files are
+estate-wide and stay MPL-2.0 wherever they are vendored.
+
+== 7. OPSM
+
+Every `docs/SETUP.adoc` has an OPSM section with
+`opsm install https://github.com/<slug>.git --registry git` and the steps to build
+OPSM itself. Repositories without a registry package are fetched through OPSM's
+git adapter, and the section says so.
+
+== 8. Conformance
+
+A repository conforms when, on a fresh clone:
+
+. `./launcher.sh --help` and `--version` exit 0;
+. `just --list` parses and lists every verb in §2;
+. `mise.toml` names no banned tool, and `mise.lock` gives every `mise.toml` tool a
+  concrete version and carries `sha256` checksums;
+. `guix.scm`, `manifest.scm` and `channels.scm` are not stubs. The test is positive:
+  `guix.scm` must define every package field (name, version, source, build-system,
+  home-page, synopsis, description, licence), `manifest.scm` must list
+  specifications and `channels.scm` must pin a 40-hex commit;
+. no template residue remains (§5);
+. `just doctor` exits 0 once `just setup` has run.
+
+`templates/build/just/provision-check.sh` checks items 1–5 without network access.
+It and doctor ask the same predicates in `provision-lib.sh` (`mise-banned`,
+`mise-lock-gaps`, `guix-stub`), so the CI gate and `just doctor` cannot disagree.
