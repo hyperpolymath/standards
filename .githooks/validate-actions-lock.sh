@@ -113,13 +113,34 @@ CHECKED=0
 declare -a SEEN_ABSENT=()
 
 # Collect every SHA-pinned uses: ref across all workflow files.
+#
+# Read with yq, never grep (YAML-POLICY Y-1). A line grep for `uses:` only
+# sees block style: on a KYAML file (`uses: "owner/repo@sha", # v1`) it
+# captured the quote and comma into the ref and reported a pinned, locked
+# action as missing. The parser returns the scalar VALUE whatever the style,
+# and never matches a `uses:` that is text inside a `run:` body.
+# Measured 2026-10-01: same 29-ref set as the old grep on the block tree.
+if ! command -v yq >/dev/null 2>&1; then
+  echo -e "${RED}[validate-actions-lock] ERROR: yq not found -- it reads the workflows (YAML-POLICY Y-1)${NC}" >&2
+  exit 1
+fi
+declare -a UNPARSED=()
 mapfile -t RAW < <(
-  grep -rhoE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*[^[:space:]#]+@[0-9a-fA-F]{40}' \
-    "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml \
-    "$ACTIONS_DIR"/*/action.yml "$ACTIONS_DIR"/*/action.yaml 2>/dev/null \
-  | sed -E 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*//' \
-  | sort -u
+  for f in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml \
+           "$ACTIONS_DIR"/*/action.yml "$ACTIONS_DIR"/*/action.yaml; do
+    [ -f "$f" ] || continue
+    yq -r '.. | select(tag == "!!map") | select(has("uses")) | .uses | select(tag == "!!str")' "$f" \
+      || printf '\001UNPARSED\001%s\n' "$f"
+  done | grep -E $'@[0-9a-fA-F]{40}$|^\001UNPARSED\001' | sort -u
 )
+# A file yq cannot parse is a file whose refs went unchecked: fail closed.
+for ref in "${RAW[@]}"; do
+  case "$ref" in $'\001UNPARSED\001'*) UNPARSED+=("${ref#$'\001UNPARSED\001'}") ;; esac
+done
+if [ "${#UNPARSED[@]}" -gt 0 ]; then
+  echo -e "${RED}[validate-actions-lock] ERROR: yq could not parse: ${UNPARSED[*]}${NC}" >&2
+  exit 1
+fi
 
 # A zero-input pass is the classic fake green: if ref extraction ever breaks,
 # this script would report success having checked nothing. If the lockfile
