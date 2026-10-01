@@ -438,6 +438,9 @@ system_deps() { # $1 adoc|ai
   elif [ $any -eq 0 ]; then printf '* No other OS packages: every tool comes from mise.\n'; fi
 }
 
+# Diagnose the provisioning set and toolchain, then the repository's own
+# doctor-local checks. The PASS/WARN/FAIL tally is the last line of stdout;
+# returns non-zero when anything FAILed.
 cmd_doctor() {
   printf '%s doctor — %s (%s; languages: %s)\n' "$REPO_NAME" "$REPO_SLUG" "$ARCHETYPE" "${LANGS[*]}"
 
@@ -545,7 +548,8 @@ cmd_doctor() {
 
   printf '\n%s: %s%d PASS%s, %s%d WARN%s, %s%d FAIL%s\n' "$REPO_NAME" "$G" "$PASS" "$Z" "$Y" "$WARN" "$Z" "$R" "$FAIL" "$Z"
   if [ "$FAIL" -gt 0 ]; then
-    echo "Next: 'just heal' fixes what is safe to fix automatically; each FAIL code is explained in docs/SETUP.adoc §Troubleshooting."
+    # stderr, so the tally above stays the last line of stdout on every outcome.
+    echo "Next: 'just heal' fixes what is safe to fix automatically; each FAIL code is explained in docs/SETUP.adoc §Troubleshooting." >&2
     return 1
   fi
   return 0
@@ -617,6 +621,30 @@ cmd_dev_shell() {
   fi
 }
 
+# Print the 40-hex commit of the `guix` channel in a channels list read from
+# stdin (`guix describe --format=channels`), or nothing when there is none.
+guix_channel_commit() {
+  awk '/\(name .guix\)/ { g = 1 }
+       g && match($0, /\(commit "[0-9a-f]{40}"\)/) { print substr($0, RSTART + 9, 40); exit }'
+}
+
+# Re-pin only the `guix` channel's commit in channels file $1 to $2, keeping
+# every other line (comments, other channels, introduction) as it is. Returns
+# non-zero, leaving the file untouched, when it has no guix channel commit.
+repin_guix_channel() {
+  local ch=$1 pin=$2 tmp
+  tmp=$(mktemp) || return 1
+  if awk -v pin="$pin" '
+       /\(name .guix\)/ { g = 1 }
+       g && !done && sub(/\(commit "[0-9a-f]{40}"\)/, "(commit \"" pin "\")") { done = 1 }
+       { print }
+       END { exit !done }' "$ch" > "$tmp"; then
+    cat "$tmp" > "$ch"; rm -f "$tmp"
+  else
+    rm -f "$tmp"; return 1
+  fi
+}
+
 # Weekly toolchain refresh: bump mise pins and the lock, re-pin the Guix channel,
 # regenerate build/guix/crates.scm when guix.scm loads it, then show the diff
 # for a signed commit.
@@ -629,8 +657,15 @@ cmd_toolchain_refresh() {
   if [ -f "$ch" ]; then
     hdr "guix: channel pin"
     if have guix; then
-      guix pull --channels="$ch" --dry-run >/dev/null 2>&1 || true
-      guix describe --format=channels > "$ch.new" 2>/dev/null && mv "$ch.new" "$ch" && info "$ch re-pinned to the current guix commit"
+      local pin
+      pin=$(guix describe --format=channels 2>/dev/null | guix_channel_commit)
+      if [ -z "$pin" ]; then
+        warn "could not read the current guix channel commit — $ch left unchanged"
+      elif repin_guix_channel "$ch" "$pin"; then
+        info "$ch: guix channel re-pinned to $pin"
+      else
+        warn "$ch has no (name 'guix) channel with a commit — left unchanged"
+      fi
     else info "guix not installed — $ch left as-is (CI re-pins it)"; fi
   fi
   local cr=""
