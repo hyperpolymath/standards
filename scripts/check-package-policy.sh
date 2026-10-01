@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
 #
-# check-package-policy.sh — gate on the Guix-primary / Nix-fallback policy.
+# check-package-policy.sh — gate on the Guix-primary packaging policy, applied
+# only where the repo's rsr-profile declares reproducible-build or container.
 #
 # Replaces the echo-only "Enforce Guix primary / Nix fallback" step in
 # governance-reusable.yml, whose every branch echoed and which terminated with
@@ -114,56 +115,136 @@ find_first() {
   printf '%s' "$out"
 }
 
-GUIX="$(find_first -name guix.scm -o -name manifest.scm -o -name channels.scm -o -name .guix-channel)"
+# ---------------------------------------------------------------------------
+# APPLICABILITY (2026-10-01, owner decision "only repos that need it").
+# Packaging is NOT a universal criterion. rsr-criteria-v2.a2ml gates 1.2.1
+# guix-primary and 8.1.4 no-scaffold-stub on `reproducible-build`, and 1.2.3
+# container-rootless on `container`; a criterion applies iff its gate is
+# `universal` OR the repo's rsr-profile declares the gating capability. This
+# script previously demanded packaging of every repo, contradicting the canon
+# for docs, proof and Julia libraries — 86/325 governance callers red, every
+# one of them with no rsr-profile at all.
+#
+# Capabilities are resolved by scripts/check-rsr-profile.sh, the reference
+# implementation of preset + capabilities + add - remove, not re-derived here.
+# No profile ⇒ no declared capability ⇒ not applicable (a notice names the file
+# to add). The Nix ban is a removal ruling, not a capability, so it still fails
+# whatever the profile says.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RSR_PROFILE_CHECKER="${RSR_PROFILE_CHECKER:-$SCRIPT_DIR/check-rsr-profile.sh}"
+
+# Print the repo's effective capabilities, one per line; nothing if it has no
+# profile. A profile the reference checker cannot resolve declares nothing it
+# can read, so it counts as undeclared but is NAMED in a warning (e.g. an
+# explicit `capabilities = []`, which check-rsr-profile.sh rejects). Only a
+# missing resolver, a deployment defect, returns 1.
+effective_capabilities() {
+  local f found="" out
+  for f in "$ROOT"/.machine_readable/rsr-profile.a2ml "$ROOT"/machine-readable/rsr-profile.a2ml; do
+    [ -f "$f" ] && found="$f" && break
+  done
+  [ -n "$found" ] || return 0
+  if [ ! -f "$RSR_PROFILE_CHECKER" ]; then
+    echo "::error::check-package-policy: capability resolver missing at $RSR_PROFILE_CHECKER" >&2
+    return 1
+  fi
+  out="$(bash "$RSR_PROFILE_CHECKER" "$ROOT" 2>&1 || true)"
+  if ! printf '%s\n' "$out" | grep -q '^effective capabilities:'; then
+    echo "::warning::check-package-policy: ${found#"$ROOT"/} could not be resolved ($(printf '%s\n' "$out" | grep -m1 ERROR || echo "no effective capabilities line")); treating it as declaring no packaging capability." >&2
+    return 0
+  fi
+  printf '%s\n' "$out" | sed -n 's/^effective capabilities: //p' | tr ' ' '\n' | sed '/^$/d'
+}
+
+# Every match, not the first: a repo's real build/container/Containerfile must
+# not be shadowed by an earlier-sorting fuzzing image (.clusterfuzzlite/ ships
+# a deliberately minimal OSS-Fuzz Containerfile that is not packaging).
+find_all() {
+  find "$ROOT" \( "${PRUNE[@]}" -o -path "$ROOT/.clusterfuzzlite" \) -prune -o \( "$@" \) -print 2>/dev/null | sort || true
+}
+
+# A scaffold stub per criterion 8.1.4: an unfilled placeholder or `(source #f)`.
+is_stub_guix() { grep -qE '\(source #f\)|\{\{[A-Z_]+\}\}' "$1"; }
+
+GUIX_ALL="$(find_all -name guix.scm -o -name manifest.scm -o -name channels.scm -o -name .guix-channel)"
+GUIX="" GUIX_STUB=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  if [ "$(basename "$f")" = guix.scm ] && is_stub_guix "$f"; then
+    GUIX_STUB="${GUIX_STUB:-$f}"
+  else
+    GUIX="$f"; break
+  fi
+done <<< "$GUIX_ALL"
 NIX="$(find_first -name flake.nix -o -name default.nix -o -name shell.nix)"
-# Sealed container — the policy's named escape hatch, previously undetectable.
-# `Containerfile*` and `Dockerfile*` both count: the estate standardises on
-# Podman/Containerfile, but a repo already carrying a Dockerfile is served by
-# the same escape hatch and should not be told it has no packaging.
-CONTAINER="$(find_first -name 'Containerfile*' -o -name 'Dockerfile*')"
+# Sealed container — the policy's named escape hatch. `Containerfile*` and
+# `Dockerfile*` both count.
+CONTAINERS="$(find_all -name 'Containerfile*' -o -name 'Dockerfile*')"
 
 if [ -n "$GUIX" ]; then
   echo "✅ Guix package management detected (primary): ${GUIX#"$ROOT"/}"
   exit 0
 fi
 
-# A Containerfile only counts if it BUILDS something. The estate scaffold ships
-# a template whose every install/build line is a commented `# TODO:` example —
-# measured 2026-07-27: 17 of 60 estate Containerfiles are that stub. Accepting
-# them on presence alone reproduces exactly the fault this script was written to
-# remove (standards#505 accepted any *.scm as "Guix detected"). A stub provides
-# no environment, so it is not packaging.
-#
-# The predicate is deliberately cheap and syntactic: at least one ACTIVE
-# RUN / ENTRYPOINT / CMD instruction. It cannot prove the image is useful, but
-# it does separate "someone filled this in" from "this is the untouched
-# template", which is the distinction that matters at gate time.
-if [ -n "$CONTAINER" ]; then
-  if grep -qE '^[[:space:]]*(RUN|ENTRYPOINT|CMD)[[:space:]]' "$CONTAINER"; then
-    echo "✅ Sealed-container packaging detected (escape hatch): ${CONTAINER#"$ROOT"/}"
-    echo "::notice::Guix is the estate primary; a sealed container is the" \
-         "accepted escape hatch for the not-in-Guix / non-free tail."
-    exit 0
+# A Containerfile only counts if it BUILDS something: at least one ACTIVE
+# RUN / ENTRYPOINT / CMD instruction. The estate scaffold ships a template whose
+# every install/build line is a commented `# TODO:` example (17/60 measured
+# 2026-07-27); presence alone would reproduce the fault of standards#505.
+# Every Containerfile is tried; any one with active instructions satisfies.
+CONTAINER="" CONTAINER_STUB=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  if grep -qE '^[[:space:]]*(RUN|ENTRYPOINT|CMD)[[:space:]]' "$f"; then
+    CONTAINER="$f"; break
   fi
-  echo "::warning::${CONTAINER#"$ROOT"/} is the UNFILLED scaffold template —" \
+  CONTAINER_STUB="${CONTAINER_STUB:-$f}"
+done <<< "$CONTAINERS"
+
+if [ -n "$CONTAINER" ]; then
+  echo "✅ Sealed-container packaging detected (escape hatch): ${CONTAINER#"$ROOT"/}"
+  echo "::notice::Guix is the estate primary; a sealed container is the" \
+       "accepted escape hatch for the not-in-Guix / non-free tail."
+  exit 0
+fi
+if [ -n "$CONTAINER_STUB" ]; then
+  echo "::warning::${CONTAINER_STUB#"$ROOT"/} is the UNFILLED scaffold template —" \
        "every install/build step is a commented '# TODO:' example, so it" \
        "provides no environment and does not satisfy the policy."
-  CONTAINER=""
+fi
+
+# Applicability is resolved only now: a repo with real packaging passed above
+# whatever its profile says, so a profile defect can never redden it.
+CAPS="$(effective_capabilities)" || exit 1
+REQUIRED=""
+if printf '%s
+' "$CAPS" | grep -qxE 'reproducible-build|container'; then
+  REQUIRED="$(printf '%s
+' "$CAPS" | grep -xE 'reproducible-build|container' | paste -sd ' ' -)"
+fi
+
+# Only a stub guix.scm. Before capability gating this passed on presence, and
+# ~90 repos rely on that; 8.1.4 is gated on reproducible-build, so the stub
+# only fails where that capability (or container) is declared.
+if [ -n "$GUIX_STUB" ]; then
+  if [ -z "$REQUIRED" ]; then
+    echo "::notice::${GUIX_STUB#"$ROOT"/} is a scaffold stub (criterion 8.1.4)." \
+         "Not enforced: this repo declares neither reproducible-build nor container."
+    echo "✅ Packaging not applicable (no packaging capability declared)."
+    exit 0
+  fi
+  echo "::error::${GUIX_STUB#"$ROOT"/} is a scaffold stub (placeholder or (source #f))," \
+       "and this repo declares: $REQUIRED. A stub builds nothing (criterion 8.1.4)."
+  echo "Make the guix.scm real, or add a Containerfile with active RUN/CMD steps."
+  exit 1
 fi
 
 # Nix-only. Under the 2026-05-18 ruling this is NOT compliance — Nix is not a
-# tier — but it is also not the same as having no packaging at all, and the
-# repos in this state are overwhelmingly there because a *sweep put them there*
-# rather than through any author's choice. So it warns until the retirement
-# date, then fails. It never prints a ✅.
+# tier — and the 2026-07-28 ruling removes it from the estate outright. That is
+# a ban, not a capability, so it applies whatever the profile declares.
 #
 # ⚠ SEQUENCING — read before changing ENFORCE_NIX_RETIREMENT_FROM.
-# Nix retirement must TRAIL per-repo Guix functionality. Campaign #102 closed
-# COMPLETED having hand-diffed 277 candidates and removed exactly ONE flake;
-# ~270 repos carry a `guix.scm` that is a non-functional scaffold stub, so for
-# them "delete the flake" means "have no working packaging". Measured over the
-# local estate checkout: 22 repos are Nix-only and would fail the moment this
-# date passes. Setting a date in the past makes that immediate, with no grace.
+# Nix retirement must TRAIL per-repo Guix functionality: for a repo whose
+# guix.scm is a stub, "delete the flake" means "have no working packaging".
 if [ -n "$NIX" ]; then
   ENFORCE_NIX_RETIREMENT_FROM="${ENFORCE_NIX_RETIREMENT_FROM:-2026-06-01}"
   require_date ENFORCE_NIX_RETIREMENT_FROM "$ENFORCE_NIX_RETIREMENT_FROM"
@@ -179,37 +260,38 @@ if [ -n "$NIX" ]; then
   echo "::error::Nix-only packaging is not compliant: ${NIX#"$ROOT"/}"
   echo
   echo "Estate policy (3-practice/LANGUAGE-POLICY.adoc, RULED 2026-05-18) is Guix primary"
-  echo "+ sealed-container escape; NO Nix mirror. Replace the flake with:"
-  echo "  guix.scm | manifest.scm | channels.scm | .guix-channel   (primary)"
-  echo "  Containerfile                                            (escape hatch)"
-  echo
-  echo "HARDENED 2026-07-28 (owner ruling): Nix is REMOVED from the estate, not"
-  echo "tolerated. Retire the flake opportunistically whenever you touch a repo."
-  echo
-  echo "But removal is not the whole job: a repo whose guix.scm is a scaffold stub"
-  echo "has no working packaging once the flake is gone. Make the Guix side real"
-  echo "(or fill the Containerfile, which is Podman-verifiable where Guix is not"
-  echo "installable) IN THE SAME CHANGE as retiring the mirror. Do not leave the"
-  echo "repo unpackaged, and do not allowlist the flake instead"
-  echo "(spec/scaffold-stub-debt.adoc, step 3)."
+  echo "+ sealed-container escape; NO Nix mirror. HARDENED 2026-07-28: Nix is REMOVED."
+  if [ -z "$REQUIRED" ]; then
+    echo "This repo declares no packaging capability, so deleting the flake is the whole fix."
+  else
+    echo "This repo declares: $REQUIRED — replace the flake with a real guix.scm or"
+    echo "an active Containerfile IN THE SAME CHANGE (spec/scaffold-stub-debt.adoc, step 3)."
+  fi
   exit 1
 fi
 
-# Violation: neither packaging system is present.
+if [ -z "$REQUIRED" ]; then
+  echo "::notice::No packaging, and none required: the repo's rsr-profile declares" \
+       "neither reproducible-build nor container." \
+       "A repo that ships a build should declare one in .machine_readable/rsr-profile.a2ml."
+  echo "✅ Packaging not applicable (no packaging capability declared)."
+  exit 0
+fi
+
+# Violation: packaging declared, none present.
 if [[ "$TODAY" < "$ENFORCE_PACKAGE_POLICY_FROM" ]]; then
-  echo "::warning::No packaging found (no Guix, no sealed container) — this" \
+  echo "::warning::No packaging found but the profile declares: $REQUIRED — this" \
        "becomes a BLOCKING failure on $ENFORCE_PACKAGE_POLICY_FROM (today is $TODAY)."
-  # Never claim a pass while the policy is unmet.
   echo "NOT YET ENFORCED: package policy unmet but inside the grace window."
   exit 0
 fi
 
-echo "::error::Package policy violation: no packaging found."
+echo "::error::Package policy violation: the profile declares $REQUIRED, but no packaging was found."
 echo
-echo "Estate policy (3-practice/LANGUAGE-POLICY.adoc, RULED 2026-05-18) is Guix primary"
-echo "+ sealed-container escape; NO Nix mirror. Add one of:"
-echo "  guix.scm | manifest.scm | channels.scm | .guix-channel   (primary)"
-echo "  Containerfile                                            (escape hatch)"
+echo "Add one of:"
+echo "  guix.scm | manifest.scm | channels.scm | .guix-channel   (primary; not a stub)"
+echo "  Containerfile with active RUN/CMD/ENTRYPOINT            (escape hatch)"
+echo "or remove the capability from .machine_readable/rsr-profile.a2ml if it is not real."
 echo
-echo "Files inside .git/ node_modules/ deps/ .lake/ vendor/ do not count."
+echo "Files inside .git/ node_modules/ deps/ .lake/ vendor/ .clusterfuzzlite/ do not count."
 exit 1
