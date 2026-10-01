@@ -124,14 +124,23 @@ jobs:
         id: typecheck
         if: steps.guard.outputs.present == 'true'
         run: |
-          set -e
+          set -eo pipefail
           echo "=== Agda proofs under lol/proofs ==="
           find lol/proofs/theories -name '*.agda' -print
           cd lol/proofs
+          failed=""
           for f in $(find theories -name '*.agda'); do
             echo "--- checking $f ---"
-            agda --safe "$f" 2>&1 | tee -a ../../agda-verify.log || true
+            if ! agda --safe "$f" 2>&1 | tee -a ../../agda-verify.log; then
+              failed="$failed$f"$'\n'
+            fi
           done
+          if [ -n "$failed" ]; then
+            echo "::warning::agda --safe FAILED to type-check the following proof(s) (advisory until the evicted lol/proofs corpus's re-entry criteria are set; see issue #748):"
+            printf '%s' "$failed" | sed 's/^/  - /'
+          else
+            echo "All Agda proofs type-checked cleanly."
+          fi
 
       - name: Postulate audit
         if: steps.guard.outputs.present == 'true'

@@ -5,7 +5,8 @@
 # Usage: ./test-repo.sh /path/to/repo [platform...]
 #   Platforms: fedora, ubuntu, alpine, debian (default: all)
 #
-# Output: JSON reports in /tmp/ux-test-results/<repo>/
+# Output: JSON reports in a per-run temp directory under $TMPDIR (the
+#         exact path is printed to stdout — see "Results:" below).
 
 set -euo pipefail
 
@@ -13,7 +14,7 @@ REPO="${1:?Usage: $0 /path/to/repo [fedora|ubuntu|alpine|debian]}"
 REPO="$(realpath "$REPO")"
 REPO_NAME="$(basename "$REPO")"
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RESULTS_DIR="/tmp/ux-test-results/$REPO_NAME"
+RESULTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ux-test-results.${REPO_NAME}.XXXXXX")"
 
 shift || true
 PLATFORMS=("${@:-fedora ubuntu alpine debian}")

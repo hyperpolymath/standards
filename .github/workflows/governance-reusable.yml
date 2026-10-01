@@ -234,15 +234,6 @@ jobs:
             echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
             exit 1
           fi
-          case "$sha" in
-            4654d7a3d49f413f49c00fb7e592db7d026ffca2|\
-            de52a3dabb2c10bf239784e50ab25267a5a6ebbb|\
-            43124f025ab338c26f137927be1e5ca6a84bd8c2|\
-            4f9874e3f589f2e4964f788687266580ccde4507)
-              echo "::warning::Hypatia HEAD $sha hits compile break hyperpolymath/hypatia#869 (standards#1050); holding on 9f2f62f5c9463c79b33a5ebf54372166ce56f349 until upstream advances"
-              sha="9f2f62f5c9463c79b33a5ebf54372166ce56f349"
-              ;;
-          esac
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Resolved hypatia HEAD: $sha"
 
@@ -559,12 +550,12 @@ jobs:
           # failures because `find` crawled gitignored vendor directories.
           # `git ls-files` works correctly on fresh PR checkouts because
           # actions/checkout populates the index before running workflows.
-          RES_FILES=$(git ls-files '*.res' || true)
-          GO_FILES=$(git ls-files '*.go' || true)
+          RES_FILES=$(git ls-files '*.res')
+          GO_FILES=$(git ls-files '*.go')
           PY_FILES=$(git ls-files '*.py' \
-            | grep -v venv | grep -v __pycache__ || true)
+            | grep -v venv | grep -v __pycache__ || [ $? -eq 1 ])
           MAKE_FILES=$(git ls-files 'Makefile' 'Makefile.*' '*.mk' \
-            | grep -v '\.github/' || true)
+            | grep -v '\.github/' || [ $? -eq 1 ])
           # Platform-required JVM shims carve-out 2026-06-02:
           # Java is permitted only in Android source trees
           # (android/**/src/**/*.java) because Android instantiates
@@ -583,12 +574,12 @@ jobs:
           # only remaining Java carve-out is the minimal Android platform
           # shim above. `.groovy` is detected so it is banned everywhere.
           JAVA_FILES=$(git ls-files '*.java' '*.kt' '*.kts' '*.groovy' \
-            | grep -vE '(^|/)android/.*/src/.*\.java$' || true)
-          SWIFT_FILES=$(git ls-files '*.swift' || true)
-          DART_FILES=$(git ls-files '*.dart' 'pubspec.yaml' || true)
+            | grep -vE '(^|/)android/.*/src/.*\.java$' || [ $? -eq 1 ])
+          SWIFT_FILES=$(git ls-files '*.swift')
+          DART_FILES=$(git ls-files '*.dart' 'pubspec.yaml')
           # V-lang detected by manifest (v.mod / vpkg.json); the .v extension
           # collides with Verilog so we never key on it.
-          VMOD_FILES=$(git ls-files 'v.mod' 'vpkg.json' || true)
+          VMOD_FILES=$(git ls-files 'v.mod' 'vpkg.json')
 
           enforce "ReScript files" "use AffineScript instead" "$RES_FILES"
           enforce "Go files" "use Rust/WASM instead" "$GO_FILES"
@@ -612,10 +603,10 @@ jobs:
         # runtime impossible, not merely awkward. It blocked what the policy
         # mandates. Bun artifacts are now accepted; npm and yarn are unchanged.
         run: |
-          LOCK_FILES=$(git ls-files 'package-lock.json' '**/package-lock.json' 2>/dev/null || true)
-          YARN_FILES=$(find . -name "yarn.lock" -not -path "./.git/*" 2>/dev/null || true)
-          NPMRC_FILES=$(find . -name ".npmrc" -not -path "./.git/*" 2>/dev/null || true)
-          BUN_LOCK=$(find . \( -name "bun.lock" -o -name "bun.lockb" \) -not -path "./.git/*" 2>/dev/null || true)
+          LOCK_FILES=$(git ls-files 'package-lock.json' '**/package-lock.json' 2>/dev/null)
+          YARN_FILES=$(find . -name "yarn.lock" -not -path "./.git/*" 2>/dev/null)
+          NPMRC_FILES=$(find . -name ".npmrc" -not -path "./.git/*" 2>/dev/null)
+          BUN_LOCK=$(find . \( -name "bun.lock" -o -name "bun.lockb" \) -not -path "./.git/*" 2>/dev/null)
           FAILED=""
           if [ -n "$LOCK_FILES" ]; then
             echo "❌ Tracked package-lock.json detected (standards#67 — npm-avoidant)."
@@ -773,17 +764,17 @@ jobs:
       - name: Security checks
         run: |
           FAILED=false
-          WEAK_CRYPTO=$(grep -rE 'md5\(|sha1\(' --include="*.py" --include="*.rb" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" . 2>/dev/null | grep -v 'checksum\|cache\|test\|spec' | head -5 || true)
+          WEAK_CRYPTO=$(grep -rE 'md5\(|sha1\(' --include="*.py" --include="*.rb" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" . 2>/dev/null | grep -v 'checksum\|cache\|test\|spec' | head -5)
           if [ -n "$WEAK_CRYPTO" ]; then
             echo "⚠️ Weak crypto (MD5/SHA1) detected. Use SHA256+ for security:"
             echo "$WEAK_CRYPTO"
           fi
-          HTTP_URLS=$(grep -rE 'http://[^l][^o][^c]' --include="*.py" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" --include="*.yaml" --include="*.yml" . 2>/dev/null | grep -v 'localhost\|127.0.0.1\|example\|test\|spec' | head -5 || true)
+          HTTP_URLS=$(grep -rE 'http://[^l][^o][^c]' --include="*.py" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" --include="*.yaml" --include="*.yml" . 2>/dev/null | grep -v 'localhost\|127.0.0.1\|example\|test\|spec' | head -5)
           if [ -n "$HTTP_URLS" ]; then
             echo "⚠️ HTTP URLs found. Use HTTPS:"
             echo "$HTTP_URLS"
           fi
-          SECRETS=$(grep -rEi '(api_key|apikey|secret_key|password)\s*[=:]\s*["\x27][A-Za-z0-9+/=]{20,}' --include="*.py" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" --include="*.env" . 2>/dev/null | grep -v 'example\|sample\|test\|mock\|placeholder' | head -3 || true)
+          SECRETS=$(grep -rEi '(api_key|apikey|secret_key|password)\s*[=:]\s*["\x27][A-Za-z0-9+/=]{20,}' --include="*.py" --include="*.js" --include="*.ts" --include="*.go" --include="*.rs" --include="*.env" . 2>/dev/null | grep -v 'example\|sample\|test\|mock\|placeholder' | head -3)
           if [ -n "$SECRETS" ]; then
             echo "❌ Potential hardcoded secrets detected!"
             FAILED=true
@@ -1010,26 +1001,50 @@ jobs:
           # same merge commit but is always fetchable.
           ref: ${{ github.sha }}
       - name: Check file permissions
+        # advisory: informational only; repos can opt into blocking locally.
+        # No continue-on-error needed: the step below always exits 0 itself;
+        # it now surfaces its finding as an explicit ::warning:: instead of a
+        # silent printout.
         run: |
-          find . -type f -perm /111 -name "*.sh" | head -20
-        continue-on-error: true
-        # advisory: informational only; repos can opt into blocking locally
+          FOUND=$(find . -type f -perm /111 -name "*.sh" | head -20)
+          if [ -n "$FOUND" ]; then
+            echo "::warning::Executable .sh files found (informational only):"
+            echo "$FOUND"
+          else
+            echo "No executable .sh files found."
+          fi
       - name: Check TODO/FIXME
+        # advisory: informational only; repos can opt into blocking locally.
         run: |
-          echo "=== TODOs ==="
-          grep -rn "TODO\|FIXME\|HACK\|XXX" --include="*.rs" --include="*.res" --include="*.py" --include="*.ex" . | head -20
-        continue-on-error: true
-        # advisory: informational only; repos can opt into blocking locally
+          FOUND=$(grep -rn "TODO\|FIXME\|HACK\|XXX" --include="*.rs" --include="*.res" --include="*.py" --include="*.ex" . | head -20)
+          if [ -n "$FOUND" ]; then
+            echo "::warning::TODO/FIXME/HACK/XXX markers found (informational only):"
+            echo "$FOUND"
+          else
+            echo "No TODO/FIXME/HACK/XXX markers found."
+          fi
       - name: Check for large files
+        # advisory: informational only; repos can opt into blocking locally.
         run: |
-          find . -type f -size +1M -not -path "./.git/*" | head -20
-        continue-on-error: true
-        # advisory: informational only; repos can opt into blocking locally
+          FOUND=$(find . -type f -size +1M -not -path "./.git/*" | head -20)
+          if [ -n "$FOUND" ]; then
+            echo "::warning::Files larger than 1M found (informational only):"
+            echo "$FOUND"
+          else
+            echo "No files larger than 1M found."
+          fi
       - name: EditorConfig check
+        id: editorconfig_check
         uses: editorconfig-checker/action-editorconfig-checker@51f63319f592f97930c73d9c46184d20bd206393 # v3.0.0
-        # advisory: formatting hygiene is reported from the reusable estate
-        # bundle; repos opt into blocking formatter checks locally when ready.
+        # advisory-by-design, fails OPEN not closed: formatting hygiene is
+        # reported from the reusable estate bundle; the follow-up step below
+        # emits ::warning:: explicitly when this fails instead of silently
+        # swallowing it. Repos opt into blocking formatter checks locally.
+        # hypatia: allow research_extensions/RE005 -- advisory-by-design, fails OPEN; see comment above.
         continue-on-error: true
+      - name: EditorConfig check - surface result
+        if: steps.editorconfig_check.outcome == 'failure'
+        run: echo "::warning::EditorConfig check found formatting issues (advisory only — see the 'EditorConfig check' step's own log above; repos opt into blocking locally when ready)."
       # Sparse-check-out standards' scripts/ for the docs gate (a reusable
       # workflow only auto-checks-out its own YAML, not sibling scripts).
       - name: Check out standards for the docs gate
@@ -1199,7 +1214,7 @@ jobs:
           fi
       - name: Mixed content check
         run: |
-          MIXED=$(grep -rE 'src="http://|href="http://' --include="*.html" --include="*.htm" . 2>/dev/null | grep -vE 'localhost|127\.0\.0\.1|example\.com|lol/|node_modules/|third-party/|vendor/' | head -5 || true)
+          MIXED=$(grep -rE 'src="http://|href="http://' --include="*.html" --include="*.htm" . 2>/dev/null | grep -vE 'localhost|127\.0\.0\.1|example\.com|lol/|node_modules/|third-party/|vendor/' | head -5)
           if [ -n "$MIXED" ]; then
             echo "::error::Mixed content (HTTP in HTML)"
             echo "$MIXED"
@@ -1242,6 +1257,10 @@ jobs:
         # very PR merges. An immutable pin removes the race entirely: the names
         # at this SHA are fixed. The self-lint fallback in the next step still
         # covers standards' own tree, where a rename lands before the bump.
+        # "Duplicate YAML keys in workflows" below refuses to run (::error:: +
+        # exit 1) when neither the fetched nor the self-hosted copy of the
+        # checker script is present, regardless of why the fetch failed.
+        # hypatia: allow research_extensions/RE005 -- deliberate fail-closed: see comment above.
         continue-on-error: true
 
       - name: Duplicate YAML keys in workflows
@@ -1368,7 +1387,7 @@ jobs:
           # review in their repositories. This pin is invisible to the caller's
           # `uses:` ref and to actions.lock — it is a third, independent pin,
           # which is precisely how it went stale across standards#946.
-          ref: 9c256b67486b4b30c757730e1b65b2c2d2af935b
+          ref: 5f82b635c5da5c3df44d5a0caa8983d9b95e0db9
           path: .standards-lock
           persist-credentials: false
           sparse-checkout: |
@@ -1451,7 +1470,7 @@ jobs:
           # branches): 200 carry actions.lock, 163 do not, 5 have no workflows
           # directory. The ledger makes that 163 an explicit, shrinking debt
           # instead of a cliff.
-          total=$(grep -cve '^[[:space:]]*$' -e '^[[:space:]]*#' "$RUNNER_TEMP/lock-allow.txt" || true)
+          total=$(grep -cve '^[[:space:]]*$' -e '^[[:space:]]*#' "$RUNNER_TEMP/lock-allow.txt" || [ $? -eq 1 ])
           : "${total:=0}"
           # The ledger excuses missing-lock debt ONLY (gate exit 3: lockless,
           # every ref pinned, grace window closed). Exit 1 is a LIVE
