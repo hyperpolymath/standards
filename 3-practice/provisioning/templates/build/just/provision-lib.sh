@@ -35,11 +35,17 @@ T="timeout 15"      # some --version probes hang (observed 2026-09-30); never pr
 
 if [ -t 1 ]; then R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; B=$'\033[34m'; Z=$'\033[0m'; else R=; G=; Y=; B=; Z=; fi
 PASS=0; WARN=0; FAIL=0
+# Increment the PASS tally and print the diagnostic message.
 pass() { PASS=$((PASS+1)); printf '  %sPASS%s  %s\n' "$G" "$Z" "$*"; }
+# Increment the WARN tally and print the diagnostic message.
 warn() { WARN=$((WARN+1)); printf '  %sWARN%s  %s\n' "$Y" "$Z" "$*"; }
+# Increment the FAIL tally and print the diagnostic message.
 fail() { FAIL=$((FAIL+1)); printf '  %sFAIL%s  %s\n' "$R" "$Z" "$*"; }
+# Print an informational message without changing diagnostic tallies.
 info() { printf '  %sinfo%s  %s\n' "$B" "$Z" "$*"; }
+# Print a section heading for provisioning output.
 hdr()  { printf '\n%s== %s ==%s\n' "$B" "$*" "$Z"; }
+# Return success when command $1 is available in the current shell.
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # Where this repository keeps each part of the set. A file sits at the root only
@@ -49,6 +55,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # This is the ONE answer: provision-check.sh asks it through `guix-dir` and
 # `set-files` rather than keeping its own copy.
 guix_dir()   { if [ -f build/guix.scm ]; then echo build; else echo .; fi; }
+# Print the first directory containing warm-up guides, falling back to the root.
 warmup_dir() {
   local d
   for d in . docs/onboarding docs; do
@@ -56,8 +63,11 @@ warmup_dir() {
   done
   echo .
 }
+# Print the path to Guix filename $1 in the repository layout.
 gpath() { local d; d=$(guix_dir); [ "$d" = . ] && echo "$1" || echo "$d/$1"; }
+# Print the warm-up guide path for audience $1 in the repository layout.
 wpath() { local d; d=$(warmup_dir); [ "$d" = . ] && echo "llm-warmup-$1.adoc" || echo "$d/llm-warmup-$1.adoc"; }
+# List the provisioning-owned paths checked for unfilled template slots.
 set_files() {
   printf '%s\n' launcher.sh Justfile justfile mise.toml \
     "$(gpath guix.scm)" "$(gpath manifest.scm)" "$(gpath channels.scm)" \
@@ -67,12 +77,14 @@ set_files() {
 
 # ---------------------------------------------------------------------------
 # Descriptor: flat `:key "value"` reads from provisioning_praxis.deed (s-expression).
+# Use default $2 when the value is absent or empty; print without a trailing newline.
 deed() { # $1 key, $2 default
   local v=""
   [ -f "$DEED" ] && v=$(grep -oE "\(:?$1[[:space:]]+\"[^\"]*\"" "$DEED" 2>/dev/null | head -1 | sed -E 's/^[^"]*"//; s/"$//')
   [ -z "$v" ] && v=$(grep -oE ":$1[[:space:]]+\"[^\"]*\"" "$DEED" 2>/dev/null | head -1 | sed -E 's/^[^"]*"//; s/"$//')
   printf '%s' "${v:-$2}"
 }
+# Derive the repository slug from origin, falling back to hyperpolymath/<directory>.
 repo_slug() {
   local u; u=$(git config --get remote.origin.url 2>/dev/null || true)
   u=${u%.git}; u=${u#*github.com[:/]}
@@ -88,7 +100,10 @@ ARCHETYPE="$(deed archetype "")"
 # Zig to three (ffi/zig/build.zig, and rsr-template-repo's src/interface/ffi/build.zig:
 # 74 repos have their only build.zig at that depth, measured 2026-09-30).
 # Order matters only for display. `docs` is reported when nothing else is.
+# Print the first path matching glob $1 within find depth $2 (default 2),
+# excluding .git, node_modules and root target contents; no match prints nothing.
 first() { find . -maxdepth "${2:-2}" -not -path './.git/*' -not -path '*/node_modules/*' -not -path './target/*' -name "$1" -print -quit 2>/dev/null; }
+# Print detected languages, one per line; use docs when no language marker exists.
 detect_langs() {
   local out=()
   [ -n "$(first Cargo.toml)" ]          && out+=(rust)
@@ -128,6 +143,7 @@ lang_tools() {
 # docker.io/metacall/guix). Guix has NO idris2, gleam, bun or lychee, and its
 # julia is 1.8.5: those come from mise, which Guix itself ships ("mise").
 GUIX_BASE="git bash coreutils nss-certs just mise shellcheck"
+# Print the Guix package specifications for language $1, if available.
 lang_guix() {
   case "$1" in
     rust)    echo "rust rust:cargo gcc-toolchain pkg-config" ;;
@@ -147,6 +163,7 @@ lang_guix_gap() {
     idris2) echo "idris2 (via pack)" ;; julia) echo julia ;; gleam) echo gleam ;; bun) echo bun ;; docs) echo lychee ;;
   esac
 }
+# Print deduplicated base and detected-language Guix package specifications.
 guix_specs() {
   local l s=" $GUIX_BASE "
   for l in "${LANGS[@]}"; do for p in $(lang_guix "$l"); do case "$s" in *" $p "*) ;; *) s="$s$p ";; esac; done; done
@@ -159,10 +176,12 @@ guix_specs() {
 MISE_BASE="just shellcheck"
 # Tools a repo's own recipes call (e.g. `deps-audit` runs trivy): pinned only where used.
 RECIPE_TOOLS="trivy"
+# Print the mise tool names for language $1, if supported.
 lang_mise() { case "$1" in
     rust) echo "rust" ;; zig) echo "zig" ;; julia) echo "julia" ;;
     elixir) echo "erlang elixir" ;; gleam) echo "erlang gleam" ;; ocaml) echo "opam" ;;
     bun) echo "bun" ;; docs) echo "lychee" ;; esac; }
+# Print known recipe tools referenced outside comments in the repository Justfiles.
 recipe_tools() {
   local t f body=""
   for f in Justfile justfile build/just/*.just; do
@@ -173,6 +192,7 @@ recipe_tools() {
   done
 }
 
+# Print deduplicated mise tools needed by the base, detected languages and recipes.
 mise_tools() {
   local l t seen=" " out=()
   for t in $MISE_BASE $(for l in "${LANGS[@]}"; do lang_mise "$l"; done) $(recipe_tools); do
@@ -181,6 +201,7 @@ mise_tools() {
   printf "%s\n" "${out[*]}"
 }
 
+# Print installation guidance for the toolchain of language $1.
 lang_remedy() {
   case "$1" in
     rust)    echo "mise use rust@latest  (or rustup: https://rustup.rs)" ;;
@@ -287,6 +308,8 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
 
 # Run a contract verb across every detected language. N/A is reported, not
 # faked green: a verb with no command for any language exits 0 but SAYS so.
+# A deed override runs alone and its status is returned. Otherwise all available
+# language commands run; return the last failing status, or 0 if none failed.
 lang_run() { # $1 verb
   local verb=$1 ran=0 rc=0 l cmd override
   override=$(deed "$verb" "")
@@ -312,33 +335,68 @@ lang_run() { # $1 verb
 # CI all see the same result.
 has_recipe() { have just && just --summary 2>/dev/null | tr " " "\n" | grep -qx "$1"; }
 
+# Return success when version $1 is at least $2, using version sort order.
 version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
 
 # Tools that must never appear in a repo's toolchain (estate language policy).
-BANNED_TOOLS='python|deno|node|nodejs|npm|yarn|pnpm|typescript|rescript|make|black|ruff|pip|poetry|nix|go|golang|java|kotlin'
+BANNED_TOOLS='python|deno|denojs|node|nodejs|npm|yarn|pnpm|typescript|rescript|make|black|ruff|pip|poetry|nix|go|golang|java|kotlin'
+BANNED_BACKENDS='npm|pipx|pip|go'
 
 # ---------------------------------------------------------------------------
 # Shared predicates. doctor and provision-check.sh both call THESE (the check via
 # `provision-lib.sh guix-stub|mise-lock-gaps|mise-banned`): a gate with its own
 # copy of a test passes what doctor warns about.
 
-# The keys of mise.toml [tools], quotes stripped ("cargo:foo" stays cargo:foo).
+# The tools every repository mise config declares, quotes stripped ("cargo:foo"
+# stays cargo:foo): the [tools] keys of mise.toml and .mise.toml and the first
+# word of each .tool-versions line. mise merges all three, so a predicate that
+# read mise.toml alone would pass a banned tool pinned in the others.
 mise_toml_tools() {
-  [ -f mise.toml ] || return 0
-  awk '/^\[tools\]/{t=1;next} /^\[/{t=0} t && /=/{sub(/[ \t]*=.*/,""); gsub(/["\x27 ]/,""); print}' mise.toml
+  local f
+  for f in .tool-versions mise.toml .mise.toml; do
+    [ -f "$f" ] || continue
+    if [ "$f" = .tool-versions ]; then
+      awk '!/^[ \t]*(#|$)/{print $1}' "$f"
+    else
+      awk '/^\[tools\]/{t=1;next} /^\[/{t=0} t && /=/{sub(/[ \t]*=.*/,""); gsub(/["\x27 ]/,""); print}' "$f"
+    fi
+  done | awk '!seen[$0]++'
 }
-# Banned tools named in mise.toml; a backend prefix does not hide one ("aqua:denoland/deno" is deno).
+# True when a bare registry name resolves only to banned backends ("prettier"
+# is only npm:prettier). Needs no network: `mise registry` reads the registry
+# baked into mise. False when mise is absent or does not know the name, so an
+# unknown tool is left to mise-lock to report, never called banned on a guess.
+only_banned_backends() {
+  local b n=0
+  command -v mise >/dev/null 2>&1 || return 1
+  for b in $(mise registry "$1" 2>/dev/null); do
+    n=$((n + 1))
+    [[ "$b" =~ ^($BANNED_BACKENDS): ]] || return 1
+  done
+  [ "$n" -gt 0 ]
+}
+# Banned tools named in the mise configs. A backend prefix does not hide one
+# ("aqua:denoland/deno" is deno), an npm:/pipx:/pip:/go: backend installs
+# through a banned runtime whatever the package is ("npm:prettier"), and so does
+# a bare name with no other backend ("prettier").
+# Print space-separated matches without a trailing newline; callers determine
+# failure from non-empty output.
 mise_banned() {
   local t base hits=""
   for t in $(mise_toml_tools); do
     base=${t##*:}; base=${base%%@*}; base=${base##*/}
-    [[ "$base" =~ ^($BANNED_TOOLS)$ ]] && hits="$hits$t "
+    if [[ "$base" =~ ^($BANNED_TOOLS)$ ]] || [[ "$t" =~ ^($BANNED_BACKENDS): ]]; then
+      hits="$hits$t "
+    elif [[ "$t" != *:* ]] && only_banned_backends "$t"; then
+      hits="$hits$t "
+    fi
   done
   printf '%s' "${hits% }"
 }
-# Why mise.lock does not pin mise.toml, or nothing when it does. Presence is not
-# enough: a zero-byte lock pins nothing. Every [tools] key needs its [[tools.<key>]]
-# entry, and the lock must carry checksums.
+# Print the first category of lockfile gaps, or nothing if none is found.
+# Skip checking when mise.toml is absent; otherwise check tools from all three
+# config files for a non-empty version and platform tables for sha256 entries.
+# Callers inspect stdout; version concreteness and checksum contents are not validated.
 mise_lock_gaps() {
   [ -f mise.toml ] || return 0
   [ -f mise.lock ] || { echo "mise.lock missing"; return; }
@@ -367,9 +425,10 @@ mise_lock_gaps() {
     END { close_table() }' mise.lock)
   [ -z "$miss" ] || echo "mise.lock has no sha256 for: ${miss% }"
 }
-# Why a Guix file is a stub, or nothing when it is real. The test is positive: a
-# guix.scm must define every field a package needs, not merely avoid known stub
-# shapes; `(package (name "x") (source (local-file ".")))` is a stub.
+# Print why Guix file $1 appears to be a stub, or nothing if the textual checks
+# pass. Check required package fields as well as known stub shapes; this does
+# not evaluate Scheme or verify that the package builds. Callers inspect stdout.
+# For example, `(package (name "x") (source (local-file ".")))` is a stub.
 guix_stub_reason() {
   local f=$1 k miss=""
   [ -f "$f" ] || { echo "missing"; return; }
@@ -402,11 +461,13 @@ lang_sysdeps() { case "$1" in
   ocaml)   echo "gcc make patch unzip bubblewrap|build-essential patch unzip bubblewrap|xcode-select --install|opam compiles OCaml and sandboxes its builds with bubblewrap" ;;
   haskell) echo "gcc gcc-c++ gmp-devel make ncurses-devel xz perl|build-essential curl libffi-dev libgmp-dev libncurses-dev|xcode-select --install|ghcup installs GHC, which links through the C toolchain and GMP" ;;
 esac; }
+# Print a comma-separated list of tools Guix cannot supply, or none.
 guix_gaps() {
   local l g gaps=""
   for l in "${LANGS[@]}"; do g=$(lang_guix_gap "$l"); [ -n "$g" ] && gaps="$gaps${gaps:+, }$g"; done
   printf '%s\n' "${gaps:-none}"
 }
+# Print AsciiDoc table rows describing required tools and installation commands.
 tool_table() {
   local l t base
   for l in "${LANGS[@]}"; do
@@ -417,6 +478,7 @@ tool_table() {
   echo "|(recipes) |\`${base// /\`, \`}\` |mise install, or your OS package manager (e.g. \`dnf install just ShellCheck\`)"
 }
 # shellcheck disable=SC2016  # the backticks are AsciiDoc literals, not command substitution
+# Print OS dependency guidance for detected languages; $1 selects adoc or ai output.
 system_deps() { # $1 adoc|ai
   local l d seen="" fed deb mac why any=0
   [ "$1" = adoc ] && printf '=== System packages\n'
@@ -438,6 +500,11 @@ system_deps() { # $1 adoc|ai
   elif [ $any -eq 0 ]; then printf '* No other OS packages: every tool comes from mise.\n'; fi
 }
 
+# Diagnose the provisioning set and toolchain, then the repository's own
+# doctor-local checks. The PASS/WARN/FAIL tally is the last line of stdout;
+# returns non-zero when anything FAILed.
+# Warnings alone do not fail. An early doctor-local.sh exit or failed
+# doctor-local recipe becomes a FAIL rather than propagating its exit status.
 cmd_doctor() {
   printf '%s doctor — %s (%s; languages: %s)\n' "$REPO_NAME" "$REPO_SLUG" "$ARCHETYPE" "${LANGS[*]}"
 
@@ -477,9 +544,9 @@ cmd_doctor() {
   [ -z "$lg" ] && pass "mise.lock pins every mise.toml tool (latest → concrete, checksummed)" || warn "PV-W20 $lg — run: just toolchain-refresh"
   [ -f .mise.toml ] && [ -f mise.toml ] && warn "PV-W21 both mise.toml and .mise.toml — mise merges them; keep only mise.toml"
   [ -f .tool-versions ] && warn "PV-W22 .tool-versions present — a second toolchain source; fold it into mise.toml"
-  if [ -f mise.toml ]; then
+  if [ -f mise.toml ] || [ -f .mise.toml ] || [ -f .tool-versions ]; then
     local bad; bad=$(mise_banned)
-    [ -z "$bad" ] && pass "mise.toml pins no banned tool" || warn "PV-W23 mise.toml pins banned tool(s): $bad (language policy: bun, no python/deno/node/make)"
+    [ -z "$bad" ] && pass "the mise configs pin no banned tool" || warn "PV-W23 a mise config pins banned tool(s): $bad (language policy: bun, no python/deno/node/npm/make)"
   fi
   # hypatia guix_not_stub reads guix.scm AND build/guix.scm; an unfilled __PLACEHOLDER__ is a stub too.
   local g r gstub=""
@@ -545,12 +612,17 @@ cmd_doctor() {
 
   printf '\n%s: %s%d PASS%s, %s%d WARN%s, %s%d FAIL%s\n' "$REPO_NAME" "$G" "$PASS" "$Z" "$Y" "$WARN" "$Z" "$R" "$FAIL" "$Z"
   if [ "$FAIL" -gt 0 ]; then
-    echo "Next: 'just heal' fixes what is safe to fix automatically; each FAIL code is explained in docs/SETUP.adoc §Troubleshooting."
+    # stderr, so the tally above stays the last line of stdout on every outcome.
+    echo "Next: 'just heal' fixes what is safe to fix automatically; each FAIL code is explained in docs/SETUP.adoc §Troubleshooting." >&2
     return 1
   fi
   return 0
 }
 
+# Install available toolchains and dependencies, run local setup hooks, then doctor;
+# return non-zero when a tracked installation step or verification fails.
+# May trust mise configuration, extend PATH, initialise opam and make the
+# launcher executable. Installation and hook failures do not skip verification.
 cmd_setup() {
   printf '%s setup — installing everything this repository needs\n' "$REPO_NAME"
   local rc=0
@@ -583,6 +655,8 @@ cmd_setup() {
   return $rc
 }
 
+# Apply automatic environment repairs and local heal hooks, then return doctor status.
+# Earlier repair and hook failures are not propagated independently of doctor.
 cmd_heal() {
   printf '%s heal — applying safe, reversible fixes, then re-checking\n' "$REPO_NAME"
   hdr "Fixes"
@@ -604,6 +678,9 @@ cmd_heal() {
   cmd_doctor
 }
 
+# Replace this process with Guix when its manifest exists and has no {{ residue;
+# otherwise use mise and SHELL (default bash). Return 1 if neither route is
+# available; a failed exec terminates the script without trying the other route.
 cmd_dev_shell() {
   local gm; gm=$(gpath manifest.scm)
   if have guix && [ -f "$gm" ] && ! grep -q '{{' "$gm"; then
@@ -617,9 +694,36 @@ cmd_dev_shell() {
   fi
 }
 
+# Print the 40-hex commit of the `guix` channel in a channels list read from
+# stdin (`guix describe --format=channels`), or nothing when there is none.
+guix_channel_commit() {
+  awk '/\(name .guix\)/ { g = 1 }
+       g && match($0, /\(commit "[0-9a-f]{40}"\)/) { print substr($0, RSTART + 9, 40); exit }'
+}
+
+# Re-pin only the `guix` channel's commit in channels file $1 to $2, keeping
+# every other line (comments, other channels, introduction) as it is. Returns
+# non-zero, leaving the file untouched, when it has no guix channel commit.
+repin_guix_channel() {
+  local ch=$1 pin=$2 tmp
+  tmp=$(mktemp) || return 1
+  if awk -v pin="$pin" '
+       /\(name .guix\)/ { g = 1 }
+       g && !done && sub(/\(commit "[0-9a-f]{40}"\)/, "(commit \"" pin "\")") { done = 1 }
+       { print }
+       END { exit !done }' "$ch" > "$tmp"; then
+    cat "$tmp" > "$ch"; rm -f "$tmp"
+  else
+    rm -f "$tmp"; return 1
+  fi
+}
+
 # Weekly toolchain refresh: bump mise pins and the lock, re-pin the Guix channel,
 # regenerate build/guix/crates.scm when guix.scm loads it, then show the diff
 # for a signed commit.
+# Return 1 for missing mise or failed mise update, locking or crate regeneration.
+# Channel pin failures are warnings; unavailable Guix operations are skipped.
+# Earlier updates are not rolled back.
 cmd_toolchain_refresh() {
   hdr "mise: bump 'latest' resolutions and re-lock"
   have mise || { fail "mise not found"; return 1; }
@@ -629,8 +733,15 @@ cmd_toolchain_refresh() {
   if [ -f "$ch" ]; then
     hdr "guix: channel pin"
     if have guix; then
-      guix pull --channels="$ch" --dry-run >/dev/null 2>&1 || true
-      guix describe --format=channels > "$ch.new" 2>/dev/null && mv "$ch.new" "$ch" && info "$ch re-pinned to the current guix commit"
+      local pin
+      pin=$(guix describe --format=channels 2>/dev/null | guix_channel_commit)
+      if [ -z "$pin" ]; then
+        warn "could not read the current guix channel commit — $ch left unchanged"
+      elif repin_guix_channel "$ch" "$pin"; then
+        info "$ch: guix channel re-pinned to $pin"
+      else
+        warn "$ch has no (name 'guix) channel with a commit — left unchanged"
+      fi
     else info "guix not installed — $ch left as-is (CI re-pins it)"; fi
   fi
   local cr=""
@@ -650,9 +761,11 @@ GUIX="${GUIX:-guix}"
 
 # Write build/guix/crates.scm: every registry crate in Cargo.lock as a Guix
 # origin, and %crate-inputs listing them for guix.scm. Written whole or not at
-# all. The importer's output is accepted only when it defines exactly one crate
-# source per registry package in Cargo.lock: run through a container, guix's exit
-# status is lost, so the count is the check.
+# all. Accept importer output when its rust- definition count matches the number
+# of registry packages in Cargo.lock; the importer's exit status is not checked.
+# GUIX may contain a command and arguments; import is limited to 1,800 seconds.
+# Missing Cargo.lock is a successful no-op. Return 1 for temporary-file creation
+# failure or a count mismatch; later write errors are not reliably propagated.
 cmd_crates_scm() {
   local dst=build/guix/crates.scm want got tmp spdx
   [ -f Cargo.lock ] || { info "no Cargo.lock — no crate inputs"; return 0; }
@@ -699,6 +812,9 @@ just_say_it() {
   [ -z "$line" ] && line="Set up $REPO_NAME from https://github.com/$REPO_SLUG — follow docs/AI_INSTALLATION_GUIDE.adoc in that repo."
   printf '%s' "$line"
 }
+# Copy stdin to an available clipboard with a three-second timeout;
+# silently consume input and return 1 when no clipboard command is available.
+# Otherwise return the timeout command's status; suppress clipboard output and errors.
 clip() { # best-effort; silent when no clipboard exists (CI, SSH)
   # wl-copy and xclip fork a daemon that inherits stdout; left attached, it
   # holds any pipeline open forever (observed 2026-09-30). Detach and bound it.
@@ -710,6 +826,8 @@ clip() { # best-effort; silent when no clipboard exists (CI, SSH)
   else cat >/dev/null; return 1; fi
   timeout 3 "${c[@]}" >/dev/null 2>&1
 }
+# Print AI-assisted setup instructions and attempt to copy the setup sentence.
+# Clipboard failure is ignored.
 cmd_ai_setup() {
   cat <<EOF
 AI-assisted setup for $REPO_NAME
@@ -727,6 +845,9 @@ Working on the code with an AI?  just ai-warmup dev   (or: user, maintainer)
 EOF
   just_say_it | clip && echo "(copied the line to your clipboard)" || true
 }
+# Print and attempt to copy the guide for $1 (default user); return 2 for an
+# invalid audience, 1 for a missing guide, or 0 when the guide was found.
+# Accepted audiences are user, dev and maintainer; clipboard failure is ignored.
 cmd_ai_warmup() {
   local who=${1:-user} f
   case "$who" in user|dev|maintainer) ;; *) echo "usage: just ai-warmup <user|dev|maintainer>" >&2; return 2 ;; esac
@@ -739,6 +860,8 @@ cmd_ai_warmup() {
   fail "llm-warmup-$who.adoc not found"; return 1
 }
 
+# Run test and bench recipes, saving output and timings under .eval/;
+# report N/A for skipped work and return 1 if either recipe fails.
 cmd_eval() {
   local logf rc=0 s e v r o st
   logf=".eval/$(date -u +%Y%m%dT%H%M%SZ).txt"
@@ -759,6 +882,7 @@ cmd_eval() {
   return $rc
 }
 
+# Print resolved repository metadata and provisioning configuration paths.
 cmd_config_show() {
   echo "repo:        $REPO_SLUG"
   echo "archetype:   $ARCHETYPE"
@@ -772,6 +896,7 @@ cmd_config_show() {
   echo "lib:         provision-lib $PROVISION_LIB_VERSION"
 }
 
+# Print repository-specific OPSM installation instructions.
 cmd_opsm() {
   cat <<EOF
 Get $REPO_NAME with OPSM (the odds-and-sods package manager):
@@ -795,6 +920,9 @@ and §Install Packages at 9aff310.)
 EOF
 }
 
+# Search tracked files for pattern $1 with agrep, falling back to git grep.
+# agrep allows one error; git grep is case-insensitive. Return the search
+# pipeline or git grep status; an empty or missing pattern terminates the script.
 cmd_search() {
   local p=${1:?usage: just search <pattern>}
   if have agrep; then git ls-files -z | xargs -0 agrep -n -1 -- "$p" 2>/dev/null

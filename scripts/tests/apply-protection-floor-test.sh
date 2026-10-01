@@ -105,6 +105,7 @@ metadatastician/org-throttled
 EOF
 cat > "$REPOS" <<'EOF'
 hyperpolymath/memory-vault
+hyperpolymath/claude-config-vault
 hyperpolymath/plain-repo
 hyperpolymath/converged-repo
 hyperpolymath/richer-repo
@@ -116,6 +117,7 @@ hyperpolymath/secondary-throttled-repo
 hyperpolymath/nosourcetype-repo
 metadatastician/org-covered-repo
 metadatastician/org-halffloor-repo
+metadatastician/org-bypassed-repo
 EOF
 
 # Rebuild fixtures, optionally making excluded repositories fully writable.
@@ -156,7 +158,8 @@ J
  "conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[]}
 J
 
-  # same rule set and same include as the floor, but WITH a bypass actor.
+  # D106: same rule set and same include as the floor, but WITH a bypass actor. A ruleset
+  # named actors can walk through is NOT cover, so this repo gets the standalone floor.
   mkrepo hyperpolymath/bypassed-twin   main  false
   echo '[{"id":30,"source_type":"Repository","target":"branch","enforcement":"active"}]' \
       > "$FIX/repos_hyperpolymath_bypassed-twin_rulesets"
@@ -165,6 +168,9 @@ J
  "conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},
  "bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}]}
 J
+  echo '{"id":9030}' > "$FIX/POST_repos_hyperpolymath_bypassed-twin_rulesets"
+  echo '[{"type":"deletion"},{"type":"non_fast_forward"}]' \
+      > "$FIX/repos_hyperpolymath_bypassed-twin_rules_branches_main"
 
   mkrepo hyperpolymath/archived-repo   main  true
   # By default NO rulesets fixture: the archived guard must return before any such read.
@@ -252,6 +258,20 @@ J
   echo '[{"type":"deletion"},{"type":"non_fast_forward"}]' \
       > "$FIX/repos_metadatastician_org-halffloor-repo_rules_branches_main"
 
+  # D106, org side: an org ruleset carrying the WHOLE floor but with an always-bypass
+  # actor. Bypassable org cover is not cover, so this repo is WOULD-CREATE, not ORG-INHERITED.
+  mkrepo metadatastician/org-bypassed-repo main false
+  echo '[{"id":62,"source_type":"Organization","target":"branch","enforcement":"active"}]' \
+      > "$FIX/repos_metadatastician_org-bypassed-repo_rulesets"
+  cat > "$FIX/repos_metadatastician_org-bypassed-repo_rulesets_62" <<'J'
+{"id":62,"rules":[{"type":"deletion"},{"type":"non_fast_forward"}],
+ "conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},
+ "bypass_actors":[{"actor_id":2,"actor_type":"RepositoryRole","bypass_mode":"always"}]}
+J
+  echo '{"id":9062}' > "$FIX/POST_repos_metadatastician_org-bypassed-repo_rulesets"
+  echo '[{"type":"deletion"},{"type":"non_fast_forward"}]' \
+      > "$FIX/repos_metadatastician_org-bypassed-repo_rules_branches_main"
+
   # A successful response without a rules array must not poison the org cache. The next
   # repo inherits the same org ruleset id and must retry the read rather than reuse it.
   mkrepo metadatastician/org-cache-invalid-a main false
@@ -292,7 +312,11 @@ check "vault is EXCLUDED-D50"            "EXCLUDED-D50"      "$(state "$OUT" hyp
 check "bare repo is WOULD-CREATE"        "WOULD-CREATE"      "$(state "$OUT" hyperpolymath/plain-repo)"
 check "exact floor is CONVERGED"         "CONVERGED"         "$(state "$OUT" hyperpolymath/converged-repo)"
 check "richer cover is COVERED-BY-RICHER" "COVERED-BY-RICHER" "$(state "$OUT" hyperpolymath/richer-repo)"
-check "bypassed twin is NOT converged"   "COVERED-BY-RICHER" "$(state "$OUT" hyperpolymath/bypassed-twin)"
+check "third vault is EXCLUDED-D50 (D235)" "EXCLUDED-D50"    "$(state "$OUT" hyperpolymath/claude-config-vault)"
+# D106: a bypassable ruleset is not cover. richer-repo (zero bypass) above is the negative
+# control proving the cover arm still fires when nobody can walk through it.
+check "bypassed twin is not cover (D106)" "WOULD-CREATE"     "$(state "$OUT" hyperpolymath/bypassed-twin)"
+check "bypassed org is not cover (D106)" "WOULD-CREATE"      "$(state "$OUT" metadatastician/org-bypassed-repo)"
 check "archived is ARCHIVED"             "ARCHIVED"          "$(state "$OUT" hyperpolymath/archived-repo)"
 check "403 is PLAN-EXCLUDED"             "PLAN-EXCLUDED"     "$(state "$OUT" hyperpolymath/private-repo)"
 # The plan arm above is the NEGATIVE CONTROL: it proves the throttle arm below did not
@@ -318,9 +342,13 @@ build_fixtures
 OUT="$(run "$SUT" --repos "$REPOS" --apply)"
 check "bare repo is CREATED"             "CREATED"           "$(state "$OUT" hyperpolymath/plain-repo)"
 check "half org cover still CREATED"     "CREATED"           "$(state "$OUT" metadatastician/org-halffloor-repo)"
-# Exactly two repos lack a floor in force: the bare one and the HALF-org-covered one.
-# Every other fixture must be left alone, so the count is an assertion in both directions.
-check "exactly two writes"               "2"                 "$(wc -l < "$FIX/PUTS.log" | tr -d ' ')"
+# Exactly four repos lack a floor in force: the bare one, the HALF-org-covered one, and
+# the two whose only cover is bypassable (D106). Every other fixture must be left alone,
+# so the count is an assertion in both directions.
+check "exactly four writes"              "4"                 "$(wc -l < "$FIX/PUTS.log" | tr -d ' ')"
+check "one write targets bypassed twin"  "1"                 "$(command grep -c 'repos/hyperpolymath/bypassed-twin/rulesets' "$FIX/PUTS.log")"
+check "one write targets bypassed org"   "1"                 "$(command grep -c 'repos/metadatastician/org-bypassed-repo/rulesets' "$FIX/PUTS.log")"
+check "no write touched the third vault" "0"                 "$(command grep -c 'claude-config-vault' "$FIX/PUTS.log")"
 check "every write is a POST"            "POST"              "$(cut -f1 "$FIX/PUTS.log" | sort -u)"
 check "one write targets plain-repo"     "1"                 "$(command grep -c 'repos/hyperpolymath/plain-repo/rulesets' "$FIX/PUTS.log")"
 check "one write targets half-org repo"  "1"                 "$(command grep -c 'repos/metadatastician/org-halffloor-repo/rulesets' "$FIX/PUTS.log")"
@@ -427,6 +455,16 @@ mutant "archived guard removed" \
 mutant "bypass dropped from the shape test" \
   's/ \&\& \[ "\$byp" = "0" \]//' \
   state "hyperpolymath/bypassed-twin=CONVERGED"
+
+# D106, verbatim: letting a bypassable ruleset into the union reinstates "cover" that
+# named actors can walk through, and the standalone floor is silently never written.
+mutant "bypassable repo ruleset counted as cover" \
+  's/^        if \[ "\$byp" = "0" \]; then$/        if true; then/' \
+  state "hyperpolymath/bypassed-twin=COVERED-BY-RICHER"
+
+mutant "bypassable org ruleset counted as cover" \
+  's/^        if \[ "\$b" = "0" \]; then$/        if true; then/' \
+  state "metadatastician/org-bypassed-repo=ORG-INHERITED"
 
 # Removing the converged early-return does NOT reach a write: the covered-by-richer check
 # catches it next. That second line of defence is the point, so this mutant is asserted on
