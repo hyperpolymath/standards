@@ -315,24 +315,39 @@ has_recipe() { have just && just --summary 2>/dev/null | tr " " "\n" | grep -qx 
 version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
 
 # Tools that must never appear in a repo's toolchain (estate language policy).
-BANNED_TOOLS='python|deno|node|nodejs|npm|yarn|pnpm|typescript|rescript|make|black|ruff|pip|poetry|nix|go|golang|java|kotlin'
+BANNED_TOOLS='python|deno|denojs|node|nodejs|npm|yarn|pnpm|typescript|rescript|make|black|ruff|pip|poetry|nix|go|golang|java|kotlin'
+BANNED_BACKENDS='npm|pipx|pip|go'
 
 # ---------------------------------------------------------------------------
 # Shared predicates. doctor and provision-check.sh both call THESE (the check via
 # `provision-lib.sh guix-stub|mise-lock-gaps|mise-banned`): a gate with its own
 # copy of a test passes what doctor warns about.
 
-# The keys of mise.toml [tools], quotes stripped ("cargo:foo" stays cargo:foo).
+# The tools every repository mise config declares, quotes stripped ("cargo:foo"
+# stays cargo:foo): the [tools] keys of mise.toml and .mise.toml and the first
+# word of each .tool-versions line. mise merges all three, so a predicate that
+# read mise.toml alone would pass a banned tool pinned in the others.
 mise_toml_tools() {
-  [ -f mise.toml ] || return 0
-  awk '/^\[tools\]/{t=1;next} /^\[/{t=0} t && /=/{sub(/[ \t]*=.*/,""); gsub(/["\x27 ]/,""); print}' mise.toml
+  local f
+  for f in .tool-versions mise.toml .mise.toml; do
+    [ -f "$f" ] || continue
+    if [ "$f" = .tool-versions ]; then
+      awk '!/^[ \t]*(#|$)/{print $1}' "$f"
+    else
+      awk '/^\[tools\]/{t=1;next} /^\[/{t=0} t && /=/{sub(/[ \t]*=.*/,""); gsub(/["\x27 ]/,""); print}' "$f"
+    fi
+  done | awk '!seen[$0]++'
 }
-# Banned tools named in mise.toml; a backend prefix does not hide one ("aqua:denoland/deno" is deno).
+# Banned tools named in the mise configs. A backend prefix does not hide one
+# ("aqua:denoland/deno" is deno), and an npm:/pipx:/pip:/go: backend installs
+# through a banned runtime whatever the package is ("npm:prettier").
 mise_banned() {
   local t base hits=""
   for t in $(mise_toml_tools); do
     base=${t##*:}; base=${base%%@*}; base=${base##*/}
-    [[ "$base" =~ ^($BANNED_TOOLS)$ ]] && hits="$hits$t "
+    if [[ "$base" =~ ^($BANNED_TOOLS)$ ]] || [[ "$t" =~ ^($BANNED_BACKENDS): ]]; then
+      hits="$hits$t "
+    fi
   done
   printf '%s' "${hits% }"
 }
@@ -480,9 +495,9 @@ cmd_doctor() {
   [ -z "$lg" ] && pass "mise.lock pins every mise.toml tool (latest → concrete, checksummed)" || warn "PV-W20 $lg — run: just toolchain-refresh"
   [ -f .mise.toml ] && [ -f mise.toml ] && warn "PV-W21 both mise.toml and .mise.toml — mise merges them; keep only mise.toml"
   [ -f .tool-versions ] && warn "PV-W22 .tool-versions present — a second toolchain source; fold it into mise.toml"
-  if [ -f mise.toml ]; then
+  if [ -f mise.toml ] || [ -f .mise.toml ] || [ -f .tool-versions ]; then
     local bad; bad=$(mise_banned)
-    [ -z "$bad" ] && pass "mise.toml pins no banned tool" || warn "PV-W23 mise.toml pins banned tool(s): $bad (language policy: bun, no python/deno/node/make)"
+    [ -z "$bad" ] && pass "the mise configs pin no banned tool" || warn "PV-W23 a mise config pins banned tool(s): $bad (language policy: bun, no python/deno/node/npm/make)"
   fi
   # hypatia guix_not_stub reads guix.scm AND build/guix.scm; an unfilled __PLACEHOLDER__ is a stub too.
   local g r gstub=""
