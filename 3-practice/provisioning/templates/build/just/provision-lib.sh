@@ -13,7 +13,7 @@
 # overwrites this file from canon.
 #
 # Usage: provision-lib.sh <verb> [args]
-#   verbs: langs doctor setup heal dev-shell toolchain-refresh ai-setup
+#   verbs: langs doctor setup heal dev-shell toolchain-refresh crates-scm ai-setup
 #          ai-warmup <user|dev|maintainer> eval config-show opsm lang-run <verb>
 #          search <pattern> version
 #   facts: guix-specs mise-tools langs guix-dir set-files guix-gaps tool-table
@@ -605,6 +605,9 @@ cmd_dev_shell() {
   fi
 }
 
+# Weekly toolchain refresh: bump mise pins and the lock, re-pin the Guix channel,
+# regenerate build/guix/crates.scm when guix.scm loads it, then show the diff
+# for a signed commit.
 cmd_toolchain_refresh() {
   hdr "mise: bump 'latest' resolutions and re-lock"
   have mise || { fail "mise not found"; return 1; }
@@ -618,8 +621,56 @@ cmd_toolchain_refresh() {
       guix describe --format=channels > "$ch.new" 2>/dev/null && mv "$ch.new" "$ch" && info "$ch re-pinned to the current guix commit"
     else info "guix not installed — $ch left as-is (CI re-pins it)"; fi
   fi
-  git --no-pager diff --stat -- mise.toml mise.lock "$ch" 2>/dev/null
+  local cr=""
+  if [ -f Cargo.lock ] && grep -qs 'crates\.scm' "$(gpath guix.scm)"; then
+    hdr "guix: crate inputs from Cargo.lock"
+    cr=build/guix/crates.scm
+    if have "${GUIX%% *}"; then cmd_crates_scm || return 1
+    else info "guix not installed — $cr left as-is (CI regenerates it)"; fi
+  fi
+  git --no-pager diff --stat -- mise.toml mise.lock "$ch" $cr 2>/dev/null
   echo "Commit the diff above (signed) as: chore(toolchain): weekly refresh"
+}
+
+# The guix command (default: guix), e.g. a wrapper that runs it in a container
+# with this directory mounted.
+GUIX="${GUIX:-guix}"
+
+# Write build/guix/crates.scm: every registry crate in Cargo.lock as a Guix
+# origin, and %crate-inputs listing them for guix.scm. Written whole or not at
+# all. The importer's output is accepted only when it defines exactly one crate
+# source per registry package in Cargo.lock: run through a container, guix's exit
+# status is lost, so the count is the check.
+cmd_crates_scm() {
+  local dst=build/guix/crates.scm want got tmp spdx
+  [ -f Cargo.lock ] || { info "no Cargo.lock — no crate inputs"; return 0; }
+  want=$(grep -c '^source = "registry+' Cargo.lock)
+  tmp=$(mktemp) || return 1
+  if [ "$want" -gt 0 ]; then
+    # GUIX is split on purpose: it may be a command with arguments.
+    # shellcheck disable=SC2086
+    timeout 1800 $GUIX import crate --lockfile=Cargo.lock "$REPO_NAME" >"$tmp" 2>"$tmp.err"
+    got=$(grep -c '^(define rust-' "$tmp")
+    if [ "$got" != "$want" ]; then
+      fail "PV-E41 guix import crate defined $got of the $want registry crates in Cargo.lock; $dst left as-is: $(grep -m1 -i 'error' "$tmp.err" || grep -v '^+' "$tmp.err" | tail -1)"
+      rm -f "$tmp" "$tmp.err"; return 1
+    fi
+  fi
+  # The licence line is guix.scm's own, so the file matches its repository.
+  spdx=$(grep -m1 'SPDX-License-Identifier' "$(gpath guix.scm)" 2>/dev/null)
+  mkdir -p build/guix
+  {
+    [ -n "$spdx" ] && printf '%s\n' "$spdx"
+    # shellcheck disable=SC2016  # the backticks are literal text
+    printf ';; Generated from Cargo.lock by `just toolchain-refresh` (guix import crate\n'
+    printf ';; --lockfile); never hand-edit it. guix.scm loads it for %%crate-inputs.\n\n'
+    grep -v '^guix (GNU Guix)' "$tmp"
+    printf '\n(define %%crate-inputs\n  (list'
+    grep -o '^(define rust-[^ ]*' "$tmp" | awk '{printf "\n    %s", $2}'
+    printf '))\n'
+  } >"$dst.new" && mv "$dst.new" "$dst"
+  rm -f "$tmp" "$tmp.err"
+  info "$dst: $want crate source(s)"
 }
 
 # The sentence people are told to say lives in one place a reader sees: the first
@@ -747,6 +798,7 @@ case "${1:-}" in
   heal)               cmd_heal ;;
   dev-shell)          cmd_dev_shell ;;
   toolchain-refresh)  cmd_toolchain_refresh ;;
+  crates-scm)         cmd_crates_scm ;;
   ai-setup)           cmd_ai_setup ;;
   ai-warmup)          shift; cmd_ai_warmup "${1:-user}" ;;
   eval)               cmd_eval ;;
