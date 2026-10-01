@@ -14,17 +14,32 @@
 #   docstring-scan.sh --worktree            uncommitted work vs HEAD (untracked files count as added)
 #   docstring-scan.sh --staged              the index vs HEAD (pre-commit)
 #   docstring-scan.sh --range BASE..HEAD    a commit range (CI, calibration)
-#   add --check to exit 1 when a NEWLY-ADDED function is undocumented.
+#   add --check to enforce two legs:
+#     leg A  exit 1 when a NEWLY-ADDED function is undocumented (always enforced).
+#     leg B  exit 1 when documented / (documented + undocumented) over ALL touched (added and
+#            modified, never skipped) functions is below DOCSTRING_THRESHOLD percent — the ratio
+#            CodeRabbit's Docstring Coverage check asks about. Phased in by a self-flipping date:
+#            before ENFORCE_DOCSTRINGS_FROM a leg-B violation is a WARN line on stderr and leaves
+#            the exit code alone; ON and after that date it exits 1. Zero touched functions give
+#            NO leg-B verdict (said explicitly on stderr): a vacuous ratio is neither pass nor fail.
+#
+# Environment (the shipped policy is the default in each case):
+#   DOCSTRING_THRESHOLD       integer 0-100, default 80 (leg B passes at exactly the threshold).
+#   ENFORCE_DOCSTRINGS_FROM   YYYY-MM-DD, default 2026-11-01; leg B blocks ON this date.
+#   DOCS_TODAY                YYYY-MM-DD; overrides "now" so both sides of the cutoff are testable.
+#   A malformed value in any of them is exit 2: it must never silently disarm the gate.
 #
 # Output (stdout): one TSV row per touched function, then one SUMMARY line.
 #   path<TAB>line<TAB>symbol<TAB>added|modified<TAB>documented|undocumented
 #   path<TAB>-<TAB>-<TAB>-<TAB>skipped          (a changed source file in an unsupported language)
 #   SUMMARY files=N functions=N documented=N undocumented=N added_undocumented=N skipped=N coverage=P%
+#           threshold=T legb=pass|fail|n/a      (one line; fields are only ever appended)
 # The denominator is always printed: "0 undocumented" out of 0 functions is a vacuous pass and must
 # not read the same as a real one.
 #
-# Exit: 0 report produced (and, with --check, no added undocumented function); 1 --check found an
-# added undocumented function; 2 usage or git error.
+# Exit: 0 report produced (and, with --check, no enforced leg failed); 1 --check found an added
+# undocumented function (leg A) or, on/after the cutoff, a touched ratio below threshold (leg B);
+# 2 usage, configuration or git error.
 #
 # Tier 1 (this version): shell. Every other source extension reports as SKIPPED — never as
 # documented. Documentation files (.adoc/.md/.rst/.txt-less docs) are ignored outright, as
@@ -39,12 +54,41 @@ while [ $# -gt 0 ]; do
     --staged)   MODE=staged ;;
     --range)    MODE=range; RANGE="${2:-}"; shift ;;
     --check)    CHECK=1 ;;
-    -h|--help)  sed -n '2,31p' "$0"; exit 0 ;;
+    -h|--help)  sed -n '2,46p' "$0"; exit 0 ;;
     *) printf 'docstring-scan: unknown argument: %s\n' "$1" >&2; exit 2 ;;
   esac
   shift
 done
 [ -n "$MODE" ] || { printf 'docstring-scan: one of --worktree, --staged, --range BASE..HEAD is required\n' >&2; exit 2; }
+
+# Leg B policy (owner ruling 2026-10-01). The cutoff is a real date that flips itself: on it, leg B
+# starts failing --check with no further edit to this file. Gate shape copied from
+# scripts/check-docs-presence.sh.
+DOCSTRING_THRESHOLD="${DOCSTRING_THRESHOLD:-80}"
+ENFORCE_DOCSTRINGS_FROM="${ENFORCE_DOCSTRINGS_FROM:-2026-11-01}"
+TODAY="${DOCS_TODAY:-$(date -u +%Y-%m-%d)}"
+
+# A malformed date would make the lexicographic comparison below silently choose the grace branch
+# forever, turning leg B into a fake gate. Refuse to run rather than run un-armed.
+# Succeed when the argument has the YYYY-MM-DD shape.
+valid_date() {
+  case "$1" in
+    [0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+# Exit 2 unless the named setting holds a YYYY-MM-DD date.
+require_date() {
+  if ! valid_date "$2"; then
+    printf "docstring-scan: %s='%s' is not YYYY-MM-DD; refusing to run: an unparseable cutoff would silently disarm leg B\n" "$1" "$2" >&2
+    exit 2
+  fi
+}
+require_date ENFORCE_DOCSTRINGS_FROM "$ENFORCE_DOCSTRINGS_FROM"
+require_date DOCS_TODAY "$TODAY"
+# A strict pattern, not arithmetic: "080" is an octal error in bash and "1e2" is not a number.
+[[ "$DOCSTRING_THRESHOLD" =~ ^(0|[1-9][0-9]?|100)$ ]] || {
+  printf "docstring-scan: DOCSTRING_THRESHOLD='%s' is not an integer 0-100\n" "$DOCSTRING_THRESHOLD" >&2; exit 2; }
 git rev-parse --git-dir >/dev/null 2>&1 || { printf 'docstring-scan: not inside a git repository\n' >&2; exit 2; }
 
 G=(git -c core.quotePath=false)
@@ -214,8 +258,34 @@ if [ "$functions" -gt 0 ]; then
 else
   cov="n/a"
 fi
-printf 'SUMMARY files=%d functions=%d documented=%d undocumented=%d added_undocumented=%d skipped=%d coverage=%s%%\n' \
-  "$files" "$functions" "$documented" "$undocumented" "$added_undoc" "$skipped" "$cov"
 
-[ "$CHECK" = 1 ] && [ "$added_undoc" -gt 0 ] && exit 1
-exit 0
+# Leg B verdict, in integers so exactly-the-threshold is unambiguous: fail iff d/n < T/100.
+# The denominator is touched documented + undocumented functions; skipped files contribute none.
+if [ "$functions" -eq 0 ]; then
+  legb="n/a"
+elif [ $((documented * 100)) -lt $((DOCSTRING_THRESHOLD * functions)) ]; then
+  legb=fail
+else
+  legb=pass
+fi
+printf 'SUMMARY files=%d functions=%d documented=%d undocumented=%d added_undocumented=%d skipped=%d coverage=%s%% threshold=%d legb=%s\n' \
+  "$files" "$functions" "$documented" "$undocumented" "$added_undoc" "$skipped" "$cov" "$DOCSTRING_THRESHOLD" "$legb"
+
+[ "$CHECK" = 1 ] || exit 0
+rc=0
+[ "$added_undoc" -gt 0 ] && rc=1
+case "$legb" in
+  n/a)
+    printf 'docstring-scan: leg B: no verdict: 0 touched functions (a vacuous ratio is neither a pass nor a fail)\n' >&2 ;;
+  fail)
+    # String comparison is sound: both operands are YYYY-MM-DD, format-validated above.
+    if [[ "$TODAY" < "$ENFORCE_DOCSTRINGS_FROM" ]]; then
+      printf 'docstring-scan: WARN leg B: %d of %d touched functions documented (%s%%) is below %d%%; NOT YET ENFORCED: this becomes a blocking failure on %s (today is %s)\n' \
+        "$documented" "$functions" "$cov" "$DOCSTRING_THRESHOLD" "$ENFORCE_DOCSTRINGS_FROM" "$TODAY" >&2
+    else
+      printf 'docstring-scan: FAIL leg B: %d of %d touched functions documented (%s%%) is below %d%% (enforced since %s)\n' \
+        "$documented" "$functions" "$cov" "$DOCSTRING_THRESHOLD" "$ENFORCE_DOCSTRINGS_FROM" >&2
+      rc=1
+    fi ;;
+esac
+exit "$rc"
