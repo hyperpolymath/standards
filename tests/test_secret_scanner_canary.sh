@@ -56,26 +56,24 @@ fi
 # skipping would restore the very "gate that cannot fail" this test exists to
 # prevent.
 # ---------------------------------------------------------------------------
-python3 - "$REUSABLE" "$WORK/rust-secrets.sh" <<'PY' || { echo "::error::canary: could not extract the rust-secrets step from the reusable"; exit 1; }
-import sys
-try:
-    import yaml
-except ImportError:
-    sys.stderr.write("PyYAML is required to run the canary (pip install pyyaml)\n")
-    sys.exit(1)
-
-src, dst = sys.argv[1], sys.argv[2]
-doc = yaml.safe_load(open(src))
-steps = doc["jobs"]["rust-secrets"]["steps"]
-step = next(s for s in steps if s.get("name", "").startswith("Check for hardcoded"))
-env = step.get("env", {}) or {}
-cutoff = env.get("ENFORCE_RUST_WIDE_SCAN_FROM", "2026-08-21")
-with open(dst, "w") as fh:
-    fh.write("#!/usr/bin/env bash\nset -uo pipefail\n")
-    fh.write('ENFORCE_RUST_WIDE_SCAN_FROM="${ENFORCE_RUST_WIDE_SCAN_FROM:-%s}"\n' % cutoff)
-    fh.write(step["run"])
-print("extracted rust-secrets step (cutoff %s)" % cutoff)
-PY
+# Read with yq, never a hand parser (YAML-POLICY Y-1). `-e` makes a missing
+# job, step or `run:` body exit non-zero instead of printing "null".
+extract_step() {
+  # Writes the first rust-secrets step named "Check for hardcoded…" from the
+  # reusable workflow ($1) as a runnable script ($2), carrying its scan cutoff.
+  local src=$1 dst=$2 sel cutoff body
+  command -v yq >/dev/null 2>&1 || { echo "yq is required to run the canary" >&2; return 1; }
+  sel='[.jobs["rust-secrets"].steps[] | select((.name // "") | test("^Check for hardcoded"))][0]'
+  body=$(yq -e "$sel | .run" "$src") || return 1
+  cutoff=$(yq "$sel | .env.ENFORCE_RUST_WIDE_SCAN_FROM // \"2026-08-21\"" "$src") || return 1
+  {
+    printf '#!/usr/bin/env bash\nset -uo pipefail\n'
+    printf 'ENFORCE_RUST_WIDE_SCAN_FROM="${ENFORCE_RUST_WIDE_SCAN_FROM:-%s}"\n' "$cutoff"
+    printf '%s\n' "$body"
+  } > "$dst"
+  echo "extracted rust-secrets step (cutoff $cutoff)"
+}
+extract_step "$REUSABLE" "$WORK/rust-secrets.sh" || { echo "::error::canary: could not extract the rust-secrets step from the reusable"; exit 1; }
 
 SCAN="$WORK/rust-secrets.sh"
 chmod +x "$SCAN"
