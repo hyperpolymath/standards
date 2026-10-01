@@ -131,8 +131,12 @@ process_repo() {
     fi
     printf '%s\n' "$files" | grep -q '^\.github/workflows/' || continue
     work="$(mktemp -d)"
-    if ! git clone --quiet --depth 1 --branch "$ref" \
-         "https://x-access-token:$token@github.com/$repo.git" "$work/r" 2>/dev/null; then
+    # The token travels as a header from the environment: never in argv, and
+    # never persisted in the checkout's remote.origin.url (CWE-522).
+    if ! GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader \
+         GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$token" | base64 -w0)" \
+         git clone --quiet --depth 1 --branch "$ref" \
+         "https://github.com/$repo.git" "$work/r" 2>/dev/null; then
       printf '%s#%s\tclone-failed\n' "$repo" "$num"; rm -rf "$work"; continue
     fi
     if [ "$(git -C "$work/r" rev-parse HEAD)" != "$sha" ]; then
@@ -153,8 +157,10 @@ process_repo() {
 
 # Enumerate every repository visible to each owner's installation token (or
 # only $1), process them, and print the denominator alongside the outcomes.
+# An owner whose enumeration fails is named and skipped, so the other owner is
+# still swept; the run then exits non-zero.
 main() {
-  local only="${1:-}" pair owner token repos total=0 seen tokens="${REGEN_TOKENS:-}"
+  local only="${1:-}" pair owner token repos total=0 seen failed=0 tokens="${REGEN_TOKENS:-}"
   if [ -z "${tokens// /}" ]; then
     echo "::warning::regen-dependabot-locks: no App installation token (vars.APP_ID / secrets.APP_PRIVATE_KEY unset or the App is not installed). Nothing was examined."
     return 0
@@ -168,7 +174,8 @@ main() {
     else
       repos="$(GH_TOKEN="$token" "$GH_BIN" api --paginate 'installation/repositories?per_page=100' \
                --jq '.repositories[] | select(.archived | not) | .full_name')" || {
-        echo "::error::could not enumerate $owner's installation repositories"; return 1; }
+        echo "::error::could not enumerate $owner's installation repositories — NOT examined"
+        failed=1; continue; }
     fi
     seen=$(printf '%s\n' "$repos" | grep -c .)
     total=$((total + seen))
@@ -178,6 +185,7 @@ main() {
     done <<< "$repos"
   done
   echo "examined $total repositories"
+  return "$failed"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

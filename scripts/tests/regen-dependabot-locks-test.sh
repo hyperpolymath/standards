@@ -65,6 +65,10 @@ if [ "$1 $2" = "api --paginate" ] && [[ "$3" == repos/*/pulls\?* ]]; then
   [ -n "${PULLS_FAIL:-}" ] && exit 1
   echo '[]'; exit 0
 fi
+if [ "$1 $2" = "api --paginate" ] && [[ "$3" == installation/repositories* ]]; then
+  [ "$GH_TOKEN" = bad ] && exit 1
+  echo "$GH_TOKEN/r"; exit 0
+fi
 if [ "$1 $2" = "api graphql" ]; then
   cat > "$GH_CAPTURE"
   echo 2222222222222222222222222222222222222222
@@ -162,6 +166,15 @@ out="$(REGEN_TOKENS='hyperpolymath= metadatastician=' main 2>&1)"; rc=$?
 expect "empty per-owner tokens (workflow shape): exits 0" 0 "$rc"
 expect "…and names both owners as NOT examined" 2 "$(printf '%s' "$out" | grep -c 'NOT examined')"
 expect "…and claims zero repositories" 1 "$(printf '%s' "$out" | grep -c '^examined 0 repositories$')"
+
+# One owner's enumeration failure must not stop the other owner's sweep.
+out="$(CONTENTS=404 REGEN_TOKENS='hyperpolymath=bad metadatastician=metadatastician' main 2>&1)"; rc=$?
+expect "an owner's failed enumeration: exits non-zero" 1 "$rc"
+expect "…names that owner as NOT examined" 1 "$(printf '%s' "$out" | grep -c "enumerate hyperpolymath's.*NOT examined")"
+expect "…and still sweeps the other owner" 1 "$(printf '%s' "$out" | grep -c '^metadatastician: 1 repositories in scope$')"
+
+# The clone URL must carry no credential (CWE-522).
+expect "no token in any clone URL" 0 "$(grep -c 'x-access-token:\$token@' "$TARGET")"
 
 echo
 echo "Total: $pass passed, $fail failed"
