@@ -163,6 +163,19 @@ export LOCK_GATE_WORKFLOW="$WORK/.github/workflows/governance-reusable.yml"
 out="$(run "$NEW")"; rc=$?
 check "missing ref: is refused" 1 "$rc" "$out" "would follow the default branch"
 
+# 11. The reusable's own commit is fresh by construction and needs no compare.
+write_fixture '${{ job.workflow_sha }}'
+out="$(run "$NEW")"; rc=$?
+check "job.workflow_sha is accepted" 0 "$rc" "$out" "fresh by construction"
+
+# 12. The CALLER's commit is not the reusable's: both forms stay refused.
+write_fixture '${{ github.workflow_sha }}'
+out="$(run "$NEW")"; rc=$?
+check "github.workflow_sha (caller's) is refused" 1 "$rc" "$out" "not an immutable 40-hex commit"
+write_fixture '${{ github.sha }}'
+out="$(run "$NEW")"; rc=$?
+check "github.sha (caller's) is refused" 1 "$rc" "$out" "not an immutable 40-hex commit"
+
 # 10. Staging nothing must not be a free pass.
 cat > "$WORK/.github/workflows/governance-reusable.yml" <<YAML
 jobs:
