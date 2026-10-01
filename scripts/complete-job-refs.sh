@@ -43,6 +43,7 @@ done | LC_ALL=C sort -u >> "$WANT"
 # 2. rewrite the workflows: section, merging wanted job refs into each path entry
 LC_ALL=C awk -v want="$WANT" '
 BEGIN { while ((getline l < want) > 0) { split(l, w, "\t"); WANT[w[1]] = WANT[w[1]] SUBSEP w[2] } }
+# flush: write the current workflow entry, merged with its wanted refs, sorted and deduplicated.
 function flush(   i, n, arr, j, k, seen, out, c) {
   if (cur == "") return
   SEEN[cur] = 1
@@ -57,7 +58,8 @@ function flush(   i, n, arr, j, k, seen, out, c) {
   for (i = 1; i <= c; i++) printf "        - '\''%s'\''\n", out[i]
   cur = ""; items = ""
 }
-function rest(   k, ks, c, i, j, t) {  # wanted paths the lock has no entry for yet
+# rest: create entries for wanted workflow paths the lock has no entry for yet.
+function rest(   k, ks, c, i, j, t) {
   c = 0; for (k in WANT) if (!(k in SEEN)) ks[++c] = k
   for (i = 1; i < c; i++) for (j = i + 1; j <= c; j++) if (ks[j] < ks[i]) { t = ks[i]; ks[i] = ks[j]; ks[j] = t }
   for (i = 1; i <= c; i++) { cur = ks[i]; items = ""; flush() }
@@ -65,8 +67,7 @@ function rest(   k, ks, c, i, j, t) {  # wanted paths the lock has no entry for 
 /^workflows:[[:space:]]*$/ { print; inwf = 1; sawwf = 1; next }
 inwf && /^[a-z_]+:/ { flush(); rest(); inwf = 0; print; next }
 inwf {
-  if (match($0, /^    '\''[^'\'']+'\'':/)) {
-    flush()
+  if (match($0, /^    '\''[^'\'']+'\'':/)) { flush()
     cur = $0; sub(/^    '\''/, "", cur); sub(/'\''.*$/, "", cur)
     items = ""
     next

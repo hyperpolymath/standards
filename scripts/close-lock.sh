@@ -29,8 +29,11 @@ L="$WF/actions.lock"
 GH_BIN="${GH_BIN:-gh}"
 [ -f "$L" ] || { echo "close-lock: no $L" >&2; exit 1; }
 SC="$(mktemp -d)"; trap 'rm -rf "$SC"' EXIT
+# keys: list the dependency record keys already present in the lock.
 keys()   { awk '/^dependencies:/{f=1;next} f&&match($0,/^    '\''[^'\'']+'\'':$/){k=$0;sub(/^    '\''/,"",k);sub(/'\'':$/,"",k);print k}' "$L" | LC_ALL=C sort -u; }
+# nested: list the refs that dependency records themselves depend on.
 nested() { awk '/^dependencies:/{f=1} f&&match($0,/^            - '\''[^'\'']+'\''/){k=$0;sub(/^            - '\''/,"",k);sub(/'\''.*$/,"",k);print k}' "$L" | LC_ALL=C sort -u; }
+# wfrefs: list every ref named under the workflows: section.
 wfrefs() { awk '/^workflows:/{f=1;next} f&&/^[a-z_]+:/{f=0} f&&match($0,/^        - '\''[^'\'']+'\''/){k=$0;sub(/^        - '\''/,"",k);sub(/'\''.*$/,"",k);print k}' "$L" | LC_ALL=C sort -u; }
 
 skipped=0
@@ -64,6 +67,7 @@ for pass in 1 2 3 4 5; do
   BEGIN { nn=0; while ((getline l < newf) > 0) {
       if (l ~ /^    '\''[^'\'']+'\'':$/) { nn++; k=l; sub(/^    '\''/,"",k); sub(/'\'':$/,"",k); NK[nn]=k; NB[nn]=l }
       else NB[nn] = NB[nn] "\n" l } }
+  # emit_lt: print each pending new record whose key sorts before key.
   function emit_lt(key,   i) { for (i=1;i<=nn;i++) if (!used[i] && NK[i] < key) { print NB[i]; used[i]=1 } }
   /^dependencies:[[:space:]]*$/ { print; indep=1; next }
   indep && /^[a-z_]+:/ { for (i=1;i<=nn;i++) if (!used[i]) { print NB[i]; used[i]=1 } indep=0; print; next }

@@ -18,10 +18,14 @@ pass=0; fail=0
 A=1111111111111111111111111111111111111111
 S=5555555555555555555555555555555555555555
 
+# ok: record and print a passing assertion.
 ok()  { echo "PASS: $1"; pass=$((pass + 1)); }
+# bad: record and print a failing assertion.
 bad() { echo "FAIL: $1"; fail=$((fail + 1)); }
+# run: execute the target inside fixture repo $1, capturing all output.
 run() { (cd "$WORK/$1" && bash "$TARGET") 2>&1; }
 
+# mkrepo: create fixture repo $1 with job-level, local, step-level and commented-out refs.
 mkrepo() {
   local d="$WORK/$1/.github/workflows"; mkdir -p "$d"
   cat > "$d/ci.yml" <<EOF

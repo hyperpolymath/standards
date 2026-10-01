@@ -19,7 +19,9 @@ A=1111111111111111111111111111111111111111
 B=2222222222222222222222222222222222222222
 C=3333333333333333333333333333333333333333
 
+# ok: record and print a passing assertion.
 ok()  { echo "PASS: $1"; pass=$((pass + 1)); }
+# bad: record and print a failing assertion.
 bad() { echo "FAIL: $1"; fail=$((fail + 1)); }
 
 # Stub: repos/<o>/<n> → "7 9"; commits/v1 → $C; anything under o/missing → an
@@ -46,6 +48,7 @@ mklock() {
     echo 'dependencies:'; cat; } > "$d/actions.lock"
   printf '%s' "$d"
 }
+# run: execute the target from the fixture repo root with the stub gh binary.
 run() { (cd "$1/../.." && GH_BIN="$WORK/gh" bash "$TARGET") 2>&1; }
 
 echo "=== closes a dangling workflows: edge ==="

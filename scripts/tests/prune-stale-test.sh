@@ -19,7 +19,9 @@ A=1111111111111111111111111111111111111111
 B=2222222222222222222222222222222222222222
 S=5555555555555555555555555555555555555555
 
+# ok: record and print a passing assertion.
 ok()  { echo "PASS: $1"; pass=$((pass + 1)); }
+# bad: record and print a failing assertion.
 bad() { echo "FAIL: $1"; fail=$((fail + 1)); }
 
 d="$WORK/r/.github/workflows"; mkdir -p "$d"
