@@ -134,6 +134,57 @@ jobs:
 YAML
 
 echo
+echo "== KYAML / flow-style workflows (YAML-POLICY Y-3) =="
+
+# A KYAML file nests every key inside `{ … }`, so the indentation scanner sees
+# one scope. These cases prove the flow path normalises it first: it must not
+# go blind (miss a real duplicate) and must not cry wolf on sibling scopes.
+
+run_case "a clean KYAML workflow is clean" 0 "clean" <<'YAML'
+# SPDX-License-Identifier: MPL-2.0
+{
+  name: "demo",
+  jobs: {
+    a: { runs-on: "ubuntu-latest", steps: [{ run: "true" }] },
+    b: { runs-on: "ubuntu-latest", steps: [{ run: "true" }] },
+  },
+}
+YAML
+
+run_case "a nested duplicate in a KYAML workflow is rejected" 1 "'runs-on'" <<'YAML'
+{
+  name: "demo",
+  jobs: {
+    build: {
+      runs-on: "ubuntu-latest",
+      runs-on: "ubuntu-24.04",
+    },
+  },
+}
+YAML
+
+run_case "a duplicate inside a one-line flow mapping is rejected" 1 "'runs-on'" <<'YAML'
+{
+  name: "demo",
+  jobs: { build: { runs-on: "ubuntu-latest", runs-on: "ubuntu-24.04" } },
+}
+YAML
+
+run_case "a top-level duplicate in a KYAML workflow is rejected" 1 "duplicate key(s)" <<'YAML'
+{
+  name: "demo",
+  jobs: {},
+  name: "demo again",
+}
+YAML
+
+run_case "an unparseable flow workflow fails closed" 1 "" <<'YAML'
+{
+  name: "demo",
+  jobs: {
+YAML
+
+echo
 echo "== directory scanning =="
 
 wfdir="$TMP/wfdir"

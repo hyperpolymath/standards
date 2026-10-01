@@ -176,10 +176,10 @@ echo "== orphan reusable pins — the four #782 witness SHAs =="
 #
 # The old predicate passed the first three, which is exactly the class this
 # gate now exists to fail on.
-SHA_W1=7fdc27050000000000000000000000000000000000
-SHA_W2=892497fe0000000000000000000000000000000000
+SHA_W1=7fdc270500000000000000000000000000000000
+SHA_W2=892497fe00000000000000000000000000000000
 SHA_W3=4696052100000000000000000000000000000000
-SHA_W4=5b1d00220000000000000000000000000000000000
+SHA_W4=5b1d002200000000000000000000000000000000
 SHA_OK=81dbf2dd00000000000000000000000000000000
 
 mk_reusable "$TMP/w1" "$SHA_W1"
@@ -289,6 +289,61 @@ jobs:
 YAML
 STUB_COMMITS=200 \
   expect "a subpath pin is resolved at the repository level" 0 "Checking 2 unique action pin(s)" "$TMP/dedup"
+
+echo
+echo "== YAML syntax independence (YAML-POLICY Y-1 / Y-3) =="
+
+# A KYAML (flow-style) workflow quotes its values. The old line grep extracted
+# NOTHING from it and reported "nothing to check" -- a dead pin sailed through.
+rm -rf "$TMP/kyaml"; mkdir -p "$TMP/kyaml/.github/workflows"
+cat > "$TMP/kyaml/.github/workflows/k.yml" <<YAML
+{
+  jobs: {
+    j: {
+      steps: [{
+        uses: "actions/checkout@${SHA_A}", # v6
+      }],
+    },
+  },
+}
+YAML
+STUB_COMMITS=200 \
+  expect "a KYAML pin is extracted and checked" 0 "Checking 1 unique action pin(s)" "$TMP/kyaml"
+STUB_COMMITS=404 STUB_REPO=200 \
+  expect "a dead KYAML pin fails (mutant: unresolvable SHA)" 1 "SHA-NOT-FOUND" "$TMP/kyaml"
+
+# Text that merely mentions `uses:` -- a header usage example, a run: body --
+# is not a ref GitHub resolves, and must not be probed.
+rm -rf "$TMP/textual"; mkdir -p "$TMP/textual/.github/workflows"
+cat > "$TMP/textual/.github/workflows/t.yml" <<YAML
+# Usage:
+#       uses: actions/checkout@${SHA_B}
+jobs:
+  j:
+    steps:
+      - run: |
+          echo "uses: actions/checkout@${SHA_B}"
+      - uses: actions/checkout@${SHA_A}
+YAML
+STUB_COMMITS=200 \
+  expect "uses: in a comment or run: body is not a pin" 0 "Checking 1 unique action pin(s)" "$TMP/textual"
+
+# A ref longer than 40 hex is not a commit SHA. The old unanchored grep
+# truncated it to 40 and probed that instead -- which is how this suite's own
+# witness fixtures carried 44-hex SHAs unnoticed until 2026-10-01.
+rm -rf "$TMP/long"; mkdir -p "$TMP/long/.github/workflows"
+cat > "$TMP/long/.github/workflows/l.yml" <<YAML
+jobs:
+  j:
+    steps:
+      - uses: actions/checkout@${SHA_A}abcd
+YAML
+expect "a 44-hex ref is not taken as a 40-hex pin" 0 "nothing to check" "$TMP/long"
+
+# A file the parser rejects must fail closed: its pins would go unchecked.
+rm -rf "$TMP/broken"; mkdir -p "$TMP/broken/.github/workflows"
+printf 'jobs: {\n  j: [\n' > "$TMP/broken/.github/workflows/b.yml"
+expect "an unparseable workflow fails closed" 1 "yq could not parse" "$TMP/broken"
 
 echo
 echo "check-action-pins-resolve regression: $pass passed, $fail failed"

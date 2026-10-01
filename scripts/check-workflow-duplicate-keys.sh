@@ -111,10 +111,43 @@ for t in "${targets[@]}"; do
   fi
 done
 
+# Succeed when the file is a flow-style (KYAML) document: its first line that is
+# not blank, a comment or a `---` marker opens a `{` mapping or `[` sequence.
+is_flow_document() {
+  awk '
+    { line = $0; sub(/\r$/, "", line); sub(/^[ \t]+/, "", line) }
+    line == "" || substr(line, 1, 1) == "#" || line ~ /^---[ \t]*$/ { next }
+    { exit (substr(line, 1, 1) == "{" || substr(line, 1, 1) == "[") ? 0 : 1 }
+    END { if (NR == 0) exit 1 }
+  ' "$1"
+}
+
+# WHY FLOW DOCUMENTS ARE NORMALISED FIRST. scan_one walks BLOCK structure by
+# indentation; a KYAML file (YAML-POLICY Y-3) puts every sibling on its own
+# line inside `{ … }`, so the walker sees each step's keys as repeats of the
+# previous step's and reports phantom duplicates (14 on the provisioning pilot,
+# measured 2026-10-01). `yq -P` rewrites flow as block while KEEPING duplicate
+# keys (it works on the node tree, not a map), so the unchanged scanner then
+# answers the same question it answers for block files. Reported line numbers
+# refer to that normalised form, and the message says so.
 failed=0
+norm="$(mktemp)"
+trap 'rm -f "$norm"' EXIT
 for f in "${files[@]}"; do
-  out="$(scan_one "$f")" || {
-    detail="$(printf '%s' "$out" | awk -F'|' '{printf "%s\x27%s\x27 (line %s)", sep, $1, $2; sep=", "}')"
+  src="$f" where=""
+  if is_flow_document "$f"; then
+    if ! yq -P '.' "$f" > "$norm" 2> "$norm.err"; then
+      echo "::error file=${f}::not parseable as YAML: $(head -c 300 "$norm.err")"
+      echo "FAIL ${f}: not parseable as YAML (yq -P): $(head -c 300 "$norm.err")"
+      rm -f "$norm.err"
+      failed=$((failed + 1))
+      continue
+    fi
+    rm -f "$norm.err"
+    src="$norm" where=" of the block-normalised form (yq -P)"
+  fi
+  out="$(scan_one "$src")" || {
+    detail="$(printf '%s' "$out" | awk -F'|' -v w="$where" '{printf "%s\x27%s\x27 (line %s%s)", sep, $1, $2, w; sep=", "}')"
     echo "::error file=${f}::duplicate key(s): ${detail}"
     echo "FAIL ${f}: duplicate key(s): ${detail}"
     failed=$((failed + 1))

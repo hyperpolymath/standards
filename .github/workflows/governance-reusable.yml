@@ -1298,6 +1298,16 @@ jobs:
       - name: Check SPDX headers + permissions
         run: |
           failed=0
+          # The permissions verdict is read with yq (YAML-POLICY Y-1): the old
+          # `grep -q "^permissions:"` FALSELY FAILED every KYAML workflow,
+          # whose keys sit indented inside `{ … }`. yq ships on GitHub-hosted
+          # Ubuntu; a runner without it (inputs.runs-on) keeps the old line
+          # test, which is still right for block-style files, and says so.
+          have_yq=1
+          command -v yq >/dev/null 2>&1 || {
+            have_yq=0
+            echo "::warning::yq not on this runner -- permissions read by line grep; a KYAML workflow will be misreported"
+          }
           for file in .github/workflows/*.yml .github/workflows/*.yaml; do
             [ -f "$file" ] || continue
             # ⚠ SCAN THE HEADER BLOCK, NOT LINE 1. REUSE places the identifier
@@ -1317,7 +1327,13 @@ jobs:
                  | grep -q "^# SPDX-License-Identifier:"; then
               echo "ERROR: $file has no SPDX-License-Identifier in its header comment block"; failed=1
             fi
-            if ! grep -q "^permissions:" "$file"; then
+            if [ "$have_yq" -eq 1 ]; then
+              if ! verdict="$(yq 'has("permissions")' "$file" 2>&1)"; then
+                echo "ERROR: $file is not parseable as YAML: $verdict"; failed=1
+              elif [ "$verdict" != "true" ]; then
+                echo "ERROR: $file missing top-level 'permissions:' declaration"; failed=1
+              fi
+            elif ! grep -q "^permissions:" "$file"; then
               echo "ERROR: $file missing top-level 'permissions:' declaration"; failed=1
             fi
           done

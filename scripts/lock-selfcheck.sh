@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
 # lock-selfcheck.sh — is a given `standards` commit SAFE TO PIN A CALLER TO?
 #
 # WHY THIS EXISTS
@@ -38,7 +39,6 @@
 # (a garbage-collected commit is the general case). Reachability is a
 # SEPARATE probe and must be made against the remote.
 #
-# SPDX-License-Identifier: MPL-2.0
 
 set -uo pipefail
 
@@ -73,6 +73,12 @@ normalise_ref() {
 }
 
 overall_rc=0
+
+# The workflows are read with yq (YAML-POLICY Y-1); without it nothing is examined.
+if ! command -v yq >/dev/null 2>&1; then
+  echo "lock-selfcheck: yq not found -- it reads the workflows (YAML-POLICY Y-1)" >&2
+  exit 2
+fi
 
 for SHA in "$@"; do
   echo "=============================================================="
@@ -140,13 +146,18 @@ for SHA in "$@"; do
   : > "$TMP/missing"
   : > "$TMP/unkeyed_wf"
   : > "$TMP/scanned"
+  : > "$TMP/unparsed"
 
   while IFS= read -r wf; do
     [ -n "$wf" ] || continue
     git -C "$STANDARDS_DIR" show "${SHA}:${wf}" 2>/dev/null > "$TMP/wfbody" || continue
-    # Extract every `uses:` value, strip inline comments and quotes.
-    /usr/bin/grep -hoE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*[^[:space:]#]+' "$TMP/wfbody" \
-      | sed -E 's/.*uses:[[:space:]]*//; s/^["\x27]//; s/["\x27]$//' \
+    # Extract every `uses:` VALUE with the YAML parser (YAML-POLICY Y-1). A
+    # line grep only sees block style: on a KYAML workflow it captured
+    # `…@sha",` and reported a keyed ref as POISON. A file yq cannot parse is
+    # recorded and fails the SHA below -- its refs went unexamined.
+    # Measured 2026-10-01 on main: same 111 (workflow, ref) pairs as the grep.
+    { yq -r '.. | select(tag == "!!map") | select(has("uses")) | .uses | select(tag == "!!str")' "$TMP/wfbody" \
+        || printf '%s\n' "$wf" >> "$TMP/unparsed"; } \
       | while IFS= read -r ref; do
           [ -n "$ref" ] || continue
           case "$ref" in
@@ -196,7 +207,11 @@ for SHA in "$@"; do
     cut -f1 "$TMP/unkeyed_wf" | sort -u | sed 's/^/          /'
   fi
 
-  if [ "$n_missing" -eq 0 ]; then
+  if [ -s "$TMP/unparsed" ]; then
+    echo "  VERDICT: UNEXAMINED — yq could not parse $(sort -u "$TMP/unparsed" | wc -l) workflow(s); their refs were not checked:"
+    sort -u "$TMP/unparsed" | sed 's/^/             /'
+    overall_rc=1
+  elif [ "$n_missing" -eq 0 ]; then
     echo "  VERDICT: SELF-CONSISTENT — every action ref used is keyed in this SHA's own lock."
     echo "           (Reachability at the remote is NOT proven by this check.)"
   else
