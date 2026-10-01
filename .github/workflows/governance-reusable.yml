@@ -7,6 +7,14 @@ name: Governance Reusable Workflow
 on:
   workflow_call:
     inputs:
+      hypatia-ref:
+        description: >-
+          Hypatia commit the baseline job builds, as a 40-hex SHA, or "HEAD"
+          for a canary run. Kept in step with hypatia-scan-reusable.yml's
+          default; a floating HEAD here broke every baseline caller when
+          hypatia#895 changed the emitted severity of `warn` findings.
+        type: string
+        default: 51ab6496bf47e30a0576d503df31fec30f3cfe56
       runs-on:
         description: Runner label for all governance jobs
         type: string
@@ -222,20 +230,25 @@ jobs:
           elixir-version: '1.19.4'
           otp-version: '28.3'
 
-      - name: Resolve Hypatia HEAD commit
+      - name: Resolve Hypatia scanner commit
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         id: hypatia-rev
+        env:
+          HYPATIA_REF: ${{ inputs.hypatia-ref }}
         run: |
-          # Pin the cache to the *current* Hypatia main tip. Resolved before the
-          # cache step because cache restore happens before the clone, so the key
-          # cannot hash a not-yet-cloned tree — it must hash the remote ref.
-          sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
+          # Resolved before the cache step because cache restore happens before
+          # the clone, so the key must hash the commit, not a cloned tree.
+          if [ "$HYPATIA_REF" = "HEAD" ]; then
+            sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
+          else
+            sha="$HYPATIA_REF"
+          fi
           if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
+            echo "ERROR: hypatia-ref must be a 40-hex commit SHA or HEAD (got '$HYPATIA_REF')" >&2
             exit 1
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "Resolved hypatia HEAD: $sha"
+          echo "Resolved hypatia scanner commit: $sha"
 
       - name: Cache Hex/Mix and Scanner Build
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
@@ -1399,19 +1412,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          # ⚠ ENFORCED, no longer a request: scripts/check-lock-gate-pin-freshness.sh
-          # fails Self Test unless this commit already contains everything on
-          # main across the sparse-checkout list below. Change one of those
-          # files and the NEXT pull request must bump this line — it cannot be
-          # this PR's own merge commit, which does not exist yet, so the pin is
-          # one change behind by construction and that is the intended shape.
-          # Pinned to an immutable commit for the same reason as the dupkey
-          # helpers in workflow-lint: following `main` would let an edit in
-          # standards change the verdict of every already-pinned caller with no
-          # review in their repositories. This pin is invisible to the caller's
-          # `uses:` ref and to actions.lock — it is a third, independent pin,
-          # which is precisely how it went stale across standards#946.
-          ref: 5f82b635c5da5c3df44d5a0caa8983d9b95e0db9
+          # The reusable's OWN commit — the one the caller's `uses:` ref
+          # resolved to — so the lock tooling is exactly what the caller
+          # pinned, never older and never following `main`. This replaced a
+          # hardcoded third pin that was one change behind by construction and
+          # went stale twice (standards#946, then #1119);
+          # scripts/check-lock-gate-pin-freshness.sh accepts only this
+          # expression or a fresh 40-hex SHA.
+          ref: ${{ job.workflow_sha }}
           path: .standards-lock
           persist-credentials: false
           sparse-checkout: |

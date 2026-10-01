@@ -205,8 +205,8 @@ assert "unresolvable profile is NAMED in a warning, read as undeclared" 0 "could
 assert "unresolvable profile + real guix.scm passes before the profile is read" 0 "Guix package management detected" \
   env PKG_TODAY="$AFTER" "$PKG" "$r"
 rm "$r/guix.scm"
-# A missing resolver is a deployment defect and must refuse.
-assert "missing capability resolver refuses" 1 "capability resolver missing" \
+# Old-shape callers ship this script without its resolver: warn, never redden.
+assert "missing capability resolver warns, reads as undeclared" 0 "capability resolver missing" \
   env PKG_TODAY="$AFTER" RSR_PROFILE_CHECKER=/nonexistent "$PKG" "$r"
 
 assert "malformed cutoff refuses to run" 1 "is not YYYY-MM-DD" \
