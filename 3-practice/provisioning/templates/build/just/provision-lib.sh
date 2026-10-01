@@ -353,7 +353,18 @@ mise_lock_gaps() {
       END { exit !ok }' mise.lock || miss="$miss$t "
   done
   [ -n "$miss" ] && { echo "mise.lock does not pin: ${miss% }"; return; }
-  grep -q '^checksum = "sha256:' mise.lock || echo "mise.lock carries no checksums"
+  # Checksums are per artefact: every [tools.X."platforms.P"] table needs its own
+  # sha256, so one checksummed tool cannot vouch for another. A tool with no
+  # platform tables has no artefact to checksum (core:rust installs through
+  # rustup, cargo: builds from source), which is what `mise lock` writes for it.
+  miss=$(awk '
+    function close_table() { if (p != "" && !c) printf "%s ", p; p = "" }
+    /^\[tools\..*platforms\./ { close_table(); p = $0; c = 0
+      gsub(/^\[tools\.|\]$|"/, "", p); sub(/\.platforms\./, "/", p); next }
+    /^\[/ { close_table() }
+    /^checksum = "sha256:[0-9a-f]+"/ { c = 1 }
+    END { close_table() }' mise.lock)
+  [ -z "$miss" ] || echo "mise.lock has no sha256 for: ${miss% }"
 }
 # Why a Guix file is a stub, or nothing when it is real. The test is positive: a
 # guix.scm must define every field a package needs, not merely avoid known stub
