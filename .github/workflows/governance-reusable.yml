@@ -289,14 +289,16 @@ jobs:
 
       # A reusable workflow only auto-checks-out its own YAML, not sibling
       # scripts. Sparse-check-out standards' scripts/ to get apply-baseline.sh,
-      # mirroring the language-policy job below. Pinned to main because
-      # github.workflow_sha resolves to the *caller* repo's SHA (which would 404).
+      # mirroring the language-policy job below. Pinned to job.workflow_sha (this
+      # reusable's own standards commit), NOT main: a script fetched from main
+      # changed every pinned caller's verdict on each standards push. (Unlike
+      # github.workflow_sha, which is the caller's SHA, job.workflow_sha is ours.)
       - name: Check out standards for the baseline filter
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts
@@ -726,10 +728,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts
+            .machine_readable/template-capability-gates.toml
           sparse-checkout-cone-mode: false
 
       - name: Enforce Guix-only packaging policy
@@ -738,9 +741,15 @@ jobs:
           # checkout before scanning: the gate walks the whole caller tree, so
           # a packaging file shipped inside .standards-checkout/ would satisfy
           # the policy on the caller's behalf (same trap as the baseline job).
-          cp .standards-checkout/scripts/check-package-policy.sh "$RUNNER_TEMP/"
+          # The capability resolver (check-rsr-profile.sh) and its gate table travel
+          # with the checker, in the same relative layout, so applicability is read
+          # from the same standards commit as the policy itself.
+          pkg="$RUNNER_TEMP/pkg-policy"
+          mkdir -p "$pkg/scripts" "$pkg/.machine_readable"
+          cp .standards-checkout/scripts/check-package-policy.sh .standards-checkout/scripts/check-rsr-profile.sh "$pkg/scripts/"
+          cp .standards-checkout/.machine_readable/template-capability-gates.toml "$pkg/.machine_readable/"
           rm -rf .standards-checkout
-          bash "$RUNNER_TEMP/check-package-policy.sh" .
+          bash "$pkg/scripts/check-package-policy.sh" .
 
   security-policy:
     name: Security policy checks
@@ -1050,7 +1059,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts
@@ -1463,7 +1472,9 @@ jobs:
           # redundant direct-SHA conversion; restoring their locked version
           # refs made GitHub's native resolver accept them again.
           if [ -f .github/workflows/actions.lock ]; then
-            gh extension install github/gh-actions-lock
+            # Pinned: an unpinned install let a new verifier release change every
+            # caller's verdict overnight. Bump deliberately, with the gate tests.
+            gh extension install github/gh-actions-lock --pin v0.1.6
           fi
 
           # The gate delegates lockfile verification to the authoritative
@@ -1529,7 +1540,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: standards
       - name: Run trusted-base check on caller repo
         run: |
@@ -1560,7 +1571,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: standards
       - name: Run licence-consistency check on caller repo
         run: |
@@ -1590,7 +1601,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts
@@ -1635,7 +1646,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts

@@ -54,6 +54,15 @@ mkrepo() {
   printf '%s' "$d"
 }
 
+# declare <repo-dir> <capability...> — write an rsr-profile declaring capabilities,
+# so a fixture opts into the packaging criterion (gated, not universal).
+declare() {
+  local d="$1"; shift
+  mkdir -p "$d/.machine_readable"
+  local caps; caps="$(printf '"%s", ' "$@")"
+  printf '[rsr-profile]\ncapabilities = [%s]\n' "${caps%, }" > "$d/.machine_readable/rsr-profile.a2ml"
+}
+
 BEFORE="2026-08-01"   # inside the grace window (cutoff 2026-08-21)
 AFTER="2026-09-01"    # past the cutoff
 
@@ -141,6 +150,65 @@ assert "day before cutoff still in grace" 0 "NOT YET ENFORCED" \
   env DOCS_TODAY="2026-08-20" "$DOCS" "$r"
 
 # Anti-disarm: a malformed cutoff must refuse to run, not silently grace.
+# --- Applicability (2026-10-01): packaging is gated on reproducible-build or
+# container, per rsr-criteria-v2 1.2.1 / 1.2.3 / 8.1.4. Not universal.
+r=$(mkrepo pkg-none-undeclared README.adoc)
+assert "no packaging + no profile is NOT applicable (passes)" 0 "Packaging not applicable" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
+
+r=$(mkrepo pkg-none-docs README.adoc)
+declare "$r" docs-site
+assert "no packaging + profile without the capability passes" 0 "Packaging not applicable" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
+
+# stub_guix <path> — write a template-style guix.scm whose package has no source.
+stub_guix() { printf '(package\n  (name "x")\n  (source #f))\n' > "$1"; }
+r=$(mkrepo pkg-stub-undeclared README.adoc); mkdir -p "$r/build"; stub_guix "$r/build/guix.scm"
+assert "stub guix.scm, capability undeclared: notice, pass" 0 "scaffold stub" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
+
+r=$(mkrepo pkg-stub-declared README.adoc); mkdir -p "$r/build"; stub_guix "$r/build/guix.scm"
+declare "$r" reproducible-build
+assert "stub guix.scm, reproducible-build declared: BLOCKS (8.1.4)" 1 "scaffold stub" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
+
+# Planted positive: declared container + TODO-only template must still fail.
+r=$(mkrepo pkg-container-todo README.adoc)
+printf 'FROM cgr.dev/chainguard/wolfi-base\n# TODO: RUN apk add ...\n' > "$r/Containerfile"
+declare "$r" container
+assert "declared container + TODO-only Containerfile BLOCKS" 1 "Package policy violation" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
+
+# Every Containerfile is tried; .clusterfuzzlite/ never counts and never shadows.
+r=$(mkrepo pkg-container-multi README.adoc)
+mkdir -p "$r/.clusterfuzzlite" "$r/build/container"
+printf 'FROM gcr.io/oss-fuzz-base/base-builder\nRUN echo fuzz\n' > "$r/.clusterfuzzlite/Containerfile"
+printf 'FROM x\n# TODO\n' > "$r/a.Containerfile"
+printf 'FROM x\nRUN true\n' > "$r/build/container/Containerfile"
+declare "$r" container
+assert "active Containerfile found past a stub; .clusterfuzzlite ignored" 0 "build/container/Containerfile" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
+
+r=$(mkrepo pkg-fuzz-only README.adoc)
+mkdir -p "$r/.clusterfuzzlite"
+printf 'FROM gcr.io/oss-fuzz-base/base-builder\nRUN echo fuzz\n' > "$r/.clusterfuzzlite/Containerfile"
+declare "$r" container
+assert ".clusterfuzzlite/Containerfile alone does not satisfy" 1 "Package policy violation" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
+
+r=$(mkrepo pkg-bad-profile README.adoc)
+mkdir -p "$r/.machine_readable"; printf '[rsr-profile]\nrole = "x"\n' > "$r/.machine_readable/rsr-profile.a2ml"
+assert "unresolvable profile is NAMED in a warning, read as undeclared" 0 "could not be resolved" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
+# A profile defect must never redden a repo whose packaging is real.
+: > "$r/guix.scm"
+assert "unresolvable profile + real guix.scm passes before the profile is read" 0 "Guix package management detected" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
+rm "$r/guix.scm"
+# A missing resolver is a deployment defect and must refuse.
+assert "missing capability resolver refuses" 1 "capability resolver missing" \
+  env PKG_TODAY="$AFTER" RSR_PROFILE_CHECKER=/nonexistent "$PKG" "$r"
+
 assert "malformed cutoff refuses to run" 1 "is not YYYY-MM-DD" \
   env ENFORCE_CONTRIBUTING_FROM="soon" "$DOCS" "$r"
 assert "missing repo root errors" 1 "is not a directory" \
@@ -168,6 +236,7 @@ assert "Nix-only packaging warns before retirement" 0 "NOT YET ENFORCED" \
 
 # Same repo, both sides of the cutoff — the self-flipping proof.
 r=$(mkrepo pkg-none README.adoc)
+declare "$r" reproducible-build
 assert "no packaging warns pre-cutoff (no pass claimed)" 0 "NOT YET ENFORCED" \
   env PKG_TODAY="$BEFORE" "$PKG" "$r"
 assert "no packaging BLOCKS post-cutoff" 1 "Package policy violation" \
@@ -176,15 +245,18 @@ assert "no packaging BLOCKS post-cutoff" 1 "Package policy violation" \
 # Tightened predicate: a stray Guile file is not packaging. The replaced step
 # accepted this via `find . -name "*.scm"`.
 r=$(mkrepo pkg-stray-scm src/helpers.scm)
+declare "$r" reproducible-build
 assert "stray .scm does NOT satisfy the policy" 1 "Package policy violation" \
   env PKG_TODAY="$AFTER" "$PKG" "$r"
 
 # Vendored trees must not satisfy the policy on the repo's behalf.
 r=$(mkrepo pkg-vendored node_modules/foo/guix.scm)
+declare "$r" reproducible-build
 assert "guix.scm in node_modules does not count" 1 "Package policy violation" \
   env PKG_TODAY="$AFTER" "$PKG" "$r"
 
 r=$(mkrepo pkg-deps deps/bar/flake.nix)
+declare "$r" reproducible-build
 assert "flake.nix in deps/ does not count" 1 "Package policy violation" \
   env PKG_TODAY="$AFTER" "$PKG" "$r"
 
