@@ -358,6 +358,7 @@ mise_lock_gaps() {
   # platform tables has no artefact to checksum (core:rust installs through
   # rustup, cargo: builds from source), which is what `mise lock` writes for it.
   miss=$(awk '
+    # Print the open platform table as tool/platform when it carried no sha256.
     function close_table() { if (p != "" && !c) printf "%s ", p; p = "" }
     /^\[tools\..*platforms\./ { close_table(); p = $0; c = 0
       gsub(/^\[tools\.|\]$|"/, "", p); sub(/\.platforms\./, "/", p); next }
