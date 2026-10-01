@@ -17,7 +17,7 @@
 #   2  touching a canon artefact forces a version bump
 #
 #   INFORMATIONAL unless --strict:
-#   3  the spine declares criteria_sha256 == canon.lock's criteria hash
+#   3  the spine deed (canon …) clause == canon.lock version + criteria + gates
 #   4  the spine is GREEN against those criteria
 #   5  the canon itself scores Gold on its own applicable set
 #
@@ -259,32 +259,80 @@ echo
 # ===========================================================================
 # ASSERTION 3 — the spine has adopted this canon
 # ===========================================================================
-echo "[3] spine declares the same criteria hash"
+# The pin's home is the spine deed's `(canon …)` clause
+# (1-formats/deed/vocabulary/canon.adoc). It moved there from
+# rsr-profile.a2ml [canon] because D43 freezes .a2ml writes, so that block
+# could not follow a canon release (rsr-template-repo#215). The a2ml is still
+# read as a LEGACY fallback, criteria only, so this gate keeps working against
+# a spine that has not adopted the deed clause yet. Delete the fallback once
+# no spine checkout lacks the clause.
+
+# deed_canon <key> <deed-file>: print the value of :<key> from the
+# deed's one (canon …) clause, or nothing when the clause or key is
+# absent or the clause is not unique. The SAME function is in
+# rsr-template-repo .github/workflows/dogfood-gate.yml and
+# build/just/repo-init.just; keep the three identical.
+deed_canon() {
+    _clauses="$(grep -vE '^[[:space:]]*;' "$2" | awk '{ printf "%s ", $0 }' | grep -oE '[(]canon[[:space:]][^()]*[)]')" || true
+    _n="$(echo "$_clauses" | grep -c '(canon' || true)"
+    if [ "$_n" != "1" ]; then
+        echo "deed_canon: $2 carries ${_n:-0} (canon …) clauses, need exactly 1" >&2
+        return 0
+    fi
+    echo "$_clauses" | grep -oE ':'"$1"'[[:space:]]+"[^"]*"' | head -1 | sed -E 's/^[^"]*"//; s/"$//' || true
+}
+
+# pin_row <name> <want> <got> <shape-regex>: compare one pin. A value of the
+# wrong shape is a failure, never a pass: "" = "" is not lockstep.
+pin_row() {
+  if ! printf '%s' "$3" | grep -qxE "$4"; then
+    softfail "spine deed :$1 is not well-formed (got '${3}')"
+  elif ! printf '%s' "$2" | grep -qxE "$4"; then
+    softfail "canon.lock $1 is not well-formed (got '${2}')"
+  elif [ "$2" = "$3" ]; then
+    pass "spine :$1 == canon.lock ($(echo "$3" | cut -c1-12)…)"
+  else
+    softfail "spine is on a DIFFERENT canon ($1)
+         canon.lock  $(echo "$2" | cut -c1-16)…
+         spine       $(echo "$3" | cut -c1-16)…
+         -> land the spine's adoption AFTER this canon release; run with
+            --strict to make this a hard failure once both are on main."
+  fi
+}
+
+echo "[3] spine declares the same canon pin"
 if [ -z "$SPINE" ] || [ ! -d "$SPINE" ]; then
   skip "no --spine DIR given (set --strict in CI release jobs)"
 else
-  PROFILE="$SPINE/.machine_readable/rsr-profile.a2ml"
-  # Hyphenated is the minority spelling, not a rejected one: this branch stays so
-  # the ~9 repos still carrying it keep resolving.
-  [ -f "$PROFILE" ] || PROFILE="$SPINE/machine-readable/rsr-profile.a2ml"
-  if [ ! -f "$PROFILE" ]; then
-    softfail "spine has no rsr-profile.a2ml at either .machine_readable/ or machine-readable/"
+  DEEDS=()
+  for d in "$SPINE"/*_chora.deed; do [ -f "$d" ] && DEEDS+=("$d"); done
+  HEX='[0-9a-f]{64}'
+  if [ "${#DEEDS[@]}" -gt 1 ]; then
+    softfail "spine carries ${#DEEDS[@]} *_chora.deed files; one-deed-per-repo (#837) expects exactly 1"
+  elif [ "${#DEEDS[@]}" -eq 1 ] && grep -vE '^[[:space:]]*;' "${DEEDS[0]}" | grep -qE '[(]canon([[:space:]]|$)'; then
+    DEED="${DEEDS[0]}"
+    echo "  reading $(basename "$DEED") (canon …)"
+    pin_row version         "$CANON_VERSION"        "$(deed_canon version "$DEED")"         '[0-9]+\.[0-9]+\.[0-9]+'
+    pin_row criteria-sha256 "$(toml_hash criteria)" "$(deed_canon criteria-sha256 "$DEED")" "$HEX"
+    pin_row gates-sha256    "$(toml_hash gates)"    "$(deed_canon gates-sha256 "$DEED")"    "$HEX"
   else
-    WANT="$(toml_hash criteria)"
-    GOT="$(grep -E '^[[:space:]]*criteria_sha256[[:space:]]*=' "$PROFILE" \
-           | grep -oE '[0-9a-f]{64}' | head -1)"
-    if [ -z "$GOT" ]; then
-      softfail "spine rsr-profile.a2ml has no [canon] criteria_sha256
+    PROFILE="$SPINE/.machine_readable/rsr-profile.a2ml"
+    # Hyphenated is the minority spelling, not a rejected one: this branch stays so
+    # the ~9 repos still carrying it keep resolving.
+    [ -f "$PROFILE" ] || PROFILE="$SPINE/machine-readable/rsr-profile.a2ml"
+    if [ ! -f "$PROFILE" ]; then
+      softfail "spine has no (canon …) deed clause and no rsr-profile.a2ml"
+    else
+      echo "  LEGACY: no (canon …) deed clause; reading rsr-profile.a2ml [canon] criteria only"
+      GOT="$(grep -E '^[[:space:]]*criteria_sha256[[:space:]]*=' "$PROFILE" \
+             | grep -oE "$HEX" | head -1)"
+      if [ -z "$GOT" ]; then
+        softfail "spine rsr-profile.a2ml has no [canon] criteria_sha256
          -> the spine still declares conformance in free text. The binding
             does not exist until this is a hash."
-    elif [ "$WANT" = "$GOT" ]; then
-      pass "spine criteria_sha256 == canon.lock criteria ($(echo "$GOT" | cut -c1-12)…)"
-    else
-      softfail "spine is on a DIFFERENT canon
-         canon.lock  $(echo "$WANT" | cut -c1-16)…
-         spine       $(echo "$GOT"  | cut -c1-16)…
-         -> land the spine's adoption AFTER this canon release; run with
-            --strict to make this a hard failure once both are on main."
+      else
+        pin_row criteria-sha256 "$(toml_hash criteria)" "$GOT" "$HEX"
+      fi
     fi
   fi
 fi
