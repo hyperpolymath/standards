@@ -136,8 +136,8 @@ RSR_PROFILE_CHECKER="${RSR_PROFILE_CHECKER:-$SCRIPT_DIR/check-rsr-profile.sh}"
 # Print the repo's effective capabilities, one per line; nothing if it has no
 # profile. A profile the reference checker cannot resolve declares nothing it
 # can read, so it counts as undeclared but is NAMED in a warning (e.g. an
-# explicit `capabilities = []`, which check-rsr-profile.sh rejects). Only a
-# missing resolver, a deployment defect, returns 1.
+# explicit `capabilities = []`, which check-rsr-profile.sh rejects). A missing
+# resolver is handled the same way, also with a named warning.
 effective_capabilities() {
   local f found="" out
   for f in "$ROOT"/.machine_readable/rsr-profile.a2ml "$ROOT"/machine-readable/rsr-profile.a2ml; do
@@ -145,8 +145,11 @@ effective_capabilities() {
   done
   [ -n "$found" ] || return 0
   if [ ! -f "$RSR_PROFILE_CHECKER" ]; then
-    echo "::error::check-package-policy: capability resolver missing at $RSR_PROFILE_CHECKER" >&2
-    return 1
+    # Callers pinned to a governance-reusable from before 2026-10-01 copy this
+    # script alone, so the resolver is absent there by construction. Reddening
+    # them would turn a deployment-shape gap into a policy failure.
+    echo "::warning::check-package-policy: capability resolver missing at $RSR_PROFILE_CHECKER (caller pin predates it); ${found#"$ROOT"/} not read, treating it as declaring no packaging capability." >&2
+    return 0
   fi
   out="$(bash "$RSR_PROFILE_CHECKER" "$ROOT" 2>&1 || true)"
   if ! printf '%s\n' "$out" | grep -q '^effective capabilities:'; then
