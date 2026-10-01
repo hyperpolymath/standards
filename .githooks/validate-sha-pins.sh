@@ -31,6 +31,7 @@
 # rather than skipped silently. The scope matches .githooks/validate-actions-lock.sh,
 # the sibling hook this repo also runs in CI (.github/workflows/actions-lock-gate.yml).
 set -euo pipefail
+command -v yq >/dev/null 2>&1 || { echo "[validate-sha-pins] ERROR: yq not found -- required to read workflows (YAML-POLICY Y-1)" >&2; exit 1; }
 SCAN_PATH="${INPUT_PATH:-.}"
 STAGED_FILES="${INPUT_STAGED_FILES:-}"
 VENDORED_MARK="rhodium-standard-repositories/"
@@ -40,9 +41,11 @@ SKIPPED=0
 
 is_vendored() { case "$1" in *"${VENDORED_MARK}"*) return 0 ;; *) return 1 ;; esac; }
 
-# One line of a workflow, emitted per unpinned ref. Local paths (`./`, `../`) are
-# this repo's own composite actions and `docker://` refs are container images, not
-# actions -- neither is modelled by actions.lock, which keys actions only.
+# Prints one `<line>:uses: <ref>` record per ref in <file> that is neither a
+# full-SHA pin, a local path, nor a docker:// image (or one record naming a
+# parse failure). Empty output means the file is clean. Local paths (`./`,
+# `../`) are this repo's own composite actions and `docker://` refs are container
+# images, not actions -- neither is modelled by actions.lock, which keys actions only.
 UNPINNED_FILTER() {
   # ONE pipeline, and the first selector matches any NON-BLANK ref.
   #
@@ -63,15 +66,40 @@ UNPINNED_FILTER() {
   #    carried a live `$/` ref the whole time. A second reader of one stdin is
   #    never a second chance.
   #
+  # 3. (YAML-POLICY Y-1) The selector was a line grep, which saw only block
+  #    style: a quoted ref (`uses: "./x"`) slipped past the local-path arm and
+  #    was false-failed, a one-line flow step (`- { uses: a/b@v1 }`) was never
+  #    matched at all, and `uses:` text inside a `run:` body was read as a ref.
+  #    Refs now come from the YAML parser, one `<line>:uses: <ref>` record each;
+  #    a file that does not parse is reported as such, never scanned clean.
+  #
   # An unknown-shaped ref must be REPORTED, never skipped. The exemptions below
   # are the only way out, and each one is explicit.
-  grep -nE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]+[^[:space:]]' \
-    | grep -vE 'uses:[[:space:]]+[./]' \
-    | grep -vE 'uses:[[:space:]]+docker://' \
-    | grep -vE 'uses:[[:space:]]+[^[:space:]@]+@[0-9a-f]{40}([^0-9a-f]|$)' \
-    || true
+  local file=$1 refs
+  if ! refs=$(yq -r '.. | select(tag == "!!map") | select(has("uses")) | .uses | select(tag == "!!str") | ((line | tostring) + ":" + .)' "$file" 2>&1); then
+    printf '0:uses: <unparseable YAML: %s>\n' "$(printf '%s' "$refs" | head -1)"
+    return 0
+  fi
+  # An unclosed quote can swallow a workflow into one scalar that still parses,
+  # leaving no jobs and no refs: that is a broken file, not a clean one.
+  case "$file" in
+    *.github/workflows/*)
+      if [ "$(yq -r '.jobs | tag' "$file" 2>/dev/null)" != '!!map' ]; then
+        printf '0:uses: <unparseable YAML: parses, but has no jobs: map>\n'
+        return 0
+      fi ;;
+  esac
+  [ -n "$refs" ] || return 0
+  printf '%s\n' "$refs" \
+    | sed -E 's/^([0-9]+):/\1:uses: /' \
+    | { /usr/bin/grep -E '^[0-9]+:uses: [^[:space:]]' || true; } \
+    | { /usr/bin/grep -vE '^[0-9]+:uses: [./]' || true; } \
+    | { /usr/bin/grep -vE '^[0-9]+:uses: docker://' || true; } \
+    | { /usr/bin/grep -vE '^[0-9]+:uses: [^[:space:]@]+@[0-9a-f]{40}$' || true; }
 }
 
+# Reports every unpinned or invalid `uses:` ref in <file> to stderr and adds
+# one to ERRORS per ref.
 validate_file() {
   local file="$1" rec lineno body
   while IFS= read -r rec; do
@@ -81,6 +109,9 @@ validate_file() {
     body="${body#"${body%%[![:space:]]*}"}"
     echo "[validate-sha-pins] ERROR: $file:$lineno: ${body}" >&2
     case "$body" in
+      *'<unparseable YAML'*)
+        echo "    the file does not parse as YAML, so no ref in it was checked." >&2
+        ;;
       *'uses:'*'$/'*)
         # Name the real fault. `$/...` is not an unpinned ref, it is not valid
         # `uses:` syntax at all, so the workflow dies at STARTUP and no job of
@@ -96,7 +127,7 @@ validate_file() {
         ;;
     esac
     ERRORS=$((ERRORS + 1))
-  done < <(UNPINNED_FILTER < "$file")
+  done < <(UNPINNED_FILTER "$file")
 }
 
 if [ -n "$STAGED_FILES" ]; then
