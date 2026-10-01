@@ -15,8 +15,9 @@ set -euo pipefail
 # ============================================================================
 APP_NAME="TemplateApp"
 APP_DIR="/path/to/app"
-PID_FILE="/tmp/${APP_NAME,,}-server.pid"
-LOG_FILE="/tmp/${APP_NAME,,}-server.log"
+# Never /tmp for pid/log (CWE-377: predictable shared path) — see launcher-standard.adoc
+PID_FILE="${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}/launch-scaffolder/${APP_NAME,,}/server.pid"
+LOG_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/launch-scaffolder/${APP_NAME,,}/server.log"
 PORT=4000
 COMMAND="command to run"
 
@@ -139,6 +140,7 @@ repair_server_not_starting() {
   
   # Try to start with more verbose logging
   cd "$APP_DIR"
+  mkdir -p -m 0700 "$(dirname "$PID_FILE")" "$(dirname "$LOG_FILE")"
   nohup $COMMAND --verbose >"$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   

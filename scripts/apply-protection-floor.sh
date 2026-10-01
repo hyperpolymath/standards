@@ -125,7 +125,7 @@ FLOOR_TYPES="$(jq -r '[.rules[].type] | sort | join(",")' "$CANON")"
 CANON_BODY="$(jq -c . "$CANON")"
 
 VAULTS="$(command grep -vE '^[[:space:]]*(#|$)' "$VAULT_CLASS" | tr -d ' \t')"
-[ -n "$VAULTS" ] || die "gcrypt-vault class file lists no members -- refusing; D50 names two"
+[ -n "$VAULTS" ] || die "gcrypt-vault class file lists no members -- refusing; D50+D235 name three"
 
 TARGETS="$(command grep -vE '^[[:space:]]*(#|$)' "$REPOS_FILE" | tr -d ' \t' | sort -u)"
 [ -n "$TARGETS" ] || die "refusing to report a clean sweep over nothing: $REPOS_FILE yielded no repos"
@@ -226,7 +226,7 @@ printf '%s\n' "$TARGETS" | while IFS= read -r repo; do
   org_ids="$(printf '%s' "$listing" | jq -r ".[]? | select(.source_type==\"Organization\" and .target==\"$TARGET\" and .enforcement==\"active\") | .id")"
 
   # 5. Walk the active repo-level rulesets of this target and classify.
-  exact_n=0; exact_ids=""; union=""
+  exact_n=0; exact_ids=""; union=""; bypassable_n=0
   if [ -n "$repo_ids" ]; then
     while IFS= read -r rid; do
       [ -n "$rid" ] || continue
@@ -239,9 +239,16 @@ printf '%s\n' "$TARGETS" | while IFS= read -r repo; do
       inc="$(printf '%s' "$body" | jq -c '.conditions.ref_name.include')"
       exc="$(printf '%s' "$body" | jq -c '[.conditions.ref_name.exclude[]?] | length')"
       byp="$(printf '%s' "$body" | jq -c '[.bypass_actors[]?] | length')"
+      # D106: a ruleset that named actors can walk through is NOT cover. Only a
+      # zero-bypass ruleset contributes to the union; a bypassable one is counted
+      # and reported, and the standalone floor is written alongside it.
       if [ "$exc" = "0" ] && printf '%s' "$body" | jq -e --argjson w "$WANT_INCLUDE" \
            'any(.conditions.ref_name.include[]?; . == $w[0])' >/dev/null 2>&1; then
-        union="$union,$types"
+        if [ "$byp" = "0" ]; then
+          union="$union,$types"
+        else
+          bypassable_n=$((bypassable_n + 1))
+        fi
       fi
       if [ "$types" = "$FLOOR_TYPES" ] && [ "$inc" = "$WANT_INCLUDE" ] && [ "$exc" = "0" ] && [ "$byp" = "0" ]; then
         exact_n=$((exact_n + 1)); exact_ids="$exact_ids $rid"
@@ -268,7 +275,7 @@ EOF
   # writable per repo, so they are kept in their OWN union: a repo-level cover can be
   # cured here, an org-level cover must be cured once at the org. Omitting this union
   # is what made ORG-INHERITED unreachable and reported 67 covered repos as WOULD-CREATE.
-  union_org=""; org_byp_max=0; org_read_ok=1
+  union_org=""; org_byp_max=0; org_read_ok=1; org_bypassable_n=0
   if [ -n "$org_ids" ]; then
     while IFS= read -r rid; do
       [ -n "$rid" ] || continue
@@ -282,12 +289,17 @@ EOF
         fi
       fi
       if [ ! -s "$cache" ]; then org_read_ok=0; break; fi
+      b="$(jq -r '[.bypass_actors[]?] | length' "$cache")"
       if jq -e --argjson w "$WANT_INCLUDE" \
            '([.conditions.ref_name.exclude[]?] | length) == 0 and
             any(.conditions.ref_name.include[]?; . == $w[0])' "$cache" >/dev/null 2>&1; then
-        union_org="$union_org,$(jq -r '[.rules[].type] | sort | join(",")' "$cache")"
+        # D106 applies to org rulesets too: bypassable org cover is not cover.
+        if [ "$b" = "0" ]; then
+          union_org="$union_org,$(jq -r '[.rules[].type] | sort | join(",")' "$cache")"
+        else
+          org_bypassable_n=$((org_bypassable_n + 1))
+        fi
       fi
-      b="$(jq -r '[.bypass_actors[]?] | length' "$cache")"
       [ "$b" -gt "$org_byp_max" ] && org_byp_max="$b"
     done <<EOF
 $org_ids
@@ -326,8 +338,12 @@ EOF
   fi
 
   # 7. The write.
+  byp_note=""
+  if [ $((bypassable_n + org_bypassable_n)) -gt 0 ]; then
+    byp_note=" (D106: $bypassable_n repo + $org_bypassable_n org floor-scoped ruleset(s) carry bypass actors and are not cover)"
+  fi
   if [ "$APPLY" -eq 0 ]; then
-    report "$repo" "WOULD-CREATE" "no floor in force; --apply would POST $(basename "$CANON")"
+    report "$repo" "WOULD-CREATE" "no floor in force$byp_note; --apply would POST $(basename "$CANON")"
     continue
   fi
 

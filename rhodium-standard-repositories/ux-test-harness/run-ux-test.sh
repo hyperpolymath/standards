@@ -9,7 +9,6 @@
 set -uo pipefail
 
 REPO_DIR="/repo"
-REPORT_FILE="/tmp/ux-test-report.json"
 OS_ID="$(cat /etc/os-release 2>/dev/null | grep '^ID=' | cut -d= -f2 | tr -d '"')"
 OS_VERSION="$(cat /etc/os-release 2>/dev/null | grep '^VERSION_ID=' | cut -d= -f2 | tr -d '"')"
 ARCH="$(uname -m)"

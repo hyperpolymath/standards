@@ -85,8 +85,9 @@ REPO_DIR="/path/to/repo"                  # Repository directory
 COMMAND="command to run"                  # Command to execute
 URL="http://localhost:PORT"               # URL if web app (empty if not)
 ICON_SOURCE="$REPO_DIR/assets/icon-256.png" # Source icon for --integ (optional)
-PID_FILE="/tmp/${APP_NAME,,}-server.pid"  # PID file
-LOG_FILE="/tmp/${APP_NAME,,}-server.log"  # Log file
+# Never /tmp for pid/log (CWE-377: predictable shared path) — see launcher-standard.adoc
+PID_FILE="${XDG_RUNTIME_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}}/launch-scaffolder/${APP_NAME,,}/server.pid"
+LOG_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/launch-scaffolder/${APP_NAME,,}/server.log"
 MODE="${1:---auto}"                       # Default mode
 FORCE="false"                             # --force flag (used by --integ)
 [[ "${2:-}" == "--force" ]] && FORCE="true"
@@ -178,6 +179,7 @@ start_server() {
   
   # Start in background with nohup to prevent process from being killed
   cd "$REPO_DIR"
+  mkdir -p -m 0700 "$(dirname "$PID_FILE")" "$(dirname "$LOG_FILE")"
   nohup $COMMAND >"$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
   
