@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= `(updates …)` — repo-deed vocabulary for dependency updates
+:toc:
+
+Status:: vocabulary, v1 (2026-10-01). Grammar unchanged: this is a `clause`
+under the normative link:../spec/abnf/deed.abnf[deed.abnf] v1.0.0.
+Policy:: link:../../../docs/DEPENDABOT-POLICY.adoc[DEPENDABOT-POLICY.adoc] (owner ruling D269).
+Fixture:: link:../tools/fixtures/valid/updates-clause_chora.deed[updates-clause_chora.deed].
+
+The spec places estate vocabulary in `estate_chora.deed` (DEED-GRAMMAR-SPEC
+§Vocabulary). No production `estate_chora.deed` exists yet: on 2026-10-01 the
+only copies under `hyper-repos/` and `meta-repos/` (depth ≤ 4) were the
+conformance fixtures in `deed-ecosystem` and `a2ml-ecosystem`. Until one exists,
+this page is the declaration, and the terms below move into that file's
+`(vocabulary …)` clause verbatim when it lands.
+
+== Where it appears
+
+Only in a `repo-deed` (`<repo>_chora.deed`), at most once, as a direct child of
+the form. **No deed, or no clause, means every default below applies.** That is
+the common case: almost no repo carries a deed today.
+
+== Terms
+
+[cols="2,2,2,5",options="header"]
+|===
+| Term | Value | Default | Meaning
+
+| `:enabled` | BOOLEAN | `#t` | `#f` opts the whole repo out of automated updates.
+| `:majors` | BOOLEAN | `#t` | `#f`: major bumps still get a PR and an issue, but are never armed for auto-merge.
+| `:soak-days` | INTEGER ≥ 0 | `0` | Days to wait after the upstream release before arming.
+| `(hold …)` | clause, repeatable | none | Pin one package below a version.
+| `(exclude …)` | clause, repeatable | none | Stop automated updates for one ecosystem in this repo.
+|===
+
+=== `(hold …)`
+
+[cols="2,2,6",options="header"]
+|===
+| Field | Value | Rule
+
+| `:ecosystem` | SYMBOL | Required. A Dependabot `package-ecosystem` with `-` for `_` (`cargo`, `mix`, `npm`, `github-actions`, `julia`, …).
+| `:package` | STRING | Required. Exact name; a trailing `*` is a prefix match (`"github/codeql-action*"`).
+| `:below` | STRING | Required. The first version NOT allowed.
+| `:reason` | STRING | Required. A hold without a reason is rejected by readers.
+| `:issue` | STRING | Optional. `"#N"` or a full issue URL.
+| `:until` | STRING | Optional. `YYYY-MM-DD`. After it the hold expires and the weekly sweep comments on `:issue`.
+|===
+
+=== `(exclude …)`
+
+[cols="2,2,6",options="header"]
+|===
+| Field | Value | Rule
+
+| `:ecosystem` | SYMBOL | Required.
+| `:reason` | STRING | Optional.
+|===
+
+== Reader obligations
+
+* An unknown field or clause inside `(updates …)` is an error. A typo must not
+  silently re-enable updates.
+* A wrongly typed value (`:enabled "no"`) is an error, never coerced.
+* On any error the reader fails closed for that repo: **no update is armed**,
+  and the error is reported, not swallowed.
+
+== Example
+
+[source,lisp]
+----
+(updates
+  :enabled #t
+  :majors #f
+  :soak-days 7
+  (hold :ecosystem cargo :package "tokio" :below "2.0.0"
+    :reason "needs the async-trait rework" :issue "#42" :until "2026-12-01")
+  (exclude :ecosystem npm))
+----
