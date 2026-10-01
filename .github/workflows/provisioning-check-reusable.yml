@@ -1,0 +1,119 @@
+# This workflow is managed by gh actions-lock.
+# SPDX-License-Identifier: MPL-2.0
+# Reusable provisioning-set conformance gate (3-practice/provisioning §8).
+#
+# Two checks, each reported on its own so one cannot hide the other:
+#
+#   engine drift  the caller's build/just/{provision.just,provision-lib.sh,
+#                 provision-modes.sh,provision-check.sh} must be byte-identical
+#                 to the canon at THIS workflow's own commit (job.workflow_sha).
+#                 channels.scm is deliberately not compared: toolchain-refresh
+#                 re-pins it per repository, so a byte compare would go red
+#                 after every refresh. provision-check.sh checks its pin instead.
+#   conformance   the CANON provision-check.sh (not the caller's copy, which may
+#                 have drifted) run against the caller, without --dev: template
+#                 residue of either tier fails, as at the pre-PR gate.
+#
+# Offline: nothing here builds the project or touches the network beyond the
+# two checkouts and the just release tarball, pinned by sha256.
+#
+# Caller:
+#   jobs:
+#     provisioning:
+#       uses: hyperpolymath/standards/.github/workflows/provisioning-check-reusable.yml@<sha>
+name: Provisioning Check Reusable
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  provisioning:
+    name: Provisioning set conforms
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+
+      - name: Checkout the provisioning canon
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: ${{ job.workflow_sha }}
+          path: .standards-checkout
+          sparse-checkout: |
+            3-practice/provisioning/templates/build/just
+          sparse-checkout-cone-mode: false
+
+      - name: Stage the canon engine outside the checked tree
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/canon"
+          cp .standards-checkout/3-practice/provisioning/templates/build/just/* "$RUNNER_TEMP/canon/"
+          rm -rf .standards-checkout
+          ls "$RUNNER_TEMP/canon"
+
+      - name: Install just (the engine's runner; >= 1.42 is required)
+        shell: bash
+        env:
+          JUST_VERSION: "1.56.0"
+          JUST_SHA256: fa2a8ec1015d9df5330941ade12437488fc40d33f9c9f8cd4eb70a26de11b639
+        run: |
+          set +e
+          tgz="$RUNNER_TEMP/just.tar.gz"
+          curl -fsSL -o "$tgz" \
+            "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            && echo "${JUST_SHA256}  $tgz" | sha256sum -c - \
+            && mkdir -p "$RUNNER_TEMP/bin" \
+            && tar -xzf "$tgz" -C "$RUNNER_TEMP/bin" just
+          STATUS=$?
+          if [ "$STATUS" -ne 0 ]; then
+            echo "::error title=just install::could not fetch or verify just ${JUST_VERSION}"
+            exit "$STATUS"
+          fi
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/just" --version
+
+      - name: Engine files match the canon
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set +e
+          drift=0
+          for f in provision.just provision-lib.sh provision-modes.sh provision-check.sh; do
+            if [ ! -f "build/just/$f" ]; then
+              echo "::error file=build/just/$f,title=engine missing::build/just/$f is missing (run: launch-scaffolder provision-set realign)"
+              drift=1
+            elif ! cmp -s "build/just/$f" "$RUNNER_TEMP/canon/$f"; then
+              echo "::error file=build/just/$f,title=engine drift::build/just/$f differs from the canon at standards@${{ job.workflow_sha }} (run: launch-scaffolder provision-set realign)"
+              drift=1
+            else
+              echo "ok  build/just/$f"
+            fi
+          done
+          exit "$drift"
+
+      - name: Provisioning set conforms (provision-check.sh)
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set +e
+          bash "$RUNNER_TEMP/canon/provision-check.sh" . | tee "$RUNNER_TEMP/check.log"
+          STATUS="${PIPESTATUS[0]}"
+          grep '^  FAIL' "$RUNNER_TEMP/check.log" | sed 's/^  FAIL  //' | while IFS= read -r line; do
+            echo "::error title=provisioning::$line"
+          done
+          {
+            echo "## Provisioning check"
+            echo ""
+            echo '```'
+            cat "$RUNNER_TEMP/check.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$STATUS"
