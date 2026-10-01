@@ -49,6 +49,8 @@ hp_platform() {
 }
 
 # Make sure `just` is runnable: PATH, then mise, then say exactly what to do.
+# May install just globally via mise, extend PATH or define a just wrapper.
+# Return 0 when available, otherwise 1 after printing installation guidance.
 hp_ensure_just() {
   command -v just >/dev/null 2>&1 && return 0
   if command -v mise >/dev/null 2>&1; then
@@ -78,7 +80,6 @@ hp_just() { hp_ensure_just || return 1; (cd "$REPO_DIR" && just "$@"); }
 # canon (which then runs that repo's *-local recipes). Only needs bash.
 hp_lib() { (cd "$REPO_DIR" && bash build/just/provision-lib.sh "$@"); }
 
-# Returns the mode's exit code, or 99 when "$1" is not a provisioning mode.
 # The one-line hook for existing launchers: exit with a provisioning mode's
 # status, or return (0) so the caller's own mode switch runs.
 hp_provision_or_return() {
@@ -142,7 +143,9 @@ Detected platform: $(hp_platform)
 EOF
 }
 
-# Whole-launcher main for non-app archetypes.
+# Whole-launcher main for non-app archetypes; use --help when $1 is absent.
+# Return the provisioning status, 2 for unknown modes, or 1 for an app runtime
+# request. Accepted runtime modes for other archetypes explain N/A and return 0.
 hp_launcher_main() {
   local mode=${1:---help} rc
   case "$mode" in

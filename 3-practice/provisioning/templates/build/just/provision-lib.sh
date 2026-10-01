@@ -77,6 +77,7 @@ set_files() {
 
 # ---------------------------------------------------------------------------
 # Descriptor: flat `:key "value"` reads from provisioning_praxis.deed (s-expression).
+# Use default $2 when the value is absent or empty; print without a trailing newline.
 deed() { # $1 key, $2 default
   local v=""
   [ -f "$DEED" ] && v=$(grep -oE "\(:?$1[[:space:]]+\"[^\"]*\"" "$DEED" 2>/dev/null | head -1 | sed -E 's/^[^"]*"//; s/"$//')
@@ -99,6 +100,8 @@ ARCHETYPE="$(deed archetype "")"
 # Zig to three (ffi/zig/build.zig, and rsr-template-repo's src/interface/ffi/build.zig:
 # 74 repos have their only build.zig at that depth, measured 2026-09-30).
 # Order matters only for display. `docs` is reported when nothing else is.
+# Print the first path matching glob $1 within find depth $2 (default 2),
+# excluding .git, node_modules and root target contents; no match prints nothing.
 first() { find . -maxdepth "${2:-2}" -not -path './.git/*' -not -path '*/node_modules/*' -not -path './target/*' -name "$1" -print -quit 2>/dev/null; }
 # Print detected languages, one per line; use docs when no language marker exists.
 detect_langs() {
@@ -305,6 +308,8 @@ lang_cmd() { # $1 lang, $2 verb  -> prints a shell command, or nothing (= N/A)
 
 # Run a contract verb across every detected language. N/A is reported, not
 # faked green: a verb with no command for any language exits 0 but SAYS so.
+# A deed override runs alone and its status is returned. Otherwise all available
+# language commands run; return the last failing status, or 0 if none failed.
 lang_run() { # $1 verb
   local verb=$1 ran=0 rc=0 l cmd override
   override=$(deed "$verb" "")
@@ -374,6 +379,8 @@ only_banned_backends() {
 # ("aqua:denoland/deno" is deno), an npm:/pipx:/pip:/go: backend installs
 # through a banned runtime whatever the package is ("npm:prettier"), and so does
 # a bare name with no other backend ("prettier").
+# Print space-separated matches without a trailing newline; callers determine
+# failure from non-empty output.
 mise_banned() {
   local t base hits=""
   for t in $(mise_toml_tools); do
@@ -386,9 +393,10 @@ mise_banned() {
   done
   printf '%s' "${hits% }"
 }
-# Why mise.lock does not pin mise.toml, or nothing when it does. Presence is not
-# enough: a zero-byte lock pins nothing. Every [tools] key needs its [[tools.<key>]]
-# entry, and the lock must carry checksums.
+# Print the first category of lockfile gaps, or nothing if none is found.
+# Skip checking when mise.toml is absent; otherwise check tools from all three
+# config files for a non-empty version and platform tables for sha256 entries.
+# Callers inspect stdout; version concreteness and checksum contents are not validated.
 mise_lock_gaps() {
   [ -f mise.toml ] || return 0
   [ -f mise.lock ] || { echo "mise.lock missing"; return; }
@@ -417,9 +425,10 @@ mise_lock_gaps() {
     END { close_table() }' mise.lock)
   [ -z "$miss" ] || echo "mise.lock has no sha256 for: ${miss% }"
 }
-# Why a Guix file is a stub, or nothing when it is real. The test is positive: a
-# guix.scm must define every field a package needs, not merely avoid known stub
-# shapes; `(package (name "x") (source (local-file ".")))` is a stub.
+# Print why Guix file $1 appears to be a stub, or nothing if the textual checks
+# pass. Check required package fields as well as known stub shapes; this does
+# not evaluate Scheme or verify that the package builds. Callers inspect stdout.
+# For example, `(package (name "x") (source (local-file ".")))` is a stub.
 guix_stub_reason() {
   local f=$1 k miss=""
   [ -f "$f" ] || { echo "missing"; return; }
@@ -494,6 +503,8 @@ system_deps() { # $1 adoc|ai
 # Diagnose the provisioning set and toolchain, then the repository's own
 # doctor-local checks. The PASS/WARN/FAIL tally is the last line of stdout;
 # returns non-zero when anything FAILed.
+# Warnings alone do not fail. An early doctor-local.sh exit or failed
+# doctor-local recipe becomes a FAIL rather than propagating its exit status.
 cmd_doctor() {
   printf '%s doctor — %s (%s; languages: %s)\n' "$REPO_NAME" "$REPO_SLUG" "$ARCHETYPE" "${LANGS[*]}"
 
@@ -610,6 +621,8 @@ cmd_doctor() {
 
 # Install available toolchains and dependencies, run local setup hooks, then doctor;
 # return non-zero when a tracked installation step or verification fails.
+# May trust mise configuration, extend PATH, initialise opam and make the
+# launcher executable. Installation and hook failures do not skip verification.
 cmd_setup() {
   printf '%s setup — installing everything this repository needs\n' "$REPO_NAME"
   local rc=0
@@ -643,6 +656,7 @@ cmd_setup() {
 }
 
 # Apply automatic environment repairs and local heal hooks, then return doctor status.
+# Earlier repair and hook failures are not propagated independently of doctor.
 cmd_heal() {
   printf '%s heal — applying safe, reversible fixes, then re-checking\n' "$REPO_NAME"
   hdr "Fixes"
@@ -664,7 +678,9 @@ cmd_heal() {
   cmd_doctor
 }
 
-# Replace this process with the Guix shell or mise environment; fail if neither works.
+# Replace this process with Guix when its manifest exists and has no {{ residue;
+# otherwise use mise and SHELL (default bash). Return 1 if neither route is
+# available; a failed exec terminates the script without trying the other route.
 cmd_dev_shell() {
   local gm; gm=$(gpath manifest.scm)
   if have guix && [ -f "$gm" ] && ! grep -q '{{' "$gm"; then
@@ -705,6 +721,9 @@ repin_guix_channel() {
 # Weekly toolchain refresh: bump mise pins and the lock, re-pin the Guix channel,
 # regenerate build/guix/crates.scm when guix.scm loads it, then show the diff
 # for a signed commit.
+# Return 1 for missing mise or failed mise update, locking or crate regeneration.
+# Channel pin failures are warnings; unavailable Guix operations are skipped.
+# Earlier updates are not rolled back.
 cmd_toolchain_refresh() {
   hdr "mise: bump 'latest' resolutions and re-lock"
   have mise || { fail "mise not found"; return 1; }
@@ -742,9 +761,11 @@ GUIX="${GUIX:-guix}"
 
 # Write build/guix/crates.scm: every registry crate in Cargo.lock as a Guix
 # origin, and %crate-inputs listing them for guix.scm. Written whole or not at
-# all. The importer's output is accepted only when it defines exactly one crate
-# source per registry package in Cargo.lock: run through a container, guix's exit
-# status is lost, so the count is the check.
+# all. Accept importer output when its rust- definition count matches the number
+# of registry packages in Cargo.lock; the importer's exit status is not checked.
+# GUIX may contain a command and arguments; import is limited to 1,800 seconds.
+# Missing Cargo.lock is a successful no-op. Return 1 for temporary-file creation
+# failure or a count mismatch; later write errors are not reliably propagated.
 cmd_crates_scm() {
   local dst=build/guix/crates.scm want got tmp spdx
   [ -f Cargo.lock ] || { info "no Cargo.lock — no crate inputs"; return 0; }
@@ -793,6 +814,7 @@ just_say_it() {
 }
 # Copy stdin to an available clipboard with a three-second timeout;
 # silently consume input and return 1 when no clipboard command is available.
+# Otherwise return the timeout command's status; suppress clipboard output and errors.
 clip() { # best-effort; silent when no clipboard exists (CI, SSH)
   # wl-copy and xclip fork a daemon that inherits stdout; left attached, it
   # holds any pipeline open forever (observed 2026-09-30). Detach and bound it.
@@ -805,6 +827,7 @@ clip() { # best-effort; silent when no clipboard exists (CI, SSH)
   timeout 3 "${c[@]}" >/dev/null 2>&1
 }
 # Print AI-assisted setup instructions and attempt to copy the setup sentence.
+# Clipboard failure is ignored.
 cmd_ai_setup() {
   cat <<EOF
 AI-assisted setup for $REPO_NAME
@@ -824,6 +847,7 @@ EOF
 }
 # Print and attempt to copy the guide for $1 (default user); return 2 for an
 # invalid audience, 1 for a missing guide, or 0 when the guide was found.
+# Accepted audiences are user, dev and maintainer; clipboard failure is ignored.
 cmd_ai_warmup() {
   local who=${1:-user} f
   case "$who" in user|dev|maintainer) ;; *) echo "usage: just ai-warmup <user|dev|maintainer>" >&2; return 2 ;; esac
@@ -897,6 +921,8 @@ EOF
 }
 
 # Search tracked files for pattern $1 with agrep, falling back to git grep.
+# agrep allows one error; git grep is case-insensitive. Return the search
+# pipeline or git grep status; an empty or missing pattern terminates the script.
 cmd_search() {
   local p=${1:?usage: just search <pattern>}
   if have agrep; then git ls-files -z | xargs -0 agrep -n -1 -- "$p" 2>/dev/null

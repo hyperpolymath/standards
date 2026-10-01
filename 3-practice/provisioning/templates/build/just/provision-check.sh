@@ -92,6 +92,7 @@ echo "[5] template residue"
 f0=$fails
 # Read text from stdin and report unfilled slots under label $1;
 # repository-specific slots are warnings in --dev mode and failures otherwise.
+# Mechanical slots always fail. Callers use the tallies, not the return status.
 residue() { # $1 label; stdin = the text to judge
   local text mech spec
   text=$(cat)
