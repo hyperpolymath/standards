@@ -21,9 +21,10 @@
 
   ;; The standard's OWN version, distinct from :schema-version (the DEED
   ;; format). Bumped 0.3.0 -> 0.4.0 because the resolution ladders below now
-  ;; name the .deed file, which is consumer-visible.
-  :standard-version "0.4.0"
-  :standard-date    "2026-09-22"
+  ;; name the .deed file, which is consumer-visible; 0.4.0 -> 0.5.0 because
+  ;; the new (js-runtime) clause is a consumer-visible obligation (D224).
+  :standard-version "0.5.0"
+  :standard-date    "2026-09-30"
   :compliance ("launcher-standard.adoc"
                "LM-LA-LIFECYCLE-STANDARD.adoc"
                "cross-platform-system-integration-modes"
@@ -145,6 +146,49 @@
     (startup-command-search
       (path :priority 10 :value "{repo-dir}/scripts/run.sh")
       (path :priority 20 :value "{repo-dir}/dev.sh")))
+
+  ;; ---------------------------------------------------------------- js-runtime
+  ;; How a launcher starts a JavaScript tool (owner ruling D224). Bun is the
+  ;; estate runtime (docs/JS-RUNTIME-POLICY.adoc); before this clause the
+  ;; standard had no compliant way to say "launch this tool via bun".
+  ;;
+  ;; Consumers try (launch-route) in ASCENDING :priority order and use the
+  ;; first route the repo supports. Routes are argv templates: implementations
+  ;; MUST build the command as an argv array and MUST NOT pass it through an
+  ;; unquoted string such as `nohup $COMMAND`, where word-splitting and
+  ;; globbing of {script} or {package} become a command-injection surface.
+  (js-runtime
+    :runtime "bun"
+    :policy  "docs/JS-RUNTIME-POLICY.adoc"
+    ;; bun honours a `#!/usr/bin/env node` shebang by default, so without this
+    ;; flag a packaged CLI silently runs under Node. Measured with bun 1.3.14:
+    ;; `bunx <cli>` reports typeof Bun = "undefined", `bunx --bun <cli>`
+    ;; reports "object"; `bun run` behaves the same way.
+    :force-runtime-flag "--bun"
+    (launch-route
+      ;; Preferred: the repo's own script, with dependencies installed from
+      ;; its committed lockfile. The lockfile carries integrity hashes, so
+      ;; this is the only route whose whole dependency tree is pinned.
+      (route :priority 10 :name repo-script
+             :requires-any-of ("bun.lock" "bun.lockb")
+             :install ("bun" "install" "--frozen-lockfile")
+             :argv    ("bun" "run" "--bun" "{script}"))
+      ;; A published CLI the repo does not vendor. {exact-version} MUST be a
+      ;; full x.y.z version: bunx installs into a shared global cache with no
+      ;; lockfile, so the version pin is the only thing fixing what runs.
+      (route :priority 20 :name pinned-package
+             :argv    ("bunx" "--bun" "{package}@{exact-version}")))
+    ;; Not launch routes. Each either leaves the runtime (npx, npm exec,
+    ;; pnpm dlx), is banned outright (deno, 2026-09-22), or floats the
+    ;; version so the tool that runs can change with no commit to the repo.
+    (forbidden
+      (command :value "npx")
+      (command :value "npm exec")
+      (command :value "pnpm dlx")
+      (command :value "deno")
+      (version :value "latest")
+      (version :value "a range such as ^1.2.0 or ~1.2.0")
+      (version :value "no version at all")))
 
   ;; ------------------------------------------------------------ browser-launch
   ;; How open_browser() resolves which command to invoke. Implementations
