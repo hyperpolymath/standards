@@ -201,6 +201,62 @@ NOTE: `hp_gui_error` writes to stderr unconditionally per
 `(error-visibility :always-also-to-stderr #t)`. Set `NO_GUI_ERROR=1`
 to suppress the dialog attempt (useful in CI).
 
+=== JS Runtime Route (Bun / bunx)
+
+Bun is the estate JavaScript runtime (link:../JS-RUNTIME-POLICY.adoc[JS-RUNTIME-POLICY.adoc]).
+A launcher that starts a JavaScript tool follows `(js-runtime)` in
+`launcher-standard_praxis.deed`: try each `(launch-route)` in ascending
+`:priority` order and use the first one the repository supports.
+
+[cols="1,2,3"]
+|===
+| Priority | Route | Command
+
+| 10
+| `repo-script`: the repo commits `bun.lock` or `bun.lockb`
+| `bun install --frozen-lockfile`, then `bun run --bun <script>`
+
+| 20
+| `pinned-package`: a published CLI the repo does not vendor
+| `bunx --bun <package>@<x.y.z>`
+|===
+
+`repo-script` is preferred because the committed lockfile carries integrity
+hashes for the whole dependency tree. `bunx` installs into a shared global
+cache with no lockfile, so for `pinned-package` the exact `x.y.z` version is
+the only thing fixing what runs.
+
+IMPORTANT: Pass `--bun`. Bun honours a `#!/usr/bin/env node` shebang by
+default, so without the flag a packaged CLI silently runs under Node.
+Measured with bun 1.3.14: `bunx <cli>` reports `typeof Bun` as `"undefined"`,
+while `bunx --bun <cli>` reports `"object"`. `bun run` behaves the same way.
+
+Build the command as an argv array. The unquoted `nohup $COMMAND` form in
+<<Process Management>> word-splits and globs its arguments, which turns a
+script or package name into a command-injection surface.
+
+[source,bash]
+----
+# repo-script route
+if [ -f "$REPO_DIR/bun.lock" ] || [ -f "$REPO_DIR/bun.lockb" ]; then
+  (cd "$REPO_DIR" && bun install --frozen-lockfile) || return 1
+  cmd=(bun run --bun "$SCRIPT")
+else
+  # pinned-package route: PKG_VERSION must be a full x.y.z version
+  cmd=(bunx --bun "${PACKAGE}@${PKG_VERSION}")
+fi
+( cd "$REPO_DIR" || exit 1
+  nohup "${cmd[@]}" >"$LOG_FILE" 2>&1 &
+  echo $! > "$PID_FILE" )
+----
+
+These are not launch routes (`(forbidden)` in the deed):
+
+* `npx`, `npm exec` and `pnpm dlx`, which leave the Bun runtime;
+* `deno`, which has been banned since 2026-09-22;
+* `latest`, a range such as `^1.2.0` or `~1.2.0`, or no version at all.
+  Each lets the tool that runs change with no commit to the repository.
+
 === Soft-Attach (optional ecosystem integrations)
 
 A "soft-attach" tool is one the launcher calls IF it is installed, and
@@ -324,9 +380,9 @@ esac
 ----
 
 [[archetypes-and-provisioning]]
-== Archetypes and Provisioning Modes (standard 0.5.0)
+== Archetypes and Provisioning Modes (standard 0.6.0)
 
-Since standard version 0.5.0 (2026-09-30) *every* repository carries a
+Since standard version 0.6.0 (2026-10-01) *every* repository carries a
 `launcher.sh`, not only desktop applications. The reason is simple: the
 launcher is the one file a newcomer is told to run, so it must also be the
 one file that gets them from a fresh clone to a working environment.
@@ -751,6 +807,7 @@ APP_NAME="AppName"
 [ ] Remove all pre-keepopen konsole wrapping from desktop files
 [ ] `Terminal=true` on the primary Exec (keepopen needs a terminal for banners + shell fallback)
 [ ] Implement `nohup` for background processes
+[ ] JavaScript tools launch via the `(js-runtime)` route ladder: `bun run --bun` or `bunx --bun <pkg>@<x.y.z>`, never npx, deno or a floating version
 [ ] Add PID file tracking and cleanup
 [ ] Implement `wait_for_server()` with reasonable timeout
 [ ] Add proper error handling and user feedback
@@ -792,6 +849,7 @@ APP_NAME="AppName"
 - Clean up PID files on exit
 - Don't log sensitive information
 - Validate URLs before opening
+- Build launch commands as argv arrays (`"${cmd[@]}"`), never an unquoted `$COMMAND`: word-splitting and globbing of a script or package name is a command-injection surface
 
 == Reference Implementations
 

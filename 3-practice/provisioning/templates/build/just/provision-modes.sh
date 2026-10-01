@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 # shellcheck shell=bash
 #
-# provision-modes.sh — the launcher-standard 0.5.0 provisioning mode family,
+# provision-modes.sh — the launcher-standard 0.6.0 provisioning mode family,
 # as a SOURCEABLE block shared by every launcher in the estate.
 #
 #   New launchers (library/tool/theory/docs): templates/launcher.sh.tmpl sources
@@ -19,7 +19,7 @@
 #        (archetypes, provisioning-modes) and
 #        3-practice/provisioning/PROVISIONING-STANDARD.adoc
 
-HP_PROVISION_MODES_VERSION="0.5.0"
+HP_PROVISION_MODES_VERSION="0.6.0"
 
 hp__deed() { # $1 key, $2 default — flat (key "value") read from provisioning_praxis.deed
   local f="$REPO_DIR/.machine_readable/descriptiles/provisioning_praxis.deed" v=""
