@@ -338,14 +338,30 @@ mise_toml_tools() {
     fi
   done | awk '!seen[$0]++'
 }
+# True when a bare registry name resolves only to banned backends ("prettier"
+# is only npm:prettier). Needs no network: `mise registry` reads the registry
+# baked into mise. False when mise is absent or does not know the name, so an
+# unknown tool is left to mise-lock to report, never called banned on a guess.
+only_banned_backends() {
+  local b n=0
+  command -v mise >/dev/null 2>&1 || return 1
+  for b in $(mise registry "$1" 2>/dev/null); do
+    n=$((n + 1))
+    [[ "$b" =~ ^($BANNED_BACKENDS): ]] || return 1
+  done
+  [ "$n" -gt 0 ]
+}
 # Banned tools named in the mise configs. A backend prefix does not hide one
-# ("aqua:denoland/deno" is deno), and an npm:/pipx:/pip:/go: backend installs
-# through a banned runtime whatever the package is ("npm:prettier").
+# ("aqua:denoland/deno" is deno), an npm:/pipx:/pip:/go: backend installs
+# through a banned runtime whatever the package is ("npm:prettier"), and so does
+# a bare name with no other backend ("prettier").
 mise_banned() {
   local t base hits=""
   for t in $(mise_toml_tools); do
     base=${t##*:}; base=${base%%@*}; base=${base##*/}
     if [[ "$base" =~ ^($BANNED_TOOLS)$ ]] || [[ "$t" =~ ^($BANNED_BACKENDS): ]]; then
+      hits="$hits$t "
+    elif [[ "$t" != *:* ]] && only_banned_backends "$t"; then
       hits="$hits$t "
     fi
   done
