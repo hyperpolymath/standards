@@ -23,8 +23,11 @@
   ;; format). Bumped 0.3.0 -> 0.4.0 because the resolution ladders below now
   ;; name the .deed file, which is consumer-visible; 0.4.0 -> 0.5.0 because
   ;; the new (js-runtime) clause is a consumer-visible obligation (D224).
-  :standard-version "0.5.0"
-  :standard-date    "2026-09-30"
+  ;; Bumped 0.5.0 -> 0.6.0 (2026-10-01): every repository now carries a
+  ;; launcher, profiled by archetype, with a mandatory provisioning mode
+  ;; family (see `archetypes` and `provisioning-modes` below).
+  :standard-version "0.6.0"
+  :standard-date    "2026-10-01"
   :compliance ("launcher-standard.adoc"
                "LM-LA-LIFECYCLE-STANDARD.adoc"
                "cross-platform-system-integration-modes"
@@ -300,6 +303,42 @@
           :command "hypatia diagnose --app {app-name} --log {log-file}")
     (tool :name panic-attack    :style command :trigger on-start-failed
           :command "panic-attack assail {repo-dir}"))
+
+  ;; ---------------------------------------------------------------- archetypes
+  ;; Since 0.6.0 EVERY repository carries launcher.sh, not only desktop apps.
+  ;; The archetype (declared in .machine_readable/descriptiles/provisioning_praxis.deed
+  ;; as `(archetype "...")`) decides which mode families apply. A mode family
+  ;; marked :not-applicable MUST still be accepted on the command line: the
+  ;; launcher prints one line naming the archetype and exits 0, so a user who
+  ;; types `--start` on a library is told why, not handed a usage error.
+  ;; A set, not a ladder.
+  (archetypes
+    (archetype :name app     :required (runtime integration meta provisioning))
+    (archetype :name tool    :required (meta provisioning)
+               :not-applicable (runtime integration))
+    (archetype :name library :required (meta provisioning)
+               :not-applicable (runtime integration))
+    (archetype :name theory  :required (meta provisioning)
+               :not-applicable (runtime integration))
+    (archetype :name docs    :required (meta provisioning)
+               :not-applicable (runtime integration)))
+
+  ;; -------------------------------------------------------- provisioning-modes
+  ;; Required for ALL archetypes. Each mode calls the provisioning engine
+  ;; directly (`bash build/just/provision-lib.sh <verb>`), not a `just`
+  ;; recipe, so a repository's own root `doctor`/`setup`/`heal` recipe can
+  ;; never shadow the canon. The engine needs only bash; `--setup` installs
+  ;; just and the rest of the toolchain through mise. A repository's own
+  ;; checks live in `doctor-local`/`setup-local`/`heal-local`, which the
+  ;; engine runs; a failing doctor-local is FAIL PV-E50.
+  ;; Full contract: 3-practice/provisioning/PROVISIONING-STANDARD.adoc and
+  ;; 3-practice/provisioning/provisioning-standard_praxis.deed.
+  (provisioning-modes
+    :modes ("--setup" "--doctor" "--heal" "--ai-setup")
+    :delegate-to "build/just/provision-lib.sh"
+    :local-hooks ("doctor-local" "setup-local" "heal-local")
+    :reference-impl "3-practice/provisioning/templates/launcher.sh.tmpl"
+    (doctor-exit-codes :all-pass 0 :any-fail 1 :usage 2))
 
   ;; ------------------------------------------------------------ metadata-block
   ;; Every generated launcher must carry this metadata block in its header so

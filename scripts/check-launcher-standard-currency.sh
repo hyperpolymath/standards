@@ -23,9 +23,9 @@
 # A reference fails on the FILENAME or on the VERSION, separately:
 #
 #   launcher-standard.a2ml           any version  -> FAIL (retired filename)
-#   launcher-standard_praxis.deed    v0.4.0       -> FAIL (stale version)
-#   launcher-standard.a2ml           v0.5.0       -> FAIL (filename only)
-#   launcher-standard_praxis.deed    v0.5.0       -> PASS
+#   launcher-standard_praxis.deed    v0.5.0       -> FAIL (stale version)
+#   launcher-standard.a2ml           v0.6.0       -> FAIL (filename only)
+#   launcher-standard_praxis.deed    v0.6.0       -> PASS
 #
 # A reference carrying no version token is checked on the filename alone; that
 # is not a defect in itself, because plenty of prose names the standard without
@@ -62,7 +62,7 @@ set -uo pipefail
 
 CANONICAL_FILE="launcher-standard_praxis.deed"
 RETIRED_FILE="launcher-standard.a2ml"
-CURRENT_VERSION="0.5.0"
+CURRENT_VERSION="0.6.0"
 SELF_TEST_TMP=""
 
 # Path globs exempt as historical records. Matched against the repo-relative
@@ -147,7 +147,7 @@ scan() {
       found="${BASH_REMATCH[3]}"
       # G1 -- THE TWO VERSIONS ARE NOT INTERCHANGEABLE, AND THIS GATE TRACKS ONE.
       # The header above says :schema-version is the GRAMMAR (1.0.0) and
-      # :standard-version is the DOCUMENT (0.5.0). This test used to accept any
+      # :standard-version is the DOCUMENT (0.6.0). This test used to accept any
       # number within 24 non-digit characters of the filename, so a line reading
       #   `launcher-standard_praxis.deed` (DEED v1.0.0). Per-app config:
       # captured the GRAMMAR version and reported it as document drift -- the gate
