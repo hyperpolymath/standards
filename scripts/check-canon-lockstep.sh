@@ -269,11 +269,12 @@ echo
 
 # deed_canon <key> <deed-file>: print the value of :<key> from the
 # deed's one (canon …) clause, or nothing when the clause or key is
-# absent or the clause is not unique. The SAME function is in
+# absent or the clause is not unique. A ";" outside a string starts a
+# comment that runs to line-end (deed.abnf), whole-line or inline. The SAME function is in
 # rsr-template-repo .github/workflows/dogfood-gate.yml and
 # build/just/repo-init.just; keep the three identical.
 deed_canon() {
-    _clauses="$(grep -vE '^[[:space:]]*;' "$2" | awk '{ printf "%s ", $0 }' | grep -oE '[(]canon[[:space:]][^()]*[)]')" || true
+    _clauses="$(awk 'BEGIN { bs = sprintf("%c", 92); dq = sprintf("%c", 34) } { o = ""; q = 0; for (i = 1; i <= length($0); i++) { c = substr($0, i, 1); if (q && c == bs) { o = o c substr($0, i + 1, 1); i++; continue } if (c == dq) q = !q; else if (!q && c == ";") break; o = o c } printf "%s ", o }' "$2" | grep -oE '[(]canon[[:space:]][^()]*[)]')" || true
     _n="$(echo "$_clauses" | grep -c '(canon' || true)"
     if [ "$_n" != "1" ]; then
         echo "deed_canon: $2 carries ${_n:-0} (canon …) clauses, need exactly 1" >&2
