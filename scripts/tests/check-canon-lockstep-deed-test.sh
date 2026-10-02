@@ -84,6 +84,16 @@ mkdir -p "$WORK/two-deeds"; deed "$WORK/two-deeds" "$WANT_VER" "$WANT_CRIT" "$WA
 cp "$WORK/two-deeds/spine_chora.deed" "$WORK/two-deeds/other_chora.deed"
 expect "two deeds fail" "$WORK/two-deeds" FAIL "one-deed-per-repo"
 
+# An inline comment (deed.abnf: ";" to line-end, anywhere outside a string)
+# is not part of the clause: a decoy :version there must never be read.
+deed "$WORK/inline-stale" "0.0.1" "$WANT_CRIT" "$WANT_GATES"
+sed -i 's/^  (canon$/  (canon ; :version "'"$WANT_VER"'"/' "$WORK/inline-stale/spine_chora.deed"
+expect "inline-comment decoy cannot mask a stale version" "$WORK/inline-stale" FAIL "(version)"
+
+deed "$WORK/inline-ok" "$WANT_VER" "$WANT_CRIT" "$WANT_GATES"
+sed -i 's/^  (canon$/  (canon ; :version "0.0.1" -- a ";" here too/' "$WORK/inline-ok/spine_chora.deed"
+expect "inline-comment decoy is ignored when the active pin matches" "$WORK/inline-ok" PASS
+
 mkdir -p "$WORK/legacy/.machine_readable"
 printf '[canon]\nversion = "0.0.1"\ncriteria_sha256 = "%s"\n' "$WANT_CRIT" > "$WORK/legacy/.machine_readable/rsr-profile.a2ml"
 expect "legacy a2ml fallback still passes on criteria" "$WORK/legacy" PASS "LEGACY"
