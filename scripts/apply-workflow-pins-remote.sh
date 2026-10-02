@@ -230,6 +230,24 @@ self_test() {
     sed 's/^/      /' "$d/mixed.yml" >&2; rc=1
   fi
 
+  # The mutation input must be an OBJECT: a JSON-encoded string is rejected by
+  # GitHub, and that defect made every --fix run fail until 2026-10-02.
+  echo "control: commit_payload sends input as an object"
+  local payload
+  payload=$(commit_payload "o/r" "$t" 'head "q"' $'line1\nline2' "$d" fresh.yml)
+  if printf '%s' "$payload" | jq -e --arg t "$t" '
+       (.variables.input | type == "object")
+       and .variables.input.expectedHeadOid == $t
+       and .variables.input.message.headline == "head \"q\""
+       and .variables.input.message.body == "line1\nline2"
+       and (.variables.input.fileChanges.additions
+            | length == 1 and .[0].path == ".github/workflows/fresh.yml")' >/dev/null \
+     && [ "$(printf '%s' "$payload" | jq -r '.variables.input.fileChanges.additions[0].contents' | base64 -d)" = "$(cat "$d/fresh.yml")" ]; then
+    echo "  PASS payload is an object with exact headline, body and contents"
+  else
+    echo "  FAIL commit_payload produced: $payload" >&2; rc=1
+  fi
+
   echo "control: rewrite_illegal produces a LEGAL ref"
   rewrite_illegal "$d/illegal.yml" "$t"
   if grep -qE "uses: $PIN_RE" "$d/illegal.yml" && ! grep -qE "$ILLEGAL_RE" "$d/illegal.yml"; then
@@ -369,37 +387,38 @@ fetch_workflows() {
 # commit is GitHub-"Verified", which required_signatures rulesets demand.
 land_pr() {
   local repo="$1" dir="$2"; shift 2
-  local base_sha base_branch ref_exists head_oid additions="" f rel b64 pr
+  local base_sha base_branch ref_exists head_oid created=0 resp oid pr
 
   base_branch=$(gh api "repos/${repo}" --jq '.default_branch' 2>/dev/null) || return 1
   base_sha=$(gh api "repos/${repo}/commits/${base_branch}" --jq '.sha' 2>/dev/null) || return 1
 
   ref_exists=$(gh api "repos/${repo}/git/ref/heads/${BRANCH_NAME}" --jq '.object.sha' 2>/dev/null || true)
-  if [ -n "$ref_exists" ]; then
+  # On a 404 gh prints the error BODY on stdout, so "something came back" is not
+  # "the branch exists": only a 40-hex SHA is.
+  if [[ "$ref_exists" =~ ^[0-9a-f]{40}$ ]]; then
     head_oid="$ref_exists"
   else
     gh api "repos/${repo}/git/refs" -X POST \
       -f "ref=refs/heads/${BRANCH_NAME}" -f "sha=${base_sha}" >/dev/null 2>&1 || return 1
-    head_oid="$base_sha"
+    head_oid="$base_sha"; created=1
   fi
-
-  for f in "$@"; do
-    rel=".github/workflows/$(basename "$f")"
-    b64=$(base64 -w0 < "${dir}/${f}")
-    additions="${additions}{\"path\":\"${rel}\",\"contents\":\"${b64}\"},"
-  done
-  additions="[${additions%,}]"
 
   local msg_head="chore(ci): re-point standards reusable-workflow pins to ${TARGET_SHA:0:12}"
   local msg_body
   msg_body=$(printf 'Opened by the standards pin applier (scripts/apply-workflow-pins-remote.sh).\n\nRe-points this repository'"'"'s pinned references to hyperpolymath/standards reusable\nworkflows at %s, which is proven reachable from standards main.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01HfgwLCdKNd5iZVo6VTiSim' "$TARGET_SHA")
 
-  gh api graphql -f query='
-    mutation($input: CreateCommitOnBranchInput!) {
-      createCommitOnBranch(input: $input) { commit { oid } }
-    }' \
-    -F input="{\"branch\":{\"repositoryNameWithOwner\":\"${repo}\",\"branchName\":\"${BRANCH_NAME}\"},\"expectedHeadOid\":\"${head_oid}\",\"message\":{\"headline\":$(json_str "$msg_head"),\"body\":$(json_str "$msg_body")},\"fileChanges\":{\"additions\":${additions}}}" \
-    >/dev/null 2>&1 || { log "  land: createCommitOnBranch failed for ${repo}"; return 1; }
+  # The request body goes in whole via --input. `-F input=<json>` sends the
+  # JSON as a STRING, which GitHub rejects as an invalid CreateCommitOnBranchInput
+  # — that is how this path failed on every repo until 2026-10-02.
+  resp=$(commit_payload "$repo" "$head_oid" "$msg_head" "$msg_body" "$dir" "$@" \
+           | gh api graphql --input - 2>&1)
+  oid=$(printf '%s' "$resp" | jq -r '.data.createCommitOnBranch.commit.oid // empty' 2>/dev/null)
+  if ! [[ "$oid" =~ ^[0-9a-f]{40}$ ]]; then
+    log "  land: createCommitOnBranch failed for ${repo}: $(printf '%s' "$resp" | head -c 300)"
+    # Do not leave an empty branch behind for the next run to trip over.
+    [ "$created" = 1 ] && gh api -X DELETE "repos/${repo}/git/refs/heads/${BRANCH_NAME}" >/dev/null 2>&1
+    return 1
+  fi
 
   pr=$(gh pr create --repo "$repo" --head "$BRANCH_NAME" --base "$base_branch" \
         --title "$msg_head" \
@@ -408,9 +427,24 @@ land_pr() {
   echo "$pr"
 }
 
-# json_str — quote a string as a JSON scalar without a JSON library.
-json_str() {
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk 'BEGIN{ORS=""}{print (NR>1 ? "\\n" : "") $0}' | sed -e 's/^/"/' -e 's/$/"/'
+# commit_payload <repo> <head_oid> <headline> <body> <dir> <files...> — print the
+# complete createCommitOnBranch GraphQL request body, with `input` as an OBJECT.
+commit_payload() {
+  local repo="$1" head_oid="$2" headline="$3" body="$4" dir="$5"; shift 5
+  local f
+  for f in "$@"; do
+    jq -n --arg path ".github/workflows/$(basename "$f")" \
+          --arg contents "$(base64 -w0 < "${dir}/${f}")" \
+          '{path: $path, contents: $contents}'
+  done | jq -s \
+    --arg repo "$repo" --arg branch "$BRANCH_NAME" --arg oid "$head_oid" \
+    --arg headline "$headline" --arg body "$body" '{
+      query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+      variables: { input: {
+        branch: { repositoryNameWithOwner: $repo, branchName: $branch },
+        expectedHeadOid: $oid,
+        message: { headline: $headline, body: $body },
+        fileChanges: { additions: . } } } }'
 }
 
 # ---------------------------------------------------------------------------
