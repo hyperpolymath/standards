@@ -197,7 +197,7 @@ fi
 CONTAINER="" CONTAINER_STUB=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  if grep -qE '^[[:space:]]*(RUN|ENTRYPOINT|CMD)[[:space:]]' "$f"; then
+  if grep -qiE '^[[:space:]]*(RUN|ENTRYPOINT|CMD)[[:space:]]' "$f"; then
     CONTAINER="$f"; break
   fi
   CONTAINER_STUB="${CONTAINER_STUB:-$f}"
