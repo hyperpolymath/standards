@@ -64,7 +64,7 @@ njobs=$(job_ids | wc -l); nro=$(grep -c 'runs-on: ${{ inputs.runs-on }}' "$F")
 B=$(job_block actions-lock-verify)
 [ -n "$B" ] && ok "actions-lock-verify job exists" || bad "actions-lock-verify job missing"
 printf '%s' "$B" | grep -q 'check-actions-lock-gate.sh' && ok "actions-lock-verify runs the tested gate script" || bad "actions-lock-verify does not run check-actions-lock-gate.sh"
-printf '%s' "$B" | grep -Eq 'ref: [0-9a-f]{40}$' && ok "actions-lock-verify pins standards at an immutable commit" || bad "actions-lock-verify standards checkout not pinned to an immutable commit"
+printf '%s' "$B" | grep -Eq 'ref: ([0-9a-f]{40}|\$\{\{ job\.workflow_sha \}\})$' && ok "actions-lock-verify pins standards at an immutable commit" || bad "actions-lock-verify standards checkout not pinned to an immutable commit"
 printf '%s' "$B" | grep -q 'ref: main' && bad "actions-lock-verify floats a standards checkout at main" || ok "actions-lock-verify has no floating ref: main"
 printf '%s' "$B" | grep -q 'ACTIONS_LOCK_VERIFIER=' && ok "gate is pointed at the fetched verifier" || bad "ACTIONS_LOCK_VERIFIER not set for the gate"
 

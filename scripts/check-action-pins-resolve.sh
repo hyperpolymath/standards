@@ -95,10 +95,32 @@ fi
 # Skips local (`./`) and docker:// refs, which have no upstream commit.
 # kind = R: the ref points at a reusable workflow file (.github/workflows/*.yml
 # in the repo) — those get the ancestry probe (see header); kind = A otherwise.
+#
+# Values come from the YAML parser, not a line grep (YAML-POLICY Y-1): a grep
+# for `uses:` extracted NOTHING from a KYAML workflow (the value is quoted),
+# so its pins went unchecked while the script reported success. The parser
+# also stops matching `# uses: …` usage examples in header comments, which
+# never execute. Measured 2026-10-01 on main: 28 refs, the grep's 30 minus
+# exactly those two comment examples.
+if ! command -v yq >/dev/null 2>&1; then
+  echo "::error::yq not found -- it reads the workflows (YAML-POLICY Y-1)" >&2
+  exit 1
+fi
+unparsed=""
+for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
+  [ -f "$wf" ] || continue
+  yq '.' "$wf" >/dev/null 2>&1 || unparsed="$unparsed $wf"
+done
+if [ -n "$unparsed" ]; then
+  echo "::error::yq could not parse:$unparsed -- their pins would go unchecked" >&2
+  exit 1
+fi
 pairs="$(
-  grep -rhoE '\buses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}' \
-    "$WORKFLOW_DIR" 2>/dev/null \
-  | sed -E 's/.*uses:[[:space:]]*//' \
+  for wf in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
+    [ -f "$wf" ] || continue
+    yq -r '.. | select(tag == "!!map") | select(has("uses")) | .uses | select(tag == "!!str")' "$wf"
+  done \
+  | grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$' \
   | awk -F'@' '{ split($1, p, "/"); k = ($1 ~ /\.github\/workflows\/[^\/]+\.ya?ml$/) ? "R" : "A"; print p[1] "/" p[2] "\t" $2 "\t" k }' \
   | sort -u
 )"

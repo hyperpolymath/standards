@@ -12,7 +12,7 @@
 # the hook certified "All workflow actions are SHA-pinned" while 26 refs in this
 # repo floated on tags. Any gate that can scan nothing must fail loudly.
 set -uo pipefail
-HOOK="$(cd "$(dirname "$0")/../.." && pwd)/.githooks/validate-sha-pins.sh"
+HOOK="${HOOK:-$(cd "$(dirname "$0")/../.." && pwd)/.githooks/validate-sha-pins.sh}"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/.github/workflows" "$T/.github/actions"
 pass=0; fail=0
@@ -42,7 +42,7 @@ printf 'name: branch\non: push\njobs:\n  a:\n    steps:\n      - uses: hyperpoly
   > "$T/.github/workflows/branch.yml"
 printf 'name: local\non: push\njobs:\n  a:\n    steps:\n      - uses: ./local-action\n      - uses: ./.github/actions/signed-push\n' \
   > "$T/.github/workflows/local.yml"
-printf 'name: docker\non:\n  a:\n    container:\n      image: node:20\n    steps:\n      - uses: docker://ghcr.io/org/img:1.2.3\n' \
+printf 'name: docker\non: push\njobs:\n  a:\n    container:\n      image: node:20\n    steps:\n      - uses: docker://ghcr.io/org/img:1.2.3\n' \
   > "$T/.github/workflows/docker.yml"
 printf 'name: short\non: push\njobs:\n  a:\n    steps:\n      - uses: actions/checkout@abc123 # not a full SHA\n' \
   > "$T/.github/workflows/short.yml"
@@ -76,6 +76,58 @@ printf 'name: t\non: push\njobs:\n  a:\n    steps:\n      - uses: actions/checko
 ckf "vendored RSR mirror is scoped out (see Debtfile)" 0 "$T/vend"
 mkdir -p "$T/empty"
 ckf "refuses to certify a tree with 0 workflow files" 1 "$T/empty"
+
+# YAML-POLICY Y-1: refs come from the parser, not a line grep. The old grep
+# false-failed a quoted local ref, never saw a one-line flow step, read `uses:`
+# text inside a `run:` body as a ref, and passed a file it could not parse.
+cat > "$T/.github/workflows/kyaml.yml" <<EOF
+# SPDX-License-Identifier: MPL-2.0
+{
+  name: "kyaml",
+  on: "push",
+  jobs: {
+    a: {
+      steps: [
+        { uses: "actions/checkout@$S40", # v7.0.1
+        },
+        { uses: "./.github/actions/signed-push" },
+      ],
+    },
+  },
+}
+EOF
+cat > "$T/.github/workflows/kyaml-mutant.yml" <<EOF
+{
+  jobs: {
+    a: {
+      steps: [
+        { uses: "actions/checkout@$S40" },
+        { uses: "actions/cache@v6.1.0" },
+      ],
+    },
+  },
+}
+EOF
+printf 'name: q\non: push\njobs:\n  a:\n    steps:\n      - uses: "./local-action"\n' \
+  > "$T/.github/workflows/quoted-local.yml"
+printf 'name: flow\non: push\njobs:\n  a:\n    steps:\n      - { uses: actions/checkout@v7.0.1 }\n' \
+  > "$T/.github/workflows/flow-step.yml"
+printf 'name: decoy\non: push\njobs:\n  a:\n    steps:\n      - uses: actions/checkout@%s # v7.0.1\n      - run: |\n          echo "uses: actions/cache@v6.1.0"\n' "$S40" \
+  > "$T/.github/workflows/decoy.yml"
+printf '{\n  jobs: {\n    a: { steps: [ { uses: "actions/checkout@v7.0.1" },\n' \
+  > "$T/.github/workflows/broken.yml"
+# The quote closes on a later line, so the file PARSES as one `name` scalar with
+# no jobs (measured: 007-lang oracle-fuzz.yml). GitHub cannot run it.
+printf 'name: "CHECK: swallowed\non: push\njobs:\n  a:\n    steps:\n      - uses: actions/checkout@v7.0.1\n      - run: echo hi"\n' \
+  > "$T/.github/workflows/swallowed.yml"
+
+ck "KYAML: pinned + quoted local ref PASSES" 0 ".github/workflows/kyaml.yml"
+ck "KYAML mutant: an unpinned flow ref FAILS" 1 ".github/workflows/kyaml-mutant.yml"
+ck "quoted local \"./x\" is a local ref, not unpinned" 0 ".github/workflows/quoted-local.yml"
+ck "one-line { uses: } flow step with a tag FAILS" 1 ".github/workflows/flow-step.yml"
+ck "uses: text inside a run: body is not a ref" 0 ".github/workflows/decoy.yml"
+ck "unparseable workflow FAILS closed" 1 ".github/workflows/broken.yml"
+ck "quote-swallowed workflow with no jobs FAILS closed" 1 ".github/workflows/swallowed.yml"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

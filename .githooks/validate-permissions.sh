@@ -7,11 +7,29 @@ SCAN_PATH="${INPUT_PATH:-.}"
 STAGED_FILES="${INPUT_STAGED_FILES:-}"
 ERRORS=0
 
+# Ask the YAML parser, not a line grep (YAML-POLICY Y-1): `^permissions:` never
+# matches a KYAML workflow, where every key sits inside `{ ... }`. Without yq the
+# grep is kept -- it can only false-FAIL a KYAML file, never false-pass one.
+HAVE_YQ=1
+command -v yq >/dev/null 2>&1 || {
+  HAVE_YQ=0
+  echo "[validate-permissions] WARNING: yq not found -- line grep used; a KYAML workflow will be misreported" >&2
+}
+
+# Records an error unless <file> declares a top-level `permissions:` key; a
+# file that does not parse is an error too, never a pass.
 validate_file() {
-  local file="$1"
-  
-  # Check for permissions block
-  if ! grep -qE '^permissions:' "$file"; then
+  local file="$1" verdict
+
+  if [ "$HAVE_YQ" -eq 1 ]; then
+    if ! verdict="$(yq 'has("permissions")' "$file" 2>&1)"; then
+      echo "[validate-permissions] ERROR: $file is not parseable as YAML: $verdict" >&2
+      ERRORS=$((ERRORS + 1))
+    elif [ "$verdict" != "true" ]; then
+      echo "[validate-permissions] ERROR: $file missing permissions block" >&2
+      ERRORS=$((ERRORS + 1))
+    fi
+  elif ! grep -qE '^permissions:' "$file"; then
     echo "[validate-permissions] ERROR: $file missing permissions block" >&2
     ERRORS=$((ERRORS + 1))
   fi

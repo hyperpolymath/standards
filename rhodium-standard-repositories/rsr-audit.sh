@@ -204,10 +204,10 @@ check_command_exists() {
 audit_category_1_infrastructure() {
     log_section "Category 1: Foundational Infrastructure"
 
-    # Nix flakes
-    check_file_exists "flake.nix" "Nix flake configuration present"
-    check_file_exists "flake.lock" "Nix flake lockfile present"
-    check_file_contains "flake.nix" "description" "flake.nix has description field"
+    # Guix (Nix is retired estate-wide)
+    check_file_exists "guix.scm" "Guix package definition present"
+    check_file_contains "guix.scm" "(name " "guix.scm declares a package name"
+    check_file_contains "guix.scm" "license" "guix.scm declares a license"
 
     # Justfile
     check_file_exists "justfile" "Justfile present"
@@ -407,9 +407,9 @@ audit_category_4_architecture() {
     # Reversibility (Git-based)
     check "Reversibility: Git repository" test -d "$REPO_PATH/.git"
 
-    # Build reproducibility (Nix)
-    if [[ -f "$REPO_PATH/flake.nix" ]]; then
-        check "Reproducible builds: Nix flakes" true
+    # Build reproducibility (Guix)
+    if [[ -f "$REPO_PATH/guix.scm" ]]; then
+        check "Reproducible builds: Guix" true
     fi
 
     # Documentation of architecture
@@ -612,9 +612,9 @@ audit_category_9_lifecycle() {
         check_file_contains "CHANGELOG.md" "\\[.*\\]" "CHANGELOG uses version brackets"
     fi
 
-    # Pinned versions (Cargo.lock, flake.lock, etc.)
+    # Pinned versions (Cargo.lock, bun.lock, etc.)
     local has_lockfile=false
-    if [[ -f "$REPO_PATH/Cargo.lock" ]] || [[ -f "$REPO_PATH/flake.lock" ]] || [[ -f "$REPO_PATH/mix.lock" ]]; then
+    if [[ -f "$REPO_PATH/Cargo.lock" ]] || [[ -f "$REPO_PATH/bun.lock" ]] || [[ -f "$REPO_PATH/mix.lock" ]]; then
         log_success "Dependency lockfile present (pinned versions)"
         PASSED_CHECKS=$((PASSED_CHECKS + 1))
         has_lockfile=true
