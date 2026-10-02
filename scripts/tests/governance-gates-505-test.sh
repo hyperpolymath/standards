@@ -183,7 +183,7 @@ assert "declared container + TODO-only Containerfile BLOCKS" 1 "Package policy v
 r=$(mkrepo pkg-container-multi README.adoc)
 mkdir -p "$r/.clusterfuzzlite" "$r/build/container"
 printf 'FROM gcr.io/oss-fuzz-base/base-builder\nRUN echo fuzz\n' > "$r/.clusterfuzzlite/Containerfile"
-printf 'FROM x\n# TODO\n' > "$r/a.Containerfile"
+printf 'FROM x\n# TODO\n' > "$r/Containerfile.template"
 printf 'FROM x\nRUN true\n' > "$r/build/container/Containerfile"
 declare "$r" container
 assert "active Containerfile found past a stub; .clusterfuzzlite ignored" 0 "build/container/Containerfile" \
@@ -233,6 +233,16 @@ assert "Nix-only packaging BLOCKS after retirement" 1 "Nix-only packaging is not
 # pre-retirement Nix-only repo warns and makes no pass claim.
 assert "Nix-only packaging warns before retirement" 0 "NOT YET ENFORCED" \
   env PKG_TODAY="2026-05-31" "$PKG" "$r"
+
+# A Guix scaffold must not hide Nix-only packaging when no profile is present.
+r=$(mkrepo pkg-nix-stub-undeclared flake.nix guix.scm)
+stub_guix "$r/guix.scm"
+assert "Nix + Guix stub, no profile: warns before retirement" 0 "NOT YET ENFORCED" \
+  env PKG_TODAY="2026-05-31" "$PKG" "$r"
+assert "Nix + Guix stub, no profile: BLOCKS on retirement cutoff" 1 "Nix-only packaging is not compliant" \
+  env PKG_TODAY="2026-06-01" "$PKG" "$r"
+assert "Nix + Guix stub, no profile: BLOCKS after retirement" 1 "Nix-only packaging is not compliant" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
 
 # Same repo, both sides of the cutoff — the self-flipping proof.
 r=$(mkrepo pkg-none README.adoc)
