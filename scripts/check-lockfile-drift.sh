@@ -49,7 +49,8 @@ set -eo pipefail
 #         file can be appended straight into the report)
 # Exit:   0 = no drift (or no lockfile — not this script's business)
 #         1 = drift found
-#         2 = usage / environment error
+#         2 = usage / environment error (incl. yq missing), or a workflow
+#             that does not parse as YAML (UNEXAMINED, never "clean")
 
 REPO_DIR="${1:-.}"
 REPO_SLUG="${2:-$(basename "$REPO_DIR")}"
@@ -63,12 +64,16 @@ WFDIR="$REPO_DIR/.github/workflows"
 # has none and runs fine), so absence is NOT evidence of a fault.
 [ -f "$LOCK" ] || { echo "[drift] no actions.lock in $REPO_DIR — out of scope (see mode 1)"; exit 0; }
 
+command -v yq >/dev/null 2>&1 || { echo "[drift] yq not found — required to read workflows (YAML-POLICY Y-1)" >&2; exit 2; }
+
 drift=0
 checked=0
+unexamined=0
 
 want_tmp="$(mktemp)"
 have_tmp="$(mktemp)"
-trap 'rm -f "$want_tmp" "$have_tmp"' EXIT
+uses_tmp="$(mktemp)"
+trap 'rm -f "$want_tmp" "$have_tmp" "$uses_tmp"' EXIT
 
 for wf in "$WFDIR"/*.yml "$WFDIR"/*.yaml; do
   [ -f "$wf" ] || continue
@@ -80,14 +85,30 @@ for wf in "$WFDIR"/*.yml "$WFDIR"/*.yaml; do
   #     those legitimately carry a bare `[]` entry and are not drift
   #   * strip sub-action paths: `github/codeql-action/init@v1` is recorded in
   #     the lockfile as `github/codeql-action@v1`
-  # Strip comments FIRST. A commented-out `#  - uses: foo@sha` is dead code;
-  # flagging it is a false positive, and a detector that cries wolf is ignored.
-  sed -E 's/^[[:space:]]*#.*$//' "$wf" 2>/dev/null \
-    | grep -oE "uses:[[:space:]]*[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[A-Za-z0-9._-]+" 2>/dev/null \
-    | sed -E 's/uses:[[:space:]]*//' \
-    | grep -v '/\.github/workflows/' \
+  # Read `uses:` values with the YAML parser (YAML-POLICY Y-1). The old line
+  # grep could not see a quoted KYAML value (`uses: "a/b@v1",`) and silently
+  # skipped the workflow; it also matched `uses:` text inside a `run:` body.
+  # A parser never sees comments, so commented-out steps stay ignored. Only
+  # owner/repo[/path]@ref values count: local `./` actions and `docker://`
+  # images have no lockfile entry. An unparseable workflow is counted as
+  # UNEXAMINED and makes the run exit 2 rather than pass as clean.
+  if ! yq -r '.. | select(tag == "!!map") | select(has("uses")) | .uses | select(tag == "!!str")' "$wf" > "$uses_tmp" 2>/dev/null; then
+    echo "[drift] $base: not parseable as YAML — UNEXAMINED" >&2
+    unexamined=$((unexamined + 1))
+    continue
+  fi
+  # An unclosed quote (`name: "X` -- measured in 007-lang oracle-fuzz.yml)
+  # can swallow the rest of the file into one scalar and still PARSE, leaving
+  # no jobs and no refs. GitHub cannot run that file, so it is not "clean".
+  if [ "$(yq -r '.jobs | tag' "$wf" 2>/dev/null)" != '!!map' ]; then
+    echo "[drift] $base: parses, but has no jobs: map — UNEXAMINED" >&2
+    unexamined=$((unexamined + 1))
+    continue
+  fi
+  { /usr/bin/grep -E '^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[A-Za-z0-9._-]+$' "$uses_tmp" || true; } \
+    | { /usr/bin/grep -v '/\.github/workflows/' || true; } \
     | sed -E 's#^([^/]+/[^/@]+)(/[^@]*)?@#\1@#' \
-    | sort -u > "$want_tmp" || true
+    | sort -u > "$want_tmp"
 
   [ -s "$want_tmp" ] || continue
 
@@ -100,7 +121,7 @@ for wf in "$WFDIR"/*.yml "$WFDIR"/*.yaml; do
 
   while read -r want; do
     [ -n "$want" ] || continue
-    grep -qxF "$want" "$have_tmp" && continue
+    /usr/bin/grep -qxF "$want" "$have_tmp" && continue
 
     name="${want%@*}"
     ref="${want#*@}"
@@ -108,13 +129,13 @@ for wf in "$WFDIR"/*.yml "$WFDIR"/*.yaml; do
     # Only DRIFT if the lockfile knows this action at a *different* version.
     # Absent entirely is mode 2/3, or a verified-creator action that
     # legitimately needs no entry (e.g. Swatinem/rust-cache) — not drift.
-    have="$(grep -m1 -F "$name@" "$have_tmp")" || continue
+    have="$(/usr/bin/grep -m1 -F "$name@" "$have_tmp")" || continue
 
     # A workflow may pin by 40-char SHA while the lockfile records a TAG.
     # That is the same action in two notations, NOT drift. The lockfile
     # resolves every entry to `commit: 'sha1-<40hex>'`, so compare against
     # that rather than against the tag string.
-    if printf '%s' "$ref" | grep -qE '^[0-9a-f]{40}$'; then
+    if printf '%s' "$ref" | /usr/bin/grep -qE '^[0-9a-f]{40}$'; then
       resolved="$(awk -v k="    '$have':" '
         $0 == k { on = 1; next }
         on && /commit:/ { gsub(/.*sha1-|.$/, ""); print; exit }
@@ -131,7 +152,13 @@ done
 if [ "$drift" -gt 0 ]; then
   echo "[drift] $drift drifted entry/entries across $checked workflow(s) in $REPO_DIR" >&2
   echo "[drift] fix: run \`gh actions-lock\` then restore SPDX to line 1" >&2
+  [ "$unexamined" -eq 0 ] || echo "[drift] also: $unexamined workflow(s) could not be parsed — not examined" >&2
   exit 1
+fi
+
+if [ "$unexamined" -gt 0 ]; then
+  echo "[drift] $unexamined workflow(s) in $REPO_DIR could not be parsed — verdict withheld" >&2
+  exit 2
 fi
 
 echo "[drift] clean — $checked workflow(s) checked in $REPO_DIR" >&2
