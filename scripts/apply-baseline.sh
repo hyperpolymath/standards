@@ -206,11 +206,16 @@ ANNOTATED="$(jq -n \
   #   referencing `.file_pattern` there would error with "Cannot index
   #   string". Capture the entry pattern first, then reference $pat
   #   inside the test() regex argument.
+  # Hypatia emitted `warn` for advisory findings until hypatia#895
+  # (2026-10-01), which now emits them as `medium`. Baselines written before
+  # then acknowledge `warn`; treating the two as one tier keeps those
+  # acknowledgements matching instead of re-reporting every one as new.
+  def sev_tier: if . == "warn" then "medium" else . end;
   def match_entry(f):
     f as $finding
     | $baseline
     | map(select(
-        .severity == $finding.severity
+        (.severity | sev_tier) == ($finding.severity | sev_tier)
         # `rule_module` is a string OR a list of strings.
         #
         # ⚠ THE LIST FORM EXISTS BECAUSE ONE DEFECT CAN BE EMITTED BY TWO

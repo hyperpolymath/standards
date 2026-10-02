@@ -7,8 +7,9 @@
 # ---------------
 # `governance-reusable.yml` stages the lock-gate tooling from a THIRD pin: not
 # the caller's `uses:` ref and not the lockfile's record of it, but a SHA
-# hardcoded inside the callee for its own `actions/checkout`. A called reusable
-# workflow has no context exposing its own commit, so the hardcode is forced.
+# hardcoded inside the callee for its own `actions/checkout`. That hardcode was
+# believed forced; `job.workflow_sha` (the reusable's own commit) removes it, and
+# this guard accepts that expression as fresh by construction.
 #
 # That third pin is invisible to every other control. When standards#946 fixed
 # `scripts/update-actions-lock.sh`, this pin still pointed at the commit BEFORE
@@ -77,6 +78,8 @@ step_block() {
   ' "$(workflow_path)"
 }
 
+# Assert the lock-gate step stages from job.workflow_sha, or from a 40-hex
+# commit that already contains COMPARE over the staged paths; exit 1 otherwise.
 main() {
   local compare="${1:-origin/main}"
   local wf block pin paths diverged
@@ -91,6 +94,17 @@ rename it here too rather than deleting the assertion"
 
   pin="$(printf '%s\n' "$block" | sed -n 's/^[[:space:]]*ref:[[:space:]]*\([^[:space:]#]*\).*/\1/p' | head -1)"
   [ -n "$pin" ] || fail "step '$STEP_NAME' has no 'ref:' — it would follow the default branch"
+  # `job.workflow_sha` is the reusable workflow's OWN commit — the one the
+  # caller's `uses:` ref resolved to. Staging from it means the tooling is the
+  # tooling of the caller's pin, never older, so there is no third pin to go
+  # stale and nothing to compare. (`github.workflow_sha` / `github.sha` name
+  # the CALLER's commit, not this file's, and stay refused below.)
+  local raw_ref
+  raw_ref="$(printf '%s\n' "$block" | sed -n 's/^[[:space:]]*ref:[[:space:]]*//p' | head -1 | sed 's/[[:space:]]*$//')"
+  if printf '%s' "$raw_ref" | grep -Eq '^\$\{\{[[:space:]]*job\.workflow_sha[[:space:]]*\}\}$'; then
+    echo "PASS: lock gate is staged from job.workflow_sha (the reusable's own commit) — fresh by construction"
+    return 0
+  fi
   printf '%s' "$pin" | grep -Eq '^[0-9a-f]{40}$' ||
     fail "step '$STEP_NAME' is pinned to '$pin', not an immutable 40-hex commit"
 

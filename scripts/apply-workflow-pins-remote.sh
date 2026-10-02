@@ -306,6 +306,10 @@ list_repos() {
 # The REMOTE content is the only evidence: a local checkout can be arbitrarily
 # stale, and reading one is what produced a false "285 callers track main"
 # census on 2026-09-15.
+# Returns non-zero when the answer is UNKNOWN (rate limit, 5xx, a file that
+# would not download). Only a 404 is "no workflows". Returning 0 on failure
+# made a rate-limited repo vanish from the census while `walked N` still
+# counted it (measured 2026-10-02, shared 5,000/h token exhausted mid-run).
 fetch_workflows() {
   local repo="$1" dest="$2" owner="${1%%/*}" name="${1##*/}" resp
   mkdir -p "$dest"
@@ -346,15 +350,17 @@ fetch_workflows() {
   # query cannot express. The REMOTE content is the only evidence either way —
   # reading a local checkout is what produced a false "285 callers track main"
   # census on 2026-09-15.
-  local fname
-  gh api "repos/${repo}/contents/.github/workflows" \
-     --jq '.[] | select(.type == "file") | .name' 2>/dev/null \
-  | grep -E '\.ya?ml$' \
-  | while IFS= read -r fname; do
-      gh api "repos/${repo}/contents/.github/workflows/${fname}" \
-         -H 'Accept: application/vnd.github.raw' > "${dest}/${fname}" 2>/dev/null \
-        || rm -f "${dest}/${fname}"
-    done
+  local fname listing
+  if ! listing=$(gh api "repos/${repo}/contents/.github/workflows" \
+                   --jq '.[] | select(.type == "file") | .name' 2>&1); then
+    case "$listing" in *"HTTP 404"*) return 0 ;; esac
+    return 1
+  fi
+  for fname in $(printf '%s\n' "$listing" | grep -E '\.ya?ml$'); do
+    gh api "repos/${repo}/contents/.github/workflows/${fname}" \
+       -H 'Accept: application/vnd.github.raw' > "${dest}/${fname}" 2>/dev/null \
+      || { rm -f "${dest}/${fname}"; return 1; }
+  done
   return 0
 }
 
@@ -449,13 +455,18 @@ main() {
   WORKDIR=$(mktemp -d); trap 'rm -rf "${WORKDIR:-}"' EXIT
   local repos n=0
   if [ -n "$ONLY_REPO" ]; then repos="$ONLY_REPO"; else repos=$(list_repos); fi
+  [ -n "$repos" ] || { log "FATAL: enumerated zero repositories for ${OWNERS} (rate limit or auth?). Refusing to report an empty census."; exit 1; }
 
   local repo
   for repo in $repos; do
     [ "$LIMIT" -gt 0 ] && [ "$n" -ge "$LIMIT" ] && break
     n=$((n+1))
     local rdir="${WORKDIR}/$(echo "$repo" | tr '/' '_')"
-    fetch_workflows "$repo" "$rdir"
+    if ! fetch_workflows "$repo" "$rdir"; then
+      log "  FETCH-FAILED ${repo}: workflows could not be read; NOT classified"
+      printf '%s\t-\tFETCH-FAILED\t-\n' "$repo" >> "$tsv"
+      continue
+    fi
     local found=0 changed=() wf base st detail
     shopt -s nullglob
     for wf in "$rdir"/*.yml "$rdir"/*.yaml; do
@@ -503,4 +514,6 @@ main() {
   rm -f "$tsv"
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

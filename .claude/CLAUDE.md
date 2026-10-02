@@ -219,7 +219,7 @@ Both are FOSS with independent governance (no Big Tech).
 ### Package Management
 
 - **Primary**: Guix (guix.scm)
-- **Fallback**: Nix (flake.nix)
+- **Nix**: retired — `flake.nix` is not accepted by Governance / Guix packaging policy; a repo with no `guix.scm` packages through a working Containerfile instead
 - **JS deps**: **Bun** (`package.json` + `bun.lock`); `bunx <tool>` to run one-off tooling
 
 ### Documentation Format

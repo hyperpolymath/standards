@@ -48,8 +48,11 @@ lock_gate_block="$(awk '
 ' "$GOVERNANCE")"
 [ -n "$lock_gate_block" ] ||
   fail "governance workflow has no step named 'Checkout standards for the lock gate'"
-printf '%s\n' "$lock_gate_block" | grep -Eq '^[[:space:]]*ref:[[:space:]]*[0-9a-f]{40}[[:space:]]*$' ||
-  fail "the lock gate is not staged from an immutable 40-hex commit"
+# Immutable either way: a literal 40-hex commit, or job.workflow_sha (the
+# reusable's own commit, i.e. exactly the caller's pin). Never a branch, and
+# never github.workflow_sha / github.sha, which name the CALLER's commit.
+printf '%s\n' "$lock_gate_block" | grep -Eq '^[[:space:]]*ref:[[:space:]]*([0-9a-f]{40}|\$\{\{ job\.workflow_sha \}\})[[:space:]]*$' ||
+  fail "the lock gate is not staged from an immutable 40-hex commit or job.workflow_sha"
 if printf '%s\n' "$lock_gate_block" | grep -Eq '^[[:space:]]*ref:[[:space:]]*main[[:space:]]*$'; then
   fail "the lock gate follows moving main"
 fi
