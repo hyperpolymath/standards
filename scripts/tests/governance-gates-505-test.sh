@@ -183,7 +183,7 @@ assert "declared container + TODO-only Containerfile BLOCKS" 1 "Package policy v
 r=$(mkrepo pkg-container-multi README.adoc)
 mkdir -p "$r/.clusterfuzzlite" "$r/build/container"
 printf 'FROM gcr.io/oss-fuzz-base/base-builder\nRUN echo fuzz\n' > "$r/.clusterfuzzlite/Containerfile"
-printf 'FROM x\n# TODO\n' > "$r/a.Containerfile"
+printf 'FROM x\n# TODO\n' > "$r/Containerfile.template"
 printf 'FROM x\nRUN true\n' > "$r/build/container/Containerfile"
 declare "$r" container
 assert "active Containerfile found past a stub; .clusterfuzzlite ignored" 0 "build/container/Containerfile" \
