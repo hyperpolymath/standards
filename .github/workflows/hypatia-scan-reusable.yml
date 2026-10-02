@@ -12,6 +12,15 @@ on:
         type: boolean
         required: false
         default: false
+      hypatia-ref:
+        description: >-
+          Hypatia commit to build the scanner from. Defaults to a vetted SHA so a
+          bad hypatia main cannot turn every caller red at once (09-12..14 and
+          09-26..30 outages). Canary callers pass "HEAD" to trial the tip before
+          the default is moved here.
+        type: string
+        required: false
+        default: 51ab6496bf47e30a0576d503df31fec30f3cfe56
 
 permissions:
   actions: read
@@ -36,15 +45,21 @@ jobs:
           elixir-version: '1.19.4'
           otp-version: '28.3'
 
-      - name: Resolve Hypatia HEAD commit
+      - name: Resolve Hypatia scanner commit
         id: hypatia-rev
+        env:
+          HYPATIA_REF: ${{ inputs.hypatia-ref }}
         run: |
-          # Pin the cache to the *current* Hypatia main tip. Resolved before the
-          # cache step because cache restore happens before the clone, so the key
-          # cannot hash a not-yet-cloned tree — it must hash the remote ref.
-          sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
+          # The scanner is PINNED (input hypatia-ref, default a vetted SHA). Only
+          # an explicit "HEAD" floats, for canary callers. Resolved before the
+          # cache step because the cache key must hash the commit.
+          if [ "$HYPATIA_REF" = "HEAD" ]; then
+            sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
+          else
+            sha="$HYPATIA_REF"
+          fi
           if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
+            echo "ERROR: hypatia-ref must be a 40-hex commit SHA or HEAD (got: $HYPATIA_REF)" >&2
             exit 1
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"

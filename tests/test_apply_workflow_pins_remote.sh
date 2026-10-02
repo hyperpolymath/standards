@@ -134,6 +134,55 @@ kill_mutant illegal_repair_still_illegal \
   's@\@\$\{target\}@\@@g' \
   "FAIL illegal repair"
 
+# --- 3. fetch_workflows fails CLOSED -----------------------------------------
+# A rate-limited repo used to come back as "no workflows": fetch_workflows
+# returned 0 on every failure, so the census dropped the repo while `walked N`
+# still counted it (2026-10-02). Only a 404 may read as "nothing here".
+echo "== 3. fetch failures are reported, not swallowed =="
+STUB="$TMP/stub"; mkdir -p "$STUB"
+cat > "$STUB/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "api graphql"*) exit 1 ;;   # force the REST fallback
+  *contents/.github/workflows/*)
+    [ "${FILE_FAIL:-}" = 1 ] && { echo "gh: rate limit (HTTP 403)" >&2; exit 1; }
+    echo 'on: push'; exit 0 ;;
+  *contents/.github/workflows*)
+    case "${LIST:-200}" in
+      200) echo ci.yml; exit 0 ;;
+      404) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+      *)   echo "gh: API rate limit exceeded (HTTP 403)" >&2; exit 1 ;;
+    esac ;;
+esac
+exit 1
+EOF
+chmod +x "$STUB/gh"
+# fetch_case <label> <want-rc> <env...> — run fetch_workflows against the stub.
+fetch_case() {
+  local label="$1" want="$2"; shift 2
+  local got
+  env PATH="$STUB:$PATH" "$@" bash -c 'source "$1"; fetch_workflows o/r "$2"' _ \
+      "${APPLIER_UNDER_TEST:-$APPLIER}" "$TMP/fetch.$label" >/dev/null 2>&1
+  got=$?
+  if [ "$got" = "$want" ]; then pass "fetch: $label (rc=$got)"; else fail "fetch: $label — expected rc=$want, got rc=$got"; fi
+}
+fetch_case "listing ok"            0 LIST=200
+fetch_case "no workflows dir (404)" 0 LIST=404
+fetch_case "rate-limited listing"   1 LIST=403
+fetch_case "file download fails"    1 LIST=200 FILE_FAIL=1
+[ -s "$TMP/fetch.listing ok/ci.yml" ] && pass "fetch: file content written" || fail "fetch: ci.yml not written"
+
+# Mutant: restore the old `return 0` on a failed listing. It must turn red.
+M="$TMP/mutant_fail_open.sh"; cp "$APPLIER" "$M"
+sed -i 's@^    return 1$@    return 0@' "$M"
+if cmp -s "$APPLIER" "$M" || ! bash -n "$M"; then
+  fail "fail-open mutant did not apply cleanly"
+else
+  out=$(APPLIER_UNDER_TEST="$M" fetch_case "MUTANT rate-limited listing" 1 LIST=403 2>&1)
+  case "$out" in *FAIL*) pass "mutant 'fetch_fail_open' killed by the rate-limit control" ;;
+                 *) fail "mutant 'fetch_fail_open' stayed GREEN" ;; esac
+fi
+
 echo
 if [ "$rc" -ne 0 ]; then echo "RESULT: FAILED" >&2; else echo "RESULT: all checks passed"; fi
 exit $rc

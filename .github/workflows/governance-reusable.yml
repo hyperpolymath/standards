@@ -7,6 +7,14 @@ name: Governance Reusable Workflow
 on:
   workflow_call:
     inputs:
+      hypatia-ref:
+        description: >-
+          Hypatia commit the baseline job builds, as a 40-hex SHA, or "HEAD"
+          for a canary run. Kept in step with hypatia-scan-reusable.yml's
+          default; a floating HEAD here broke every baseline caller when
+          hypatia#895 changed the emitted severity of `warn` findings.
+        type: string
+        default: 51ab6496bf47e30a0576d503df31fec30f3cfe56
       runs-on:
         description: Runner label for all governance jobs
         type: string
@@ -222,20 +230,25 @@ jobs:
           elixir-version: '1.19.4'
           otp-version: '28.3'
 
-      - name: Resolve Hypatia HEAD commit
+      - name: Resolve Hypatia scanner commit
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         id: hypatia-rev
+        env:
+          HYPATIA_REF: ${{ inputs.hypatia-ref }}
         run: |
-          # Pin the cache to the *current* Hypatia main tip. Resolved before the
-          # cache step because cache restore happens before the clone, so the key
-          # cannot hash a not-yet-cloned tree — it must hash the remote ref.
-          sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
+          # Resolved before the cache step because cache restore happens before
+          # the clone, so the key must hash the commit, not a cloned tree.
+          if [ "$HYPATIA_REF" = "HEAD" ]; then
+            sha=$(git ls-remote https://github.com/hyperpolymath/hypatia.git HEAD | cut -f1)
+          else
+            sha="$HYPATIA_REF"
+          fi
           if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "ERROR: could not resolve hypatia HEAD via git ls-remote" >&2
+            echo "ERROR: hypatia-ref must be a 40-hex commit SHA or HEAD (got '$HYPATIA_REF')" >&2
             exit 1
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "Resolved hypatia HEAD: $sha"
+          echo "Resolved hypatia scanner commit: $sha"
 
       - name: Cache Hex/Mix and Scanner Build
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
@@ -289,14 +302,16 @@ jobs:
 
       # A reusable workflow only auto-checks-out its own YAML, not sibling
       # scripts. Sparse-check-out standards' scripts/ to get apply-baseline.sh,
-      # mirroring the language-policy job below. Pinned to main because
-      # github.workflow_sha resolves to the *caller* repo's SHA (which would 404).
+      # mirroring the language-policy job below. Pinned to job.workflow_sha (this
+      # reusable's own standards commit), NOT main: a script fetched from main
+      # changed every pinned caller's verdict on each standards push. (Unlike
+      # github.workflow_sha, which is the caller's SHA, job.workflow_sha is ours.)
       - name: Check out standards for the baseline filter
         if: needs.workflow-staleness.outputs.has_baseline == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts
@@ -726,10 +741,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts
+            .machine_readable/template-capability-gates.toml
           sparse-checkout-cone-mode: false
 
       - name: Enforce Guix-only packaging policy
@@ -738,9 +754,15 @@ jobs:
           # checkout before scanning: the gate walks the whole caller tree, so
           # a packaging file shipped inside .standards-checkout/ would satisfy
           # the policy on the caller's behalf (same trap as the baseline job).
-          cp .standards-checkout/scripts/check-package-policy.sh "$RUNNER_TEMP/"
+          # The capability resolver (check-rsr-profile.sh) and its gate table travel
+          # with the checker, in the same relative layout, so applicability is read
+          # from the same standards commit as the policy itself.
+          pkg="$RUNNER_TEMP/pkg-policy"
+          mkdir -p "$pkg/scripts" "$pkg/.machine_readable"
+          cp .standards-checkout/scripts/check-package-policy.sh .standards-checkout/scripts/check-rsr-profile.sh "$pkg/scripts/"
+          cp .standards-checkout/.machine_readable/template-capability-gates.toml "$pkg/.machine_readable/"
           rm -rf .standards-checkout
-          bash "$RUNNER_TEMP/check-package-policy.sh" .
+          bash "$pkg/scripts/check-package-policy.sh" .
 
   security-policy:
     name: Security policy checks
@@ -916,70 +938,69 @@ jobs:
             echo "ℹ️  [R5] no $DIR/ — skipped (repo has not opted in)"
             exit 0
           fi
-          if ! command -v python3 >/dev/null 2>&1; then
-            echo "❌ [R5] python3 missing on runner — required for YAML rule parsing"
+          # Rule files are read with yq, never a hand parser (YAML-POLICY Y-1); this
+          # gate previously parsed them with Python, which the estate bans.
+          if ! command -v yq >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+            echo "❌ [R5] yq and jq are required on the runner for YAML rule parsing"
             exit 2
           fi
-          python3 - <<'PY'
-          import os, sys, glob, subprocess
-          try:
-              import yaml
-          except ImportError:
-              sys.exit("❌ [R5] PyYAML not installed on runner; install python3-yaml")
+          mapfile -t files < <(find "$DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name '.*' | LC_ALL=C sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "ℹ️  [R5] $DIR/ has no .yml/.yaml rules — skipped"
+            exit 0
+          fi
 
-          dir_ = ".github/canonical-references"
-          files = sorted(glob.glob(f"{dir_}/*.yml") + glob.glob(f"{dir_}/*.yaml"))
-          if not files:
-              print(f"ℹ️  [R5] {dir_}/ has no .yml/.yaml rules — skipped")
-              sys.exit(0)
+          err=$(mktemp)
+          trap 'rm -f "$err"' EXIT
+          total=0
+          for rf in "${files[@]}"; do
+            if ! cfg=$(yq -o json '.' "$rf" 2>&1); then
+              echo "❌ [R5] $rf: not parseable YAML: $cfg"; total=$((total + 1)); continue
+            fi
+            if [ "$(jq -r 'type' <<<"$cfg")" != object ]; then
+              echo "❌ [R5] $rf: top-level must be a mapping"; total=$((total + 1)); continue
+            fi
+            rid=$(jq -r --arg b "$(basename "$rf")" 'if has("id") then .id | tostring else $b end' <<<"$cfg")
+            desc=$(jq -r '.description // ""' <<<"$cfg")
+            canon=$(jq -r '.canonical_pointer // ""' <<<"$cfg")
+            mapfile -t pats < <(jq -r '(.patterns // [])[]' <<<"$cfg")
+            mapfile -t includes < <(jq -r '((.scope // {}).include // [])[]' <<<"$cfg")
+            if [ "${#pats[@]}" -eq 0 ] || [ "${#includes[@]}" -eq 0 ]; then
+              echo "❌ [R5:$rid] missing patterns or scope.include in $rf"
+              total=$((total + 1)); continue
+            fi
+            rule_hits=0
+            for f_ in "${includes[@]}"; do
+              # Self-references are excluded: the changelogs, the rule file, and the
+              # rule's own canonical pointer.
+              case "$f_" in CHANGELOG.md|CHANGELOG.adoc|"$rf") continue ;; esac
+              if [ -n "$canon" ] && [ "$f_" = "$canon" ]; then continue; fi
+              [ -f "$f_" ] || continue
+              for pat in "${pats[@]}"; do
+                out=$(grep -nE -e "$pat" -- "$f_" 2>"$err"); rc=$?
+                if [ "$rc" -eq 0 ]; then
+                  while IFS= read -r line; do
+                    echo "::error file=$f_,line=${line%%:*}::[R5:$rid] ${line#*:}  →  route to ${canon:-drop or move to a canonical source}"
+                    rule_hits=$((rule_hits + 1))
+                  done <<<"$out"
+                elif [ "$rc" -gt 1 ]; then
+                  echo "❌ [R5:$rid] grep error on $f_: $(<"$err")"
+                  rule_hits=$((rule_hits + 1))
+                fi
+              done
+            done
+            if [ "$rule_hits" -gt 0 ]; then
+              echo "❌ [R5:$rid] $rule_hits hit(s). $desc"
+            fi
+            total=$((total + rule_hits))
+          done
 
-          total = 0
-          for rf in files:
-              with open(rf, encoding="utf-8") as fh:
-                  cfg = yaml.safe_load(fh)
-              if not isinstance(cfg, dict):
-                  print(f"❌ [R5] {rf}: top-level must be a mapping"); total += 1; continue
-              rid  = cfg.get("id", os.path.basename(rf))
-              desc = cfg.get("description", "")
-              pats = cfg.get("patterns") or []
-              canon = cfg.get("canonical_pointer", "")
-              scope = (cfg.get("scope") or {})
-              includes = scope.get("include") or []
-              if not pats or not includes:
-                  print(f"❌ [R5:{rid}] missing patterns or scope.include in {rf}")
-                  total += 1; continue
-              # exclude self-references
-              skip = set(["CHANGELOG.md", "CHANGELOG.adoc", rf])
-              if canon: skip.add(canon)
-              rule_hits = 0
-              for f_ in includes:
-                  if f_ in skip or not os.path.isfile(f_):
-                      continue
-                  for pat in pats:
-                      r = subprocess.run(
-                          ["grep", "-nE", pat, f_],
-                          capture_output=True, text=True,
-                      )
-                      if r.returncode == 0:
-                          for line in r.stdout.splitlines():
-                              ln_no, _, body = line.partition(":")
-                              tail = canon or "drop or move to a canonical source"
-                              print(f"::error file={f_},line={ln_no}::"
-                                    f"[R5:{rid}] {body}  →  route to {tail}")
-                              rule_hits += 1
-                      elif r.returncode > 1:
-                          print(f"❌ [R5:{rid}] grep error on {f_}: {r.stderr.strip()}")
-                          rule_hits += 1
-              if rule_hits:
-                  print(f"❌ [R5:{rid}] {rule_hits} hit(s). {desc}")
-              total += rule_hits
-
-          if total:
-              print()
-              print(f"❌ [R5] {total} canonical-reference drift hit(s) across {len(files)} rule(s).")
-              sys.exit(1)
-          print(f"✅ [R5] canonical-reference drift: clean across {len(files)} rule(s).")
-          PY
+          if [ "$total" -gt 0 ]; then
+            echo
+            echo "❌ [R5] $total canonical-reference drift hit(s) across ${#files[@]} rule(s)."
+            exit 1
+          fi
+          echo "✅ [R5] canonical-reference drift: clean across ${#files[@]} rule(s)."
 
   quality:
     name: Code quality + docs
@@ -1051,7 +1072,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts
@@ -1298,6 +1319,16 @@ jobs:
       - name: Check SPDX headers + permissions
         run: |
           failed=0
+          # The permissions verdict is read with yq (YAML-POLICY Y-1): the old
+          # `grep -q "^permissions:"` FALSELY FAILED every KYAML workflow,
+          # whose keys sit indented inside `{ … }`. yq ships on GitHub-hosted
+          # Ubuntu; a runner without it (inputs.runs-on) keeps the old line
+          # test, which is still right for block-style files, and says so.
+          have_yq=1
+          command -v yq >/dev/null 2>&1 || {
+            have_yq=0
+            echo "::warning::yq not on this runner -- permissions read by line grep; a KYAML workflow will be misreported"
+          }
           for file in .github/workflows/*.yml .github/workflows/*.yaml; do
             [ -f "$file" ] || continue
             # ⚠ SCAN THE HEADER BLOCK, NOT LINE 1. REUSE places the identifier
@@ -1317,7 +1348,13 @@ jobs:
                  | grep -q "^# SPDX-License-Identifier:"; then
               echo "ERROR: $file has no SPDX-License-Identifier in its header comment block"; failed=1
             fi
-            if ! grep -q "^permissions:" "$file"; then
+            if [ "$have_yq" -eq 1 ]; then
+              if ! verdict="$(yq 'has("permissions")' "$file" 2>&1)"; then
+                echo "ERROR: $file is not parseable as YAML: $verdict"; failed=1
+              elif [ "$verdict" != "true" ]; then
+                echo "ERROR: $file missing top-level 'permissions:' declaration"; failed=1
+              fi
+            elif ! grep -q "^permissions:" "$file"; then
               echo "ERROR: $file missing top-level 'permissions:' declaration"; failed=1
             fi
           done
@@ -1375,19 +1412,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          # ⚠ ENFORCED, no longer a request: scripts/check-lock-gate-pin-freshness.sh
-          # fails Self Test unless this commit already contains everything on
-          # main across the sparse-checkout list below. Change one of those
-          # files and the NEXT pull request must bump this line — it cannot be
-          # this PR's own merge commit, which does not exist yet, so the pin is
-          # one change behind by construction and that is the intended shape.
-          # Pinned to an immutable commit for the same reason as the dupkey
-          # helpers in workflow-lint: following `main` would let an edit in
-          # standards change the verdict of every already-pinned caller with no
-          # review in their repositories. This pin is invisible to the caller's
-          # `uses:` ref and to actions.lock — it is a third, independent pin,
-          # which is precisely how it went stale across standards#946.
-          ref: 5f82b635c5da5c3df44d5a0caa8983d9b95e0db9
+          # The reusable's OWN commit — the one the caller's `uses:` ref
+          # resolved to — so the lock tooling is exactly what the caller
+          # pinned, never older and never following `main`. This replaced a
+          # hardcoded third pin that was one change behind by construction and
+          # went stale twice (standards#946, then #1119);
+          # scripts/check-lock-gate-pin-freshness.sh accepts only this
+          # expression or a fresh 40-hex SHA.
+          ref: ${{ job.workflow_sha }}
           path: .standards-lock
           persist-credentials: false
           sparse-checkout: |
@@ -1448,7 +1480,9 @@ jobs:
           # redundant direct-SHA conversion; restoring their locked version
           # refs made GitHub's native resolver accept them again.
           if [ -f .github/workflows/actions.lock ]; then
-            gh extension install github/gh-actions-lock
+            # Pinned: an unpinned install let a new verifier release change every
+            # caller's verdict overnight. Bump deliberately, with the gate tests.
+            gh extension install github/gh-actions-lock --pin v0.1.6
           fi
 
           # The gate delegates lockfile verification to the authoritative
@@ -1514,7 +1548,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: standards
       - name: Run trusted-base check on caller repo
         run: |
@@ -1545,7 +1579,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: standards
       - name: Run licence-consistency check on caller repo
         run: |
@@ -1575,7 +1609,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts
@@ -1620,7 +1654,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: main
+          ref: ${{ job.workflow_sha }}
           path: .standards-checkout
           sparse-checkout: |
             scripts

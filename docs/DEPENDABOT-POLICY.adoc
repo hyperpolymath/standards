@@ -3,15 +3,49 @@
 :toc:
 :toc-placement: preamble
 
-= Dependabot policy — major-version bumps + auto-merge
+= Dependency update policy — always current, gated, reversible
 
 == TL;DR
 
-* `feedback_always_automerge_prs` is fine for **minor / patch** dependabot PRs.
-* It is **structurally unsafe** for **major** bumps without a paired call-site update — they pass the validation gates (K9 / A2ML / language-policy) which do not compile the workspace, and only break the downstream compile checks on subsequent pushes.
-* Estate policy (this document): **dependabot must not open major-version bumps unattended.** Major bumps land via the normal author-supplied PR path (issue → branch → code update + dep bump in one PR → review → merge).
+* **Every valid update lands unattended — patch, minor *and* major.** The estate
+  is meant to be current by default; nobody should have to ask for a bump.
+* **"Valid" means a green _required_ build/test check.** A repo whose default
+  branch has no required status check (`required: []`) never auto-merges any
+  update. It gets the PR, the fix-up and an issue, and a required build check is
+  rolled out to it (hypatia rule `UG001`).
+* **Every merged update gets a changelog line, and every one can be rolled back.**
+  A rollback is a revert PR plus a `hold` in the repo deed so the same version is
+  not proposed again.
+* **Per-repo opt-out lives in the repo deed** (`<repo>_chora.deed`, the
+  `(updates …)` clause below). No deed, or no clause, means the defaults apply.
+* **A failed update is reported to the repo within one CI cycle**: a PR comment,
+  the label `updates:blocked`, and one deduplicated issue carrying the diagnosis.
 
-== Why
+Owner ruling *D269* (2026-10-01, recorded on standards#787) supersedes the
+2026-05-29 "dependabot must not open major-version bumps unattended" policy.
+
+== Implementation status
+
+This document specifies the pipeline before all of it exists. Until a row says
+*landed*, do not call that component or assume a repo is protected by it.
+
+[cols="3,2,3",options="header"]
+|===
+| Component | Status | Where
+
+| This policy, the `(updates …)` vocabulary, the cliff `Dependencies` group | landed with this document | `standards`
+| `deed-read` (repo-deed reader) | specified, not built | `deed-ecosystem/rs/deed-read`
+| `squabble bump`, `squabble rollback` | specified, not built | `cicd-squabbler`
+| `dependency-update-reusable.yml` | specified, not built | `standards/.github/workflows`
+| hypatia `UG001`, `DA005`, `estate-dependabot-render.sh` | specified, not built | `hypatia`
+| Template caller + `dependabot.yml` | specified, not built | `rsr-template-repo`
+| Pilot (5 repos), then waves of ~50 | not started | —
+|===
+
+Until the fixer lands, the existing per-repo `dependabot-automerge.yml` remains
+what merges updates, and the gate in §1 is what makes that safe.
+
+== Why the old rule is replaced, not relaxed
 
 `hyperpolymath/echidna` (2026-05-29): five dependabot major-version bumps merged in a chain over ~2h:
 
@@ -26,98 +60,200 @@
 | #124 | rustyline 15 → 18 | editor API changes
 |===
 
-Each passed the estate validation gates (`Validate K9 contracts`, `Validate A2ML manifests`, `governance / *`) — none of which compile the workspace — and was auto-merged green. Every subsequent push was red on `Rust CI` (compile errors) + `Live Provers` (all T1 + T2 fail to compile) + `MVP Smoke`. Recovery was a single revert PR (echidna#128) but `main` was effectively broken for ~24h.
+Each passed the estate validation gates (`Validate K9 contracts`, `governance / *`)
+— none of which compile the workspace — and was auto-merged green. Recovery was a
+single revert PR (echidna#128) but `main` was broken for ~24h.
 
-The root cause is the gap between **what the auto-merge hook authorises** (any green PR) and **what the green PR has actually been tested against** (the validation gates, not the compile gates).
+The root cause was never "majors are dangerous". It was the gap between **what the
+auto-merge authorised** (any green PR) and **what the green PR had been tested
+against** (validation gates, not the compile gate). Banning majors treated the
+symptom and left the estate permanently behind; requiring the compile gate closes
+the gap for patches and minors too, which break things just as well.
 
 == Policy
 
-=== 1. Dependabot config — ignore major bumps by default
+=== 1. The gate: a required build/test check, or no auto-merge
 
-Every estate repo's `.github/dependabot.yml` should ignore `version-update:semver-major` for each ecosystem entry. Minors and patches continue to flow normally.
+An update PR is armed for auto-merge only when the base branch's *effective* rules
+(`GET repos/{o}/{r}/rules/branches/{base}`) carry at least one required status
+check that builds or tests the code:
+
+* Rust: `Rust CI` (`rust-ci-reusable.yml`, with `--locked`, standards#299).
+* Other ecosystems: the equivalent compile / test job (`mix test`, `bun test`,
+  `lake build`, `julia --project -e 'using Pkg; Pkg.test()'`, …).
+
+Arming is done with the GraphQL `enablePullRequestAutoMerge` mutation
+(`mergeMethod: SQUASH`). **Never** `gh pr merge --auto`: when requirements are
+already met it merges immediately instead of arming. **Never** arm on a repo with
+no required context: auto-merge there merges at once, untested.
+
+A repo without a required build check is reported by hypatia `UG001` and gets a
+PR adding the template `build` job plus the ruleset tier that requires it. Until
+that lands, its update PRs are fixed up and labelled `updates:awaiting-gate`, not
+armed.
+
+=== 2. Dependabot proposes; nothing is ignored by default
+
+Dependabot remains the proposer (no Renovate). The estate shape:
 
 [source,yaml]
 ----
-# .github/dependabot.yml — recommended estate shape
 version: 2
 updates:
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
+    # Conventional subject so git-cliff files it under "Dependencies" (§5).
+    # Without this, Dependabot writes `Bump X from a to b`.
+    commit-message:
+      prefix: "chore(deps)"
     groups:
-      minors-and-patches:
+      cargo:
         patterns: ["*"]
+        # majors are grouped separately so one breaking upstream does not
+        # hold every patch hostage
         update-types: ["minor", "patch"]
-    ignore:
-      # Major bumps require paired call-site updates — open them via
-      # an author-supplied PR, not unattended dependabot auto-merge.
-      # See standards/docs/DEPENDABOT-POLICY.adoc.
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      cargo-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
     groups:
       actions:
         patterns: ["*"]
-    # github-actions major bumps are usually safe (the SHA pin is the
-    # real version); group them with the others. Override per-repo if
-    # a specific action has a history of breaking major-version moves.
+        # A hold inside a group MUST be an exclude-pattern: an update-level
+        # `ignore` is not honoured for grouped updates (standards#1037).
+        # Holds are rendered from the repo deed by hypatia
+        # `estate-dependabot-render.sh`; do not hand-edit them.
+        # Active estate hold (nexia-list#100, standards#1005): codeql-action
+        # v4.38.1 introduced an unpinned transitive ref. Always use the
+        # trailing wildcard so subpath actions (`.../init`, `.../analyze`)
+        # match. Lift once a >= 4.38.2 release is verified clean.
+        exclude-patterns:
+          - "github/codeql-action*"
     ignore:
-      # Subpath actions (`github/codeql-action/init`, `.../analyze`,
-      # `.../upload-sarif`) are evaluated by Dependabot against their full
-      # subpath name. An exact `dependency-name: "github/codeql-action"` does
-      # NOT match subpath actions and silently lets grouped `actions` PRs
-      # re-introduce blocked versions (measured across 48 PRs in standards#1037).
-      # ALWAYS use the trailing wildcard `github/codeql-action*`.
-      #
-      # Active estate hold (nexia-list#100, standards#1005, standards#1037):
-      # v4.38.1 (1c5b6756f7f1ab9f5bde6bbb02dbcebd0fffd908) introduced an
-      # unpinned transitive action ref that trips validate-actions-lock.sh.
-      # Revisit trigger: lift or raise the floor once a >= 4.38.2 release is
-      # verified clean of unpinned transitive refs.
+      # Kept for the ungrouped (security-update) path, which does honour it.
       - dependency-name: "github/codeql-action*"
         versions: [">= 4.38.1"]
-
-  # Add npm / nix / pip / mix / ... entries with the same ignore rule.
 ----
 
-=== 2. Branch protection — require the compile gate
+There is no `version-update:semver-major` ignore. Remove it where the 2026-05
+campaign added one.
 
-For Rust repos, `Rust CI` (the `rust-ci-reusable.yml` wrapper) MUST be in the required-status-checks list. This catches any version drift at PR time, regardless of how the PR was opened.
+Security updates are opened ungrouped by Dependabot's security-update flow. They
+go through the same gate, fixer and changelog as any other update. A major that
+is also a security fix is not special-cased.
 
-For other ecosystems, the equivalent compile / test gate (e.g. `mix test` for Elixir, `deno check` for Deno) MUST be required.
+=== 3. The fixer: an update PR is brought to green, not left red
 
-=== 3. `--locked` everywhere it's available
+Dependabot changes the manifest and nothing else. On every Dependabot PR, the
+reusable workflow `dependency-update-reusable.yml` runs `squabble bump`
+(`hyperpolymath/cicd-squabbler`), which:
 
-Already landed in `rust-ci-reusable.yml` (standards#299). Cargo, npm, deno, bundler, mix, etc. all support a "use the lockfile verbatim" flag. CI MUST pass it. See standards#295 for the Rust case.
+. **classifies** the update from the manifest diff — never from the PR title
+  (the codeql-action v4.38.1 bumps reached `main` through a spoofed title);
+. **repairs `.github/workflows/actions.lock`**, which Dependabot cannot update
+  (39 of 200 repos had silently dead CI from this, standards#968). It detects with
+  `gh actions-lock --no-fix` and writes only the changed entries; fix mode is never
+  used (it de-pins SHAs and invents `$/.github/actions` refs). The result must be
+  transitively closed and every pin 40 hex characters;
+. **refreshes the lockfile** where Dependabot leaves it stale;
+. **adds the changelog line** (§5);
+. **commits back signed**, through the GraphQL `createCommitOnBranch` mutation
+  with the workflow token, so `required_signatures` holds.
 
-=== 4. The (rare) legitimate major bump path
+=== 4. Majors, soak, and the deed toggle
 
-When a major bump is genuinely wanted:
+A repo controls its own updates in its repo deed. The clause is optional; these
+are the defaults it overrides:
 
-1. Open an issue: "bump `<dep>` `<old>` → `<new>`; touches `<file list>`".
-2. Branch + commit the matching call-site update + the dep bump in one PR.
-3. Normal review, normal CI (which now includes the compile gate).
-4. Squash-merge as usual.
+[source,lisp]
+----
+(updates
+  :enabled #t           ; #f — the repo is opted out entirely
+  :majors #t            ; #f — majors get a PR + issue, never auto-merge
+  :soak-days 0          ; wait N days after the upstream release
+  (hold :ecosystem cargo :package "tokio" :below "2.0.0"
+        :reason "needs the async-trait rework" :issue "#42" :until "2026-12-01")
+  (exclude :ecosystem npm))
+----
 
-This is the same path any other code change takes. The point of the policy is not "majors are forbidden" — it's "majors are not unattended."
+* `hold` pins a package below a version. It expires at `:until`; the weekly sweep
+  comments on `:issue` when it does. A hold without `:reason` is rejected.
+* `exclude` stops auto-updates for one ecosystem in this repo.
+* The grammar already permits the clause (it is a `clause` under
+  `deed.abnf` v1.0.0); only the vocabulary is new. It is specified in
+  link:../1-formats/deed/vocabulary/updates.adoc[`1-formats/deed/vocabulary/updates.adoc`],
+  including the reader rule that an unknown term fails closed.
+
+=== 5. Changelog
+
+Every merged update appears in the repo's changelog under `[Unreleased]`:
+
+* Repos on `changelog-reusable.yml` (git-cliff, `templates/cliff.toml`) get the
+  line from the commit subject. `cliff.toml` files `chore(deps):`,
+  `build(deps):` and Dependabot's unprefixed `Bump X from a to b` under
+  `### Dependencies`. `squabble bump` makes no extra write there, so there is no
+  duplicate.
+* Other repos get the line appended by `squabble bump` under
+  `=== Dependencies` (AsciiDoc) or `### Dependencies` (Markdown). A repo with no
+  changelog gets the template `CHANGELOG.adoc`.
+
+=== 6. Failure feedback
+
+When an update PR is still red after the fixer:
+
+. `squabble fight --json` diagnoses it;
+. the PR gets a comment with the diagnosis and the label `updates:blocked`;
+. one issue is filed in the repo, deduplicated by the marker
+  `<!-- squabble-update:<ecosystem>/<package>@<to> -->` and never reopened once
+  closed. It carries the failing check, the upstream release link and the
+  suggested fix.
+
+=== 7. Rollback
+
+If the default branch turns red on an update's merge commit while its parent was
+green, `squabble rollback <owner>/<repo> <pr>`:
+
+. opens a revert PR, armed like any update;
+. adds a `(hold …)` to the repo deed with `:reason` and `:issue`;
+. re-renders `dependabot.yml` so the same version is not proposed again.
+
+The same command is the manual rollback.
+
+=== 8. `--locked` everywhere it's available
+
+Already landed in `rust-ci-reusable.yml` (standards#299). CI MUST pass the
+lockfile-verbatim flag for every ecosystem that has one.
 
 == Migration
 
-The estate has ~140 repos shipping `.github/dependabot.yml` (audit 2026-05-26). Fan-out the major-ignore stanza via a campaign — the patch is the same shape per repo. Track under a follow-up standards issue (TODO: file once this PR lands).
+* 361 of 445 local estate clones carry `.github/dependabot.yml`
+  (measured 2026-10-01 over `hyper-repos/` + `meta-repos/`, depth ≤ 3). The rest
+  get one from the same hypatia render, in propagation waves.
+* The change lands in `rsr-template-repo` once, is piloted on five repos, then
+  propagates in waves of about 50.
 
-== Open questions
+== Increment 2 (planned, not yet built)
 
-* **Per-dep override**: some deps (e.g. `serde`, `tokio`) have unusually stable major bumps and might be safe to auto-merge anyway. Carve-outs should be added with explicit rationale per repo, not as a blanket rule.
-* **Security advisories**: a major bump that's also a security fix is a different shape. Dependabot's `security-updates` flow opens those separately; this policy does not block them. See https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/configuring-dependabot-security-updates.
+* **Release intelligence** (hypatia `RI001`): for each merged update, read the
+  upstream notes between the two versions and file an `updates:opportunity` issue
+  only when a concrete location in the repo matches — a workaround that upstream
+  now makes redundant, a deprecated call site, a newly available capability.
+* **Upstream feedback**: a reproducible upstream breakage is drafted as an
+  upstream issue with a minimal reproduction. Posting to a third-party repo is
+  owner-approved each time.
 
 == Cross-refs
 
-* https://github.com/hyperpolymath/standards/issues/297[standards#297] — the issue this document closes.
-* https://github.com/hyperpolymath/echidna/issues/92[echidna#92] — the real-world incident the policy is derived from.
-* https://github.com/hyperpolymath/echidna/pull/128[echidna#128] — the revert that recovered echidna.
-* https://github.com/hyperpolymath/standards/pull/299[standards#299] — `--locked` in rust-ci-reusable (the complementary CI-level fix).
+* https://github.com/hyperpolymath/standards/issues/787[standards#787] — D269, the ruling this document implements.
+* https://github.com/hyperpolymath/standards/issues/297[standards#297] — the original policy issue.
+* https://github.com/hyperpolymath/echidna/issues/92[echidna#92] — the incident; https://github.com/hyperpolymath/echidna/pull/128[echidna#128] — the revert.
+* https://github.com/hyperpolymath/standards/pull/299[standards#299] — `--locked` in rust-ci-reusable.
+* https://github.com/hyperpolymath/standards/issues/968[standards#968] — actions.lock drift after Dependabot bumps.

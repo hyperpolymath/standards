@@ -46,6 +46,8 @@ restore_workflows() {
     done
 }
 
+# Succeeds when <workflow> calls a reusable workflow of <dependency>'s repo at
+# exactly <dependency>'s ref (owner/repo/.github/workflows/<file>@<ref>).
 workflow_references_reusable_dependency() {
   workflow=$1
   dependency=$2
@@ -53,20 +55,17 @@ workflow_references_reusable_dependency() {
   ref=${dependency#*@}
 
   [[ -f "$workflow" ]] || return 1
-  awk -v prefix="$repo/.github/workflows/" -v suffix="@$ref" '
-    /^[[:space:]]*uses:[[:space:]]*/ {
-      value = $0
-      sub(/^[[:space:]]*uses:[[:space:]]*/, "", value)
-      sub(/[[:space:]]*#.*/, "", value)
-      sub(/[[:space:]]*$/, "", value)
-      if (index(value, prefix) == 1 &&
-          length(value) >= length(suffix) &&
-          substr(value, length(value) - length(suffix) + 1) == suffix) {
-        found = 1
-      }
-    }
-    END { exit(found ? 0 : 1) }
-  ' "$workflow"
+  # Read `uses:` values with the YAML parser (YAML-POLICY Y-1): a line awk
+  # never matched the quoted value in a KYAML workflow, so a KYAML caller of a
+  # reusable had its stale finding rejected instead of accepted as coverage.
+  # A parse failure returns 1 -- the finding stays a failure, never a pass.
+  yq -r '.. | select(tag == "!!map") | select(has("uses")) | .uses | select(tag == "!!str")' "$workflow" 2>/dev/null |
+    awk -v prefix="$repo/.github/workflows/" -v suffix="@$ref" '
+      index($0, prefix) == 1 &&
+      length($0) >= length(suffix) &&
+      substr($0, length($0) - length(suffix) + 1) == suffix { found = 1 }
+      END { exit(found ? 0 : 1) }
+    '
 }
 
 is_advisory_category() {

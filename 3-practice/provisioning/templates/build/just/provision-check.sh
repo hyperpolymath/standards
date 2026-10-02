@@ -20,7 +20,7 @@ REPO="${1:-.}"
 cd "$REPO" || { echo "provision-check: no such directory: $REPO" >&2; exit 1; }
 
 MIN_JUST="1.42.0"
-VERBS="setup doctor heal dev-shell toolchain-refresh ai-setup ai-warmup eval config-show opsm build test bench lint fmt fmt-check run deps"
+VERBS="setup doctor heal dev-shell toolchain-refresh ai-setup ai-warmup eval config-show opsm build test bench lint fmt fmt-check run deps"  # hypatia:ignore eval_in_shell -- "eval" is a verb name, not the shell builtin
 # Files the provisioning set owns; residue anywhere else is not ours to judge.
 # The engine scripts under build/just/ are excluded: they name slot syntax in their
 # own comments and code, and realign owns them. README.adoc is scanned only inside

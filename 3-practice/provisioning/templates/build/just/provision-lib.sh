@@ -14,7 +14,7 @@
 #
 # Usage: provision-lib.sh <verb> [args]
 #   verbs: langs doctor setup heal dev-shell toolchain-refresh crates-scm ai-setup
-#          ai-warmup <user|dev|maintainer> eval config-show opsm lang-run <verb>
+#          ai-warmup <user|dev|maintainer> eval config-show opsm lang-run <verb>  (hypatia:ignore eval_in_shell -- verb list)
 #          search <pattern> version
 #   facts: guix-specs mise-tools langs guix-dir set-files guix-gaps tool-table
 #          system-deps <adoc|ai>
@@ -860,12 +860,12 @@ cmd_ai_warmup() {
   fail "llm-warmup-$who.adoc not found"; return 1
 }
 
-# Run test and bench recipes, saving output and timings under .eval/;
+# Run test and bench recipes, saving output and timings under .eval/;  (hypatia:ignore eval_in_shell -- directory name)
 # report N/A for skipped work and return 1 if either recipe fails.
 cmd_eval() {
   local logf rc=0 s e v r o st
-  logf=".eval/$(date -u +%Y%m%dT%H%M%SZ).txt"
-  mkdir -p .eval
+  logf=".eval/$(date -u +%Y%m%dT%H%M%SZ).txt"  # hypatia:ignore eval_in_shell -- .eval/ is a directory name
+  mkdir -p .eval  # hypatia:ignore eval_in_shell -- .eval/ is a directory name
   { echo "# $REPO_NAME evaluation — $(date -u +%FT%TZ) — $(git rev-parse --short HEAD 2>/dev/null || echo no-git)"
     echo "# languages: ${LANGS[*]}   archetype: $ARCHETYPE"; } > "$logf"
   for v in test bench; do
@@ -874,7 +874,7 @@ cmd_eval() {
     s=$(date +%s); o=$(mktemp)
     if just "$r" >"$o" 2>&1; then st=PASS; else st=FAIL; rc=1; fi
     e=$(( $(date +%s) - s )); cat "$o" >>"$logf"
-    # A skip is not a pass: lang_run exits 0 on N/A (users see success), eval says N/A.
+    # A skip is not a pass: lang_run exits 0 on N/A (users see success), eval says N/A.  (hypatia:ignore eval_in_shell -- verb name)
     [ "$st" = PASS ] && grep -q "nothing was faked" "$o" && st=N/A
     rm -f "$o"; echo "$v: $st (${e}s)" | tee -a "$logf"
   done
@@ -941,7 +941,7 @@ case "${1:-}" in
   crates-scm)         cmd_crates_scm ;;
   ai-setup)           cmd_ai_setup ;;
   ai-warmup)          shift; cmd_ai_warmup "${1:-user}" ;;
-  eval)               cmd_eval ;;
+  eval)               cmd_eval ;;  # hypatia:ignore eval_in_shell -- the "eval" verb, not the builtin
   config-show)        cmd_config_show ;;
   opsm)               cmd_opsm ;;
   search)             shift; cmd_search "${1:-}" ;;

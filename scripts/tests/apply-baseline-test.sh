@@ -56,6 +56,31 @@ EOF
 assert_status "file_pattern matches nested file" \
   "$WORK/findings2.json" "$WORK/baseline2.json" "1,0"
 
+# === Case 2b: severity tier — a `warn` acknowledgement still matches the
+# same finding now emitted as `medium` (hypatia#895), and vice versa; a
+# different tier must not match. Real shape from standards' own baseline.
+cat > "$WORK/findings2b.json" <<'EOF'
+[{"severity":"medium","rule_module":"research_extensions","type":"RE001","file":".github/workflows/mirror-reusable.yml"}]
+EOF
+cat > "$WORK/baseline2b-warn.json" <<'EOF'
+[{"severity":"warn","rule_module":"research_extensions","type":"RE001","file":".github/workflows/mirror-reusable.yml"}]
+EOF
+cat > "$WORK/baseline2b-high.json" <<'EOF'
+[{"severity":"high","rule_module":"research_extensions","type":"RE001","file":".github/workflows/mirror-reusable.yml"}]
+EOF
+cat > "$WORK/findings2b-warn.json" <<'EOF'
+[{"severity":"warn","rule_module":"research_extensions","type":"RE001","file":".github/workflows/mirror-reusable.yml"}]
+EOF
+cat > "$WORK/baseline2b-medium.json" <<'EOF'
+[{"severity":"medium","rule_module":"research_extensions","type":"RE001","file":".github/workflows/mirror-reusable.yml"}]
+EOF
+assert_status "warn acknowledgement matches a medium finding" \
+  "$WORK/findings2b.json" "$WORK/baseline2b-warn.json" "1,0"
+assert_status "medium acknowledgement matches a warn finding" \
+  "$WORK/findings2b-warn.json" "$WORK/baseline2b-medium.json" "1,0"
+assert_status "a different tier does not match" \
+  "$WORK/findings2b.json" "$WORK/baseline2b-high.json" "0,1"
+
 # === Case 3: file_pattern MUST NOT match unrelated file (regression
 # against the always-matches bug from `.file_pattern` inside test()) ===
 cat > "$WORK/findings3.json" <<'EOF'

@@ -17,9 +17,10 @@ it supersedes the sequencing in D90.
   gitbot-fleet, AI tools running unattended)
 | GitHub's web-flow **GPG** key
 | Write through the API so GitHub signs the commit itself: GraphQL
-  `createCommitOnBranch`, the estate
-  link:../.github/actions/signed-push/README.md[`signed-push`] action, or a
-  squash merge of a PR. Never `git push` a locally made commit.
+  `createCommitOnBranch` or the estate
+  link:../.github/actions/signed-push/README.md[`signed-push`] action. Never
+  `git push` a locally made commit. A squash merge is *not* a way round this:
+  see <<pr-branch-commits>>.
 
 | **Humans and interactive agents** (the owner, collaborators, Claude Code and
   other agents running on a person's machine)
@@ -44,7 +45,8 @@ These were each measured on default branches between 2026-07 and 2026-09. Do not
 
 * **Rebase-merge.** It replays the PR's commits *unsigned* under the merger's
   identity (D89). Rebase-merge is off wherever signatures are required. Use squash
-  instead: GitHub signs the squash commit.
+  instead: GitHub signs the squash commit. Squash does not excuse the commits on
+  the PR branch, though (<<pr-branch-commits>>).
 * **The contents API (`PUT /repos/.../contents`) with a user OAuth token or PAT.**
   The commit is unsigned. Use `createCommitOnBranch` instead.
 * **`git push` from a workflow** using `GITHUB_TOKEN` or a PAT. The commit is
@@ -53,6 +55,22 @@ These were each measured on default branches between 2026-07 and 2026-09. Do not
   commit-suggestions). Turn that off; the bot suggests, and a human applies.
 * **A second machine or container without signing configured.** Configure it
   before its first push.
+
+[[pr-branch-commits]]
+=== Squash signs the result, not the PR branch
+
+`required_signatures` checks *every commit on the PR branch* before it allows a
+merge, not just the commit that will land. GitHub signs the squash commit, but
+one unsigned commit on the head still blocks the PR. This was measured on
+pons-asinorum #46 (2026-09-30): with `required_signatures` as the only active
+rule, a single unsigned bot commit left the PR `BLOCKED`, and
+`gh pr merge --squash` was refused with "base branch policy prohibits".
+
+So every commit pushed to a PR branch must itself be signed. When one is not,
+re-create the branch from the default branch with `git cherry-pick -S` (the
+original author is kept; the re-signer adds a trailer). Check that
+`git diff <old-head> HEAD` is empty, open a new PR, and close the old one. Do not
+force-push, and do not merge with `--admin`.
 
 == Enforcement
 

@@ -138,15 +138,15 @@ MR="$REPO_DIR/.machine_readable"
 [ -f "$MR/ADJUST.contractile" ] && record "adjust_contractile" "pass" "ADJUST.contractile present" \
     || record "adjust_contractile" "warn" "ADJUST.contractile missing"
 
-# --- Phase 5: Guix/Nix environment ---
+# --- Phase 5: Guix environment (Nix is retired) ---
 echo "" >&2
 echo "Phase 5: Reproducible environment" >&2
 
 [ -f "$REPO_DIR/guix.scm" ] && record "guix" "pass" "guix.scm present" \
     || record "guix" "warn" "guix.scm missing"
 
-[ -f "$REPO_DIR/flake.nix" ] && record "nix" "pass" "flake.nix present" \
-    || record "nix" "warn" "flake.nix missing"
+[ -f "$REPO_DIR/flake.nix" ] && record "nix" "warn" "flake.nix present (Nix is retired; remove it)" \
+    || record "nix" "pass" "no flake.nix"
 
 # --- Phase 6: LLM warmup ---
 echo "" >&2

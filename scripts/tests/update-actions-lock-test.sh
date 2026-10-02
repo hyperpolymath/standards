@@ -147,6 +147,54 @@ if FAKE_VERIFY_FINDING=reusable-non-stale GH_BIN="$WORK/bin/fake-gh" \
 fi
 echo "PASS: non-stale reusable-workflow finding remains blocking"
 
+# The same caller in KYAML (YAML-POLICY Y-3). A line matcher never saw the
+# quoted value, so the exact dependency was rejected; the parser reads it.
+cp .github/workflows/reusable.yml "$WORK/reusable.block"
+cat > .github/workflows/reusable.yml <<'EOF'
+# SPDX-License-Identifier: MPL-2.0
+{
+  name: "Reusable caller",
+  on: "push",
+  permissions: {},
+  jobs: {
+    governance: {
+      uses: "hyperpolymath/standards/.github/workflows/governance-reusable.yml@abc123",
+    },
+  },
+}
+EOF
+FAKE_VERIFY_FINDING=reusable-exact GH_BIN="$WORK/bin/fake-gh" \
+  bash "$UPDATE" --verify-local .github/workflows >/dev/null
+echo "PASS: exact reusable-workflow dependency is accepted from a KYAML caller"
+
+if FAKE_VERIFY_FINDING=reusable-wrong-ref GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: wrong reusable-workflow ref was accepted from a KYAML caller" >&2
+  exit 1
+fi
+echo "PASS: wrong reusable-workflow ref remains blocking from a KYAML caller"
+
+# Text that only MENTIONS the reusable (a run: body) is not a reference.
+cat > .github/workflows/reusable.yml <<'EOF'
+# SPDX-License-Identifier: MPL-2.0
+name: Reusable caller
+on: push
+permissions: {}
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          uses: hyperpolymath/standards/.github/workflows/governance-reusable.yml@abc123
+EOF
+if FAKE_VERIFY_FINDING=reusable-exact GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: a run: body mentioning the reusable was accepted as a reference" >&2
+  exit 1
+fi
+echo "PASS: a run: body mentioning the reusable is not a reference"
+cp "$WORK/reusable.block" .github/workflows/reusable.yml
+
 advisory_output="$(FAKE_VERIFY_FINDING=valid-advisory GH_BIN="$WORK/bin/fake-gh" \
   bash "$UPDATE" --verify-local .github/workflows)"
 printf '%s\n' "$advisory_output" | grep -q '"category":"sha-as-ref"'
