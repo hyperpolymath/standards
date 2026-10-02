@@ -58,5 +58,23 @@ expect 0 "a v4 inside .git/ is ignored"
 fresh; printf '\000%s\n' "$V4" > "$WORK/t/blob.bin"
 expect 0 "a v4 inside a binary file is ignored"
 
+# Julia project files: registry-assigned dependency UUIDs are external IDs.
+fresh; printf 'name = "P"\nuuid = "%s"\n\n[deps]\nX = "%s"\n\n[weakdeps]\nY = "%s"\n\n[extras]\nZ = "%s"\n' \
+  "$V7_8" "$V4" "$V4" "$V4" > "$WORK/t/Project.toml"
+expect 0 "v4 dependency UUIDs in Project.toml [deps]/[weakdeps]/[extras] are accepted"
+
+fresh; printf 'name = "P"\nuuid = "%s"\n\n[deps]\nX = "%s"\n' "$V4" "$V7_8" > "$WORK/t/Project.toml"
+expect 1 "a v4 package's own uuid in Project.toml is rejected"
+
+fresh; printf 'uuid = "%s"\n[ deps ] # comment\nX = "%s"\n\n[compat]\n\n[sources]\nY = "%s"\n' \
+  "$V7_8" "$V4" "$V4" > "$WORK/t/JuliaProject.toml"
+expect 1 "the exemption ends at the next table header"
+
+fresh; printf '[deps]\nX = "%s"\n' "$V4" > "$WORK/t/deps.toml"
+expect 1 "a [deps] table outside a Julia project file is not exempt"
+
+fresh; mkdir -p "$WORK/t/docs"; printf '[[deps.X]]\nuuid = "%s"\n' "$V4" > "$WORK/t/docs/Manifest-v1.12.toml"
+expect 0 "a v4 in a Julia Manifest is accepted"
+
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]
