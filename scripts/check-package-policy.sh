@@ -225,22 +225,6 @@ if printf '%s
 ' "$CAPS" | grep -xE 'reproducible-build|container' | paste -sd ' ' -)"
 fi
 
-# Only a stub guix.scm. Before capability gating this passed on presence, and
-# ~90 repos rely on that; 8.1.4 is gated on reproducible-build, so the stub
-# only fails where that capability (or container) is declared.
-if [ -n "$GUIX_STUB" ]; then
-  if [ -z "$REQUIRED" ]; then
-    echo "::notice::${GUIX_STUB#"$ROOT"/} is a scaffold stub (criterion 8.1.4)." \
-         "Not enforced: this repo declares neither reproducible-build nor container."
-    echo "✅ Packaging not applicable (no packaging capability declared)."
-    exit 0
-  fi
-  echo "::error::${GUIX_STUB#"$ROOT"/} is a scaffold stub (placeholder or (source #f))," \
-       "and this repo declares: $REQUIRED. A stub builds nothing (criterion 8.1.4)."
-  echo "Make the guix.scm real, or add a Containerfile with active RUN/CMD steps."
-  exit 1
-fi
-
 # Nix-only. Under the 2026-05-18 ruling this is NOT compliance — Nix is not a
 # tier — and the 2026-07-28 ruling removes it from the estate outright. That is
 # a ban, not a capability, so it applies whatever the profile declares.
@@ -270,6 +254,22 @@ if [ -n "$NIX" ]; then
     echo "This repo declares: $REQUIRED — replace the flake with a real guix.scm or"
     echo "an active Containerfile IN THE SAME CHANGE (spec/scaffold-stub-debt.adoc, step 3)."
   fi
+  exit 1
+fi
+
+# Only a stub guix.scm. Before capability gating this passed on presence, and
+# ~90 repos rely on that; 8.1.4 is gated on reproducible-build, so the stub
+# only fails where that capability (or container) is declared.
+if [ -n "$GUIX_STUB" ]; then
+  if [ -z "$REQUIRED" ]; then
+    echo "::notice::${GUIX_STUB#"$ROOT"/} is a scaffold stub (criterion 8.1.4)." \
+         "Not enforced: this repo declares neither reproducible-build nor container."
+    echo "✅ Packaging not applicable (no packaging capability declared)."
+    exit 0
+  fi
+  echo "::error::${GUIX_STUB#"$ROOT"/} is a scaffold stub (placeholder or (source #f))," \
+       "and this repo declares: $REQUIRED. A stub builds nothing (criterion 8.1.4)."
+  echo "Make the guix.scm real, or add a Containerfile with active RUN/CMD steps."
   exit 1
 fi
 

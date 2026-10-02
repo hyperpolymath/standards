@@ -234,6 +234,16 @@ assert "Nix-only packaging BLOCKS after retirement" 1 "Nix-only packaging is not
 assert "Nix-only packaging warns before retirement" 0 "NOT YET ENFORCED" \
   env PKG_TODAY="2026-05-31" "$PKG" "$r"
 
+# A Guix scaffold must not hide Nix-only packaging when no profile is present.
+r=$(mkrepo pkg-nix-stub-undeclared flake.nix guix.scm)
+stub_guix "$r/guix.scm"
+assert "Nix + Guix stub, no profile: warns before retirement" 0 "NOT YET ENFORCED" \
+  env PKG_TODAY="2026-05-31" "$PKG" "$r"
+assert "Nix + Guix stub, no profile: BLOCKS on retirement cutoff" 1 "Nix-only packaging is not compliant" \
+  env PKG_TODAY="2026-06-01" "$PKG" "$r"
+assert "Nix + Guix stub, no profile: BLOCKS after retirement" 1 "Nix-only packaging is not compliant" \
+  env PKG_TODAY="$AFTER" "$PKG" "$r"
+
 # Same repo, both sides of the cutoff — the self-flipping proof.
 r=$(mkrepo pkg-none README.adoc)
 declare "$r" reproducible-build
