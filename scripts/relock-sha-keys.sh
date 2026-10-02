@@ -34,7 +34,8 @@ LOCK="$WF_DIR/actions.lock"
 #    Lockfile entries key the repo root, while an inline ref may carry a
 #    subpath (github/codeql-action/init@sha), so index by owner/repo only.
 INLINE="$(mktemp)"
-trap 'rm -f "$INLINE" "$MAP" "$TMPLOCK"' EXIT
+TAGGED="$(mktemp)"
+trap 'rm -f "$INLINE" "$TAGGED" "$MAP" "$TMPLOCK"' EXIT
 find "$WF_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 \
   | xargs -0 -r awk '
       match($0, /uses:[ \t]*[A-Za-z0-9_.-]+\/[A-Za-z0-9_.\/-]+@[0-9a-f]{40}/) {
@@ -46,11 +47,32 @@ find "$WF_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0
         print tolower(seg[1] "/" seg[2]) "\t" sha
       }' | sort -u > "$INLINE"
 
+# 1b. Collect refs still written in TAG form on a live (uncommented) uses: line,
+#     as "owner/repo<TAB>ref". A tag-keyed entry whose tag is still in use must
+#     keep its key: re-keying it to the SHA strands every workflow that writes
+#     the tag (prune-stale then empties their lists and --verify-local reports
+#     not-pinned). Measured on metadatastician/_pathroot, 2026-10-02: 17
+#     workflows use actions/checkout@v7.0.1 and one pins its SHA inline.
+#     complete-job-refs and close-lock supply the SHA-form entry for the latter.
+find "$WF_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 \
+  | xargs -0 -r awk '
+      /^[ \t]*#/ { next }
+      match($0, /uses:[ \t]*[A-Za-z0-9_.-]+\/[A-Za-z0-9_.\/-]+@[^ \t#'"'"'"]+/) {
+        s = substr($0, RSTART, RLENGTH)
+        sub(/^uses:[ \t]*/, "", s)
+        n = index(s, "@")
+        path = substr(s, 1, n - 1); ref = substr(s, n + 1)
+        if (ref ~ /^[0-9a-f]{40}$/) next
+        split(path, seg, "/")
+        print tolower(seg[1] "/" seg[2]) "\t" ref
+      }' | sort -u > "$TAGGED"
+
 # 2. Walk the lockfile, building tag-key -> sha-key replacements.
 MAP="$(mktemp)"
-awk -v inline="$INLINE" '
+awk -v inline="$INLINE" -v tagged="$TAGGED" '
   BEGIN {
     while ((getline line < inline) > 0) { split(line, f, "\t"); seen[f[1] SUBSEP f[2]] = 1 }
+    while ((getline line < tagged) > 0) { split(line, f, "\t"); intag[f[1] SUBSEP f[2]] = 1 }
   }
   # A dependency entry:    '\''action@ref'\'':
   match($0, /^    '\''[^'\''@]+@[^'\'']+'\'':$/) {
@@ -60,6 +82,8 @@ awk -v inline="$INLINE" '
     action = substr(key, 1, n - 1); ref = substr(key, n + 1)
     # already SHA-keyed: nothing to do
     if (ref ~ /^[0-9a-f]{40}$/) { cur = ""; next }
+    # still written as this tag somewhere: keep the tag key (see 1b)
+    if ((tolower(action) SUBSEP ref) in intag) { cur = ""; next }
     cur = key; curaction = action; next
   }
   # its body carries    commit: '\''sha1-<sha>'\''
