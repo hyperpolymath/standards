@@ -114,31 +114,55 @@ jobs:
           chmod +x "$RUNNER_TEMP/nickel"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
+      # Each step mirrors its output into $GITHUB_STEP_SUMMARY as well as
+      # stdout. The PR then shows the verdict without anyone opening a raw log,
+      # and `gh api repos/{o}/{r}/check-runs/{job_id} --jq .output.summary`
+      # reads it back — which matters on a machine that cannot reach the log
+      # blob host. `set -uo pipefail` without `-e` so a failing validator still
+      # reaches the tee and its own status is what the step exits with.
       - name: K9 contract self-test
         run: |
-          set -euo pipefail
+          set -uo pipefail
           # Asserts the validator's bash mirrors still agree with the normative
           # contract, the capability arithmetic, the structural extractor, and
           # the envelope strip. Runs before the fixtures so a broken validator
           # is reported as a broken validator rather than as a broken corpus.
-          bash 1-formats/k9/tools/k9-validate.sh --self-test
+          {
+            echo '## K9 contract self-test'
+            echo '```'
+            bash 1-formats/k9/tools/k9-validate.sh --self-test 2>&1
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
 
       - name: K9 conformance fixtures (positive AND negative controls)
         run: |
-          set -euo pipefail
+          set -uo pipefail
           # --strict: with Nickel on PATH every format layer (L0-L2) must
-          # actually run, so a missing toolchain cannot report a pass. The 18
+          # actually run, so a missing toolchain cannot report a pass. The 21
           # negative controls are the load-bearing half — a validator that
           # accepts everything satisfies the positive half trivially.
-          bash 1-formats/k9/tools/k9-validate.sh --strict \
-            --fixtures 1-formats/k9/tools/fixtures
+          {
+            echo '## K9 conformance fixtures'
+            echo '```'
+            bash 1-formats/k9/tools/k9-validate.sh --strict \
+              --fixtures 1-formats/k9/tools/fixtures 2>&1
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
 
       - name: K9 corpus conformance (ratcheted)
         run: |
-          set -euo pipefail
+          set -uo pipefail
           # The whole tracked corpus, through the same gate the pre-commit hook
           # uses, so CI and the hook cannot disagree about what a K9 file is.
           # .machine_readable/k9-contract-debt.txt grandfathers the 25 files
           # that predate the contract; it is shrink-only (a conforming file
           # left in it fails), and it does not protect a file this PR touches.
-          bash .githooks/validate-k9.sh
+          {
+            echo '## K9 corpus conformance'
+            echo '```'
+            bash .githooks/validate-k9.sh 2>&1
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
