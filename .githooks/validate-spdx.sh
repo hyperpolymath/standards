@@ -40,6 +40,29 @@ is_source_file() {
   esac
 }
 
+# A NEGATIVE CONTROL CANNOT ALSO SATISFY THE RULE IT TESTS.
+#
+# 1-formats/k9/tools/fixtures/invalid/ holds the K9 conformance corpus, and
+# every file in it exists to violate one named rule. L0-K9-E004-no-spdx.k9.ncl
+# is there precisely BECAUSE it has no SPDX header: it is the control that
+# proves rule K9-E004 can fire. Requiring a header on it would not tighten this
+# gate, it would delete the fixture and leave the K9 rule untested.
+#
+# The exemption is keyed to the RULE the fixture tests, not to the directory:
+# only a fixture whose name declares K9-E004 may lack a header. Every other
+# negative control still has to carry one, so this cannot become a blanket hole
+# in the corpus. It is also a separate predicate from is_source_file, so the two
+# reasons stay distinct: "is this a source file" is about syntax, "is this a
+# test vector for the licence rule" is about intent. Same reasoning as the
+# secret scanner's exclusion of published conformance vectors
+# (secret-scanner-reusable.yml).
+is_exempt_path() {
+  case "$1" in
+    1-formats/k9/tools/fixtures/invalid/*K9-E004*) return 0 ;;
+  esac
+  return 1
+}
+
 # If staged files provided, only check those
 if [ -n "$STAGED_FILES" ]; then
   FILES_TO_CHECK=$STAGED_FILES
@@ -68,6 +91,7 @@ while IFS= read -r file; do
   [ -n "$file" ] || continue
   [ -f "$file" ] || continue
   is_source_file "$file" || continue
+  is_exempt_path "$file" && continue
 
   CHECKED=$((CHECKED + 1))
 
