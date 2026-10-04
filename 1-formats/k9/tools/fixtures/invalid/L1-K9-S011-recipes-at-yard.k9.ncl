@@ -20,7 +20,7 @@ K9!
   },
 
   recipes = {
-    default = { recipe = "run" },
+    default_recipe = { recipe = "run" },
     run = {
       commands = ["echo 'this should never be reachable at Yard'"],
     },

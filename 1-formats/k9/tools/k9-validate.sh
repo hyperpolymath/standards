@@ -577,10 +577,15 @@ check_l2() {
       err K9-N001 L2 "library does not typecheck: $(printf '%s' "$out" | head -n 5 | tr '\n' ' ')"
     fi
   else
+    # `k9_doc`, not `doc`: Nickel's lexer reserves `doc` (it is the metadata
+    # keyword in `x | doc "..."`), and its `Ident` production admits only `or`,
+    # `as` and `include` as contextual keywords. `let doc = ...` is a parse
+    # error at the identifier, which is what four positive controls died on.
+    # Keyword list: nickel 1.18.0 parser/src/lexer.rs.
     cat > "$drv_tmp" <<EOF
 let K9 = import "$CONTRACT" in
-let doc = import "./$(basename "$body_tmp")" in
-doc | K9.Component
+let k9_doc = import "./$(basename "$body_tmp")" in
+k9_doc | K9.Component
 EOF
     if ! out="$("$nb" typecheck "$drv_tmp" 2>&1)"; then
       err K9-N001 L2 "component does not satisfy K9.Component: $(printf '%s' "$out" | head -n 5 | tr '\n' ' ')"
@@ -821,6 +826,32 @@ EOF
   else
     echo -e "${YEL}SKIP${NC} attribution assertions: $impostor not present"
   fi
+
+  echo "== no Nickel reserved word is used as an identifier =="
+  # D173 gives the body to Nickel's grammar rather than restating it in an
+  # ABNF, which means Nickel's lexer is normative for identifiers and this
+  # validator cannot see a violation the way it sees a missing field. Two such
+  # violations cost CI runs to find: `let doc = ...` in the L2 driver, and a
+  # `default = { ... }` recipe field in two fixtures. Nickel's `Ident`
+  # production admits only `or`, `as` and `include` as contextual keywords, so
+  # every other keyword is unusable as a binding or field name.
+  # Keyword list: nickel 1.18.0 parser/src/lexer.rs.
+  local k9_kw='as default doc else false forall force fun if import in match merge nix not_exported null optional priority rec then true'
+  local kw_hits=0 kf k
+  for kf in "$CONTRACT" "$SCRIPT_DIR"/fixtures/valid/* "$SCRIPT_DIR"/fixtures/invalid/*; do
+    [ -f "$kf" ] || continue
+    case "$kf" in *.sh|*.adoc) continue ;; esac
+    for k in $k9_kw; do
+      # Field or binding position only: `| default = x` is Nickel's default
+      # marker and is correct, so a keyword preceded by `|` is not a hit.
+      if grep -qE "(^[[:space:]]*|[{(,][[:space:]]*)$k[[:space:]]*=[^=]" "$kf" \
+        || grep -qE "\blet[[:space:]]+$k[[:space:]]*=" "$kf"; then
+        echo -e "${RED}FAIL${NC} $(basename "$kf") uses the Nickel keyword '$k' as an identifier"
+        kw_hits=$((kw_hits + 1))
+      fi
+    done
+  done
+  t "the contract and all 26 fixtures avoid Nickel's reserved words" 0 "$kw_hits"
 
   echo
   if [ $SELFTEST_FAILS -eq 0 ]; then
