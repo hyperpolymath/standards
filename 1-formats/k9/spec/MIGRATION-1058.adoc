@@ -264,30 +264,36 @@ a component pedigree have different required fields for good reasons, and
 merging them to end a naming collision would be the naming collision winning.
 What M6 should do is make the relationship explicit in `SPEC.adoc`.
 
-=== M7 — L2 has never actually run on this corpus
+=== M7 — L2 on the corpus: still open, and now measurable
 
 *Rules cleared:* unknown until it runs · *ledger entries removed:* unknown
 
-This is the honest gap in the work. `nickel` is not available in the
-environment where this migration was prepared (the GitHub release-asset host is
-unreachable from it), so **L2 has not been executed against the corpus or the
-fixtures**. Everything asserted in this plan was asserted at L0/L1, plus the
-self-test.
+L2 has now run, but only over the **fixtures**. The result of the first run of
+`K9-SVC Contractile Validation` with Nickel installed (run `37169542241`,
+commit `37b42e9`):
 
-The conformance suite is built so this cannot pass unnoticed: `--strict` exits
-`3` with the message *"no nickel binary — L2 semantics were never checked, so
-this run is not a conformance result"*, and the CI step runs `--strict` with
-Nickel installed. The first CI run on a branch with Nickel will be the first
-time K9 semantics have ever been checked in this repository.
+----
+K9 normative contract typecheck  ok
+K9 contract self-test            ok  (30 assertions)
+K9 conformance fixtures          ok  5 positive, 21 negative, 0 failures
+K9 corpus conformance            ok  5 conforming, 25 grandfathered
+----
 
-Expect it to find things. At minimum:
+The corpus step runs the local hook, which is pinned to `--layer L1` so it can
+run in a pre-commit hook without a toolchain. So the 25 grandfathered files
+have **still never been through Nickel**, and M5's prediction is untested:
+`rhodium-standard-repositories/rsr-compliance-checklist.k9.ncl` opens with a
+top-level *sequence of bindings*, which is not a Nickel term and should be a
+parse error the moment anything typechecks it.
 
-* M5's top-level binding sequence is a Nickel parse error;
-* the two `L2-K9-N001-*` negative fixtures become assertable (they are held to
-  be lexically clean by the runner today, which is the precondition for being
-  an L2 control at all);
-* `nickel format --check` has never been run on any `.k9.ncl` body, and may
-  object to all of them.
+M7 is therefore: raise the corpus step to L2 for the five conforming files,
+then work the ledger down. Expect each removal to need a real fix, not a
+relabel.
+
+Still never run anywhere: `nickel format --check` on a `.k9.ncl` body.
+`ci-pipeline.yml` excludes that pathspec, and formatting is not reproducible
+without the binary — so any M1–M6 change that adds a body will be the first
+thing to discover what `nickel fmt` thinks of these files.
 
 == Suggested issue breakdown
 
@@ -346,13 +352,48 @@ Every count and path in this plan was produced by running the tools named in
 it, in the repository, at the revision this plan was written against. The two
 exceptions are stated rather than hidden:
 
-* *L2 (Nickel semantics) was not run.* No `nickel` binary was obtainable in the
-  preparation environment. See M7.
-* *`nickel format --check` was not run*, for the same reason. It has never been
-  run on a `.k9.ncl` body in this repository, because `ci-pipeline.yml`
-  excludes that pathspec.
+* *L2 (Nickel semantics) was not run where this plan was written.* No `nickel`
+  binary was obtainable in the preparation environment — the GitHub
+  release-asset host is TLS-refused from it, and `codeload` serves only the
+  source tarball with no `cargo` to build it. It has since been run in CI; see
+  M7 for what that found and what is still outstanding.
+* *`nickel format --check` has still not been run*, anywhere, on a `.k9.ncl`
+  body. `ci-pipeline.yml` excludes that pathspec.
 
-What *was* run, and passed: the validator's 26-assertion self-test; the
-conformance suite (5 positive controls, 19 negative controls asserted, 2 L2
-controls held to be lexically clean); the local hook in all four ratchet paths;
-and the corpus baseline above.
+What *was* run, and passed: the validator's 30-assertion self-test; the
+conformance suite under Nickel (5 positive controls, 21 negative controls, all
+21 rejected by their named rule at their named layer); the local hook in all
+four ratchet paths; and the corpus baseline above.
+
+=== What the first Nickel runs found
+
+Seven defects, every one of them in this work's own code, and not one of them
+visible without a `nickel` binary:
+
+[cols="1,3",options="header"]
+|===
+|Defect |Effect
+|`Record` used as a type |Not a Nickel type. The contract did not typecheck, so
+every L2 verdict downstream was void and all five positive controls failed.
+|`Any` used as its replacement |Also not a Nickel type; the dynamic type is
+`Dyn`. Same failure, one run later.
+|`let doc = …` in the L2 driver |`doc` is a Nickel keyword (the metadata
+keyword in `x \| doc "…"`). Parse error at the identifier.
+|`default = { … }` recipe fields in two fixtures |`default` is the
+default-value marker keyword. Nickel's `Ident` admits only `or`, `as` and
+`include` as contextual keywords.
+|L2 ran only `nickel typecheck` |Documented as "typechecks the program but
+does not run it". Contracts are applied when a value flows, so a predicate
+contract never fired and *both L2 negative controls were accepted*.
+|Negative-control attribution grepped free text |A control's filename contains
+its rule id, so "rejected by K9-N001" matched the path and succeeded no matter
+which rule fired — a gate that could not fail, in the suite built to prevent
+them.
+|`std.string.substring i 1 s` |1.18.0's `substring` takes `(start, end, str)`,
+not a length. It returned `""` at every index past 0, so `is_semver_of`
+rejected `"1.0.0"` and every component positive control with it.
+|===
+
+Four of the seven are the same lesson: the contract and its driver were written
+against Nickel as remembered rather than Nickel as shipped. The other three are
+gates that reported success without doing the work.

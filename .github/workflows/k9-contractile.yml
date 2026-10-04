@@ -127,6 +127,31 @@ jobs:
       # reads it back — which matters on a machine that cannot reach the log
       # blob host. `set -uo pipefail` without `-e` so a failing validator still
       # reaches the tee and its own status is what the step exits with.
+      - name: K9 normative contract typecheck
+        run: |
+          set -uo pipefail
+          # Its own step, ahead of the fixtures. `nickel typecheck` stops at the
+          # first error, and when the contract is broken every fixture verdict
+          # downstream is void — reported as five "non-conforming" positive
+          # controls rather than one broken contract. Twice now that cost a run
+          # to diagnose (`Record`, then `Any`: neither is a Nickel type).
+          set +e
+          out="$(nickel typecheck 1-formats/k9/spec/contract/k9_contract.ncl 2>&1)"; rc=$?
+          set -e
+          {
+            echo '## K9 normative contract typecheck'
+            echo '```'
+            [ $rc -eq 0 ] && echo 'k9_contract.ncl typechecks' || printf '%s\n' "$out"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
+          if [ $rc -ne 0 ]; then
+            printf '%s\n' "$out" | head -20 | while IFS= read -r line; do
+              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
+              [ -n "$esc" ] && printf '::error title=k9_contract.ncl does not typecheck::%s\n' "$esc"
+            done
+          fi
+          exit $rc
+
       - name: K9 contract self-test
         run: |
           set -uo pipefail

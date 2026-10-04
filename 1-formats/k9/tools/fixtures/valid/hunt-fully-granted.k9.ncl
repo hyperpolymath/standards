@@ -56,7 +56,7 @@ K9!
   },
 
   recipes = {
-    default = { recipe = "deploy" },
+    default_recipe = { recipe = "deploy" },
     deploy = {
       description = "Apply the deployment.",
       commands = ["echo '[fixture] would deploy to %{config.target_dir}'"],

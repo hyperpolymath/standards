@@ -97,7 +97,14 @@ let is_semver_of = fun major v =>
     if i >= std.string.length s then
       dots == 2 && seg_len > 0
     else
-      let c = std.string.substring i 1 s in
+      # `substring start end str`, NOT (start, length, str): 1.18.0's
+      # std.ncl documents `substring start end str` as the slice from `start`
+      # (included) to `end` (excluded), so the single character at `i` is
+      # `substring i (i + 1) s`. Written as `substring i 1 s` it returned "1"
+      # at i=0 by coincidence and "" at every later index, so the walk fell
+      # out at the second character and `is_semver_of` rejected "1.0.0" —
+      # every positive control with it. Verified against core/stdlib/std.ncl.
+      let c = std.string.substring i (i + 1) s in
       if c == "." then
         seg_len > 0 && go (i + 1) (dots + 1) 0 false s
       else if is_digit c then
@@ -106,6 +113,7 @@ let is_semver_of = fun major v =>
       else
         false
   in
+  # A dot-triple is at least `want` plus "N.N": three more characters.
   std.string.length v >= (std.string.length want + 3)
     && std.string.substring 0 (std.string.length want) v == want
     && go 0 0 0 false v in
@@ -413,15 +421,21 @@ let is_semver_of = fun major v =>
   # 'Hunt. The validator enforces that; this contract only shapes the blocks.
   Component = {
     pedigree | Pedigree,
-    # `{ _ : Any }` is the open record: any fields, any values. These three
-    # blocks are the component's own business and the contract deliberately
-    # does not shape them — §6.7's `recipes`-forces-'Hunt rule is enforced by
-    # the validator over the extracted facts, not by a type here. There is no
-    # `Record` builtin in Nickel; this field used to name one, so the contract
-    # itself failed to typecheck and every L2 verdict downstream was void.
-    config | { _ : Any } | optional,
-    recipes | { _ : Any } | optional,
-    validation | { _ : Any } | optional,
+    # An open record: any fields, any values. These three blocks are the
+    # component's own business and the contract deliberately does not shape
+    # them — §6.7's `recipes`-forces-'Hunt rule is enforced by the validator
+    # over the extracted facts, not by a type here.
+    #
+    # Two names were tried and rejected by Nickel before this one: `Record`
+    # and then `Any`. Neither exists; the dynamic type is `Dyn`. Both failures
+    # were invisible locally — no nickel binary is obtainable in the sandbox
+    # that wrote this file — and both made every L2 verdict downstream void,
+    # because a contract that does not typecheck cannot judge anything. That
+    # is why k9-contractile.yml now typechecks this file as its own named step
+    # before the fixtures run.
+    config | { _ : Dyn } | optional,
+    recipes | { _ : Dyn } | optional,
+    validation | { _ : Dyn } | optional,
   },
 
   # ── §11 Library dialect ──────────────────────────────────────────────
