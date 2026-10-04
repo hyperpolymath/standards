@@ -165,8 +165,13 @@ jobs:
           # the first two runs of this workflow had to be diagnosed from.
           # Workflow-command escaping: % first, then CR and LF.
           if [ $rc -ne 0 ]; then
-            esc="$(printf '%s' "$out" | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}' | sed 's/%0A$//')"
-            printf '::error title=K9 conformance fixtures failed::%s\n' "$esc"
+            # One annotation per failure, not one multi-kilobyte annotation: a
+            # whole-report message never reached the check-run API, and a
+            # per-failure annotation is what a reader wants anyway.
+            printf '%s\n' "$out" | grep -E '^(FAIL|ERROR)' | head -20 | while IFS= read -r line; do
+              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
+              printf '::error title=K9 conformance fixture::%s\n' "$esc"
+            done
           fi
           exit $rc
 
@@ -188,8 +193,10 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
           if [ $rc -ne 0 ]; then
-            esc="$(printf '%s' "$out" | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}' | sed 's/%0A$//')"
-            printf '::error title=K9 corpus conformance failed::%s\n' "$esc"
+            printf '%s\n' "$out" | grep -E '^(FAIL|ERROR)' | head -20 | while IFS= read -r line; do
+              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
+              printf '::error title=K9 corpus conformance::%s\n' "$esc"
+            done
           fi
           exit $rc
 
