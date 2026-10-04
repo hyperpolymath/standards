@@ -1,0 +1,158 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+//
+// FFP spec part 1 — the declared marker.
+= FFP/1 — The declared marker
+:toc: preamble
+:icons: font
+
+== Purpose
+
+A producer that fills a form programmatically can *say so* in the document.
+That declaration is the only provenance evidence a print path can trust without
+inference, so it is the load-bearing half of this standard.
+
+== Namespace
+
+[cols="1,3",options="header"]
+|===
+| Property | Value
+
+| Namespace URI | `pass:[https://hyperpolymath.dev/ns/form-fill-provenance/1.0/]`
+| Preferred prefix | `ffp`
+| Wire version | `1.0` (the trailing path segment)
+| Carrier | an XMP packet in the document catalog's `/Metadata` stream
+|===
+
+The URI is an XML namespace name: it identifies the vocabulary and need not
+resolve to a document. A future incompatible revision changes the trailing
+segment; the URI is therefore the wire version.
+
+== Properties
+
+[cols="1,1,1,3",options="header"]
+|===
+| Property | Type | Presence | Meaning
+
+| `ffp:filledBy`
+| string, value `machine`
+| MUST, when the marker is present
+| The values in this document were written programmatically. `machine` is the
+*only* value defined in 1.0. Producers MUST NOT write any other value — see
+<<no-human>>.
+
+| `ffp:tool`
+| string
+| SHOULD
+| Producing tool identifier, e.g. `blocky-writer`.
+
+| `ffp:toolVersion`
+| string
+| MAY
+| Producing tool version, e.g. `0.2.0`.
+
+| `ffp:filledAt`
+| string, ISO 8601 date-time with `Z` or an offset
+| MAY
+| When the values were written. This is *not* a privacy-neutral field; see
+<<privacy>>.
+
+| `ffp:appearancesGenerated`
+| boolean
+| SHOULD
+| `true` iff the producer generated the `/AP` normal appearance streams for
+every filled widget. `false` preserves the print-path hazard described in
+link:PRINT-PATH.adoc[PRINT-PATH].
+|===
+
+=== The packet
+
+XMP permits properties as attributes or as child elements; both are conforming
+and a detector MUST accept both. The attribute form:
+
+[source,xml]
+----
+<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description rdf:about=""
+        xmlns:ffp="https://hyperpolymath.dev/ns/form-fill-provenance/1.0/"
+        ffp:filledBy="machine"
+        ffp:tool="blocky-writer"
+        ffp:toolVersion="0.2.0"
+        ffp:appearancesGenerated="false"/>
+  </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>
+----
+
+The `<?xpacket?>` wrapper is customary, not required: a detector MUST find the
+properties whether or not it is present, and MUST NOT depend on the byte-order
+mark (U+FEFF) that generators conventionally place inside `begin`. The vectors
+in link:conformance/README.adoc[the conformance suite] omit it.
+
+[[no-human]]
+== Why `filledBy` has exactly one value
+
+FFP defines `human` as *not a value of this vocabulary*. A producer cannot know
+that a human filled a form: an interactive editor knows only that *it* wrote the
+values, not who typed them, and a printer cannot observe the pen. Offering
+`filledBy=human` would invite a claim the producer cannot support and that a
+consumer would then repeat as fact.
+
+The absence of a marker is what hand-completion looks like from the print path
+(`blank-form`, or `filled-unknown` if values are nevertheless present). Absence
+is honest; a false declaration is not.
+
+A consumer that reads a marker whose `filledBy` it does not recognise MUST
+record it as unrecognised evidence (link:DETECTION.adoc[`FFP-E-DECL-UNRECOGNISED`])
+and let the structural rules decide. It MUST NOT treat an unknown declaration as
+`machine`.
+
+[[privacy]]
+== Privacy and retention
+
+The marker describes the *document*, not a person: it is an authoring-tool
+declaration, not an identity. Consumers MUST NOT infer or record authorship,
+identity, or location from it. `ffp:filledAt` and `ffp:tool` exist for audit
+*of the pipeline*; a consumer that persists them MUST obey the same retention
+policy as the document itself, and a producer SHOULD omit `ffp:filledAt` when
+the field's own contents are timestamp-bearing anyway.
+
+== Writer obligations
+
+A conforming producer:
+
+1. MUST write `ffp:filledBy=machine` when it wrote any field value.
+2. MUST place the packet in the catalog's `/Metadata` stream (not in `/Info`;
+   ISO 32000-2 deprecates the Info dictionary, and XMP is the designed
+   extension point — ISO 32000-1 §14.3.2, ISO 16684-1).
+3. MUST NOT remove or overwrite an existing XMP packet. Where the packet
+   already exists, the new `rdf:Description` is added to the existing `rdf:RDF`
+   (or the existing description gains the `ffp:` properties).
+4. MUST set `ffp:appearancesGenerated` truthfully when it writes it. A producer
+   that writes `/V` without generating `/AP`, relying on `NeedAppearances`, MUST
+   write `false` (or omit the property, which is recorded as *unknown*).
+5. SHOULD generate appearances. `NeedAppearances` is deprecated in PDF 2.0,
+   PDF/A requires appearances to be present, and numerous viewers and print
+   rasterisers ignore the flag and print blank fields. Generating appearances is
+   the correctness fix for the producer side; the marker then declares
+   `appearancesGenerated=true` and the print path no longer has to warn.
+6. MUST NOT set `ffp:filledBy=machine` on a document it did not fill (a
+   pass-through converter, a merger, a print router copying bytes). The marker
+   is a record of authorship of the *values*, and pass-through components MUST
+   preserve it verbatim if present.
+
+== Producer note: what the marker does not replace
+
+The marker does not describe *which* fields were filled, does not replace the
+`/V` entries, and does not assert the document is valid, printable, or
+complete. It records one fact — the values were machine-written — and the
+appearances flag.
+
+== Detector note
+
+A detector MUST look for the property in the FFP namespace, not for the literal
+string `filledBy` anywhere in the packet (an unrelated vocabulary may carry that
+name). Namespace-prefix spelling is not normative: `ffp:` is a convention, and
+any prefix bound to the FFP namespace URI is equivalent.

@@ -132,6 +132,11 @@ dyadt-conformance:
 dyadt-test:
     @bash scripts/tests/wave4-dyadt-test.sh
 
+# FFP: run the form-fill provenance conformance vectors against the reference probe
+# (set FFP_DETECTOR to test a product detector instead)
+ffp-conformance:
+    @bash 1-formats/sub-specs/form-fill-provenance/spec/conformance/run-conformance.sh
+
 # Structural lint for per-language testing guides (required sections + R1..R9)
 language-guides-check:
     @bash scripts/check-language-guide.sh

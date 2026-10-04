@@ -1,0 +1,146 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+//
+// FFP spec part 3 — obligations on the print path.
+= FFP/3 — The print path
+:toc: preamble
+:icons: font
+
+== Scope of this part
+
+This part binds a *print-path consumer*: any component that accepts a document
+for printing, routing or job management — the `presswerk` class of software.
+The obligations are written so that they are implementable in a single intake
+function and verifiable from the job record.
+
+== Why the print path
+
+A filled application form is usually a print job before it is anything else.
+The print path is where the distinction has consequences:
+
+* *Routing* — a blank form going to a printer to be filled by hand and a
+  machine-filled form going to a printer to be filed are different jobs with
+  different handling, and today they are byte-indistinguishable at the queue.
+* *Audit* — the audit trail is the record of what was printed, when, and from
+  what. "Arrived already-filled by a machine" is a fact about the document that
+  the trail cannot reconstruct afterwards unless it was captured at intake.
+* *Hazard* — a document whose filled fields have no appearance streams can
+  print *blank* on viewers and print rasterisers that ignore
+  `NeedAppearances`; see <<hazard>>.
+
+== Obligations
+
+[[P1]]
+=== P1 — classify at intake (MUST)
+
+Every document entering the print path MUST be classified per
+link:DETECTION.adoc[DETECTION] before the job is submitted to a printer, and
+the classification MUST be attached to that job. A print path MAY implement the
+detector itself or call a shared one; it MUST NOT skip classification because
+"it is probably not a form".
+
+Network-received jobs (e.g. an embedded IPP print server) are in scope: the
+classification is performed on the received payload, at receipt.
+
+[[P2]]
+=== P2 — record (MUST)
+
+The full FFP record (link:DETECTION.adoc[DETECTION] §The record) MUST be
+persisted with the job, alongside the document hash, so a later reader can
+distinguish the two cases *without re-parsing the document*. At least:
+
+* the job's own persistent metadata (the queue/record the job lives in), and
+* the audit trail entry for the job's submission.
+
+`machine-filled` and `machine-filled-suspected` MUST be recorded as distinct
+values, and the evidence list MUST be preserved with them. A record that says
+only "form: yes" fails this obligation.
+
+[[P3]]
+=== P3 — never silently normalise (MUST)
+
+Classification MUST NOT change the document bytes on their way to the printer,
+and a print path MUST NOT silently generate appearances, rewrite `/V`, or strip
+`NeedAppearances` in order to make a job printable. This restates, for
+provenance, the suite's existing clause that no component may silently
+normalise the document.
+
+Any repair is an explicit, user-visible operation performed before submission —
+never an invisible side effect of intake.
+
+[[P4]]
+=== P4 — surface the distinction (MUST)
+
+Operator-visible surfaces (job list, job detail, audit view) MUST show the
+classification such that `blank-form`, `machine-filled` and
+`machine-filled-suspected` are distinguishable without opening the document.
+
+If the print path consults a routing policy, the classification MUST be
+available to that policy as a job attribute. Its *representation* is the
+consumer's choice; its *presence* is not.
+
+[[hazard]]
+=== P5 — the blank-print hazard
+
+If `appearances` is `incomplete` and `filled_fields` is non-zero, the document
+may print with empty fields. The print path:
+
+* MUST record the hazard on the job (evidence `FFP-E-AP-INCOMPLETE` is
+  sufficient);
+* MUST surface it in the job's operator-visible detail; and
+* SHOULD require explicit confirmation before submitting such a job
+  interactively, or hold it for review in an unattended route.
+
+A print path MUST NOT present such a document as only `filled-unknown` when
+`FFP-E-AP-INCOMPLETE` is present: the hazard is about appearances, not about
+authorship, and it is actionable in both `machine-filled` and
+`machine-filled-suspected`.
+
+=== P6 — no guessing, no authorship
+
+`unreadable` is a conforming outcome and MUST be recorded as such rather than
+defaulted to `blank-form`. The record MUST NOT contain, and no surface may
+display, an inference about *who* filled the form; FFP is about the pipeline,
+not the person (link:MARKER.adoc[MARKER] §Privacy).
+
+=== P7 — retention
+
+The FFP record is metadata about the document and MUST follow the document's own
+retention: deleting the job deletes the record, and exporting/archiving a job
+carries its classification with it. It is not a separate personal-data store.
+
+== Seam declaration
+
+The handoff this standard governs is a declared seam under
+`docs/SEAMS-SPEC.adoc`. Each side records it in its own
+`.machine_readable/contractiles/trust/Trustfile.a2ml` `[SEAMS]` section:
+
+[source,yaml]
+----
+seams:
+  - id: "blocky-writer-presswerk-form-handoff"
+    description: "A filled AcroForm PDF crosses from a form filler to a print router; FFP classification crosses back as job metadata"
+    from: "hyperpolymath/blocky-writer (fill_blocks output)"
+    to: "hyperpolymath/presswerk (print-path intake)"
+    contract: "1-formats/sub-specs/form-fill-provenance/ (this standard, v1.0.0)"
+    test_ref: "1-formats/sub-specs/form-fill-provenance/spec/conformance/run-conformance.sh"
+    failure_mode: "fail-degrade"
+    tier: "external-trust"
+    notes: "The producer side is optional in time: a consumer classifies structurally until producers emit the marker."
+----
+
+`failure_mode` is `fail-degrade` deliberately: a document that does not parse
+must not block printing, and a document without a marker must not be treated as
+unfilled. `tier` is `external-trust` because neither side is proven against the
+other at compile time; the shared ground truth is the conformance suite, which
+both sides run.
+
+== Conformance for this part
+
+A print-path consumer conforms to FFP/3 when:
+
+1. the conformance suite passes for its detector (FFP/2);
+2. a test demonstrates the classification is attached to a submitted job and
+   survives a queue round-trip; and
+3. a test demonstrates an `unreadable` document is recorded as `unreadable`,
+   not as `blank-form`.

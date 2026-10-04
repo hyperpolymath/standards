@@ -87,6 +87,7 @@ publication-pre-flight|governance|3-practice/publication-pre-flight/|Publication
 release-pre-flight|governance|3-practice/release-pre-flight/|Release Pre-Flight (V1 Gate)|hard v1.0.0 audit requirements
 hypatia-rules|integration|hypatia-rules/|Standards Hypatia Rules|the dogfooding rules that scan THIS repo (incl. drift detection)
 a2ml-templates|integration|1-formats/templates/|A2ML Templates|copy-in templates for the 7 A2ML files
+form-fill-provenance|foundation|1-formats/sub-specs/form-fill-provenance/|FFP — Form-Fill Provenance|whether a PDF form was machine-filled or printed blank for hand completion, and what a print path must record
 TSV
 
 # ---------------------------------------------------------------------------

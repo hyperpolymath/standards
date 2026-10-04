@@ -1,0 +1,210 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+//
+// FFP spec part 2 — the detection algorithm.
+= FFP/2 — Detection and classification
+:toc: preamble
+:icons: font
+
+== Purpose
+
+This part defines exactly what a detector reads, what it may conclude, and what
+it must record. The rules are written against ISO 32000-1 §12.7 (interactive
+forms) and §12.5.5 (appearance streams).
+
+A detector is conforming iff, for every vector in
+link:conformance/README.adoc[the conformance suite], it produces the expected
+classification, counts, appearance state and evidence codes.
+
+== The algorithm
+
+=== Step 1 — parse
+
+Parse the document structure. If it cannot be parsed — not a PDF, truncated,
+or encrypted and not decryptable by the consumer — stop with:
+
+* classification `unreadable`
+* evidence `FFP-E-UNREADABLE`
+
+MUST NOT guess in this case, and MUST NOT classify an unparsed document as
+`blank-form`. An encrypted document the consumer cannot open is also
+`unreadable`; provenance detection is not a licence to attempt decryption.
+
+=== Step 2 — declared marker
+
+If the catalog has a `/Metadata` stream, parse it as XMP and look for the FFP
+namespace (link:MARKER.adoc[MARKER]):
+
+* `filledBy=machine` present → evidence `FFP-E-DECL-MACHINE`; capture `tool`,
+  `toolVersion`, `filledAt`, `appearancesGenerated`.
+* the FFP namespace present but `filledBy` absent or not `machine` → evidence
+  `FFP-E-DECL-UNRECOGNISED`; capture the value verbatim in the record.
+* the namespace absent → no declaration evidence.
+* `/Metadata` present but not parseable XML → evidence `FFP-E-XMP-UNREADABLE`;
+  continue *without* declaring anything.
+
+=== Step 3 — fillable fields
+
+Find `/AcroForm` in the catalog and walk its `/Fields` array recursively.
+
+An *inheritable* field attribute is resolved from the field dictionary or its
+nearest ancestor (`/FT`, `/Ff`, `/V`, `/DA`, `/Opt`).
+
+A terminal field is a node with no `/Kids`, or whose `/Kids` are all widget
+annotations (`/Subtype /Widget`). A node that is not an annotation and has
+non-widget kids is an intermediate node: recurse.
+
+A terminal field is *fillable* iff its resolved `/FT` is one of:
+
+* `Tx` — text
+* `Ch` — choice
+* `Btn` — button, **excluding** pushbuttons (the pushbutton bit is set in the
+  resolved `/Ff` bit position 17, 1-based as defined by ISO 32000-1 Table 226)
+
+Signature (`Sig`) fields are never fillable. A document with no fillable
+terminal field is `no-form` with evidence `FFP-E-NO-ACROFORM`.
+
+Read-only fields remain in scope: read-only constrains interactive editing, not
+machine filling, and a read-only field with a value is still evidence.
+
+=== Step 4 — meaningful values
+
+`total_fields` is the count of fillable terminal fields. `filled_fields` is the
+count whose resolved value is *meaningful*:
+
+[cols="1,3",options="header"]
+|===
+| Field type | Meaningful value
+
+| `Tx`
+| `/V` resolves to a string containing at least one non-whitespace character.
+Whitespace is U+0020, U+0009, U+000D, U+000A.
+
+| `Ch`
+| `/V` resolves to such a string, or to a non-empty array containing at least
+one such string (multi-select).
+
+| `Btn`
+| `/V` resolves to a name other than `Off`. A detector MAY additionally require
+that the value matches an on-state (a non-`Off` key of `/AP /N`) of at least
+one widget kid; if it does not match, the value is not meaningful.
+|===
+
+If `filled_fields` is zero, the form is blank; emit evidence `FFP-E-NO-VALUES`.
+A value on a non-fillable field (pushbutton caption, signature) is ignored.
+
+=== Step 5 — appearance state
+
+For each filled terminal field, collect its widgets (the field dictionary
+itself when it is a widget, otherwise its `/Subtype /Widget` kids). A filled
+widget has a *normal appearance* iff:
+
+1. it has an `/AP` dictionary containing `/N`; and
+2. either `/N` resolves to a stream, or `/N` resolves to a dictionary that
+   contains the widget's current state (`/AS`, or for `Btn` fields the resolved
+   `/V`) as a stream.
+
+Then:
+
+[cols="1,3",options="header"]
+|===
+| `appearances` | When
+
+| `generated`
+| every filled widget has a normal appearance
+| `incomplete`
+| at least one filled widget does not
+| `not-applicable`
+| `filled_fields` is zero
+| `unknown`
+| the structures cannot be resolved from the file
+|===
+
+`incomplete` emits evidence `FFP-E-AP-INCOMPLETE`.
+
+`NeedAppearances` (AcroForm `/NeedAppearances` = the boolean `true`) emits
+evidence `FFP-E-NEED-APPEARANCES`. It is a document-level key, not inherited.
+
+=== Step 6 — classify
+
+Apply the lattice and precedence from the
+link:../README.adoc[standard's front page] — marker first, structural signature
+second, `blank-form` never promoted, `unreadable` never invented over:
+
+[cols="1,1",options="header"]
+|===
+| Condition | Classification
+
+| parse failed | `unreadable`
+| no fillable terminal field | `no-form`
+| `filled_fields` = 0 | `blank-form`
+| `FFP-E-DECL-MACHINE` | `machine-filled`
+| `FFP-E-NEED-APPEARANCES` **and** `FFP-E-AP-INCOMPLETE` | `machine-filled-suspected`
+| otherwise | `filled-unknown`
+|===
+
+== The record (normative shape)
+
+A consumer that records a classification MUST persist at least
+`classification`; it SHOULD persist the full record. The record is JSON with
+this shape (`declared` is `null` when no marker parsed):
+
+[source,json]
+----
+{
+  "ffp": "1.0",
+  "classification": "machine-filled",
+  "form": "present",
+  "filled_fields": 2,
+  "total_fields": 2,
+  "appearances": "incomplete",
+  "declared": {
+    "filledBy": "machine",
+    "tool": "blocky-writer",
+    "toolVersion": "0.2.0",
+    "filledAt": null,
+    "appearancesGenerated": false
+  },
+  "evidence": ["FFP-E-DECL-MACHINE", "FFP-E-NEED-APPEARANCES", "FFP-E-AP-INCOMPLETE"]
+}
+----
+
+Field notes:
+
+* `form` ∈ `present` | `absent`.
+* `total_fields` counts fillable terminal fields; `0/0` accompanies `no-form`.
+* `declared.filledBy` MUST be the verbatim value read from the packet when one
+  is present, including unrecognised values.
+* `evidence` is a set (order-independent, duplicates removed).
+
+=== Evidence codes
+
+[cols="1,3",options="header"]
+|===
+| Code | Meaning
+
+| `FFP-E-DECL-MACHINE` | marker present, `filledBy=machine`
+| `FFP-E-DECL-UNRECOGNISED` | FFP namespace present, value absent/unknown
+| `FFP-E-XMP-UNREADABLE` | `/Metadata` present, not parseable as XMP
+| `FFP-E-NEED-APPEARANCES` | AcroForm `NeedAppearances` is `true`
+| `FFP-E-AP-INCOMPLETE` | ≥1 filled widget has no normal appearance
+| `FFP-E-NO-ACROFORM` | no fillable terminal field
+| `FFP-E-NO-VALUES` | form present, zero meaningful values
+| `FFP-E-UNREADABLE` | document structure could not be parsed
+|===
+
+Adding a code is a MINOR change; consumers MUST ignore codes they do not know.
+
+== Worked examples
+
+* *blocky-writer output today* — values written, `NeedAppearances=true`, no
+  `/AP` → `machine-filled-suspected`, evidence
+  `[FFP-E-NEED-APPEARANCES, FFP-E-AP-INCOMPLETE]`.
+* *blocky-writer output with the marker and appearances generated* — as
+  recommended → `machine-filled`, `appearances=generated`.
+* *A blank form downloaded from an agency, printed and filled in by hand* —
+  zero values → `blank-form`. This is the case the print path must keep
+  distinct from the one above.
+* *A form completed in a desktop editor and saved* — values, `/AP` present,
+  `NeedAppearances` absent or false → `filled-unknown`, not `hand`. FFP does not
+  pretend the byte stream can tell you who typed.
