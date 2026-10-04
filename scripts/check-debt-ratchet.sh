@@ -71,10 +71,27 @@ ceilings_at() {
 }
 
 # Does the pull request declare that a SPECIFIC entry may rise or vanish?
+# Checks both commit messages (for non-squash merges) and PR body (for squash merges
+# where commit messages are lost).
 declared_for() {
   local entry="$1" msgs
   msgs="$(git log --format=%B "${BASE_REF}..HEAD" 2>/dev/null || true)"
-  printf '%s' "$msgs" | grep -iE '^Debt-exception' | grep -qF "$entry"
+  
+  # Check commit messages
+  if printf '%s' "$msgs" | grep -iE '^Debt-exception' | grep -qF "$entry"; then
+    return 0
+  fi
+  
+  # Also check PR body if available (for squash merges where commit messages are discarded)
+  if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
+    local pr_body
+    pr_body="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || true)"
+    if printf '%s' "$pr_body" | grep -iE '^Debt-exception' | grep -qF "$entry"; then
+      return 0
+    fi
+  fi
+  
+  return 1
 }
 
 before_list="$(ceilings_at "$BASE_REF")"

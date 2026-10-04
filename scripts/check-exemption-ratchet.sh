@@ -118,10 +118,28 @@ count_at() {
 #     Ratchet-exception(<ledger path>): <why>
 # A declaration naming no known ledger is rejected rather than treated as
 # blanket permission, because "unparseable" must never mean "allowed".
+# Does the pull request declare that a SPECIFIC ledger may change?
+# Checks both commit messages (for non-squash merges) and PR body (for squash merges
+# where commit messages are lost).
 declared_for() {
   local ledger="$1" msgs
   msgs="$(git log --format=%B "${BASE_REF}..HEAD" 2>/dev/null || true)"
-  printf '%s' "$msgs" | grep -iE '^Ratchet-exception' | grep -qF "$ledger"
+  
+  # Check commit messages
+  if printf '%s' "$msgs" | grep -iE '^Ratchet-exception' | grep -qF "$ledger"; then
+    return 0
+  fi
+  
+  # Also check PR body if available (for squash merges where commit messages are discarded)
+  if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
+    local pr_body
+    pr_body="$(jq -r '.pull_request.body // ""' "${GITHUB_EVENT_PATH}" 2>/dev/null || true)"
+    if printf '%s' "$pr_body" | grep -iE '^Ratchet-exception' | grep -qF "$ledger"; then
+      return 0
+    fi
+  fi
+  
+  return 1
 }
 
 LEDGERS=(

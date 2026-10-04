@@ -55,6 +55,7 @@ if [ -f "$WF_DIR/actions.lock" ]; then
   rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "::error::actions-lock gate: lockfile verification FAILED (exit $rc). Regenerate with scripts/update-actions-lock.sh in the same PR as the uses: change."
+    echo "Note: Per estate canon rule 10, actions MUST be SHA-pinned. A bare SHA must be accompanied by a version comment (e.g., '# v2.0.0') for traceability."
     exit "$rc"
   fi
   echo "Immutable direct and transitive lockfile coverage verified."
