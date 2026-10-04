@@ -154,5 +154,5 @@ expect "RSR self-audit blocks an unpinned live policy" 1 sha-off \
 expect "RSR self-audit accepts a compliant live policy" 0 all-ok \
   env RSR_REPOSITORY=owner/repo "$SELF_AUDIT" "$SCRIPT_DIR/../.."
 
-echo "actions-policy-486-test: $pass passed, $fail failed"
+echo "actions-policy-test: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
