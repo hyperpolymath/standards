@@ -36,6 +36,12 @@ jobs:
     name: K9-SVC contractile validation
     timeout-minutes: 10
     runs-on: ubuntu-latest
+    # Needed only by the final step, which posts the validator's verdict to
+    # the pull request. Log blobs are not reachable from every machine that
+    # needs the result, so the result is published where it can be read.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,6 +119,7 @@ jobs:
           echo "${NICKEL_SHA256}  ${RUNNER_TEMP}/nickel" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/nickel"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          echo "K9_REPORT=$RUNNER_TEMP/k9-report.md" >> "$GITHUB_ENV"
 
       # Each step mirrors its output into $GITHUB_STEP_SUMMARY as well as
       # stdout. The PR then shows the verdict without anyone opening a raw log,
@@ -132,7 +139,7 @@ jobs:
             echo '```'
             bash 1-formats/k9/tools/k9-validate.sh --self-test 2>&1
             echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
           exit "${PIPESTATUS[0]}"
 
       - name: K9 conformance fixtures (positive AND negative controls)
@@ -148,7 +155,7 @@ jobs:
             bash 1-formats/k9/tools/k9-validate.sh --strict \
               --fixtures 1-formats/k9/tools/fixtures 2>&1
             echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
           exit "${PIPESTATUS[0]}"
 
       - name: K9 corpus conformance (ratcheted)
@@ -164,5 +171,31 @@ jobs:
             echo '```'
             bash .githooks/validate-k9.sh 2>&1
             echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
           exit "${PIPESTATUS[0]}"
+
+      - name: Publish the K9 verdict to the pull request
+        # always(): a failing gate is exactly when the detail is needed, and a
+        # skipped step would publish nothing.
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          [ -s "$K9_REPORT" ] || { echo "no K9 report produced"; exit 0; }
+          {
+            echo '<!-- k9-contractile-report: regenerated on every run -->'
+            echo '# K9 contract conformance'
+            echo
+            echo "_run_ $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            cat "$K9_REPORT"
+          } > "$RUNNER_TEMP/body.md"
+          prev=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json comments \
+            --jq '.comments[] | select(.body | startswith("<!-- k9-contractile-report")) | .url' | tail -1 || true)
+          if [ -n "$prev" ]; then
+            # Edit the previous report in place so repeated runs do not stack up.
+            gh api -X PATCH "${prev#https://github.com/}" -F body=@"$RUNNER_TEMP/body.md" >/dev/null
+          else
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md" >/dev/null
+          fi
