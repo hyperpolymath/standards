@@ -93,6 +93,18 @@ field_tx() {
   printf '%s >>' "$body"
 }
 
+# field_tx_ap <name> <value> <appearance-stream-object-number>
+# As field_tx, but with a normal appearance. /AP is a key *inside* the widget
+# dictionary: an indirect object holds exactly one object, so appending a second
+# dictionary after the widget's closing `>>` would be malformed PDF. The
+# reference probe tolerates that spelling because it matches text, but a real
+# parser (and therefore any conforming product detector) cannot.
+field_tx_ap() {
+  local name="$1" value="$2" ap="$3"
+  local body; body="$(field_tx "$name" "$value")"
+  printf '%s /AP << /N %s 0 R >> >>' "${body% >>}" "$ap"
+}
+
 # xmp <filledBy-value> <tool> <appearancesGenerated>
 # filledBy-value may be empty (namespace present, no property).
 xmp_packet() {
@@ -184,8 +196,8 @@ v_machine_filled_declared_generated() {
   obj 2 '<< /Type /Pages /Kids [3 0 R] /Count 1 >>'
   obj 3 "$PAGE /Annots [5 0 R 6 0 R] >>"
   obj 4 '<< /Fields [5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) >>'
-  obj 5 "$(field_tx surname Jewell) /AP << /N 10 0 R >>"
-  obj 6 "$(field_tx given Jonathan) /AP << /N 11 0 R >>"
+  obj 5 "$(field_tx_ap surname Jewell 10)"
+  obj 6 "$(field_tx_ap given Jonathan 11)"
   obj 8 "$FONT"
   stream_obj 9 '<< /Type /Metadata /Subtype /XML' "$packet"
   stream_obj 10 '<< /Type /XObject /Subtype /Form /BBox [0 0 250 30]' "$FORM_STREAM"
@@ -209,7 +221,7 @@ v_machine_filled_suspected_mixed_ap() {
   obj 2 '<< /Type /Pages /Kids [3 0 R] /Count 1 >>'
   obj 3 "$PAGE /Annots [5 0 R 6 0 R] >>"
   obj 4 '<< /Fields [5 0 R 6 0 R] /NeedAppearances true /DA (/Helv 0 Tf 0 g) >>'
-  obj 5 "$(field_tx surname Jewell) /AP << /N 10 0 R >>"
+  obj 5 "$(field_tx_ap surname Jewell 10)"
   obj 6 "$(field_tx given Jonathan)"
   obj 8 "$FONT"
   stream_obj 10 '<< /Type /XObject /Subtype /Form /BBox [0 0 250 30]' "$FORM_STREAM"
@@ -221,8 +233,8 @@ v_viewer_filled() {
   obj 2 '<< /Type /Pages /Kids [3 0 R] /Count 1 >>'
   obj 3 "$PAGE /Annots [5 0 R 6 0 R] >>"
   obj 4 '<< /Fields [5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) >>'
-  obj 5 "$(field_tx surname Jewell) /AP << /N 10 0 R >>"
-  obj 6 "$(field_tx given Jonathan) /AP << /N 11 0 R >>"
+  obj 5 "$(field_tx_ap surname Jewell 10)"
+  obj 6 "$(field_tx_ap given Jonathan 11)"
   obj 8 "$FONT"
   stream_obj 10 '<< /Type /XObject /Subtype /Form /BBox [0 0 250 30]' "$FORM_STREAM"
   stream_obj 11 '<< /Type /XObject /Subtype /Form /BBox [0 0 250 30]' "$FORM_STREAM"
@@ -234,8 +246,8 @@ v_filled_with_ap_need_appearances() {
   obj 2 '<< /Type /Pages /Kids [3 0 R] /Count 1 >>'
   obj 3 "$PAGE /Annots [5 0 R 6 0 R] >>"
   obj 4 '<< /Fields [5 0 R 6 0 R] /NeedAppearances true /DA (/Helv 0 Tf 0 g) >>'
-  obj 5 "$(field_tx surname Jewell) /AP << /N 10 0 R >>"
-  obj 6 "$(field_tx given Jonathan) /AP << /N 11 0 R >>"
+  obj 5 "$(field_tx_ap surname Jewell 10)"
+  obj 6 "$(field_tx_ap given Jonathan 11)"
   obj 8 "$FONT"
   stream_obj 10 '<< /Type /XObject /Subtype /Form /BBox [0 0 250 30]' "$FORM_STREAM"
   stream_obj 11 '<< /Type /XObject /Subtype /Form /BBox [0 0 250 30]' "$FORM_STREAM"
