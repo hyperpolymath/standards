@@ -1,0 +1,138 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= K9 conformance lane — tools
+Campaign: standards#1058 · Ruling: D173 ·
+Contract: link:../spec/contract/k9_contract.ncl[`spec/contract/k9_contract.ncl` (v1.0.0, normative)] ·
+Prose: link:../spec/K9-CONTRACT-SPEC.adoc[`spec/K9-CONTRACT-SPEC.adoc`]
+
+== What lives here
+
+[cols="1,3"]
+|===
+|`k9-validate.sh` |The canonical validator. The only place K9 rules are
+*executed*; the contract file is where they are *stated*.
+|`fixtures/valid/` |5 positive controls.
+|`fixtures/invalid/` |21 negative controls. The load-bearing half.
+|===
+
+The local gate (`.githooks/validate-k9.sh`) and the CI gate
+(`.github/workflows/k9-contractile.yml`) both call `k9-validate.sh`. Neither
+owns a rule.
+
+== Running it
+
+[source,bash]
+----
+# 1. the validator's own assertions — run this first
+./k9-validate.sh --self-test
+
+# 2. the corpus
+./k9-validate.sh --fixtures fixtures
+
+# 3. with Nickel on PATH, every format layer must actually run
+./k9-validate.sh --strict --fixtures fixtures
+
+# 4. one file
+./k9-validate.sh path/to/component.k9.ncl
+./k9-validate.sh --json path/to/component.k9.ncl
+----
+
+Exit codes: `0` conforming · `1` violation · `2` usage error · `3` required
+checks were SKIPPED under `--strict`.
+
+== The four layers, and why the difference matters
+
+[cols="1,2,3",options="header"]
+|===
+|Layer |Establishes |Needs
+|L0 |the file *claims* to be K9 (bytes, licence, dialect) |nothing
+|L1 |the pedigree fields are *written* |nothing
+|L2 |the body *satisfies the contract* |`nickel`
+|L3 |the signature *verifies* |an external verifier
+|===
+
+Each row is strictly weaker than the one below it, and the recurring defect in
+this estate is a gate that reports the authority of a higher layer while doing
+the work of a lower one. The two most expensive instances, both closed by this
+lane:
+
+* a Hunt gate satisfied by the *presence* of a `signature` field (§10.4 — only
+  `'Verified` counts, and `'Present_Unverified` is false);
+* a lexical pass reported as conformance (§12.3 — L1 is a screen, and a reader
+  MUST NOT report conformance on L1 alone where Nickel is available).
+
+A check that could not run is reported as `SKIPPED`, naming the rule and the
+layer. It is never a pass, and `--strict` turns it into a failure.
+
+== Negative controls
+
+A validator that accepts everything passes every positive fixture, so a suite
+of positives alone proves nothing. `fixtures/invalid/` is what shows the gate
+can fire — standards#1058 says so directly: *"a grammar with no rejecting
+validator is the same class of artefact"* as the gates that could never fire
+(#49, #64).
+
+Each negative fixture is named `L<layer>-<rule>-<reason>.k9.ncl`, and the
+runner asserts three things:
+
+. the file is rejected;
+. it is rejected *by the rule its name claims*;
+. it is rejected *at the layer its name claims*.
+
+Assertions 2 and 3 are what stop a fixture from passing for the wrong reason.
+A fixture that trips an unrelated earlier check still gets rejected, and a
+runner that only checked rejection would report that as a pass while the rule
+under test does nothing.
+
+Coverage, measured: *20 of the 23* rules in the contract have a negative
+control that names them. Of the three that do not:
+
+[horizontal]
+`K9-C001` |Asserted in `--self-test` with a stub verifier rather than by a
+fixture, because no fixture can make a verifier appear. All three verdicts a
+host can reach are exercised there.
+`K9-N002` |A self-check on the contract file itself, run before the contract is
+used to judge anything.
+`K9-E000` |A usage error (the file does not exist), not a conformance rule.
+
+=== The two L2 controls
+
+`L2-K9-N001-wrong-field-type.k9.ncl` and
+`L2-K9-N001-two-segment-version.k9.ncl` are rejected *only* by Nickel:
+
+* `allow_network = "yes"` is spelled correctly, sits at the right path and
+  carries a value — it is just a `String` where the contract requires a `Bool`.
+  L1 has no notion of a type.
+* `schema_version = "1.0"` has the right major and only digits and dots, so L1's
+  bounded screen accepts it. §5.2 requires a dot-*triple*, and it is the
+  contract's `is_semver_of` that counts the segments.
+
+Between them they are the argument for the layering. Without a `nickel` binary
+the runner does not pretend to assert them: it verifies the half it *can* —
+that they are lexically clean, which is the precondition for being an L2
+control at all — reports `SKIP`, and `--strict` refuses the run outright.
+
+== Byte-preserved fixtures
+
+`L0-K9-E003-crlf.k9.ncl` exists to be rejected for its line endings.
+`1-formats/k9/.gitattributes` carries `-text -eol` for it, because normalising
+it on commit would delete the negative control while leaving the file behind —
+and a suite whose negative control no longer fails is a suite that reports
+green over nothing.
+
+Corpus scans must skip `fixtures/` entirely, for the mirror-image reason: a
+"fix" that made the negative controls pass would be a fix that broke the suite.
+`.githooks/validate-k9.sh` excludes the directory.
+
+== Adding a rule
+
+. State it in link:../spec/K9-CONTRACT-SPEC.adoc[`K9-CONTRACT-SPEC.adoc`] with
+  a rule id, and add it to the rule index (Appendix A). Rule ids are never
+  renumbered; a withdrawn rule keeps its id.
+. Encode it in link:../spec/contract/k9_contract.ncl[`k9_contract.ncl`] if it
+  is semantic, or in `k9-validate.sh` if it is lexical — and say which layer it
+  belongs to. A rule that cannot say is not ready.
+. Add a negative control named for it, and assert it fires *at the layer you
+  claimed*.
+. If the rule duplicates a list already in `leash.ncl` or `capabilities.ncl`,
+  add a `--self-test` mirror assertion so the duplication cannot drift.

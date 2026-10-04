@@ -100,7 +100,20 @@ else
 fi
 
 # ── Nickel ──────────────────────────────────────────────────────────────
-NCL="$(staged_matching '\.ncl$')"
+# `*.k9.ncl` is EXCLUDED here, matching .github/workflows/ci-pipeline.yml,
+# which excludes the same pathspec in both its `detect` and `nickel` jobs.
+#
+# A K9 component opens with the three-octet `K9!` sentinel, which is not
+# Nickel: `nickel typecheck` dies at 1:3 on the `!` (the CI comment says so
+# verbatim). Running it here anyway was not a strict gate, it was a wrong one
+# — it failed on a byte the format requires, on files no edit could fix, which
+# is the shape of a hook people learn to bypass with --no-verify.
+#
+# K9 files are not therefore unchecked. They are checked by the gate that
+# knows the format: .githooks/validate-k9.sh, which delegates to
+# 1-formats/k9/tools/k9-validate.sh and applies the envelope-strip rule
+# (K9-CONTRACT-SPEC §3.6) before it reaches for Nickel at all.
+NCL="$(staged_matching '\.ncl$' | grep -v '\.k9\.ncl$' || true)"
 if [ -n "$NCL" ]; then
   note "Nickel: $(echo "$NCL" | grep -c .) staged file(s)"
   if require_tool nickel Nickel "https://github.com/tweag/nickel/releases"; then

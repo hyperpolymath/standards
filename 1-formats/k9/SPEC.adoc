@@ -35,7 +35,32 @@ word `must` appears in both and means different things; never conflate them.
 |Version |1.0.0
 |Stability |Stable
 |Magic Number |`K9!` (`\x4B\x39\x21`)
+|Normative contract |link:spec/K9-CONTRACT-SPEC.adoc[K9 Component Contract
+Specification v1.0.0] — *this document is the format overview; conformance is
+specified there*
+|Contract file |link:spec/contract/k9_contract.ncl[`spec/contract/k9_contract.ncl`]
+|Canonical validator |link:tools/k9-validate.sh[`tools/k9-validate.sh`]
+|Conformance suite |link:tools/fixtures/[`tools/fixtures/`] (5 positive, 21 negative)
 |===
+
+[IMPORTANT]
+.Where the normative text lives
+====
+This document describes the format: the problem, the layer model, the triad,
+the MIME path. It is *not* the conformance specification, and the Nickel
+snippets below are illustrative sketches rather than the contract.
+
+Conformance is specified by
+link:spec/K9-CONTRACT-SPEC.adoc[*K9 Component Contract Specification v1.0.0*],
+whose machine-readable form is
+link:spec/contract/k9_contract.ncl[`spec/contract/k9_contract.ncl`]. Where a
+sketch here and the contract disagree, the contract wins.
+
+Ruling *D173* (standards#1058, 2026-09-30) settled the artefact question: *"K9
+needs a Nickel contract, not an ABNF."* There is deliberately no `k9.abnf` —
+K9 has no syntax of its own, since a component body *is* a Nickel term. The
+reasoning is recorded in Appendix B of the contract specification.
+====
 
 == Problem Statement
 
@@ -134,6 +159,17 @@ K9Pedigree = {
 
 All data must pass these contracts before deployment.
 
+[NOTE]
+====
+The sketch above is the *repository* pedigree and it is illustrative. The
+normative contract for a *component* file (`*.k9.ncl`) is
+link:spec/contract/k9_contract.ncl[`spec/contract/k9_contract.ncl`], and the
+two shapes are not interchangeable — see
+link:spec/K9-CONTRACT-SPEC.adoc#_pedigree_ncl_a_different_contract[§16.2 of the
+contract specification]. Applying one to the other is a defect, not a
+convenience.
+====
+
 === L3: The Muscle (Just Orchestration)
 
 Just recipes handle environment-specific deployment:
@@ -155,7 +191,18 @@ Podman-first deployment prevents host pollution while supporting native fallback
 === The Leash System (Normative)
 
 To prevent abuse, `.k9` mandates tiered execution levels. These are NORMATIVE:
-an implementation MUST enforce them. The canonical encoding is `leash.ncl`.
+an implementation MUST enforce them.
+
+The normative statement is
+link:spec/K9-CONTRACT-SPEC.adoc[contract spec §7]; the closed set is encoded in
+link:spec/contract/k9_contract.ncl[`k9_contract.ncl`] as both the
+`SecurityLevel` enum and the `leash_levels` list a validator can read without a
+Nickel toolchain, and `tools/k9-validate.sh --self-test` asserts the two agree.
+`leash.ncl` carries the host-side machinery (`detect_level`, `check_level`, the
+handshake formats).
+
+An unknown leash tag is a contract violation, not a warning and not a
+downgrade. Adding a fourth level is a MAJOR change.
 
 [cols="1,2,3",options="header"]
 |===
@@ -186,17 +233,43 @@ NOT sufficient (this is the normative change from the alpha).
 |===
 |Precondition |Meaning
 
-|`signature` |A valid Ed25519 signature over the payload hash.
+|`signature` |A *verified* Ed25519 signature over the payload hash — see the
+distinction below.
 |`policy` |An explicit policy decision of `allow`.
 |`sandbox` |An isolation sandbox is in force for the run.
 |`dry_run` |A dry-run plan was produced (and reviewed).
 |`capability_grant` |Every requested capability is explicitly granted (default-deny; see Capability Model).
 |===
 
-The gate is `authorize_hunt(evidence)` in `leash.ncl`: it permits `'Hunt` iff
+The gate is `authorize_hunt(evidence)` in `leash.ncl`, and identically in
+link:spec/contract/k9_contract.ncl[`k9_contract.ncl`]: it permits `'Hunt` iff
 all five evidence flags are true, and otherwise returns `permitted = false`,
 `enforced_level = 'Yard`, and the exact list of unmet preconditions (which the
 receipt records).
+
+[WARNING]
+.Presence is not verification
+====
+The `signature` precondition is satisfied by a signature that *verified*, and
+by nothing else. A `signature` block in a pedigree is a **claim**: reading it
+proves the file says it was signed, not that it was, and not that the signature
+covers the bytes about to be executed.
+
+link:spec/K9-CONTRACT-SPEC.adoc[Contract spec §10] fixes the mapping a
+conforming implementation may make — `'Absent`, `'Present_Unverified`,
+`'Verified`, `'Rejected` — and notes what is absent from it: *there is no input
+that turns "no verifier ran" into "verified".* A lexical check that counted a
+signature field and called it a Hunt authorisation would re-create exactly the
+alpha behaviour this directive removed.
+
+`tools/k9-validate.sh` therefore embeds no verifier. It reports
+`'Present_Unverified` as a SKIPPED check and says, in its output, that this
+does not authorise `'Hunt`.
+====
+
+Conformance is also not authorisation. A component that satisfies every rule in
+the contract is a well-formed *request* to run; §9 of the contract spec is what
+decides whether it runs.
 
 === Dependability Collapse Prevention
 
@@ -237,9 +310,32 @@ until explicitly permitted.
 == Capability Model (Normative)
 
 K9 is *default-deny*: a component is granted *no* capability unless it is
-explicitly listed in its pedigree `policy.capabilities`. The leash checks the
-grant before any Hunt-level action; an action needing an ungranted capability
-is refused even at `'Hunt`. The canonical encoding is `capabilities.ncl`.
+explicitly listed in its pedigree. The leash checks the grant before any
+Hunt-level action; an action needing an ungranted capability is refused even at
+`'Hunt`.
+
+The closed set is encoded in
+link:spec/contract/k9_contract.ncl[`k9_contract.ncl`] (`core_capabilities`) and
+mirrored in `capabilities.ncl`; the normative statement is
+link:spec/K9-CONTRACT-SPEC.adoc[contract spec §8].
+
+[IMPORTANT]
+.A flag is a request that must be paid for
+====
+New in contract v1.0.0 (§8.4): a security flag *requests* a capability, and the
+grant MUST cover it.
+
+[cols="1,1"]
+|===
+|`allow_network = true` |requires `net.fetch`
+|`allow_filesystem_write = true` |requires `fs.write`
+|`allow_subprocess = true` |requires `process.spawn`
+|===
+
+A component with `allow_network = true` and an empty grant is *invalid*, not
+merely unwise. Before this rule the flags and the grant were two unrelated
+opinions in the same block, so "default-deny" denied nothing.
+====
 
 === Closed core capabilities
 
@@ -267,6 +363,16 @@ Non-core capabilities MUST be namespaced `x-<vendor>.<path>` (e.g.
 names (no `x-` prefix) are reserved to this specification.
 
 == The Active Pedigree (Seven Sections)
+
+[NOTE]
+====
+This is the *repository* pedigree — the seven-section form a K9 repository root
+carries in `pedigree.ncl`. It is a different contract from the `pedigree` block
+inside a `*.k9.ncl` *component* file, the two shapes are not compatible, and
+they share only a name. The component pedigree is specified by
+link:spec/K9-CONTRACT-SPEC.adoc[contract spec §6]. A reader MUST NOT apply one
+to the other.
+====
 
 v1.0.0 restructures the pedigree (`pedigree.ncl`) into seven explicit, named
 sections. Two are new in v1.0.0: *recovery_recipe* and *docs_rationale*.
@@ -352,6 +458,16 @@ To be listed as a conforming `.k9` repository:
 |`SPEC.adoc`
 |This specification document (optional but recommended)
 |===
+
+[NOTE]
+====
+These are requirements for a *repository*. They say nothing about whether an
+individual `*.k9.ncl` file is a valid component — that is
+link:spec/K9-CONTRACT-SPEC.adoc[the contract specification's] job, and a
+repository can satisfy every row above while shipping components that fail it.
+The two are checked by different things: this table by review, component
+conformance by link:tools/k9-validate.sh[`tools/k9-validate.sh`].
+====
 
 == Path to MIME Recognition
 

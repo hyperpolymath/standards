@@ -1,0 +1,358 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= K9 Contract Migration Plan — standards#1058
+:subtitle: From "no contract at all" to a gated one, without a red wall
+:revnumber: 1.0
+:revdate: 2026-10-03
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== What landed, and what it costs
+
+link:K9-CONTRACT-SPEC.adoc[K9-CONTRACT-SPEC v1.0.0] is now the normative
+contract for `application/vnd.k9`, with
+link:contract/k9_contract.ncl[`contract/k9_contract.ncl`] as its
+machine-readable form, link:../tools/k9-validate.sh[`tools/k9-validate.sh`] as
+the canonical validator, and link:../tools/fixtures/[`tools/fixtures/`] as the
+conformance suite (5 positive controls, 21 negative).
+
+Landed with it:
+
+[cols="2,4"]
+|===
+|`.githooks/validate-k9.sh` |Rewritten. It owned its own rule set (`grep '^contract'`,
+which no file in this repo has); it now delegates and owns only commit policy.
+|`.githooks/validate-lint-format.sh` |Excludes `*.k9.ncl` from the bare
+`nickel typecheck`, matching `ci-pipeline.yml`, and routes K9 files to the gate
+that knows the format.
+|`.github/workflows/k9-contractile.yml` |Installs Nickel (pinned, sha256-verified,
+same pin as `ci-pipeline.yml`) and runs `--self-test`, the fixtures `--strict`,
+and the whole corpus through the same hook.
+|`.machine_readable/k9-contract-debt.txt` |Shrink-only ledger of the 25 files
+that predate the contract.
+|`1-formats/k9/.gitattributes` |`-text -eol` for the CRLF negative control, so
+normalising it on commit cannot silently delete it.
+|`.githooks/validate-spdx.sh` |Exempts `fixtures/invalid/*K9-E004*` — a negative
+control cannot also satisfy the rule it tests. Keyed to the rule id in the
+filename, not the directory, so the other 20 controls still need a header.
+|===
+
+Two of those are gate changes made *because* the fixtures exist, and both were
+verified in both directions: the exempted control passes the SPDX gate while a
+`.ncl` file elsewhere without a header still fails it.
+
+=== The baseline, measured
+
+Produced by running the canonical validator over every tracked `*.k9` and
+`*.k9.ncl` outside the fixtures directory:
+
+[source,bash]
+----
+git ls-files -z -- '*.k9' '*.k9.ncl' \
+  | grep -zv '^1-formats/k9/tools/fixtures/' \
+  | xargs -0 1-formats/k9/tools/k9-validate.sh --layer L1 --json
+----
+
+[cols="2,1,4"]
+|===
+|Files in scope |30 |
+|Conforming |*5* |3 components pass; 2 `coordination.k9` files are *routed*
+|Non-conforming |*25* |13 violations, 12 unclaimed-dialect errors
+|===
+
+By dialect: 8 component, 8 library, 2 coordination (routed), 12 unclaimed.
+
+Rule incidence across the 25:
+
+[cols="1,1,4"]
+|===
+|K9-E004 |11 |No SPDX identifier — the 11 `PROTOCOL.k9` stubs missing one.
+|K9-E005 |12 |Body belongs to no K9 dialect — the 12 `PROTOCOL.k9` stubs.
+|K9-S003 |3 |`component_type` is a `TODO` placeholder — the three templates.
+|K9-S004 |1 |`security.leash` missing — `rsr-compliance-checklist.k9.ncl`.
+|K9-S005 |4 |`metadata.name` missing or a placeholder.
+|K9-S007 |2 |Security flags request capabilities the grant does not cover.
+|K9-S009 |2 |`'Hunt` with no `signature` block.
+|K9-S010 |4 |`'Hunt` with empty or placeholder `side_effects`.
+|K9-S012 |6 |Pedigree in a file with no `K9!` envelope — the 6 contractiles.
+|K9-S013 |6 |Unresolvable `import` — the same 6 contractiles.
+|K9-S014 |3 |Leash claim outside `pedigree.security`.
+|===
+
+== Why this is a ratchet and not a wall
+
+Turning 25 files red in one commit is how this estate has twice ended up
+*deleting a gate* rather than fixing the files. The A2ML note in
+`.githooks/pre-commit` records the shape of it exactly: a validator that passed
+0 of 222 tracked files meant no commit could be made, so the validator was
+removed.
+
+`.githooks/validate-k9.sh` therefore fails on three things and advises on one:
+
+[cols="3,2"]
+|===
+|A file this commit touches that does not conform |FAIL
+|A ledger entry whose file now conforms |FAIL (stale)
+|An unlisted file that does not conform |FAIL
+|A listed, *unchanged* file that does not conform |advisory
+|===
+
+All four paths were exercised against the hook before this plan was written:
+touching `.machine_readable/contractiles/must/must.k9.ncl` fails, adding a
+conforming path to the ledger fails as stale, a new non-conforming file fails,
+and an untouched listed file reports as debt.
+
+The residual risk is honest and stated in §13.3 of the spec: a contributor can
+add a path to the ledger instead of fixing it. Review is the control, as it is
+for `.machine_readable/inline-python-allow.txt`.
+
+== Migration items
+
+Ordered by value-per-risk. Each item names the rules it clears and the ledger
+entries it removes, so "done" is checkable rather than a matter of opinion.
+
+=== M1 — Six contractile components have no envelope and a dangling import
+
+*Files:* `.machine_readable/contractiles/{adjust,bust,dust,intend,must,trust}/*.k9.ncl`
+*Rules cleared:* K9-S012 (6), K9-S013 (6) · *ledger entries removed:* 6
+
+Each of the six carries a `pedigree` block — four of them at `'Hunt` — with no
+`K9!` magic on line 1. Per §11.2 an execution licence in a file with no
+envelope is *unenforceable*: nothing downstream can detect the leash, because
+the leash is detected from the envelope. A reviewer reading the file sees a
+licence and believes it.
+
+Each also begins:
+
+[source,nickel]
+----
+let base_k9 = import "../k9/template-hunt.k9.ncl" in
+----
+
+`.machine_readable/contractiles/` has no `k9/` subdirectory, so the import does
+not resolve; and the real template (`.machine_readable/svc/k9/template-hunt.k9.ncl`)
+defines `pedigree`, not the `pedigree_schema` these files then merge from.
+`_base.ncl` is what defines `pedigree_schema`. So the pedigree a reviewer reads
+is not the pedigree a host would evaluate — which is precisely why §11.4 makes
+a dangling import a conformance failure rather than a style note.
+
+*Work:*
+
+. Add `K9!` as line 1 to all six (they are components, not libraries).
+. Point the import at a file that exists — `_base.ncl` for `pedigree_schema`, or
+  a new `.machine_readable/contractiles/k9/` base if a contractile-specific
+  base is wanted.
+. Add `component_type = "contractile:<verb>"` (§6.2) — this is also the
+  resolution of the `must` naming collision the issue raised: the contractiles
+  family keeps its verbs, and the K9 contract only ever sees a reserved prefix.
+. Confirm `capabilities` covers whatever `allow_*` flags each verb sets
+  (K9-S007, §8.4). `must` and `trust` set `allow_subprocess = true`, so they
+  need `process.spawn`.
+
+*Blocks:* nothing. *Blocked by:* nothing. This is the highest-value item: six
+files, twelve rule instances, and it closes the only place in the repo where a
+`'Hunt` pedigree is invisible to every tool.
+
+=== M2 — Twelve `PROTOCOL.k9` stubs claim a reserved suffix
+
+*Files:* `3-practice/session-management-standards/*/*/PROTOCOL.k9`
+*Rules cleared:* K9-E005 (12), K9-E004 (11) · *ledger entries removed:* 12
+
+These are YAML stubs for a session-management protocol. They are neither K9 SVC
+(no Nickel body) nor `k9-coordination` (no `K9!` magic, and a different schema
+again). `.machine_readable/scorecards/session-management-standards.scorecard.a2ml`
+already flags the collision in its own words: *".k9 files that don't follow the
+actual K9 grammar could confuse tooling or reviewers who expect the k9-svc
+schema."*
+
+Two acceptable outcomes, owner's choice:
+
+[horizontal]
+(a) *Rename off the suffix* — `PROTOCOL.yaml`. Cheapest, and correct if these
+are ordinary structured data.
+(b) *Adopt a dialect* — if a session-management protocol is meant to be
+machine-consumed as K9, give it the `K9!` envelope and either the Nickel
+component shape or a registered dialect of its own.
+
+*Note:* the same scorecard references
+`1-formats/k9/actions/validate/validate-k9.sh`, a path that does not exist
+(`ls` confirms no `1-formats/k9/actions/`). Whatever is chosen, that reference
+should be repointed at `1-formats/k9/tools/k9-validate.sh`.
+
+=== M3 — Three templates ship placeholders and one example is unsigned
+
+*Files:* `.machine_readable/svc/k9/template-{hunt,kennel,yard}.k9.ncl`,
+`.machine_readable/svc/k9/examples/setup-repo.k9.ncl`
+*Rules cleared:* K9-S003 (3), K9-S005 (3), K9-S007 (2), K9-S009 (2),
+K9-S010 (3) · *ledger entries removed:* 4
+
+Two separate problems in one directory.
+
+*The templates.* `template-hunt.k9.ncl` declares
+`component_type = "TODO: describe component type"`, `name = "TODO: component-name"`,
+and a `side_effects` list made entirely of `TODO` lines. §6.2 and §6.5 refuse
+placeholders on purpose: a field that exists and says nothing is
+indistinguishable from a field that was never written, except that it passes
+the gate.
+
+But a *template* is not a component — it is never loaded. The right fix is to
+stop claiming the component suffix for it: rename to
+`template-*.k9.ncl.in` (or move them under a `templates/` directory with a
+non-reserved suffix) and keep the placeholders, which are the point of a
+template. Adding them to the ledger instead would be recording a defect that
+should not exist.
+
+*The example.* `setup-repo.k9.ncl` is a real component at `'Hunt` that sets all
+three `allow_*` flags, grants no capabilities (K9-S007), carries no
+`signature` block (K9-S009), and declares no `side_effects` (K9-S010). It is
+the clearest single illustration of why §8.4 exists. Fix it as a component:
+grant `net.fetch`, `fs.write`, `process.spawn`, add a `signature` block, and
+describe what it actually does.
+
+=== M4 — Two Axel config files declare a leash nothing reads
+
+*Files:* `2-protocols/axel/config/{ci,metadata}.k9.ncl`
+*Rules cleared:* K9-S014 (2) · *ledger entries removed:* 2
+
+Both open with a top-level `leash = 'Kennel,` and no pedigree. A leash outside
+`pedigree.security` is read by nothing that applies this contract, so the files
+declare a security level no host enforces.
+
+Cheapest fix: make them Kennel *components* — add the `K9!` envelope and a
+minimal pedigree. They are project metadata and CI configuration, which is
+exactly what `'Kennel` is for. Alternatively drop the stray `leash` and let them
+be libraries, but then nothing records that they are data-only.
+
+=== M5 — `rsr-compliance-checklist.k9.ncl` is not a single Nickel term
+
+*File:* `rhodium-standard-repositories/rsr-compliance-checklist.k9.ncl`
+*Rules cleared:* K9-S004, K9-S005, K9-S014 · *ledger entries removed:* 1
+
+The file has the envelope and a `pedigree`, but its top level is a *sequence of
+bindings* — `leash = 'Kennel` then `pedigree = { … }` then `rsr_standards = { … }`
+— and a Nickel file must be a single term. The leash sits outside the pedigree
+(K9-S014), the pedigree has no `security` block at all (K9-S004), and it puts
+`author` and `description` at pedigree level rather than in `metadata` (K9-S005).
+
+Restructure into one record with the leash inside `pedigree.security`. This one
+is also the file most likely to fail at L2 once Nickel runs, since the
+top-level binding sequence is a parse error.
+
+=== M6 — Three closed lists are written down three times
+
+*Files:* `1-formats/k9/{leash,capabilities,pedigree}.ncl`,
+`spec/contract/k9_contract.ncl`
+*Rules cleared:* none (hygiene) · *ledger entries removed:* 0
+
+The leash set, the five Hunt preconditions and the eight core capabilities now
+exist in both `leash.ncl` / `capabilities.ncl` and the contract. That
+duplication is deliberate for now — those files carry host-side machinery
+(`detect_level`, `check_level`, the handshake formats) a contract file has no
+business holding — and `--self-test` asserts the mirrors agree, so it cannot
+drift silently.
+
+Deriving them from one source is the right end state. Do it *after* M1–M5, so
+that the change can be verified against a corpus that already conforms rather
+than against one that does not.
+
+Also in scope here: §16.2 of the spec names the collision between the
+*component* pedigree (this contract) and the *repository* pedigree
+(`pedigree.ncl`, seven sections). They are different contracts with the same
+name. This plan deliberately does *not* unify them — a repository pedigree and
+a component pedigree have different required fields for good reasons, and
+merging them to end a naming collision would be the naming collision winning.
+What M6 should do is make the relationship explicit in `SPEC.adoc`.
+
+=== M7 — L2 has never actually run on this corpus
+
+*Rules cleared:* unknown until it runs · *ledger entries removed:* unknown
+
+This is the honest gap in the work. `nickel` is not available in the
+environment where this migration was prepared (the GitHub release-asset host is
+unreachable from it), so **L2 has not been executed against the corpus or the
+fixtures**. Everything asserted in this plan was asserted at L0/L1, plus the
+self-test.
+
+The conformance suite is built so this cannot pass unnoticed: `--strict` exits
+`3` with the message *"no nickel binary — L2 semantics were never checked, so
+this run is not a conformance result"*, and the CI step runs `--strict` with
+Nickel installed. The first CI run on a branch with Nickel will be the first
+time K9 semantics have ever been checked in this repository.
+
+Expect it to find things. At minimum:
+
+* M5's top-level binding sequence is a Nickel parse error;
+* the two `L2-K9-N001-*` negative fixtures become assertable (they are held to
+  be lexically clean by the runner today, which is the precondition for being
+  an L2 control at all);
+* `nickel format --check` has never been run on any `.k9.ncl` body, and may
+  object to all of them.
+
+== Suggested issue breakdown
+
+[cols="1,3,1,2",options="header"]
+|===
+|Issue |Title |Depends |Clears
+|#A |K9 contract: give the six contractile components an envelope and a
+resolvable import |— |M1 · K9-S012 ×6, K9-S013 ×6
+|#B |K9 contract: settle the `PROTOCOL.k9` suffix collision |— |M2 · K9-E005 ×12,
+K9-E004 ×11
+|#C |K9 contract: templates are not components; make `setup-repo` a real
+component |— |M3 · K9-S003 ×3, K9-S005 ×3, K9-S007 ×2, K9-S009 ×2, K9-S010 ×3
+|#D |K9 contract: Axel config files declare a leash nothing reads |— |M4 · K9-S014 ×2
+|#E |K9 contract: restructure `rsr-compliance-checklist` into one Nickel term |— |M5
+|#F |K9 contract: first `--strict` CI run — triage whatever L2 finds |#A–#E |M7
+|#G |K9 contract: derive the closed lists from one source |#F |M6
+|===
+
+#A, #B, #C, #D and #E are independent and can run in parallel. #F should not
+start before them, because triaging a first L2 run is much easier against a
+corpus whose lexical defects are already gone. #G is last for the same reason.
+
+Every one of them ends with the same acceptance test:
+
+[source,bash]
+----
+# the ledger must have shrunk by exactly the entries the issue fixed
+grep -c . .machine_readable/k9-contract-debt.txt
+
+# and the gate must still be able to fire
+1-formats/k9/tools/k9-validate.sh --self-test
+1-formats/k9/tools/k9-validate.sh --fixtures 1-formats/k9/tools/fixtures
+----
+
+A stale ledger entry fails the hook, so an issue that fixes a file without
+shrinking the ledger does not pass. That is the ratchet doing its job.
+
+== What is deliberately NOT in this plan
+
+[horizontal]
+Hunt is unchanged:: All five preconditions, always, no configurable subset, no
+self-granted evidence. Nothing in M1–M7 relaxes §9. Two of the items (M1, M3)
+make `'Hunt` *harder* to reach, by requiring the grant to cover the flags and
+the signature block to be present.
+No ABNF:: Ruling D173. See Appendix B of the spec for the reasoning, recorded
+so it does not have to be re-litigated.
+No signature verification:: §10.5. The canonical validator embeds no verifier,
+because key trust is host policy. M1–M7 require signature *blocks* to be
+present at `'Hunt`; none of them claims to verify one, and a reader that
+reported `'Verified` without a verifier would be non-conforming (§10.3).
+No unification of the two pedigrees:: §16.2, and M6 above.
+
+== Verification status of this document
+
+Every count and path in this plan was produced by running the tools named in
+it, in the repository, at the revision this plan was written against. The two
+exceptions are stated rather than hidden:
+
+* *L2 (Nickel semantics) was not run.* No `nickel` binary was obtainable in the
+  preparation environment. See M7.
+* *`nickel format --check` was not run*, for the same reason. It has never been
+  run on a `.k9.ncl` body in this repository, because `ci-pipeline.yml`
+  excludes that pathspec.
+
+What *was* run, and passed: the validator's 26-assertion self-test; the
+conformance suite (5 positive controls, 19 negative controls asserted, 2 L2
+controls held to be lexically clean); the local hook in all four ratchet paths;
+and the corpus baseline above.
