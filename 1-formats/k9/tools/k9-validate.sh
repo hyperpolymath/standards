@@ -573,6 +573,11 @@ check_l2() {
   strip_envelope "$f" "$body_tmp"
 
   if [ "$DIALECT" = "library" ]; then
+    # Static check only. A library is imported, never evaluated as a
+    # component, and it may legitimately hold functions, which have no JSON
+    # representation — so `export` would fail on a conforming library. What a
+    # library must satisfy is the negative contract of §11 (no pedigree, no
+    # leash), which L1 already establishes lexically.
     if ! out="$("$nb" typecheck "$body_tmp" 2>&1)"; then
       err K9-N001 L2 "library does not typecheck: $(printf '%s' "$out" | head -n 5 | tr '\n' ' ')"
     fi
@@ -587,8 +592,22 @@ let K9 = import "$CONTRACT" in
 let k9_doc = import "./$(basename "$body_tmp")" in
 k9_doc | K9.Component
 EOF
+    # Two Nickel invocations, because they answer different questions.
+    #
+    # `typecheck` is documented in Nickel's own CLI as "typechecks the program
+    # but does not run it". A Nickel CONTRACT (`|`) is enforced when a value
+    # flows through it, and a predicate contract such as
+    # `std.contract.from_predicate (is_semver_of …)` has no static type the
+    # checker could reason about. Running only `typecheck` accepted both L2
+    # negative controls — `schema_version = "1.0"` and `allow_network = "yes"`
+    # — which is precisely the pair written to prove L2 sees what L1 cannot.
+    #
+    # `export` evaluates, and evaluation is what applies the contracts.
     if ! out="$("$nb" typecheck "$drv_tmp" 2>&1)"; then
-      err K9-N001 L2 "component does not satisfy K9.Component: $(printf '%s' "$out" | head -n 5 | tr '\n' ' ')"
+      err K9-N001 L2 "component does not typecheck against K9.Component: $(printf '%s' "$out" | head -n 5 | tr '\n' ' ')"
+    fi
+    if ! out="$("$nb" export --format json "$drv_tmp" 2>&1 >/dev/null)"; then
+      err K9-N001 L2 "component violates the K9.Component contract: $(printf '%s' "$out" | head -n 5 | tr '\n' ' ')"
     fi
   fi
   rm -f "$body_tmp" "$drv_tmp"
