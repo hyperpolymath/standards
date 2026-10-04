@@ -149,14 +149,26 @@ jobs:
           # actually run, so a missing toolchain cannot report a pass. The 21
           # negative controls are the load-bearing half — a validator that
           # accepts everything satisfies the positive half trivially.
+          set +e
+          out="$(bash 1-formats/k9/tools/k9-validate.sh --strict \
+            --fixtures 1-formats/k9/tools/fixtures 2>&1)"; rc=$?
+          set -e
           {
             echo '## K9 conformance fixtures'
             echo '```'
-            bash 1-formats/k9/tools/k9-validate.sh --strict \
-              --fixtures 1-formats/k9/tools/fixtures 2>&1
+            printf '%s\n' "$out"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          exit "${PIPESTATUS[0]}"
+          # A failing gate also raises a check-run annotation. Annotations are
+          # readable through `gh api repos/{o}/{r}/check-runs/{job}/annotations`
+          # from machines that cannot reach the log blob host, which is where
+          # the first two runs of this workflow had to be diagnosed from.
+          # Workflow-command escaping: % first, then CR and LF.
+          if [ $rc -ne 0 ]; then
+            esc="$(printf '%s' "$out" | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}' | sed 's/%0A$//')"
+            printf '::error title=K9 conformance fixtures failed::%s\n' "$esc"
+          fi
+          exit $rc
 
       - name: K9 corpus conformance (ratcheted)
         run: |
@@ -166,13 +178,20 @@ jobs:
           # .machine_readable/k9-contract-debt.txt grandfathers the 25 files
           # that predate the contract; it is shrink-only (a conforming file
           # left in it fails), and it does not protect a file this PR touches.
+          set +e
+          out="$(bash .githooks/validate-k9.sh 2>&1)"; rc=$?
+          set -e
           {
             echo '## K9 corpus conformance'
             echo '```'
-            bash .githooks/validate-k9.sh 2>&1
+            printf '%s\n' "$out"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          exit "${PIPESTATUS[0]}"
+          if [ $rc -ne 0 ]; then
+            esc="$(printf '%s' "$out" | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}' | sed 's/%0A$//')"
+            printf '::error title=K9 corpus conformance failed::%s\n' "$esc"
+          fi
+          exit $rc
 
       - name: Publish the K9 verdict to the pull request
         # always(): a failing gate is exactly when the detail is needed, and a
@@ -191,11 +210,17 @@ jobs:
             echo "_run_ $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             cat "$K9_REPORT"
           } > "$RUNNER_TEMP/body.md"
+          # `gh pr view --json comments` hands back API urls, not web urls, so
+          # the id is taken off the end and PATCHed by resource path. `.body`
+          # can be null on a deleted comment, which startswith() would choke on.
           prev=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json comments \
-            --jq '.comments[] | select(.body | startswith("<!-- k9-contractile-report")) | .url' | tail -1 || true)
+            --jq '.comments[] | select((.body // "") | startswith("<!-- k9-contractile-report")) | .url' \
+            | tail -1 || true)
           if [ -n "$prev" ]; then
             # Edit the previous report in place so repeated runs do not stack up.
-            gh api -X PATCH "${prev#https://github.com/}" -F body=@"$RUNNER_TEMP/body.md" >/dev/null
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/${prev##*/}" \
+              -F body=@"$RUNNER_TEMP/body.md" >/dev/null
           else
             gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md" >/dev/null
           fi
+          echo "published the K9 verdict to #$PR_NUMBER"
