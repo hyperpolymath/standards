@@ -210,17 +210,12 @@ jobs:
             echo "_run_ $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             cat "$K9_REPORT"
           } > "$RUNNER_TEMP/body.md"
-          # `gh pr view --json comments` hands back API urls, not web urls, so
-          # the id is taken off the end and PATCHed by resource path. `.body`
-          # can be null on a deleted comment, which startswith() would choke on.
-          prev=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json comments \
-            --jq '.comments[] | select((.body // "") | startswith("<!-- k9-contractile-report")) | .url' \
-            | tail -1 || true)
-          if [ -n "$prev" ]; then
-            # Edit the previous report in place so repeated runs do not stack up.
-            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/${prev##*/}" \
-              -F body=@"$RUNNER_TEMP/body.md" >/dev/null
-          else
-            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md" >/dev/null
-          fi
+          # Always post; never PATCH. Creating a comment is the one path this
+          # step has been observed to complete, and two runs were lost
+          # diagnosing an update that could not be read back. Stacked reports
+          # cost a little noise on the PR and buy a result that actually
+          # arrives, which is the right trade while the log host is
+          # unreachable. Newest comment wins; each one names its run.
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body-file "$RUNNER_TEMP/body.md" >/dev/null
           echo "published the K9 verdict to #$PR_NUMBER"
