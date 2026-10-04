@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: MPL-2.0
+= Decision D??? – Deno Residue Probe False Positives Acceptance
+:date: 2026-10-04
+:author: Jonathan D.A. Jewell (hyperpolymath)
+:status: ACCEPTED
+:scope: repo
+:issue: hyperpolymath/standards#955
+
+== Context
+
+The `deno-residue` probe in `.machine_readable/Debtfile.a2ml` measures remaining
+Deno runtime invocations after the estate-wide ruling that "Deno is REMOVED and Bun
+is permanent" (reaffirmed 2026-08-07). The probe greps for patterns:
+
+----
+git grep -hE "denoland/setup-deno|deno run|deno test|deno fmt|deno lint" \
+  -- ".github/workflows/*.yml" "scripts/*" | grep -vE '^\s*(#|//)' | wc -l
+----
+
+The probe is designed to exclude comment lines (`grep -vE '^\s*(#|//)'`), but the
+current implementation is still counting false positives.
+
+== Problem Statement
+
+Since commit `0afcfd4c` (#820), the Debtfile gate `governance / Debt ratchet` has
+failed on **every** PR to this repository, because `run-debtfile.sh --write` emits
+a file that `check-debtfile-structure.sh` rejects.
+
+Root cause: `scripts/run-debtfile.sh` deliberately refuses to raise ceilings, but
+`--write` does raise `count` when debt grows. This leaves behind an internally
+inconsistent file (`count > ceiling`) that the structure validator rejects.
+
+For the `deno-residue` entry specifically, the current state is:
+
+| Field | Value | Live Probe |
+|---|---|---|
+| count | 0 | 0 (true non-comment count) |
+| ceiling | 1 | 3 (includes comments) |
+
+All matching lines are **comments** describing Deno's removal:
+
+- `.github/workflows/ci-pipeline.yml:377-378` – workflow retirement notes
+- `.github/workflows/governance-reusable.yml:375-376` – workflow retirement notes  
+- `scripts/check-ts-allowlist.deno.js:15` – comment inside the shim
+
+The true non-comment count is **0**. This repository has zero live Deno invocations.
+
+However, the probe is still producing false positives because:
+
+1. The `grep -vE '^\s*(#|//)'` pattern only excludes lines that *start* with
+   whitespace followed by `#` or `//`. It does NOT exclude lines where the comment
+   appears after other content.
+
+2. The `deno-residue` description in Debtfile.a2ml already notes that the three
+   remaining mentions "are documentation, not residue, and a probe that punishes
+   documentation is a broken metric."
+
+== Decision
+
+**ACCEPT the false positives from the deno-residue probe** as a known limitation.
+
+Do NOT attempt to fix the probe to be perfectly accurate at this time. The probe's
+purpose is advisory, and the known false positives are:
+
+- Well-understood (documentation-only matches)
+- Bounded (3 lines, all comments)
+- Non-actionable (they are intentional historical notes)
+
+The debt entry will remain with:
+
+- count: 0 (no real Deno residue)
+- ceiling: 1 (accepts the known false positives)
+- policy: remediable (future work may improve the probe)
+
+== Rationale
+
+Fixing the probe to exclude all comment lines would require a more sophisticated
+parser that understands YAML and JavaScript comment syntax in context. This is
+out of scope for the current work on hyperpolymath/standards#968 and would block
+the higher-priority lock-sync gate campaign.
+
+The `run-debtfile.sh` / `check-debtfile-structure.sh` contradiction is addressed
+separately: either `--write` must refuse to write when `count > ceiling`, or the
+structure check must tolerate it. This decision does not resolve that contradiction
+— it accepts the current state while that fix is developed.
+
+== Consequences
+
+. The `deno-residue` entry will show count=0, ceiling=1, accepting the false
+  positives.
+. `governance / Debt ratchet` will pass once the run-debtfile.sh writer/validator
+  contradiction is resolved (issue #955 acceptance criteria 3-4).
+. No Ratchet-exception or Debt-exception trailer is required for this change
+  because it is a ratchet-down (count staying at 0).
+
+== Acceptance Criteria
+
+- [ ] `check-debtfile-structure.sh` exits 0 on main (after writer/validator fix)
+- [ ] `run-debtfile.sh` exits 0 on main
+- [ ] Debt ratchet gate is green on a fresh PR
+- [ ] `run-debtfile.sh --write` against a grown probe either refuses to write, or
+  writes a file that `check-debtfile-structure.sh` accepts
+
+== Related
+
+* Issue: https://github.com/hyperpolymath/standards/issues/955[hyperpolymath/standards#955]
+* Debtfile: `.machine_readable/Debtfile.a2ml` (deno-residue entry)
+* Writer: `scripts/run-debtfile.sh`
+* Validator: `scripts/check-debtfile-structure.sh`
+* Decision sheet: https://github.com/hyperpolymath/standards/issues/787[hyperpolymath/standards#787]

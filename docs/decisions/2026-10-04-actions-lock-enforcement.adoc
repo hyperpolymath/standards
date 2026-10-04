@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: MPL-2.0
+= Decision D??? – Actions Lock Enforcement Date Deferral
+:date: 2026-10-04
+:author: Jonathan D.A. Jewell (hyperpolymath)
+:status: ACCEPTED
+:scope: estate
+:issue: hyperpolymath/standards#903
+
+== Context
+
+The `actions-lock` gate (`scripts/check-actions-lock-gate.sh`) enforces that every
+repository carrying SHA-pinned `uses:` refs must also carry a
+`.github/workflows/actions.lock` file that records those refs and their
+transitive dependencies. The gate has a grace window controlled by the
+`ENFORCE_ACTIONS_LOCK_FROM` variable (default: `2026-10-01`) during which
+repositories with all SHA-pinned refs but no lockfile receive a warning rather
+than an error.
+
+An estate-wide census on 2026-09-22 measured:
+
+| Population | Count |
+|---|---|
+| Repositories calling governance-reusable.yml | 368 |
+| …with `actions.lock` | 200 |
+| …without `actions.lock` | **163** |
+| …no workflows directory | 5 |
+
+The lockless 163 split: **154 ALL-PINNED / 9 UNPINNED**.
+
+Arming the gate estate-wide on 2026-10-01 would therefore redden **163 repositories**
+with no human action in between and no merge required, because the date is baked
+into a pinned artefact (the governance-reusable.yml SHA) that callers have already
+pinned.
+
+== Problem Statement
+
+A date inside a pinned artefact is the one mechanism in this estate that can change
+caller behaviour with nobody in the loop. Everything else requires a deliberate pin
+bump. Setting `ENFORCE_ACTIONS_LOCK_FROM=2026-10-01` would cause 163 repositories to
+fail their CI on that date through no action of their own, violating the
+"no silent breakage" principle.
+
+== Decision
+
+**ACCEPT the 163 lockless repositories as current technical debt.**
+
+Do NOT push the `ENFORCE_ACTIONS_LOCK_FROM` date forward. Keep the default at
+`2026-10-01` but document that this date is NOT a deadline — it is the date at which
+the grace window *would* close if we had not accepted the debt.
+
+The existing shrink-only ledger `.machine_readable/lock-allow.txt` (203 lines:
+41 header + 162 repo entries) already tracks every lockless repository. Each entry
+is a repository whose gate exit code 3 (missing-lock debt) is converted to a notice
+and a passing verdict.
+
+== Consequences
+
+. Repositories listed in `lock-allow.txt` continue to pass the `workflow-lint` job
+despite missing lockfiles.
+. The `ENFORCE_ACTIONS_LOCK_FROM` variable remains at `2026-10-01` but is effectively
+suspended by the ledger.
+. No repository may be added to the ledger without a `Ratchet-exception:` trailer
+naming the exact path (per `scripts/check-exemption-ratchet.sh`).
+. Removing a repository from the ledger requires it to land a lockfile first.
+
+== Acceptance Criteria (current state)
+
+- [x] A shrink-only ledger exists under `.machine_readable/lock-allow.txt`
+- [x] The ledger contains all 162 lockless repositories
+- [x] The ledger is shrink-only (enforced by `check-exemption-ratchet.sh`)
+- [x] The gate prints the denominator on every run
+- [ ] `ENFORCE_ACTIONS_LOCK_FROM` is moved out of the pinned artefact
+
+The last item is NOT actioned: per this decision, we explicitly do NOT change the
+date mechanism, because doing so would break the principle we are defending.
+
+== Related
+
+* Issue: https://github.com/hyperpolymath/standards/issues/903[hyperpolymath/standards#903]
+* Ledger: `.machine_readable/lock-allow.txt`
+* Gate: `scripts/check-actions-lock-gate.sh`
+* Verifier: `scripts/update-actions-lock.sh`
+* Decision sheet: https://github.com/hyperpolymath/standards/issues/787[hyperpolymath/standards#787]
