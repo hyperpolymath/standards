@@ -413,15 +413,21 @@ let is_semver_of = fun major v =>
   # 'Hunt. The validator enforces that; this contract only shapes the blocks.
   Component = {
     pedigree | Pedigree,
-    # `{ _ : Any }` is the open record: any fields, any values. These three
-    # blocks are the component's own business and the contract deliberately
-    # does not shape them — §6.7's `recipes`-forces-'Hunt rule is enforced by
-    # the validator over the extracted facts, not by a type here. There is no
-    # `Record` builtin in Nickel; this field used to name one, so the contract
-    # itself failed to typecheck and every L2 verdict downstream was void.
-    config | { _ : Any } | optional,
-    recipes | { _ : Any } | optional,
-    validation | { _ : Any } | optional,
+    # An open record: any fields, any values. These three blocks are the
+    # component's own business and the contract deliberately does not shape
+    # them — §6.7's `recipes`-forces-'Hunt rule is enforced by the validator
+    # over the extracted facts, not by a type here.
+    #
+    # Two names were tried and rejected by Nickel before this one: `Record`
+    # and then `Any`. Neither exists; the dynamic type is `Dyn`. Both failures
+    # were invisible locally — no nickel binary is obtainable in the sandbox
+    # that wrote this file — and both made every L2 verdict downstream void,
+    # because a contract that does not typecheck cannot judge anything. That
+    # is why k9-contractile.yml now typechecks this file as its own named step
+    # before the fixtures run.
+    config | { _ : Dyn } | optional,
+    recipes | { _ : Dyn } | optional,
+    validation | { _ : Dyn } | optional,
   },
 
   # ── §11 Library dialect ──────────────────────────────────────────────
