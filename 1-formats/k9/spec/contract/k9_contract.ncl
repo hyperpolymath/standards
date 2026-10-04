@@ -413,9 +413,15 @@ let is_semver_of = fun major v =>
   # 'Hunt. The validator enforces that; this contract only shapes the blocks.
   Component = {
     pedigree | Pedigree,
-    config | Record | optional,
-    recipes | Record | optional,
-    validation | Record | optional,
+    # `{ _ : Any }` is the open record: any fields, any values. These three
+    # blocks are the component's own business and the contract deliberately
+    # does not shape them — §6.7's `recipes`-forces-'Hunt rule is enforced by
+    # the validator over the extracted facts, not by a type here. There is no
+    # `Record` builtin in Nickel; this field used to name one, so the contract
+    # itself failed to typecheck and every L2 verdict downstream was void.
+    config | { _ : Any } | optional,
+    recipes | { _ : Any } | optional,
+    validation | { _ : Any } | optional,
   },
 
   # ── §11 Library dialect ──────────────────────────────────────────────

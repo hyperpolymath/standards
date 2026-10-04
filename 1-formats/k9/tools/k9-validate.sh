@@ -775,6 +775,53 @@ EOF
   fi
   rm -f "$stub_ok" "$stub_bad"
 
+  echo "== the fixture runner's attribution cannot be fooled by a filename =="
+  # This block exists because of a real failure. A negative control's filename
+  # contains its rule id, and attribution used to grep the human-readable
+  # finding line — which echoes the path. So `L2-K9-N001-*.k9.ncl` "proved"
+  # itself whenever ANY rule fired, including K9-N002 (the contract does not
+  # typecheck). Both L2 controls reported ok on a contract that judged nothing.
+  # The suite's whole purpose is catching gates that cannot fire, so the
+  # predicate is asserted here rather than trusted.
+  local impostor fired
+  impostor="$SCRIPT_DIR/fixtures/invalid/L0-K9-E001-bad-magic.k9.ncl"
+  if [ -f "$impostor" ]; then
+    QUIET=1
+    local sj="$JSON"; JSON=1
+    fired="$(validate_one "$impostor" 2>/dev/null \
+      | grep -oE '"severity":"error","rule":"K9-[A-Z][0-9]+","layer":"L[0-9]+"' \
+      | sed -E 's/.*"rule":"(K9-[A-Z][0-9]+)","layer":"(L[0-9])"/\1 \2/' \
+      | sort -u || true)"
+    JSON="$sj"; QUIET=0
+
+    # Every extracted pair must be well-formed, not merely "at least one": a
+    # silently unmatched finding would vanish from the set and a control could
+    # then fail to be attributed. (E001 fires twice — bad magic also leaves the
+    # body unclaimed — so the count is compared, not asserted to be 1.)
+    t "every extracted finding is well-formed rule+layer" \
+      "$(printf '%s\n' "$fired" | grep -c . || true)" \
+      "$(printf '%s\n' "$fired" | grep -cE '^[A-Z0-9-]+ L[0-9]$' || true)"
+    t "the rule that really fired is attributed" 1 \
+      "$(printf '%s\n' "$fired" | grep -cE '^K9-E001 L0$' || true)"
+    # The assertion that was missing: a rule id present in the PATH but absent
+    # from the findings must NOT satisfy the control.
+    t "a rule named only in the filename is NOT attributed" 0 \
+      "$(printf '%s\n' "$fired" | grep -cE '^K9-S004 L0$' || true)"
+    # Nor may a skip satisfy it: only severity "error" counts. hunt-fully-granted
+    # carries a signature block with no verifier, so K9-C001 is SKIPPED; if a
+    # skip could satisfy a control, a missing toolchain would pass a gate.
+    local hunt_json
+    hunt_json="$(QUIET=1 JSON=1 validate_one "$SCRIPT_DIR/fixtures/valid/hunt-fully-granted.k9.ncl" 2>/dev/null || true)"
+    t "K9-C001 is present as a skipped finding" 1 \
+      "$(printf '%s' "$hunt_json" | grep -cE '"severity":"skipped","rule":"K9-C001"' || true)"
+    t "and that same finding is NOT extractable as a rejection" 0 \
+      "$(printf '%s' "$hunt_json" \
+        | grep -oE '"severity":"error","rule":"K9-[A-Z][0-9]+","layer":"L[0-9]+"' \
+        | grep -c 'K9-C001' || true)"
+  else
+    echo -e "${YEL}SKIP${NC} attribution assertions: $impostor not present"
+  fi
+
   echo
   if [ $SELFTEST_FAILS -eq 0 ]; then
     echo -e "${GRN}self-test: all assertions passed${NC}"
@@ -858,21 +905,46 @@ run_fixtures() {
       continue
     fi
 
-    out="$(validate_one "$f" 2>&1)"; rc=$?
+    # Attribution is read off the JSON findings, NOT off free text. The human
+    # line is `ERROR <rule> [<layer>] <path>: <msg>`, and a negative control's
+    # path deliberately CONTAINS its rule id — so grepping the human output for
+    # K9-N001 matched the filename and the control "proved" itself no matter
+    # which rule fired. The first CI run caught exactly that: the contract did
+    # not typecheck, both L2 controls were rejected by K9-N002, and both still
+    # reported ok. A gate that cannot fire is the defect class this suite
+    # exists to prevent, so the assertion reads the structured verdict.
+    local saved_json="$JSON"
+    JSON=1
+    out="$(validate_one "$f" 2>/dev/null)"; rc=$?
+    JSON="$saved_json"
+
     if [ $rc -eq 0 ]; then
       echo -e "${RED}FAIL${NC} $base was ACCEPTED — the gate did not fire"
       fails=$((fails + 1))
       continue
     fi
-    if [ -n "$want_rule" ] && ! printf '%s' "$out" | grep -q "$want_rule"; then
+
+    # Error findings only: a skip or a warning is not a rejection, and letting
+    # one satisfy a negative control would let a missing toolchain pass a gate.
+    local fired
+    fired="$(printf '%s' "$out" \
+      | grep -oE '"severity":"error","rule":"K9-[A-Z][0-9]+","layer":"L[0-9]+"' \
+      | sed -E 's/.*"rule":"(K9-[A-Z][0-9]+)","layer":"(L[0-9])"/\1 \2/' \
+      | sort -u || true)"
+
+    # K9-N002 means the normative contract itself is broken, in which case no
+    # L2 control can have proved anything — say that, not "wrong rule".
+    if printf '%s' "$fired" | grep -q '^K9-N002 '; then
+      echo -e "${RED}FAIL${NC} $base cannot assert $want_rule: the normative contract does not typecheck (K9-N002), so L2 rejected nothing on its own merits"
       printf '%s\n' "$out" >&2
-      echo -e "${RED}FAIL${NC} $base was rejected, but not by $want_rule"
       fails=$((fails + 1))
       continue
     fi
-    if ! printf '%s' "$out" | grep -q "\[$want_layer\]"; then
+
+    if [ -n "$want_rule" ] && ! printf '%s\n' "$fired" | grep -qE "^$want_rule $want_layer$"; then
       printf '%s\n' "$out" >&2
-      echo -e "${RED}FAIL${NC} $base was rejected at the wrong layer (expected $want_layer)"
+      echo -e "${RED}FAIL${NC} $base was rejected, but not by $want_rule at $want_layer"
+      [ -n "$fired" ] && echo "        fired instead: $(printf '%s\n' "$fired" | tr '\n' ';')" >&2
       fails=$((fails + 1))
       continue
     fi
