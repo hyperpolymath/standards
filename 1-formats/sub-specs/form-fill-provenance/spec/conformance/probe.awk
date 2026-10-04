@@ -293,7 +293,7 @@ function walk_field(id, inh_ft, inh_ff, inh_v, depth,   f, ft, ff, v, kids, kids
 # register_field <field-text> <field-id> <widget-ids-or-empty> <ft> <ff> <v>
 function register_field(f, fid, wids, ft, ff, v,   fnum, wcnt, wparts, i, wid, w, ap, nn, stream, state, substream) {
   if (ft !~ /^\/(Tx|Ch|Btn)$/) return
-  fnum = substr(ff, 2) + 0
+  fnum = ff + 0
   if (ft == "/Btn" && int(fnum / 65536) % 2 == 1) return
 
   total++
