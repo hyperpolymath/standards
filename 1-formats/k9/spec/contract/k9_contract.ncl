@@ -97,7 +97,14 @@ let is_semver_of = fun major v =>
     if i >= std.string.length s then
       dots == 2 && seg_len > 0
     else
-      let c = std.string.substring i 1 s in
+      # `substring start end str`, NOT (start, length, str): 1.18.0's
+      # std.ncl documents `substring start end str` as the slice from `start`
+      # (included) to `end` (excluded), so the single character at `i` is
+      # `substring i (i + 1) s`. Written as `substring i 1 s` it returned "1"
+      # at i=0 by coincidence and "" at every later index, so the walk fell
+      # out at the second character and `is_semver_of` rejected "1.0.0" —
+      # every positive control with it. Verified against core/stdlib/std.ncl.
+      let c = std.string.substring i (i + 1) s in
       if c == "." then
         seg_len > 0 && go (i + 1) (dots + 1) 0 false s
       else if is_digit c then
@@ -106,6 +113,7 @@ let is_semver_of = fun major v =>
       else
         false
   in
+  # A dot-triple is at least `want` plus "N.N": three more characters.
   std.string.length v >= (std.string.length want + 3)
     && std.string.substring 0 (std.string.length want) v == want
     && go 0 0 0 false v in
