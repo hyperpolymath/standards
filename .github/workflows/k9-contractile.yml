@@ -149,14 +149,31 @@ jobs:
           # actually run, so a missing toolchain cannot report a pass. The 21
           # negative controls are the load-bearing half — a validator that
           # accepts everything satisfies the positive half trivially.
+          set +e
+          out="$(bash 1-formats/k9/tools/k9-validate.sh --strict \
+            --fixtures 1-formats/k9/tools/fixtures 2>&1)"; rc=$?
+          set -e
           {
             echo '## K9 conformance fixtures'
             echo '```'
-            bash 1-formats/k9/tools/k9-validate.sh --strict \
-              --fixtures 1-formats/k9/tools/fixtures 2>&1
+            printf '%s\n' "$out"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          exit "${PIPESTATUS[0]}"
+          # A failing gate also raises a check-run annotation. Annotations are
+          # readable through `gh api repos/{o}/{r}/check-runs/{job}/annotations`
+          # from machines that cannot reach the log blob host, which is where
+          # the first two runs of this workflow had to be diagnosed from.
+          # Workflow-command escaping: % first, then CR and LF.
+          if [ $rc -ne 0 ]; then
+            # One annotation per failure, not one multi-kilobyte annotation: a
+            # whole-report message never reached the check-run API, and a
+            # per-failure annotation is what a reader wants anyway.
+            printf '%s\n' "$out" | grep -E '^(FAIL|ERROR)' | head -20 | while IFS= read -r line; do
+              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
+              printf '::error title=K9 conformance fixture::%s\n' "$esc"
+            done
+          fi
+          exit $rc
 
       - name: K9 corpus conformance (ratcheted)
         run: |
@@ -166,13 +183,22 @@ jobs:
           # .machine_readable/k9-contract-debt.txt grandfathers the 25 files
           # that predate the contract; it is shrink-only (a conforming file
           # left in it fails), and it does not protect a file this PR touches.
+          set +e
+          out="$(bash .githooks/validate-k9.sh 2>&1)"; rc=$?
+          set -e
           {
             echo '## K9 corpus conformance'
             echo '```'
-            bash .githooks/validate-k9.sh 2>&1
+            printf '%s\n' "$out"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          exit "${PIPESTATUS[0]}"
+          if [ $rc -ne 0 ]; then
+            printf '%s\n' "$out" | grep -E '^(FAIL|ERROR)' | head -20 | while IFS= read -r line; do
+              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
+              printf '::error title=K9 corpus conformance::%s\n' "$esc"
+            done
+          fi
+          exit $rc
 
       - name: Publish the K9 verdict to the pull request
         # always(): a failing gate is exactly when the detail is needed, and a
@@ -191,11 +217,12 @@ jobs:
             echo "_run_ $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             cat "$K9_REPORT"
           } > "$RUNNER_TEMP/body.md"
-          prev=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json comments \
-            --jq '.comments[] | select(.body | startswith("<!-- k9-contractile-report")) | .url' | tail -1 || true)
-          if [ -n "$prev" ]; then
-            # Edit the previous report in place so repeated runs do not stack up.
-            gh api -X PATCH "${prev#https://github.com/}" -F body=@"$RUNNER_TEMP/body.md" >/dev/null
-          else
-            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md" >/dev/null
-          fi
+          # Always post; never PATCH. Creating a comment is the one path this
+          # step has been observed to complete, and two runs were lost
+          # diagnosing an update that could not be read back. Stacked reports
+          # cost a little noise on the PR and buy a result that actually
+          # arrives, which is the right trade while the log host is
+          # unreachable. Newest comment wins; each one names its run.
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body-file "$RUNNER_TEMP/body.md" >/dev/null
+          echo "published the K9 verdict to #$PR_NUMBER"
