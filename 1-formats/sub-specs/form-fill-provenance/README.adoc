@@ -1,0 +1,233 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// (MPL-2.0 is automatic legal fallback until PMPL is formally recognised)
+//
+// FFP — Form-Fill Provenance. Normative sub-spec of 1-formats.
+// Home: 1-formats/sub-specs/form-fill-provenance/
+// Version: 1.0.0  ·  Status: ACTIVE  ·  Ratified: 2026-10-04
+
+= Form-Fill Provenance (FFP) — machine-filled vs hand-completed forms in the print path
+:toc: preamble
+:icons: font
+:revdate: 2026-10-04
+:revnumber: 1.0.0
+:status: ACTIVE
+
+[.lead]
+FFP is the estate standard for *stating, detecting and recording how a PDF form
+came to be filled* — by a machine before printing, or by hand after it. It
+exists because a filled application form is a print job, and the print path
+currently cannot tell the two apart.
+
+== Why this document exists
+
+`blocky-writer` fills fixed-layout PDF and application forms. Its `fill_blocks`
+returns ordinary PDF bytes — an AcroForm with `/V` values written and
+`NeedAppearances` set — with **no marker** distinguishing that output from a
+form a human completed. It asked the question deliberately
+(https://github.com/hyperpolymath/presswerk/issues/118[presswerk#118], from the
+2026-09-27 ecosystem recon in
+https://github.com/hyperpolymath/blocky-writer/pull/73[blocky-writer#73]).
+
+The owner answered it as **D189** (2026-09-30, `scope: repo`, basis
+*applied-unless-struck*; surface
+https://github.com/hyperpolymath/standards/issues/787#issuecomment-5913118060[standards#787]):
+
+[quote]
+____
+Yes: record machine-filled provenance as metadata in the print path so
+audit/routing can distinguish it.
+____
+
+A ruling that only one repository acts on cannot bind two. *How* the two sides
+agree is a cross-repository matter — the marker a producer writes and the
+evidence a print path validates — so the normative text lives here, and the
+implementations live where the work happens:
+
+[cols="1,2,2",options="header"]
+|===
+| Class | Who | What they owe
+
+| *Producer*
+| `blocky-writer` (and any future form-filling producer)
+| Writes the FFP marker (link:spec/MARKER.adoc[MARKER]) so its output is *declared*, not guessed.
+
+| *Print-path consumer*
+| `presswerk` (and any future print router/batch tool)
+| Classifies every document that enters the print path (link:spec/DETECTION.adoc[DETECTION]), and
+*records* the result on the job and in the audit trail (link:spec/PRINT-PATH.adoc[PRINT-PATH]).
+
+| *Detector*
+| any of the above, or a third party
+| Implements link:spec/DETECTION.adoc[DETECTION] exactly; passes the
+link:spec/conformance/README.adoc[conformance suite].
+|===
+
+[IMPORTANT]
+====
+This standard does **not** require a producer to write a marker before a
+consumer may classify. It defines *both* legs: a declared marker that is
+authoritative when present, and a structural signature that is honest when it
+is not. A consumer that cannot see a marker MUST NOT invent one; see
+<<honesty>>.
+====
+
+== Scope
+
+*In scope:* PDF documents containing interactive form fields (AcroForm,
+ISO 32000-1 §12.7), the provenance metadata a producer may attach to them, the
+classification a print path derives from them, and the record it keeps.
+
+*Out of scope:* XFA-only forms (PDF 2.0 deprecates XFA; XFA provenance is
+undefined here), digital signatures, document authorship or identity of the
+person who filled a form, and any rendering decision (FFP classifies; it never
+re-renders).
+
+== The spec set
+
+[cols="1,3",options="header"]
+|===
+| Document | What it defines
+
+| link:spec/MARKER.adoc[MARKER]
+| The `ffp:filledBy` XMP marker: namespace, properties, writer obligations,
+forward-compatibility, and why XMP rather than `/Info`.
+
+| link:spec/DETECTION.adoc[DETECTION]
+| The classification algorithm: fillable-field counting, value meaningfulness,
+appearance detection, the classification lattice, and the evidence codes.
+
+| link:spec/PRINT-PATH.adoc[PRINT-PATH]
+| The obligations of a print-path consumer: record, surface, never silently
+normalise, and the blank-print hazard.
+
+| link:spec/conformance/README.adoc[CONFORMANCE]
+| Fourteen vectors + a reference probe + a runner. A conforming detector MUST
+pass this suite.
+|===
+
+== Definitions
+
+machine-filled::
+  A document whose field values were written programmatically, without an
+  interactive editing session — the `blocky-writer` case.
+
+hand-completed::
+  A document completed by a person on paper, after printing. A print path
+  usually sees this as a *blank form* (link:spec/DETECTION.adoc[DETECTION]): the values are added
+  later, by pen.
+
+interactively-filled::
+  A document completed by a person in a PDF viewer/editor. FFP deliberately does
+  **not** classify this case as `hand` — see <<honesty>>.
+
+declared provenance::
+  What the document says about itself, via the FFP marker (link:spec/MARKER.adoc[MARKER]).
+
+inferred provenance::
+  What the document's AcroForm structure shows, per the rules in
+  link:spec/DETECTION.adoc[DETECTION].
+
+appearances::
+  The widget appearance streams (`/AP` with a normal appearance) that determine
+  what a viewer or printer actually draws. A field can hold a value and still
+  print blank when its appearance is missing — this is the reason FFP is a
+  *print-path* concern, not merely a labelling one.
+
+== The two axes
+
+FFP never collapses "is there a form?" with "how was it filled?" into one guess.
+It reports both, and derives one classification from them.
+
+*Axis 1 — form/fill state:* `absent` · `present`, with `filled_fields/total_fields`.
+*Axis 2 — provenance evidence:* declared (marker) · inferred (structure) · none.
+
+=== The classification lattice
+
+[cols="1,2,3",options="header"]
+|===
+| Classification | Set when | Routing meaning
+
+| `no-form`
+| no interactive form, or no fillable terminal fields
+| not a form; nothing to distinguish
+
+| `blank-form`
+| form present, *zero* meaningful values
+| the print-and-hand-complete case — print blank, fill by hand
+
+| `machine-filled`
+| ≥1 meaningful value **and** the FFP marker declares `filledBy=machine`
+| machine-filled, *declared*
+
+| `machine-filled-suspected`
+| ≥1 meaningful value **and** no machine marker **and**
+`NeedAppearances=true` **and** appearances incomplete
+| machine-filled by structural signature only — treat conservatively, record the weaker evidence
+
+| `filled-unknown`
+| ≥1 meaningful value, none of the above matched
+| filled, provenance undetermined — never guess
+
+| `unreadable`
+| the document structure could not be parsed
+| unknown; the job MUST still record that FFP ran and could not decide
+|===
+
+`machine-filled-suspected` exists so a print path never has to choose between
+lying and silence: the structural signature is strong evidence, and the
+classification says exactly how strong.
+
+=== Precedence
+
+1. The declared marker wins over the structural signature when it is present
+   and recognised (`machine-filled`, even if appearances are complete and
+   `NeedAppearances` is absent).
+2. An unrecognised declaration does not fall back to "trusting" the producer:
+   it is recorded as evidence and the structural rules decide.
+3. `blank-form` is never promoted to `machine-filled*`: a form with zero
+   meaningful values is blank regardless of flags (a negative control for this
+   rule is vector `blank-form-need-appearances`).
+4. If the document cannot be parsed, the classification is `unreadable`. It is
+   never `blank-form`.
+
+[[honesty]]
+== The honesty rule (normative)
+
+A consumer MUST NOT report a provenance the evidence does not support.
+
+* FFP does not claim to detect "hand-filled in a viewer". `/AP` streams can be
+  generated by a program just as well as by an editor, so the honest
+  classification for that case is `filled-unknown`.
+* `ffp:filledBy` is a *declaration*, not proof. Consumers MUST NOT present it as
+  verification, and MUST NOT infer authorship or identity from it: FFP records
+  **how** values were written, never **who** wrote them.
+* A `machine-filled-suspected` result MUST be recorded with the evidence that
+  produced it, so a later reviewer can re-derive the classification.
+
+== Relationship to other standards
+
+* ISO 32000-1 §12.7 (interactive forms), §12.5.5 (`/AP` appearance streams),
+  §14.3.2 (metadata streams); ISO 16684-1 (XMP). `NeedAppearances` is
+  deprecated by ISO 32000-2 (PDF 2.0) and PDF/A requires appearances to be
+  present — which is *why* the structural signature in
+  link:spec/DETECTION.adoc[DETECTION] is a
+  reliable, if not sufficient, machine-fill signal.
+* `docs/SEAMS-SPEC.adoc` — the blocky-writer → presswerk handoff is a declared
+  seam (`blocky-writer-presswerk-form-handoff`); the seam-register entry for
+  each side is in link:spec/PRINT-PATH.adoc[PRINT-PATH] §Seam.
+* The precision-document suite's composition contract forbids any component
+  from silently normalising page geometry. FFP extends the same discipline to
+  content provenance: a print path may *report* that appearances are missing,
+  but it may not silently regenerate them.
+* link:../../../docs/decisions/[ADR-004] (README discipline) is why this spec
+  is one README plus normative parts, and why the registry entry is a
+  `scripts/build-registry.sh` row rather than a hand-kept index.
+
+== Versioning
+
+This spec is versioned as a whole, `MAJOR.MINOR.PATCH`, and additionally carries
+a *wire* version in the marker namespace (`…/1.0/`) and in the record
+(`"ffp": "1.0"`). Adding a classification, an evidence code, or a marker
+property is a MINOR change; repurposing an existing value is MAJOR. Consumers
+MUST ignore unknown properties and MUST NOT fail a job because a document
+declares a version they do not know.
