@@ -1,5 +1,6 @@
+K9!
 # SPDX-License-Identifier: MPL-2.0
-# must.k9.ncl — K9 trust-tier component of the must trident
+# must.k9.ncl — K9 contractile component of the must trident
 # Author: Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 #
 # Pairs with: Mustfile.a2ml (declaration) + must.ncl (runner).
