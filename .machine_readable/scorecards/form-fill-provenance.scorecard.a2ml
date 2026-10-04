@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: CC-BY-SA-4.0
+# form-fill-provenance.scorecard.a2ml
+# Hand-authored source. Regenerate the dashboard with: just scorecards
+# Schema: .machine_readable/scorecards/scorecard.schema.json
+
+[scorecard]
+spec_id = "form-fill-provenance"
+version = "1.0.0"
+assessed_date = "2026-10-04"
+assessor = "arena session 01a1046c (standards), on ruling D189"
+
+[[must]]
+id = "M1"
+text = "The DETECTION rules MUST be executable and exact: a detector MUST reproduce every conformance vector's expected line, and the vectors MUST be byte-reproducible from their generator."
+system = "1-formats/sub-specs/form-fill-provenance/spec/conformance/run-conformance.sh — 14 vectors, each diffed against expected/, plus a make-fixtures.sh --check reproducibility pass"
+status = "pass"
+evidence = "just ffp-conformance: 14 passed, 0 failed, 0 orphan expectation(s); run 2026-10-04"
+check = "bash 1-formats/sub-specs/form-fill-provenance/spec/conformance/run-conformance.sh >/dev/null 2>&1"
+
+[[must]]
+id = "M2"
+text = "The marker MUST be recognised by namespace, `filledBy=machine` MUST be the only defined value, and an unrecognised declaration MUST be recorded rather than trusted."
+system = "vectors machine-filled-declared, machine-filled-declared-generated and declared-unknown-value, diffed by run-conformance.sh"
+status = "pass"
+evidence = "declared-unknown-value expects FFP-E-DECL-UNRECOGNISED with classification machine-filled-suspected — the unknown declaration does not promote the classification; machine-filled-declared-generated expects machine-filled with appearances=generated, i.e. declaration wins over the structural signature"
+check = "grep -q 'FFP-E-DECL-UNRECOGNISED' 1-formats/sub-specs/form-fill-provenance/spec/conformance/expected/declared-unknown-value.expected && grep -q 'form-fill-provenance/1.0/' 1-formats/sub-specs/form-fill-provenance/spec/MARKER.adoc"
+
+[[must]]
+id = "M3"
+text = "A print-path consumer MUST classify every entered document, persist the FFP record with the job, keep it in the audit trail, and make it visible/routable (FFP/3 P1-P4) — the D189 obligation in presswerk."
+system = "none — presswerk has no FFP code; D189 ruled 2026-09-30 on presswerk#118, implementation issue filed 2026-10-04"
+status = "fail"
+effects = "A machine-filled form and a blank form to be completed by hand stay byte-indistinguishable in presswerk's queue and audit trail, so routing and audit cannot tell them apart and no record survives the print. The blank-print hazard (values present, appearance streams absent) is also unrecorded, so a job can print empty fields with nothing in the trail to explain it."
+
+[[must]]
+id = "M4"
+text = "A form-filling producer MUST declare machine authorship via the FFP marker, and SHOULD generate widget appearance streams (FFP/1)."
+system = "none — blocky-writer writes /V and NeedAppearances but no metadata marker; producer issue filed 2026-10-04"
+status = "fail"
+effects = "blocky-writer output can only ever classify as machine-filled-suspected (weaker evidence, no tool/version attribution), and its reliance on NeedAppearances leaves print output dependent on a flag PDF 2.0 deprecates and that some viewers and rasterisers ignore — the condition FFP/3 P5 exists to warn about."
+
+[[should]]
+id = "S1"
+text = "The conformance suite SHOULD run in this repository's CI on every pull request, not only on a developer's workstation."
+system = ".github/workflows/dyadt-verify.yml step 'FFP conformance vectors'"
+status = "pass"
+evidence = "step added 2026-10-04, running the same runner as just ffp-conformance; no new action references, so the actions.lock gate is untouched"
+check = "grep -q 'form-fill-provenance/spec/conformance/run-conformance.sh' .github/workflows/dyadt-verify.yml"
+
+[[should]]
+id = "S2"
+text = "A product detector SHOULD be testable against the same vectors without adding a runtime to the suite (no Python, no JS)."
+system = "run-conformance.sh honours FFP_DETECTOR=<command>; the whole conformance tree is bash + awk"
+status = "pass"
+evidence = "the reference path itself is invoked as FFP_DETECTOR default ('awk -f probe.awk'); no .py/.js/.ts file exists under the spec home"
+check = "test -z \"$(find 1-formats/sub-specs/form-fill-provenance -name '*.py' -o -name '*.js' -o -name '*.ts')\" && grep -q 'FFP_DETECTOR' 1-formats/sub-specs/form-fill-provenance/spec/conformance/run-conformance.sh"
+
+[[could]]
+id = "C1"
+text = "A future revision COULD carry the appearance hazard into the submission gate (hold for confirmation) once a print-path consumer implements FFP/3, so that P5's SHOULD becomes mechanical."
+system = "none — deliberately aspirational; P5 is a SHOULD in FFP/3 v1.0.0"
+status = "aspirational"
+effects = "Until a consumer implements it, the hazard is recorded and surfaced but not gated; a user can still send a form to the printer and receive blank fields."
