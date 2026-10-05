@@ -72,18 +72,18 @@ let ExtensionPrefix = "x-" in
 # ─────────────────────────────────────────────────────────────────────────
 # §5.2 / §8.1 — name shapes, using nothing beyond length and substring
 # ─────────────────────────────────────────────────────────────────────────
-
 let is_digit = fun c =>
   c == "0"
-    || c == "1"
-    || c == "2"
-    || c == "3"
-    || c == "4"
-    || c == "5"
-    || c == "6"
-    || c == "7"
-    || c == "8"
-    || c == "9" in
+  || c == "1"
+  || c == "2"
+  || c == "3"
+  || c == "4"
+  || c == "5"
+  || c == "6"
+  || c == "7"
+  || c == "8"
+  || c == "9"
+in
 
 # A numeric dot-triple whose MAJOR segment equals `major`. Walks the string
 # once. Rejects: non-digits, a leading or trailing dot, an empty segment, a
@@ -109,14 +109,15 @@ let is_semver_of = fun major v =>
         seg_len > 0 && go (i + 1) (dots + 1) 0 false s
       else if is_digit c then
         (first_zero == false || seg_len == 0)
-          && go (i + 1) dots (seg_len + 1) (c == "0") s
+        && go (i + 1) dots (seg_len + 1) (c == "0") s
       else
         false
   in
   # A dot-triple is at least `want` plus "N.N": three more characters.
   std.string.length v >= (std.string.length want + 3)
-    && std.string.substring 0 (std.string.length want) v == want
-    && go 0 0 0 false v in
+  && std.string.substring 0 (std.string.length want) v == want
+  && go 0 0 0 false v
+in
 
 # ─────────────────────────────────────────────────────────────────────────
 # The contract record. Nickel records are recursive, so fields below refer to
@@ -177,8 +178,7 @@ let is_semver_of = fun major v =>
   # pedigree cannot crash on it.
   leash_of = fun pedigree =>
     if std.record.has_field "security" pedigree
-      && std.record.has_field "leash" pedigree.security
-    then
+    && std.record.has_field "leash" pedigree.security then
       pedigree.security.leash
     else
       'Kennel,
@@ -208,13 +208,13 @@ let is_semver_of = fun major v =>
   # after the vendor segment, i.e. "x-vendor.something", never bare "x-vendor".
   is_extension = fun name =>
     std.string.length name > std.string.length ExtensionPrefix
-      && std.string.substring 0 (std.string.length ExtensionPrefix) name
-        == ExtensionPrefix
-      && std.array.length (std.string.split "." name) >= 2,
+    && std.string.substring 0 (std.string.length ExtensionPrefix) name == ExtensionPrefix
+    && std.array.length (std.string.split "." name) >= 2,
 
-  Capability = std.contract.from_predicate (fun name =>
-    is_core name || is_extension name
-  ),
+  Capability =
+    std.contract.from_predicate (fun name =>
+      is_core name || is_extension name
+    ),
 
   # An explicit allow-list. DEFAULT-DENY is expressed by the empty grant: it
   # permits nothing, and "nothing" is the correct answer for an absent grant.
@@ -241,28 +241,25 @@ let is_semver_of = fun major v =>
   required_capabilities = fun security =>
     (
       if std.record.has_field "allow_network" security
-        && security.allow_network
-      then
+      && security.allow_network then
         ["net.fetch"]
       else
         []
     )
-      @ (
-        if std.record.has_field "allow_filesystem_write" security
-          && security.allow_filesystem_write
-        then
-          ["fs.write"]
-        else
-          []
-      )
-      @ (
-        if std.record.has_field "allow_subprocess" security
-          && security.allow_subprocess
-        then
-          ["process.spawn"]
-        else
-          []
-      ),
+    @ (
+      if std.record.has_field "allow_filesystem_write" security
+      && security.allow_filesystem_write then
+        ["fs.write"]
+      else
+        []
+    )
+    @ (
+      if std.record.has_field "allow_subprocess" security
+      && security.allow_subprocess then
+        ["process.spawn"]
+      else
+        []
+    ),
 
   # What the grant fails to cover. Empty iff the pedigree is self-consistent.
   grant_deficit = fun grant security =>
@@ -285,6 +282,11 @@ let is_semver_of = fun major v =>
   # The host supplies one Bool of EVIDENCE per precondition. Evidence is
   # runtime fact, not a static component field — which is why `check_level`
   # in leash.ncl can never authorise Hunt on its own.
+  # Host-side, and deliberately CLOSED unlike the component-facing records
+  # above: §9.2 says the host supplies one Boolean of evidence per
+  # precondition, so a misspelt evidence field must be an error rather than a
+  # silently ignored precondition. §5.5's openness is about a *component's*
+  # fields.
   HuntEvidence = {
     signature | Bool,
     policy | Bool,
@@ -299,10 +301,10 @@ let is_semver_of = fun major v =>
   authorize_hunt = fun evidence =>
     let unmet =
       (if evidence.signature then [] else ["signature"])
-        @ (if evidence.policy then [] else ["policy"])
-        @ (if evidence.sandbox then [] else ["sandbox"])
-        @ (if evidence.dry_run then [] else ["dry_run"])
-        @ (if evidence.capability_grant then [] else ["capability_grant"])
+      @ (if evidence.policy then [] else ["policy"])
+      @ (if evidence.sandbox then [] else ["sandbox"])
+      @ (if evidence.dry_run then [] else ["dry_run"])
+      @ (if evidence.capability_grant then [] else ["capability_grant"])
     in
     if std.array.length unmet == 0 then
       {
@@ -316,7 +318,7 @@ let is_semver_of = fun major v =>
         enforced_level = 'Yard,
         reason =
           "Hunt requires all five preconditions; unmet: "
-            ++ std.string.join ", " unmet,
+          ++ std.string.join ", " unmet,
         unmet_preconditions = unmet,
       },
 
@@ -365,6 +367,10 @@ let is_semver_of = fun major v =>
     payload_hash | String | optional,
     signed_at | String | optional,
     key_id | String | default = "primary",
+    # §5.5 — unknown fields are PERMITTED; see the `..` block above `Metadata`.
+    # A host that reads `signature.public_key` MUST NOT be the reason a future
+    # `counter_signature` field is rejected.
+    ..
   },
 
   # ── §6 The component pedigree, v1 ────────────────────────────────────
@@ -373,16 +379,50 @@ let is_semver_of = fun major v =>
   # actually carry (`.machine_readable/svc/k9/template-*.k9.ncl`), with two
   # normative tightenings: `component_type` is REQUIRED (§6.2), and the
   # security flags must be paid for in the capability grant (§8.4).
+  #
+  # ── THE `..` TAIL, AND WHY EVERY COMPONENT-FACING RECORD HERE HAS ONE ──
+  #
+  # §5.5's table ends with "Unknown fields anywhere | PERMITTED. A reader SHOULD
+  # report them and MUST NOT consult them to relax any requirement of §8 or §9."
+  # That is normative prose, and by this file's own first rule the prose wins:
+  # where the two disagree, this file is the bug.
+  #
+  # They disagreed until 2026-10-05. A Nickel record contract is CLOSED by
+  # default — the sharp edge is recorded in Nickel's own integration suite,
+  # core/tests/integration/inputs/contracts/record_contract_extra_field.ncl,
+  # which asserts `EvalError::BlameError` with the message "extra field" and
+  # advises appending `, ..`. So a component carrying a legitimate extension
+  # field was blamed by this file while §5.5 permitted the field. The six
+  # `.machine_readable/contractiles/*/*.k9.ncl` components are the live case
+  # (they keep `semantics`, `contractile_verb`, `tier`, `authority`,
+  # `variance_schema`, `execution`, `failure_mode_defenses` in the pedigree;
+  # `probe_scope`, `probe_kinds_*`, `allow_filesystem_write_conditional` in
+  # security; `paired_xfile`, `paired_runner` in metadata), and
+  # `2-protocols/axel/config/*.k9.ncl` keep their payload at top level.
+  #
+  # Opening these five records is a CONFORMANCE fix, not a contract revision:
+  # the specified contract (the prose) never changed, so `contract_version`
+  # stays 1.0.0. It does not weaken §8 or §9 either — §5.5's own last clause
+  # forbids that, and the validator enforces the capability arithmetic over the
+  # extracted facts whatever an extension field claims (K9-S007, K9-S008).
+  #
+  # The positive control `tools/fixtures/valid/extension-fields.k9.ncl` exists
+  # so this cannot silently regress: it fails at L2 the moment any of these
+  # records closes again.
 
   Metadata = {
     name | String,
     version | String | default = "0.0.0",
     description | String | optional,
     author | String | optional,
+    # §5.5 — see the block comment above. The estate's contractiles add
+    # `paired_xfile` / `paired_runner` here.
+    ..
   },
 
   Security = {
-    # §7 — closed set. An unknown tag is a contract violation, not a warning.
+    # §7 — closed set. An unknown LEASH TAG is a contract violation, not a
+    # warning; an unknown FIELD in this block is §5.5's business.
     leash | SecurityLevel,
     trust_level | String | default = "unset",
     allow_network | Bool | default = false,
@@ -393,6 +433,11 @@ let is_semver_of = fun major v =>
     signature_required | Bool | default = false,
     # §8.3 — the explicit grant. Default-deny: absent means empty.
     capabilities | CapabilityGrant | default = [],
+    # §5.5 — unknown fields are PERMITTED, and the prose names this block's own
+    # examples: "the estate's contractiles use `probe_scope` and
+    # `authorised_probes_only`". No conforming reader may let one of them
+    # weaken §8 or §9 — the grant above is what a host enforces.
+    ..
   },
 
   Pedigree = {
@@ -412,6 +457,12 @@ let is_semver_of = fun major v =>
     side_effects | Array String | default = [],
     # §10.1 — the signature claim. Presence is per-leash; see Signature above.
     signature | Signature | optional,
+    # §5.5 — unknown fields are PERMITTED. This is the line MIGRATION-1058 M1
+    # turned on: the contractile family keeps its own vocabulary in the pedigree
+    # (`semantics`, `contractile_verb`, `tier`, `authority`, `variance_schema`,
+    # `execution`, `failure_mode_defenses`), and nothing in this file may force
+    # those names out of it.
+    ..
   },
 
   # The whole component: the pedigree plus the optional Nickel payload.
@@ -436,6 +487,12 @@ let is_semver_of = fun major v =>
     config | { _ : Dyn } | optional,
     recipes | { _ : Dyn } | optional,
     validation | { _ : Dyn } | optional,
+    # §5.5 — unknown fields are PERMITTED at top level too, which is the case
+    # MIGRATION-1058 M4 recorded for whoever first ran the corpus at L2:
+    # `2-protocols/axel/config/*.k9.ncl` keep their payload (`ci`, `local_dev`,
+    # `quality`; `metadata.k9.ncl`: `project`, `tech_stack`, `deployment`,
+    # `features`, `status`) beside `pedigree`.
+    ..
   },
 
   # ── §11 Library dialect ──────────────────────────────────────────────
@@ -445,5 +502,5 @@ let is_semver_of = fun major v =>
   # no pedigree, no leash claim, no execution licence of any kind.
   is_library = fun lib =>
     !(std.record.has_field "pedigree" lib)
-      && !(std.record.has_field "leash" lib),
+    && !(std.record.has_field "leash" lib),
 }

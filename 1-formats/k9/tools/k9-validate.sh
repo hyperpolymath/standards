@@ -310,9 +310,10 @@ check_l0() {
     # and belongs at L1/L2, not to a dialect mismatch.
     if [ "$HAS_MAGIC" -eq 1 ]; then DIALECT="component"; else DIALECT="library"; fi
   elif printf '%s' "$body_start" | grep -qE '^[A-Za-z_][A-Za-z0-9_.-]*:'; then
-    # A `key:` line: the coordination dialect permits one, and so do the
-    # unclaimed session-management PROTOCOL.k9 stubs. Only the magic line
-    # separates the two, so with no magic this file claims nothing.
+    # A `key:` line: the coordination dialect permits one, and so did the
+    # unclaimed session-management PROTOCOL.k9 stubs (renamed to PROTOCOL.yaml
+    # by migration item M2). Only the magic line separates the two, so with no
+    # magic this file claims nothing.
     if [ "$HAS_MAGIC" -eq 1 ]; then DIALECT="coordination"; else DIALECT="unclaimed"; fi
   else
     DIALECT="unclaimed"
@@ -870,7 +871,7 @@ EOF
       fi
     done
   done
-  t "the contract and all 26 fixtures avoid Nickel's reserved words" 0 "$kw_hits"
+  t "the contract and all 27 fixtures avoid Nickel's reserved words" 0 "$kw_hits"
 
   echo
   if [ $SELFTEST_FAILS -eq 0 ]; then
