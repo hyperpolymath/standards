@@ -1,8 +1,9 @@
 K9!
 # SPDX-License-Identifier: MPL-2.0
 # Negative control §6.2: an unfilled component_type placeholder. This is the
-# exact state of .machine_readable/svc/k9/template-hunt.k9.ncl today: the field
-# exists, so a presence check passes, and the value says nothing.
+# exact state of .machine_readable/svc/k9/template-hunt.k9.ncl.in (a template,
+# which is why it no longer claims the .k9.ncl suffix): the field exists, so a
+# presence check passes, and the value says nothing.
 {
   pedigree = {
     schema_version = "1.0.0",

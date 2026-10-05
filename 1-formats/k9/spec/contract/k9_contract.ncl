@@ -370,9 +370,11 @@ let is_semver_of = fun major v =>
   # ── §6 The component pedigree, v1 ────────────────────────────────────
   #
   # Field-for-field this is the shape the estate's `.k9.ncl` components
-  # actually carry (`.machine_readable/svc/k9/template-*.k9.ncl`), with two
-  # normative tightenings: `component_type` is REQUIRED (§6.2), and the
-  # security flags must be paid for in the capability grant (§8.4).
+  # actually carry (`.machine_readable/svc/k9/template-*.k9.ncl.in`, the
+  # trust-tier templates — `.in` because a template is not a component and is
+  # never loaded; MIGRATION-1058 M3), with two normative tightenings:
+  # `component_type` is REQUIRED (§6.2), and the security flags must be paid
+  # for in the capability grant (§8.4).
 
   Metadata = {
     name | String,
