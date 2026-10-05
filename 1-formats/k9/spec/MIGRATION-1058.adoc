@@ -15,7 +15,7 @@ contract for `application/vnd.k9`, with
 link:contract/k9_contract.ncl[`contract/k9_contract.ncl`] as its
 machine-readable form, link:../tools/k9-validate.sh[`tools/k9-validate.sh`] as
 the canonical validator, and link:../tools/fixtures/[`tools/fixtures/`] as the
-conformance suite (5 positive controls, 21 negative).
+conformance suite (6 positive controls, 21 negative).
 
 Landed with it:
 
@@ -154,6 +154,64 @@ a dangling import a conformance failure rather than a style note.
 files, twelve rule instances, and it closes the only place in the repo where a
 `'Hunt` pedigree is invisible to every tool.
 
+==== M1 — resolved (2026-10-05)
+
+All six `.machine_readable/contractiles/*/*.k9.ncl` files pass the canonical
+validator at L1 with 0 findings, so K9-S013 has no instance here. Three
+corrections to the paragraph above, from reading the tree rather than the
+report:
+
+* The `K9!` envelope was already line 1 of all six, so "add `K9!` as line 1"
+  was already done and **K9-S012 does not fire**. What was missing was
+  everything the envelope makes enforceable: `component_type`, the §8.4 grant
+  for each `allow_*` flag, and — for the four `'Hunt` verbs — a signature
+  block, `signature_required`, and non-empty `side_effects`.
+* The import now merges `base.pedigree_schema` from `../_base.ncl`, which is
+  where `pedigree_schema` actually lives; no contractile-specific base was
+  created, because `_base.ncl` is already the shared base for the
+  `<verb>.ncl` runners. `variance_schema` is marked `not_exported`: its fields
+  are declarations with no definitions, and Nickel's export refuses a record
+  containing one.
+* The ledger had already lost its six contractile entries (the header's
+  "6 contractiles" removal), which is why the hook reported all six as hard
+  FAILs until they conformed. This change removes nothing from the ledger and
+  re-lists nothing; it makes the earlier removal true.
+
+*Naming resolution, stated rather than implied* (the issue's second ask): the
+K9 contract never names a contractile verb. A contractile component is an
+ordinary K9 component whose `component_type` begins `contractile:` — that
+prefix is the entire tie between the contractiles family
+(must/trust/dust/intend) and K9's execution triad (must/just/nickel), and it is
+the only name K9 machinery ever sees. DEED translation renames nothing this
+specification depends on, and the contractile family keeps its verbs.
+
+*Leash and grant:* adjust and dust are `'Yard` and request `fs.write` and
+`process.spawn`; at `'Yard` the leash is the cap (§7.3 — pure evaluation), so
+those entries record the *request*, not a permission in force. Recording them
+is still mandatory: §8.4/K9-S007 makes a flag whose capability the grant does
+not cover a contradiction inside the pedigree, not a preference. bust, intend,
+must and trust are `'Hunt`; their signature blocks are claims, so the §10.2
+verdict stays `'Present_Unverified` and §10.4 leaves all four unauthorised to
+run until the signing ceremony replaces the placeholder key.
+
+*Verification* (branch `arena/01a10a3b-standards`, run `37262876162`):
+`--self-test` all assertions passed; `--strict --fixtures` 5 positive, 21
+negative, 0 needing nickel, 0 failures; L1 over the six: `pass`, 0 findings;
+the corpus report falls 8 → 2 violations (the remainder are the Axel files of
+M4/#D, untouched here) with 0 stale ledger entries.
+
+*Contract-side follow-up, done in M7's first step (below):* the corpus step ran
+at L1, so the six were never evaluated against `K9.Component`. §5.5 permits the
+extension fields they carry — `pedigree.semantics`, `pedigree.contractile_verb`,
+`pedigree.tier`, `pedigree.authority`, `pedigree.variance_schema`,
+`pedigree.execution`, `pedigree.failure_mode_defenses`, `security.probe_scope`,
+`security.probe_kinds_*`, `security.allow_filesystem_write_conditional` — but
+`Component`, `Pedigree`, `Metadata`, `Security` and `Signature` in
+`k9_contract.ncl` were closed record contracts, so L2 would have blamed every
+one of them ("extra field"). Those five records now take a `, ..` tail, and the
+new positive control `fixtures/valid/extension-fields.k9.ncl` fails at L2 if any
+of them closes again.
+
 === M2 — Twelve `PROTOCOL.k9` stubs claim a reserved suffix
 
 *Files:* `3-practice/session-management-standards/*/*/PROTOCOL.k9`
@@ -175,10 +233,21 @@ are ordinary structured data.
 machine-consumed as K9, give it the `K9!` envelope and either the Nickel
 component shape or a registered dialect of its own.
 
-*Note:* the same scorecard references
+*Ruling — outcome (a), applied 2026-10-05 (issue #B).* These are ordinary
+structured data: plain YAML contracts for session-management protocols that no
+K9 host loads. Option (b) would mean inventing a dialect so the naming
+collision could keep its name — the suffix exists to promise a format, and the
+honest move is to stop promising one. All 12 files are now `PROTOCOL.yaml`;
+their 12 ledger entries are gone (17 → 5); the 11 files that lacked an SPDX
+header gained `MPL-2.0` headers as they entered the `*.yaml` extension scope of
+`.githooks/validate-spdx.sh`; and the scorecard's S1 is re-graded against
+`1-formats/k9/tools/k9-validate.sh`, with the reservation rule as the
+requirement.
+
+*Note (fixed):* the scorecard used to reference
 `1-formats/k9/actions/validate/validate-k9.sh`, a path that does not exist
-(`ls` confirms no `1-formats/k9/actions/`). Whatever is chosen, that reference
-should be repointed at `1-formats/k9/tools/k9-validate.sh`.
+(`ls` confirms no `1-formats/k9/actions/`). Its S1 entry now points at
+`1-formats/k9/tools/k9-validate.sh`.
 
 === M3 — Three templates ship placeholders and one example is unsigned
 
@@ -268,16 +337,15 @@ the report:
   leash without deleting that envelope yields K9-S001, and deleting both
   demotes them to libraries and discards the declared level entirely.
 
-Not fixed here, and recorded for M7/#F instead: §6.4 permits unknown top-level
-fields, but `Component` in `contract/k9_contract.ncl` is a record contract with
-no `, ..`, and Nickel forbids additional fields in record contracts by default
-(1.18.0 manual, "Open record contracts"); the manual defines `optional` as "not
-mandatory" and nothing more, so it does not open a record — `, ..` alone does
-(1.18.0 `doc/manual/syntax.md`, field metadata). If that reading holds, K9-N001 will
-report `extra field` for every component that keeps its payload at top level —
-`burble-metadata.k9.ncl` (`rsr`) and both `examples/` files as much as these
-two. That is an estate-wide L2 reconciliation, not an S014 question, and no
-`nickel` binary was available to run it here.
+Resolved in M7's first step (below): §6.4/§5.5 permit unknown top-level
+fields, but `Component` in `contract/k9_contract.ncl` was a record contract
+with no `, ..`, and Nickel forbids additional fields in record contracts by
+default (1.18.0 manual, "Open record contracts"); the manual defines `optional`
+as "not mandatory" and nothing more, so it does not open a record — `, ..`
+alone does (1.18.0 `doc/manual/syntax.md`, field metadata). Against a closed
+`Component`, K9-N001 would have reported `extra field` for every component that
+keeps its payload at top level — `burble-metadata.k9.ncl` and both `examples/`
+files as much as these two. The record now takes a `, ..` tail.
 
 === M5 — `rsr-compliance-checklist.k9.ncl` is not a single Nickel term
 
@@ -344,6 +412,32 @@ parse error the moment anything typechecks it.
 M7 is therefore: raise the corpus step to L2 for the five conforming files,
 then work the ledger down. Expect each removal to need a real fix, not a
 relabel.
+
+==== M7 — started (2026-10-05)
+
+The corpus step in `.github/workflows/k9-contractile.yml` now runs the hook with
+`K9_VALIDATE_LAYER=all`, so CI checks the whole corpus at L2 while the
+pre-commit hook keeps its L1 default — a hook that fails on a laptop without a
+toolchain is a hook people bypass. Two things had to be true first, and both now
+are:
+
+* `k9_contract.ncl`'s record contracts were CLOSED, so the extension fields
+  §5.5 permits were blamed; M1's and M4's notes above both measured that
+  against live files. `Component`, `Pedigree`, `Metadata`, `Security` and
+  `Signature` now carry `, ..`, and the host-side `HuntEvidence` stays closed on
+  purpose. By this file's own precedence rule — the prose wins, the file is the
+  bug — that is a conformance fix, not a contract revision, so
+  `contract_version` stays 1.0.0.
+* Nothing tested it. `tools/fixtures/valid/extension-fields.k9.ncl` is a new
+  positive control shaped like a contractile: extension fields at pedigree,
+  security, metadata and top level, plus a declaration-only `variance_schema`
+  marked `not_exported`, so it exercises the *export* path rather than only the
+  typecheck. The suite is now 6 positive / 21 negative.
+
+What remains of M7's sentence: the five ledger entries — the four `svc/k9`
+files and `rsr-compliance-checklist.k9.ncl` — are *reported* as grandfathered
+debt by the L2 run rather than failed (they are unchanged), and working them
+down still needs a real fix each: M3 for the four, M5 for the checklist.
 
 Still never run anywhere: `nickel format --check` on a `.k9.ncl` body.
 `ci-pipeline.yml` excludes that pathspec, and formatting is not reproducible

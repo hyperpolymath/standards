@@ -28,11 +28,22 @@ K9!
 # fabrication of success "facts" — invariants ground truth against
 # marketing copy) and D1 (lore fabrication about what the repo contains).
 
-let base_k9 = import "../k9/template-hunt.k9.ncl" in
-let base    = import "../_base.ncl" in
+# §11.4/K9-S013 — `pedigree_schema` lives in ../_base.ncl. There is no k9/
+# subdirectory under .machine_readable/contractiles/, so the old
+# `import "../k9/template-hunt.k9.ncl"` never resolved — and the pedigree a
+# reviewer read was not the pedigree a host would evaluate.
+let base = import "../_base.ncl" in
 
 {
-  pedigree = base_k9.pedigree_schema & {
+  pedigree = base.pedigree_schema & {
+    # §5.2/§6.2 — schema_version, and the reserved-prefix component_type. The
+    # `contractile:` prefix is the whole of the disambiguation between this
+    # family's verbs (must/trust/dust/intend/...) and K9's own execution triad
+    # (must/just/nickel): the K9 contract never names a contractile verb, it
+    # only ever sees this string.
+    schema_version   = "1.0.0",
+    component_type   = "contractile:must",
+    semantics        = "invariant-assertion",
     contractile_verb = "must",
     paired_xfile     = "../must/Mustfile.a2ml",
     paired_runner    = "../must/must.ncl",
@@ -58,6 +69,13 @@ let base    = import "../_base.ncl" in
       allow_network = false,
       allow_filesystem_write = false,
       allow_subprocess = true,
+      signature_required = true,
+      # §8.3/§8.4 — the grant. allow_subprocess is a REQUEST for a capability,
+      # and a request the grant does not cover is a contradiction inside the
+      # pedigree, not a preference (K9-S007).
+      capabilities = [
+        "process.spawn",
+      ],
       probe_scope = 'read_only,              # must probes NEVER mutate
       probe_kinds_allowed = [
         'file_existence,
@@ -74,14 +92,43 @@ let base    = import "../_base.ncl" in
         'exploit_attempt,          # that's trust's safe_hacking territory
       ],
     },
+
+    # §6.5/K9-S010 — mandatory at 'Hunt, and none of it may be a placeholder:
+    # §9 requires a dry_run precondition, i.e. a plan that was produced AND
+    # reviewed, and a reviewer cannot review a plan for a component that
+    # shells out while describing none of what it does.
+    side_effects = [
+      "spawns read-only probe commands as child processes (grep, test, file and schema checks); probe_scope = 'read_only and probe_kinds_denied excludes mutation, network calls, external APIs and exploit attempts",
+      "records per-invariant outcomes and their trend in the host's evidence sinks (contractile_executions, must_invariant_history); the DRIFT.a2ml append is indirected by the host, not performed by this component",
+      "a failed invariant fails the gate and blocks the merge — the gate is this component's effect, and no filesystem write is performed by it",
+    ],
+
+    # §10.1/K9-S009 — a 'Hunt component MUST carry a signature block. This is
+    # the claim the file-format requires, and it is not a verified signature:
+    # with no external verifier the verdict is 'Present_Unverified (§10.2),
+    # and 'Present_Unverified does not satisfy the Hunt `signature`
+    # precondition (§10.4). So the file is conforming and still NOT authorised
+    # to run until the signing ceremony replaces this block.
+    signature = {
+      algorithm = "Ed25519",
+      key_id = "must-k9",
+      payload_hash = "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      signature = "NOT-A-REAL-SIGNATURE",
+    },
   },
 
   # -------------------------------------------------------------------
   # Variance schema — trust-style severity acknowledgement.
   # Because must is BLOCKING, variances carry real weight. Critical-
   # severity invariants can only be varied by maintainer-or-above.
+  #
+  # A contract, not payload. The fields below are declarations with no
+  # definition, and Nickel's export refuses to serialize a record containing
+  # one ("missing field definition for `entry_id`"). `not_exported` says what
+  # is true: this block documents the variance shape and is not data to
+  # serialize. Reading `variance_schema` as a contract is unaffected.
   # -------------------------------------------------------------------
-  variance_schema = {
+  variance_schema | not_exported = {
     entry_id     | String,   # which invariant id the variance applies to
     reason       | String,
     approved_by  | String,   # maintainer or above for critical-severity

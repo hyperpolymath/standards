@@ -43,11 +43,22 @@ K9!
 # * Failure-mode defenses cross-referenced — trust carries the most
 #   defenses of any verb because the threat surface is widest.
 
-let base_k9 = import "../k9/template-hunt.k9.ncl" in
-let base    = import "../_base.ncl" in
+# §11.4/K9-S013 — `pedigree_schema` lives in ../_base.ncl. There is no k9/
+# subdirectory under .machine_readable/contractiles/, so the old
+# `import "../k9/template-hunt.k9.ncl"` never resolved — and the pedigree a
+# reviewer read was not the pedigree a host would evaluate.
+let base = import "../_base.ncl" in
 
 {
-  pedigree = base_k9.pedigree_schema & {
+  pedigree = base.pedigree_schema & {
+    # §5.2/§6.2 — schema_version, and the reserved-prefix component_type. The
+    # `contractile:` prefix is the whole of the disambiguation between this
+    # family's verbs (must/trust/dust/intend/...) and K9's own execution triad
+    # (must/just/nickel): the K9 contract never names a contractile verb, it
+    # only ever sees this string.
+    schema_version   = "1.0.0",
+    component_type   = "contractile:trust",
+    semantics        = "security-verification-and-authorised-probe",
     contractile_verb = "trust",
     paired_xfile     = "../trust/Trustfile.a2ml",
     paired_runner    = "../trust/trust.ncl",
@@ -76,8 +87,38 @@ let base    = import "../_base.ncl" in
       allow_network = false,            # verifications offline by default
       allow_filesystem_write = false,   # evidence sinks are indirected
       allow_subprocess = true,
+      signature_required = true,
+      # §8.3/§8.4 — the grant. allow_subprocess is a REQUEST for a capability,
+      # and a request the grant does not cover is a contradiction inside the
+      # pedigree, not a preference (K9-S007).
+      capabilities = [
+        "process.spawn",
+      ],
       authorised_probes_only = true,    # probe section explicitly lists allowed targets + probe classes
       probe_scope_enforcement = 'this_repo_only,  # probes NEVER hit external systems
+    },
+
+    # §6.5/K9-S010 — mandatory at 'Hunt, and none of it may be a placeholder:
+    # §9 requires a dry_run precondition, i.e. a plan that was produced AND
+    # reviewed, and a reviewer cannot review a plan for a component that
+    # shells out while describing none of what it does.
+    side_effects = [
+      "spawns verification probes as child processes, including the authorised active probes (fuzz/injection/auth-bypass) — scoped to this repository only by probe_scope_enforcement = 'this_repo_only and authorised_probes_only = true",
+      "records verification outcomes in the host's evidence sinks (contractile_executions); the drift-log append is indirected by the host, not performed by this component",
+      "a failed verification fails the gate and blocks the merge (HARD GATE) — the gate is this component's effect, and no filesystem write is performed by it",
+    ],
+
+    # §10.1/K9-S009 — a 'Hunt component MUST carry a signature block. This is
+    # the claim the file-format requires, and it is not a verified signature:
+    # with no external verifier the verdict is 'Present_Unverified (§10.2),
+    # and 'Present_Unverified does not satisfy the Hunt `signature`
+    # precondition (§10.4). So the file is conforming and still NOT authorised
+    # to run until the signing ceremony replaces this block.
+    signature = {
+      algorithm = "Ed25519",
+      key_id = "trust-k9",
+      payload_hash = "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      signature = "NOT-A-REAL-SIGNATURE",
     },
   },
 
@@ -88,8 +129,14 @@ let base    = import "../_base.ncl" in
   # variances on trust entries are SIGNIFICANTLY more consequential than
   # variances on intend (reporting) entries — variance approver MUST
   # be the repo maintainer or above for critical-severity entries.
+  #
+  # A contract, not payload. The fields below are declarations with no
+  # definition, and Nickel's export refuses to serialize a record containing
+  # one ("missing field definition for `entry_id`"). `not_exported` says what
+  # is true: this block documents the variance shape and is not data to
+  # serialize. Reading `variance_schema` as a contract is unaffected.
   # -------------------------------------------------------------------
-  variance_schema = {
+  variance_schema | not_exported = {
     entry_id     | String,   # which verification / probe id
     reason       | String,
     approved_by  | String,   # maintainer or above for critical entries
