@@ -14,7 +14,7 @@
 set -euo pipefail
 
 VERBOSE=false
-if [[ "$1" == "--verbose" ]]; then
+if [[ ${1:-} == "--verbose" ]]; then
     VERBOSE=true
 fi
 
