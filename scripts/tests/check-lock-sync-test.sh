@@ -1,109 +1,88 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MPL-2.0
-#
-# Test suite for scripts/check-lock-sync.sh
-# Part of hyperpolymath/standards#968 campaign
-
+# Regression tests for issue #968: compare workflow refs in both directions.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-CHECK_SCRIPT="$REPO_ROOT/check-lock-sync.sh"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CHECK_SCRIPT="$ROOT/scripts/check-lock-sync.sh"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+WF="$TMP/workflows"
+mkdir -p "$WF"
+pass=0
+fail=0
 
-# Load test helpers if available
-if [ -f "$SCRIPT_DIR/test-helpers.sh" ]; then
-  # shellcheck source=scripts/tests/test-helpers.sh
-  source "$SCRIPT_DIR/test-helpers.sh"
-fi
-
-PASS=0
-FAIL=0
-TOTAL=0
-
-fail() {
-  echo "FAIL: $*"
-  FAIL=$((FAIL + 1))
-  TOTAL=$((TOTAL + 1))
-}
-
-pass() {
-  echo "PASS: $*"
-  PASS=$((PASS + 1))
-  TOTAL=$((TOTAL + 1))
-}
-
-echo "=== Test suite for check-lock-sync.sh ==="
-
-# Test 1: Script exists and is executable
-if [ -x "$CHECK_SCRIPT" ]; then
-  pass "Script exists and is executable"
-else
-  fail "Script missing or not executable"
-fi
-
-# Test 2: Script has SPDX header
-grep -q "SPDX-License-Identifier: MPL-2.0" "$CHECK_SCRIPT" && \
-  pass "Script has SPDX license header" || \
-  fail "Script missing SPDX license header"
-
-# Test 3: Script exits 0 when lockfile is in sync (test with current repo if it has a lockfile)
-if [ -f "$REPO_ROOT/.github/workflows/actions.lock" ]; then
-  if "$CHECK_SCRIPT" "$REPO_ROOT/.github/workflows" >/dev/null 2>&1; then
-    pass "Script exits 0 when lockfile is in sync (self-test)"
+expect() {
+  local want="$1" label="$2" out rc=0
+  out="$(bash "$CHECK_SCRIPT" "$WF" 2>&1)" || rc=$?
+  if [ "$rc" -eq "$want" ]; then
+    echo "PASS: $label"
+    pass=$((pass + 1))
   else
-    fail "Script failed on current repo (may be out of sync, or script error)"
+    echo "FAIL: $label (expected $want, got $rc)"
+    printf '%s\n' "$out"
+    fail=$((fail + 1))
   fi
-else
-  echo "SKIP: No actions.lock in current repo, cannot test sync case"
-fi
+}
 
-# Test 4: Script exits 1 when no lockfile exists
-mkdir -p /tmp/test-lock-sync-empty
-cd /tmp/test-lock-sync-empty
-mkdir -p .github/workflows
-touch .github/workflows/test.yml
-if "$CHECK_SCRIPT" .github/workflows >/dev/null 2>&1; then
-  fail "Script should exit 1 when no lockfile exists"
-else
-  pass "Script exits 1 when no lockfile exists"
-fi
-rm -rf /tmp/test-lock-sync-empty
+cat > "$WF/test.yml" <<'YAML'
+jobs:
+  test:
+    steps:
+      - uses: Actions/Checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+YAML
+expect 1 'missing lockfile fails closed'
+cat > "$WF/actions.lock" <<'YAML'
+workflows:
+    '.github/workflows/test.yml':
+        - 'actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+YAML
+expect 0 'repository names compare case-insensitively'
+sed -i 's/Actions\/Checkout/actions\/checkout/' "$WF/test.yml"
+expect 0 'matching block workflow is accepted'
 
-# Test 5: Script handles empty workflows directory gracefully
-# Note: An empty workflows directory with just actions.lock is an edge case.
-# The script exits 0 because there are no workflows to validate.
-mkdir -p /tmp/test-lock-sync-no-wf
-cd /tmp/test-lock-sync-no-wf
-mkdir -p .github/workflows
-touch .github/workflows/actions.lock
-if "$CHECK_SCRIPT" .github/workflows >/dev/null 2>&1; then
-  pass "Script handles empty workflows directory (exits 0 - no workflows to check)"
-else
-  fail "Script failed unexpectedly on empty workflows directory"
-fi
-rm -rf /tmp/test-lock-sync-no-wf
+cat > "$WF/test.yml" <<'YAML'
+{
+  jobs: {
+    test: {
+      steps: [
+        {
+          uses: "actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", # pinned
+        },
+        {
+          uses: 'actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        },
+      ],
+    },
+  },
+}
+YAML
+expect 0 'KYAML quoted refs exclude the trailing comma'
+sed -i 's/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/g' "$WF/test.yml"
+expect 1 'KYAML changed SHA remains a failure'
 
-# Test 6: Script has proper documentation
-if grep -q "standards#968\|issue #968" "$CHECK_SCRIPT"; then
-  pass "Script references issue #968"
-else
-  fail "Script missing reference to issue #968"
-fi
+cat > "$WF/test.yml" <<'YAML'
+jobs:
+  test:
+    uses: owner/repo/.github/workflows/test.yml@Release
+YAML
+cat > "$WF/actions.lock" <<'YAML'
+workflows:
+    '.github/workflows/test.yml':
+        - 'Owner/Repo@Release'
+YAML
+expect 0 'job-level reusable workflow is checked and lock names normalised'
+sed -i 's/@Release/@release/' "$WF/test.yml"
+expect 1 'ref case remains significant'
+sed -i 's/@release/@Release/' "$WF/test.yml"
+printf "        - 'actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n" >> "$WF/actions.lock"
+expect 1 'stale lock entries remain failures'
+sed -i '/actions\/checkout/d' "$WF/actions.lock"
+cp "$WF/test.yml" "$WF/unlocked.yml"
+expect 1 'workflow missing from lock remains a failure'
+rm "$WF/unlocked.yml"
+rm "$WF/test.yml"
+expect 1 'deleted workflow lock entries remain failures'
 
-if grep -q "burble#224" "$CHECK_SCRIPT"; then
-  pass "Script references burble#224"
-else
-  fail "Script missing reference to burble#224"
-fi
-
-echo ""
-echo "=== Results ==="
-echo "PASS: $PASS"
-echo "FAIL: $FAIL"
-echo "TOTAL: $TOTAL"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
-
-exit 0
+printf '\ncheck-lock-sync regression: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

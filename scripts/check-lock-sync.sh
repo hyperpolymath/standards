@@ -51,7 +51,8 @@ function norm(r,   at, path, ref, n, parts) {
   if (path == "" || ref == "") return ""
   if (substr(path, 1, 2) == "./" || substr(path, 1, 2) == "$/") return ""   # local action
   if (split(path, parts, "/") < 2) return ""
-  return parts[1] "/" parts[2] "@" ref
+  # GitHub owner/repository names are case-insensitive; refs are not.
+  return tolower(parts[1] "/" parts[2]) "@" ref
 }
 
 # ---------- pass 1: the lockfile ----------
@@ -68,7 +69,7 @@ FILENAME == lockfile {
     next
   }
   if (match($0, /^        - '"'"'([^'"'"']+)'"'"'[[:space:]]*$/, m) && cur != "") {
-    lock[cur, m[1]] = 1
+    lock[cur, norm(m[1])] = 1
     lockcount[cur]++
     next
   }
@@ -82,6 +83,9 @@ FNR == 1 { wf = FILENAME }
   sub(/[[:space:]]+#.*$/, "", line)              # strip trailing comment
   if (match(line, /^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*(.+)$/, m)) {
     raw = m[1]
+    # KYAML puts a comma after a quoted scalar. Strip the YAML delimiter
+    # before unquoting, otherwise the closing quote becomes part of the ref.
+    sub(/["\x27],[[:space:]]*$/, "", raw)
     gsub(/^["'"'"']|["'"'"']$/, "", raw)
     gsub(/[[:space:]]+$/, "", raw)
     if (raw ~ /^\$\//) { dollar[wf] = dollar[wf] " " raw; next }   # known corruption
