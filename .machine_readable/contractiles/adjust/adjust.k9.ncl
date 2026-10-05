@@ -22,11 +22,22 @@ K9!
 # erosion causing gradual parameter drift). Where must flags "broken
 # now", adjust flags "drifting toward broken".
 
-let base_k9 = import "../k9/template-hunt.k9.ncl" in
-let base    = import "../_base.ncl" in
+# §11.4/K9-S013 — `pedigree_schema` lives in ../_base.ncl. There is no k9/
+# subdirectory under .machine_readable/contractiles/, so the old
+# `import "../k9/template-hunt.k9.ncl"` never resolved — and the pedigree a
+# reviewer read was not the pedigree a host would evaluate.
+let base = import "../_base.ncl" in
 
 {
-  pedigree = base_k9.pedigree_schema & {
+  pedigree = base.pedigree_schema & {
+    # §5.2/§6.2 — schema_version, and the reserved-prefix component_type. The
+    # `contractile:` prefix is the whole of the disambiguation between this
+    # family's verbs (must/trust/dust/intend/...) and K9's own execution triad
+    # (must/just/nickel): the K9 contract never names a contractile verb, it
+    # only ever sees this string.
+    schema_version   = "1.0.0",
+    component_type   = "contractile:adjust",
+    semantics        = "drift-tolerance-and-corrective-action",
     contractile_verb = "adjust",
     paired_xfile     = "../adjust/Adjustfile.a2ml",
     paired_runner    = "../adjust/adjust.ncl",
@@ -49,11 +60,27 @@ let base    = import "../_base.ncl" in
       allow_network = false,
       allow_filesystem_write_conditional = true,  # auto_fix_when_available may edit
       allow_subprocess = true,
+      # §8.3/§8.4 — the grant. Each flag above is a REQUEST for a capability,
+      # and a request the grant does not cover is a contradiction inside the
+      # pedigree, not a preference (K9-S007). process.spawn pays for
+      # allow_subprocess; fs.write pays for the conditional write path, which
+      # K9 can only express as the whole capability. At 'Yard the leash is
+      # still the cap: §7.3 leaves a Yard component unable to write or spawn,
+      # so these entries describe the request, not a permission in force.
+      capabilities = [
+        "fs.write",
+        "process.spawn",
+      ],
       probe_scope = 'measurement_plus_declared_fix,
     },
   },
 
-  variance_schema = {
+  # A contract, not payload. The fields below are declarations with no
+  # definition, and Nickel's export refuses to serialize a record containing
+  # one ("missing field definition for `entry_id`"). `not_exported` says what
+  # is true: this block documents the variance shape and is not data to
+  # serialize. Reading `variance_schema` as a contract is unaffected.
+  variance_schema | not_exported = {
     entry_id     | String,
     reason       | String,
     approved_by  | String,

@@ -27,11 +27,22 @@ K9!
 # * Evidence sinks: VeriSimDB (queryable) + descriptiles/DRIFT.a2ml (repo-local).
 # * Failure-mode defenses cross-referenced to the AI failure catalog.
 
-let base_k9 = import "../k9/template-hunt.k9.ncl" in
-let base    = import "../_base.ncl" in
+# §11.4/K9-S013 — `pedigree_schema` lives in ../_base.ncl. There is no k9/
+# subdirectory under .machine_readable/contractiles/, so the old
+# `import "../k9/template-hunt.k9.ncl"` never resolved — and the pedigree a
+# reviewer read was not the pedigree a host would evaluate.
+let base = import "../_base.ncl" in
 
 {
-  pedigree = base_k9.pedigree_schema & {
+  pedigree = base.pedigree_schema & {
+    # §5.2/§6.2 — schema_version, and the reserved-prefix component_type. The
+    # `contractile:` prefix is the whole of the disambiguation between this
+    # family's verbs (must/trust/dust/intend/...) and K9's own execution triad
+    # (must/just/nickel): the K9 contract never names a contractile verb, it
+    # only ever sees this string.
+    schema_version   = "1.0.0",
+    component_type   = "contractile:intend",
+    semantics        = "commitment-and-aspiration",
     contractile_verb = "intend",
     paired_xfile     = "../intend/Intentfile.a2ml",
     paired_runner    = "../intend/intend.ncl",
@@ -64,6 +75,36 @@ let base    = import "../_base.ncl" in
       allow_network = false,
       allow_filesystem_write = false,   # evidence sinks are indirected
       allow_subprocess = true,
+      signature_required = true,
+      # §8.3/§8.4 — the grant. allow_subprocess is a REQUEST for a capability,
+      # and a request the grant does not cover is a contradiction inside the
+      # pedigree, not a preference (K9-S007).
+      capabilities = [
+        "process.spawn",
+      ],
+    },
+
+    # §6.5/K9-S010 — mandatory at 'Hunt, and none of it may be a placeholder:
+    # §9 requires a dry_run precondition, i.e. a plan that was produced AND
+    # reviewed, and a reviewer cannot review a plan for a component that
+    # shells out while describing none of what it does.
+    side_effects = [
+      "spawns read-only probes for tracked intents as child processes (no mutation, no network)",
+      "emits drift-log and receipt entries to the host's evidence sinks at session close; the sink writes are indirected by the host, not performed by this component",
+      "never blocks: an unmet intent or wish is reported as drift, not as a failed gate",
+    ],
+
+    # §10.1/K9-S009 — a 'Hunt component MUST carry a signature block. This is
+    # the claim the file-format requires, and it is not a verified signature:
+    # with no external verifier the verdict is 'Present_Unverified (§10.2),
+    # and 'Present_Unverified does not satisfy the Hunt `signature`
+    # precondition (§10.4). So the file is conforming and still NOT authorised
+    # to run until the signing ceremony replaces this block.
+    signature = {
+      algorithm = "Ed25519",
+      key_id = "intend-k9",
+      payload_hash = "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      signature = "NOT-A-REAL-SIGNATURE",
     },
   },
 
@@ -75,8 +116,14 @@ let base    = import "../_base.ncl" in
   # drift, logged to the drift log.
   # Per user 2026-04-18: variances are structural, not magic-comment
   # markers — markers are gameable.
+  #
+  # A contract, not payload. The fields below are declarations with no
+  # definition, and Nickel's export refuses to serialize a record containing
+  # one ("missing field definition for `entry_id`"). `not_exported` says what
+  # is true: this block documents the variance shape and is not data to
+  # serialize. Reading `variance_schema` as a contract is unaffected.
   # -------------------------------------------------------------------
-  variance_schema = {
+  variance_schema | not_exported = {
     entry_id     | String,   # which intent/wish id the variance applies to
     reason       | String,
     approved_by  | String,
