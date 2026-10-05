@@ -1,196 +1,123 @@
 # This workflow is managed by gh actions-lock.
 # SPDX-License-Identifier: MPL-2.0
 # This workflow is managed by gh actions-lock.
-name: AffineScript Verify
-# Direct pushes only on integration branches. Feature-branch validation
-# is fully covered by pull_request — running a full AffineScript verify
-# on every WIP push to every branch in every consumer repo was a dominant
-# estate-wide drain on the shared Actions concurrency pool. No coverage
-# is lost: PRs and post-merge main/master still verify.
-on:
-  push:
-    branches: [main, master]
-  pull_request:
-
-# Estate guardrail: cancel superseded runs so re-pushes / rebased PR
-# updates do not pile up queued runs against the shared account-wide
-# Actions concurrency pool. Applied only to read-only check workflows
-# (no publish/mutation), so cancelling a superseded run is always safe.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  actions: read
-  contents: read
-
-# Compile-verifies changed `.affine` files with the canonical AffineScript
-# compiler (hyperpolymath/affinescript). The compiler is pinned to a commit
-# SHA for reproducibility; bump COMPILER_REF deliberately.
-#
-# SPLIT GATE (Wave 8, standards#446 honest-gating): the initial
-# ReScript->AffineScript port (PR #62) predates the compiler, so some legacy
-# ports still fail `affinescript check`. Blindly flipping the whole job to
-# blocking would red every PR that touches a legacy port — manufactured noise.
-# Instead the gate distinguishes:
-#   * ADDED .affine files (diff-filter=A)  -> BLOCKING. New code has no excuse
-#     not to compile; a failing added file fails this job.
-#   * MODIFIED legacy files (diff-filter=CMR) -> advisory warnings until the
-#     port backlog clears (flip LEGACY_BLOCKING=true then).
-#   * Toolchain failures (compiler checkout/opam/build) -> advisory: the step
-#     reports "toolchain unavailable" and the verify step SKIPS (loudly) rather
-#     than blocking unrelated changes on OCaml infra flake.
-env:
-  LEGACY_BLOCKING: "false"
-  COMPILER_REPO: hyperpolymath/affinescript
-  COMPILER_REF: d2875a552f1d389b4a60c4adfdc02ae53e36aca3
-
-jobs:
-  verify:
-    timeout-minutes: 20
-    name: AffineScript Verify
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout standards
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Determine changed .affine files
-        id: changed
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE="${{ github.event.before }}"
-          fi
-          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null \
-             || printf '%s' "$BASE" | grep -qE '^0+$'; then
-            BASE="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
-          fi
-          # Split-gate inputs: ADDED files gate hard; modified legacy files are
-          # advisory until the port backlog clears (see header).
-          ADDED="$(git diff --name-only --diff-filter=A "$BASE" HEAD -- '*.affine' || true)"
-          MODIFIED="$(git diff --name-only --diff-filter=CMR "$BASE" HEAD -- '*.affine' || true)"
-          FILES="$(printf '%s\n%s\n' "$ADDED" "$MODIFIED" | sed '/^$/d')"
-          if [ -z "$FILES" ]; then
-            echo "any=false" >> "$GITHUB_OUTPUT"
-            echo "No changed .affine files — nothing to verify."
-          else
-            echo "any=true" >> "$GITHUB_OUTPUT"
-            echo "Changed .affine files (added gate hard; modified advisory):"
-            echo "$FILES"
-            { echo 'files<<EOF'; echo "$FILES"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
-            { echo 'added<<EOF'; echo "$ADDED"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Checkout AffineScript compiler
-        if: steps.changed.outputs.any == 'true'
-        # advisory: compiler checkout is report-only until the port backlog
-        # is cleared and BLOCKING flips to true. "Verify changed .affine
-        # files" below checks steps.build.outputs.ok and the checkout dir,
-        # and on toolchain-unavailable emits an explicit ::warning:: +
-        # step-summary "SKIPPED — not a pass" instead of a silent green claim.
-        # hypatia: allow research_extensions/RE005 -- advisory-by-design, fails OPEN not closed; see comment above.
-        continue-on-error: true
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ env.COMPILER_REPO }}
-          ref: ${{ env.COMPILER_REF }}
-          path: .affinescript-compiler
-
-      - name: Set up OCaml
-        if: steps.changed.outputs.any == 'true'
-        # advisory: setup failures should surface as signal without blocking
-        # unrelated standards changes while AffineScript verification matures.
-        continue-on-error: true
-        uses: ocaml/setup-ocaml@93303b622b2522e4411e295f9e77411a24912ac7 # v3
-        with:
-          ocaml-compiler: "5.1"
-
-      - name: Build compiler
-        id: build
-        if: steps.changed.outputs.any == 'true'
-        # advisory: toolchain failures are infra flake, not code failures —
-        # they must not block unrelated changes. The verify step below skips
-        # LOUDLY (never a silent green claim) when the compiler is unavailable.
-        continue-on-error: true
-        working-directory: .affinescript-compiler
-        run: |
-          opam install . --deps-only
-          opam exec -- dune build
-          echo "ok=true" >> "$GITHUB_OUTPUT"
-
-      - name: Verify changed .affine files (added files gate; legacy advisory)
-        if: steps.changed.outputs.any == 'true'
-        # No working-directory: if the (advisory) compiler checkout failed, the
-        # dir may not exist — the guard below must run BEFORE any cd.
-        run: |
-          set -u
-          if [ "${{ steps.build.outputs.ok }}" != "true" ] || [ ! -d .affinescript-compiler ]; then
-            echo "::warning::AffineScript toolchain unavailable (compiler checkout/opam/build failed) — verification SKIPPED, not passed."
-            {
-              echo "## AffineScript Verify"
-              echo "⚠️ **SKIPPED — toolchain unavailable.** The compiler did not build;"
-              echo "no \`.affine\` file was verified. This is an infra flake, not a pass."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          cd .affinescript-compiler
-          # is_added <file>: is this file in the added set? (added files gate hard)
-          is_added() {
-            case $'\n'"${ADDED_SET}"$'\n' in *$'\n'"$1"$'\n'*) return 0 ;; *) return 1 ;; esac
-          }
-          ADDED_SET="$(cat <<'EOF'
-          ${{ steps.changed.outputs.added }}
-          EOF
-          )"
-          ADDED_SET="$(printf '%s\n' "$ADDED_SET" | sed 's/^[[:space:]]*//' | sed '/^$/d')"
-          added_fail=""
-          legacy_fail=""
-          while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            abs="$GITHUB_WORKSPACE/$f"
-            echo "::group::check $f"
-            if opam exec -- dune exec affinescript -- check "$abs" 2>&1; then
-              echo "✅ $f"
-            elif is_added "$f"; then
-              echo "::error file=$f::AffineScript check failed (ADDED file — blocking)"
-              echo "❌ $f failed (added file — blocking)"
-              added_fail="$added_fail$f"$'\n'
-            else
-              echo "::warning file=$f::AffineScript check failed (legacy port — advisory until backlog clears)"
-              echo "⚠️ $f failed (legacy port — advisory)"
-              legacy_fail="$legacy_fail$f"$'\n'
-            fi
-            echo "::endgroup::"
-          done <<'EOF'
-          ${{ steps.changed.outputs.files }}
-          EOF
-
-          {
-            echo "## AffineScript Verify (split gate)"
-            if [ -z "$added_fail" ] && [ -z "$legacy_fail" ]; then
-              echo "All changed \`.affine\` files passed \`affinescript check\`."
-            fi
-            if [ -n "$added_fail" ]; then
-              echo "### ❌ ADDED files failing (BLOCKING — new code must compile)"
-              echo "$added_fail" | sed '/^$/d' | sed 's/^/- /'
-            fi
-            if [ -n "$legacy_fail" ]; then
-              echo "### ⚠️ Legacy ports failing (advisory until the port backlog clears)"
-              echo "$legacy_fail" | sed '/^$/d' | sed 's/^/- /'
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -n "$added_fail" ]; then
-            echo "AffineScript verification failed for ADDED files (blocking)."
-            exit 1
-          fi
-          if [ -n "$legacy_fail" ] && [ "$LEGACY_BLOCKING" = "true" ]; then
-            echo "Legacy port failures are blocking (LEGACY_BLOCKING=true)."
-            exit 1
-          fi
-          echo "Verification complete (added files clean)."
+{
+  name: "AffineScript Verify",
+  # Direct pushes only on integration branches. Feature-branch validation
+  # is fully covered by pull_request — running a full AffineScript verify
+  # on every WIP push to every branch in every consumer repo was a dominant
+  # estate-wide drain on the shared Actions concurrency pool. No coverage
+  # is lost: PRs and post-merge main/master still verify.
+  on: {
+    push: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    pull_request: null,
+  },
+  # Estate guardrail: cancel superseded runs so re-pushes / rebased PR
+  # updates do not pile up queued runs against the shared account-wide
+  # Actions concurrency pool. Applied only to read-only check workflows
+  # (no publish/mutation), so cancelling a superseded run is always safe.
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  permissions: {
+    actions: "read",
+    contents: "read",
+  },
+  # Compile-verifies changed `.affine` files with the canonical AffineScript
+  # compiler (hyperpolymath/affinescript). The compiler is pinned to a commit
+  # SHA for reproducibility; bump COMPILER_REF deliberately.
+  #
+  # SPLIT GATE (Wave 8, standards#446 honest-gating): the initial
+  # ReScript->AffineScript port (PR #62) predates the compiler, so some legacy
+  # ports still fail `affinescript check`. Blindly flipping the whole job to
+  # blocking would red every PR that touches a legacy port — manufactured noise.
+  # Instead the gate distinguishes:
+  #   * ADDED .affine files (diff-filter=A)  -> BLOCKING. New code has no excuse
+  #     not to compile; a failing added file fails this job.
+  #   * MODIFIED legacy files (diff-filter=CMR) -> advisory warnings until the
+  #     port backlog clears (flip LEGACY_BLOCKING=true then).
+  #   * Toolchain failures (compiler checkout/opam/build) -> advisory: the step
+  #     reports "toolchain unavailable" and the verify step SKIPS (loudly) rather
+  #     than blocking unrelated changes on OCaml infra flake.
+  env: {
+    LEGACY_BLOCKING: "false",
+    COMPILER_REPO: "hyperpolymath/affinescript",
+    COMPILER_REF: "d2875a552f1d389b4a60c4adfdc02ae53e36aca3",
+  },
+  jobs: {
+    verify: {
+      timeout-minutes: 20,
+      name: "AffineScript Verify",
+      runs-on: "ubuntu-latest",
+      permissions: {
+        contents: "read",
+      },
+      steps: [
+        {
+          name: "Checkout standards",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            fetch-depth: 0,
+          },
+        },
+        {
+          name: "Determine changed .affine files",
+          id: "changed",
+          run: "if [ \"${{ github.event_name }}\" = \"pull_request\" ]; then\n  BASE=\"${{ github.event.pull_request.base.sha }}\"\nelse\n  BASE=\"${{ github.event.before }}\"\nfi\nif [ -z \"$BASE\" ] || ! git cat-file -e \"$BASE^{commit}\" 2>/dev/null \\\n   || printf '%s' \"$BASE\" | grep -qE '^0+$'; then\n  BASE=\"$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)\"\nfi\n# Split-gate inputs: ADDED files gate hard; modified legacy files are\n# advisory until the port backlog clears (see header).\nADDED=\"$(git diff --name-only --diff-filter=A \"$BASE\" HEAD -- '*.affine' || true)\"\nMODIFIED=\"$(git diff --name-only --diff-filter=CMR \"$BASE\" HEAD -- '*.affine' || true)\"\nFILES=\"$(printf '%s\\n%s\\n' \"$ADDED\" \"$MODIFIED\" | sed '/^$/d')\"\nif [ -z \"$FILES\" ]; then\n  echo \"any=false\" >> \"$GITHUB_OUTPUT\"\n  echo \"No changed .affine files — nothing to verify.\"\nelse\n  echo \"any=true\" >> \"$GITHUB_OUTPUT\"\n  echo \"Changed .affine files (added gate hard; modified advisory):\"\n  echo \"$FILES\"\n  { echo 'files<<EOF'; echo \"$FILES\"; echo 'EOF'; } >> \"$GITHUB_OUTPUT\"\n  { echo 'added<<EOF'; echo \"$ADDED\"; echo 'EOF'; } >> \"$GITHUB_OUTPUT\"\nfi\n",
+        },
+        {
+          name: "Checkout AffineScript compiler",
+          if: "steps.changed.outputs.any == 'true'",
+          # advisory: compiler checkout is report-only until the port backlog
+          # is cleared and BLOCKING flips to true. "Verify changed .affine
+          # files" below checks steps.build.outputs.ok and the checkout dir,
+          # and on toolchain-unavailable emits an explicit ::warning:: +
+          # step-summary "SKIPPED — not a pass" instead of a silent green claim.
+          # hypatia: allow research_extensions/RE005 -- advisory-by-design, fails OPEN not closed; see comment above.
+          continue-on-error: true,
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            repository: "${{ env.COMPILER_REPO }}",
+            ref: "${{ env.COMPILER_REF }}",
+            path: ".affinescript-compiler",
+          },
+        },
+        {
+          name: "Set up OCaml",
+          if: "steps.changed.outputs.any == 'true'",
+          # advisory: setup failures should surface as signal without blocking
+          # unrelated standards changes while AffineScript verification matures.
+          continue-on-error: true,
+          uses: "ocaml/setup-ocaml@93303b622b2522e4411e295f9e77411a24912ac7", # v3
+          with: {
+            ocaml-compiler: "5.1",
+          },
+        },
+        {
+          name: "Build compiler",
+          id: "build",
+          if: "steps.changed.outputs.any == 'true'",
+          # advisory: toolchain failures are infra flake, not code failures —
+          # they must not block unrelated changes. The verify step below skips
+          # LOUDLY (never a silent green claim) when the compiler is unavailable.
+          continue-on-error: true,
+          working-directory: ".affinescript-compiler",
+          run: "opam install . --deps-only\nopam exec -- dune build\necho \"ok=true\" >> \"$GITHUB_OUTPUT\"\n",
+        },
+        {
+          name: "Verify changed .affine files (added files gate; legacy advisory)",
+          if: "steps.changed.outputs.any == 'true'",
+          # No working-directory: if the (advisory) compiler checkout failed, the
+          # dir may not exist — the guard below must run BEFORE any cd.
+          run: "set -u\nif [ \"${{ steps.build.outputs.ok }}\" != \"true\" ] || [ ! -d .affinescript-compiler ]; then\n  echo \"::warning::AffineScript toolchain unavailable (compiler checkout/opam/build failed) — verification SKIPPED, not passed.\"\n  {\n    echo \"## AffineScript Verify\"\n    echo \"⚠️ **SKIPPED — toolchain unavailable.** The compiler did not build;\"\n    echo \"no \\`.affine\\` file was verified. This is an infra flake, not a pass.\"\n  } >> \"$GITHUB_STEP_SUMMARY\"\n  exit 0\nfi\ncd .affinescript-compiler\n# is_added <file>: is this file in the added set? (added files gate hard)\nis_added() {\n  case $'\\n'\"${ADDED_SET}\"$'\\n' in *$'\\n'\"$1\"$'\\n'*) return 0 ;; *) return 1 ;; esac\n}\nADDED_SET=\"$(cat <<'EOF'\n${{ steps.changed.outputs.added }}\nEOF\n)\"\nADDED_SET=\"$(printf '%s\\n' \"$ADDED_SET\" | sed 's/^[[:space:]]*//' | sed '/^$/d')\"\nadded_fail=\"\"\nlegacy_fail=\"\"\nwhile IFS= read -r f; do\n  [ -z \"$f\" ] && continue\n  abs=\"$GITHUB_WORKSPACE/$f\"\n  echo \"::group::check $f\"\n  if opam exec -- dune exec affinescript -- check \"$abs\" 2>&1; then\n    echo \"✅ $f\"\n  elif is_added \"$f\"; then\n    echo \"::error file=$f::AffineScript check failed (ADDED file — blocking)\"\n    echo \"❌ $f failed (added file — blocking)\"\n    added_fail=\"$added_fail$f\"$'\\n'\n  else\n    echo \"::warning file=$f::AffineScript check failed (legacy port — advisory until backlog clears)\"\n    echo \"⚠️ $f failed (legacy port — advisory)\"\n    legacy_fail=\"$legacy_fail$f\"$'\\n'\n  fi\n  echo \"::endgroup::\"\ndone <<'EOF'\n${{ steps.changed.outputs.files }}\nEOF\n\n{\n  echo \"## AffineScript Verify (split gate)\"\n  if [ -z \"$added_fail\" ] && [ -z \"$legacy_fail\" ]; then\n    echo \"All changed \\`.affine\\` files passed \\`affinescript check\\`.\"\n  fi\n  if [ -n \"$added_fail\" ]; then\n    echo \"### ❌ ADDED files failing (BLOCKING — new code must compile)\"\n    echo \"$added_fail\" | sed '/^$/d' | sed 's/^/- /'\n  fi\n  if [ -n \"$legacy_fail\" ]; then\n    echo \"### ⚠️ Legacy ports failing (advisory until the port backlog clears)\"\n    echo \"$legacy_fail\" | sed '/^$/d' | sed 's/^/- /'\n  fi\n} >> \"$GITHUB_STEP_SUMMARY\"\n\nif [ -n \"$added_fail\" ]; then\n  echo \"AffineScript verification failed for ADDED files (blocking).\"\n  exit 1\nfi\nif [ -n \"$legacy_fail\" ] && [ \"$LEGACY_BLOCKING\" = \"true\" ]; then\n  echo \"Legacy port failures are blocking (LEGACY_BLOCKING=true).\"\n  exit 1\nfi\necho \"Verification complete (added files clean).\"\n",
+        },
+      ],
+    },
+  },
+}

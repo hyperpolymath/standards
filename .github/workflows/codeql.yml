@@ -1,51 +1,67 @@
 # This workflow is managed by gh actions-lock.
 # SPDX-License-Identifier: MPL-2.0
 # This workflow is managed by gh actions-lock.
-name: CodeQL Security Analysis
-
-on:
-  push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
-  schedule:
-    # Estate cut 3 (standards#233): weekly → monthly. 1st of each month
-    # at 06:00 UTC. Owner-decision Option B (2026-05-30): ~85% savings
-    # (~46k Actions-min/yr) with bounded 30-day CVE-detection floor.
-    # PR-trigger runs (push + pull_request) are kept regardless — this
-    # cut only changes the scheduled-baseline cadence.
-    - cron: '0 6 1 * *'
-
-# Estate guardrail: serialise superseded runs so re-pushes / rebased PR
-# updates do not pile up against the shared account-wide Actions pool.
-#
-# cancel-in-progress is DELIBERATELY false: CodeQL is a REQUIRED
-# code-scanning tool in the estate branch rulesets (a result must upload
-# for the head commit before a PR can merge). A cancelled run uploads
-# nothing, leaving branch protection stuck "expecting 1 result from CodeQL
-# for <sha>" indefinitely — the ghost check that blocks PRs for hours/days.
-# Queue rather than cancel so the latest commit's scan always completes and
-# uploads. (Non-required read-only workflows may still cancel-in-progress.)
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
-# Must cover everything codeql-reusable's `analyze` job requests: a reusable
-# cannot widen its caller's grant, and asking for more aborts the run as
-# `startup_failure` with zero jobs. security-events: write is what uploads
-# the SARIF results that branch protection requires.
-permissions:
-  actions: read
-  contents: read
-  security-events: write
-
-jobs:
-  analyze-js:
-    uses: ./.github/workflows/codeql-reusable.yml
-    with:
-      language: javascript-typescript
-
-  analyze-actions:
-    uses: ./.github/workflows/codeql-reusable.yml
-    with:
-      language: actions
+{
+  name: "CodeQL Security Analysis",
+  on: {
+    push: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    pull_request: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    schedule: [
+      # Estate cut 3 (standards#233): weekly → monthly. 1st of each month
+      # at 06:00 UTC. Owner-decision Option B (2026-05-30): ~85% savings
+      # (~46k Actions-min/yr) with bounded 30-day CVE-detection floor.
+      # PR-trigger runs (push + pull_request) are kept regardless — this
+      # cut only changes the scheduled-baseline cadence.
+      {
+        cron: "0 6 1 * *",
+      },
+    ],
+  },
+  # Estate guardrail: serialise superseded runs so re-pushes / rebased PR
+  # updates do not pile up against the shared account-wide Actions pool.
+  #
+  # cancel-in-progress is DELIBERATELY false: CodeQL is a REQUIRED
+  # code-scanning tool in the estate branch rulesets (a result must upload
+  # for the head commit before a PR can merge). A cancelled run uploads
+  # nothing, leaving branch protection stuck "expecting 1 result from CodeQL
+  # for <sha>" indefinitely — the ghost check that blocks PRs for hours/days.
+  # Queue rather than cancel so the latest commit's scan always completes and
+  # uploads. (Non-required read-only workflows may still cancel-in-progress.)
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    cancel-in-progress: false,
+  },
+  # Must cover everything codeql-reusable's `analyze` job requests: a reusable
+  # cannot widen its caller's grant, and asking for more aborts the run as
+  # `startup_failure` with zero jobs. security-events: write is what uploads
+  # the SARIF results that branch protection requires.
+  permissions: {
+    actions: "read",
+    contents: "read",
+    security-events: "write",
+  },
+  jobs: {
+    analyze-js: {
+      uses: "./.github/workflows/codeql-reusable.yml",
+      with: {
+        language: "javascript-typescript",
+      },
+    },
+    analyze-actions: {
+      uses: "./.github/workflows/codeql-reusable.yml",
+      with: {
+        language: "actions",
+      },
+    },
+  },
+}

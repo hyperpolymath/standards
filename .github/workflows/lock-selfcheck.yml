@@ -23,39 +23,39 @@
 #
 # SCOPE: this proves INTERNAL CONSISTENCY of the commit under test. It does
 # NOT prove the commit is reachable at the remote — that is a separate probe.
-name: Lock Self-Check
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-# Deliberately NO `paths:` filter. This check is intended to be REQUIRED, and
-# a required check that filters itself off does not report as passing — it
-# does not report at all, which leaves the PR blocked on a context that can
-# never arrive.
-
-permissions:
-  contents: read
-
-jobs:
-  selfcheck:
-    name: Lockfile self-consistency
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout the commit under test
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Check this commit validates against its own actions.lock
-        run: |
-          set -euo pipefail
-          sha="$(git rev-parse HEAD)"
-          # State the population. A gate that does not say what it examined
-          # cannot report that it examined the wrong thing.
-          echo "Commit under test: $sha"
-          echo "Event: ${{ github.event_name }}"
-          # On `pull_request` this is the MERGE PREVIEW, i.e. the content that
-          # would land on main, which is exactly the content callers will pin.
-          bash scripts/lock-selfcheck.sh "$sha"
+{
+  name: "Lock Self-Check",
+  on: {
+    pull_request: null,
+    push: {
+      branches: [
+        "main",
+      ],
+    },
+    workflow_dispatch: null,
+  },
+  # Deliberately NO `paths:` filter. This check is intended to be REQUIRED, and
+  # a required check that filters itself off does not report as passing — it
+  # does not report at all, which leaves the PR blocked on a context that can
+  # never arrive.
+  permissions: {
+    contents: "read",
+  },
+  jobs: {
+    selfcheck: {
+      name: "Lockfile self-consistency",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 5,
+      steps: [
+        {
+          name: "Checkout the commit under test",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "Check this commit validates against its own actions.lock",
+          run: "set -euo pipefail\nsha=\"$(git rev-parse HEAD)\"\n# State the population. A gate that does not say what it examined\n# cannot report that it examined the wrong thing.\necho \"Commit under test: $sha\"\necho \"Event: ${{ github.event_name }}\"\n# On `pull_request` this is the MERGE PREVIEW, i.e. the content that\n# would land on main, which is exactly the content callers will pin.\nbash scripts/lock-selfcheck.sh \"$sha\"\n",
+        },
+      ],
+    },
+  },
+}

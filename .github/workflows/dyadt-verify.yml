@@ -4,52 +4,60 @@
 # dyadt-verify — DYADT dogfood. Verify this repo's CLAIMS.a2ml against primary
 # evidence, and run the DYADT conformance vector suite. If a claim this change
 # makes is false, the verifier REFUTES it and this job fails loudly.
-name: DYADT Verify
-
-on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  actions: read
-  contents: read
-
-jobs:
-  verify-claims:
-    name: Verify CLAIMS.a2ml + conformance
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0  # need origin/main as the DYADT diff base
-
-      - name: DYADT conformance vectors
-        run: |
-          bash 1-formats/sub-specs/did-you-actually-do-that/spec/conformance/run-conformance.sh
-
-      - name: FFP conformance vectors (form-fill provenance)
-        run: |
-          # Same shape as DYADT: the spec's own vectors are the gate. A detector
-          # change that stops reproducing a vector's expected line fails here.
-          # Reference probe only (bash + awk); a product detector runs the same
-          # runner via FFP_DETECTOR=<command>.
-          bash 1-formats/sub-specs/form-fill-provenance/spec/conformance/run-conformance.sh
-
-      - name: Verify this change's own claims (dogfood)
-        env:
-          DYADT_BASE: origin/${{ github.base_ref || 'main' }}
-        run: |
-          if [ -f CLAIMS.a2ml ]; then
-            bash scripts/verify-claims.sh CLAIMS.a2ml
-          else
-            echo "No CLAIMS.a2ml at root — nothing to verify."
-          fi
+{
+  name: "DYADT Verify",
+  on: {
+    push: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    pull_request: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    workflow_dispatch: null,
+  },
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  permissions: {
+    actions: "read",
+    contents: "read",
+  },
+  jobs: {
+    verify-claims: {
+      name: "Verify CLAIMS.a2ml + conformance",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      steps: [
+        {
+          name: "Checkout repository",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            fetch-depth: 0, # need origin/main as the DYADT diff base
+          },
+        },
+        {
+          name: "DYADT conformance vectors",
+          run: "bash 1-formats/sub-specs/did-you-actually-do-that/spec/conformance/run-conformance.sh\n",
+        },
+        {
+          name: "FFP conformance vectors (form-fill provenance)",
+          run: "# Same shape as DYADT: the spec's own vectors are the gate. A detector\n# change that stops reproducing a vector's expected line fails here.\n# Reference probe only (bash + awk); a product detector runs the same\n# runner via FFP_DETECTOR=<command>.\nbash 1-formats/sub-specs/form-fill-provenance/spec/conformance/run-conformance.sh\n",
+        },
+        {
+          name: "Verify this change's own claims (dogfood)",
+          env: {
+            DYADT_BASE: "origin/${{ github.base_ref || 'main' }}",
+          },
+          run: "if [ -f CLAIMS.a2ml ]; then\n  bash scripts/verify-claims.sh CLAIMS.a2ml\nelse\n  echo \"No CLAIMS.a2ml at root — nothing to verify.\"\nfi\n",
+        },
+      ],
+    },
+  },
+}

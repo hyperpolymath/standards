@@ -4,100 +4,73 @@
 # registry-verify — fail the build if the spec registry or the DERIVED
 # topology map has drifted from the file tree. This is the in-repo half of
 # the drift-detection loop (the estate half is Hypatia rule HYP-S006).
-name: Registry Verify
-
-on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  actions: read
-  contents: read
-
-jobs:
-  verify:
-    name: Registry + topology in sync
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0  # full history so `git ls-files -s` hashes are stable
-
-      # The scorecard `--verify` step below EXECUTES every pass-row's check.
-      # Those checks shell out to real tools; ubuntu-latest ships neither
-      # ripgrep nor xmllint. Without them `3-practice/release-pre-flight/v1-audit.sh`
-      # exits 2 ("v1-audit requires ripgrep") and the k9-svc MIME check exits
-      # 127 — which the verifier then reported as "claimed PASS but the pass
-      # is not real". That was a FALSE ACCUSATION: the passes were real, the
-      # checks simply never ran. A gate that cannot run its own checks must
-      # not be allowed to call the repo dishonest.
-      #
-      # NB this is a distinct fault from standards#381, which concerns
-      # REGISTRY.a2ml source_hash drift in the *first* step below and is
-      # not addressed here.
-      - name: Install check dependencies (ripgrep, xmllint)
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ripgrep libxml2-utils
-          rg --version | head -1
-          xmllint --version 2>&1 | head -1
-
-      - name: Verify registry + derived topology are current
-        run: |
-          if ! bash scripts/build-registry.sh --check; then
-            {
-              echo "### Registry drift detected"
-              echo ""
-              echo "A tracked file under a spec home (or STATE.a2ml) changed without"
-              echo "regenerating the derived registry/topology. Fix locally:"
-              echo ""
-              echo '```sh'
-              echo "just registry        # or: bash scripts/build-registry.sh"
-              echo "git add .machine_readable/REGISTRY.a2ml TOPOLOGY.adoc"
-              echo '```'
-              echo ""
-              echo "Install the pre-commit guard so this is caught before push:"
-              echo ""
-              echo '```sh'
-              echo "just hooks-install"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-
-      - name: Mustfile enforcement (structural + execute invariants)
-        run: |
-          # Wave-8 gate promotion: the Mustfile's invariants previously executed
-          # only on push-to-main (boj-build.yml). PRs now gate on them too —
-          # a change that breaks a MUST invariant fails before merge, not after.
-          bash scripts/check-mustfile-structure.sh
-          bash scripts/run-mustfile.sh
-
-      - name: Verify compliance dashboard is current (and pass-checks hold)
-        run: |
-          # --verify RUNS every pass-row's executable `check`: a claimed pass
-          # whose check does not hold fails this job (DYADT on the scorecards).
-          if ! bash scripts/build-scorecards.sh --check --strict --verify; then
-            {
-              echo "### Compliance dashboard drift"
-              echo ""
-              echo "0-canon/COMPLIANCE-DASHBOARD.adoc is stale, a scorecard is malformed/orphaned,"
-              echo "or a registered spec has no scorecard. Fix locally:"
-              echo ""
-              echo '```sh'
-              echo "just scorecards            # regenerate the dashboard"
-              echo "just scorecards-check-strict"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
+{
+  name: "Registry Verify",
+  on: {
+    push: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    pull_request: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    workflow_dispatch: null,
+  },
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  permissions: {
+    actions: "read",
+    contents: "read",
+  },
+  jobs: {
+    verify: {
+      name: "Registry + topology in sync",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      steps: [
+        {
+          name: "Checkout repository",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            fetch-depth: 0, # full history so `git ls-files -s` hashes are stable
+          },
+        },
+        # The scorecard `--verify` step below EXECUTES every pass-row's check.
+        # Those checks shell out to real tools; ubuntu-latest ships neither
+        # ripgrep nor xmllint. Without them `3-practice/release-pre-flight/v1-audit.sh`
+        # exits 2 ("v1-audit requires ripgrep") and the k9-svc MIME check exits
+        # 127 — which the verifier then reported as "claimed PASS but the pass
+        # is not real". That was a FALSE ACCUSATION: the passes were real, the
+        # checks simply never ran. A gate that cannot run its own checks must
+        # not be allowed to call the repo dishonest.
+        #
+        # NB this is a distinct fault from standards#381, which concerns
+        # REGISTRY.a2ml source_hash drift in the *first* step below and is
+        # not addressed here.
+        {
+          name: "Install check dependencies (ripgrep, xmllint)",
+          run: "set -euo pipefail\nsudo apt-get update -qq\nsudo apt-get install -y --no-install-recommends ripgrep libxml2-utils\nrg --version | head -1\nxmllint --version 2>&1 | head -1\n",
+        },
+        {
+          name: "Verify registry + derived topology are current",
+          run: "if ! bash scripts/build-registry.sh --check; then\n  {\n    echo \"### Registry drift detected\"\n    echo \"\"\n    echo \"A tracked file under a spec home (or STATE.a2ml) changed without\"\n    echo \"regenerating the derived registry/topology. Fix locally:\"\n    echo \"\"\n    echo '```sh'\n    echo \"just registry        # or: bash scripts/build-registry.sh\"\n    echo \"git add .machine_readable/REGISTRY.a2ml TOPOLOGY.adoc\"\n    echo '```'\n    echo \"\"\n    echo \"Install the pre-commit guard so this is caught before push:\"\n    echo \"\"\n    echo '```sh'\n    echo \"just hooks-install\"\n    echo '```'\n  } >> \"$GITHUB_STEP_SUMMARY\"\n  exit 1\nfi\n",
+        },
+        {
+          name: "Mustfile enforcement (structural + execute invariants)",
+          run: "# Wave-8 gate promotion: the Mustfile's invariants previously executed\n# only on push-to-main (boj-build.yml). PRs now gate on them too —\n# a change that breaks a MUST invariant fails before merge, not after.\nbash scripts/check-mustfile-structure.sh\nbash scripts/run-mustfile.sh\n",
+        },
+        {
+          name: "Verify compliance dashboard is current (and pass-checks hold)",
+          run: "# --verify RUNS every pass-row's executable `check`: a claimed pass\n# whose check does not hold fails this job (DYADT on the scorecards).\nif ! bash scripts/build-scorecards.sh --check --strict --verify; then\n  {\n    echo \"### Compliance dashboard drift\"\n    echo \"\"\n    echo \"0-canon/COMPLIANCE-DASHBOARD.adoc is stale, a scorecard is malformed/orphaned,\"\n    echo \"or a registered spec has no scorecard. Fix locally:\"\n    echo \"\"\n    echo '```sh'\n    echo \"just scorecards            # regenerate the dashboard\"\n    echo \"just scorecards-check-strict\"\n    echo '```'\n  } >> \"$GITHUB_STEP_SUMMARY\"\n  exit 1\nfi\n",
+        },
+      ],
+    },
+  },
+}

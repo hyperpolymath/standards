@@ -9,380 +9,193 @@
 # Triggered when:
 # - .githooks/ directory is updated in standards repo
 # - Manual trigger via workflow_dispatch
-name: "⚙️ AUTO: Propagate Hook Updates"
-
-on:
-  push:
-    branches: [main, master]
-    paths:
-      - '.githooks/**'
-      - '.github/workflows/propagate-hooks.yml'
-  workflow_dispatch:
-    inputs:
-      target-repo:
-        description: 'Specific repo to update (optional)'
-        required: false
-      dry-run:
-        description: 'Dry run - do not actually update' 
-        required: false
-        default: 'false'
-  repository_dispatch:
-    types: [refresh-githooks]
-
-# Least privilege (WH002/S8233): only the `propagate` job pushes, so only it
-# carries `contents: write` (job level). `pull-requests: write` and
-# `actions: read` were dead — no step opens a PR or calls the Actions API.
-permissions:
-  contents: read
-
-# Only run one instance at a time
-concurrency:
-  group: propagate-hooks
-  cancel-in-progress: false
-
-jobs:
-  identify-repos:
-    name: Identify Repositories to Update
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      repos: ${{ steps.identify.outputs.repos }}
-      dry_run: ${{ steps.config.outputs.dry_run }}
-
-    steps:
-      - name: Harden runner (egress block)
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          # Runs on a protected-branch push (RE002): block, not audit. This
-          # job only talks to GitHub (checkout, the REST API, git transport).
-          egress-policy: block
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-      - name: Checkout standards repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-
-      - name: Configure
-        id: config
-        run: |
-          # Check if this is a dry run
-          if [ "${{ github.event.inputs.dry-run }}" = "true" ] || [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            echo "dry_run=true" >> $GITHUB_OUTPUT
-            echo "::notice::Running in DRY RUN mode - no changes will be made"
-          else
-            echo "dry_run=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Identify repositories with .githooks
-        id: identify
-        env:
-          # CREDENTIAL (issue #807, root cause 1): the probe below calls the
-          # contents API on target repos. HYPATIA_SCAN_PAT is the estate's
-          # read-only PAT (contents:read across repos) — the same credential
-          # governance-reusable.yml and allowlist-preflight-reusable.yml use
-          # for live repo reads. Without a token every probe fails silently
-          # and every repo is misclassified as hookless.
-          GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
-        run: |
-          echo "🔍 Identifying repositories that need hook updates..."
-          
-          # Get the SHA of the current commit (triggering commit)
-          TRIGGER_SHA="${{ github.sha }}"
-          
-          # Check if specific repo was requested
-          if [ -n "${{ github.event.inputs.target-repo }}" ]; then
-            TARGET="${{ github.event.inputs.target-repo }}"
-            # -c: compact, single-line JSON — a multiline value breaks
-            # $GITHUB_OUTPUT below (same defect class as root cause 2, #807).
-            REPOS_JSON=$(jq -cn --arg repo "$TARGET" '[$repo]')
-          else
-            # Use a sample list for now - TODO: Query all repos dynamically
-            # For production, this should query the GitHub API for all repos
-            # in hyperpolymath and metadatastician orgs and filter by .githooks
-            ALL_REPOS=(
-              "hyperpolymath/standards"
-            )
-            
-            # Filter to only repos that have .githooks directory.
-            # Three outcomes per repo, not two (issue #807): has-hooks, no-hooks,
-            # and PROBE ERROR. The old code folded error into no-hooks (2>/dev/null
-            # + jq -e on the error object), so a credential failure read as
-            # "nothing to do" — a fake green.
-            echo "🔍 Filtering repos with .githooks directory..."
-            REPOS_WITH_HOOKS=()
-            DISCOVERY_ERRORS=()
-            for repo in "${ALL_REPOS[@]}"; do
-              ERR_FILE=$(mktemp)
-              if OUT=$(gh api "/repos/$repo/contents/.githooks" \
-                -H "Accept: application/vnd.github+json" \
-                -H "X-GitHub-Api-Version: 2022-11-28" 2>"$ERR_FILE"); then
-                if jq -e 'type == "array"' >/dev/null <<<"$OUT"; then
-                  REPOS_WITH_HOOKS+=("$repo")
-                  echo "  ✓ $repo has .githooks"
-                else
-                  echo "  ✗ $repo skipped (.githooks exists but is not a directory)"
-                fi
-              elif grep -q "HTTP 404" "$ERR_FILE"; then
-                echo "  ✗ $repo skipped (no .githooks)"
-              else
-                DISCOVERY_ERRORS+=("$repo")
-                echo "  ⚠ $repo: probe errored — NOT counted as hookless: $(head -1 "$ERR_FILE")"
-              fi
-              rm -f "$ERR_FILE"
-            done
-
-            # An erroring probe must fail the job, never propagate blind.
-            if ((${#DISCOVERY_ERRORS[@]})); then
-              echo "::error::Discovery errored for ${#DISCOVERY_ERRORS[@]} repo(s): ${DISCOVERY_ERRORS[*]} — refusing to propagate blind (check the credential on this step)"
-              exit 1
-            fi
-
-            # CANARY (issue #807): hyperpolymath/standards OWNS .githooks — 14
-            # hooks. If the canonical repo classifies as hookless, the classifier
-            # is broken, not the repo. Fail loudly instead of propagating nowhere.
-            CANARY="hyperpolymath/standards"
-            if [[ " ${ALL_REPOS[*]} " == *" $CANARY "* && ! " ${REPOS_WITH_HOOKS[*]} " == *" $CANARY "* ]]; then
-              echo "::error::Discovery canary failed: $CANARY has .githooks yet classified hookless — discovery is broken, refusing to propagate"
-              exit 1
-            fi
-
-            # (issue #807, root cause 2): printf on an EMPTY bash array still
-            # prints one empty line, yielding [""]  — and a multiline value then
-            # breaks $GITHUB_OUTPUT ('Invalid format'). Serialize [] explicitly,
-            # and always compact single-line JSON.
-            if ((${#REPOS_WITH_HOOKS[@]})); then
-              REPOS_JSON=$(printf '%s\n' "${REPOS_WITH_HOOKS[@]}" | jq -R . | jq -cs .)
-            else
-              REPOS_JSON='[]'
-            fi
-          fi
-          
-          echo "repos=$REPOS_JSON" >> $GITHUB_OUTPUT
-          echo "repo_count=$(echo "$REPOS_JSON" | jq 'length')" >> $GITHUB_OUTPUT
-
-      - name: Display repositories to update
-        run: |
-          REPO_COUNT="${{ steps.identify.outputs.repo_count }}"
-          echo "📊 Found $REPO_COUNT repository(ies) to check for hook updates"
-          
-          # Pretty print the repos list
-          echo "${{ steps.identify.outputs.repos }}" | jq '.'
-
-  propagate:
-    name: Propagate Hook Updates
-    runs-on: ubuntu-latest
-    needs: identify-repos
-    timeout-minutes: 60
-    permissions:
-      # Required to push hook updates to target repos. Job level replaces
-      # the top level; `contents: write` implies read, so this is sufficient.
-      contents: write
-    strategy:
-      matrix:
-        repo: ${{ fromJson(needs.identify-repos.outputs.repos) }}
-      max-parallel: 10  # Limit concurrent updates
-      fail-fast: false  # Don't stop on individual failures
-
-    steps:
-      - name: Harden runner (egress block)
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          # Runs on a protected-branch push (RE002): block, not audit. This
-          # job only talks to GitHub (checkout, the REST API, git transport).
-          egress-policy: block
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-      - name: Checkout standards repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Determine source and target
-        id: config
-        run: |
-          SOURCE_REPO="${{ github.repository }}"
-          TARGET_REPO="${{ matrix.repo }}"
-          
-          echo "source_repo=$SOURCE_REPO" >> $GITHUB_OUTPUT
-          echo "target_repo=$TARGET_REPO" >> $GITHUB_OUTPUT
-          
-          # Extract org and repo name
-          TARGET_ORG=$(echo "$TARGET_REPO" | cut -d'/' -f1)
-          TARGET_NAME=$(echo "$TARGET_REPO" | cut -d'/' -f2)
-          
-          echo "target_org=$TARGET_ORG" >> $GITHUB_OUTPUT
-          echo "target_name=$TARGET_NAME" >> $GITHUB_OUTPUT
-
-      - name: Checkout target repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ matrix.repo }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          path: target-repo
-          fetch-depth: 1
-
-      - name: Check if target has .githooks directory
-        id: check-githooks
-        run: |
-          if [ -d "target-repo/.githooks" ]; then
-            echo "has_githooks=true" >> $GITHUB_OUTPUT
-            echo "::notice::✅ $TARGET_REPO has .githooks directory"
-          else
-            echo "has_githooks=false" >> $GITHUB_OUTPUT
-            echo "::warning::⚠️  $TARGET_REPO does not have .githooks directory - creating"
-          fi
-
-      - name: Create .githooks directory if missing
-        if: steps.check-githooks.outputs.has_githooks != 'true'
-        run: |
-          mkdir -p target-repo/.githooks
-          echo "::notice::Created .githooks directory in $TARGET_REPO"
-
-      - name: Copy updated hooks
-        run: |
-          SOURCE="./.githooks"
-          DEST="target-repo/.githooks"
-          
-          echo "📝 Copying hooks from $SOURCE to $DEST..."
-          
-          # Copy all hook files - safe because SOURCE is controlled
-          cp -v $SOURCE/* $DEST/ 2>&1 || true
-          
-          # Make all hooks executable - required for git hooks to function
-          chmod +x $DEST/*
-          
-          # List what was copied
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Files Copied to $TARGET_REPO" >> $GITHUB_STEP_SUMMARY
-          ls -la $DEST/ >> $GITHUB_STEP_SUMMARY || true
-
-      - name: Create or update install.sh
-        run: |
-          DEST="target-repo/.githooks/install.sh"
-          
-          # Create an install.sh specific to this repo
-          cat > "$DEST" << 'EOF'
-          #!/usr/bin/env bash
-          # SPDX-License-Identifier: MPL-2.0
-          # Git Hooks Installer for this repository
-          # Copied from: hyperpolymath/standards
-          
-          set -euo pipefail
-          
-          REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-          
-          echo "Installing git hooks for $REPO_ROOT..."
-          git config core.hooksPath .githooks
-          chmod +x .githooks/*
-          echo "✅ Hooks installed. Use: git config core.hooksPath .githooks"
-          EOF
-          
-          chmod +x "$DEST"
-
-      - name: Commit and push hook updates
-        if: needs.identify-repos.outputs.dry_run != 'true'
-        run: |
-          cd target-repo
-          
-          # Check if there are changes
-          if git status --porcelain | grep -q '.githooks'; then
-            echo "📝 Changes detected in .githooks - committing..."
-            
-            # Configure git
-            git config user.name "hyperpolymath-hooks-bot"
-            git config user.email "hooks-bot@hyperpolymath.dev"
-            
-            # Add all changes
-            git add .githooks/
-            
-            # Commit
-            COMMIT_MSG="chore(.githooks): update hooks from standards (${{ github.sha }})"
-            git commit -m "$COMMIT_MSG"
-            
-            # Push - using force-with-lease for safety
-            # Note: This requires write permissions on the target repo
-            if git push origin HEAD --force-with-lease 2>&1; then
-              echo "::notice::✅ Successfully updated hooks in $TARGET_REPO"
-            else
-              echo "::error::❌ Failed to push hook updates to $TARGET_REPO"
-              echo "This may be due to insufficient permissions"
-              exit 1
-            fi
-          else
-            echo "::notice::⚪ No changes needed for $TARGET_REPO"
-          fi
-
-      - name: Dry run - show what would be updated
-        if: needs.identify-repos.outputs.dry_run == 'true'
-        run: |
-          cd target-repo
-          
-          echo "🔧 DRY RUN MODE - No changes will be made"
-          echo ""
-          echo "Would copy the following files to $TARGET_REPO/.githooks/:"
-          ls -la ./.githooks/ || true
-          echo ""
-          
-          # Show diff
-          if [ -d "target-repo/.githooks" ]; then
-            echo "Differences:"
-            diff -r ./.githooks target-repo/.githooks/ || echo "  (no differences)"
-          else
-            echo "  Would create .githooks directory"
-          fi
-
-  summary:
-    name: Propagation Summary
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [identify-repos, propagate]
-    if: always()
-
-    steps:
-      - name: Generate Summary
-        run: |
-          echo "## Hook Propagation Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          REPO_COUNT="${{ needs.identify-repos.outputs.repo_count }}"
-          echo "**Repositories processed:** $REPO_COUNT" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Count successes and failures
-          SUCCESS_COUNT=$(echo "${{ needs.propagate.result }}" | grep -c 'success' || echo "0")
-          FAILURE_COUNT=$(echo "${{ needs.propagate.result }}" | grep -c 'failure' || echo "0")
-          
-          echo "### Results" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Successful: $SUCCESS_COUNT" >> $GITHUB_STEP_SUMMARY
-          echo "- ❌ Failed: $FAILURE_COUNT" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "${{ needs.identify-repos.outputs.dry_run }}" = "true" ]; then
-            echo "**Mode:** DRY RUN (no changes made)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "**Mode:** LIVE (changes applied)" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### What This Workflow Does" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "1. **Identifies** all repositories in hyperpolymath and metadatastician orgs" >> $GITHUB_STEP_SUMMARY
-          echo "2. **Checks** if each repo has a .githooks directory" >> $GITHUB_STEP_SUMMARY
-          echo "3. **Copies** updated hook files from standards repo" >> $GITHUB_STEP_SUMMARY
-          echo "4. **Commits and pushes** the updates (with force-with-lease)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Triggering This Workflow" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Automatic:** Pushes to .githooks/ in standards repo" >> $GITHUB_STEP_SUMMARY
-          echo "- **Manual:** `gh workflow run propagate-hooks.yml`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository dispatch:** Send `refresh-githooks` event" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Notes" >> $GITHUB_STEP_SUMMARY
-          echo "- Requires write permissions on target repositories" >> $GITHUB_STEP_SUMMARY
-          echo "- Uses --force-with-lease for safe updates" >> $GITHUB_STEP_SUMMARY
-          echo "- Can be run in dry-run mode for testing" >> $GITHUB_STEP_SUMMARY
+{
+  name: "⚙️ AUTO: Propagate Hook Updates",
+  on: {
+    push: {
+      branches: [
+        "main",
+        "master",
+      ],
+      paths: [
+        ".githooks/**",
+        ".github/workflows/propagate-hooks.yml",
+      ],
+    },
+    workflow_dispatch: {
+      inputs: {
+        target-repo: {
+          description: "Specific repo to update (optional)",
+          required: false,
+        },
+        dry-run: {
+          description: "Dry run - do not actually update",
+          required: false,
+          default: "false",
+        },
+      },
+    },
+    repository_dispatch: {
+      types: [
+        "refresh-githooks",
+      ],
+    },
+  },
+  # Least privilege (WH002/S8233): only the `propagate` job pushes, so only it
+  # carries `contents: write` (job level). `pull-requests: write` and
+  # `actions: read` were dead — no step opens a PR or calls the Actions API.
+  permissions: {
+    contents: "read",
+  },
+  # Only run one instance at a time
+  concurrency: {
+    group: "propagate-hooks",
+    cancel-in-progress: false,
+  },
+  jobs: {
+    identify-repos: {
+      name: "Identify Repositories to Update",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 30,
+      outputs: {
+        repos: "${{ steps.identify.outputs.repos }}",
+        dry_run: "${{ steps.config.outputs.dry_run }}",
+      },
+      steps: [
+        {
+          name: "Harden runner (egress block)",
+          uses: "step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1", # v2.21.1
+          with: {
+            # Runs on a protected-branch push (RE002): block, not audit. This
+            # job only talks to GitHub (checkout, the REST API, git transport).
+            egress-policy: "block",
+            allowed-endpoints: "github.com:443 api.github.com:443 codeload.github.com:443 objects.githubusercontent.com:443\n",
+          },
+        },
+        {
+          name: "Checkout standards repository",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            fetch-depth: 1,
+          },
+        },
+        {
+          name: "Configure",
+          id: "config",
+          run: "# Check if this is a dry run\nif [ \"${{ github.event.inputs.dry-run }}\" = \"true\" ] || [ \"${{ github.event.inputs.dry_run }}\" = \"true\" ]; then\n  echo \"dry_run=true\" >> $GITHUB_OUTPUT\n  echo \"::notice::Running in DRY RUN mode - no changes will be made\"\nelse\n  echo \"dry_run=false\" >> $GITHUB_OUTPUT\nfi\n",
+        },
+        {
+          name: "Identify repositories with .githooks",
+          id: "identify",
+          env: {
+            # CREDENTIAL (issue #807, root cause 1): the probe below calls the
+            # contents API on target repos. HYPATIA_SCAN_PAT is the estate's
+            # read-only PAT (contents:read across repos) — the same credential
+            # governance-reusable.yml and allowlist-preflight-reusable.yml use
+            # for live repo reads. Without a token every probe fails silently
+            # and every repo is misclassified as hookless.
+            GH_TOKEN: "${{ secrets.HYPATIA_SCAN_PAT }}",
+          },
+          run: "echo \"🔍 Identifying repositories that need hook updates...\"\n\n# Get the SHA of the current commit (triggering commit)\nTRIGGER_SHA=\"${{ github.sha }}\"\n\n# Check if specific repo was requested\nif [ -n \"${{ github.event.inputs.target-repo }}\" ]; then\n  TARGET=\"${{ github.event.inputs.target-repo }}\"\n  # -c: compact, single-line JSON — a multiline value breaks\n  # $GITHUB_OUTPUT below (same defect class as root cause 2, #807).\n  REPOS_JSON=$(jq -cn --arg repo \"$TARGET\" '[$repo]')\nelse\n  # Use a sample list for now - TODO: Query all repos dynamically\n  # For production, this should query the GitHub API for all repos\n  # in hyperpolymath and metadatastician orgs and filter by .githooks\n  ALL_REPOS=(\n    \"hyperpolymath/standards\"\n  )\n  \n  # Filter to only repos that have .githooks directory.\n  # Three outcomes per repo, not two (issue #807): has-hooks, no-hooks,\n  # and PROBE ERROR. The old code folded error into no-hooks (2>/dev/null\n  # + jq -e on the error object), so a credential failure read as\n  # \"nothing to do\" — a fake green.\n  echo \"🔍 Filtering repos with .githooks directory...\"\n  REPOS_WITH_HOOKS=()\n  DISCOVERY_ERRORS=()\n  for repo in \"${ALL_REPOS[@]}\"; do\n    ERR_FILE=$(mktemp)\n    if OUT=$(gh api \"/repos/$repo/contents/.githooks\" \\\n      -H \"Accept: application/vnd.github+json\" \\\n      -H \"X-GitHub-Api-Version: 2022-11-28\" 2>\"$ERR_FILE\"); then\n      if jq -e 'type == \"array\"' >/dev/null <<<\"$OUT\"; then\n        REPOS_WITH_HOOKS+=(\"$repo\")\n        echo \"  ✓ $repo has .githooks\"\n      else\n        echo \"  ✗ $repo skipped (.githooks exists but is not a directory)\"\n      fi\n    elif grep -q \"HTTP 404\" \"$ERR_FILE\"; then\n      echo \"  ✗ $repo skipped (no .githooks)\"\n    else\n      DISCOVERY_ERRORS+=(\"$repo\")\n      echo \"  ⚠ $repo: probe errored — NOT counted as hookless: $(head -1 \"$ERR_FILE\")\"\n    fi\n    rm -f \"$ERR_FILE\"\n  done\n\n  # An erroring probe must fail the job, never propagate blind.\n  if ((${#DISCOVERY_ERRORS[@]})); then\n    echo \"::error::Discovery errored for ${#DISCOVERY_ERRORS[@]} repo(s): ${DISCOVERY_ERRORS[*]} — refusing to propagate blind (check the credential on this step)\"\n    exit 1\n  fi\n\n  # CANARY (issue #807): hyperpolymath/standards OWNS .githooks — 14\n  # hooks. If the canonical repo classifies as hookless, the classifier\n  # is broken, not the repo. Fail loudly instead of propagating nowhere.\n  CANARY=\"hyperpolymath/standards\"\n  if [[ \" ${ALL_REPOS[*]} \" == *\" $CANARY \"* && ! \" ${REPOS_WITH_HOOKS[*]} \" == *\" $CANARY \"* ]]; then\n    echo \"::error::Discovery canary failed: $CANARY has .githooks yet classified hookless — discovery is broken, refusing to propagate\"\n    exit 1\n  fi\n\n  # (issue #807, root cause 2): printf on an EMPTY bash array still\n  # prints one empty line, yielding [\"\"]  — and a multiline value then\n  # breaks $GITHUB_OUTPUT ('Invalid format'). Serialize [] explicitly,\n  # and always compact single-line JSON.\n  if ((${#REPOS_WITH_HOOKS[@]})); then\n    REPOS_JSON=$(printf '%s\\n' \"${REPOS_WITH_HOOKS[@]}\" | jq -R . | jq -cs .)\n  else\n    REPOS_JSON='[]'\n  fi\nfi\n\necho \"repos=$REPOS_JSON\" >> $GITHUB_OUTPUT\necho \"repo_count=$(echo \"$REPOS_JSON\" | jq 'length')\" >> $GITHUB_OUTPUT\n",
+        },
+        {
+          name: "Display repositories to update",
+          run: "REPO_COUNT=\"${{ steps.identify.outputs.repo_count }}\"\necho \"📊 Found $REPO_COUNT repository(ies) to check for hook updates\"\n\n# Pretty print the repos list\necho \"${{ steps.identify.outputs.repos }}\" | jq '.'\n",
+        },
+      ],
+    },
+    propagate: {
+      name: "Propagate Hook Updates",
+      runs-on: "ubuntu-latest",
+      needs: "identify-repos",
+      timeout-minutes: 60,
+      permissions: {
+        # Required to push hook updates to target repos. Job level replaces
+        # the top level; `contents: write` implies read, so this is sufficient.
+        contents: "write",
+      },
+      strategy: {
+        matrix: {
+          repo: "${{ fromJson(needs.identify-repos.outputs.repos) }}",
+        },
+        max-parallel: 10, # Limit concurrent updates
+        fail-fast: false, # Don't stop on individual failures
+      },
+      steps: [
+        {
+          name: "Harden runner (egress block)",
+          uses: "step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1", # v2.21.1
+          with: {
+            # Runs on a protected-branch push (RE002): block, not audit. This
+            # job only talks to GitHub (checkout, the REST API, git transport).
+            egress-policy: "block",
+            allowed-endpoints: "github.com:443 api.github.com:443 codeload.github.com:443 objects.githubusercontent.com:443\n",
+          },
+        },
+        {
+          name: "Checkout standards repository",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "Determine source and target",
+          id: "config",
+          run: "SOURCE_REPO=\"${{ github.repository }}\"\nTARGET_REPO=\"${{ matrix.repo }}\"\n\necho \"source_repo=$SOURCE_REPO\" >> $GITHUB_OUTPUT\necho \"target_repo=$TARGET_REPO\" >> $GITHUB_OUTPUT\n\n# Extract org and repo name\nTARGET_ORG=$(echo \"$TARGET_REPO\" | cut -d'/' -f1)\nTARGET_NAME=$(echo \"$TARGET_REPO\" | cut -d'/' -f2)\n\necho \"target_org=$TARGET_ORG\" >> $GITHUB_OUTPUT\necho \"target_name=$TARGET_NAME\" >> $GITHUB_OUTPUT\n",
+        },
+        {
+          name: "Checkout target repository",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            repository: "${{ matrix.repo }}",
+            token: "${{ secrets.GITHUB_TOKEN }}",
+            path: "target-repo",
+            fetch-depth: 1,
+          },
+        },
+        {
+          name: "Check if target has .githooks directory",
+          id: "check-githooks",
+          run: "if [ -d \"target-repo/.githooks\" ]; then\n  echo \"has_githooks=true\" >> $GITHUB_OUTPUT\n  echo \"::notice::✅ $TARGET_REPO has .githooks directory\"\nelse\n  echo \"has_githooks=false\" >> $GITHUB_OUTPUT\n  echo \"::warning::⚠️  $TARGET_REPO does not have .githooks directory - creating\"\nfi\n",
+        },
+        {
+          name: "Create .githooks directory if missing",
+          if: "steps.check-githooks.outputs.has_githooks != 'true'",
+          run: "mkdir -p target-repo/.githooks\necho \"::notice::Created .githooks directory in $TARGET_REPO\"\n",
+        },
+        {
+          name: "Copy updated hooks",
+          run: "SOURCE=\"./.githooks\"\nDEST=\"target-repo/.githooks\"\n\necho \"📝 Copying hooks from $SOURCE to $DEST...\"\n\n# Copy all hook files - safe because SOURCE is controlled\ncp -v $SOURCE/* $DEST/ 2>&1 || true\n\n# Make all hooks executable - required for git hooks to function\nchmod +x $DEST/*\n\n# List what was copied\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"### Files Copied to $TARGET_REPO\" >> $GITHUB_STEP_SUMMARY\nls -la $DEST/ >> $GITHUB_STEP_SUMMARY || true\n",
+        },
+        {
+          name: "Create or update install.sh",
+          run: "DEST=\"target-repo/.githooks/install.sh\"\n\n# Create an install.sh specific to this repo\ncat > \"$DEST\" << 'EOF'\n#!/usr/bin/env bash\n# SPDX-License-Identifier: MPL-2.0\n# Git Hooks Installer for this repository\n# Copied from: hyperpolymath/standards\n\nset -euo pipefail\n\nREPO_ROOT=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")/..\" && pwd)\"\n\necho \"Installing git hooks for $REPO_ROOT...\"\ngit config core.hooksPath .githooks\nchmod +x .githooks/*\necho \"✅ Hooks installed. Use: git config core.hooksPath .githooks\"\nEOF\n\nchmod +x \"$DEST\"\n",
+        },
+        {
+          name: "Commit and push hook updates",
+          if: "needs.identify-repos.outputs.dry_run != 'true'",
+          run: "cd target-repo\n\n# Check if there are changes\nif git status --porcelain | grep -q '.githooks'; then\n  echo \"📝 Changes detected in .githooks - committing...\"\n  \n  # Configure git\n  git config user.name \"hyperpolymath-hooks-bot\"\n  git config user.email \"hooks-bot@hyperpolymath.dev\"\n  \n  # Add all changes\n  git add .githooks/\n  \n  # Commit\n  COMMIT_MSG=\"chore(.githooks): update hooks from standards (${{ github.sha }})\"\n  git commit -m \"$COMMIT_MSG\"\n  \n  # Push - using force-with-lease for safety\n  # Note: This requires write permissions on the target repo\n  if git push origin HEAD --force-with-lease 2>&1; then\n    echo \"::notice::✅ Successfully updated hooks in $TARGET_REPO\"\n  else\n    echo \"::error::❌ Failed to push hook updates to $TARGET_REPO\"\n    echo \"This may be due to insufficient permissions\"\n    exit 1\n  fi\nelse\n  echo \"::notice::⚪ No changes needed for $TARGET_REPO\"\nfi\n",
+        },
+        {
+          name: "Dry run - show what would be updated",
+          if: "needs.identify-repos.outputs.dry_run == 'true'",
+          run: "cd target-repo\n\necho \"🔧 DRY RUN MODE - No changes will be made\"\necho \"\"\necho \"Would copy the following files to $TARGET_REPO/.githooks/:\"\nls -la ./.githooks/ || true\necho \"\"\n\n# Show diff\nif [ -d \"target-repo/.githooks\" ]; then\n  echo \"Differences:\"\n  diff -r ./.githooks target-repo/.githooks/ || echo \"  (no differences)\"\nelse\n  echo \"  Would create .githooks directory\"\nfi\n",
+        },
+      ],
+    },
+    summary: {
+      name: "Propagation Summary",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      needs: [
+        "identify-repos",
+        "propagate",
+      ],
+      if: "always()",
+      steps: [
+        {
+          name: "Generate Summary",
+          run: "echo \"## Hook Propagation Summary\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\n\nREPO_COUNT=\"${{ needs.identify-repos.outputs.repo_count }}\"\necho \"**Repositories processed:** $REPO_COUNT\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\n\n# Count successes and failures\nSUCCESS_COUNT=$(echo \"${{ needs.propagate.result }}\" | grep -c 'success' || echo \"0\")\nFAILURE_COUNT=$(echo \"${{ needs.propagate.result }}\" | grep -c 'failure' || echo \"0\")\n\necho \"### Results\" >> $GITHUB_STEP_SUMMARY\necho \"- ✅ Successful: $SUCCESS_COUNT\" >> $GITHUB_STEP_SUMMARY\necho \"- ❌ Failed: $FAILURE_COUNT\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\n\nif [ \"${{ needs.identify-repos.outputs.dry_run }}\" = \"true\" ]; then\n  echo \"**Mode:** DRY RUN (no changes made)\" >> $GITHUB_STEP_SUMMARY\nelse\n  echo \"**Mode:** LIVE (changes applied)\" >> $GITHUB_STEP_SUMMARY\nfi\n\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"### What This Workflow Does\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"1. **Identifies** all repositories in hyperpolymath and metadatastician orgs\" >> $GITHUB_STEP_SUMMARY\necho \"2. **Checks** if each repo has a .githooks directory\" >> $GITHUB_STEP_SUMMARY\necho \"3. **Copies** updated hook files from standards repo\" >> $GITHUB_STEP_SUMMARY\necho \"4. **Commits and pushes** the updates (with force-with-lease)\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"### Triggering This Workflow\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"- **Automatic:** Pushes to .githooks/ in standards repo\" >> $GITHUB_STEP_SUMMARY\necho \"- **Manual:** `gh workflow run propagate-hooks.yml`\" >> $GITHUB_STEP_SUMMARY\necho \"- **Repository dispatch:** Send `refresh-githooks` event\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"### Notes\" >> $GITHUB_STEP_SUMMARY\necho \"- Requires write permissions on target repositories\" >> $GITHUB_STEP_SUMMARY\necho \"- Uses --force-with-lease for safe updates\" >> $GITHUB_STEP_SUMMARY\necho \"- Can be run in dry-run mode for testing\" >> $GITHUB_STEP_SUMMARY\n",
+        },
+      ],
+    },
+  },
+}

@@ -4,80 +4,69 @@
 # End-to-end check for the signed-push composite action: pushes a throwaway commit
 # via the GitHub App and asserts GitHub marks it "Verified". Manual trigger only.
 # Requires repo/org secret APP_PRIVATE_KEY and variable APP_ID (the estate App).
-name: signed-push smoke test
-
-on:
-  workflow_dispatch:
-
-# Manual workflow: use concurrency group to prevent concurrent runs but
-# do NOT cancel-in-progress since this is a manually triggered mutation.
-concurrency:
-  group: ${{ github.workflow }}
-
-permissions:
-  contents: read
-
-jobs:
-  smoke:
-    runs-on: ubuntu-latest
-    # Safe here because `smoke` is a steps-job. Never add timeout-minutes to a
-    # job that `uses:` a reusable workflow — it is an illegal key there and
-    # GitHub refuses to parse the ENTIRE file, killing every job in it.
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - name: Harden runner (egress audit)
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Create throwaway branch + a local commit
-        id: prep
-        shell: bash
-        run: |
-          set -euo pipefail
-          BRANCH="ci/signed-push-smoke-${GITHUB_RUN_ID}"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          git config user.name  "estate-committer[bot]"
-          git config user.email "estate-committer[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          # Create the remote branch at the current base so createCommitOnBranch has
-          # an existing ref to commit onto, then fetch its tracking ref for the diff.
-          git push origin "$BRANCH"
-          git fetch origin "$BRANCH"
-          # Trivial change to be pushed as a Verified commit.
-          mkdir -p .ci-smoke
-          date -u +"%Y-%m-%dT%H:%M:%SZ" > .ci-smoke/last-signed-push.txt
-          git add .ci-smoke/last-signed-push.txt
-          git commit -m "test(signed-push): verified-commit smoke [run ${GITHUB_RUN_ID}]"
-
-      - name: Push the local commit as Verified (via the App)
-        uses: ./.github/actions/signed-push
-        with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          branch: ${{ steps.prep.outputs.branch }}
-
-      - name: Assert Verified, then delete the throwaway branch
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ steps.prep.outputs.branch }}
-        run: |
-          set -euo pipefail
-          SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${BRANCH}" --jq '.sha')
-          read -r VERIFIED REASON < <(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}" \
-            --jq '.commit.verification | "\(.verified) \(.reason)"')
-          echo "head ${SHA} → verified=${VERIFIED} reason=${REASON}"
-          # Always clean up the throwaway branch.
-          git push origin --delete "$BRANCH" || true
-          if [ "$VERIFIED" != "true" ]; then
-            echo "::error::signed-push produced an UNVERIFIED commit (reason=${REASON}). Check that APP_ID/APP_PRIVATE_KEY are set and the App is installed on this repo."
-            exit 1
-          fi
-          echo "✅ signed-push produced a Verified commit — Arm B1 works end-to-end."
+{
+  name: "signed-push smoke test",
+  on: {
+    workflow_dispatch: null,
+  },
+  # Manual workflow: use concurrency group to prevent concurrent runs but
+  # do NOT cancel-in-progress since this is a manually triggered mutation.
+  concurrency: {
+    group: "${{ github.workflow }}",
+  },
+  permissions: {
+    contents: "read",
+  },
+  jobs: {
+    smoke: {
+      runs-on: "ubuntu-latest",
+      # Safe here because `smoke` is a steps-job. Never add timeout-minutes to a
+      # job that `uses:` a reusable workflow — it is an illegal key there and
+      # GitHub refuses to parse the ENTIRE file, killing every job in it.
+      timeout-minutes: 10,
+      permissions: {
+        contents: "write",
+      },
+      steps: [
+        {
+          name: "Harden runner (egress audit)",
+          uses: "step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1", # v2.21.1
+          with: {
+            egress-policy: "audit",
+          },
+        },
+        {
+          name: "Checkout",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            fetch-depth: 0,
+          },
+        },
+        {
+          name: "Create throwaway branch + a local commit",
+          id: "prep",
+          shell: "bash",
+          run: "set -euo pipefail\nBRANCH=\"ci/signed-push-smoke-${GITHUB_RUN_ID}\"\necho \"branch=$BRANCH\" >> \"$GITHUB_OUTPUT\"\ngit config user.name  \"estate-committer[bot]\"\ngit config user.email \"estate-committer[bot]@users.noreply.github.com\"\ngit checkout -b \"$BRANCH\"\n# Create the remote branch at the current base so createCommitOnBranch has\n# an existing ref to commit onto, then fetch its tracking ref for the diff.\ngit push origin \"$BRANCH\"\ngit fetch origin \"$BRANCH\"\n# Trivial change to be pushed as a Verified commit.\nmkdir -p .ci-smoke\ndate -u +\"%Y-%m-%dT%H:%M:%SZ\" > .ci-smoke/last-signed-push.txt\ngit add .ci-smoke/last-signed-push.txt\ngit commit -m \"test(signed-push): verified-commit smoke [run ${GITHUB_RUN_ID}]\"\n",
+        },
+        {
+          name: "Push the local commit as Verified (via the App)",
+          uses: "./.github/actions/signed-push",
+          with: {
+            app-id: "${{ vars.APP_ID }}",
+            private-key: "${{ secrets.APP_PRIVATE_KEY }}",
+            branch: "${{ steps.prep.outputs.branch }}",
+          },
+        },
+        {
+          name: "Assert Verified, then delete the throwaway branch",
+          shell: "bash",
+          env: {
+            GH_TOKEN: "${{ github.token }}",
+            BRANCH: "${{ steps.prep.outputs.branch }}",
+          },
+          run: "set -euo pipefail\nSHA=$(gh api \"repos/${GITHUB_REPOSITORY}/commits/${BRANCH}\" --jq '.sha')\nread -r VERIFIED REASON < <(gh api \"repos/${GITHUB_REPOSITORY}/commits/${SHA}\" \\\n  --jq '.commit.verification | \"\\(.verified) \\(.reason)\"')\necho \"head ${SHA} → verified=${VERIFIED} reason=${REASON}\"\n# Always clean up the throwaway branch.\ngit push origin --delete \"$BRANCH\" || true\nif [ \"$VERIFIED\" != \"true\" ]; then\n  echo \"::error::signed-push produced an UNVERIFIED commit (reason=${REASON}). Check that APP_ID/APP_PRIVATE_KEY are set and the App is installed on this repo.\"\n  exit 1\nfi\necho \"✅ signed-push produced a Verified commit — Arm B1 works end-to-end.\"\n",
+        },
+      ],
+    },
+  },
+}

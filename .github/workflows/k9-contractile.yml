@@ -16,250 +16,121 @@
 # The job name below is VERBATIM from the required-context list. A required
 # context is matched against the emitted job name, so renaming it silently
 # un-gates the branch.
-name: K9-SVC Contractile Validation
-
-on:
-  push:
-    branches: [main, master]
-  pull_request:
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
-
-jobs:
-  validate-contractiles:
-    name: K9-SVC contractile validation
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
-    # Needed only by the final step, which posts the validator's verdict to
-    # the pull request. Log blobs are not reachable from every machine that
-    # needs the result, so the result is published where it can be read.
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: K9-SVC Validation
-        run: |
-          set -euo pipefail
-          echo "Running K9-SVC contractile validation..."
-          # Real structural validation (no placeholder): every Mustfile check
-          # must carry a severity and a means of discharge (run or verification).
-          # A hollow check fails loudly. See scripts/check-mustfile-structure.sh
-          # (unit-tested by scripts/tests/wave0-false-green-test.sh).
-          bash scripts/check-mustfile-structure.sh
-
-      - name: Mustfile Enforcement (execute the checks)
-        run: |
-          set -euo pipefail
-          # Execute the Mustfile's `- run:` invariants — the mandatory checks
-          # that were previously declared but never run by any CI job. A failing
-          # critical/high check fails the build (fail loudly); warning-severity
-          # failures are reported but non-blocking. See scripts/run-mustfile.sh.
-          bash scripts/run-mustfile.sh
-
-      - name: Contractile Check
-        run: |
-          set -euo pipefail
-          echo "Checking contractile completeness..."
-          index=".machine_readable/contractiles/INDEX.a2ml"
-          if [ ! -f "$index" ]; then
-            echo "❌ Contractile registry not found: $index"
-            exit 1
-          fi
-          # Read the canonical verb set from the registry rather than hard-coding
-          # it (INDEX.a2ml §Registry: consumers SHOULD discover verbs from here).
-          # Each verb's trident lists "<verb>/<Verb>file.a2ml" as its first entry.
-          mapfile -t files < <(grep -oE '"[a-z]+/[A-Z][a-z]+file\.a2ml"' "$index" | tr -d '"' | sort -u)
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "❌ No contractile files discovered in $index"
-            exit 1
-          fi
-          missing=0
-          for rel in "${files[@]}"; do
-            if [ -f ".machine_readable/contractiles/$rel" ]; then
-              echo "✅ $rel"
-            else
-              echo "❌ Missing: $rel"
-              missing=$((missing + 1))
-            fi
-          done
-          if [ "$missing" -gt 0 ]; then
-            echo "❌ $missing contractile(s) missing"
-            exit 1
-          fi
-          echo "✅ All ${#files[@]} contractiles present"
-      # ── K9 CONTRACT CONFORMANCE (standards#1058, ruling D173) ──────────
-      #
-      # Everything above this line checks that contractile FILES EXIST. None of
-      # it checked that a `.k9.ncl` file is a valid K9 component: the local hook
-      # grepped for a line beginning `contract`, which no file in this repo has,
-      # and ci-pipeline.yml excludes `*.k9.ncl` from Nickel entirely. So the
-      # required check named "K9-SVC contractile validation" validated the
-      # registry and never once read a pedigree.
-      #
-      # Nickel is installed here, pinned and sha256-verified with the SAME pin
-      # as ci-pipeline.yml's `nickel` job — one version estate-wide, so a file
-      # cannot typecheck in one lane and not in another.
-      - name: Install Nickel (pinned, sha256-verified)
-        env:
-          NICKEL_VERSION: '1.18.0'
-          NICKEL_SHA256: '9cba4dd65ae9915ec61f73033aafcff307a377665a83fd8f530df086763318cb'
-        run: |
-          set -euo pipefail
-          URL="https://github.com/tweag/nickel/releases/download/${NICKEL_VERSION}/nickel-x86_64-linux"
-          curl -sSfL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -o "$RUNNER_TEMP/nickel" "$URL"
-          echo "${NICKEL_SHA256}  ${RUNNER_TEMP}/nickel" | sha256sum -c -
-          chmod +x "$RUNNER_TEMP/nickel"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          echo "K9_REPORT=$RUNNER_TEMP/k9-report.md" >> "$GITHUB_ENV"
-
-      # Each step mirrors its output into $GITHUB_STEP_SUMMARY as well as
-      # stdout. The PR then shows the verdict without anyone opening a raw log,
-      # and `gh api repos/{o}/{r}/check-runs/{job_id} --jq .output.summary`
-      # reads it back — which matters on a machine that cannot reach the log
-      # blob host. `set -uo pipefail` without `-e` so a failing validator still
-      # reaches the tee and its own status is what the step exits with.
-      - name: K9 normative contract typecheck
-        run: |
-          set -uo pipefail
-          # Its own step, ahead of the fixtures. `nickel typecheck` stops at the
-          # first error, and when the contract is broken every fixture verdict
-          # downstream is void — reported as five "non-conforming" positive
-          # controls rather than one broken contract. Twice now that cost a run
-          # to diagnose (`Record`, then `Any`: neither is a Nickel type).
-          set +e
-          out="$(nickel typecheck 1-formats/k9/spec/contract/k9_contract.ncl 2>&1)"; rc=$?
-          set -e
-          {
-            echo '## K9 normative contract typecheck'
-            echo '```'
-            [ $rc -eq 0 ] && echo 'k9_contract.ncl typechecks' || printf '%s\n' "$out"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          if [ $rc -ne 0 ]; then
-            printf '%s\n' "$out" | head -20 | while IFS= read -r line; do
-              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
-              [ -n "$esc" ] && printf '::error title=k9_contract.ncl does not typecheck::%s\n' "$esc"
-            done
-          fi
-          exit $rc
-
-      - name: K9 contract self-test
-        run: |
-          set -uo pipefail
-          # Asserts the validator's bash mirrors still agree with the normative
-          # contract, the capability arithmetic, the structural extractor, and
-          # the envelope strip. Runs before the fixtures so a broken validator
-          # is reported as a broken validator rather than as a broken corpus.
-          {
-            echo '## K9 contract self-test'
-            echo '```'
-            bash 1-formats/k9/tools/k9-validate.sh --self-test 2>&1
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          exit "${PIPESTATUS[0]}"
-
-      - name: K9 conformance fixtures (positive AND negative controls)
-        run: |
-          set -uo pipefail
-          # --strict: with Nickel on PATH every format layer (L0-L2) must
-          # actually run, so a missing toolchain cannot report a pass. The 21
-          # negative controls are the load-bearing half — a validator that
-          # accepts everything satisfies the positive half trivially.
-          set +e
-          out="$(bash 1-formats/k9/tools/k9-validate.sh --strict \
-            --fixtures 1-formats/k9/tools/fixtures 2>&1)"; rc=$?
-          set -e
-          {
-            echo '## K9 conformance fixtures'
-            echo '```'
-            printf '%s\n' "$out"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          # A failing gate also raises a check-run annotation. Annotations are
-          # readable through `gh api repos/{o}/{r}/check-runs/{job}/annotations`
-          # from machines that cannot reach the log blob host, which is where
-          # the first two runs of this workflow had to be diagnosed from.
-          # Workflow-command escaping: % first, then CR and LF.
-          if [ $rc -ne 0 ]; then
-            # One annotation per failure, not one multi-kilobyte annotation: a
-            # whole-report message never reached the check-run API, and a
-            # per-failure annotation is what a reader wants anyway.
-            printf '%s\n' "$out" | grep -E '^(FAIL|ERROR)' | head -20 | while IFS= read -r line; do
-              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
-              printf '::error title=K9 conformance fixture::%s\n' "$esc"
-            done
-          fi
-          exit $rc
-
-      - name: K9 corpus conformance (ratcheted, L2)
-        env:
-          # MIGRATION-1058 M7's first step. The hook's own default stays L1: a
-          # pre-commit hook that fails because a laptop lacks a toolchain
-          # teaches people to pass --no-verify, which is how a gate gets
-          # deleted. CI has the pinned binary, so here the corpus is checked at
-          # L2 as well. The six contractiles and the two axel config files that
-          # M1/M4 fixed had never been evaluated against K9.Component, and the
-          # closed record contracts in k9_contract.ncl rejected exactly the
-          # extension fields §5.5 permits. Ledger entries stay advisory, so the
-          # four svc templates and the rsr checklist are reported, not failed,
-          # until their own items land.
-          K9_VALIDATE_LAYER: all
-        run: |
-          set -uo pipefail
-          # The whole tracked corpus, through the same gate the pre-commit hook
-          # uses, so CI and the hook cannot disagree about what a K9 file is.
-          # .machine_readable/k9-contract-debt.txt grandfathers the files
-          # that predate the contract; it is shrink-only (a conforming file
-          # left in it fails), and it does not protect a file this PR touches.
-          set +e
-          out="$(bash .githooks/validate-k9.sh 2>&1)"; rc=$?
-          set -e
-          {
-            echo '## K9 corpus conformance (L2)'
-            echo '```'
-            printf '%s\n' "$out"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          if [ $rc -ne 0 ]; then
-            printf '%s\n' "$out" | grep -E '^(FAIL|ERROR)' | head -20 | while IFS= read -r line; do
-              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
-              printf '::error title=K9 corpus conformance::%s\n' "$esc"
-            done
-          fi
-          exit $rc
-
-      - name: Publish the K9 verdict to the pull request
-        # always(): a failing gate is exactly when the detail is needed, and a
-        # skipped step would publish nothing.
-        if: ${{ always() && github.event_name == 'pull_request' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -uo pipefail
-          [ -s "$K9_REPORT" ] || { echo "no K9 report produced"; exit 0; }
-          {
-            echo '<!-- k9-contractile-report: regenerated on every run -->'
-            echo '# K9 contract conformance'
-            echo
-            echo "_run_ $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            cat "$K9_REPORT"
-          } > "$RUNNER_TEMP/body.md"
-          # Always post; never PATCH. Creating a comment is the one path this
-          # step has been observed to complete, and two runs were lost
-          # diagnosing an update that could not be read back. Stacked reports
-          # cost a little noise on the PR and buy a result that actually
-          # arrives, which is the right trade while the log host is
-          # unreachable. Newest comment wins; each one names its run.
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body-file "$RUNNER_TEMP/body.md" >/dev/null
-          echo "published the K9 verdict to #$PR_NUMBER"
+{
+  name: "K9-SVC Contractile Validation",
+  on: {
+    push: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    pull_request: null,
+    workflow_dispatch: null,
+  },
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  permissions: {
+    contents: "read",
+  },
+  jobs: {
+    validate-contractiles: {
+      name: "K9-SVC contractile validation",
+      timeout-minutes: 10,
+      runs-on: "ubuntu-latest",
+      # Needed only by the final step, which posts the validator's verdict to
+      # the pull request. Log blobs are not reachable from every machine that
+      # needs the result, so the result is published where it can be read.
+      permissions: {
+        contents: "read",
+        pull-requests: "write",
+      },
+      steps: [
+        {
+          name: "Checkout",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "K9-SVC Validation",
+          run: "set -euo pipefail\necho \"Running K9-SVC contractile validation...\"\n# Real structural validation (no placeholder): every Mustfile check\n# must carry a severity and a means of discharge (run or verification).\n# A hollow check fails loudly. See scripts/check-mustfile-structure.sh\n# (unit-tested by scripts/tests/wave0-false-green-test.sh).\nbash scripts/check-mustfile-structure.sh\n",
+        },
+        {
+          name: "Mustfile Enforcement (execute the checks)",
+          run: "set -euo pipefail\n# Execute the Mustfile's `- run:` invariants — the mandatory checks\n# that were previously declared but never run by any CI job. A failing\n# critical/high check fails the build (fail loudly); warning-severity\n# failures are reported but non-blocking. See scripts/run-mustfile.sh.\nbash scripts/run-mustfile.sh\n",
+        },
+        {
+          name: "Contractile Check",
+          run: "set -euo pipefail\necho \"Checking contractile completeness...\"\nindex=\".machine_readable/contractiles/INDEX.a2ml\"\nif [ ! -f \"$index\" ]; then\n  echo \"❌ Contractile registry not found: $index\"\n  exit 1\nfi\n# Read the canonical verb set from the registry rather than hard-coding\n# it (INDEX.a2ml §Registry: consumers SHOULD discover verbs from here).\n# Each verb's trident lists \"<verb>/<Verb>file.a2ml\" as its first entry.\nmapfile -t files < <(grep -oE '\"[a-z]+/[A-Z][a-z]+file\\.a2ml\"' \"$index\" | tr -d '\"' | sort -u)\nif [ \"${#files[@]}\" -eq 0 ]; then\n  echo \"❌ No contractile files discovered in $index\"\n  exit 1\nfi\nmissing=0\nfor rel in \"${files[@]}\"; do\n  if [ -f \".machine_readable/contractiles/$rel\" ]; then\n    echo \"✅ $rel\"\n  else\n    echo \"❌ Missing: $rel\"\n    missing=$((missing + 1))\n  fi\ndone\nif [ \"$missing\" -gt 0 ]; then\n  echo \"❌ $missing contractile(s) missing\"\n  exit 1\nfi\necho \"✅ All ${#files[@]} contractiles present\"\n",
+        },
+        # ── K9 CONTRACT CONFORMANCE (standards#1058, ruling D173) ──────────
+        #
+        # Everything above this line checks that contractile FILES EXIST. None of
+        # it checked that a `.k9.ncl` file is a valid K9 component: the local hook
+        # grepped for a line beginning `contract`, which no file in this repo has,
+        # and ci-pipeline.yml excludes `*.k9.ncl` from Nickel entirely. So the
+        # required check named "K9-SVC contractile validation" validated the
+        # registry and never once read a pedigree.
+        #
+        # Nickel is installed here, pinned and sha256-verified with the SAME pin
+        # as ci-pipeline.yml's `nickel` job — one version estate-wide, so a file
+        # cannot typecheck in one lane and not in another.
+        {
+          name: "Install Nickel (pinned, sha256-verified)",
+          env: {
+            NICKEL_VERSION: "1.18.0",
+            NICKEL_SHA256: "9cba4dd65ae9915ec61f73033aafcff307a377665a83fd8f530df086763318cb",
+          },
+          run: "set -euo pipefail\nURL=\"https://github.com/tweag/nickel/releases/download/${NICKEL_VERSION}/nickel-x86_64-linux\"\ncurl -sSfL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -o \"$RUNNER_TEMP/nickel\" \"$URL\"\necho \"${NICKEL_SHA256}  ${RUNNER_TEMP}/nickel\" | sha256sum -c -\nchmod +x \"$RUNNER_TEMP/nickel\"\necho \"$RUNNER_TEMP\" >> \"$GITHUB_PATH\"\necho \"K9_REPORT=$RUNNER_TEMP/k9-report.md\" >> \"$GITHUB_ENV\"\n",
+        },
+        # Each step mirrors its output into $GITHUB_STEP_SUMMARY as well as
+        # stdout. The PR then shows the verdict without anyone opening a raw log,
+        # and `gh api repos/{o}/{r}/check-runs/{job_id} --jq .output.summary`
+        # reads it back — which matters on a machine that cannot reach the log
+        # blob host. `set -uo pipefail` without `-e` so a failing validator still
+        # reaches the tee and its own status is what the step exits with.
+        {
+          name: "K9 normative contract typecheck",
+          run: "set -uo pipefail\n# Its own step, ahead of the fixtures. `nickel typecheck` stops at the\n# first error, and when the contract is broken every fixture verdict\n# downstream is void — reported as five \"non-conforming\" positive\n# controls rather than one broken contract. Twice now that cost a run\n# to diagnose (`Record`, then `Any`: neither is a Nickel type).\nset +e\nout=\"$(nickel typecheck 1-formats/k9/spec/contract/k9_contract.ncl 2>&1)\"; rc=$?\nset -e\n{\n  echo '## K9 normative contract typecheck'\n  echo '```'\n  [ $rc -eq 0 ] && echo 'k9_contract.ncl typechecks' || printf '%s\\n' \"$out\"\n  echo '```'\n} | tee -a \"$GITHUB_STEP_SUMMARY\" \"$K9_REPORT\"\nif [ $rc -ne 0 ]; then\n  printf '%s\\n' \"$out\" | head -20 | while IFS= read -r line; do\n    esc=\"$(printf '%s' \"$line\" | sed 's/%/%25/g' | tr -d '\\r\\n')\"\n    [ -n \"$esc\" ] && printf '::error title=k9_contract.ncl does not typecheck::%s\\n' \"$esc\"\n  done\nfi\nexit $rc\n",
+        },
+        {
+          name: "K9 contract self-test",
+          run: "set -uo pipefail\n# Asserts the validator's bash mirrors still agree with the normative\n# contract, the capability arithmetic, the structural extractor, and\n# the envelope strip. Runs before the fixtures so a broken validator\n# is reported as a broken validator rather than as a broken corpus.\n{\n  echo '## K9 contract self-test'\n  echo '```'\n  bash 1-formats/k9/tools/k9-validate.sh --self-test 2>&1\n  echo '```'\n} | tee -a \"$GITHUB_STEP_SUMMARY\" \"$K9_REPORT\"\nexit \"${PIPESTATUS[0]}\"\n",
+        },
+        {
+          name: "K9 conformance fixtures (positive AND negative controls)",
+          run: "set -uo pipefail\n# --strict: with Nickel on PATH every format layer (L0-L2) must\n# actually run, so a missing toolchain cannot report a pass. The 21\n# negative controls are the load-bearing half — a validator that\n# accepts everything satisfies the positive half trivially.\nset +e\nout=\"$(bash 1-formats/k9/tools/k9-validate.sh --strict \\\n  --fixtures 1-formats/k9/tools/fixtures 2>&1)\"; rc=$?\nset -e\n{\n  echo '## K9 conformance fixtures'\n  echo '```'\n  printf '%s\\n' \"$out\"\n  echo '```'\n} | tee -a \"$GITHUB_STEP_SUMMARY\" \"$K9_REPORT\"\n# A failing gate also raises a check-run annotation. Annotations are\n# readable through `gh api repos/{o}/{r}/check-runs/{job}/annotations`\n# from machines that cannot reach the log blob host, which is where\n# the first two runs of this workflow had to be diagnosed from.\n# Workflow-command escaping: % first, then CR and LF.\nif [ $rc -ne 0 ]; then\n  # One annotation per failure, not one multi-kilobyte annotation: a\n  # whole-report message never reached the check-run API, and a\n  # per-failure annotation is what a reader wants anyway.\n  printf '%s\\n' \"$out\" | grep -E '^(FAIL|ERROR)' | head -20 | while IFS= read -r line; do\n    esc=\"$(printf '%s' \"$line\" | sed 's/%/%25/g' | tr -d '\\r\\n')\"\n    printf '::error title=K9 conformance fixture::%s\\n' \"$esc\"\n  done\nfi\nexit $rc\n",
+        },
+        {
+          name: "K9 corpus conformance (ratcheted, L2)",
+          env: {
+            # MIGRATION-1058 M7's first step. The hook's own default stays L1: a
+            # pre-commit hook that fails because a laptop lacks a toolchain
+            # teaches people to pass --no-verify, which is how a gate gets
+            # deleted. CI has the pinned binary, so here the corpus is checked at
+            # L2 as well. The six contractiles and the two axel config files that
+            # M1/M4 fixed had never been evaluated against K9.Component, and the
+            # closed record contracts in k9_contract.ncl rejected exactly the
+            # extension fields §5.5 permits. Ledger entries stay advisory, so the
+            # four svc templates and the rsr checklist are reported, not failed,
+            # until their own items land.
+            K9_VALIDATE_LAYER: "all",
+          },
+          run: "set -uo pipefail\n# The whole tracked corpus, through the same gate the pre-commit hook\n# uses, so CI and the hook cannot disagree about what a K9 file is.\n# .machine_readable/k9-contract-debt.txt grandfathers the files\n# that predate the contract; it is shrink-only (a conforming file\n# left in it fails), and it does not protect a file this PR touches.\nset +e\nout=\"$(bash .githooks/validate-k9.sh 2>&1)\"; rc=$?\nset -e\n{\n  echo '## K9 corpus conformance (L2)'\n  echo '```'\n  printf '%s\\n' \"$out\"\n  echo '```'\n} | tee -a \"$GITHUB_STEP_SUMMARY\" \"$K9_REPORT\"\nif [ $rc -ne 0 ]; then\n  printf '%s\\n' \"$out\" | grep -E '^(FAIL|ERROR)' | head -20 | while IFS= read -r line; do\n    esc=\"$(printf '%s' \"$line\" | sed 's/%/%25/g' | tr -d '\\r\\n')\"\n    printf '::error title=K9 corpus conformance::%s\\n' \"$esc\"\n  done\nfi\nexit $rc\n",
+        },
+        {
+          name: "Publish the K9 verdict to the pull request",
+          # always(): a failing gate is exactly when the detail is needed, and a
+          # skipped step would publish nothing.
+          if: "${{ always() && github.event_name == 'pull_request' }}",
+          env: {
+            GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}",
+            PR_NUMBER: "${{ github.event.pull_request.number }}",
+          },
+          run: "set -uo pipefail\n[ -s \"$K9_REPORT\" ] || { echo \"no K9 report produced\"; exit 0; }\n{\n  echo '<!-- k9-contractile-report: regenerated on every run -->'\n  echo '# K9 contract conformance'\n  echo\n  echo \"_run_ $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"\n  cat \"$K9_REPORT\"\n} > \"$RUNNER_TEMP/body.md\"\n# Always post; never PATCH. Creating a comment is the one path this\n# step has been observed to complete, and two runs were lost\n# diagnosing an update that could not be read back. Stacked reports\n# cost a little noise on the PR and buy a result that actually\n# arrives, which is the right trade while the log host is\n# unreachable. Newest comment wins; each one names its run.\ngh pr comment \"$PR_NUMBER\" --repo \"$GITHUB_REPOSITORY\" \\\n  --body-file \"$RUNNER_TEMP/body.md\" >/dev/null\necho \"published the K9 verdict to #$PR_NUMBER\"\n",
+        },
+      ],
+    },
+  },
+}

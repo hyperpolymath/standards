@@ -13,68 +13,74 @@
 # non-executable test, or a missing interpreter fails the job rather than
 # reporting a vacuous pass.
 
-name: Self Test
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
-
-jobs:
-  tests:
-    name: Repo self-tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # check-lock-gate-pin-freshness.sh compares the lock gate's pinned
-          # commit against the base ref. A depth-1 clone has neither object, and
-          # that guard fails rather than skipping on an unresolvable pin, so the
-          # history is a requirement and not an optimisation.
-          fetch-depth: 0
-
-      # The secret-scanner canary reads YAML with yq (preinstalled on the
-      # runner; YAML-POLICY Y-1) -- no Python. The scorecard
-      # grounding tests execute the same checks as registry-verify, including
-      # checks that require ripgrep and xmllint.
-      - name: Install test dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ripgrep libxml2-utils ruby ruby-minitest
-
-      - name: Run tests/*.sh and scripts/tests/*.sh
-        run: bash scripts/run-shell-test-suite.sh
-
-      # KYAML ratchet (YAML-POLICY Y-3, §5 step 5, standards#1024): every file
-      # already converted must stay KYAML. A file joins this list in the PR that
-      # converts it and never leaves it. Workflows are not listed here (step 6,
-      # standards#1025), and neither are files read by a third-party bot
-      # (Dependabot, FUNDING, issue forms, GitLab CI, Copilot).
-      - name: Converted YAML stays KYAML
-        run: |
-          set -euo pipefail
-          bash scripts/kyaml-format.sh --check \
-            _shared/container/.gatekeeper.yaml
-
-      # Not part of the offline suite: this one needs real git history, so it
-      # cannot live in scripts/tests/*.sh where a contributor runs it on a
-      # shallow or detached tree. On a pull request the comparison is the base
-      # SHA, so a PR that edits a helper is not asked to pin to its own
-      # unborn merge commit; on main it is HEAD, so the bump owed after such a
-      # PR lands shows up immediately instead of rotting silently.
-      - name: Lock-gate pin is not stale
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          COMPARE="${BASE_SHA:-$GITHUB_SHA}"
-          bash scripts/check-lock-gate-pin-freshness.sh "$COMPARE"
+{
+  name: "Self Test",
+  on: {
+    pull_request: null,
+    push: {
+      branches: [
+        "main",
+      ],
+    },
+    workflow_dispatch: null,
+  },
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  permissions: {
+    contents: "read",
+  },
+  jobs: {
+    tests: {
+      name: "Repo self-tests",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 15,
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            # check-lock-gate-pin-freshness.sh compares the lock gate's pinned
+            # commit against the base ref. A depth-1 clone has neither object, and
+            # that guard fails rather than skipping on an unresolvable pin, so the
+            # history is a requirement and not an optimisation.
+            fetch-depth: 0,
+          },
+        },
+        # The secret-scanner canary reads YAML with yq (preinstalled on the
+        # runner; YAML-POLICY Y-1) -- no Python. The scorecard
+        # grounding tests execute the same checks as registry-verify, including
+        # checks that require ripgrep and xmllint.
+        {
+          name: "Install test dependencies",
+          run: "sudo apt-get update -qq\nsudo apt-get install -y --no-install-recommends ripgrep libxml2-utils ruby ruby-minitest\n",
+        },
+        {
+          name: "Run tests/*.sh and scripts/tests/*.sh",
+          run: "bash scripts/run-shell-test-suite.sh",
+        },
+        # KYAML ratchet (YAML-POLICY Y-3, §5 steps 5-6, standards#1024-1025):
+        # every file already converted must stay KYAML. A file joins this list
+        # in the PR that converts it and never leaves it. Steps 5 (non-workflow
+        # YAML) and 6 (workflows) are now complete for this repo.
+        {
+          name: "Converted YAML stays KYAML",
+          run: "set -euo pipefail\nbash scripts/kyaml-format.sh --check \\\n  _shared/container/.gatekeeper.yaml \\\n  .github/workflows/*.yml\n",
+        },
+        # Not part of the offline suite: this one needs real git history, so it
+        # cannot live in scripts/tests/*.sh where a contributor runs it on a
+        # shallow or detached tree. On a pull request the comparison is the base
+        # SHA, so a PR that edits a helper is not asked to pin to its own
+        # unborn merge commit; on main it is HEAD, so the bump owed after such a
+        # PR lands shows up immediately instead of rotting silently.
+        {
+          name: "Lock-gate pin is not stale",
+          env: {
+            BASE_SHA: "${{ github.event.pull_request.base.sha }}",
+          },
+          run: "set -euo pipefail\nCOMPARE=\"${BASE_SHA:-$GITHUB_SHA}\"\nbash scripts/check-lock-gate-pin-freshness.sh \"$COMPARE\"\n",
+        },
+      ],
+    },
+  },
+}

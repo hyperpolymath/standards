@@ -1,111 +1,89 @@
 # This workflow is managed by gh actions-lock.
 # SPDX-License-Identifier: MPL-2.0
 # Reusable fail-closed Actions policy preflight (standards#486).
-name: Actions Policy Preflight Reusable
-
-on:
-  workflow_call:
-    secrets:
-      HYPATIA_SCAN_PAT:
-        description: Fine-grained token with repository Administration read access
-        required: false
-
-permissions:
-  contents: read
-
-jobs:
-  preflight:
-    name: Actions policy (tree)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout caller repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.sha }}
-
-      - name: Checkout policy source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: hyperpolymath/standards
-          ref: ${{ job.workflow_sha }}
-          path: .standards-checkout
-          sparse-checkout: |
-            rhodium-standard-repositories/actions-allowlist
-            scripts/check-actions-policy.sh
-            scripts/check-allowed-actions.sh
-          sparse-checkout-cone-mode: false
-
-      - name: Stage policy tools outside the scanned tree
-        run: |
-          if [ "$GITHUB_REPOSITORY" = hyperpolymath/standards ]; then
-            cp scripts/check-actions-policy.sh scripts/check-allowed-actions.sh "$RUNNER_TEMP/"
-            cp rhodium-standard-repositories/actions-allowlist/allowed-actions.json \
-               "$RUNNER_TEMP/allowed-actions.json"
-          else
-            cp .standards-checkout/scripts/check-actions-policy.sh \
-               .standards-checkout/scripts/check-allowed-actions.sh "$RUNNER_TEMP/"
-            cp .standards-checkout/rhodium-standard-repositories/actions-allowlist/allowed-actions.json \
-               "$RUNNER_TEMP/allowed-actions.json"
-          fi
-          rm -rf .standards-checkout
-
-      - name: Check workflow references against canonical allowlist
-        run: |
-          bash "$RUNNER_TEMP/check-allowed-actions.sh" \
-            "$RUNNER_TEMP/allowed-actions.json" .github/workflows
-
-  live-policy:
-    name: Live Actions policy (credentialed advisory)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout policy source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: hyperpolymath/standards
-          ref: ${{ job.workflow_sha }}
-          path: .standards-checkout
-          sparse-checkout: |
-            rhodium-standard-repositories/actions-allowlist
-            scripts/check-actions-policy.sh
-          sparse-checkout-cone-mode: false
-
-      - name: Report unavailable live policy credential
-        env:
-          GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
-        if: ${{ env.GH_TOKEN == '' }}
-        run: |
-          echo "::notice::Live Actions policy was not evaluated: HYPATIA_SCAN_PAT was not supplied by the caller. The separate tree allowlist gate still ran."
-          # shellcheck disable=SC2016
-          printf '%s\n' \
-            '### Live Actions policy not evaluated' \
-            '' \
-            'The caller did not supply `HYPATIA_SCAN_PAT`. This advisory job' \
-            'does not claim that the repository Administration setting passed.' \
-            'The independent tree allowlist preflight remains enforced.' \
-            >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Check live repository policy
-        env:
-          GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
-        if: ${{ env.GH_TOKEN != '' }}
-        run: |
-          set +e
-          bash .standards-checkout/scripts/check-actions-policy.sh \
-            "$GITHUB_REPOSITORY" \
-            .standards-checkout/rhodium-standard-repositories/actions-allowlist/allowed-actions.json
-          rc=$?
-          set -e
-          if [ "$rc" -eq 3 ]; then
-            echo "::notice::Live Actions policy was not evaluated: the supplied credential could not read the Administration endpoint."
-            printf '%s\n' \
-              '### Live Actions policy not evaluated' \
-              '' \
-              'A credential was supplied, but the Administration API was unavailable.' \
-              'No live-policy pass is claimed; rotate or re-authorise the credential.' \
-              >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          exit "$rc"
+{
+  name: "Actions Policy Preflight Reusable",
+  on: {
+    workflow_call: {
+      secrets: {
+        HYPATIA_SCAN_PAT: {
+          description: "Fine-grained token with repository Administration read access",
+          required: false,
+        },
+      },
+    },
+  },
+  permissions: {
+    contents: "read",
+  },
+  jobs: {
+    preflight: {
+      name: "Actions policy (tree)",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 5,
+      steps: [
+        {
+          name: "Checkout caller repository",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            repository: "${{ github.repository }}",
+            ref: "${{ github.sha }}",
+          },
+        },
+        {
+          name: "Checkout policy source",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            repository: "hyperpolymath/standards",
+            ref: "${{ job.workflow_sha }}",
+            path: ".standards-checkout",
+            sparse-checkout: "rhodium-standard-repositories/actions-allowlist\nscripts/check-actions-policy.sh\nscripts/check-allowed-actions.sh\n",
+            sparse-checkout-cone-mode: false,
+          },
+        },
+        {
+          name: "Stage policy tools outside the scanned tree",
+          run: "if [ \"$GITHUB_REPOSITORY\" = hyperpolymath/standards ]; then\n  cp scripts/check-actions-policy.sh scripts/check-allowed-actions.sh \"$RUNNER_TEMP/\"\n  cp rhodium-standard-repositories/actions-allowlist/allowed-actions.json \\\n     \"$RUNNER_TEMP/allowed-actions.json\"\nelse\n  cp .standards-checkout/scripts/check-actions-policy.sh \\\n     .standards-checkout/scripts/check-allowed-actions.sh \"$RUNNER_TEMP/\"\n  cp .standards-checkout/rhodium-standard-repositories/actions-allowlist/allowed-actions.json \\\n     \"$RUNNER_TEMP/allowed-actions.json\"\nfi\nrm -rf .standards-checkout\n",
+        },
+        {
+          name: "Check workflow references against canonical allowlist",
+          run: "bash \"$RUNNER_TEMP/check-allowed-actions.sh\" \\\n  \"$RUNNER_TEMP/allowed-actions.json\" .github/workflows\n",
+        },
+      ],
+    },
+    live-policy: {
+      name: "Live Actions policy (credentialed advisory)",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 5,
+      steps: [
+        {
+          name: "Checkout policy source",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            repository: "hyperpolymath/standards",
+            ref: "${{ job.workflow_sha }}",
+            path: ".standards-checkout",
+            sparse-checkout: "rhodium-standard-repositories/actions-allowlist\nscripts/check-actions-policy.sh\n",
+            sparse-checkout-cone-mode: false,
+          },
+        },
+        {
+          name: "Report unavailable live policy credential",
+          env: {
+            GH_TOKEN: "${{ secrets.HYPATIA_SCAN_PAT }}",
+          },
+          if: "${{ env.GH_TOKEN == '' }}",
+          run: "echo \"::notice::Live Actions policy was not evaluated: HYPATIA_SCAN_PAT was not supplied by the caller. The separate tree allowlist gate still ran.\"\n# shellcheck disable=SC2016\nprintf '%s\\n' \\\n  '### Live Actions policy not evaluated' \\\n  '' \\\n  'The caller did not supply `HYPATIA_SCAN_PAT`. This advisory job' \\\n  'does not claim that the repository Administration setting passed.' \\\n  'The independent tree allowlist preflight remains enforced.' \\\n  >> \"$GITHUB_STEP_SUMMARY\"\n",
+        },
+        {
+          name: "Check live repository policy",
+          env: {
+            GH_TOKEN: "${{ secrets.HYPATIA_SCAN_PAT }}",
+          },
+          if: "${{ env.GH_TOKEN != '' }}",
+          run: "set +e\nbash .standards-checkout/scripts/check-actions-policy.sh \\\n  \"$GITHUB_REPOSITORY\" \\\n  .standards-checkout/rhodium-standard-repositories/actions-allowlist/allowed-actions.json\nrc=$?\nset -e\nif [ \"$rc\" -eq 3 ]; then\n  echo \"::notice::Live Actions policy was not evaluated: the supplied credential could not read the Administration endpoint.\"\n  printf '%s\\n' \\\n    '### Live Actions policy not evaluated' \\\n    '' \\\n    'A credential was supplied, but the Administration API was unavailable.' \\\n    'No live-policy pass is claimed; rotate or re-authorise the credential.' \\\n    >> \"$GITHUB_STEP_SUMMARY\"\n  exit 0\nfi\nexit \"$rc\"\n",
+        },
+      ],
+    },
+  },
+}

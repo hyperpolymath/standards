@@ -30,98 +30,84 @@
 # mutates a setting or another repository — consistent with the estate guardrail
 # that unattended cross-repo mutation is a human decision. Settings are exactly
 # where that guardrail matters most.
-name: Settings Drift Detect
-
-on:
-  schedule:
-    # Monday 06:40 UTC — before the working week, so a weekend change is seen
-    # on Monday rather than discovered mid-campaign.
-    - cron: '40 6 * * 1'
-  workflow_dispatch:
-    inputs:
-      limit:
-        description: 'Max repos to scan (0 = all)'
-        type: string
-        default: '0'
-
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
-
-permissions:
-  contents: read
-  issues: write
-
-jobs:
-  detect:
-    name: Sweep the estate for settings drift
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - name: Harden runner (egress audit)
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Scan estate for settings drift
-        id: scan
-        env:
-          # A settings read needs more than the default GITHUB_TOKEN can see:
-          # actions/permissions and actions/variables are admin-scoped, and
-          # security_and_analysis is ABSENT from LIST endpoints entirely, so it
-          # needs a per-repo GET. Without an admin-scoped token this reports a
-          # FALSE CLEAN — it cannot read the settings it is checking. That is
-          # the "guard asks a different question than its consumer" trap, so the
-          # step fails loudly below rather than reporting an empty result.
-          GH_TOKEN: ${{ secrets.ESTATE_SETTINGS_READ_TOKEN || github.token }}
-        run: |
-          set -o pipefail
-          if ! gh api repos/${{ github.repository }}/actions/permissions >/dev/null 2>&1; then
-            echo "::error::Token cannot read actions/permissions. A clean result would be FALSE."
-            echo "::error::Set secret ESTATE_SETTINGS_READ_TOKEN to a PAT with admin:repo scope."
-            exit 2
-          fi
-          chmod +x scripts/check-settings-drift.sh
-          set +e
-          scripts/check-settings-drift.sh --limit "${{ inputs.limit || '0' }}" > drift.tsv
-          rc=$?
-          set -e
-          echo "rows=$(( $(wc -l < drift.tsv) - 1 ))" >> "$GITHUB_OUTPUT"
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          cat drift.tsv
-
-      - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: settings-drift
-          path: drift.tsv
-
-      - name: Open or update the tracking issue
-        if: steps.scan.outputs.rc == '1'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo "Settings drift detected: ${{ steps.scan.outputs.rows }} row(s)."
-            echo
-            echo "A row means the live setting differs from \`config/settings/repo.json\`."
-            echo "It does NOT by itself mean anything is broken — read the calibration"
-            echo "section at the top of \`scripts/check-settings-drift.sh\` before acting."
-            echo "In particular a CLEAN result is not proof CI is healthy: a startup"
-            echo "failure can be event-specific and invisible in every setting and file."
-            echo
-            echo '```'
-            head -200 drift.tsv
-            echo '```'
-          } > body.md
-          n=$(gh issue list --repo "${{ github.repository }}" --state open \
-                --search "Settings drift in:title" --json number --jq '.[0].number')
-          if [ -n "$n" ]; then
-            gh issue comment "$n" --repo "${{ github.repository }}" --body-file body.md
-          else
-            gh issue create --repo "${{ github.repository }}" \
-              --title "Settings drift detected" --body-file body.md
-          fi
+{
+  name: "Settings Drift Detect",
+  on: {
+    schedule: [
+      # Monday 06:40 UTC — before the working week, so a weekend change is seen
+      # on Monday rather than discovered mid-campaign.
+      {
+        cron: "40 6 * * 1",
+      },
+    ],
+    workflow_dispatch: {
+      inputs: {
+        limit: {
+          description: "Max repos to scan (0 = all)",
+          type: "string",
+          default: "0",
+        },
+      },
+    },
+  },
+  concurrency: {
+    group: "${{ github.workflow }}",
+    cancel-in-progress: false,
+  },
+  permissions: {
+    contents: "read",
+    issues: "write",
+  },
+  jobs: {
+    detect: {
+      name: "Sweep the estate for settings drift",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 45,
+      steps: [
+        {
+          name: "Harden runner (egress audit)",
+          uses: "step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1", # v2.21.1
+          with: {
+            egress-policy: "audit",
+          },
+        },
+        {
+          name: "Checkout",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "Scan estate for settings drift",
+          id: "scan",
+          env: {
+            # A settings read needs more than the default GITHUB_TOKEN can see:
+            # actions/permissions and actions/variables are admin-scoped, and
+            # security_and_analysis is ABSENT from LIST endpoints entirely, so it
+            # needs a per-repo GET. Without an admin-scoped token this reports a
+            # FALSE CLEAN — it cannot read the settings it is checking. That is
+            # the "guard asks a different question than its consumer" trap, so the
+            # step fails loudly below rather than reporting an empty result.
+            GH_TOKEN: "${{ secrets.ESTATE_SETTINGS_READ_TOKEN || github.token }}",
+          },
+          run: "set -o pipefail\nif ! gh api repos/${{ github.repository }}/actions/permissions >/dev/null 2>&1; then\n  echo \"::error::Token cannot read actions/permissions. A clean result would be FALSE.\"\n  echo \"::error::Set secret ESTATE_SETTINGS_READ_TOKEN to a PAT with admin:repo scope.\"\n  exit 2\nfi\nchmod +x scripts/check-settings-drift.sh\nset +e\nscripts/check-settings-drift.sh --limit \"${{ inputs.limit || '0' }}\" > drift.tsv\nrc=$?\nset -e\necho \"rows=$(( $(wc -l < drift.tsv) - 1 ))\" >> \"$GITHUB_OUTPUT\"\necho \"rc=$rc\" >> \"$GITHUB_OUTPUT\"\ncat drift.tsv\n",
+        },
+        {
+          name: "Upload report",
+          if: "always()",
+          uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", # v7.0.1
+          with: {
+            name: "settings-drift",
+            path: "drift.tsv",
+          },
+        },
+        {
+          name: "Open or update the tracking issue",
+          if: "steps.scan.outputs.rc == '1'",
+          env: {
+            GH_TOKEN: "${{ github.token }}",
+          },
+          run: "{\n  echo \"Settings drift detected: ${{ steps.scan.outputs.rows }} row(s).\"\n  echo\n  echo \"A row means the live setting differs from \\`config/settings/repo.json\\`.\"\n  echo \"It does NOT by itself mean anything is broken — read the calibration\"\n  echo \"section at the top of \\`scripts/check-settings-drift.sh\\` before acting.\"\n  echo \"In particular a CLEAN result is not proof CI is healthy: a startup\"\n  echo \"failure can be event-specific and invisible in every setting and file.\"\n  echo\n  echo '```'\n  head -200 drift.tsv\n  echo '```'\n} > body.md\nn=$(gh issue list --repo \"${{ github.repository }}\" --state open \\\n      --search \"Settings drift in:title\" --json number --jq '.[0].number')\nif [ -n \"$n\" ]; then\n  gh issue comment \"$n\" --repo \"${{ github.repository }}\" --body-file body.md\nelse\n  gh issue create --repo \"${{ github.repository }}\" \\\n    --title \"Settings drift detected\" --body-file body.md\nfi\n",
+        },
+      ],
+    },
+  },
+}

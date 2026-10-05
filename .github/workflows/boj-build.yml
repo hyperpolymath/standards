@@ -7,59 +7,54 @@
 # It is a no-op if BOJ_SERVER_URL is not set or the server is unreachable.
 # To enable: set BOJ_SERVER_URL as a repository secret or variable.
 # To disable: delete this file or leave BOJ_SERVER_URL unset.
-name: BoJ Server Build Trigger
-
-on:
-  push:
-    branches: [main, master]
-  workflow_dispatch:
-
-# Estate guardrail: cancel superseded runs so re-pushes / rebased PR
-# updates do not pile up queued runs against the shared account-wide
-# Actions concurrency pool. Applied only to read-only check workflows
-# (no publish/mutation), so cancelling a superseded run is always safe.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  actions: read
-  contents: read
-
-jobs:
-  trigger-boj:
-    name: Trigger BoJ server
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # No job-level gate: the `secrets` context is not available in `if:`
-    # (referencing it is an "Unrecognized named-value: 'secrets'" startup
-    # failure). The Trigger step below already self-gates — it exits 0 when
-    # BOJ_URL (secret-or-var) is empty — so the whole job is a cheap no-op
-    # when unconfigured.
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Trigger BoJ Server (Casket/ssg-mcp)
-        env:
-          BOJ_URL: ${{ secrets.BOJ_SERVER_URL || vars.BOJ_SERVER_URL }}
-          REPO_NAME: ${{ github.repository }}
-          BRANCH_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "$BOJ_URL" ]; then
-            echo "BOJ_SERVER_URL not configured - skipping"
-            exit 0
-          fi
-
-          payload="$(jq -cn \
-            --arg repo "$REPO_NAME" \
-            --arg branch "$BRANCH_NAME" \
-            --arg engine "casket" \
-            '{repo:$repo, branch:$branch, engine:$engine}')"
-
-          curl -sf -X POST "${BOJ_URL}/cartridges/ssg-mcp/invoke" \
-            -H "Content-Type: application/json" \
-            --data "$payload" \
-            || echo "BoJ server unreachable - skipping (non-fatal)"
+{
+  name: "BoJ Server Build Trigger",
+  on: {
+    push: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    workflow_dispatch: null,
+  },
+  # Estate guardrail: cancel superseded runs so re-pushes / rebased PR
+  # updates do not pile up queued runs against the shared account-wide
+  # Actions concurrency pool. Applied only to read-only check workflows
+  # (no publish/mutation), so cancelling a superseded run is always safe.
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  permissions: {
+    actions: "read",
+    contents: "read",
+  },
+  jobs: {
+    trigger-boj: {
+      name: "Trigger BoJ server",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      # No job-level gate: the `secrets` context is not available in `if:`
+      # (referencing it is an "Unrecognized named-value: 'secrets'" startup
+      # failure). The Trigger step below already self-gates — it exits 0 when
+      # BOJ_URL (secret-or-var) is empty — so the whole job is a cheap no-op
+      # when unconfigured.
+      steps: [
+        {
+          name: "Checkout",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "Trigger BoJ Server (Casket/ssg-mcp)",
+          env: {
+            BOJ_URL: "${{ secrets.BOJ_SERVER_URL || vars.BOJ_SERVER_URL }}",
+            REPO_NAME: "${{ github.repository }}",
+            BRANCH_NAME: "${{ github.ref_name }}",
+          },
+          run: "set -euo pipefail\n\nif [ -z \"$BOJ_URL\" ]; then\n  echo \"BOJ_SERVER_URL not configured - skipping\"\n  exit 0\nfi\n\npayload=\"$(jq -cn \\\n  --arg repo \"$REPO_NAME\" \\\n  --arg branch \"$BRANCH_NAME\" \\\n  --arg engine \"casket\" \\\n  '{repo:$repo, branch:$branch, engine:$engine}')\"\n\ncurl -sf -X POST \"${BOJ_URL}/cartridges/ssg-mcp/invoke\" \\\n  -H \"Content-Type: application/json\" \\\n  --data \"$payload\" \\\n  || echo \"BoJ server unreachable - skipping (non-fatal)\"\n",
+        },
+      ],
+    },
+  },
+}

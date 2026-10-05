@@ -1,109 +1,57 @@
 # This workflow is managed by gh actions-lock.
 # SPDX-License-Identifier: MPL-2.0
 # This workflow is managed by gh actions-lock.
-name: Documentation Format Enforcement
-
-on:
-  push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
-
-# Estate guardrail: cancel superseded runs so re-pushes / rebased PR
-# updates do not pile up queued runs against the shared account-wide
-# Actions concurrency pool. Applied only to read-only check workflows
-# (no publish/mutation), so cancelling a superseded run is always safe.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  actions: read
-  contents: read
-
-jobs:
-  check-doc-format:
-    timeout-minutes: 10
-    name: Check Documentation Format
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
-
-      - name: Check for duplicate documentation formats
-        run: |
-          DUPLICATES=0
-
-          # .adoc-primary docs: keep only .adoc. README is NOT here — README is a
-          # GitHub-required Markdown file (see the README rule below).
-          for doc in ARCHITECTURE ROADMAP PHILOSOPHY INSTALL; do
-            if [ -f "${doc}.md" ] && [ -f "${doc}.adoc" ]; then
-              echo "::error::Duplicate documentation: ${doc}.md and ${doc}.adoc both exist. Keep only .adoc"
-              DUPLICATES=$((DUPLICATES + 1))
-            fi
-          done
-
-          # README: AsciiDoc is canonical estate-wide (ADR-004). A README.md
-          # alongside README.adoc is legitimate ONLY when it is a *derived*
-          # artefact — it must carry the GENERATED banner and the repo must
-          # declare a [publishing.readme] consumer in descriptiles. A hand-
-          # maintained README.md next to README.adoc is the duplicate to remove
-          # (this is the case the June 2026 runaway inverted).
-          if [ -f "README.md" ] && [ -f "README.adoc" ]; then
-            if grep -q "GENERATED from README.adoc" README.md 2>/dev/null; then
-              echo "✓ README.md is a derived artefact (GENERATED banner present)"
-            else
-              echo "::error::README.md alongside README.adoc is not a derived artefact (no GENERATED banner). Under ADR-004, README.adoc is canonical; either derive README.md via readme-derive-reusable.yml (with a [publishing.readme] declaration) or remove the hand-maintained README.md."
-              DUPLICATES=$((DUPLICATES + 1))
-            fi
-          fi
-
-          # CONTRIBUTING can have both but .md should just be a redirect
-          if [ -f "CONTRIBUTING.md" ] && [ -f "3-practice/CONTRIBUTING.adoc" ]; then
-            if ! grep -q "See.*3-practice/CONTRIBUTING.adoc" CONTRIBUTING.md 2>/dev/null; then
-              echo "::warning::CONTRIBUTING.md exists alongside 3-practice/CONTRIBUTING.adoc but is not a redirect"
-            fi
-          fi
-
-          if [ $DUPLICATES -gt 0 ]; then
-            echo "::error::Found $DUPLICATES duplicate documentation files"
-            exit 1
-          fi
-
-          echo "✓ No duplicate documentation formats found"
-
-      - name: Check documentation format
-        run: |
-          # ADR-004: README.adoc is canonical estate-wide. A lone README.adoc
-          # is correct and needs no action — do NOT nudge it to Markdown. A
-          # README.md is only produced by deriving it (readme-derive-reusable.yml)
-          # for repos that declare a [publishing.readme] consumer. GitHub renders
-          # .adoc natively; only external Markdown-only consumers (Glama, the
-          # profile repo) need the derived .md.
-
-          # Community-health files that GitHub special-cases by exact .md name:
-          # 3-practice/SECURITY.md, CONTRIBUTING.md (can redirect), CODE_OF_CONDUCT.md, CHANGELOG.md
-
-          # Check other docs are .adoc
-          for doc in ARCHITECTURE ROADMAP PHILOSOPHY INSTALL; do
-            if [ -f "${doc}.md" ]; then
-              echo "::warning::${doc}.md should be ${doc}.adoc"
-            fi
-          done
-
-          echo "✓ Documentation format check complete"
-
-      - name: Verify GitHub-required files exist
-        run: |
-          # These files are required/preferred by GitHub in .md format
-          MISSING=0
-
-          if [ ! -f "3-practice/SECURITY.md" ]; then
-            echo "::warning::3-practice/SECURITY.md not found (required for GitHub security tab)"
-          fi
-
-          if [ ! -f "LICENSE.txt" ] && [ ! -f "LICENSE" ]; then
-            echo "::warning::LICENSE file not found"
-          fi
-
-          echo "✓ GitHub-required files check complete"
+{
+  name: "Documentation Format Enforcement",
+  on: {
+    push: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+    pull_request: {
+      branches: [
+        "main",
+        "master",
+      ],
+    },
+  },
+  # Estate guardrail: cancel superseded runs so re-pushes / rebased PR
+  # updates do not pile up queued runs against the shared account-wide
+  # Actions concurrency pool. Applied only to read-only check workflows
+  # (no publish/mutation), so cancelling a superseded run is always safe.
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  permissions: {
+    actions: "read",
+    contents: "read",
+  },
+  jobs: {
+    check-doc-format: {
+      timeout-minutes: 10,
+      name: "Check Documentation Format",
+      runs-on: "ubuntu-latest",
+      steps: [
+        {
+          name: "Checkout",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v4
+        },
+        {
+          name: "Check for duplicate documentation formats",
+          run: "DUPLICATES=0\n\n# .adoc-primary docs: keep only .adoc. README is NOT here — README is a\n# GitHub-required Markdown file (see the README rule below).\nfor doc in ARCHITECTURE ROADMAP PHILOSOPHY INSTALL; do\n  if [ -f \"${doc}.md\" ] && [ -f \"${doc}.adoc\" ]; then\n    echo \"::error::Duplicate documentation: ${doc}.md and ${doc}.adoc both exist. Keep only .adoc\"\n    DUPLICATES=$((DUPLICATES + 1))\n  fi\ndone\n\n# README: AsciiDoc is canonical estate-wide (ADR-004). A README.md\n# alongside README.adoc is legitimate ONLY when it is a *derived*\n# artefact — it must carry the GENERATED banner and the repo must\n# declare a [publishing.readme] consumer in descriptiles. A hand-\n# maintained README.md next to README.adoc is the duplicate to remove\n# (this is the case the June 2026 runaway inverted).\nif [ -f \"README.md\" ] && [ -f \"README.adoc\" ]; then\n  if grep -q \"GENERATED from README.adoc\" README.md 2>/dev/null; then\n    echo \"✓ README.md is a derived artefact (GENERATED banner present)\"\n  else\n    echo \"::error::README.md alongside README.adoc is not a derived artefact (no GENERATED banner). Under ADR-004, README.adoc is canonical; either derive README.md via readme-derive-reusable.yml (with a [publishing.readme] declaration) or remove the hand-maintained README.md.\"\n    DUPLICATES=$((DUPLICATES + 1))\n  fi\nfi\n\n# CONTRIBUTING can have both but .md should just be a redirect\nif [ -f \"CONTRIBUTING.md\" ] && [ -f \"3-practice/CONTRIBUTING.adoc\" ]; then\n  if ! grep -q \"See.*3-practice/CONTRIBUTING.adoc\" CONTRIBUTING.md 2>/dev/null; then\n    echo \"::warning::CONTRIBUTING.md exists alongside 3-practice/CONTRIBUTING.adoc but is not a redirect\"\n  fi\nfi\n\nif [ $DUPLICATES -gt 0 ]; then\n  echo \"::error::Found $DUPLICATES duplicate documentation files\"\n  exit 1\nfi\n\necho \"✓ No duplicate documentation formats found\"\n",
+        },
+        {
+          name: "Check documentation format",
+          run: "# ADR-004: README.adoc is canonical estate-wide. A lone README.adoc\n# is correct and needs no action — do NOT nudge it to Markdown. A\n# README.md is only produced by deriving it (readme-derive-reusable.yml)\n# for repos that declare a [publishing.readme] consumer. GitHub renders\n# .adoc natively; only external Markdown-only consumers (Glama, the\n# profile repo) need the derived .md.\n\n# Community-health files that GitHub special-cases by exact .md name:\n# 3-practice/SECURITY.md, CONTRIBUTING.md (can redirect), CODE_OF_CONDUCT.md, CHANGELOG.md\n\n# Check other docs are .adoc\nfor doc in ARCHITECTURE ROADMAP PHILOSOPHY INSTALL; do\n  if [ -f \"${doc}.md\" ]; then\n    echo \"::warning::${doc}.md should be ${doc}.adoc\"\n  fi\ndone\n\necho \"✓ Documentation format check complete\"\n",
+        },
+        {
+          name: "Verify GitHub-required files exist",
+          run: "# These files are required/preferred by GitHub in .md format\nMISSING=0\n\nif [ ! -f \"3-practice/SECURITY.md\" ]; then\n  echo \"::warning::3-practice/SECURITY.md not found (required for GitHub security tab)\"\nfi\n\nif [ ! -f \"LICENSE.txt\" ] && [ ! -f \"LICENSE\" ]; then\n  echo \"::warning::LICENSE file not found\"\nfi\n\necho \"✓ GitHub-required files check complete\"\n",
+        },
+      ],
+    },
+  },
+}

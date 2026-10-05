@@ -21,71 +21,74 @@
 # Callers opt in per job. When the secrets are absent the job skips with a
 # warning instead of failing, so adding this to a repo is safe before the
 # credentials land; pass `require: true` to make that case red on purpose.
-name: Tailscale connect (reusable)
-
-on:
-  workflow_call:
-    inputs:
-      tags:
-        description: 'Tailscale tags to apply to the ephemeral CI node'
-        required: false
-        type: string
-        default: 'tag:ci'
-      ping:
-        description: 'Comma-separated tailnet hosts to ping for readiness'
-        required: false
-        type: string
-        default: ''
-      version:
-        description: 'Tailscale client version pin (empty = action default)'
-        required: false
-        type: string
-        default: ''
-      require:
-        description: 'Fail instead of skipping when TS_OAUTH_* are unavailable'
-        required: false
-        type: boolean
-        default: false
-
-permissions:
-  contents: read
-
-jobs:
-  connect:
-    name: Join tailnet
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      connected: ${{ steps.gate.outputs.ready }}
-    steps:
-      - name: Check tailnet credentials
-        id: gate
-        env:
-          TS_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          TS_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
-          REQUIRE: ${{ inputs.require }}
-        run: |
-          if [ -n "$TS_ID" ] && [ -n "$TS_SECRET" ]; then
-            printf 'ready=true\n' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          printf 'ready=false\n' >> "$GITHUB_OUTPUT"
-          if [ "$REQUIRE" = "true" ]; then
-            echo "::error::TS_OAUTH_CLIENT_ID / TS_OAUTH_SECRET are not available to this job." \
-              "Set them on the repository, environment or org (Tailscale admin console ->" \
-              "OAuth clients, scope auth_keys), or drop require: true."
-            exit 1
-          fi
-          echo "::warning::No Tailscale credentials available -- skipping the tailnet connect step." \
-            "Any job that depends on tailnet reachability will fail to reach private endpoints."
-
-      # Pinned per estate policy (SHA pins everywhere); refresh with `gh actions-lock`.
-      - name: Connect to Tailscale
-        if: steps.gate.outputs.ready == 'true'
-        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: ${{ inputs.tags }}
-          version: ${{ inputs.version }}
-          ping: ${{ inputs.ping }}
+{
+  name: "Tailscale connect (reusable)",
+  on: {
+    workflow_call: {
+      inputs: {
+        tags: {
+          description: "Tailscale tags to apply to the ephemeral CI node",
+          required: false,
+          type: "string",
+          default: "tag:ci",
+        },
+        ping: {
+          description: "Comma-separated tailnet hosts to ping for readiness",
+          required: false,
+          type: "string",
+          default: "",
+        },
+        version: {
+          description: "Tailscale client version pin (empty = action default)",
+          required: false,
+          type: "string",
+          default: "",
+        },
+        require: {
+          description: "Fail instead of skipping when TS_OAUTH_* are unavailable",
+          required: false,
+          type: "boolean",
+          default: false,
+        },
+      },
+    },
+  },
+  permissions: {
+    contents: "read",
+  },
+  jobs: {
+    connect: {
+      name: "Join tailnet",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      outputs: {
+        connected: "${{ steps.gate.outputs.ready }}",
+      },
+      steps: [
+        {
+          name: "Check tailnet credentials",
+          id: "gate",
+          env: {
+            TS_ID: "${{ secrets.TS_OAUTH_CLIENT_ID }}",
+            TS_SECRET: "${{ secrets.TS_OAUTH_SECRET }}",
+            REQUIRE: "${{ inputs.require }}",
+          },
+          run: "if [ -n \"$TS_ID\" ] && [ -n \"$TS_SECRET\" ]; then\n  printf 'ready=true\\n' >> \"$GITHUB_OUTPUT\"\n  exit 0\nfi\nprintf 'ready=false\\n' >> \"$GITHUB_OUTPUT\"\nif [ \"$REQUIRE\" = \"true\" ]; then\n  echo \"::error::TS_OAUTH_CLIENT_ID / TS_OAUTH_SECRET are not available to this job.\" \\\n    \"Set them on the repository, environment or org (Tailscale admin console ->\" \\\n    \"OAuth clients, scope auth_keys), or drop require: true.\"\n  exit 1\nfi\necho \"::warning::No Tailscale credentials available -- skipping the tailnet connect step.\" \\\n  \"Any job that depends on tailnet reachability will fail to reach private endpoints.\"\n",
+        },
+        # Pinned per estate policy (SHA pins everywhere); refresh with `gh actions-lock`.
+        {
+          name: "Connect to Tailscale",
+          if: "steps.gate.outputs.ready == 'true'",
+          uses: "tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd", # v4.2.0
+          with: {
+            oauth-client-id: "${{ secrets.TS_OAUTH_CLIENT_ID }}",
+            oauth-secret: "${{ secrets.TS_OAUTH_SECRET }}",
+            tags: "${{ inputs.tags }}",
+            version: "${{ inputs.version }}",
+            ping: "${{ inputs.ping }}",
+          },
+        },
+      ],
+    },
+  },
+}

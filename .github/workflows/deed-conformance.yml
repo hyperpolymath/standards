@@ -1,42 +1,50 @@
 # This workflow is managed by gh actions-lock.
 # SPDX-License-Identifier: MPL-2.0
-name: deed-conformance
-
-# Conformance lane for the DEED grammar (standards#837). Three gates:
-# validator self-test → fixture corpus → every committed *.deed file.
-
-on:
-  push:
-    paths:
-      - '**.deed'
-      - '1-formats/deed/**'
-      - '.github/workflows/deed-conformance.yml'
-  pull_request:
-    paths:
-      - '**.deed'
-      - '1-formats/deed/**'
-      - '.github/workflows/deed-conformance.yml'
-
-permissions: {}
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: validator self-test
-        run: python3 1-formats/deed/tools/deed_lint.py --self-test
-      - name: fixture corpus (valid must pass, invalid must fail)
-        run: python3 1-formats/deed/tools/deed_lint.py --fixtures 1-formats/deed/tools/fixtures
-      - name: lint every committed deed
-        run: |
-          set -e
-          FILES=$(find . -name '*.deed' -not -path './1-formats/deed/tools/fixtures/invalid/*' -print)
-          if [ -z "$FILES" ]; then
-            echo "no committed .deed files yet — fixtures carry the gate"
-            exit 0
-          fi
-          echo "$FILES" | xargs python3 1-formats/deed/tools/deed_lint.py
+{
+  name: "deed-conformance",
+  # Conformance lane for the DEED grammar (standards#837). Three gates:
+  # validator self-test → fixture corpus → every committed *.deed file.
+  on: {
+    push: {
+      paths: [
+        "**.deed",
+        "1-formats/deed/**",
+        ".github/workflows/deed-conformance.yml",
+      ],
+    },
+    pull_request: {
+      paths: [
+        "**.deed",
+        "1-formats/deed/**",
+        ".github/workflows/deed-conformance.yml",
+      ],
+    },
+  },
+  permissions: {},
+  jobs: {
+    lint: {
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            persist-credentials: false,
+          },
+        },
+        {
+          name: "validator self-test",
+          run: "python3 1-formats/deed/tools/deed_lint.py --self-test",
+        },
+        {
+          name: "fixture corpus (valid must pass, invalid must fail)",
+          run: "python3 1-formats/deed/tools/deed_lint.py --fixtures 1-formats/deed/tools/fixtures",
+        },
+        {
+          name: "lint every committed deed",
+          run: "set -e\nFILES=$(find . -name '*.deed' -not -path './1-formats/deed/tools/fixtures/invalid/*' -print)\nif [ -z \"$FILES\" ]; then\n  echo \"no committed .deed files yet — fixtures carry the gate\"\n  exit 0\nfi\necho \"$FILES\" | xargs python3 1-formats/deed/tools/deed_lint.py\n",
+        },
+      ],
+    },
+  },
+}

@@ -2,86 +2,92 @@
 # SPDX-License-Identifier: MPL-2.0
 # This workflow is managed by gh actions-lock.
 # Prevention workflow - runs OpenSSF Scorecard and fails on low scores
-name: OpenSSF Scorecard Enforcer
-
-on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: '0 6 * * 1'  # Weekly on Monday
-  workflow_dispatch:
-
-permissions:
-  actions: read
-  contents: read
-
-jobs:
-  scorecard:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      security-events: write
-      id-token: write  # For OIDC
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run Scorecard
-        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
-        with:
-          results_file: results.json
-          results_format: json
-          publish_results: true
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: scorecard-results
-          path: results.json
-          retention-days: 5
-
-  check-score:
-    needs: scorecard
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: scorecard-results
-
-      - name: Check minimum score
-        run: |
-          # Parse score from results.json
-          SCORE=$(jq -r '.score // 0' results.json 2>/dev/null || echo "0")
-
-          echo "OpenSSF Scorecard Score: $SCORE"
-
-          # Minimum acceptable score (0-10 scale)
-          MIN_SCORE=5
-
-          if [ "$(echo "$SCORE < $MIN_SCORE" | bc -l)" = "1" ]; then
-            echo "::error::Scorecard score $SCORE is below minimum $MIN_SCORE"
-            exit 1
-          fi
-
-  check-critical:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Check 3-practice/SECURITY.md exists
-        run: |
-          if [ ! -f "3-practice/SECURITY.md" ]; then
-            echo "::error::3-practice/SECURITY.md is required"
-            exit 1
-          fi
-
-      - name: Check for pinned dependencies
-        run: |
-          # Check workflows for unpinned actions
-          unpinned=$(grep -r "uses:.*@v[0-9]" .github/workflows/*.yml 2>/dev/null | grep -v "#" | head -5)
-          if [ -n "$unpinned" ]; then
-            echo "::warning::Found unpinned actions:"
-            echo "$unpinned"
-          fi
+{
+  name: "OpenSSF Scorecard Enforcer",
+  on: {
+    push: {
+      branches: [
+        "main",
+      ],
+    },
+    schedule: [
+      {
+        cron: "0 6 * * 1", # Weekly on Monday
+      },
+    ],
+    workflow_dispatch: null,
+  },
+  permissions: {
+    actions: "read",
+    contents: "read",
+  },
+  jobs: {
+    scorecard: {
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 15,
+      permissions: {
+        security-events: "write",
+        id-token: "write", # For OIDC
+      },
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+          with: {
+            persist-credentials: false,
+          },
+        },
+        {
+          name: "Run Scorecard",
+          uses: "ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc", # v2.4.4
+          with: {
+            results_file: "results.json",
+            results_format: "json",
+            publish_results: true,
+          },
+        },
+        {
+          uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", # v7.0.1
+          with: {
+            name: "scorecard-results",
+            path: "results.json",
+            retention-days: 5,
+          },
+        },
+      ],
+    },
+    check-score: {
+      needs: "scorecard",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      steps: [
+        {
+          uses: "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", # v8.0.1
+          with: {
+            name: "scorecard-results",
+          },
+        },
+        {
+          name: "Check minimum score",
+          run: "# Parse score from results.json\nSCORE=$(jq -r '.score // 0' results.json 2>/dev/null || echo \"0\")\n\necho \"OpenSSF Scorecard Score: $SCORE\"\n\n# Minimum acceptable score (0-10 scale)\nMIN_SCORE=5\n\nif [ \"$(echo \"$SCORE < $MIN_SCORE\" | bc -l)\" = \"1\" ]; then\n  echo \"::error::Scorecard score $SCORE is below minimum $MIN_SCORE\"\n  exit 1\nfi\n",
+        },
+      ],
+    },
+    check-critical: {
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      steps: [
+        {
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "Check 3-practice/SECURITY.md exists",
+          run: "if [ ! -f \"3-practice/SECURITY.md\" ]; then\n  echo \"::error::3-practice/SECURITY.md is required\"\n  exit 1\nfi\n",
+        },
+        {
+          name: "Check for pinned dependencies",
+          run: "# Check workflows for unpinned actions\nunpinned=$(grep -r \"uses:.*@v[0-9]\" .github/workflows/*.yml 2>/dev/null | grep -v \"#\" | head -5)\nif [ -n \"$unpinned\" ]; then\n  echo \"::warning::Found unpinned actions:\"\n  echo \"$unpinned\"\nfi\n",
+        },
+      ],
+    },
+  },
+}

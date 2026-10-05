@@ -5,262 +5,114 @@
 #
 # Monitors the status of all check suites in the repository to ensure
 # CI health and catch misconfigurations early.
-name: "🟡 CHECK: Check Suite Monitor"
-
-on:
-  check_suite:
-    types: [completed, requested, rerequested]
-  workflow_run:
-    workflows: ["🔴 GATE: *", "🟡 CHECK: *"]
-    types: [completed]
-
-# Least privilege: both monitor jobs only read the event payload and log it
-# (the github-script step makes no API calls — see its "would create an
-# issue" comment). Event payloads need no grants; `checks/pull-requests/
-# actions: read` were dead.
-permissions:
-  contents: read
-
-jobs:
-  monitor-check-suite:
-    name: Monitor Check Suite Completion
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Get Check Suite Details
-        id: check-suite
-        run: |
-          echo "🔍 Retrieving check suite information..."
-          
-          # Get the check suite that triggered this workflow
-          CHECK_SUITE_ID="${{ github.event.check_suite.id }}"
-          REPO="${{ github.repository }}"
-          
-          if [ -n "$CHECK_SUITE_ID" ]; then
-            echo "check_suite_id=$CHECK_SUITE_ID" >> $GITHUB_OUTPUT
-            
-            # Get check suite details via GitHub API
-            # Note: This would require a token with appropriate permissions
-            # For now, we'll use the context information
-            
-            echo "repository=$REPO" >> $GITHUB_OUTPUT
-            echo "event_type=${{ github.event.action }}" >> $GITHUB_OUTPUT
-            
-            # Extract branch information
-            if [ "${{ github.event.check_suite.pull_requests[0].id }}" != "" ]; then
-              echo "is_pr=true" >> $GITHUB_OUTPUT
-              echo "pr_number=${{ github.event.check_suite.pull_requests[0].number }}" >> $GITHUB_OUTPUT
-            else
-              echo "is_pr=false" >> $GITHUB_OUTPUT
-            fi
-            
-            echo "head_sha=${{ github.event.check_suite.head_sha }}" >> $GITHUB_OUTPUT
-            echo "conclusion=${{ github.event.check_suite.conclusion }}" >> $GITHUB_OUTPUT
-          else
-            echo "check_suite_id=unknown" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Analyze Check Suite Results
-        id: analyze
-        run: |
-          echo "🔍 Analyzing check suite results..."
-          
-          CONCLUSION="${{ steps.check-suite.outputs.conclusion }}"
-          IS_PR="${{ steps.check-suite.outputs.is_pr }}"
-          REPO="${{ steps.check-suite.outputs.repository }}"
-          
-          case "$CONCLUSION" in
-            "success")
-              echo "status=✅ PASSED" >> $GITHUB_OUTPUT
-              echo "severity=none" >> $GITHUB_OUTPUT
-              ;;
-            "failure")
-              echo "status=❌ FAILED" >> $GITHUB_OUTPUT
-              echo "severity=high" >> $GITHUB_OUTPUT
-              ;;
-            "neutral")
-              echo "status=⚪ NEUTRAL" >> $GITHUB_OUTPUT
-              echo "severity=low" >> $GITHUB_OUTPUT
-              ;;
-            "cancelled"|"timed_out")
-              echo "status=⏹️  ${CONCLUSION^^}" >> $GITHUB_OUTPUT
-              echo "severity=medium" >> $GITHUB_OUTPUT
-              ;;
-            *)
-              echo "status=❓ $CONCLUSION" >> $GITHUB_OUTPUT
-              echo "severity=unknown" >> $GITHUB_OUTPUT
-              ;;
-          esac
-
-      - name: Check Required GATE Workflows
-        if: steps.check-suite.outputs.is_pr == 'true'
-        id: gate-check
-        run: |
-          echo "🔍 Checking required 🔴 GATE workflows..."
-          
-          # List of required GATE workflows
-          REQUIRED_GATES=(
-            "🔴 GATE: Governance"
-            "🔴 GATE: CodeQL"
-            "🔴 GATE: Scorecard"
-            "🔴 GATE: Hypatia Scan"
-            "🔴 GATE: Secret Scanner"
-            "🔴 GATE: Main Estate Audit"
-          )
-          
-          # Get all check runs for this check suite
-          # Note: This is a simplified version - in practice you'd need the GitHub API
-          
-          # For now, we'll just document what should be checked
-          echo "required_gates=${#REQUIRED_GATES[@]}" >> $GITHUB_OUTPUT
-          echo "gate_list=${REQUIRED_GATES[*]}" >> $GITHUB_OUTPUT
-          
-          # In a real implementation, this would query the GitHub API
-          # to get all check runs and verify the required ones passed
-          echo "::notice::This check verifies that all required 🔴 GATE workflows complete successfully"
-
-      - name: Alert on Critical Failures
-        if: steps.analyze.outputs.severity == 'high'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const checkSuiteId = '${{ steps.check-suite.outputs.check_suite_id }}';
-            const conclusion = '${{ steps.check-suite.outputs.conclusion }}';
-            const repo = context.repo;
-            
-            console.log(`Check suite ${checkSuiteId} ${conclusion.toUpperCase()}`);
-            
-            // This would create an issue or send a notification
-            // For now, we'll just log it
-            core.notice(`Check suite failed: ${checkSuiteId}`);
-
-      - name: Log Check Suite Information
-        run: |
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Check Suite Monitor Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Repository:** ${{ steps.check-suite.outputs.repository }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Check Suite ID:** ${{ steps.check-suite.outputs.check_suite_id }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Event Type:** ${{ steps.check-suite.outputs.event_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Head SHA:** ${{ steps.check-suite.outputs.head_sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Conclusion:** ${{ steps.check-suite.outputs.conclusion }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** ${{ steps.analyze.outputs.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Severity:** ${{ steps.analyze.outputs.severity }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "${{ steps.check-suite.outputs.is_pr }}" = "true" ]; then
-            echo "**Pull Request:** #${{ steps.check-suite.outputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Required GATE Workflows:**" >> $GITHUB_STEP_SUMMARY
-            echo "${{ steps.gate-check.outputs.gate_list }}" >> $GITHUB_STEP_SUMMARY
-          fi
-
-  workflow-run-monitor:
-    name: Monitor Workflow Runs
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: github.event_name == 'workflow_run'
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Get Workflow Run Information
-        id: workflow-info
-        run: |
-          echo "workflow_name=${{ github.event.workflow }}" >> $GITHUB_OUTPUT
-          echo "workflow_id=${{ github.event.workflow_run.id }}" >> $GITHUB_OUTPUT
-          echo "conclusion=${{ github.event.workflow_run.conclusion }}" >> $GITHUB_OUTPUT
-          echo "run_number=${{ github.event.workflow_run.run_number }}" >> $GITHUB_OUTPUT
-          echo "head_sha=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
-
-      - name: Analyze GATE Workflow Results
-        if: contains(github.event.workflow, '🔴 GATE:')
-        run: |
-          CONCLUSION="${{ steps.workflow-info.outputs.conclusion }}"
-          WORKFLOW="${{ steps.workflow-info.outputs.workflow_name }}"
-          
-          echo "🔍 Analyzing $WORKFLOW result: $CONCLUSION"
-          
-          case "$CONCLUSION" in
-            "success")
-              echo "::notice::✅ GATE workflow PASSED: $WORKFLOW"
-              ;;
-            "failure")
-              echo "::error::❌ GATE workflow FAILED: $WORKFLOW"
-              echo "This is a blocking failure - the PR cannot be merged"
-              ;;
-            "cancelled"|"timed_out")
-              echo "::warning::⏹️  GATE workflow $CONCLUSION: $WORKFLOW"
-              echo "This needs attention"
-              ;;
-            *)
-              echo "::notice::❓ GATE workflow $CONCLUSION: $WORKFLOW"
-              ;;
-          esac
-
-      - name: Track CI Health Metrics
-        run: |
-          echo "📊 Tracking CI health metrics..."
-          
-          # This would collect and store metrics about CI performance
-          # For now, we'll just document the pattern
-          
-          echo "## CI Health Metrics" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Workflow:** ${{ steps.workflow-info.outputs.workflow_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Run Number:** ${{ steps.workflow-info.outputs.run_number }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Conclusion:** ${{ steps.workflow-info.outputs.conclusion }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Head SHA:** ${{ steps.workflow-info.outputs.head_sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "In a full implementation, this would track:" >> $GITHUB_STEP_SUMMARY
-          echo "- Average workflow duration" >> $GITHUB_STEP_SUMMARY
-          echo "- Failure rates by workflow" >> $GITHUB_STEP_SUMMARY
-          echo "- Flaky workflow detection" >> $GITHUB_STEP_SUMMARY
-
-  summary:
-    name: Check Suite Monitor Summary
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [monitor-check-suite, workflow-run-monitor]
-    if: always()
-
-    steps:
-      - name: Generate Summary
-        run: |
-          echo "## Check Suite Monitor - Final Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### Check Suite Monitoring" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.monitor-check-suite.result }}" = "success" ]; then
-            echo "✅ Check suite monitoring: **PASSED**" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ needs.monitor-check-suite.result }}" = "failure" ]; then
-            echo "❌ Check suite monitoring: **FAILED**" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚪ Check suite monitoring: **SKIPPED**" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Workflow Run Monitoring" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.workflow-run-monitor.result }}" = "success" ]; then
-            echo "✅ Workflow run monitoring: **PASSED**" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ needs.workflow-run-monitor.result }}" = "failure" ]; then
-            echo "❌ Workflow run monitoring: **FAILED**" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚪ Workflow run monitoring: **SKIPPED**" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### About This Workflow" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "This workflow monitors the health of your CI/CD pipeline by:" >> $GITHUB_STEP_SUMMARY
-          echo "- Tracking check suite completion status" >> $GITHUB_STEP_SUMMARY
-          echo "- Alerting on critical failures" >> $GITHUB_STEP_SUMMARY
-          echo "- Verifying required GATE workflows" >> $GITHUB_STEP_SUMMARY
-          echo "- Collecting CI health metrics" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "This helps catch CI misconfigurations and flaky workflows early." >> $GITHUB_STEP_SUMMARY
+{
+  name: "🟡 CHECK: Check Suite Monitor",
+  on: {
+    check_suite: {
+      types: [
+        "completed",
+        "requested",
+        "rerequested",
+      ],
+    },
+    workflow_run: {
+      workflows: [
+        "🔴 GATE: *",
+        "🟡 CHECK: *",
+      ],
+      types: [
+        "completed",
+      ],
+    },
+  },
+  # Least privilege: both monitor jobs only read the event payload and log it
+  # (the github-script step makes no API calls — see its "would create an
+  # issue" comment). Event payloads need no grants; `checks/pull-requests/
+  # actions: read` were dead.
+  permissions: {
+    contents: "read",
+  },
+  jobs: {
+    monitor-check-suite: {
+      name: "Monitor Check Suite Completion",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      steps: [
+        {
+          name: "Checkout repository",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "Get Check Suite Details",
+          id: "check-suite",
+          run: "echo \"🔍 Retrieving check suite information...\"\n\n# Get the check suite that triggered this workflow\nCHECK_SUITE_ID=\"${{ github.event.check_suite.id }}\"\nREPO=\"${{ github.repository }}\"\n\nif [ -n \"$CHECK_SUITE_ID\" ]; then\n  echo \"check_suite_id=$CHECK_SUITE_ID\" >> $GITHUB_OUTPUT\n  \n  # Get check suite details via GitHub API\n  # Note: This would require a token with appropriate permissions\n  # For now, we'll use the context information\n  \n  echo \"repository=$REPO\" >> $GITHUB_OUTPUT\n  echo \"event_type=${{ github.event.action }}\" >> $GITHUB_OUTPUT\n  \n  # Extract branch information\n  if [ \"${{ github.event.check_suite.pull_requests[0].id }}\" != \"\" ]; then\n    echo \"is_pr=true\" >> $GITHUB_OUTPUT\n    echo \"pr_number=${{ github.event.check_suite.pull_requests[0].number }}\" >> $GITHUB_OUTPUT\n  else\n    echo \"is_pr=false\" >> $GITHUB_OUTPUT\n  fi\n  \n  echo \"head_sha=${{ github.event.check_suite.head_sha }}\" >> $GITHUB_OUTPUT\n  echo \"conclusion=${{ github.event.check_suite.conclusion }}\" >> $GITHUB_OUTPUT\nelse\n  echo \"check_suite_id=unknown\" >> $GITHUB_OUTPUT\nfi\n",
+        },
+        {
+          name: "Analyze Check Suite Results",
+          id: "analyze",
+          run: "echo \"🔍 Analyzing check suite results...\"\n\nCONCLUSION=\"${{ steps.check-suite.outputs.conclusion }}\"\nIS_PR=\"${{ steps.check-suite.outputs.is_pr }}\"\nREPO=\"${{ steps.check-suite.outputs.repository }}\"\n\ncase \"$CONCLUSION\" in\n  \"success\")\n    echo \"status=✅ PASSED\" >> $GITHUB_OUTPUT\n    echo \"severity=none\" >> $GITHUB_OUTPUT\n    ;;\n  \"failure\")\n    echo \"status=❌ FAILED\" >> $GITHUB_OUTPUT\n    echo \"severity=high\" >> $GITHUB_OUTPUT\n    ;;\n  \"neutral\")\n    echo \"status=⚪ NEUTRAL\" >> $GITHUB_OUTPUT\n    echo \"severity=low\" >> $GITHUB_OUTPUT\n    ;;\n  \"cancelled\"|\"timed_out\")\n    echo \"status=⏹️  ${CONCLUSION^^}\" >> $GITHUB_OUTPUT\n    echo \"severity=medium\" >> $GITHUB_OUTPUT\n    ;;\n  *)\n    echo \"status=❓ $CONCLUSION\" >> $GITHUB_OUTPUT\n    echo \"severity=unknown\" >> $GITHUB_OUTPUT\n    ;;\nesac\n",
+        },
+        {
+          name: "Check Required GATE Workflows",
+          if: "steps.check-suite.outputs.is_pr == 'true'",
+          id: "gate-check",
+          run: "echo \"🔍 Checking required 🔴 GATE workflows...\"\n\n# List of required GATE workflows\nREQUIRED_GATES=(\n  \"🔴 GATE: Governance\"\n  \"🔴 GATE: CodeQL\"\n  \"🔴 GATE: Scorecard\"\n  \"🔴 GATE: Hypatia Scan\"\n  \"🔴 GATE: Secret Scanner\"\n  \"🔴 GATE: Main Estate Audit\"\n)\n\n# Get all check runs for this check suite\n# Note: This is a simplified version - in practice you'd need the GitHub API\n\n# For now, we'll just document what should be checked\necho \"required_gates=${#REQUIRED_GATES[@]}\" >> $GITHUB_OUTPUT\necho \"gate_list=${REQUIRED_GATES[*]}\" >> $GITHUB_OUTPUT\n\n# In a real implementation, this would query the GitHub API\n# to get all check runs and verify the required ones passed\necho \"::notice::This check verifies that all required 🔴 GATE workflows complete successfully\"\n",
+        },
+        {
+          name: "Alert on Critical Failures",
+          if: "steps.analyze.outputs.severity == 'high'",
+          uses: "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3", # v9.0.0
+          with: {
+            script: "const checkSuiteId = '${{ steps.check-suite.outputs.check_suite_id }}';\nconst conclusion = '${{ steps.check-suite.outputs.conclusion }}';\nconst repo = context.repo;\n\nconsole.log(`Check suite ${checkSuiteId} ${conclusion.toUpperCase()}`);\n\n// This would create an issue or send a notification\n// For now, we'll just log it\ncore.notice(`Check suite failed: ${checkSuiteId}`);\n",
+          },
+        },
+        {
+          name: "Log Check Suite Information",
+          run: "echo \"\" >> $GITHUB_STEP_SUMMARY\necho \"## Check Suite Monitor Report\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"**Repository:** ${{ steps.check-suite.outputs.repository }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Check Suite ID:** ${{ steps.check-suite.outputs.check_suite_id }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Event Type:** ${{ steps.check-suite.outputs.event_type }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Head SHA:** ${{ steps.check-suite.outputs.head_sha }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Conclusion:** ${{ steps.check-suite.outputs.conclusion }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Status:** ${{ steps.analyze.outputs.status }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Severity:** ${{ steps.analyze.outputs.severity }}\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\n\nif [ \"${{ steps.check-suite.outputs.is_pr }}\" = \"true\" ]; then\n  echo \"**Pull Request:** #${{ steps.check-suite.outputs.pr_number }}\" >> $GITHUB_STEP_SUMMARY\n  echo \"\" >> $GITHUB_STEP_SUMMARY\n  echo \"**Required GATE Workflows:**\" >> $GITHUB_STEP_SUMMARY\n  echo \"${{ steps.gate-check.outputs.gate_list }}\" >> $GITHUB_STEP_SUMMARY\nfi\n",
+        },
+      ],
+    },
+    workflow-run-monitor: {
+      name: "Monitor Workflow Runs",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      if: "github.event_name == 'workflow_run'",
+      steps: [
+        {
+          name: "Checkout repository",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
+        },
+        {
+          name: "Get Workflow Run Information",
+          id: "workflow-info",
+          run: "echo \"workflow_name=${{ github.event.workflow }}\" >> $GITHUB_OUTPUT\necho \"workflow_id=${{ github.event.workflow_run.id }}\" >> $GITHUB_OUTPUT\necho \"conclusion=${{ github.event.workflow_run.conclusion }}\" >> $GITHUB_OUTPUT\necho \"run_number=${{ github.event.workflow_run.run_number }}\" >> $GITHUB_OUTPUT\necho \"head_sha=${{ github.event.workflow_run.head_sha }}\" >> $GITHUB_OUTPUT\n",
+        },
+        {
+          name: "Analyze GATE Workflow Results",
+          if: "contains(github.event.workflow, '🔴 GATE:')",
+          run: "CONCLUSION=\"${{ steps.workflow-info.outputs.conclusion }}\"\nWORKFLOW=\"${{ steps.workflow-info.outputs.workflow_name }}\"\n\necho \"🔍 Analyzing $WORKFLOW result: $CONCLUSION\"\n\ncase \"$CONCLUSION\" in\n  \"success\")\n    echo \"::notice::✅ GATE workflow PASSED: $WORKFLOW\"\n    ;;\n  \"failure\")\n    echo \"::error::❌ GATE workflow FAILED: $WORKFLOW\"\n    echo \"This is a blocking failure - the PR cannot be merged\"\n    ;;\n  \"cancelled\"|\"timed_out\")\n    echo \"::warning::⏹️  GATE workflow $CONCLUSION: $WORKFLOW\"\n    echo \"This needs attention\"\n    ;;\n  *)\n    echo \"::notice::❓ GATE workflow $CONCLUSION: $WORKFLOW\"\n    ;;\nesac\n",
+        },
+        {
+          name: "Track CI Health Metrics",
+          run: "echo \"📊 Tracking CI health metrics...\"\n\n# This would collect and store metrics about CI performance\n# For now, we'll just document the pattern\n\necho \"## CI Health Metrics\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"- **Workflow:** ${{ steps.workflow-info.outputs.workflow_name }}\" >> $GITHUB_STEP_SUMMARY\necho \"- **Run Number:** ${{ steps.workflow-info.outputs.run_number }}\" >> $GITHUB_STEP_SUMMARY\necho \"- **Conclusion:** ${{ steps.workflow-info.outputs.conclusion }}\" >> $GITHUB_STEP_SUMMARY\necho \"- **Head SHA:** ${{ steps.workflow-info.outputs.head_sha }}\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"In a full implementation, this would track:\" >> $GITHUB_STEP_SUMMARY\necho \"- Average workflow duration\" >> $GITHUB_STEP_SUMMARY\necho \"- Failure rates by workflow\" >> $GITHUB_STEP_SUMMARY\necho \"- Flaky workflow detection\" >> $GITHUB_STEP_SUMMARY\n",
+        },
+      ],
+    },
+    summary: {
+      name: "Check Suite Monitor Summary",
+      runs-on: "ubuntu-latest",
+      timeout-minutes: 10,
+      needs: [
+        "monitor-check-suite",
+        "workflow-run-monitor",
+      ],
+      if: "always()",
+      steps: [
+        {
+          name: "Generate Summary",
+          run: "echo \"## Check Suite Monitor - Final Summary\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\n\necho \"### Check Suite Monitoring\" >> $GITHUB_STEP_SUMMARY\nif [ \"${{ needs.monitor-check-suite.result }}\" = \"success\" ]; then\n  echo \"✅ Check suite monitoring: **PASSED**\" >> $GITHUB_STEP_SUMMARY\nelif [ \"${{ needs.monitor-check-suite.result }}\" = \"failure\" ]; then\n  echo \"❌ Check suite monitoring: **FAILED**\" >> $GITHUB_STEP_SUMMARY\nelse\n  echo \"⚪ Check suite monitoring: **SKIPPED**\" >> $GITHUB_STEP_SUMMARY\nfi\n\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"### Workflow Run Monitoring\" >> $GITHUB_STEP_SUMMARY\nif [ \"${{ needs.workflow-run-monitor.result }}\" = \"success\" ]; then\n  echo \"✅ Workflow run monitoring: **PASSED**\" >> $GITHUB_STEP_SUMMARY\nelif [ \"${{ needs.workflow-run-monitor.result }}\" = \"failure\" ]; then\n  echo \"❌ Workflow run monitoring: **FAILED**\" >> $GITHUB_STEP_SUMMARY\nelse\n  echo \"⚪ Workflow run monitoring: **SKIPPED**\" >> $GITHUB_STEP_SUMMARY\nfi\n\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"### About This Workflow\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"This workflow monitors the health of your CI/CD pipeline by:\" >> $GITHUB_STEP_SUMMARY\necho \"- Tracking check suite completion status\" >> $GITHUB_STEP_SUMMARY\necho \"- Alerting on critical failures\" >> $GITHUB_STEP_SUMMARY\necho \"- Verifying required GATE workflows\" >> $GITHUB_STEP_SUMMARY\necho \"- Collecting CI health metrics\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"This helps catch CI misconfigurations and flaky workflows early.\" >> $GITHUB_STEP_SUMMARY\n",
+        },
+      ],
+    },
+  },
+}

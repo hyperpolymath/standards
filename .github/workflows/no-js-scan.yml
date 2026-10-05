@@ -1,108 +1,50 @@
 # This workflow is managed by gh actions-lock.
 # SPDX-License-Identifier: MPL-2.0
 # This workflow is managed by gh actions-lock.
-name: No-JS Scan (warn-first)
-
-# Estate policy: no hand-authored JavaScript/TypeScript source
-# (see standards docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc). This workflow is
-# WARN-FIRST: it reports the authored-JS surface for migration but never fails
-# the build. The authoritative hard-block for NEW JS in non-carve-out paths is
-# hypatia (cicd_rules/javascript_detected); this is an additive companion.
-
-on:
-  # NO path filter, deliberately. The previous filter matched only
-  # **/*.{js,jsx,mjs,cjs,ts,tsx} - precisely the files estate policy bans - so
-  # the better the estate complied, the more reliably this required check never
-  # ran and deadlocked every PR. The scan is a cheap grep; always run it.
-  push:
-    branches: [main]
-  pull_request:
-
-# Estate guardrail: cancel superseded runs (read-only check, no mutation).
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  actions: read
-  contents: read
-
-jobs:
-  scan-authored-js:
-    timeout-minutes: 10
-    name: Scan for hand-authored JavaScript/TypeScript
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
-
-      - name: Report authored JS/TS (warn-first, non-blocking)
-        shell: bash
-        run: |
-          # Exclude only things that are NOT hand-authored source: vendored
-          # (node_modules, deps, vendor, .git), generated/compiled (*.res.js,
-          # *.res.mjs, lib/{js,es6,bs}, out, dist, .deno, generated/, *.min.js),
-          # and declaration headers (*.d.ts). Everything else is reported.
-          mapfile -t hits < <(
-            find . \
-              \( -path './.git' -o -name node_modules -o -path '*/deps/*' \
-                 -o -path '*/vendor/*' -o -path '*/lib/js/*' -o -path '*/lib/es6/*' \
-                 -o -path '*/lib/bs/*' -o -path '*/out/*' -o -path '*/dist/*' \
-                 -o -path '*/.deno/*' -o -path '*/generated/*' \) -prune -o \
-              -type f \
-              \( -name '*.js' -o -name '*.jsx' -o -name '*.mjs' -o -name '*.cjs' \
-                 -o -name '*.ts' -o -name '*.tsx' \) \
-              ! -name '*.res.js' ! -name '*.res.mjs' ! -name '*.min.js' ! -name '*.d.ts' \
-              -print 2>/dev/null | sort || true
-          )
-
-          count=${#hits[@]}
-
-          {
-            echo "# No-JS scan (warn-first)"
-            echo
-            echo "Estate policy: **no hand-authored JavaScript/TypeScript source.**"
-            echo "Destination is AffineScript -> typed-wasm, or Rust + Zig -> wasm."
-            echo "This check is **non-blocking** — it reports the migration surface only."
-            echo "Authoritative hard-block for new files: hypatia \`cicd_rules/javascript_detected\`."
-            echo "Policy: standards \`docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc\`."
-            echo
-            echo "**Hand-authored JS/TS files found: ${count}**"
-            if [ "${count}" -gt 0 ]; then
-              echo
-              echo '| # | File |'
-              echo '|---|------|'
-              i=0
-              for f in "${hits[@]}"; do
-                i=$((i + 1))
-                echo "| ${i} | \`${f#./}\` |"
-              done
-            else
-              echo
-              echo "No hand-authored JavaScript/TypeScript found. :white_check_mark:"
-            fi
-          } >> "${GITHUB_STEP_SUMMARY}"
-
-          # Ratchet. The existing files are debt, not a blocker; what is
-          # forbidden is ADDING to them. Reading the baseline from a committed
-          # file makes every reduction a visible, reviewable commit.
-          baseline_file=".github/no-js-baseline.txt"
-          baseline=$(tr -cd '0-9' < "${baseline_file}" 2>/dev/null || echo "")
-          if [ -z "${baseline}" ]; then
-            echo "::error title=No-JS ratchet::${baseline_file} is missing or not a number."
-            echo "A ratchet with no baseline cannot fail, which is the defect this replaced."
-            exit 1
-          fi
-
-          echo "count=${count} baseline=${baseline}"
-
-          if [ "${count}" -gt "${baseline}" ]; then
-            echo "::error title=No-JS ratchet::${count} hand-authored JS/TS files, baseline is ${baseline}. Adding hand-authored JS/TS is not permitted; estate target is AffineScript->typed-wasm or Rust+Zig->wasm. See docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc."
-            exit 1
-          fi
-
-          if [ "${count}" -lt "${baseline}" ]; then
-            echo "::notice title=No-JS ratchet::${count} < baseline ${baseline}. Lower ${baseline_file} to ${count} to lock the improvement in."
-          fi
-
-          exit 0
+{
+  name: "No-JS Scan (warn-first)",
+  # Estate policy: no hand-authored JavaScript/TypeScript source
+  # (see standards docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc). This workflow is
+  # WARN-FIRST: it reports the authored-JS surface for migration but never fails
+  # the build. The authoritative hard-block for NEW JS in non-carve-out paths is
+  # hypatia (cicd_rules/javascript_detected); this is an additive companion.
+  on: {
+    # NO path filter, deliberately. The previous filter matched only
+    # **/*.{js,jsx,mjs,cjs,ts,tsx} - precisely the files estate policy bans - so
+    # the better the estate complied, the more reliably this required check never
+    # ran and deadlocked every PR. The scan is a cheap grep; always run it.
+    push: {
+      branches: [
+        "main",
+      ],
+    },
+    pull_request: null,
+  },
+  # Estate guardrail: cancel superseded runs (read-only check, no mutation).
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    cancel-in-progress: true,
+  },
+  permissions: {
+    actions: "read",
+    contents: "read",
+  },
+  jobs: {
+    scan-authored-js: {
+      timeout-minutes: 10,
+      name: "Scan for hand-authored JavaScript/TypeScript",
+      runs-on: "ubuntu-latest",
+      steps: [
+        {
+          name: "Checkout",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v4
+        },
+        {
+          name: "Report authored JS/TS (warn-first, non-blocking)",
+          shell: "bash",
+          run: "# Exclude only things that are NOT hand-authored source: vendored\n# (node_modules, deps, vendor, .git), generated/compiled (*.res.js,\n# *.res.mjs, lib/{js,es6,bs}, out, dist, .deno, generated/, *.min.js),\n# and declaration headers (*.d.ts). Everything else is reported.\nmapfile -t hits < <(\n  find . \\\n    \\( -path './.git' -o -name node_modules -o -path '*/deps/*' \\\n       -o -path '*/vendor/*' -o -path '*/lib/js/*' -o -path '*/lib/es6/*' \\\n       -o -path '*/lib/bs/*' -o -path '*/out/*' -o -path '*/dist/*' \\\n       -o -path '*/.deno/*' -o -path '*/generated/*' \\) -prune -o \\\n    -type f \\\n    \\( -name '*.js' -o -name '*.jsx' -o -name '*.mjs' -o -name '*.cjs' \\\n       -o -name '*.ts' -o -name '*.tsx' \\) \\\n    ! -name '*.res.js' ! -name '*.res.mjs' ! -name '*.min.js' ! -name '*.d.ts' \\\n    -print 2>/dev/null | sort || true\n)\n\ncount=${#hits[@]}\n\n{\n  echo \"# No-JS scan (warn-first)\"\n  echo\n  echo \"Estate policy: **no hand-authored JavaScript/TypeScript source.**\"\n  echo \"Destination is AffineScript -> typed-wasm, or Rust + Zig -> wasm.\"\n  echo \"This check is **non-blocking** — it reports the migration surface only.\"\n  echo \"Authoritative hard-block for new files: hypatia \\`cicd_rules/javascript_detected\\`.\"\n  echo \"Policy: standards \\`docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc\\`.\"\n  echo\n  echo \"**Hand-authored JS/TS files found: ${count}**\"\n  if [ \"${count}\" -gt 0 ]; then\n    echo\n    echo '| # | File |'\n    echo '|---|------|'\n    i=0\n    for f in \"${hits[@]}\"; do\n      i=$((i + 1))\n      echo \"| ${i} | \\`${f#./}\\` |\"\n    done\n  else\n    echo\n    echo \"No hand-authored JavaScript/TypeScript found. :white_check_mark:\"\n  fi\n} >> \"${GITHUB_STEP_SUMMARY}\"\n\n# Ratchet. The existing files are debt, not a blocker; what is\n# forbidden is ADDING to them. Reading the baseline from a committed\n# file makes every reduction a visible, reviewable commit.\nbaseline_file=\".github/no-js-baseline.txt\"\nbaseline=$(tr -cd '0-9' < \"${baseline_file}\" 2>/dev/null || echo \"\")\nif [ -z \"${baseline}\" ]; then\n  echo \"::error title=No-JS ratchet::${baseline_file} is missing or not a number.\"\n  echo \"A ratchet with no baseline cannot fail, which is the defect this replaced.\"\n  exit 1\nfi\n\necho \"count=${count} baseline=${baseline}\"\n\nif [ \"${count}\" -gt \"${baseline}\" ]; then\n  echo \"::error title=No-JS ratchet::${count} hand-authored JS/TS files, baseline is ${baseline}. Adding hand-authored JS/TS is not permitted; estate target is AffineScript->typed-wasm or Rust+Zig->wasm. See docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc.\"\n  exit 1\nfi\n\nif [ \"${count}\" -lt \"${baseline}\" ]; then\n  echo \"::notice title=No-JS ratchet::${count} < baseline ${baseline}. Lower ${baseline_file} to ${count} to lock the improvement in.\"\nfi\n\nexit 0\n",
+        },
+      ],
+    },
+  },
+}
