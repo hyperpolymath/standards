@@ -2,9 +2,34 @@ K9!
 # SPDX-License-Identifier: MPL-2.0
 # K9 Contractile: Kennel Level (Pure Data)
 # Project metadata for axel-protocol
+#
+# The leash lives at pedigree.security.leash (K9-S014). A top-level `leash`
+# was the old shape: nothing that applies the K9 contract reads it, so the
+# file declared a security level no host enforced.
+#
+# 'Kennel is the honest level for this body: it is a record of literals with
+# no contract annotation anywhere, so it is read, parsed and displayed and
+# never evaluated (§7). The leash a host reads is now the one a host enforces.
 
 {
-  leash = 'Kennel,
+  pedigree = {
+    schema_version = "1.0.0",
+    component_type = "project-metadata",
+    security = {
+      leash = 'Kennel,
+      trust_level = "data-only",
+      allow_network = false,
+      allow_filesystem_write = false,
+      allow_subprocess = false,
+      capabilities = [],
+    },
+    metadata = {
+      name = "axel-project-metadata",
+      version = "0.1.0",
+      description = "Project metadata for axel-protocol; pure data, never evaluated.",
+    },
+    side_effects = [],
+  },
 
   project = {
     name = "axel-protocol",
