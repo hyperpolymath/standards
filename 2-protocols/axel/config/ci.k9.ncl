@@ -2,6 +2,18 @@ K9!
 # SPDX-License-Identifier: MPL-2.0
 # K9 Contractile: Yard Level (Validated Config)
 # CI/CD configuration with Nickel contracts
+#
+# The leash lives at pedigree.security.leash (K9-S014). A top-level `leash`
+# was the old shape: nothing that applies the K9 contract reads it, so the
+# file declared a security level no host enforced.
+#
+# 'Yard and not 'Kennel, because this file is *evaluated*: `Port` and
+# `NonEmptyString` below are Nickel contracts applied to the values that flow
+# through them. K9-CONTRACT-SPEC §7 defines 'Yard as "Nickel contract
+# evaluation. No filesystem, no network, no subprocess. Pure." and 'Kennel as
+# "Nothing. Read, parse, display. No evaluation of any kind." Declaring
+# 'Kennel here would tell a conforming host not to evaluate the contracts this
+# file exists to carry.
 
 let Port = std.contract.from_predicate (fun port =>
   std.is_number port && port >= 1 && port <= 65535
@@ -12,7 +24,24 @@ let NonEmptyString = std.contract.from_predicate (fun s =>
 ) in
 
 {
-  leash = 'Yard,
+  pedigree = {
+    schema_version = "1.0.0",
+    component_type = "ci-configuration",
+    security = {
+      leash = 'Yard,
+      trust_level = "validated-config",
+      allow_network = false,
+      allow_filesystem_write = false,
+      allow_subprocess = false,
+      capabilities = [],
+    },
+    metadata = {
+      name = "axel-ci-config",
+      version = "0.1.0",
+      description = "CI/CD configuration for axel-protocol, typed by Nickel contracts.",
+    },
+    side_effects = [],
+  },
 
   ci = {
     provider = "GitHub Actions" | NonEmptyString,
