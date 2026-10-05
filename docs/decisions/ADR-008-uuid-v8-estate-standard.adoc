@@ -1,0 +1,170 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell
+= ADR-008: Estate UUIDs move to version 8 (PROPOSAL)
+:toc: preamble
+
+[cols="1,4"]
+|===
+| Status | *Proposed*: step 1 of `0-canon/constitution/CHANGE-PROCEDURE.adoc`. Not adopted. `ESTATE-UUID-V7` remains active and binding until this record is decided.
+| Date | 2026-10-05
+| Supersedes (if adopted) | `docs/UUID-V7-ESTATE-STANDARD.adoc` (`ESTATE-UUID-V7` 1.0.0, effective 2026-09-29)
+| Authority sought | normative: the estate identifier format, its checker, its Hypatia rule (`HYP-UUID-001`) and the migration register
+| Origin | Owner ruling, 2026-10-05, via the selection UI: "v8 everywhere", given after the costs below were put to the owner
+|===
+
+== The request
+
+The owner asked that the standards state UUID version 8 as the estate format and
+that an estate-wide campaign be planned to move every repository to it.
+
+This record exists because the request reverses a standard that is six days
+old, and the change procedure does not let a binding standard be replaced by
+an edit. It writes down the request, the design that makes it workable, the
+costs, and the campaign. It performs none of the later steps.
+
+== Context: what version 8 is, and what it is not
+
+RFC 9562 numbers UUID *layouts*, not generations. Version 8 is not "newer
+version 7". It is the RFC's *custom* layout: the RFC fixes only the 4-bit
+version field (`8`) and the 2-bit variant (`10`), and leaves the meaning of the
+other 122 bits to the implementation. The RFC recommends version 7 for new
+time-ordered identifiers.
+
+So "v8 everywhere" is only an identifier *format* once the estate says what its
+122 bits mean. Without that, every repository invents its own layout, and two
+v8 values from two repositories can no longer be compared, ordered or
+validated beyond the version nibble. This record therefore defines the
+estate's v8 layouts. That definition is the substance of the proposal.
+
+What prompted the request: `metadatastician/berrywiki` already mints v8 for
+content-derived import ids (`crates/berrywiki-import/src/marker.rs`:
+SHA-256 of a domain-separated marker, first 16 bytes, version and variant
+set). Re-importing the same CherryTree notebook reproduces the same page ids,
+which is what makes re-import idempotent. Version 7 cannot express that.
+`ESTATE-UUID-V7` has no clause for deterministic identifiers at all; DEED and
+ANCHOR's `#u5` (UUIDv5, SHA-1) literals already sit outside it.
+
+== Proposed decision
+
+All UUIDs created, persisted, exchanged or exposed by an estate repository
+MUST be version 8, variant `10`, under exactly one of the two estate profiles
+below. Lowercase canonical `8-4-4-4-12` text, as before.
+
+=== Profile T: time-ordered (replaces v7)
+
+Bit-for-bit the RFC 9562 §5.7 version 7 layout, with the version nibble set to
+`8`:
+
+----
+ 48 bits  unix_ts_ms   big-endian Unix epoch milliseconds
+  4 bits  ver          0b1000 (8)
+ 12 bits  rand_a       CSPRNG, or the RFC 9562 §6.2 monotonic counter
+  2 bits  var          0b10
+ 62 bits  rand_b       CSPRNG
+----
+
+Every v7 generation rule carries over unchanged: a CSPRNG for the random bits,
+monotonicity within a millisecond where ordering matters, and the timestamp
+never used for authorisation or as an audited event time.
+
+Generation: take a well-tested library's v7 output and set the version nibble
+to `8`. This is the only bit operation permitted, and it is one shared, tested
+function per language, not a per-repository recipe.
+
+=== Profile C: content-derived (replaces v3, v5 and ad-hoc hashing)
+
+----
+ bytes 0..15 of SHA-256( domain ":" name )
+ then: byte 6 high nibble = 0b1000 (ver 8); byte 8 top two bits = 0b10 (var)
+----
+
+`domain` is a registered, repository-unique ASCII string (for example
+`berrywiki-import`). It separates the uses so that one name hashed for two
+purposes cannot collide. Profile C ids are reproducible by design: the same
+domain and name always give the same id. They are not secret and must not be
+used where unpredictability is required.
+
+=== Distinguishing the profiles
+
+A v8 value does not say which profile produced it, and this proposal does not
+spend id bits to make it do so. The profile is part of the field's declared
+type: a schema, API contract or metadata key that holds a v8 id MUST state
+`profile T` or `profile C`. Open question Q1 records the alternative.
+
+== Costs the owner accepted
+
+Put to the owner before the ruling:
+
+. *A second migration within weeks of the first.* `ESTATE-UUID-V7` (effective
+  2026-09-29) is mid-migration. Mitigation: a v7 value maps to profile T by
+  flipping one nibble, reversibly, so a v7 -> v8 alias is a pure function and
+  needs no stored mapping table.
+. *Library support.* Few libraries mint v8 directly. Profile T depends on the
+  shared nibble-flip wrapper; profile C is a few lines over SHA-256.
+. *External validators.* Systems that accept only v4 or v7 will reject v8.
+  External boundaries keep their own formats under the existing "preserve and
+  type explicitly" rule.
+. *Self-description.* A reader cannot tell T from C from the bits alone (Q1).
+. *DEED and ANCHOR.* `#u5` literals would become profile C. That is a format
+  change in two specifications with their own grammars (`anchor.abnf`), and
+  needs its own record.
+
+== Alternatives considered
+
+. *Keep v7 and add a deterministic-id clause* (v8 profile C only where
+  content-derived ids are needed). Smaller and keeps RFC alignment. Not chosen
+  by the owner.
+. *Strict v7; BerryWiki dedupes imports through its stored marker.* Loses
+  reproducible import ids. Not chosen.
+
+== Campaign plan (planned, not started)
+
+End-condition, per `AGENTS.md` §5e: the repository set is the estate census of
+*live, non-archived source repositories*, measured 2026-10-05T13:38Z as
+*401 (hyperpolymath) + 58 (metadatastician) = 459*, re-measured at campaign
+start with the census revision recorded. The campaign stops when every one of
+them has a migration record in state `complete` or `excluded`. `not checked`,
+`unknown`, `partial` and `blocked` remain non-success states, as in
+`ESTATE-UUID-V7`.
+
+Phases, each its own increment that leaves `main` green (ADR-006):
+
+. *P0, ratify.* Steps 2-6 of the change procedure on this record. Nothing below
+  starts before P0 completes.
+. *P1, tooling.* `scripts/check-uuid-v8.sh` (version `8`, variant `10`,
+  profile declared), the Hypatia rule, the governance-reusable job, shared
+  profile T and C generators per estate language (Rust, Zig, Elixir, Julia,
+  Bun/JS for existing JS), and their tests, including planted negatives.
+  `check-uuid-v7.sh` keeps running until P4.
+. *P2, dual-accept.* Write boundaries accept v7 and v8 and emit v8. Every v7
+  read is aliased to profile T by the nibble flip.
+. *P3, repository migration.* Per repository, in census order, with a
+  migration record: inventory, classify, convert literals and fixtures,
+  convert generators, post-cutover scan. Batches are capped by the AGENTS.md
+  §5e session limit; findings go to `dev-notes/inbox/findings.md`.
+. *P4, retire v7.* Remove v7 acceptance and `check-uuid-v7.sh` only once every
+  in-scope repository is `complete` or `excluded`.
+
+Known first entry for P3: `metadatastician/berrywiki`. Its import ids are
+already profile C, apart from the domain-registration step. Its page ids are
+v7 minted by hand from `std::collections::hash_map::RandomState`, which is
+not a CSPRNG. That already breaks `ESTATE-UUID-V7` (hand-rolled bits,
+non-CSPRNG randomness) and will need fixing under either standard.
+
+== Open questions for review
+
+. *Q1: profile in the bits?* Reserve the top bit of `rand_a` (profile T) or
+  of the hash (profile C) as a profile flag, costing one bit of entropy, so
+  ids self-describe. Recommended: no; declare the profile in the type, as
+  above.
+. *Q2: DEED and ANCHOR `#u5`:* migrate to profile C in this campaign, or
+  leave them as an external-format exception? Recommended: separate record.
+. *Q3: profile C hash:* SHA-256 as proposed, or BLAKE3 for speed?
+  Recommended: SHA-256, since it is already used in BerryWiki and is in
+  every standard library.
+
+== What this record does not do
+
+It does not change `ESTATE-UUID-V7`, `scripts/check-uuid-v7.sh`,
+`HYP-UUID-001` or any repository. All of those stay binding and unchanged
+until this proposal is decided.
