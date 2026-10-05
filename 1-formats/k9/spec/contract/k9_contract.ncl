@@ -72,18 +72,18 @@ let ExtensionPrefix = "x-" in
 # ─────────────────────────────────────────────────────────────────────────
 # §5.2 / §8.1 — name shapes, using nothing beyond length and substring
 # ─────────────────────────────────────────────────────────────────────────
-
 let is_digit = fun c =>
   c == "0"
-    || c == "1"
-    || c == "2"
-    || c == "3"
-    || c == "4"
-    || c == "5"
-    || c == "6"
-    || c == "7"
-    || c == "8"
-    || c == "9" in
+  || c == "1"
+  || c == "2"
+  || c == "3"
+  || c == "4"
+  || c == "5"
+  || c == "6"
+  || c == "7"
+  || c == "8"
+  || c == "9"
+in
 
 # A numeric dot-triple whose MAJOR segment equals `major`. Walks the string
 # once. Rejects: non-digits, a leading or trailing dot, an empty segment, a
@@ -109,14 +109,15 @@ let is_semver_of = fun major v =>
         seg_len > 0 && go (i + 1) (dots + 1) 0 false s
       else if is_digit c then
         (first_zero == false || seg_len == 0)
-          && go (i + 1) dots (seg_len + 1) (c == "0") s
+        && go (i + 1) dots (seg_len + 1) (c == "0") s
       else
         false
   in
   # A dot-triple is at least `want` plus "N.N": three more characters.
   std.string.length v >= (std.string.length want + 3)
-    && std.string.substring 0 (std.string.length want) v == want
-    && go 0 0 0 false v in
+  && std.string.substring 0 (std.string.length want) v == want
+  && go 0 0 0 false v
+in
 
 # ─────────────────────────────────────────────────────────────────────────
 # The contract record. Nickel records are recursive, so fields below refer to
@@ -177,8 +178,7 @@ let is_semver_of = fun major v =>
   # pedigree cannot crash on it.
   leash_of = fun pedigree =>
     if std.record.has_field "security" pedigree
-      && std.record.has_field "leash" pedigree.security
-    then
+    && std.record.has_field "leash" pedigree.security then
       pedigree.security.leash
     else
       'Kennel,
@@ -208,13 +208,13 @@ let is_semver_of = fun major v =>
   # after the vendor segment, i.e. "x-vendor.something", never bare "x-vendor".
   is_extension = fun name =>
     std.string.length name > std.string.length ExtensionPrefix
-      && std.string.substring 0 (std.string.length ExtensionPrefix) name
-        == ExtensionPrefix
-      && std.array.length (std.string.split "." name) >= 2,
+    && std.string.substring 0 (std.string.length ExtensionPrefix) name == ExtensionPrefix
+    && std.array.length (std.string.split "." name) >= 2,
 
-  Capability = std.contract.from_predicate (fun name =>
-    is_core name || is_extension name
-  ),
+  Capability =
+    std.contract.from_predicate (fun name =>
+      is_core name || is_extension name
+    ),
 
   # An explicit allow-list. DEFAULT-DENY is expressed by the empty grant: it
   # permits nothing, and "nothing" is the correct answer for an absent grant.
@@ -241,28 +241,25 @@ let is_semver_of = fun major v =>
   required_capabilities = fun security =>
     (
       if std.record.has_field "allow_network" security
-        && security.allow_network
-      then
+      && security.allow_network then
         ["net.fetch"]
       else
         []
     )
-      @ (
-        if std.record.has_field "allow_filesystem_write" security
-          && security.allow_filesystem_write
-        then
-          ["fs.write"]
-        else
-          []
-      )
-      @ (
-        if std.record.has_field "allow_subprocess" security
-          && security.allow_subprocess
-        then
-          ["process.spawn"]
-        else
-          []
-      ),
+    @ (
+      if std.record.has_field "allow_filesystem_write" security
+      && security.allow_filesystem_write then
+        ["fs.write"]
+      else
+        []
+    )
+    @ (
+      if std.record.has_field "allow_subprocess" security
+      && security.allow_subprocess then
+        ["process.spawn"]
+      else
+        []
+    ),
 
   # What the grant fails to cover. Empty iff the pedigree is self-consistent.
   grant_deficit = fun grant security =>
@@ -299,10 +296,10 @@ let is_semver_of = fun major v =>
   authorize_hunt = fun evidence =>
     let unmet =
       (if evidence.signature then [] else ["signature"])
-        @ (if evidence.policy then [] else ["policy"])
-        @ (if evidence.sandbox then [] else ["sandbox"])
-        @ (if evidence.dry_run then [] else ["dry_run"])
-        @ (if evidence.capability_grant then [] else ["capability_grant"])
+      @ (if evidence.policy then [] else ["policy"])
+      @ (if evidence.sandbox then [] else ["sandbox"])
+      @ (if evidence.dry_run then [] else ["dry_run"])
+      @ (if evidence.capability_grant then [] else ["capability_grant"])
     in
     if std.array.length unmet == 0 then
       {
@@ -316,7 +313,7 @@ let is_semver_of = fun major v =>
         enforced_level = 'Yard,
         reason =
           "Hunt requires all five preconditions; unmet: "
-            ++ std.string.join ", " unmet,
+          ++ std.string.join ", " unmet,
         unmet_preconditions = unmet,
       },
 
@@ -447,5 +444,5 @@ let is_semver_of = fun major v =>
   # no pedigree, no leash claim, no execution licence of any kind.
   is_library = fun lib =>
     !(std.record.has_field "pedigree" lib)
-      && !(std.record.has_field "leash" lib),
+    && !(std.record.has_field "leash" lib),
 }
