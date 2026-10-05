@@ -21,69 +21,92 @@
 #   jobs:
 #     provisioning:
 #       uses: hyperpolymath/standards/.github/workflows/provisioning-check-reusable.yml@<sha>
-{
-  name: "Provisioning Check Reusable",
-  on: {
-    workflow_call: null,
-  },
-  permissions: {
-    contents: "read",
-  },
-  jobs: {
-    provisioning: {
-      name: "Provisioning set conforms",
-      runs-on: "ubuntu-latest",
-      timeout-minutes: 10,
-      steps: [
-        {
-          name: "Checkout caller repository",
-          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
-          with: {
-            repository: "${{ github.repository }}",
-            ref: "${{ github.sha }}",
+name: "Provisioning Check Reusable"
+
+on:
+  workflow_call: null
+
+permissions:
+  contents: read
+
+jobs:
+  provisioning:
+    name: "Provisioning set conforms"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+        - name: "Checkout caller repository"
+          uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          with:
+            repository: "${{ github.repository }}"
+            ref: "${{ github.sha }}"
             # launcher.sh (caller code) runs below: never leave the token in .git/config.
-            persist-credentials: false,
-          },
-        },
-        {
-          name: "Checkout the provisioning canon",
-          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", # v7.0.1
-          with: {
-            repository: "hyperpolymath/standards",
-            ref: "${{ job.workflow_sha }}",
-            path: ".standards-checkout",
-            persist-credentials: false,
-            sparse-checkout: "3-practice/provisioning/templates/build/just\n",
-            sparse-checkout-cone-mode: false,
-          },
-        },
-        {
-          name: "Stage the canon engine outside the checked tree",
-          shell: "bash",
-          run: "mkdir -p \"$RUNNER_TEMP/canon\"\ncp .standards-checkout/3-practice/provisioning/templates/build/just/* \"$RUNNER_TEMP/canon/\"\nrm -rf .standards-checkout\nls \"$RUNNER_TEMP/canon\"\n",
-        },
-        {
-          name: "Install just (the engine's runner; >= 1.42 is required)",
-          shell: "bash",
-          env: {
-            JUST_VERSION: "1.56.0",
-            JUST_SHA256: "fa2a8ec1015d9df5330941ade12437488fc40d33f9c9f8cd4eb70a26de11b639",
-          },
-          run: "set +e\ntgz=\"$RUNNER_TEMP/just.tar.gz\"\ncurl -fsSL -o \"$tgz\" \\\n  \"https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz\" \\\n  && echo \"${JUST_SHA256}  $tgz\" | sha256sum -c - \\\n  && mkdir -p \"$RUNNER_TEMP/bin\" \\\n  && tar -xzf \"$tgz\" -C \"$RUNNER_TEMP/bin\" just\nSTATUS=$?\nif [ \"$STATUS\" -ne 0 ]; then\n  echo \"::error title=just install::could not fetch or verify just ${JUST_VERSION}\"\n  exit \"$STATUS\"\nfi\necho \"$RUNNER_TEMP/bin\" >> \"$GITHUB_PATH\"\n\"$RUNNER_TEMP/bin/just\" --version\n",
-        },
-        {
-          name: "Engine files match the canon",
-          if: "${{ !cancelled() }}",
-          shell: "bash",
-          run: "set +e\ndrift=0\nfor f in provision.just provision-lib.sh provision-modes.sh provision-check.sh; do\n  if [ ! -f \"build/just/$f\" ]; then\n    echo \"::error file=build/just/$f,title=engine missing::build/just/$f is missing (run: launch-scaffolder provision-set realign)\"\n    drift=1\n  elif ! cmp -s \"build/just/$f\" \"$RUNNER_TEMP/canon/$f\"; then\n    echo \"::error file=build/just/$f,title=engine drift::build/just/$f differs from the canon at standards@${{ job.workflow_sha }} (run: launch-scaffolder provision-set realign)\"\n    drift=1\n  else\n    echo \"ok  build/just/$f\"\n  fi\ndone\nexit \"$drift\"\n",
-        },
-        {
-          name: "Provisioning set conforms (provision-check.sh)",
-          if: "${{ !cancelled() }}",
-          shell: "bash",
-          run: "set +e\nbash \"$RUNNER_TEMP/canon/provision-check.sh\" . | tee \"$RUNNER_TEMP/check.log\"\nSTATUS=\"${PIPESTATUS[0]}\"\ngrep '^  FAIL' \"$RUNNER_TEMP/check.log\" | sed 's/^  FAIL  //' | while IFS= read -r line; do\n  echo \"::error title=provisioning::$line\"\ndone\n{\n  echo \"## Provisioning check\"\n  echo \"\"\n  echo '```'\n  cat \"$RUNNER_TEMP/check.log\"\n  echo '```'\n} >> \"$GITHUB_STEP_SUMMARY\"\nexit \"$STATUS\"\n",
-        },
-      ],
-    },
-  },
-}
+            persist-credentials: false
+        - name: "Checkout the provisioning canon"
+          uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          with:
+            repository: hyperpolymath/standards
+            ref: ${{ job.workflow_sha }}
+            path: .standards-checkout
+            persist-credentials: false
+            sparse-checkout: "3-practice/provisioning/templates/build/just\n"
+            sparse-checkout-cone-mode: false
+        - name: "Stage the canon engine outside the checked tree"
+          shell: bash
+          run: "mkdir -p \"$RUNNER_TEMP/canon\"\ncp .standards-checkout/3-practice/provisioning/templates/build/just/* \"$RUNNER_TEMP/canon/\"\nrm -rf .standards-checkout\nls \"$RUNNER_TEMP/canon\"\n"
+        - name: "Install just (the engine's runner; >= 1.42 is required)"
+          shell: bash
+          env:
+            JUST_VERSION: "1.56.0"
+            JUST_SHA256: "fa2a8ec1015d9df5330941ade12437488fc40d33f9c9f8cd4eb70a26de11b639"
+          run: |
+            set +e
+            tgz="$RUNNER_TEMP/just.tar.gz"
+            curl -fsSL -o "$tgz" \
+              "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+              && echo "${JUST_SHA256}  $tgz" | sha256sum -c - \
+              && mkdir -p "$RUNNER_TEMP/bin" \
+              && tar -xzf "$tgz" -C "$RUNNER_TEMP/bin" just
+            STATUS=$?
+            if [ "$STATUS" -ne 0 ]; then
+              echo "::error title=just install::could not fetch or verify just ${JUST_VERSION}"
+              exit "$STATUS"
+            fi
+            echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+            "$RUNNER_TEMP/bin/just" --version
+        - name: "Engine files match the canon"
+          if: "${{ !cancelled() }}"
+          shell: bash
+          run: |
+            set +e
+            drift=0
+            for f in provision.just provision-lib.sh provision-modes.sh provision-check.sh; do
+              if [ ! -f "build/just/$f" ]; then
+                echo "::error file=build/just/$f,title=engine missing::build/just/$f is missing (run: launch-scaffolder provision-set realign)"
+                drift=1
+              elif ! cmp -s "build/just/$f" "$RUNNER_TEMP/canon/$f"; then
+                echo "::error file=build/just/$f,title=engine drift::build/just/$f differs from the canon at standards@${{ job.workflow_sha }} (run: launch-scaffolder provision-set realign)"
+                drift=1
+              else
+                echo "ok  build/just/$f"
+              fi
+            done
+            exit "$drift"
+        - name: "Provisioning set conforms (provision-check.sh)"
+          if: "${{ !cancelled() }}"
+          shell: bash
+          run: |
+            set +e
+            bash "$RUNNER_TEMP/canon/provision-check.sh" . | tee "$RUNNER_TEMP/check.log"
+            STATUS="${PIPESTATUS[0]}"
+            grep '^  FAIL' "$RUNNER_TEMP/check.log" | sed 's/^  FAIL  //' | while IFS= read -r line; do
+              echo "::error title=provisioning::$line"
+            done
+            {
+              echo "## Provisioning check"
+              echo ""
+              echo '```'
+              cat "$RUNNER_TEMP/check.log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$STATUS"
