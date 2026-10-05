@@ -871,7 +871,7 @@ EOF
       fi
     done
   done
-  t "the contract and all 26 fixtures avoid Nickel's reserved words" 0 "$kw_hits"
+  t "the contract and all 27 fixtures avoid Nickel's reserved words" 0 "$kw_hits"
 
   echo
   if [ $SELFTEST_FAILS -eq 0 ]; then
