@@ -45,6 +45,10 @@
 
 set -euo pipefail
 
+# The shared ancestry assertion (D5c): every pin bumper calls the same one.
+# shellcheck source-path=SCRIPTDIR source=lib/pin-ancestry.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/pin-ancestry.sh"
+
 # ---------------------------------------------------------------------------
 # Configuration / argument parsing
 # ---------------------------------------------------------------------------
@@ -140,26 +144,10 @@ validate_target() {
 
   # Neither usable local main ref proved reachability. Local refs can be stale,
   # so only the authoritative server comparison may return a negative result.
-
-  local api="${STANDARDS_REACHABILITY_API_BASE:-https://api.github.com}"
-  local -a auth=()
-  [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-  local body status
-  body=$(curl -fsS --max-time 20 \
-    -H 'Accept: application/vnd.github+json' \
-    "${auth[@]}" \
-    "$api/repos/hyperpolymath/standards/compare/${TARGET_SHA}...main") || {
-      log "ERROR: could not prove target ${TARGET_SHA} is reachable from standards main; refusing propagation."
-      return 1
-    }
-  status=$(printf '%s' "$body" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' | head -n1)
-  case "$status" in
-    identical|ahead) return 0 ;;
-    *)
-      log "ERROR: target ${TARGET_SHA} is not reachable from standards main (compare status: ${status:-unknown}); refusing propagation."
-      return 1
-      ;;
-  esac
+  assert_pin_ancestry hyperpolymath/standards "$TARGET_SHA" main || {
+    log "ERROR: refusing propagation of ${TARGET_SHA}."
+    return 1
+  }
 }
 
 validate_target || exit 2
