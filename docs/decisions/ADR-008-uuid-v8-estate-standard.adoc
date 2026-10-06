@@ -80,9 +80,12 @@ function per language, not a per-repository recipe.
 ----
 
 `domain` is a registered, repository-unique ASCII string (for example
-`berrywiki-import`). It separates the uses so that one name hashed for two
-purposes cannot collide. Profile C ids are reproducible by design: the same
-domain and name always give the same id. They are not secret and must not be
+`berrywiki-import`) that MUST NOT contain `:`. It separates the uses so that one
+name hashed for two purposes cannot collide. Because `domain` has no `:`, the
+first `:` in the preimage always ends it, so two distinct (domain, name) pairs
+never hash the same bytes. `name` is unconstrained.
+Profile C ids are reproducible by design: the same domain and name always
+give the same id. They are not secret and must not be
 used where unpredictability is required.
 
 === Distinguishing the profiles
@@ -195,6 +198,8 @@ the pull request that carries this section.
 ** By default (dual-accept, P2) it accepts version 8 and version 7 with
    variant `10`.
 ** `--strict` accepts version 8 only.
+** It checks every UUID on a line, not only the last one, and a missing scan
+   path is an error. The v7 checker did neither; see the rollback limits below.
 ** It cannot see which profile an identifier uses. That check belongs to
    type-aware tests, as in the profiles section above.
 * `scripts/tests/uuid-v8-test.sh` gives the checker known-answer controls and
@@ -220,10 +225,22 @@ the pull request that carries this section.
   replacement belongs with the deed migration, not with a new `.a2ml` edit.
   Until then they describe the v7 rule. This is a known lag.
 
-*Migration and rollback limits.* The P2 gate is a strict superset of the old
-gate: everything that passed the v7 gate still passes. Reverting this change
-therefore makes nothing fail that passes today. A profile T value maps back
-to version 7 by the same one-nibble flip. A profile C value has no version 7
+*Migration and rollback limits.* The P2 gate accepts every version and
+variant pair the v7 gate accepted, and adds version 8. It is stricter in two
+places, both found in review of this record:
+
+* the v7 checker read only the last UUID on a line, so a non-v7 literal
+  placed before a v7 one passed. The v8 checker reads every UUID on the line;
+* a scan path that does not exist now exits 2. It used to scan nothing and
+  pass.
+
+On 2026-10-06 both checkers were run over the checked-out trees of the 478
+local estate clones (`hyper-repos/` and `meta-repos/`). No clone that passed
+the v7 checker fails the v8 one. One clone, `julia-ecosystem`, has no v7
+baseline, because the v7 run timed out at 600 s. So turning the gate on
+breaks no measured repository. Rolling back to v7 is clean only until v8
+literals appear: after that, reverting makes them fail. A profile T value
+maps back to version 7 by the same one-nibble flip. A profile C value has no version 7
 counterpart, so once identifiers are minted as profile C (P3), rollback means
 keeping them as external identifiers.
 

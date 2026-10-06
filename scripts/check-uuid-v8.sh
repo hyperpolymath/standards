@@ -23,6 +23,13 @@ fi
 if [ "$#" -eq 0 ]; then
   set -- .
 fi
+# A mistyped path must not turn into an empty, passing scan.
+for path in "$@"; do
+  if [ ! -e "$path" ]; then
+    printf '%s: scan path does not exist\n' "$path" >&2
+    exit 2
+  fi
+done
 
 # Print the text of a file that is subject to the UUID rule.
 #
@@ -61,8 +68,8 @@ while IFS= read -r file; do
     */.git/*|*/check-uuid-v7.sh|*/check-uuid-v8.sh) continue ;;
   esac
   if grep -IEni -- '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' "$file" >/dev/null 2>&1; then
-    while IFS= read -r match; do
-      uuid=$(printf '%s\n' "$match" | sed -nE 's/.*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}).*/\1/p' | head -n 1)
+    # Every UUID on a line is checked, not only the last one (grep -o).
+    while IFS= read -r uuid; do
       [ -n "$uuid" ] || continue
       version=$(printf '%s' "$uuid" | cut -d- -f3 | cut -c1)
       variant=$(printf '%s' "$uuid" | cut -d- -f4 | cut -c1 | tr 'A-F' 'a-f')
@@ -75,7 +82,7 @@ while IFS= read -r file; do
         status=1
       fi
     done <<EOF
-$(scannable_text "$file" | grep -Ei -- '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true)
+$(scannable_text "$file" | grep -oEi -- '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true)
 EOF
   fi
 done <<EOF
