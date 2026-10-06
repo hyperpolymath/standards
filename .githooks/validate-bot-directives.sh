@@ -17,13 +17,20 @@ validate_file() {
   fi
 }
 
-# If staged files provided, only check those
+# If staged files provided, only check those that sit under .machine_readable/,
+# the same population scan mode checks below. Without this fence the grep ran
+# over every staged prose file, so any README naming the AI tool "Codex"
+# could not be committed (owner ruling D316).
 if [ -n "$STAGED_FILES" ]; then
   while IFS=$'\n' read -r file; do
     [ -z "$file" ] && continue
+    case "$file" in
+      .machine_readable/*|*/.machine_readable/*) ;;
+      *) continue ;;
+    esac
     # Check all text files
     case "$file" in
-      *.md|*.txt|*.adoc|*.yml|*.yaml|*.json|*.toml|*.sh|*.bash|*.js|*.ts|*.rs|*.ex|*.exs) ;;
+      *.a2ml|*.deed|*.md|*.txt|*.adoc|*.yml|*.yaml|*.json|*.toml|*.sh|*.bash|*.js|*.ts|*.rs|*.ex|*.exs) ;;
       *) continue ;;
     esac
     [ -f "$file" ] || continue
