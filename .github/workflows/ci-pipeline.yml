@@ -891,22 +891,22 @@ jobs:
           # trade than a narrower gate. -Wall -Werror is the spec's "fail on
           # warnings" and is read-only with respect to tracked files.
           #
-          # BUILD WHAT `detect` COUNTED. The probe counts `*.cabal` at ANY depth
-          # (a git pathspec `*` crosses `/`), so a repo whose only package is
-          # nested — standards' own sanctify-php satellite — turned this job on
-          # and then died in a root that holds no package. A guard that counts
-          # a different set than its consumer builds is the defect; narrowing
-          # the probe to the root would have hidden nested Haskell instead.
+          # BUILD WHAT `detect` COUNTED. Since #1184 the probe counts Haskell only
+          # from a ROOT `cabal.project` or a ROOT `*.cabal` (`:(glob)` stops `*`
+          # crossing `/`); a repo whose only packages are nested is reported by
+          # detect as UNSUPPORTED and this job does not run (owner ruling
+          # 2026-10-06, standards#1161). So this step always has a root package.
           # A root `cabal.project` is the repo's own word and is used as-is;
-          # otherwise one is written (untracked) listing every package
-          # directory, from the SAME pathspec the probe uses.
+          # otherwise one is written (untracked) listing the root package and
+          # every tracked nested package directory, so a satellite package that
+          # sits beside the root one is built too, not silently skipped.
           if [ -f cabal.project ]; then
             echo "Using the repository's own cabal.project."
             source_note="root cabal.project"
           else
             mapfile -t pkg_dirs < <(git ls-files -- '*.cabal' | xargs -r -n1 dirname | sort -u)
             if [ "${#pkg_dirs[@]}" -eq 0 ]; then
-              echo "::error::Haskell was detected (*.hs or stack.yaml) but no *.cabal package is tracked, so there is nothing cabal can build. Add a .cabal file (hpack users: commit the generated one) or a cabal.project."
+              echo "::error::Haskell was detected from a root *.cabal, but git ls-files lists no tracked *.cabal, so there is nothing cabal can build. Commit the .cabal file (hpack users: commit the generated one) or add a root cabal.project."
               exit 1
             fi
             { echo "packages:"; printf '  %s/\n' "${pkg_dirs[@]}"; } > cabal.project
