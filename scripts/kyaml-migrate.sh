@@ -69,6 +69,11 @@ if $DRY_RUN; then
     exit 0
 fi
 
+# Scratch file for each candidate rewrite: private (mktemp), never a fixed
+# /tmp name, and removed on every exit path.
+NEW_FILE="$(mktemp)"
+trap 'rm -f "$NEW_FILE"' EXIT
+
 CHANGED=false
 ERRORS=0
 CONVERTED=0
@@ -85,24 +90,24 @@ for file in "${YAML_FILES[@]}"; do
     fi
     
     # Try to parse with yq
-    if ! yq -o kyaml "$file" > /tmp/kyaml_new_$$ 2>&1; then
+    if ! yq -o kyaml "$file" > "$NEW_FILE" 2>&1; then
         echo "ERROR (parse failed)"
         ERRORS=$((ERRORS + 1))
-        rm -f /tmp/kyaml_new_$$
+        : > "$NEW_FILE"
         continue
     fi
     
     # Check if conversion would change the file
-    if cmp -s "$file" /tmp/kyaml_new_$$; then
+    if cmp -s "$file" "$NEW_FILE"; then
         echo "OK (already KYAML)"
-        rm -f /tmp/kyaml_new_$$
+        : > "$NEW_FILE"
         continue
     fi
     
     if $CHECK_MODE; then
         echo "WOULD CHANGE"
         CHANGED=true
-        rm -f /tmp/kyaml_new_$$
+        : > "$NEW_FILE"
         continue
     fi
     
@@ -111,7 +116,7 @@ for file in "${YAML_FILES[@]}"; do
         echo "WOULD CONVERT"
         CHANGED=true
     else
-        mv /tmp/kyaml_new_$$ "$file"
+        cat "$NEW_FILE" > "$file"  # keep the target mode; mktemp is 0600
         echo "CONVERTED"
         CONVERTED=$((CONVERTED + 1))
     fi
