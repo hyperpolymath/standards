@@ -63,6 +63,10 @@
 
 set -uo pipefail
 
+# The shared ancestry assertion (D5c): every pin bumper calls the same one.
+# shellcheck source-path=SCRIPTDIR source=lib/pin-ancestry.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/pin-ancestry.sh"
+
 STANDARDS_REPO="hyperpolymath/standards"
 TARGET_SHA="${STANDARDS_TARGET_SHA:-}"
 DO_FIX=0
@@ -278,19 +282,7 @@ resolve_target() {
 # The comparison is done SERVER-side so a shallow/partial clone cannot produce
 # a false negative.
 validate_target() {
-  local sha="$1" status
-  case "$sha" in
-    *[!0-9a-fA-F]*|"") log "ERROR: target '$sha' is not hex."; return 1 ;;
-  esac
-  if [ "${#sha}" -ne 40 ]; then
-    log "ERROR: target must be a full 40-hex SHA, got ${#sha} chars."; return 1
-  fi
-  status=$(gh api "repos/${STANDARDS_REPO}/compare/${sha}...main" --jq '.status' 2>/dev/null)
-  case "$status" in
-    identical|ahead) return 0 ;;
-    "") log "ERROR: could not prove ${sha} is reachable from ${STANDARDS_REPO} main; refusing."; return 1 ;;
-    *)  log "ERROR: ${sha} is NOT reachable from main (compare status: ${status}); refusing."; return 1 ;;
-  esac
+  assert_pin_ancestry "$STANDARDS_REPO" "$1" main
 }
 
 # sha_is_commit <sha> — is this a real commit in standards?
