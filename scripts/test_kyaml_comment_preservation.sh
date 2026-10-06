@@ -25,7 +25,9 @@ log() {
 }
 
 # Create a test file with various comment types
-TEST_FILE="/tmp/kyaml_test_$$"
+TEST_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_DIR"' EXIT
+TEST_FILE="$TEST_DIR/kyaml_test"
 cat > "$TEST_FILE" << 'EOF'
 # Header comment
 # Another header line

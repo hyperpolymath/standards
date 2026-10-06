@@ -293,9 +293,11 @@ rank() {
 
 THRESHOLD_RANK="$(rank "$BLOCKING_THRESHOLD")"
 MAX_KEPT_RANK=0
+BLOCKING_COUNT=0  # kept findings at or above the threshold (the gate message names these, not all kept)
 while IFS= read -r sev; do
   r="$(rank "$sev")"
   if (( r > MAX_KEPT_RANK )); then MAX_KEPT_RANK=$r; fi
+  if (( r >= THRESHOLD_RANK )); then BLOCKING_COUNT=$((BLOCKING_COUNT + 1)); fi
 done < <(jq -r '.[].severity' <<<"$KEPT")
 
 KEPT_COUNT="$(jq 'length' <<<"$KEPT")"
@@ -334,7 +336,7 @@ if [[ "$MODE" == "advisory" ]]; then
 fi
 
 if (( MAX_KEPT_RANK >= THRESHOLD_RANK )); then
-  echo "::error::Gate failed: $KEPT_COUNT unfiltered finding(s) at or above '$BLOCKING_THRESHOLD'." >&2
+  echo "::error::Gate failed: $BLOCKING_COUNT unfiltered finding(s) at or above '$BLOCKING_THRESHOLD' ($KEPT_COUNT kept in total)." >&2
   exit 1
 fi
 
