@@ -25,7 +25,7 @@ pass=0; fail=0
 # Run the checker (with any extra flags) over $WORK/t and compare its exit code.
 expect() { # expect <wanted-exit> <label> [checker flags...]
   local want="$1" label="$2" got=0; shift 2
-  bash "$SCRIPT" "$@" "$WORK/t" >"$WORK/out" 2>&1 || got=$?
+  "$SCRIPT" "$@" "$WORK/t" >"$WORK/out" 2>&1 || got=$?   # by shebang (/bin/sh), as CI runs it
   if [ "$got" = "$want" ]; then pass=$((pass+1)); echo "  ok    $label"
   else fail=$((fail+1)); echo "  FAIL  $label (wanted exit $want, got $got)"; sed 's/^/        /' "$WORK/out"; fi
 }
