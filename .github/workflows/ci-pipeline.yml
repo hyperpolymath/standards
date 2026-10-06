@@ -873,12 +873,36 @@ jobs:
           # anywhere in the estate — an unpinned toolchain install is a worse
           # trade than a narrower gate. -Wall -Werror is the spec's "fail on
           # warnings" and is read-only with respect to tracked files.
+          #
+          # BUILD WHAT `detect` COUNTED. The probe counts `*.cabal` at ANY depth
+          # (a git pathspec `*` crosses `/`), so a repo whose only package is
+          # nested — standards' own sanctify-php satellite — turned this job on
+          # and then died in a root that holds no package. A guard that counts
+          # a different set than its consumer builds is the defect; narrowing
+          # the probe to the root would have hidden nested Haskell instead.
+          # A root `cabal.project` is the repo's own word and is used as-is;
+          # otherwise one is written (untracked) listing every package
+          # directory, from the SAME pathspec the probe uses.
+          if [ -f cabal.project ]; then
+            echo "Using the repository's own cabal.project."
+            source_note="root cabal.project"
+          else
+            mapfile -t pkg_dirs < <(git ls-files -- '*.cabal' | xargs -r -n1 dirname | sort -u)
+            if [ "${#pkg_dirs[@]}" -eq 0 ]; then
+              echo "::error::Haskell was detected (*.hs or stack.yaml) but no *.cabal package is tracked, so there is nothing cabal can build. Add a .cabal file (hpack users: commit the generated one) or a cabal.project."
+              exit 1
+            fi
+            { echo "packages:"; printf '  %s/\n' "${pkg_dirs[@]}"; } > cabal.project
+            echo "No root cabal.project; generated one for ${#pkg_dirs[@]} package dir(s):"
+            cat cabal.project
+            source_note="generated cabal.project, ${#pkg_dirs[@]} package dir(s)"
+          fi
           cabal update
           cabal build all --ghc-options='-Wall -Werror'
           {
             echo "### Haskell"
             echo ""
-            echo "- \`cabal build all --ghc-options='-Wall -Werror'\`: pass"
+            echo "- \`cabal build all --ghc-options='-Wall -Werror'\` ($source_note): pass"
             echo "- note: format gate not run — no pinned fourmolu/hlint in the estate"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"

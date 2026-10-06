@@ -1,5 +1,5 @@
 = DEED Grammar Specification
-:version: 0.2.0
+:version: 0.2.1
 :status: DRAFT
 :toc:
 :toclevels: 3
@@ -39,6 +39,13 @@ Compatible with:
 [cols="1,1,3"]
 |===
 | Version | Date | Changes
+
+| 0.2.1
+| 2026-10-06
+| Aligned to `deed.abnf` v1.0.0 (owner ruling D308, ABNF wins): tabs
+  INVALID, `_` legal in symbols, `:schema-version` exactly once in any
+  position. Recorded the D305 `#u5` → UUIDv8 profile C transition as
+  pending its own increment.
 
 | 0.2.0
 | DRAFT
@@ -126,19 +133,22 @@ valid; `REPO-DEED` is not. `#t` is valid; `#T` is not. This matches RFC 7405
   Comments are UTF-8, not ASCII — the mandated SPDX header carries `©`.
 
 | WS
-| space (0x20), tab (0x09), LF, CRLF. Insignificant except as a token
-  separator. Bare CR is not a separator. Tabs ARE legal in DEED (unlike
-  K9, which forbids them).
+| space (0x20), LF, CRLF. Insignificant except as a token separator. Bare
+  CR is not a separator. Tab (0x09) is INVALID anywhere in a deed, as in
+  K9 (`deed.abnf` `token-sep`; D308).
 
 | SYMBOL
-| `[A-Za-z][A-Za-z0-9.*/<>=!?+-]*` — first character a letter; continuation
-  may include `*`. Dots are structural: `Type.Software.Library` is *one*
-  symbol whose dotted segments are meaningful to the type resolver.
-  Underscore is INVALID. Hyphen, never underscore.
+| `[A-Za-z][A-Za-z0-9.*/<>=!?+_-]*` — first character a letter; continuation
+  may include `*` and `_`. Dots are structural: `Type.Software.Library` is
+  *one* symbol whose dotted segments are meaningful to the type resolver.
+  Underscore is lexically valid (`deed.abnf` `symbol`; D308). Hyphen is
+  the estate convention for vocabulary names; that is a lint matter, not
+  a parse rule.
 
 | KEYWORD
-| `:` followed by a SYMBOL. Example: `:schema-version`. Never
-  `:schema_version`.
+| `:` followed by a SYMBOL. Example: `:schema-version`. `:schema_version`
+  parses, but it is a different keyword and does not satisfy the
+  `:schema-version` requirement.
 
 | STRING
 | `"…"`, body is printable ASCII except `"` and `\` plus UTF-8 multibyte
@@ -159,7 +169,10 @@ valid; `REPO-DEED` is not. `#t` is valid; `#T` is not. This matches RFC 7405
 | `#u5` immediately followed by a STRING, with *no* intervening space:
   `#u5"estate/chora"`. The body is the name input to RFC 4122 §4.3 under
   the estate namespace. See <<uuid-semantics>>. UUID v4 is intentionally
-  excluded.
+  excluded. *Transition:* owner ruling D305 folds `#u5` into ESTATE-UUID-V8
+  profile C (ADR-008, Q2). That changes the grammar and every existing
+  deed identifier, so it lands as its own increment; until it does,
+  `deed.abnf` v1.0.0 accepts `#u5` only.
 
 | QUOTED
 | `'` followed by a SYMBOL or a list. Suppresses evaluation. Quoting an
@@ -187,11 +200,10 @@ Header       ::= SpdxLine+                  ; see Required header
 
 Sep          ::= ( WS | COMMENT )+          ; a COMMENT *is* a separator
 
-Form         ::= "(" DocHead Sep VersionField
-                 ( Sep ( Field | Clause ) )* Sep? ")"
+Form         ::= "(" DocHead ( Sep ( Field | Clause ) )+ Sep? ")"
+                 ; exactly one ":schema-version" STRING field, any position
 DocHead      ::= "estate-deed" | "repo-deed" | "estate-atlas-deed"
                | "praxis-deed"              ; exact, case-sensitive
-VersionField ::= ":schema-version" Sep STRING   ; REQUIRED, structurally first
 
 Field        ::= KEYWORD Sep Value
 Value        ::= STRING | SYMBOL | INTEGER | BOOLEAN | UUID5
@@ -239,16 +251,17 @@ first 10 lines; that check carries over unchanged.
 Non-SPDX `;;` comments and blank lines MAY appear *after* the header and
 *before* the opening `(` (they are `Sep`).
 
-=== Order is not semantic — except `:schema-version`
+=== Order is not semantic
 
-`:schema-version` is structurally the first field after the document head.
-That is a parse rule, not a lint convention. A form whose first field is
-anything else is not a deed.
+`:schema-version` MUST appear exactly once at the top level of the form,
+with a STRING value. Its position is free: `deed.abnf` folds it into
+`field`, and the validator counts it. Writing it first is the canonical
+style, not a parse rule.
 
-All *subsequent* fields and clauses are order-free and may interleave.
-The repetition is `( Sep ( Field | Clause ) )`, deliberately not
-`Field* Clause*`. A canonical ordering of those remaining members is a
-lint convention for diffability, never a parse rule.
+All fields and clauses are order-free and may interleave. The repetition
+is `( Sep ( Field | Clause ) )`, deliberately not `Field* Clause*`. A
+canonical ordering is a lint convention for diffability, never a parse
+rule.
 
 Where precedence genuinely matters — the rules inside a praxis deed — it
 is carried by an explicit `:priority` INTEGER, never by file position.
@@ -266,6 +279,9 @@ Lint obligations that follow:
 
 RULED 2026-09-08 by the owner on standards#752 — match the ABNF to this
 EBNF (`:schema-version` first; remaining members order-free).
+SUPERSEDED 2026-10-06 by owner ruling D308: `deed.abnf` v1.0.0 is
+authoritative, and it requires `:schema-version` exactly once in any
+position.
 
 == The four document forms
 
@@ -343,9 +359,9 @@ RULED 2026-09-08 by the owner. The owner’s original text was not uniform:
 `:registry-version`, and `repo-deed` carried neither. The grammar
 normalises this:
 
-* `:schema-version` STRING is REQUIRED on all four heads, and is
-  structurally first. It versions the *format*, so a consumer can refuse a
-  file it cannot parse.
+* `:schema-version` STRING is REQUIRED exactly once on all four heads
+  (any position; first by convention). It versions the *format*, so a
+  consumer can refuse a file it cannot parse.
 * `:registry-version` STRING remains available on `estate-atlas-deed` as
   an optional additional field. It versions the registry’s *contents*.
 
@@ -514,7 +530,7 @@ onto a `BaseRecord` field is the typed-core bridge, not a parse rule.)
 | `:beholding-chora` UUID5; `:registry-version` STRING optional
 |===
 
-Plus, on every head: `:schema-version` STRING, structurally first.
+Plus, on every head: `:schema-version` STRING, exactly once (any position).
 
 The head symbol itself is identifying: a file whose first form is one of
 the four declared heads is a deed of that kind, and a validator MAY treat
