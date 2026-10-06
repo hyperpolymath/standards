@@ -35,6 +35,18 @@
 # Disagreement means KEEP. A parser blind spot therefore cannot delete a needed
 # entry (scripts/tests/prune-stale-test.sh plants exactly that blind spot).
 #
+# ── A key whose workflow file is gone is dropped whole ──────────────────────
+# Retiring a workflow is the limit case: every ref under its key is stale, and
+# the key itself names a file that does not exist, which check-lock-sync.sh
+# rejects ("lockfile entry for a workflow file that does not exist"). Leaving
+# `[]` is not enough. `gh actions-lock` would remove the key, but it is blind
+# to refs used only by a local composite action and drops those records too
+# (#947 deleted asana/push-signed-commits that way; #954 restored it). The
+# same two-oracle rule applies: a key is dropped only when it matches no file
+# the workflow glob found AND `-f` on that path fails. The pass is scoped to
+# the workflows: section, because dependencies: keys share the same shape and
+# are never files.
+#
 # Lock repair order: gh actions-lock → relock-sha-keys.sh → complete-job-refs.sh
 # → close-lock.sh → prune-stale.sh (see complete-job-refs.sh).
 #
@@ -107,7 +119,23 @@ AWK
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 "$AWK" -v lockfile="$LOCK" "$CAND" "$LOCK" "${WORKFLOWS[@]}" | LC_ALL=C sort -u > "$TMP/cand.tsv"
 
-if [ ! -s "$TMP/cand.tsv" ]; then
+# ── keys whose workflow file is gone. Both oracles must agree. ─────────────
+declare -A present=()
+for wf in "${WORKFLOWS[@]}"; do present[".github/workflows/${wf##*/}"]=1; done
+: > "$TMP/gone.txt"
+while IFS= read -r key; do
+  [ -n "${present[$key]:-}" ] && continue
+  if [ -f "$WF_DIR/${key##*/}" ]; then
+    printf '  ! oracle disagrees, KEEPING key %s (file present, not matched by the glob)\n' "$key"
+    continue
+  fi
+  printf '%s\n' "$key" >> "$TMP/gone.txt"
+done < <("$AWK" '
+  /^workflows:[[:space:]]*$/ { inwf = 1; next }
+  /^[a-z_]+:/                { inwf = 0; next }
+  inwf && match($0, /^    '\''([^'\'']+)'\'':/, m) { print m[1] }' "$LOCK")
+
+if [ ! -s "$TMP/cand.tsv" ] && [ ! -s "$TMP/gone.txt" ]; then
   echo "prune-stale: no stale workflow-entry refs; lockfile unchanged"
   exit 0
 fi
@@ -125,7 +153,7 @@ while IFS=$'\t' read -r path ref; do
   printf '%s\t%s\n' "$path" "$ref" >> "$TMP/drop.tsv"
 done < "$TMP/cand.tsv"
 
-if [ ! -s "$TMP/drop.tsv" ]; then
+if [ ! -s "$TMP/drop.tsv" ] && [ ! -s "$TMP/gone.txt" ]; then
   echo "prune-stale: every candidate was vetoed by the literal-grep oracle; lockfile unchanged"
   exit 0
 fi
@@ -145,7 +173,11 @@ NR == FNR { drop[$1 SUBSEP $2] = 1; next }
 END { printf "prune-stale: pruned %d stale workflow-entry ref(s)\n", pruned + 0 > "/dev/stderr" }
 AWK
 
-"$AWK" -F'\t' "$APPLY" "$TMP/drop.tsv" "$LOCK" > "$TMP/new.lock"
+if [ -s "$TMP/drop.tsv" ]; then
+  "$AWK" -F'\t' "$APPLY" "$TMP/drop.tsv" "$LOCK" > "$TMP/new.lock"
+else
+  cat "$LOCK" > "$TMP/new.lock"
+fi
 
 # An entry left with no items must become an explicit empty list, or the YAML
 # key would take a null value and the schema would reject it.
@@ -168,6 +200,19 @@ AWK
     }
   }' "$TMP/new.lock" > "$TMP/new2.lock"
 
-if command -v diff >/dev/null 2>&1; then diff -u "$LOCK" "$TMP/new2.lock" | sed 's/^/   | /' || true; fi
-cat "$TMP/new2.lock" > "$LOCK"
+# Drop each gone key with its items, again scoped to the workflows: section.
+"$AWK" '
+  NR == FNR { gone[$0] = 1; next }
+  /^workflows:[[:space:]]*$/ { inwf = 1; skip = 0; print; next }
+  /^[a-z_]+:/                { inwf = 0; skip = 0; print; next }
+  inwf && match($0, /^    '\''([^'\'']+)'\'':/, m) {
+    skip = (m[1] in gone); if (skip) { dropped++; next }
+  }
+  skip && /^        - / { next }
+  { skip = 0; print }
+  END { if (dropped) printf "prune-stale: dropped %d key(s) for workflow files that no longer exist\n", dropped > "/dev/stderr" }
+' "$TMP/gone.txt" "$TMP/new2.lock" > "$TMP/new3.lock"
+
+if command -v diff >/dev/null 2>&1; then diff -u "$LOCK" "$TMP/new3.lock" | sed 's/^/   | /' || true; fi
+cat "$TMP/new3.lock" > "$LOCK"
 echo "prune-stale: done (oracle vetoes: $kept_by_oracle)"
