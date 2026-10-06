@@ -33,7 +33,8 @@ gh_owned = {"actions", "github"}  # github_owned_allowed
 
 def owner_repo(u):
     base = u.split('@', 1)[0]
-    parts = base.split('/')
+    # GitHub owner/repository names are case-insensitive.
+    parts = base.lower().split('/')
     return '/'.join(parts[:2]), parts[0]
 
 def covered(u):
@@ -44,7 +45,7 @@ def covered(u):
     if owner in gh_owned:                       # github-owned (actions/*, github/*)
         return True
     for p in patterns:
-        base = p.split('@', 1)[0]
+        base = p.split('@', 1)[0].lower()
         if base == f"{owner}/*":                # owner-wide (covers reusable workflows)
             return True
         if base == orp or fnmatch.fnmatch(orp, base):
