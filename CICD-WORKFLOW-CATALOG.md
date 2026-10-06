@@ -46,7 +46,7 @@ These workflows **block** merges if they fail. They enforce critical estate-wide
 | `main-estate-audit.yml` | Estate audit checks | rsr-template-repo | Yes |
 | `scorecard.yml` | OSSF Scorecard | rsr-template-repo | Yes |
 | `scorecard-reusable.yml` | Reusable Scorecard | standards | Yes |
-| `security-gate-pr-target.yml` | **NEW:** Security gate for fork PRs | standards | No |
+| ~~`security-gate-pr-target.yml`~~ | **RETIRED 2026-10-06:** the Actions policy blocks `pull_request_target`, so it never ran (startup_failure on every PR) | standards | No |
 | `estate-rules.yml` | Estate-wide conventions enforcement | rsr-template-repo | No |
 | `guix-policy.yml` | Guix/Nix package policy | knot-rider (canonical) | No |
 | `secret-scanner.yml` | Secrets detection | rsr-template-repo | Yes |
@@ -234,7 +234,6 @@ Use sparingly - only when certain it's a false positive.
 - [ ] `hypatia-scan.yml` - GATE
 - [ ] `secret-scanner.yml` - GATE
 - [ ] `main-estate-audit.yml` - GATE
-- [ ] `security-gate-pr-target.yml` - GATE (for fork PR security)
 - [ ] `check-suite-monitor.yml` - CHECK (for CI health monitoring)
 
 ### Recommended (Most Repos)

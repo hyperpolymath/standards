@@ -52,6 +52,9 @@ workflows:
         - 'o/kept@v1'
     '.github/workflows/empty.yml':
         - 'o/gone@v1'
+    '.github/workflows/retired.yml':
+        - 'o/gone@v1'
+    '.github/workflows/retired-empty.yml': []
 dependencies:
     'actions/setup-node@$A':
         ref: '$A'
@@ -70,10 +73,19 @@ grep -qxF "        - 'o/kept@v1'" "$L" && grep -qF 'oracle disagrees, KEEPING o/
   && ok "comment-only ref vetoed by the literal-grep oracle" || bad "comment-only ref vetoed by the literal-grep oracle"
 ! grep -qF "o/gone@v1" "$L" && ok "stale refs dropped from both workflows" || bad "stale refs dropped from both workflows"
 grep -qxF "    '.github/workflows/empty.yml': []" "$L" && ok "emptied entry becomes []" || bad "emptied entry becomes []"
+! grep -qF "retired.yml" "$L" && ok "key for a deleted workflow with refs dropped" || bad "key for a deleted workflow with refs dropped"
+! grep -qF "retired-empty.yml" "$L" && ok "key for a deleted workflow already [] dropped" || bad "key for a deleted workflow already [] dropped"
 grep -qxF "    'actions/setup-node@$A':" "$L" && grep -qxF "        commit: 'sha1-$A'" "$L" \
   && ok "dependencies: records untouched" || bad "dependencies: records untouched"
 cp "$L" "$WORK/before"; out=$(cd "$WORK/r" && bash "$TARGET" 2>&1)
 cmp -s "$L" "$WORK/before" && ok "idempotent: second run changes nothing" || bad "idempotent: second run changes nothing — $out"
+
+g="$WORK/g/.github/workflows"; mkdir -p "$g"
+printf 'jobs:\n  a:\n    steps:\n      - uses: actions/checkout@%s\n' "$A" > "$g/ci.yml"
+printf 'workflows:\n    '\''.github/workflows/ci.yml'\'':\n        - '\''actions/checkout@%s'\''\n    '\''.github/workflows/gone.yml'\'': []\ndependencies:\n' "$A" > "$g/actions.lock"
+(cd "$WORK/g" && bash "$TARGET") >/dev/null 2>&1
+! grep -qF "gone.yml" "$g/actions.lock" && grep -qxF "        - 'actions/checkout@$A'" "$g/actions.lock" \
+  && ok "only a deleted workflow [] key stale: key dropped, live ref kept" || bad "only a deleted workflow [] key stale: key dropped, live ref kept — $(cat "$g/actions.lock")"
 
 mkdir -p "$WORK/n/.github/workflows"; (cd "$WORK/n" && bash "$TARGET") >/dev/null 2>&1; st=$?
 [ "$st" = 1 ] && ok "no lockfile → exit 1" || bad "no lockfile → exit 1 (got $st)"
