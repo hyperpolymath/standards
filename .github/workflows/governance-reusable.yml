@@ -977,7 +977,11 @@ jobs:
               if [ -n "$canon" ] && [ "$f_" = "$canon" ]; then continue; fi
               [ -f "$f_" ] || continue
               for pat in "${pats[@]}"; do
-                out=$(grep -nE -e "$pat" -- "$f_" 2>"$err"); rc=$?
+                # The step runs under `bash -e`: a bare `out=$(grep …)` that matches nothing
+                # returns 1 and kills the step silently before rc is read. `|| rc=$?` keeps
+                # the status without tripping -e.
+                rc=0
+                out=$(grep -nE -e "$pat" -- "$f_" 2>"$err") || rc=$?
                 if [ "$rc" -eq 0 ]; then
                   while IFS= read -r line; do
                     echo "::error file=$f_,line=${line%%:*}::[R5:$rid] ${line#*:}  →  route to ${canon:-drop or move to a canonical source}"
