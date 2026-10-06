@@ -1,78 +1,112 @@
-K9 Coordination File Specification
-Table of Contents
-Status
-File Identity
-Schema
-Required Sections
-Optional Sections
-Validation Rules
-Generator Behaviour
-Relationship to Existing Files
-Status
-Draft — Version 1.0.0
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= K9 Coordination File Specification
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:revdate: 2026-10-06
+:revnumber: 1.1.1
+:description: Schema specification for coordination.k9 files
+:toc:
 
-File Identity
-Filename
+== Status
 
-coordination.k9
+Stable — Version 1.1.1. Owner ruling D311 (2026-10-06) made the 1.1 line
+canonical; rulings D317 and D318 made the 1.1.1 grammar patch below.
 
-Location
+The normative grammar is
+link:abnf/coordination-k9-grammar_v1.1.abnf[`coordination-k9-grammar_v1.1.abnf`].
+Where this prose, its examples or a generator disagree with the ABNF about
+syntax, the ABNF wins.
 
-Repository root
+Every example in this document parses under that ABNF. Read them closely:
+`repo:`, `pattern:` and `languages:` items are bare tokens, while
+`alternatives_rejected:` items are quoted strings. Blank lines appear
+between sections, never inside one.
 
-K9 Level
+NOTE: *Changes in 1.1.1.* Two grammar fixes, both owner rulings of
+2026-10-06. (1) D317: `languages:` items are indented one level deeper than
+their key (four spaces), as every other list already was; 1.1.0 placed them
+at the key's own indent. (2) D318: full-line `#` comments are permitted
+between sections, as blank lines are. They are not permitted within a
+section, and a `---` separator is still invalid.
 
-Kennel (pure data, no execution)
+== File Identity
 
-Magic Number
+[cols="1,3"]
+|===
+| Filename | `coordination.k9`
+| Location | Repository root
+| K9 Level | Kennel (pure data, no execution)
+| Magic Number | `K9!` (mandatory first line)
+| SPDX | `PMPL-1.0-or-later` (or project license)
+|===
 
-K9! (mandatory first line)
+== Schema
 
-SPDX
+=== Required Sections
 
-PMPL-1.0-or-later (or project license)
+==== `metadata`
 
-Schema
-Required Sections
-metadata
 Identity and versioning for the coordination file itself.
 
+[source,yaml]
+----
 metadata:
   schema: k9-coordination
-  schema_version: 1.0.0
+  schema_version: 1.1.1
   generated_by: k9-coordination-generator
   last_updated: 2026-04-03
-project
+----
+
+==== `project`
+
 Core project identity. Tells any arriving agent what this project IS.
 
+[source,yaml]
+----
 project:
   name: "project-name"
   description: "One-line description"
   license: PMPL-1.0-or-later
-  repo: "hyperpolymath/project-name"
+  repo: hyperpolymath/project-name
   languages:
     - ReScript
     - Rust
   build_system: just
   runtime: deno
-invariants
+----
+
+==== `invariants`
+
 Rules that MUST NOT be violated. Each invariant has an id, rule, and reason.
 
+[source,yaml]
+----
 invariants:
   - id: no-typescript
     rule: "Do not introduce TypeScript files anywhere in this project"
     reason: "ReScript is the chosen frontend language — this is deliberate"
     severity: critical
-
   - id: custom-tea-runtime
     rule: "Do not replace the custom TEA runtime in src/tea/"
     reason: "18-module custom build — rescript-tea was deliberately rejected"
     severity: critical
-Severity levels: critical (never violate), high (ask user first), moderate (prefer compliance).
+----
 
-protected
-Files and directories that are architecturally significant and must not be deleted, reorganised, or replaced without explicit user approval.
+Severity levels: `critical` (never violate), `high` (ask user first),
+`moderate` (prefer compliance).
 
+=== Optional Sections
+
+Optional sections appear in this fixed order, each at most once:
+`protected`, `architecture`, `do_not_create`, `terminology`, `ecosystem`,
+`coordination`.
+
+==== `protected`
+
+Files and directories that are architecturally significant and must not be
+deleted, reorganised, or replaced without explicit user approval.
+
+[source,yaml]
+----
 protected:
   - path: src/tea/
     reason: "Custom TEA runtime — 18 modules"
@@ -80,37 +114,51 @@ protected:
     reason: "Canonical location for all A2ML state files"
   - path: coordination.k9
     reason: "This file — source of truth for AI coordination"
-Optional Sections
-architecture
+----
+
+==== `architecture`
+
 Deliberate architectural decisions that may look wrong to an unfamiliar agent.
 
+[source,yaml]
+----
 architecture:
   - id: gossamer-not-tauri
     decision: "Gossamer (Zig + WebKitGTK) is the desktop backend"
     reason: "Migrated from Tauri 2.0 — this is the intended direction"
     alternatives_rejected:
-      - Tauri
-      - Electron
-      - native GTK
-
+      - "Tauri"
+      - "Electron"
+      - "native GTK"
   - id: deno-npm-hybrid
     decision: "Deno orchestrates builds but npm used for ReScript compiler"
     reason: "ReScript compiler requires npm — this is the only exception"
-do_not_create
-Things that must NOT be introduced. Prevents well-meaning agents from creating parallel systems.
+----
 
+==== `do_not_create`
+
+Things that must NOT be introduced. Prevents well-meaning agents from
+creating parallel systems.
+
+[source,yaml]
+----
 do_not_create:
-  - pattern: "**/*.ts"
+  - pattern: **/*.ts
     reason: "TypeScript is banned — use ReScript"
-  - pattern: "Dockerfile"
+  - pattern: Dockerfile
     reason: "Use Containerfile (Podman, not Docker)"
-  - pattern: "package-lock.json"
+  - pattern: package-lock.json
     reason: "npm lock files banned — use deno.lock"
   - description: "REST API parallel to Groove endpoints"
     reason: "Groove is the inter-service protocol"
-terminology
+----
+
+==== `terminology`
+
 Correct terminology for this project. Prevents agents from using wrong names.
 
+[source,yaml]
+----
 terminology:
   - correct: panels
     incorrect:
@@ -118,9 +166,15 @@ terminology:
       - tabs
       - windows
     context: "PanLL UI elements are always called panels"
-ecosystem
-How this project relates to others. Helps agents understand what NOT to duplicate and where to look for related functionality.
+----
 
+==== `ecosystem`
+
+How this project relates to others. Helps agents understand what NOT to
+duplicate and where to look for related functionality.
+
+[source,yaml]
+----
 ecosystem:
   depends_on:
     - name: gossamer
@@ -133,9 +187,14 @@ ecosystem:
   related:
     - name: typell
       role: "Type intelligence engine — cross-panel type checking"
-coordination (Phase 2)
+----
+
+==== `coordination` (Phase 2)
+
 Active agent work tracking. Updated by agents or tooling.
 
+[source,yaml]
+----
 coordination:
   active:
     - agent: claude
@@ -154,41 +213,55 @@ coordination:
   available:
     - "Documentation for new API surface"
     - "Integration tests for Groove handlers"
-Validation Rules
-File MUST start with K9! on line 1
+----
 
-metadata section MUST be present with schema: k9-coordination
+== Validation Rules
 
-project section MUST be present
+The ABNF is normative; these rules summarise it (1–10) and add the schema
+rules a grammar cannot express (11–13).
 
-invariants section MUST be present (even if empty list)
+1. File MUST start with `K9!` on line 1, with no leading whitespace or BOM.
+2. One or more `# SPDX-` header lines MUST immediately follow the magic line.
+3. `metadata`, `project` and `invariants` MUST appear, in that order.
+4. Optional sections MUST appear in the fixed order given above, each at
+   most once. `protected`, `architecture`, `do_not_create`, `terminology`,
+   `ecosystem` and `coordination` each need at least one entry when present;
+   `invariants` may be empty.
+5. Indentation is exactly two spaces per level; tabs are invalid.
+6. Blank lines and full-line `#` comments are permitted between sections,
+   not within them. A `---` separator is invalid.
+7. Keys and enumerated values are case-sensitive (RFC 7405 `%s`).
+8. Strings are double-quoted and support only the escapes `\"`, `\\`,
+   `\n` and `\t`.
+9. `schema_version:` (and any `value`) may be a bare version such as
+   `1.1.1`, unquoted.
+10. Dates are ISO 8601 calendar dates (`2026-10-06`) or full RFC 3339
+    date-times (`2026-10-06T12:00:00.5+01:00`). Line endings are LF or CRLF.
+11. `metadata` MUST carry `schema: k9-coordination`.
+12. Each invariant MUST have `id`, `rule` and `reason`; each protected
+    entry MUST have `path` and `reason`.
+13. Severity defaults to `critical` if omitted.
 
-Each invariant MUST have id, rule, and reason
+== Generator Behaviour
 
-Each protected entry MUST have path and reason
+The generator reads `coordination.k9` and emits one file per supported AI tool.
+All generated files:
 
-Severity defaults to critical if omitted
+1. Start with a comment indicating they were generated from `coordination.k9`
+2. Include a "do not edit directly" warning
+3. Render all sections as markdown appropriate for the target tool
+4. Are idempotent — re-running overwrites with current state
 
-Generator Behaviour
-The generator reads coordination.k9 and emits one file per supported AI tool. All generated files:
+Generated files SHOULD be committed to the repository so that AI tools
+which read them on startup get the coordination context immediately.
 
-Start with a comment indicating they were generated from coordination.k9
+== Relationship to Existing Files
 
-Include a "do not edit directly" warning
+`coordination.k9` does NOT replace:
 
-Render all sections as markdown appropriate for the target tool
+* `0-AI-MANIFEST.a2ml` — the gateway file still serves as universal entry point
+* `.machine_readable/*.a2ml` — state/meta files remain authoritative
+* `.claude/CLAUDE.md` — can coexist; generated CLAUDE.md merges with existing
 
-Are idempotent — re-running overwrites with current state
-
-Generated files SHOULD be committed to the repository so that AI tools which read them on startup get the coordination context immediately.
-
-Relationship to Existing Files
-coordination.k9 does NOT replace:
-
-0-AI-MANIFEST.a2ml — the gateway file still serves as universal entry point
-
-.machine_readable/*.a2ml — state/meta files remain authoritative
-
-.claude/CLAUDE.md — can coexist; generated CLAUDE.md merges with existing
-
-The A2ML gateway SHOULD reference coordination.k9 in its inventory so agents following the gatekeeper protocol discover it.
+The A2ML gateway SHOULD reference `coordination.k9` in its inventory so
+agents following the gatekeeper protocol discover it.
