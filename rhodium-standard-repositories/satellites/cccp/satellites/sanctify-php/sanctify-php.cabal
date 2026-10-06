@@ -1,16 +1,17 @@
 cabal-version:      3.0
 name:               sanctify-php
-version:            0.1.0.0
+version:            0.2.0
 synopsis:           Haskell-based PHP hardening and security analysis tool
 description:
     Sanctify-PHP transforms PHP code to be safer and more robust:
     .
-    * Adds strict_types declarations
-    * Infers and adds type hints
-    * Detects security vulnerabilities (SQLi, XSS, CSRF)
-    * Enforces WordPress-specific constraints
-    * Generates PHPStan annotations
-    * Identifies OPcache optimization opportunities
+    * Comprehensive PHP 8.2+ parser (readonly classes, DNF types, enums, attributes)
+    * Advanced security analysis (OWASP Top 10, ReDoS, SSRF, XXE, TOCTOU)
+    * WordPress-specific security checks (nonce, capabilities, AJAX, REST API)
+    * Automatic code transformations (sanitization, type hints, strict types)
+    * Multiple output formats (text, JSON, SARIF, HTML)
+    * Interactive fix mode and watch mode for development
+    * Infrastructure export (php.ini, nginx, Guix/Nix)
 license:            LicenseRef-PMPL-1.0-or-later
 license-file:       LICENSE
 author:             Jonathan D.A. Jewell
@@ -30,21 +31,26 @@ library
         Sanctify.Parser
         Sanctify.AST
         Sanctify.Analysis.Security
+        Sanctify.Analysis.Advanced
         Sanctify.Analysis.Types
         Sanctify.Analysis.Taint
+        Sanctify.Analysis.DeadCode
         Sanctify.Transform.StrictTypes
         Sanctify.Transform.TypeHints
         Sanctify.Transform.Sanitize
+        Sanctify.Transform.Strict
         Sanctify.WordPress.Constraints
         Sanctify.WordPress.Hooks
+        Sanctify.WordPress.Security
         Sanctify.Emit
         Sanctify.Config
         Sanctify.Report
+        Sanctify.Ruleset
     other-modules:
         Sanctify.Parser.Lexer
         Sanctify.Parser.Token
     build-depends:
-        base ^>=4.17,
+        base >=4.17,
         text >=2.0,
         containers >=0.6,
         mtl >=2.3,
@@ -59,7 +65,8 @@ library
         vector >=0.13,
         unordered-containers >=0.2,
         prettyprinter >=1.7,
-        optparse-applicative >=0.18
+        optparse-applicative >=0.18,
+        time >=1.12
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
@@ -73,26 +80,69 @@ executable sanctify
     import:           warnings
     main-is:          Main.hs
     build-depends:
-        base ^>=4.17,
+        base >=4.17,
         sanctify-php,
         text,
+        containers,
+        mtl,
         optparse-applicative,
         filepath,
-        directory
+        directory,
+        time,
+        aeson,
+        bytestring
     hs-source-dirs:   app
     default-language: GHC2021
     default-extensions:
         OverloadedStrings
+        LambdaCase
 
 test-suite sanctify-php-test
     import:           warnings
     default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
-    main-is:          Main.hs
+    main-is:          Spec.hs
+    other-modules:
+        ParserSpec
+        SecuritySpec
+        TransformSpec
+        E2ESpec
+        PropertySpec
+        AspectSpec
     build-depends:
-        base ^>=4.17,
+        base >=4.17,
         sanctify-php,
         hspec >=2.10,
+        hspec-discover >=2.10,
         hspec-megaparsec >=2.2,
-        text
+        hspec-golden >=0.2,
+        QuickCheck >=2.14,
+        text,
+        containers,
+        filepath,
+        directory,
+        bytestring,
+        transformers
+    build-tool-depends:
+        hspec-discover:hspec-discover >=2.10
+
+benchmark sanctify-php-bench
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   bench
+    main-is:          Main.hs
+    build-depends:
+        base >=4.17,
+        sanctify-php,
+        criterion >=1.6,
+        text,
+        filepath
+    ghc-options:
+        -O2
+        -rtsopts
+        -with-rtsopts=-N

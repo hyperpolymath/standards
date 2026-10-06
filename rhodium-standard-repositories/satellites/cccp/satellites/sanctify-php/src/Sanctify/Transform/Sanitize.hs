@@ -19,12 +19,18 @@ module Sanctify.Transform.Sanitize
     , sanitizeSuperglobalAccess
     , escapeEchoStatement
     , addExitAfterRedirect
+    , transformSanitizeOutput
+    , transformSanitizeInput
+    , transformSQLPrepare
+    , transformRedirectSafety
+    , transformModernizeCrypto
     ) where
 
 import Data.Text (Text)
 import qualified Data.Text as T
 
 import Sanctify.AST
+import Sanctify.WordPress.Constraints (isWpdbObject)
 
 -- | Context for output escaping
 data EscapeContext
@@ -207,3 +213,128 @@ addExitAfterRedirect = concatMap processStmt
         ExprCall
             (Located pos $ ExprConstant $ QualifiedName [Name "exit"] False)
             []
+
+-- | Transform: escape outputs across the file
+transformSanitizeOutput :: PhpFile -> PhpFile
+transformSanitizeOutput file = file { phpStatements = map escapeStmt (phpStatements file) }
+  where
+    escapeStmt stmt@(Located pos (StmtEcho exprs)) =
+        Located pos $ StmtEcho $ map (wrapWithEscape $ detectEscapeContext stmt) exprs
+    escapeStmt stmt = stmt
+
+-- | Transform: sanitize superglobal inputs everywhere
+transformSanitizeInput :: PhpFile -> PhpFile
+transformSanitizeInput file = file { phpStatements = map (mapStatement sanitizeExpr) (phpStatements file) }
+  where
+    sanitizeExpr = mapExpr sanitizeSuperglobalAccess
+
+-- | Transform: wrap unsafe $wpdb queries with prepare()
+transformSQLPrepare :: PhpFile -> PhpFile
+transformSQLPrepare file = file { phpStatements = map (mapStatement prepareQueries) (phpStatements file) }
+  where
+    prepareQueries = mapExpr prepareNode
+
+    prepareNode loc@(Located pos expr@(ExprMethodCall obj method args))
+        | isWpdbObject obj
+        , let name = unName method
+        , name `elem` ["query", "get_results", "get_row", "get_col", "get_var"]
+        , not (null args)
+        , let firstArg@(Argument n argVal unpack) = head args
+        , Just (query, params) <- convertToParameterizedQuery argVal
+        = Located pos $ ExprMethodCall obj method $ Argument n (wrapWithPrepare query params) unpack : tail args
+    prepareNode loc = loc
+
+-- | Transform: ensure redirects end with exit()
+transformRedirectSafety :: PhpFile -> PhpFile
+transformRedirectSafety file = file { phpStatements = addExitAfterRedirect (phpStatements file) }
+
+-- | Transform: modernize weak crypto helpers
+transformModernizeCrypto :: PhpFile -> PhpFile
+transformModernizeCrypto file = file { phpStatements = map (mapStatement modernizeExpr) (phpStatements file) }
+  where
+    modernizeExpr = mapExpr modernizeNode
+
+    modernizeNode loc@(Located pos expr@(ExprCall callee args)) =
+        case functionName callee of
+            Just fn | fn == "rand" -> Located pos $ ExprCall (makeConst pos "random_int") (map updateArg args)
+                    | fn == "md5" -> Located pos $ ExprCall (makeConst pos "hash") (Argument Nothing (Located pos $ ExprLiteral $ LitString "sha3-256") False : map updateArg args)
+                    | fn == "sha1" -> Located pos $ ExprCall (makeConst pos "sodium_crypto_generichash") (map updateArg args)
+            _ -> loc
+
+    modernizeNode loc = loc
+
+    updateArg (Argument name value unpack) = Argument name (modernizeExpr value) unpack
+
+    makeConst p name = Located p $ ExprConstant $ QualifiedName [Name name] False
+
+    functionName (Located _ (ExprConstant (QualifiedName parts _))) = Just $ unName $ last parts
+    functionName _ = Nothing
+
+mapArgument :: (Located Expr -> Located Expr) -> Argument -> Argument
+mapArgument f (Argument name value unpack) = Argument name (f value) unpack
+
+mapExpr :: (Located Expr -> Located Expr) -> Located Expr -> Located Expr
+mapExpr f (Located pos expr) = f $ Located pos (case expr of
+    ExprBinary op l r -> ExprBinary op (mapExpr f l) (mapExpr f r)
+    ExprUnary op e -> ExprUnary op (mapExpr f e)
+    ExprAssign e1 e2 -> ExprAssign (mapExpr f e1) (mapExpr f e2)
+    ExprAssignOp op e1 e2 -> ExprAssignOp op (mapExpr f e1) (mapExpr f e2)
+    ExprTernary c t e -> ExprTernary (mapExpr f c) (fmap (mapExpr f) t) (mapExpr f e)
+    ExprCall callee args -> ExprCall (mapExpr f callee) (map (mapArgument f) args)
+    ExprMethodCall obj name args -> ExprMethodCall (mapExpr f obj) name (map (mapArgument f) args)
+    ExprStaticCall qn name args -> ExprStaticCall qn name (map (mapArgument f) args)
+    ExprNullsafeMethodCall obj name args -> ExprNullsafeMethodCall (mapExpr f obj) name (map (mapArgument f) args)
+    ExprPropertyAccess obj name -> ExprPropertyAccess (mapExpr f obj) name
+    ExprNullsafePropertyAccess obj name -> ExprNullsafePropertyAccess (mapExpr f obj) name
+    ExprStaticPropertyAccess qn name -> ExprStaticPropertyAccess qn name
+    ExprArrayAccess base idx -> ExprArrayAccess (mapExpr f base) (fmap (mapExpr f) idx)
+    ExprNew qn args -> ExprNew qn (map (mapArgument f) args)
+    ExprClosure{closureStatic=st, closureParams=ps, closureUses=us, closureReturn=ret, closureBody=body} ->
+        ExprClosure st ps us ret (map (mapStatement f) body)
+    ExprArrowFunction{arrowParams=params, arrowReturn=ret, arrowExpr=expr} ->
+        ExprArrowFunction params ret (mapExpr f expr)
+    ExprCast ty e -> ExprCast ty (mapExpr f e)
+    ExprIsset exprs -> ExprIsset (map (mapExpr f) exprs)
+    ExprEmpty e -> ExprEmpty (mapExpr f e)
+    ExprEval e -> ExprEval (mapExpr f e)
+    ExprInclude ty e -> ExprInclude ty (mapExpr f e)
+    ExprYield m1 m2 -> ExprYield (fmap (mapExpr f) m1) (fmap (mapExpr f) m2)
+    ExprYieldFrom e -> ExprYieldFrom (mapExpr f e)
+    ExprThrow e -> ExprThrow (mapExpr f e)
+    ExprClassConstAccess qn name -> ExprClassConstAccess qn name
+    ExprConstant qn -> ExprConstant qn
+    ExprShellExec t -> ExprShellExec t
+    ExprHeredoc t -> ExprHeredoc t
+    ExprList items -> ExprList (map (fmap (mapExpr f)) items)
+    _ -> expr)
+
+mapStatement :: (Located Expr -> Located Expr) -> Located Statement -> Located Statement
+mapStatement f (Located pos stmt) = Located pos (case stmt of
+    StmtExpr expr -> StmtExpr (f expr)
+    StmtDecl decl -> StmtDecl decl
+    StmtIf cond thenStmts elseStmts -> StmtIf (f cond) (map (mapStatement f) thenStmts) (fmap (map (mapStatement f)) elseStmts)
+    StmtWhile cond body -> StmtWhile (f cond) (map (mapStatement f) body)
+    StmtFor mInit mCond mUpdate body -> StmtFor (fmap f mInit) (fmap f mCond) (fmap f mUpdate) (map (mapStatement f) body)
+    StmtForeach expr var forKey body -> StmtForeach (f expr) var forKey (map (mapStatement f) body)
+    StmtSwitch expr cases -> StmtSwitch (f expr) (map (mapCase f) cases)
+    StmtMatch expr arms -> StmtMatch (f expr) (map (mapArm f) arms)
+    StmtTry tryBody catches finally -> StmtTry (map (mapStatement f) tryBody) (map (mapCatch f) catches) (fmap (map (mapStatement f)) finally)
+    StmtReturn mExpr -> StmtReturn (fmap f mExpr)
+    StmtThrow expr -> StmtThrow (f expr)
+    StmtBreak n -> StmtBreak n
+    StmtContinue n -> StmtContinue n
+    StmtEcho exprs -> StmtEcho (map f exprs)
+    StmtGlobal vars -> StmtGlobal vars
+    StmtStatic pairs -> StmtStatic (map (\(var, mexpr) -> (var, fmap f mexpr)) pairs)
+    StmtUnset exprs -> StmtUnset (map f exprs)
+    StmtDeclare decls body -> StmtDeclare decls (map (mapStatement f) body)
+    StmtNoop -> StmtNoop)
+
+mapCase :: (Located Expr -> Located Expr) -> SwitchCase -> SwitchCase
+mapCase f (SwitchCase cond body) = SwitchCase (fmap (mapExpr f) cond) (map (mapStatement f) body)
+
+mapArm :: (Located Expr -> Located Expr) -> MatchArm -> MatchArm
+mapArm f (MatchArm cond result) = MatchArm (map (mapExpr f) cond) (mapExpr f result)
+
+mapCatch :: (Located Expr -> Located Expr) -> CatchClause -> CatchClause
+mapCatch f (CatchClause types var body) = CatchClause types var (map (mapStatement f) body)

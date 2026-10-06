@@ -4,13 +4,16 @@
 module Sanctify.AST
     ( -- * Top-level structures
       PhpFile(..)
+    , UseDecl(..)
+    , UseKind(..)
     , Statement(..)
     , Declaration(..)
     , Visibility(..)
     , Modifier(..)
 
-      -- * Expressions
+    -- * Expressions
     , Expr(..)
+    , IncludeType(..)
     , Literal(..)
     , BinOp(..)
     , UnaryOp(..)
@@ -30,8 +33,16 @@ module Sanctify.AST
     , ReturnType(..)
 
       -- * Control flow
+    , SwitchCase(..)
     , MatchArm(..)
     , CatchClause(..)
+
+      -- * Class members
+    , ClassMember(..)
+    , InterfaceMethod(..)
+    , EnumCase(..)
+    , TraitAdaptation(..)
+    , Attribute(..)
 
       -- * Source location
     , SourcePos(..)
@@ -88,12 +99,12 @@ data UseKind = UseClass | UseFunction | UseConstant
 
 -- | Variable reference
 newtype Variable = Variable { varName :: Text }
-    deriving stock (Eq, Show, Generic)
+    deriving stock (Eq, Ord, Show, Generic)
     deriving anyclass (ToJSON, FromJSON)
 
 -- | Simple name/identifier
 newtype Name = Name { unName :: Text }
-    deriving stock (Eq, Show, Generic)
+    deriving stock (Eq, Ord, Show, Generic)
     deriving anyclass (ToJSON, FromJSON)
 
 -- | Qualified name (namespaced)

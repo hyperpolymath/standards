@@ -13,6 +13,7 @@ module Sanctify.Transform.TypeHints
 
       -- * Full file transformation
     , addAllTypeHints
+    , transformAddTypeHints
     ) where
 
 import Data.Text (Text)
@@ -20,7 +21,7 @@ import qualified Data.Text as T
 import Data.Maybe (fromMaybe, mapMaybe)
 
 import Sanctify.AST
-import Sanctify.Analysis.Types
+import Sanctify.Analysis.Types (TypeContext, emptyTypeContext, InferredType)
 
 -- | Add type hints to function parameters based on defaults and usage
 addParameterTypeHints :: TypeContext -> Declaration -> Declaration
@@ -256,3 +257,11 @@ addAllTypeHints ctx file = file
     addMethodReturnHint c meth@MemberMethod{methReturn = Nothing, methBody = Just body} =
         meth { methReturn = inferReturnType c body }
     addMethodReturnHint _ meth = meth
+
+-- | Run the type hint inference pipeline on a PHP file
+transformAddTypeHints :: PhpFile -> PhpFile
+transformAddTypeHints = addAllTypeHints emptyTypeContext
+
+-- | Apply all type hint transformations with a fresh context
+transformAddTypeHints :: PhpFile -> PhpFile
+transformAddTypeHints = addAllTypeHints emptyTypeContext
