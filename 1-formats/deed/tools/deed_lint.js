@@ -201,73 +201,85 @@ function checkUuid8Body(body, line) {
   }
 }
 
+/** #-forms: #u5"name" (uuid5), #u8"domain:name" (uuid8) or #t / #f (boolean); anything else is a parse error. */
+function lexHashForm(lx) {
+  const two = lx.t.slice(lx.i, lx.i + 3);
+  if (two.startsWith("#u5")) {
+    lx.i += 3;
+    if (lx.peek() !== '"') {
+      throw new LintError('uuid5 must be followed immediately by a string: #u5"name"', lx.line());
+    }
+    lexString(lx);
+    return ["uuid5", null];
+  }
+  if (two.startsWith("#u8")) {
+    const line = lx.line();
+    lx.i += 3;
+    if (lx.peek() !== '"') {
+      throw new LintError('uuid8 must be followed immediately by a string: #u8"domain:name"', line);
+    }
+    checkUuid8Body(lexString(lx)[1], line);
+    return ["uuid8", null];
+  }
+  if (two.slice(0, 2) === "#t" || two.slice(0, 2) === "#f") {
+    const nxt = lx.peek(2);
+    if (nxt && !" \r\n()".includes(nxt)) {
+      const tok = lx.t.slice(lx.i + 2, lx.i + 24).trim().split(/\s+/)[0].slice(0, 20);
+      throw new LintError(
+        `booleans are exactly #t/#f (got ${pyRepr(two + tok)}); true/false/1/0 are parse errors`,
+        lx.line(),
+      );
+    }
+    lx.i += 2;
+    return ["boolean", two];
+  }
+  throw new LintError('unrecognised #-form: only #t, #f, #u5"…", #u8"…" are legal', lx.line());
+}
+
+/** list = "(" *(sep value) ")" — returns ["list", items]. */
+function lexList(lx) {
+  lx.i += 1;
+  const items = [];
+  for (;;) {
+    lx.skipSep();
+    if (lx.peek() === ")") {
+      lx.i += 1;
+      return ["list", items];
+    }
+    items.push(lexValue(lx));
+  }
+}
+
+/** quoted = "'" value, where only symbols and lists may be quoted. */
+function lexQuoted(lx) {
+  lx.i += 1;
+  lx.skipSep();
+  const v = lexValue(lx);
+  if (v[0] !== "symbol" && v[0] !== "list") {
+    throw new LintError(`only symbols and lists may be quoted, not ${v[0]}`, lx.line());
+  }
+  return ["quoted", v];
+}
+
+/** integer token; rejects a number run straight into identifier characters. */
+function lexIntegerToken(lx) {
+  const v = lexNumber(lx);
+  const nxt = lx.peek();
+  if (nxt && (SYMBOL_CONT.test(nxt) || /^\p{L}$/u.test(nxt))) {
+    throw new LintError("malformed token: number followed by identifier characters", lx.line());
+  }
+  return v;
+}
+
 /** value = string / symbol / integer / boolean / uuid5 / uuid8 / quoted / list */
 function lexValue(lx) {
   const c = lx.peek();
   if (c === '"') return lexString(lx);
-  if (c === "#") {
-    const two = lx.t.slice(lx.i, lx.i + 3);
-    if (two.startsWith("#u5")) {
-      lx.i += 3;
-      if (lx.peek() !== '"') {
-        throw new LintError('uuid5 must be followed immediately by a string: #u5"name"', lx.line());
-      }
-      lexString(lx);
-      return ["uuid5", null];
-    }
-    if (two.startsWith("#u8")) {
-      const line = lx.line();
-      lx.i += 3;
-      if (lx.peek() !== '"') {
-        throw new LintError('uuid8 must be followed immediately by a string: #u8"domain:name"', line);
-      }
-      checkUuid8Body(lexString(lx)[1], line);
-      return ["uuid8", null];
-    }
-    if (two.slice(0, 2) === "#t" || two.slice(0, 2) === "#f") {
-      const nxt = lx.peek(2);
-      if (nxt && !" \r\n()".includes(nxt)) {
-        const tok = lx.t.slice(lx.i + 2, lx.i + 24).trim().split(/\s+/)[0].slice(0, 20);
-        throw new LintError(
-          `booleans are exactly #t/#f (got ${pyRepr(two + tok)}); true/false/1/0 are parse errors`,
-          lx.line(),
-        );
-      }
-      lx.i += 2;
-      return ["boolean", two];
-    }
-    throw new LintError('unrecognised #-form: only #t, #f, #u5"…", #u8"…" are legal', lx.line());
-  }
-  if (c === "(") {
-    lx.i += 1;
-    const items = [];
-    for (;;) {
-      lx.skipSep();
-      if (lx.peek() === ")") {
-        lx.i += 1;
-        return ["list", items];
-      }
-      items.push(lexValue(lx));
-    }
-  }
-  if (c === "'") {
-    lx.i += 1;
-    lx.skipSep();
-    const v = lexValue(lx);
-    if (v[0] !== "symbol" && v[0] !== "list") {
-      throw new LintError(`only symbols and lists may be quoted, not ${v[0]}`, lx.line());
-    }
-    return ["quoted", v];
-  }
+  if (c === "#") return lexHashForm(lx);
+  if (c === "(") return lexList(lx);
+  if (c === "'") return lexQuoted(lx);
   if (c === ":") throw new LintError("stray keyword — a keyword may only lead a field", lx.line());
-  if (isDigit(c) || (c === "-" && isDigit(lx.peek(1)))) {
-    const v = lexNumber(lx);
-    const nxt = lx.peek();
-    if (nxt && (SYMBOL_CONT.test(nxt) || /^\p{L}$/u.test(nxt))) {
-      throw new LintError("malformed token: number followed by identifier characters", lx.line());
-    }
-    return v;
-  }
+  if (isDigit(c) || (c === "-" && isDigit(lx.peek(1)))) return lexIntegerToken(lx);
   const v = lexSymbol(lx);
   if (v) return v;
   throw new LintError(
