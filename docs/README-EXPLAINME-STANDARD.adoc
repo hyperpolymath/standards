@@ -182,6 +182,7 @@ Tracked in link:https://github.com/hyperpolymath/{repo}/issues/{n}[#{n}].
 If there are no known gaps, write: "No known gaps between README claims and
 current implementation."
 
+[[evidence-index]]
 ==== 4. Evidence index (optional but strongly encouraged)
 
 For repos with significant test suites or proofs:
@@ -197,6 +198,95 @@ For repos with significant test suites or proofs:
 | `src/foo.ext`
 | {What this file demonstrates}
 |===
+----
+
+[[proof-ledger]]
+==== 5. Proof ledger (required when a proof is claimed)
+
+*Required* when README, EXPLAINME or AFFIRMATION claims that anything is
+proved, verified or formally checked. Optional otherwise. Every proof
+obligation the repository speaks about gets one row, including the ones
+that are only argued or still open.
+
+[source,asciidoc]
+----
+[[proof-ledger]]
+== Proof Ledger
+
+[cols="2,1,2,2,2", options="header"]
+|===
+| Obligation | Status | Checker (version, flags) | Where | Trust boundary
+
+| {property, in one line}
+| {status}
+| {tool version flags, or "-"}
+| `{file}:{theorem or test}`
+| {what the proof does not cover}
+|===
+----
+
+The status vocabulary is closed:
+
+[cols="1,3", options="header"]
+|===
+| Status | Meaning
+
+| `proven`
+| Machine-checked with no postulates, axioms or escape hatches beyond the
+  checker's safe mode (e.g. Agda `--safe`, Idris2 `%default total` without
+  `believe_me`). The checker command is in the row.
+
+| `proven-with-postulates`
+| Machine-checked, but it rests on named postulates or axioms. List them in
+  the trust-boundary column.
+
+| `argued`
+| A written argument, not machine-checked (e.g. a correspondence document).
+
+| `tested-only`
+| Checked by tests or property tests, not proved. Give the run and its count.
+
+| `open`
+| Stated and not yet discharged.
+|===
+
+Rules:
+
+. The ledger is the source of the *Proofs* row in the README scorecard. That
+  row shows the count of `proven` rows over all rows and links to
+  `EXPLAINME.adoc#proof-ledger`. README never states a proof grade that the
+  ledger does not support.
+. A row's status may only be as strong as the weakest step it depends on. A
+  theorem about a model is `proven` *for the model*. The link from model to
+  code is its own row, usually `argued`.
+. If the code does not build, no row that depends on running the code can be
+  stronger than `open`. Proofs that are checked independently of the build
+  (a separate Agda or Idris2 model) keep their status.
+. A ledger row and a <<evidence-index,Evidence index>> row may point at the
+  same file. The ledger says *what* is proved and *how strongly*. The
+  evidence index says *where to look*.
+
+Worked example (from `metadatastician/ZenodoDeposits.jl` at `796971f0`):
+
+[source,asciidoc]
+----
+| Publish happens at most once per journal
+| proven
+| Agda 2.6.4.3, agda-stdlib 2.1, `--safe --without-K`
+| `proofs/agda/ZenodoDeposits/Journal.agda:at-most-one-publish`
+| Over the transition table only; HTTP, filesystem and crash timing are outside the model
+
+| The proved table is the code's table
+| tested-only
+| `julia --project proofs/agda/generate.jl` then `git status -s proofs` is empty
+| `proofs/agda/generate.jl`
+| Regeneration is checked; the generator itself is not proved
+
+| The Julia code follows the Agda model beyond the table
+| argued
+| -
+| `proofs/agda/CORRESPONDENCE.adoc`
+| Not formalised
 ----
 
 === What NOT to put in EXPLAINME
@@ -216,6 +306,8 @@ An EXPLAINME is considered **complete** when:
   one code path, and a caveat (even if "None currently known.").
 . The dogfooding table has at least three rows.
 . No section is a stub (placeholder text, TODO, or "coming soon").
+. If the repository claims any proof, the <<proof-ledger,Proof ledger>> is
+  present and every row uses the closed status vocabulary.
 . The file compiles without AsciiDoc warnings.
 
 == File naming and placement
