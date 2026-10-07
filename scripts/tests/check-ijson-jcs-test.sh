@@ -37,6 +37,11 @@ names "NOT CANONICAL t/a.json" "the report names the unsorted file"
 expect 1 "an unsorted .json fails --enforce" --enforce
 fresh; printf '{\n  "a": 1\n}\n' > "$WORK/t/a.json"
 expect 1 "a pretty-printed .json fails --enforce" --enforce
+fresh; printf '{"a":1}' > "$WORK/t/a.json"
+expect 1 "a .json without a final newline fails --enforce" --enforce
+names "NOT CANONICAL t/a.json" "the missing newline is classed non-canonical"
+fresh; printf '{"a":1}\n\n' > "$WORK/t/a.json"
+expect 1 "a .json with two final newlines fails --enforce" --enforce
 fresh; printf '{"a":1,"a":2}\n' > "$WORK/t/a.json"
 expect 1 "a duplicate-key .json fails --enforce" --enforce
 names "INVALID t/a.json" "the duplicate key is classed invalid, not merely non-canonical"

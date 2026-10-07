@@ -54,9 +54,14 @@ is_jsonc_carve_out() {
 }
 
 # Classify one .json file; print CANONICAL, NOT_CANONICAL or INVALID.
+# `ijson-jcs check` accepts a file with no final newline, so a missing one is
+# checked here: J-1 requires exactly one.
 classify_json() {
   local rc=0
   "$IJSON_JCS" check "$1" >/dev/null 2>&1 || rc=$?
+  if [ "$rc" = 0 ] && [ "$(tail -c 1 "$1" | od -An -c | tr -d ' ')" != '\n' ]; then
+    rc=1
+  fi
   case "$rc" in
     0) echo CANONICAL ;;
     1) echo NOT_CANONICAL ;;
