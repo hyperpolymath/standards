@@ -88,20 +88,23 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Checkout UUID v7 validator
+      # ADR-008 P2 dual-accept (v8 and v7 pass). The job id and name stay
+      # "UUID v7 conformance" so no caller's required context moves; v7
+      # acceptance retires at P4.
+      - name: Checkout UUID validator (ESTATE-UUID-V8)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
           ref: ${{ job.workflow_sha }}
           path: .standards-uuid
-          sparse-checkout: scripts/check-uuid-v7.sh
+          sparse-checkout: scripts/check-uuid-v8.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
-      - name: Reject non-v7 UUID literals
+      - name: Reject UUID literals that are neither v8 nor v7
         run: |
-          chmod +x .standards-uuid/scripts/check-uuid-v7.sh
-          .standards-uuid/scripts/check-uuid-v7.sh .
+          chmod +x .standards-uuid/scripts/check-uuid-v8.sh
+          .standards-uuid/scripts/check-uuid-v8.sh .
 
   allowlist-preflight:
     name: Allowlist Preflight
@@ -977,7 +980,11 @@ jobs:
               if [ -n "$canon" ] && [ "$f_" = "$canon" ]; then continue; fi
               [ -f "$f_" ] || continue
               for pat in "${pats[@]}"; do
-                out=$(grep -nE -e "$pat" -- "$f_" 2>"$err"); rc=$?
+                # The step runs under `bash -e`: a bare `out=$(grep …)` that matches nothing
+                # returns 1 and kills the step silently before rc is read. `|| rc=$?` keeps
+                # the status without tripping -e.
+                rc=0
+                out=$(grep -nE -e "$pat" -- "$f_" 2>"$err") || rc=$?
                 if [ "$rc" -eq 0 ]; then
                   while IFS= read -r line; do
                     echo "::error file=$f_,line=${line%%:*}::[R5:$rid] ${line#*:}  →  route to ${canon:-drop or move to a canonical source}"

@@ -282,6 +282,11 @@ in
   # The host supplies one Bool of EVIDENCE per precondition. Evidence is
   # runtime fact, not a static component field — which is why `check_level`
   # in leash.ncl can never authorise Hunt on its own.
+  # Host-side, and deliberately CLOSED unlike the component-facing records
+  # above: §9.2 says the host supplies one Boolean of evidence per
+  # precondition, so a misspelt evidence field must be an error rather than a
+  # silently ignored precondition. §5.5's openness is about a *component's*
+  # fields.
   HuntEvidence = {
     signature | Bool,
     policy | Bool,
@@ -362,6 +367,10 @@ in
     payload_hash | String | optional,
     signed_at | String | optional,
     key_id | String | default = "primary",
+    # §5.5 — unknown fields are PERMITTED; see the `..` block above `Metadata`.
+    # A host that reads `signature.public_key` MUST NOT be the reason a future
+    # `counter_signature` field is rejected.
+    ..
   },
 
   # ── §6 The component pedigree, v1 ────────────────────────────────────
@@ -372,16 +381,50 @@ in
   # never loaded; MIGRATION-1058 M3), with two normative tightenings:
   # `component_type` is REQUIRED (§6.2), and the security flags must be paid
   # for in the capability grant (§8.4).
+  #
+  # ── THE `..` TAIL, AND WHY EVERY COMPONENT-FACING RECORD HERE HAS ONE ──
+  #
+  # §5.5's table ends with "Unknown fields anywhere | PERMITTED. A reader SHOULD
+  # report them and MUST NOT consult them to relax any requirement of §8 or §9."
+  # That is normative prose, and by this file's own first rule the prose wins:
+  # where the two disagree, this file is the bug.
+  #
+  # They disagreed until 2026-10-05. A Nickel record contract is CLOSED by
+  # default — the sharp edge is recorded in Nickel's own integration suite,
+  # core/tests/integration/inputs/contracts/record_contract_extra_field.ncl,
+  # which asserts `EvalError::BlameError` with the message "extra field" and
+  # advises appending `, ..`. So a component carrying a legitimate extension
+  # field was blamed by this file while §5.5 permitted the field. The six
+  # `.machine_readable/contractiles/*/*.k9.ncl` components are the live case
+  # (they keep `semantics`, `contractile_verb`, `tier`, `authority`,
+  # `variance_schema`, `execution`, `failure_mode_defenses` in the pedigree;
+  # `probe_scope`, `probe_kinds_*`, `allow_filesystem_write_conditional` in
+  # security; `paired_xfile`, `paired_runner` in metadata), and
+  # `2-protocols/axel/config/*.k9.ncl` keep their payload at top level.
+  #
+  # Opening these five records is a CONFORMANCE fix, not a contract revision:
+  # the specified contract (the prose) never changed, so `contract_version`
+  # stays 1.0.0. It does not weaken §8 or §9 either — §5.5's own last clause
+  # forbids that, and the validator enforces the capability arithmetic over the
+  # extracted facts whatever an extension field claims (K9-S007, K9-S008).
+  #
+  # The positive control `tools/fixtures/valid/extension-fields.k9.ncl` exists
+  # so this cannot silently regress: it fails at L2 the moment any of these
+  # records closes again.
 
   Metadata = {
     name | String,
     version | String | default = "0.0.0",
     description | String | optional,
     author | String | optional,
+    # §5.5 — see the block comment above. The estate's contractiles add
+    # `paired_xfile` / `paired_runner` here.
+    ..
   },
 
   Security = {
-    # §7 — closed set. An unknown tag is a contract violation, not a warning.
+    # §7 — closed set. An unknown LEASH TAG is a contract violation, not a
+    # warning; an unknown FIELD in this block is §5.5's business.
     leash | SecurityLevel,
     trust_level | String | default = "unset",
     allow_network | Bool | default = false,
@@ -392,6 +435,11 @@ in
     signature_required | Bool | default = false,
     # §8.3 — the explicit grant. Default-deny: absent means empty.
     capabilities | CapabilityGrant | default = [],
+    # §5.5 — unknown fields are PERMITTED, and the prose names this block's own
+    # examples: "the estate's contractiles use `probe_scope` and
+    # `authorised_probes_only`". No conforming reader may let one of them
+    # weaken §8 or §9 — the grant above is what a host enforces.
+    ..
   },
 
   Pedigree = {
@@ -411,6 +459,12 @@ in
     side_effects | Array String | default = [],
     # §10.1 — the signature claim. Presence is per-leash; see Signature above.
     signature | Signature | optional,
+    # §5.5 — unknown fields are PERMITTED. This is the line MIGRATION-1058 M1
+    # turned on: the contractile family keeps its own vocabulary in the pedigree
+    # (`semantics`, `contractile_verb`, `tier`, `authority`, `variance_schema`,
+    # `execution`, `failure_mode_defenses`), and nothing in this file may force
+    # those names out of it.
+    ..
   },
 
   # The whole component: the pedigree plus the optional Nickel payload.
@@ -435,6 +489,12 @@ in
     config | { _ : Dyn } | optional,
     recipes | { _ : Dyn } | optional,
     validation | { _ : Dyn } | optional,
+    # §5.5 — unknown fields are PERMITTED at top level too, which is the case
+    # MIGRATION-1058 M4 recorded for whoever first ran the corpus at L2:
+    # `2-protocols/axel/config/*.k9.ncl` keep their payload (`ci`, `local_dev`,
+    # `quality`; `metadata.k9.ncl`: `project`, `tech_stack`, `deployment`,
+    # `features`, `status`) beside `pedigree`.
+    ..
   },
 
   # ── §11 Library dialect ──────────────────────────────────────────────

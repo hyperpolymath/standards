@@ -3,6 +3,12 @@
 # Reconcile only Scorecard's inline action-pin findings with native lock coverage.
 # No lock semantics are reimplemented: gh actions-lock verifies each workflow.
 # Usage: ruby reconcile-scorecard-actions-lock.rb INPUT OUTPUT AUDIT_JSON [ROOT]
+# Exit codes:
+#   0  every eligible workflow verified; OUTPUT and AUDIT_JSON written.
+#   3  OUTPUT and AUDIT_JSON written, but at least one workflow failed native
+#      verification. Only that workflow's findings are retained; findings in
+#      verified workflows are still removed. Callers must treat this as failure.
+#   2  usage or SARIF structure error; OUTPUT is NOT written.
 require 'json'
 require 'open3'
 require 'yaml'
@@ -80,6 +86,11 @@ module ScorecardActionsLock
     end
   end
 
+  # Decide whether one workflow's `gh actions-lock --verify` result is clean
+  # enough to suppress its Scorecard pin findings. Accepts a valid result whose
+  # findings are empty (with a zero exit) or only `sha-as-ref`, and an invalid
+  # result whose only non-`sha-as-ref` findings are `stale` entries for
+  # job-level reusable refs the verifier cannot see (standards#1036).
   def self.verification_accepted?(verification, status, reusable_deps)
     return false unless verification.is_a?(Hash) && verification['findings'].is_a?(Array)
     findings = verification['findings']
@@ -103,22 +114,52 @@ module ScorecardActionsLock
     accepted_stale.positive?
   end
 
+  # Verify one workflow (+relative+ to +root+) against `actions.lock`: job-level
+  # reusable refs must be recorded in the lock, and `gh actions-lock --verify`
+  # must report an accepted result. Returns the verifier's JSON on success.
+  # Raises with the reason on any failure, including unparseable workflow YAML,
+  # a missing `gh`, or non-JSON verifier output, so the caller can confine the
+  # failure to this one file.
+  def self.verify_workflow(root, relative)
+    path = File.join(root, relative)
+    lock_path = File.join(root, '.github/workflows/actions.lock')
+    reusable_deps = reusable_workflow_deps(path)
+    unless lock_covers_reusable_deps?(lock_path, relative, reusable_deps)
+      raise "Native action-lock verification failed for #{relative}: job-level reusable ref absent from actions.lock"
+    end
+
+    stdout, stderr, status = Open3.capture3('gh', 'actions-lock', relative,
+      '--verify', '--no-interactive', '--json=valid,findings', chdir: root)
+    warn stderr unless stderr.empty?
+    verification = JSON.parse(stdout)
+    unless verification_accepted?(verification, status, reusable_deps)
+      raise "Native action-lock verification failed for #{relative}"
+    end
+    verification
+  end
+
   # Remove Scorecard action-pin findings only when they identify a remote action
   # entry in a regular workflow below +root+ and native action-lock verification
-  # succeeds. The supplied SARIF document is updated in place and returned with
-  # audit records for removed findings.
+  # of THAT workflow succeeds. Verification is per file: a workflow that fails
+  # keeps all of its findings and is recorded in the returned failures map
+  # (relative path => reason), while findings in other, verified workflows are
+  # still removed. The supplied SARIF document is updated in place and returned
+  # as [document, audit, failures], where audit lists the removed findings.
   #
-  # Invokes +gh actions-lock+ once per eligible workflow. Raises when the SARIF
-  # structure or native verification result is invalid, or verification fails.
+  # Invokes +gh actions-lock+ at most once per eligible workflow. Raises only
+  # when the SARIF structure itself is invalid.
   def self.reconcile(document, root)
     raise 'Expected a SARIF 2.1.0 document with runs' unless document.is_a?(Hash) &&
       document['version'] == '2.1.0' && document['runs'].is_a?(Array) && !document['runs'].empty?
+    document['runs'].each do |run|
+      raise 'Expected a results array' unless run.is_a?(Hash) && run['results'].is_a?(Array)
+    end
 
     root = File.realpath(root)
     verified = {}
+    failures = {}
     audit = []
     document['runs'].each do |run|
-      raise 'Expected a results array' unless run['results'].is_a?(Array)
       next unless run.dig('tool', 'driver', 'name') == 'Scorecard'
 
       run['results'] = run['results'].reject do |result|
@@ -135,23 +176,25 @@ module ScorecardActionsLock
         path = File.join(root, relative)
         next false unless File.file?(path) && !File.symlink?(path) &&
           File.realpath(path).start_with?(root + '/') && File.file?(File.join(root, '.github/workflows/actions.lock'))
-        next false unless action_lines(path).include?(line)
+        # A failure in one workflow is confined to that workflow: its findings
+        # are kept and every other workflow is still reconciled on its own.
+        next false if failures.key?(relative)
+
+        begin
+          lines = action_lines(path)
+        rescue StandardError => error
+          failures[relative] = "Unparseable workflow #{relative}: #{error.message}"
+          next false
+        end
+        next false unless lines.include?(line)
 
         unless verified.key?(relative)
-          lock_path = File.join(root, '.github/workflows/actions.lock')
-          reusable_deps = reusable_workflow_deps(path)
-          unless lock_covers_reusable_deps?(lock_path, relative, reusable_deps)
-            raise "Native action-lock verification failed for #{relative}: job-level reusable ref absent from actions.lock"
+          begin
+            verified[relative] = verify_workflow(root, relative)
+          rescue StandardError => error
+            failures[relative] = error.message
+            next false
           end
-
-          stdout, stderr, status = Open3.capture3('gh', 'actions-lock', relative,
-            '--verify', '--no-interactive', '--json=valid,findings', chdir: root)
-          warn stderr unless stderr.empty?
-          verification = JSON.parse(stdout)
-          unless verification_accepted?(verification, status, reusable_deps)
-            raise "Native action-lock verification failed for #{relative}"
-          end
-          verified[relative] = verification
         end
         audit << { 'file' => relative, 'line' => line, 'rule' => result['ruleId'],
           'reason' => 'False positive: native direct and transitive pins verified by gh actions-lock --verify',
@@ -159,7 +202,7 @@ module ScorecardActionsLock
         true
       end
     end
-    [document, audit]
+    [document, audit, failures]
   end
 end
 
@@ -168,10 +211,16 @@ if $PROGRAM_NAME == __FILE__
     input, output, audit_path, root = ARGV
     raise 'Usage: INPUT OUTPUT AUDIT_JSON [ROOT]' unless input && output && audit_path && ARGV.length <= 4
     raise 'Keep the original SARIF as a separate artifact' if File.expand_path(input) == File.expand_path(output)
-    document, audit = ScorecardActionsLock.reconcile(JSON.parse(File.read(input)), root || Dir.pwd)
+    document, audit, failures = ScorecardActionsLock.reconcile(JSON.parse(File.read(input)), root || Dir.pwd)
     File.write(output, JSON.pretty_generate(document) + "\n")
     File.write(audit_path, JSON.pretty_generate(audit) + "\n")
     puts "Reconciled #{audit.length} verified native action-pin false positives; all other findings retained."
+    unless failures.empty?
+      failures.each { |relative, reason| warn "Scorecard reconciliation kept findings for #{relative}: #{reason}" }
+      warn "Scorecard reconciliation incomplete: #{failures.length} workflow(s) failed native action-lock " \
+           'verification; their findings are retained in the reconciled SARIF.'
+      exit 3
+    end
   rescue StandardError => error
     warn "Scorecard reconciliation failed: #{error.message}"
     exit 2

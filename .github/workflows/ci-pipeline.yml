@@ -147,7 +147,16 @@ jobs:
           # proof scripts and Verilog sources, so globbing `*.v` would install
           # a V toolchain to lint a Coq development.
           N_V=$(count 'v.mod' '*/v.mod')
-          N_HASKELL=$(count '*.cabal' 'stack.yaml' '*/stack.yaml' '*.hs')
+          # Haskell is counted ONLY where its consuming job can run: the `haskell`
+          # job runs `cabal build all` at the REPOSITORY ROOT, which needs a root
+          # `cabal.project` or a root `*.cabal`. `:(glob)` stops `*` crossing `/`.
+          # The old marker set (`*.cabal`, `*.hs`, `stack.yaml` at any depth)
+          # went true on a nested satellite (standards: sanctify-php,
+          # palimpsest-license/TOOLS/validation/haskell) and then failed with
+          # Cabal-7136 "There is no <pkgname>.cabal package file or cabal.project" —
+          # a guard counting a different set than its consumer checks
+          # (standards#1161). Nested Haskell is reported below as unsupported.
+          N_HASKELL=$(count 'cabal.project' ':(glob)*.cabal')
           # ⚠ DO NOT REMOVE THE DENO PROBE. It does not exist to lint Deno —
           # it is the trigger for the REFUSAL job `deno` below, i.e. the teeth
           # of the estate's standing no-Deno ruling, with slugs still live in
@@ -220,6 +229,14 @@ jobs:
           # which repositories get linted.
           probe 'Bun'      'bun.lock' '*/bun.lock' 'bun.lockb' '*/bun.lockb' 'bunfig.toml' '*/bunfig.toml' 'package.json' '*/package.json'
 
+          # Haskell the `haskell` job cannot build (no root cabal.project or
+          # `*.cabal`): nested projects, stack-only projects, loose `*.hs`.
+          # Probed only when N_HASKELL is 0 — under a root project, nested
+          # sources belong to it and ARE built.
+          if [ "$N_HASKELL" -eq 0 ]; then
+            probe 'Haskell (no root cabal.project/*.cabal)' '*.cabal' 'cabal.project' '*/cabal.project' 'stack.yaml' '*/stack.yaml' '*.hs'
+          fi
+
           bool() { [ "$1" -gt 0 ] && echo true || echo false; }
 
           {
@@ -246,7 +263,7 @@ jobs:
             echo "| Nickel | \`*.ncl\` excluding \`*.k9.ncl\` | ${N_NICKEL} |"
             echo "| ReScript | \`rescript.json\`, \`bsconfig.json\`, \`*.res\` | ${N_RESCRIPT} |"
             echo "| V | \`v.mod\` only | ${N_V} |"
-            echo "| Haskell | \`*.cabal\`, \`stack.yaml\`, \`*.hs\` | ${N_HASKELL} |"
+            echo "| Haskell | root \`cabal.project\` or root \`*.cabal\` | ${N_HASKELL} |"
             echo "| Deno | \`deno.json(c)\` | ${N_DENO} |"
             echo "| **Total checkable** | | **${TOTAL}** |"
             echo ""
@@ -873,12 +890,37 @@ jobs:
           # anywhere in the estate — an unpinned toolchain install is a worse
           # trade than a narrower gate. -Wall -Werror is the spec's "fail on
           # warnings" and is read-only with respect to tracked files.
+          #
+          # BUILD WHAT `detect` COUNTED. Since #1184 the probe counts Haskell only
+          # from a ROOT `cabal.project` or a ROOT `*.cabal` (`:(glob)` stops `*`
+          # crossing `/`); a repo with nested packages and neither root file is
+          # reported by detect as UNSUPPORTED and this job does not run (owner
+          # ruling 2026-10-06, standards#1161). A root `cabal.project` is the
+          # repo's own word and is used as-is, even when every package it lists
+          # is nested. Without one, detect fired on a root `*.cabal`, and one is
+          # written (untracked) listing the root package and
+          # every tracked nested package directory, so a satellite package that
+          # sits beside the root one is built too, not silently skipped.
+          if [ -f cabal.project ]; then
+            echo "Using the repository's own cabal.project."
+            source_note="root cabal.project"
+          else
+            mapfile -t pkg_dirs < <(git ls-files -- '*.cabal' | xargs -r -n1 dirname | sort -u)
+            if [ "${#pkg_dirs[@]}" -eq 0 ]; then
+              echo "::error::Haskell was detected from a root *.cabal, but git ls-files lists no tracked *.cabal, so there is nothing cabal can build. Commit the .cabal file (hpack users: commit the generated one) or add a root cabal.project."
+              exit 1
+            fi
+            { echo "packages:"; printf '  %s/\n' "${pkg_dirs[@]}"; } > cabal.project
+            echo "No root cabal.project; generated one for ${#pkg_dirs[@]} package dir(s):"
+            cat cabal.project
+            source_note="generated cabal.project, ${#pkg_dirs[@]} package dir(s)"
+          fi
           cabal update
           cabal build all --ghc-options='-Wall -Werror'
           {
             echo "### Haskell"
             echo ""
-            echo "- \`cabal build all --ghc-options='-Wall -Werror'\`: pass"
+            echo "- \`cabal build all --ghc-options='-Wall -Werror'\` ($source_note): pass"
             echo "- note: format gate not run — no pinned fourmolu/hlint in the estate"
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
@@ -959,7 +1001,7 @@ jobs:
             row "Deno"            "$R_DENO"     "BANNED — refusal gate; skipped means no deno.json(c) tracked (has_deno=${H_DENO})"
             row "ReScript"        "$R_RESCRIPT" "no rescript.json/bsconfig.json/*.res tracked (has_rescript=${H_RESCRIPT})"
             row "V"               "$R_V"        "no v.mod tracked (has_v=${H_V})"
-            row "Haskell"         "$R_HASKELL"  "no *.cabal/stack.yaml/*.hs tracked (has_haskell=${H_HASKELL})"
+            row "Haskell"         "$R_HASKELL"  "no root cabal.project/*.cabal tracked (has_haskell=${H_HASKELL})"
             echo ""
             echo "_A skipped gate examined nothing. It is not a pass._"
             echo ""
