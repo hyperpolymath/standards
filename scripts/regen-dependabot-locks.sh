@@ -16,7 +16,9 @@
 #
 # WHAT IT DOES, PER PULL REQUEST
 # ------------------------------
-# Selects open PRs authored by dependabot[bot], from a same-repo branch, that
+# Selects open PRs authored by dependabot[bot], or opened by the standards pin
+# applier (a bot author on its fixed branch; see select_prs), from a same-repo
+# branch, that
 # touch .github/workflows/, in a repository that already carries actions.lock.
 # On a clone of the PR head it runs the estate lock repair order (see
 # complete-job-refs.sh):
@@ -65,7 +67,19 @@ regen_lock() {
     cd "$dir" || exit 1
     [ -f "$LOCK_PATH" ] || { echo no-lock; exit 0; }
     [ -d .github/actions ] && { echo composite-unsupported; exit 0; }
-    if ! "$GH_BIN" actions-lock >&2; then echo tool-failed; exit 0; fi
+    # `gh actions-lock` exits non-zero whenever a workflow names a mutable
+    # ref it will not auto-pin (e.g. hyperpolymath/cicd-suite/...@main, which
+    # the template's dogfood-gate and main-estate-audit carry), even though it
+    # has rewritten the lock for every other action. Measured 2026-10-05 on
+    # proof-burrower#103: rc=1, lock rewritten, and the chain below plus
+    # --verify-local then accepted it. So a non-zero exit is fatal only when
+    # the tool left the lock untouched; otherwise the verifier stays the judge.
+    local before
+    before="$(git hash-object "$LOCK_PATH")"
+    if ! "$GH_BIN" actions-lock >&2; then
+      [ "$(git hash-object "$LOCK_PATH")" = "$before" ] && { echo tool-failed; exit 0; }
+      echo "regen: gh actions-lock exited non-zero but rewrote the lock; continuing, --verify-local decides" >&2
+    fi
     # Keep only the lock: undo every tool-authored workflow rewrite.
     git checkout --quiet -- . ":(exclude)$LOCK_PATH"
     git clean -fdq
@@ -101,11 +115,21 @@ commit_lock() {
   printf '%s' "$payload" | "$GH_BIN" api graphql --input - --jq '.data.createCommitOnBranch.commit.oid'
 }
 
+# The branch scripts/apply-workflow-pins-remote.sh opens its PRs from.
+APPLIER_BRANCH="${APPLIER_BRANCH:-chore/re-point-standards-workflow-pins}"
+
 # Read a pulls-list JSON array on stdin; print "number<TAB>head_ref<TAB>head_sha"
-# for each open, non-draft Dependabot PR whose head branch is in the same repo.
+# for each open, non-draft PR from a same-repo branch that changes workflow refs
+# without touching the lock: one authored by Dependabot, or one opened by the
+# standards pin applier (scripts/apply-workflow-pins-remote.sh). The applier
+# rewrites `uses:` pins only, so without this its PRs die at startup on an
+# unclosed lock record. It is matched on a bot author AND its fixed branch name,
+# so a human's branch of the same name is never rewritten.
 select_prs() {
-  jq -r '.[]
-    | select(.user.login == "dependabot[bot]" and (.draft | not)
+  jq -r --arg applier "$APPLIER_BRANCH" '.[]
+    | select(((.user.login == "dependabot[bot]")
+              or ((.user.login | endswith("[bot]")) and .head.ref == $applier))
+             and (.draft | not)
              and .head.repo.full_name == .base.repo.full_name)
     | [.number, .head.ref, .head.sha] | @tsv'
 }

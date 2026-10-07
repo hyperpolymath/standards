@@ -50,6 +50,7 @@ if [ "$1" = actions-lock ]; then
              echo junk > .github/workflows/new-by-tool.yml ;;
     dollar)  echo "  - '\$/.github/actions/x'" >> .github/workflows/actions.lock ;;
     fail)    exit 1 ;;
+    partial) echo "  - 'a/b@v2'" >> .github/workflows/actions.lock; exit 1 ;;
     none)    : ;;
   esac
   exit 0
@@ -117,6 +118,13 @@ expect "a lock the gate's verifier rejects is refused" unverified "$(TOOL_ACTION
 d="$(fixture toolfail)"
 expect "a failing gh actions-lock is reported" tool-failed "$(TOOL_ACTION=fail regen_lock "$d" 2>/dev/null)"
 
+# gh actions-lock exits 1 on a mutable @main ref it will not auto-pin, yet has
+# rewritten the lock for everything else: continue, and let the verifier judge.
+d="$(fixture partial)"
+expect "a non-zero gh actions-lock that rewrote the lock still regenerates" changed "$(TOOL_ACTION=partial regen_lock "$d" 2>/dev/null)"
+d="$(fixture partialunver)"
+expect "…but the verifier still refuses a bad partial lock" unverified "$(TOOL_ACTION=partial VERIFY_RC=1 regen_lock "$d" 2>/dev/null)"
+
 d="$(fixture current)"
 expect "an already-current lock is 'current' (idempotent second run)" current "$(TOOL_ACTION=none regen_lock "$d" 2>/dev/null)"
 
@@ -141,6 +149,17 @@ prs='[
  {"number":4,"draft":false,"user":{"login":"dependabot[bot]"},"head":{"ref":"dependabot/z","sha":"ddd","repo":{"full_name":"fork/r"}},"base":{"repo":{"full_name":"o/r"}}}
 ]'
 expect "only same-repo, non-draft Dependabot PRs are selected" "1	dependabot/x	aaa" "$(printf '%s' "$prs" | select_prs)"
+
+# The pin applier's PRs rewrite `uses:` without the lock, so they are selected
+# too, but only when a bot opened them on the applier's branch: a human on that
+# branch name, or the applier bot on any other branch, is left alone.
+prs='[
+ {"number":5,"draft":false,"user":{"login":"estate-applier[bot]"},"head":{"ref":"chore/re-point-standards-workflow-pins","sha":"eee","repo":{"full_name":"o/r"}},"base":{"repo":{"full_name":"o/r"}}},
+ {"number":6,"draft":false,"user":{"login":"someone"},"head":{"ref":"chore/re-point-standards-workflow-pins","sha":"fff","repo":{"full_name":"o/r"}},"base":{"repo":{"full_name":"o/r"}}},
+ {"number":7,"draft":false,"user":{"login":"estate-applier[bot]"},"head":{"ref":"feat","sha":"ggg","repo":{"full_name":"o/r"}},"base":{"repo":{"full_name":"o/r"}}}
+]'
+expect "the pin applier's PR is selected; same branch by a human, or the bot elsewhere, is not" \
+  "5	chore/re-point-standards-workflow-pins	eee" "$(printf '%s' "$prs" | select_prs)"
 
 # --- commit_lock -----------------------------------------------------------
 d="$(fixture commit)"
