@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MPL-2.0
+# Local dogfood gate for 3-practice/JSON-POLICY.adoc (owner ruling D306):
+# every .json / .jsonl is I-JSON (RFC 7493) + JCS (RFC 8785) canonical.
+# REPORT-ONLY: the scan lists non-canonical files and exits 0. The test step
+# is what can fail, and it proves the scan can tell the three verdicts apart.
+name: ijson-jcs conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ijson-jcs:
+    name: Report non-canonical JSON (report-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pinned to a commit: ijson-jcs has no releases yet.
+      - run: cargo install --git https://github.com/hyperpolymath/ijson-jcs --rev 0fdeea716fd558e9807362acf6f8202d56d8d88f --locked ijson-jcs
+      - run: bash scripts/tests/check-ijson-jcs-test.sh
+      - run: scripts/check-ijson-jcs.sh .

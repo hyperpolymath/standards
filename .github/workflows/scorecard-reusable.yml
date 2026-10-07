@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: 591cea1b074b56367f25ec0084a0c4ab66b42a7e
+          ref: 5a0891e9e58b785181a92e141505ca96ca987b42 # per-file reconciliation (#1168)
           path: .standards-scorecard
           persist-credentials: false
           sparse-checkout: scripts/reconcile-scorecard-actions-lock.rb
@@ -76,8 +76,15 @@ jobs:
         run: |
           set -euo pipefail
           gh extension install github/gh-actions-lock --pin v0.1.6
+          # Exit 3: the reconciled SARIF was written, but some workflows failed
+          # native lock verification and keep their findings. Exit 2: usage or
+          # SARIF-structure error, nothing written. The code is passed on so
+          # the final step can say which one happened.
+          rc=0
           ruby .standards-scorecard/scripts/reconcile-scorecard-actions-lock.rb \
-            results.sarif results.reconciled.sarif actions-lock-audit.json
+            results.sarif results.reconciled.sarif actions-lock-audit.json || rc=$?
+          printf 'rc=%s\n' "$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
 
       - name: Select SARIF to upload
         id: select-sarif
@@ -112,7 +119,11 @@ jobs:
       - name: Fail if reconciliation did not succeed
         if: "!cancelled() && (steps.reconcile.outcome != 'success' || steps.select-sarif.outputs.reconciled != 'true')"
         run: |
-          echo "::error title=Scorecard reconciliation failed::Reconcile step outcome was '${{ steps.reconcile.outcome }}'. Raw SARIF was uploaded so results are not lost, but this run fails by design."
+          if [ "${{ steps.reconcile.outputs.rc }}" = "3" ] && [ "${{ steps.select-sarif.outputs.reconciled }}" = "true" ]; then
+            echo "::error title=Scorecard reconciliation incomplete::Reconciled SARIF was uploaded. Workflows that failed native action-lock verification keep their findings; the reconcile step log names each one. This run fails by design."
+          else
+            echo "::error title=Scorecard reconciliation failed::Reconcile step outcome was '${{ steps.reconcile.outcome }}' (exit '${{ steps.reconcile.outputs.rc }}'). Raw SARIF was uploaded so results are not lost, but this run fails by design."
+          fi
           exit 1
 
   pull-request:
@@ -188,7 +199,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
-          ref: 591cea1b074b56367f25ec0084a0c4ab66b42a7e
+          ref: 5a0891e9e58b785181a92e141505ca96ca987b42 # per-file reconciliation (#1168)
           path: .standards-scorecard
           persist-credentials: false
           sparse-checkout: scripts/reconcile-scorecard-actions-lock.rb
@@ -209,8 +220,15 @@ jobs:
         run: |
           set -euo pipefail
           gh extension install github/gh-actions-lock --pin v0.1.6
+          # Exit 3: the reconciled SARIF was written, but some workflows failed
+          # native lock verification and keep their findings. Exit 2: usage or
+          # SARIF-structure error, nothing written. The code is passed on so
+          # the final step can say which one happened.
+          rc=0
           ruby .standards-scorecard/scripts/reconcile-scorecard-actions-lock.rb \
-            results.sarif results.reconciled.sarif actions-lock-audit.json
+            results.sarif results.reconciled.sarif actions-lock-audit.json || rc=$?
+          printf 'rc=%s\n' "$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
 
       - name: Select SARIF to upload
         id: select-sarif
@@ -245,5 +263,9 @@ jobs:
       - name: Fail if reconciliation did not succeed
         if: "!cancelled() && (steps.reconcile.outcome != 'success' || steps.select-sarif.outputs.reconciled != 'true')"
         run: |
-          echo "::error title=Scorecard reconciliation failed::Reconcile step outcome was '${{ steps.reconcile.outcome }}'. Raw SARIF was uploaded so results are not lost, but this run fails by design."
+          if [ "${{ steps.reconcile.outputs.rc }}" = "3" ] && [ "${{ steps.select-sarif.outputs.reconciled }}" = "true" ]; then
+            echo "::error title=Scorecard reconciliation incomplete::Reconciled SARIF was uploaded. Workflows that failed native action-lock verification keep their findings; the reconcile step log names each one. This run fails by design."
+          else
+            echo "::error title=Scorecard reconciliation failed::Reconcile step outcome was '${{ steps.reconcile.outcome }}' (exit '${{ steps.reconcile.outputs.rc }}'). Raw SARIF was uploaded so results are not lost, but this run fails by design."
+          fi
           exit 1

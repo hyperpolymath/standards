@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Hyperpolymath JSON Policy: I-JSON + JCS
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toc-placement: preamble
+
+Canonical policy for how JSON and JSON Lines are *written* across all
+hyperpolymath and metadatastician repositories.
+
+Ruled by the owner on 2026-10-06 as D306 (recorded on `standards#787`). As in
+`YAML-POLICY.adoc`, every rule below says whether it is *in force*, and what
+enforces it. A rule with no tool behind it is labelled as such.
+
+== 0. The measurement this rests on
+
+Taken 2026-10-07 over this repository at `9f68971b`, with
+`scripts/check-ijson-jcs.sh` and `ijson-jcs` built from `0fdeea71`:
+
+[cols="4,2,2,6",options="header"]
+|===
+| Population | Files | Canonical | Notes
+
+| tracked `.json`
+| 61
+| 0
+| None is invalid; every one fails only on layout or key order.
+
+| tracked `.jsonl`
+| 1
+| 0
+| `.hypatia/activity.jsonl`, bot-appended.
+|===
+
+Nothing in this repository conforms yet. That is why the gate in §3 starts
+report-only.
+
+== 1. Rule J-1: JSON is I-JSON, serialised by JCS
+
+*Status: IN FORCE for every new or rewritten file. Enforced by: report-only
+gate (§3). Not yet blocking.*
+
+Every `.json` file the estate authors is
+
+. an I-JSON message (RFC 7493): UTF-8, no duplicate member names, numbers
+  representable as IEEE 754 doubles, no lone surrogates; and
+. serialised in the JSON Canonicalization Scheme (RFC 8785): members sorted by
+  UTF-16 code unit, no insignificant whitespace, ECMAScript number and string
+  serialisation;
+. followed by exactly one line feed.
+
+The tool is `hyperpolymath/ijson-jcs`:
+`ijson-jcs check FILE` (exit 0 canonical, 1 not canonical, 2 invalid),
+`ijson-jcs fix FILE` (rewrites in place), `ijson-jcs canon` (stdin to stdout).
+
+*File extensions do not change.* There is no `.ijson` or `.ijsonl`; the rule is
+about content (D306).
+
+== 2. Rule J-2: JSON Lines is one canonical record per line
+
+*Status: IN FORCE for every new or rewritten file. Enforced by: report-only
+gate (§3).*
+
+A `.jsonl` file is a sequence of J-1 records, one per line, each followed by a
+line feed. No blank lines. `ijson-jcs` reads whole documents only, so the gate
+checks each line with `ijson-jcs canon`.
+
+== 3. The gate
+
+`scripts/check-ijson-jcs.sh [--enforce] [PATH...]`, run by
+`.github/workflows/ijson-jcs.yml` on every push and pull request.
+
+* *Default, report-only.* Lists every non-canonical or invalid file and a
+  summary, emits one `::notice`, exits 0.
+* `--enforce` exits 1 on any finding. It exists for repositories that have
+  finished converting, and for the test.
+* Exit 2 means the check could not run (tool or path missing). A gate that
+  cannot look does not report a pass.
+* `scripts/tests/check-ijson-jcs-test.sh` proves the gate can fail: planted
+  canonical, non-canonical and invalid files of both kinds, plus the carve-out.
+  The workflow runs it before the scan.
+
+Making the gate blocking here, or adding it to the estate's reusable gates, is
+a separate owner decision. It should follow conversion, not precede it.
+
+== 4. Carve-out: tool-demanded JSONC
+
+Some tools demand a file named `*.json` whose content is JSON with comments:
+`devcontainer.json`, `.vscode/*.json`. Those comments carry SPDX headers, and
+canonicalising would delete them. The gate skips these paths and counts the
+skips in its summary.
+
+Adding a path to the carve-out needs the same evidence: a tool that demands the
+name, and content that is not JSON.
+
+== 5. Conformance of the tool itself
+
+Measured 2026-10-07 on `ijson-jcs@0fdeea71`:
+
+* its own suite: 38 unit, 11 CLI and 3 doc tests pass;
+* the RFC 8785 §3.2.3 sample canonicalises correctly (CLI test
+  `rfc8785_sample_canonicalises`);
+* RFC 8785 Appendix B number vectors: *23 of 24 pass*. The failure is
+  `43143ff3c1cb0959`: expected `1424953923781206.2`, emitted
+  `1424953923781206.3`. Both strings round-trip to the same double; ECMAScript
+  picks the one closer to the exact value, and the tool does not;
+* `NaN`, `Infinity` and `1e400` are rejected (exit 2), as I-JSON requires.
+
+The failure affects only doubles whose two shortest round-trip forms are a
+tie. Estate JSON rarely carries such numbers, but a byte-exact hash over one
+would differ from another JCS implementation's.
+
+== 6. What this document does not rule
+
+* *Bot-written files.* Some JSON is written by tools that rewrite it in their
+  own layout: `package.json` (`bun add`), `.hypatia-baseline.json`, scanner
+  output. Converting those is undone on the next tool run. Whether they are
+  carved out, or the tools are changed, is open.
+* *Mass reformatting.* Convert a repository's JSON in a PR scoped to that
+  repository, after checking each consumer reads it by parsing, not by line.
+  Do not reformat estate-wide outside a PR that adds the gate.
+* *JSON Schema files.* They are JSON and fall under J-1. This document does not
+  rule on schema dialect.
+
+== 7. Sources
+
+* RFC 7493, The I-JSON Message Format.
+* RFC 8785, JSON Canonicalization Scheme (JCS).
+* `hyperpolymath/ijson-jcs`.
+* Owner ruling D306, `standards#787`.
+* `developer/AGENTS.md` §2a, the transition table.
+
+== 8. Change log
+
+[cols="2,3,8",options="header"]
+|===
+| Date | Change | Detail
+
+| 2026-10-07
+| Created
+| J-1 and J-2 from D306. Report-only gate and its test. §0 measurement and §5
+  tool conformance taken the same day.
+|===

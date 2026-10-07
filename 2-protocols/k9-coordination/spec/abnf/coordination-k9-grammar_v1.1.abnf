@@ -2,14 +2,20 @@
 ; SPDX-License: MPL-2.0
 ; SPDX-License-Identifier: CC-BY-SA-4.0
 ;
-; K9 Coordination File Grammar, v1.1.0
+; K9 Coordination File Grammar, v1.1.1
 ; Normative for parsing coordination.k9 files
-; Prose specification: ../specs/K9-COORDINATION-SPEC.adoc
+; Prose specification: ../COORDINATION-K9-SPEC.adoc
 ;
 ; K9 is YAML-like but NOT standard YAML. It is a domain-specific
 ; coordination language with strict schema validation.
 ;
 ; Requires RFC 7405 (%s"..." case-sensitive string literals).
+;
+; CHANGELOG (v1.1.0 -> v1.1.1), owner rulings D317 + D318:
+;   - lang-list items are indented one level under "languages:" (indent2),
+;     the same nesting every other list follows (was: indent, a defect)
+;   - Full-line "#" comments are permitted between sections (rule gap);
+;     still not within a section; "---" separators remain invalid
 ;
 ; CHANGELOG (v1.0.0 → v1.1.0):
 ;   - Added %s prefix for case-sensitive literals (RFC 7405)
@@ -23,7 +29,7 @@
 ;   - Required ≥1 entry in ecosystem / coordination sections
 ;   - Fixed optional sections: explicit order, no duplicates
 
-k9-file       = magic-line line-end header *blank-line body
+k9-file       = magic-line line-end header *gap body
 
 ; --- Magic Number (REQUIRED first line) ----------------------------
 magic-line    = %s"K9!"
@@ -32,21 +38,24 @@ magic-line    = %s"K9!"
 header        = 1*spdx-line
 spdx-line     = "#" SP %s"SPDX-" 1*text-char line-end
 
-; --- Blank Lines (permitted between sections, not within) ----------
+; --- Gaps between sections (not permitted within a section) --------
+; A gap is a blank line or a full-line comment starting in column 0.
+gap           = blank-line / comment-line
 blank-line    = *SP line-end
+comment-line  = "#" *text-char line-end
 
 ; --- Body Structure ------------------------------------------------
 ; Required sections MUST appear in this order.
 ; Optional sections MUST appear in the order shown; each at most once.
-body          = metadata-section    *blank-line
-                project-section     *blank-line
-                invariants-section  *blank-line
-                [protected-section     *blank-line]
-                [architecture-section  *blank-line]
-                [do-not-create-section *blank-line]
-                [terminology-section   *blank-line]
-                [ecosystem-section     *blank-line]
-                [coordination-section  *blank-line]
+body          = metadata-section    *gap
+                project-section     *gap
+                invariants-section  *gap
+                [protected-section     *gap]
+                [architecture-section  *gap]
+                [do-not-create-section *gap]
+                [terminology-section   *gap]
+                [ecosystem-section     *gap]
+                [coordination-section  *gap]
 
 ; --- Required Sections ---------------------------------------------
 
@@ -70,7 +79,7 @@ project-field  = indent %s"name:"         SP string        line-end
                / indent %s"build_system:" SP symbol        line-end
                / indent %s"runtime:"      SP symbol        line-end
 
-lang-list      = 1*(indent "- " symbol line-end)
+lang-list      = 1*(indent2 "- " symbol line-end)
 
 invariants-section = %s"invariants:" line-end
                      *invariant-entry                     ; May be empty
@@ -203,6 +212,7 @@ line-end       = CRLF / LF
 ;  5. Optional sections appear in fixed order; each at most once.
 ;  6. deed_ref links to a .deed file for typed identity.
 ;  7. Line endings may be CRLF or LF (mixing is permitted).
-;  8. Blank lines are permitted between sections, not within them.
+;  8. Blank lines and full-line "#" comments are permitted between
+;     sections, not within them.
 ;  9. Strings support escape sequences: \" \\ \n \t
 ; 10. Bare version numbers (e.g., 1.0.0) are valid unquoted values.
