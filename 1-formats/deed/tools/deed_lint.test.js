@@ -65,6 +65,10 @@ const RULE = {
   "intrailing_chora.deed": /trailing content/,
   "intrue-literal_chora.deed": /bare symbol 'true' is forbidden/,
   "inunbalanced_chora.deed": /unbalanced parens/,
+  "inu7_chora.deed": /unrecognised #-form/,
+  "inu8-empty-domain_chora.deed": /uuid8 domain '' must be non-empty/,
+  "inu8-no-colon_chora.deed": /has no ":"/,
+  "inu8-no-string_chora.deed": /uuid8 must be followed immediately by a string/,
 };
 
 describe("fixtures/valid", () => {
@@ -125,6 +129,19 @@ describe("extra rules", () => {
   });
   test("unterminated string", () => {
     expect(verdict(HDR + '(repo-deed :schema-version "1" :a "oops)')).toMatch(/unterminated string/);
+  });
+  test("uuid8: domain with a space is rejected", () => {
+    expect(verdict(HDR + '(repo-deed :schema-version "1" :id #u8"gv clade:x")\n')).toMatch(/uuid8 domain/);
+  });
+  test("uuid8: name is unconstrained (empty, or holding further colons)", () => {
+    expect(verdict(HDR + '(repo-deed :schema-version "1" :id #u8"d:")\n')).toBeNull();
+    expect(verdict(HDR + '(repo-deed :schema-version "1" :id #u8"d:a:b c")\n')).toBeNull();
+  });
+  test("uuid8 is accepted inside a list and a clause", () => {
+    expect(verdict(HDR + '(repo-deed :schema-version "1" (c :ids (#u8"d:a" #u8"d:b")))\n')).toBeNull();
+  });
+  test("uuid5 stays legal alongside uuid8 (v1.1.0 is additive)", () => {
+    expect(verdict(HDR + '(repo-deed :schema-version "1" :a #u5"estate/chora" :b #u8"d:n")\n')).toBeNull();
   });
   test("error carries line number", () => {
     const e = (() => { try { validate(HDR + "(chora-deed)\n"); } catch (x) { return x; } })();

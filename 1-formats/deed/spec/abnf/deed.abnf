@@ -2,7 +2,7 @@
 ; SPDX-License-Identifier: MPL-2.0
 ; SPDX-License-Identifier: CC-BY-SA-4.0
 ;
-; DEED grammar, v1.0.0
+; DEED grammar, v1.1.0
 ; Normative for parsing. Prose and rationale: ../DEED-GRAMMAR-SPEC.adoc
 ;
 ; NOTICE (standards#837): OWNER RULING 2026-09-19 — the grammar files have
@@ -16,6 +16,10 @@
 ; NOTE: there is no "key = value" production and no "[section]" production.
 ; The only bracket is "(". A file using "=" as a field separator is not a deed.
 ; ("=" MAY appear INSIDE a symbol, e.g., a comparison operator.)
+;
+; CHANGELOG (v1.0.0 → v1.1.0, owner rulings D305/D320, 2026-10-07):
+;   - Added uuid8 (#u8"domain:name"), the ADR-008 profile C literal. Additive:
+;     uuid5 stays legal until its own cutover, so every v1.0.0 deed is a v1.1.0 deed.
 ;
 ; CHANGELOG (v0.1.0 → v1.0.0):
 ;   - Added %s prefix for all case-sensitive literals (RFC 7405)
@@ -81,7 +85,7 @@ field         = keyword token-sep value
 clause        = "(" symbol *(token-sep (field / clause)) [token-sep] ")"
 
 keyword       = ":" symbol
-value         = string / symbol / integer / boolean / uuid5 / quoted / list
+value         = string / symbol / integer / boolean / uuid5 / uuid8 / quoted / list
 list          = "(" [value *(token-sep value)] [token-sep] ")"
 quoted        = "'" ( symbol / list )
                 ; NOTE: Only symbols and lists may be quoted.
@@ -128,9 +132,21 @@ boolean       = %s"#t" / %s"#f"
 uuid5         = %s"#u5" string
                 ; Body is the NAME input to RFC 4122 §4.3 under the
                 ; estate namespace.
-                ; NOTE: Only UUID v5 (name-based, deterministic) is supported.
+                ; NOTE: Only name-based, deterministic identifiers are supported:
+                ; uuid5 here and uuid8 (profile C) below.
                 ; UUID v4 (random) is intentionally excluded — all DEED
                 ; identifiers MUST be reproducible from their inputs.
+
+uuid8         = %s"#u8" string
+                ; ESTATE-UUID-V8 profile C (ADR-008; D305, D320). The body is
+                ; the PREIMAGE domain ":" name. The identifier is bytes 0..15
+                ; of SHA-256(body) with version 8 and variant 10, so it is
+                ; reproducible from the deed alone, as uuid5 is.
+                ; SEMANTIC (validator-enforced): the body contains ":", and the
+                ; domain before the FIRST ":" is non-empty printable ASCII
+                ; (%x21-7E) — ADR-008 forbids ":" in a domain, so the first
+                ; ":" always ends it. The name after it is unconstrained.
+                ; Example: #u8"gv-clade-index:github.com/hyperpolymath/standards"
 
 token-sep     = 1*(SP / line-end / comment)
                 ; Tabs (HTAB) are INVALID separators (consistent with K9).
