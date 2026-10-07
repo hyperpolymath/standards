@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: CC-BY-SA-4.0
 = DEED conformance lane — tools
-Campaign: standards#837 · Grammar: link:../spec/abnf/deed.abnf[spec/abnf/deed.abnf (v1.0.0, normative)]
+Campaign: standards#837 · Grammar: link:../spec/abnf/deed.abnf[spec/abnf/deed.abnf (v1.1.0, normative)]
 
 == The lane's one property
 
@@ -9,17 +9,19 @@ it may be written; every `.deed` committed in this repo is linted in CI.
 
 == `deed_lint.js` / `deed_lint.py` — the validator
 
-Two implementations of the normative grammar, held byte-identical:
+Two implementations; only the bun one is current:
 
 * `deed_lint.js` — bun, zero dependencies. **This is the CI gate**
   (`.github/workflows/deed-conformance.yml`, callable from other repos via
   `workflow_call`). Unit tests: `bun test 1-formats/deed/tools/`.
-* `deed_lint.py` — stdlib-only. Kept because `a2ml_to_deed.py` imports it
-  in-process to lint what it emits. Retire it with the translator.
+* `deed_lint.py` — stdlib-only, **frozen at deed.abnf v1.0.0** (no `#u8`).
+  Kept only because `a2ml_to_deed.py` imports it in-process; retire it with
+  the translator. Do not extend it (Python is banned estate-wide).
 
-The workflow's parity step runs both over every committed `.deed`
-(invalid fixtures included) and fails on any byte of difference in their
-output, so the two cannot drift while both exist.
+The python/bun parity step was retired when `#u8` landed (deed.abnf
+v1.1.0, owner ruling D323, 2026-10-07): the frozen Python linter rejects `#u8`, so
+parity could only be kept by extending Python. `deed_lint.js` is the sole
+authority.
 
 Enforced rules:
 
@@ -31,6 +33,9 @@ Enforced rules:
   split on the final suffix only)
 * booleans ONLY `#t`/`#f`; bare `true/false/yes/no` values rejected
 * uuid5 literals `#u5"name"` — body is the RFC 4122 §4.3 name input, never hex
+* uuid8 literals `#u8"domain:name"` — body is the ADR-008 profile C preimage;
+  the domain before the first `:` must be non-empty printable ASCII
+  (`#u7` and every other `#`-form is a parse error)
 * strings: exactly four legal escapes (`\" \\ \n \t`); `\r`/`\uXXXX` are
   parse errors; raw control bytes rejected; spaces INSIDE symbols impossible
 * separators are SP / line-end / comment ONLY — tabs are invalid everywhere
@@ -75,8 +80,10 @@ lacks `primary-name` — CLADE-006 territory, reported on #837).
 
 `fixtures/valid/` and `fixtures/invalid/` mirror the embedded self-test
 corpus plus one real translated deed (`valid/rsr-template-repo_chora.deed`).
-Reload rule: fixtures are generated FROM the `_FIXTURES` table in
-`deed_lint.py` — edit the table, regenerate the files, commit both.
+The fixtures that mirror the self-test corpus were generated from the
+`_FIXTURES` table in `deed_lint.py`; the `#u8`/`#u7` fixtures (`uuid8-clade`,
+`inu8-*`, `inu7`) are hand-written. Every invalid fixture must have an entry in
+the `RULE` table of `deed_lint.test.js` naming the error it fails with.
 
 == CI
 

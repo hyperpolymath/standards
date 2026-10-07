@@ -1,16 +1,18 @@
 #!/usr/bin/env bun
 // SPDX-License-Identifier: MPL-2.0
 // Port of deed_lint.py to plain JavaScript (bun, zero dependencies).
-const DOC = String.raw`deed-lint — conformance validator for the DEED grammar (deed.abnf v1.0.0).
+const DOC = String.raw`deed-lint — conformance validator for the DEED grammar (deed.abnf v1.1.0).
 
 Stdlib-only. Implements the normative grammar faithfully:
   * header = 1* spdx-line                 (";;" SP "SPDX-" …)
   * form   = "(" doc-head 1*(sep (field/clause)) [sep] ")"
   * doc-head ∈ {estate-deed, repo-deed, estate-atlas-deed, praxis-deed}
   * field  = keyword sep value            clause = "(" symbol *(sep (field/clause)) [sep] ")"
-  * value  = string / symbol / integer / boolean / uuid5 / quoted / list
+  * value  = string / symbol / integer / boolean / uuid5 / uuid8 / quoted / list
   * boolean = #t | #f  (lowercase ONLY; true/false/1/0 are parse errors)
   * uuid5 = %s"#u5" string                (body is the RFC 4122 §4.3 NAME input)
+  * uuid8 = %s"#u8" string                (body is the ADR-008 profile C preimage
+                                          domain ":" name; domain = 1*%x21-7E minus ":")
   * escapes exactly {" \\ \n \t}      (\r, \uXXXX and all others INVALID)
   * sep    = 1*(SP / line-end / comment)  (HTAB is INVALID — K9-consistent)
   * symbol = ALPHA *(ALPHA/DIGIT/./"*"//"<"/">"/"="/"!"/"?"/"+"/"-"/"_")
@@ -178,7 +180,28 @@ function isDigit(c) {
   return c !== "" && c >= "0" && c <= "9";
 }
 
-/** #-forms: #u5"name" (uuid5) or #t / #f (boolean); anything else is a parse error. */
+/**
+ * Enforce the uuid8 body rule: an ADR-008 profile C preimage domain ":" name,
+ * whose domain (before the first ":") is non-empty printable ASCII.
+ */
+function checkUuid8Body(body, line) {
+  const colon = body.indexOf(":");
+  if (colon < 0) {
+    throw new LintError(
+      `uuid8 body ${pyRepr(body)} has no ":" — it must be a profile C preimage "domain:name"`,
+      line,
+    );
+  }
+  const domain = body.slice(0, colon);
+  if (!/^[\x21-\x7e]+$/.test(domain)) {
+    throw new LintError(
+      `uuid8 domain ${pyRepr(domain)} must be non-empty printable ASCII (ADR-008 profile C)`,
+      line,
+    );
+  }
+}
+
+/** #-forms: #u5"name" (uuid5), #u8"domain:name" (uuid8) or #t / #f (boolean); anything else is a parse error. */
 function lexHashForm(lx) {
   const two = lx.t.slice(lx.i, lx.i + 3);
   if (two.startsWith("#u5")) {
@@ -188,6 +211,15 @@ function lexHashForm(lx) {
     }
     lexString(lx);
     return ["uuid5", null];
+  }
+  if (two.startsWith("#u8")) {
+    const line = lx.line();
+    lx.i += 3;
+    if (lx.peek() !== '"') {
+      throw new LintError('uuid8 must be followed immediately by a string: #u8"domain:name"', line);
+    }
+    checkUuid8Body(lexString(lx)[1], line);
+    return ["uuid8", null];
   }
   if (two.slice(0, 2) === "#t" || two.slice(0, 2) === "#f") {
     const nxt = lx.peek(2);
@@ -201,7 +233,7 @@ function lexHashForm(lx) {
     lx.i += 2;
     return ["boolean", two];
   }
-  throw new LintError('unrecognised #-form: only #t, #f, #u5"…" are legal', lx.line());
+  throw new LintError('unrecognised #-form: only #t, #f, #u5"…", #u8"…" are legal', lx.line());
 }
 
 /** list = "(" *(sep value) ")" — returns ["list", items]. */
@@ -239,7 +271,7 @@ function lexIntegerToken(lx) {
   return v;
 }
 
-/** value = string / symbol / integer / boolean / uuid5 / quoted / list */
+/** value = string / symbol / integer / boolean / uuid5 / uuid8 / quoted / list */
 function lexValue(lx) {
   const c = lx.peek();
   if (c === '"') return lexString(lx);
