@@ -54,6 +54,20 @@
 #       uses: hyperpolymath/standards/.github/workflows/elixir-ci-reusable.yml@571cc734cd69fb846032ec77a662aa8ee4fc32cd
 #       with:
 #         working_directory: server
+#
+# Ecto / ArangoDB test suites (the `mix test` alias creates and migrates a
+# database before any test runs, so without a server the job dies at
+# `ecto.create` — bofig lived this). Pass a DIGEST-PINNED image; the
+# database is started on the runner's loopback at its default port with
+# authentication off, so whatever test credentials config/test.exs uses
+# are accepted:
+#
+#   jobs:
+#     elixir-ci:
+#       uses: hyperpolymath/standards/.github/workflows/elixir-ci-reusable.yml@<sha>
+#       with:
+#         postgres-image: "postgres:16@sha256:<digest>"
+#         arangodb-image: "arangodb:3.12@sha256:<digest>"
 
 name: Elixir CI (reusable)
 
@@ -116,6 +130,25 @@ on:
         type: string
         required: false
         default: "."
+      postgres-image:
+        description: >-
+          Optional PostgreSQL image (pin it by digest). When set, the server
+          runs on 127.0.0.1:5432 with trust authentication for the test job.
+          Empty (the default) starts nothing, so existing callers are
+          unchanged. Started with `docker run`, not a `services:` block, so
+          the job stays valid on runners that have no service-container
+          support (tma-mark2 calls this on a self-hosted runner).
+        type: string
+        required: false
+        default: ""
+      arangodb-image:
+        description: >-
+          Optional ArangoDB image (pin it by digest). When set, the server
+          runs on 127.0.0.1:8529 with authentication disabled for the test
+          job. Empty (the default) starts nothing.
+        type: string
+        required: false
+        default: ""
 
 # Only `contents: read` is requested. A reusable workflow may narrow the
 # caller's permissions but never widen them: requesting a permission the
@@ -176,6 +209,21 @@ jobs:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
 
+      # Opt-in databases start before the BEAM toolchain is installed so
+      # they warm up while deps compile. Images arrive through env, never
+      # interpolated into the script, so a caller value cannot inject shell.
+      - name: Start PostgreSQL (opt-in)
+        if: ${{ inputs.postgres-image != '' }}
+        env:
+          IMAGE: ${{ inputs.postgres-image }}
+        run: docker run --detach --name ci-postgres --publish 127.0.0.1:5432:5432 --env POSTGRES_HOST_AUTH_METHOD=trust "$IMAGE"
+
+      - name: Start ArangoDB (opt-in)
+        if: ${{ inputs.arangodb-image != '' }}
+        env:
+          IMAGE: ${{ inputs.arangodb-image }}
+        run: docker run --detach --name ci-arangodb --publish 127.0.0.1:8529:8529 --env ARANGO_NO_AUTH=1 "$IMAGE"
+
       - name: Guard — rebar3 pinning needs an authenticated lookup
         if: ${{ inputs.rebar3-version != '' && inputs.github-token == '' }}
         run: |
@@ -221,6 +269,31 @@ jobs:
       - name: Dialyzer
         if: ${{ inputs.enable_dialyzer }}
         run: mix dialyzer
+
+      # A database that never came up must fail here, by name, rather than
+      # as an opaque connection error inside the test alias.
+      - name: Wait for opt-in databases
+        if: ${{ inputs.postgres-image != '' || inputs.arangodb-image != '' }}
+        env:
+          WANT_PG: ${{ inputs.postgres-image != '' }}
+          WANT_ARANGO: ${{ inputs.arangodb-image != '' }}
+        run: |
+          for _ in $(seq 1 60); do
+            pg_ok=true; arango_ok=true
+            if [ "$WANT_PG" = true ]; then
+              docker exec ci-postgres pg_isready --host 127.0.0.1 --username postgres >/dev/null || pg_ok=false
+            fi
+            if [ "$WANT_ARANGO" = true ]; then
+              curl --silent --fail --output /dev/null http://127.0.0.1:8529/_api/version || arango_ok=false
+            fi
+            if $pg_ok && $arango_ok; then echo "databases ready"; exit 0; fi
+            sleep 2
+          done
+          echo "::error title=database not ready::postgres ready=$pg_ok, arangodb ready=$arango_ok after 120s"
+          docker ps --all
+          [ "$WANT_PG" = true ] && docker logs ci-postgres | tail -n 40
+          [ "$WANT_ARANGO" = true ] && docker logs ci-arangodb | tail -n 40
+          exit 1
 
       - name: Run tests
         run: mix test --cover
