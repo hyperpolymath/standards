@@ -5,7 +5,7 @@
 
 [cols="1,4"]
 |===
-| Status | *Accepted* (owner ruling D305/D305b, 2026-10-06). Phase P1 tooling and P2 dual-accept start with this record; see <<decision-record>>. `ESTATE-UUID-V7` stays enforced, in dual-accept, until P4.
+| Status | *Accepted* (owner ruling D305/D305b, 2026-10-06). *Amended* by owner ruling D320 (2026-10-07): the gates run strict, version 8 only, from the merge of that amendment; see <<amendment-d320>>.
 | Date | 2026-10-05
 | Decided | 2026-10-06, `hyperpolymath/standards#787` (https://github.com/hyperpolymath/standards/issues/787#issuecomment-6023959688)
 | Supersedes | `docs/UUID-V7-ESTATE-STANDARD.adoc` (`ESTATE-UUID-V7` 1.0.0, effective 2026-09-29), progressively: see <<decision-record>>
@@ -244,7 +244,63 @@ maps back to version 7 by the same one-nibble flip. A profile C value has no ver
 counterpart, so once identifiers are minted as profile C (P3), rollback means
 keeping them as external identifiers.
 
+[[amendment-d320]]
+== Amendment: strict now (owner ruling D320, 2026-10-07)
+
+*Decision.* The owner ruled, through the selection UI, that the gates move
+straight to strict: version 8 only, estate-wide, now, rather than at P4. The
+owner was told beforehand that about 888 local workflow directories call
+`governance-reusable.yml@main`, so the change reaches them on merge, and
+chose "flip strict now". D320 also rules:
+
+* *Retired A2ML files are not scanned.* `check-uuid-v8.sh` skips `*.a2ml`
+  and `*.a2ml.in`. A2ML is dead and may not be hand-converted (D313); its
+  identifiers become version 8 when kcX converts each file into deed. This is
+  the only arm that keeps strict-now, deed-first and D313 all true. Without
+  it, every repository holding a `CLADE.a2ml` (328 of 334 local copies carry
+  a UUIDv5) would be red until kcX exists.
+* *Clade identifiers are profile C*, derived in the domain `gv-clade-index`
+  from `github.com/<owner>/<name>`. This replaces both the UUIDv5 derivation
+  gv-clade-index uses today and the CSPRNG-v7 rule in the clade mapping's P-1.
+  The change starts at the source (gv-clade-index), then reaches each
+  repository's chora deed once deed admits a version 8 literal.
+* *A Julia package's own `uuid` is re-minted as version 8*, not exempted,
+  where the package is not registered in General. A registered package is a
+  separate question for the owner.
+
+*What this amendment ships.*
+
+* `governance-reusable.yml` (job `uuid-v7-conformance`) and the dogfood
+  `uuid-v7.yml` run `check-uuid-v8.sh --strict`. The workflow names, job ids
+  and job names are unchanged, so no required status context moves.
+* `check-uuid-v8.sh` skips `*.a2ml` and `*.a2ml.in`. The test suite gains four
+  cases: both extensions are skipped, and a file merely named after A2ML
+  (`a2ml-notes.adoc`) or with a near-miss extension (`.a2mlx`) is still
+  checked. Removing the skip fails the first two; widening it to `*a2ml*`
+  fails the last two.
+* This repository passes `--strict`. Two illustrative literals were flipped to
+  version 8 (the axel attestation example, the palimpsest consent-layer
+  example), and the clade mapping's P-1 and worked example now state the
+  profile C rule instead of quoting a version 7 identifier.
+
+*Shim and rollback (ADR-006).* This is a cutover, and it has no parallel run.
+The shim is the reusable's own pinning: it checks out the validator at
+`job.workflow_sha`, so a caller pinned to a SHA keeps the behaviour of that
+SHA until it bumps. Callers on `@main` change on merge. Rollback is removing
+the `--strict` argument in the two workflows, which restores P2 dual-accept;
+nothing else changes.
+
+*Measured impact.* Measured on 2026-10-07 over the **default-branch tree** (`git archive origin/HEAD`, refs fetched within a day) of each of the 481 local clones under `hyper-repos/` and `meta-repos/`, so untracked files and side branches do not count. One clone, `julia-ecosystem`, timed out in both modes and is unmeasured. Of the other 480, the checker on standards `main` (dual-accept, no A2ML skip) passes 135 and fails 345. This checker with `--strict` passes 296 and fails 184. *168 repos turn green*, almost all because of the A2ML skip. *6 repos turn red*, not counting standards, whose 4 hits this change fixes. Only `kcq` calls the gate at `@main`, so it is the one repo that goes red on its next run (a v7 literal in two deed files). `phantom-metal-taste` (a placeholder UUID in a Julia `Project.toml`), `ZenodoDeposits.jl` (one v7 literal in its tests) and `sim-public-relations` (two literals) pin the gate to a SHA, so each goes red only when it bumps. `berrywiki` and `berrywiki-course-template` call no gate. The other 177 repos fail in both modes. On default branches, 3 repos call `governance-reusable.yml@main`, 357 pin it to a SHA, and 121 do not call it. The figure of about 888 quoted at decision time was not a default-branch count.
+
+*What still follows.* The deed grammar's version 8 literal (`#u8`, whose body
+is the profile C preimage `domain:name`), its linter and fixtures, and the
+shared profile T and C generators are the next standards increment. The
+gv-clade-index derivation change follows it. Each repository then migrates
+under P3 as before; strict only means a repository is red until it does.
+
 == What this record does not do
 
-It does not migrate any repository (P3), retire version 7 acceptance (P4),
-change the deed grammar, or update `HYP-UUID-001`.
+It does not migrate any repository (P3), change the deed grammar, or update
+`HYP-UUID-001`. The D320 amendment retires version 7 acceptance at the gates;
+P4 is now only the removal of `check-uuid-v7.sh` and the superseded v7
+standard once every in-scope repository is `complete` or `excluded`.

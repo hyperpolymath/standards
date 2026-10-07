@@ -13,6 +13,11 @@
 #
 # A literal scanner cannot tell profile T from profile C; ADR-008 puts the
 # profile in the field's declared type, which this script does not read.
+#
+# Retired A2ML files (*.a2ml, *.a2ml.in) are not scanned (owner ruling D320,
+# 2026-10-07). A2ML is dead and may not be hand-converted (D313); its
+# identifiers become v8 when kcX converts each file into deed, so checking
+# them here would only force edits to a format the estate is deleting.
 set -eu
 
 strict=0
@@ -63,9 +68,10 @@ acceptable() {
 status=0
 while IFS= read -r file; do
   [ -f "$file" ] || continue
-  # Ignore the checkers themselves; scan source and data files, not binaries.
+  # Ignore the checkers themselves and retired A2ML files (D320); scan source
+  # and data files, not binaries.
   case "$file" in
-    */.git/*|*/check-uuid-v7.sh|*/check-uuid-v8.sh) continue ;;
+    */.git/*|*/check-uuid-v7.sh|*/check-uuid-v8.sh|*.a2ml|*.a2ml.in) continue ;;
   esac
   if grep -IEni -- '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' "$file" >/dev/null 2>&1; then
     # Every UUID on a line is checked, not only the last one (grep -o).
