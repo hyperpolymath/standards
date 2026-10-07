@@ -83,6 +83,15 @@ expect 1 "a [deps] table outside a Julia project file is not exempt"
 fresh; mkdir -p "$WORK/t/docs"; printf '[[deps.X]]\nuuid = "%s"\n' "$V4" > "$WORK/t/docs/Manifest-v1.12.toml"
 expect 0 "a v4 in a Julia Manifest is accepted"
 
+fresh; printf 'id = "%s"\n' "$V4" > "$WORK/t/CLADE.a2ml"
+expect 0 "a v4 in a retired .a2ml file is ignored (D320)"
+fresh; printf 'id = "%s"\n' "$V4" > "$WORK/t/CLADE.a2ml.in"
+expect 0 "a v4 in a retired .a2ml.in template is ignored (D320)"
+fresh; printf 'id = "%s"\n' "$V4" > "$WORK/t/a2ml-notes.adoc"
+expect 1 "a v4 in a file merely NAMED after a2ml is still rejected"
+fresh; printf 'id = "%s"\n' "$V4" > "$WORK/t/x.a2mlx"
+expect 1 "a v4 in a .a2mlx file (near-miss extension) is still rejected"
+
 echo "scan paths"
 got=0; "$SCRIPT" "$WORK/no-such-dir" >"$WORK/out" 2>&1 || got=$?
 if [ "$got" = 2 ]; then pass=$((pass+1)); echo "  ok    a missing scan path exits 2"
