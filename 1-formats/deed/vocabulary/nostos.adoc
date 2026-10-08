@@ -1,0 +1,238 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= `(nostos …)` — repo-deed vocabulary for the way back to what a repo depends on
+:toc:
+
+Status:: vocabulary, draft v0.1 (2026-10-08). Grammar unchanged: this is a `clause`
+under the normative link:../spec/abnf/deed.abnf[deed.abnf] v1.1.0.
+Name:: _nostos_ is Greek for the journey home. The clause records, for each thing a
+repo depends on, every way back to where that thing came from.
+Fixture:: link:../tools/fixtures/valid/nostos-clause_chora.deed[nostos-clause_chora.deed].
+
+A repo depends on things it did not make: runtimes, compilers, tools, SDKs and
+libraries, and outside software, games, datasets and models. For each of them,
+`(nostos …)` records how to fetch it again, whole or in part, and how to check a
+fetch. It also records where its documentation refreshes from, what else its maker
+publishes, which feeds announce changes, and which channels reach the maker.
+Those changes include security advisories, releases, end of life, add-ons and
+funding appeals.
+
+The clause only describes. It does not install, update, alert or send anything.
+Those are jobs for readers, and the obligations below bind them.
+
+As with link:updates.adoc[`(updates …)`] and link:maturity.adoc[`(maturity …)`], no
+production `estate_chora.deed` exists yet, so this page is the declaration. The
+terms below move into that file's `(vocabulary …)` clause verbatim when it lands.
+
+== Where it appears
+
+Only in a `repo-deed` (`<repo>_chora.deed`), at most once, as a direct child of
+the form. It holds one or more `(artefact …)` clauses. **No clause means nothing
+is declared.** A reader must not fill the gap from `.tool-versions`, `mise.toml`
+or `build/guix.scm`.
+
+== `(artefact …)` — one thing the repo depends on
+
+[cols="2,3,1,5",options="header"]
+|===
+| Term | Value | Required | Meaning
+
+| `:name` | STRING | yes | The name the artefact's maker uses (`"graalvm-community"`, `"just"`). Unique within the clause.
+| `:kind` | SYMBOL, one of `language` `runtime` `compiler` `tool` `library` `sdk` `application` `game` `dataset` `model` `firmware` `other` | yes | What sort of thing it is.
+| `:version` | STRING | yes | The version this repo pins, written as the maker writes it.
+| `:version-scheme` | SYMBOL, one of `semver` `calver` `pep440` `opaque` | no | How to compare versions. Unstated means `opaque`: a reader must not classify a release as major, minor or patch.
+| `:vendor` | STRING | no | The maker's identifier. Matches `(kin …)` `:vendor`.
+| `:homepage` | STRING | no | URL.
+| `:license` | STRING | no | SPDX licence expression.
+| `(fetch …)` | clause, repeatable | yes, at least one | A way to get it again.
+| `(digest …)` | clause, repeatable | no | A way to check a fetch.
+| `(part …)` | clause, repeatable | no | A piece that can be fetched on its own.
+| `(docs …)` | clause, at most once | no | Documentation that refreshes on its own.
+| `(kin …)` | clause, at most once | no | The maker's other work.
+| `(feed …)` | clause, repeatable | no | Where changes are announced.
+| `(contact …)` | clause, repeatable | no | A channel that reaches the maker.
+|===
+
+=== `(fetch …)` — how to get it again
+
+[cols="2,3,1,5",options="header"]
+|===
+| Field | Value | Required | Rule
+
+| `:manager` | SYMBOL, one of `mise` `asdf` `guix` `apt` `opam` `alire` `cargo` `hex` `bun` `npm` `docker` `oci` `vendor` `git` `other` | yes | Who fetches it.
+| `:package` | STRING | yes, unless `:manager` is `vendor`, `git` or `oci` | The artefact's name inside that manager (`"java"` in mise for GraalVM).
+| `:ref` | STRING | no | The version as that manager writes it, when it differs from `:version` (`"graalvm-community-25.0.2"`).
+| `:backend` | STRING | no | The manager's own backend coordinate (mise `"core:java"`, `"aqua:casey/just"`).
+| `:plugin` | STRING | no | asdf or mise plugin URL, for names the manager's registry does not know.
+| `:url` | STRING | yes when `:manager` is `vendor`, `git` or `oci` | Direct locator.
+| `:channel` | SYMBOL, one of `stable` `lts` `beta` `nightly` | no | Release stream.
+| `:primary` | BOOLEAN | no | `#t` on the fetch a plain re-fetch uses.
+|===
+
+=== `(digest …)` — how to check a fetch
+
+[cols="2,3,1,5",options="header"]
+|===
+| Field | Value | Required | Rule
+
+| `:algo` | SYMBOL, one of `sha256` `sha512` | yes |
+| `:value` | STRING, lowercase hex (64 for `sha256`, 128 for `sha512`) | yes |
+| `:covers` | STRING | no | Which bytes. Unstated means the archive the primary fetch downloads. Otherwise `"part:<class>"` or `"installed:<path relative to the install root>"`.
+| `:checked` | STRING, `YYYY-MM-DD` | no | When the value was last confirmed against the maker.
+|===
+
+Signatures are not part of v0.1. A later version adds them, aligned with the
+Anchor/Provenance/Leaf tiers of `action-trust-layers`. Until then a signature
+field is an unknown field, and so an error.
+
+=== `(part …)` — pieces that can be fetched alone
+
+[cols="2,3,1,5",options="header"]
+|===
+| Field | Value | Required | Rule
+
+| `:class` | SYMBOL, one of `binary` `source` `sdk` `docs` `symbols` `man` `completions` `sbom` `license` | yes |
+| `:url` | STRING | yes |
+| `:platform` | STRING | no | Target, for platform-specific pieces (`"x86_64-linux"`).
+| `:on-demand` | BOOLEAN | no | `#t`: fetch only when asked for, never with the artefact. Default `#f`.
+|===
+
+=== `(docs …)` — documentation that refreshes on its own
+
+Modelled on PowerShell's `Update-Help` and `HelpInfoURI`: a stable address that
+says which documentation version is current, so docs can be refreshed without
+fetching the artefact again.
+
+[cols="2,3,1,5",options="header"]
+|===
+| Field | Value | Required | Rule
+
+| `:help-info-url` | STRING | yes | Where the current docs version is announced.
+| `:version` | STRING | no | The docs version held locally.
+| `:format` | SYMBOL, one of `html` `man` `info` `adoc` `pdf` | no |
+| `:follows-artefact` | BOOLEAN | no | `#t`: docs change only when the artefact does. Default `#f`.
+|===
+
+=== `(kin …)` — the maker's other work
+
+[cols="2,3,1,5",options="header"]
+|===
+| Field | Value | Required | Rule
+
+| `:vendor` | STRING | yes | Same value as the artefact's `:vendor`.
+| `:discovery-url` | STRING | no | Where the maker lists everything they publish.
+| `:known` | LIST of STRING | no | Names of the maker's other artefacts already known.
+|===
+
+=== `(feed …)` — where changes are announced
+
+[cols="2,3,1,5",options="header"]
+|===
+| Field | Value | Required | Rule
+
+| `:kind` | SYMBOL, one of the kinds below | yes |
+| `:url` | STRING | yes |
+| `:ecosystem` | STRING | no | For `security`: the OSV ecosystem name (`"crates.io"`, `"Maven"`).
+| `:package` | STRING | no | For `security`: the name that ecosystem indexes the artefact under.
+|===
+
+`security`:: Advisories and CVEs that may affect the pinned version.
+`release`:: New versions. With a `:version-scheme` other than `opaque`, a reader can
+classify each one as major, minor or patch.
+`deprecation`:: Features or interfaces the maker is withdrawing.
+`eol`:: End of support for a version.
+`addon`:: Downloadable content, plugins, expansions.
+`funding`:: Funding appeals and sponsorship drives.
+`news`:: Anything else the maker announces.
+
+=== `(contact …)` — channels that reach the maker
+
+[cols="2,3,1,5",options="header"]
+|===
+| Field | Value | Required | Rule
+
+| `:channel` | SYMBOL, one of `security` `bugs` `support` `funding` `maintainer` `press` | yes | What the channel is for.
+| `:method` | SYMBOL, one of `email` `issue-tracker` `form` `matrix` `mailing-list` `discussion` | yes |
+| `:address` | STRING | yes when `:method` is `email` or `matrix` |
+| `:url` | STRING containing an HTTPS URL | yes for every other `:method` | Readers must validate the certificate and reject redirects that downgrade to HTTP.
+| `:found-at` | STRING containing an HTTPS URL | yes | HTTPS URL of the maker's page that publishes this channel. It is what lets a reader re-check the channel before using it. Readers must validate the certificate and reject redirects that downgrade to HTTP.
+| `:checked` | STRING, `YYYY-MM-DD` | no | When the channel was last confirmed published.
+|===
+
+== Reader obligations
+
+* An unknown field or clause anywhere inside `(nostos …)` is an error.
+* A symbol outside its closed set is an error, never mapped to a nearby value. A
+  string where a symbol is expected (`:kind "tool"`) is an error.
+* Two `(nostos …)` clauses in one deed is an error. So are two artefacts with the
+  same `:name`, and an artefact with no `(fetch …)`.
+* More than one `(fetch …)` with `:primary #t` is an error. With none, there is no
+  primary: a reader that needs one reports that, and never picks.
+* An artefact is verified only when a reader hashes the bytes covered by an
+  applicable `(digest …)` clause with its `:algo` and the result matches its
+  `:value`. Digest presence alone is not sufficient. If no digest exists, or a
+  digest does not match the bytes it covers, the artefact is unverified.
+* **Refresh before send.** Before a reader sends anything to a `(contact …)`, it
+  fetches `:found-at` and confirms the channel is still published there. If it is
+  not, the reader sends nothing and reports the drift.
+* A reader MUST apply an outbound-fetch policy to `:found-at`. The policy MUST
+  reject loopback, link-local, and private-network destinations after DNS
+  resolution and after every redirect.
+* When an artefact is also pinned in `.tool-versions`, `mise.toml` or
+  `build/guix.scm` and the versions disagree, that is drift. A reader reports it,
+  and never resolves it by choosing one side.
+
+== Relationship to other files
+
+`(updates …)`:: Governs what automation may do to a repo's dependencies.
+`(nostos …)` records where to look. A `release` feed may inform an update, but it
+never arms one.
+`.tool-versions`, `mise.toml`, `build/guix.scm`:: These stay the files tools read.
+Today they are kept by hand, and `(nostos …)` only describes them. Once the planned
+kcX projection compiler exists, `(nostos …)` is meant to be one of its inputs. A
+fetch with `:manager asdf` or `mise` would become a `.tool-versions` line, plus a
+`mise.toml` `[plugins]` entry when the name is not in mise's registry. A fetch with
+`:manager guix` would become a package in `build/guix.scm`. None of this is
+implemented.
+odds-and-sods-package-manager:: Planned to import `.tool-versions` and `mise.toml`
+into `(nostos …)` clauses, and to read `(feed …)` for change detection.
+
+== Horizon (not decided here)
+
+* **A machine-level record.** A workstation's own tools have no home: none of the
+  four doc-heads fits. Giving them one needs an owner ruling, and a new doc-head
+  is a grammar change.
+* **Per-person interest.** Which feed kinds a person wants to hear about belongs in
+  a separate document, not in a repo deed.
+* **Signatures** in `(digest …)`, as above.
+* **Identifiers.** v0.1 has no ID field: artefacts are keyed by `:name`. If one is
+  added it is an ADR-008 profile C literal, `#u8"<domain>:<name>"`, which
+  deed.abnf v1.1.0 already admits.
+* **Enforcement.** No reader enforces these obligations yet. They are declared
+  here, not implemented.
+
+== Example
+
+[source,lisp]
+----
+(nostos
+  (artefact
+    :name "just"
+    :kind tool
+    :version "1.56.0"
+    :version-scheme semver
+    :vendor "casey"
+    :license "CC0-1.0"
+    (fetch :manager mise :package "just" :backend "aqua:casey/just" :primary #t)
+    (fetch :manager asdf :package "just"
+      :plugin "https://github.com/olofvndrhr/asdf-just")
+    (feed :kind release :url "https://github.com/casey/just/releases.atom")
+    (feed :kind security :url "https://osv.dev/list?ecosystem=crates.io&q=just"
+      :ecosystem "crates.io" :package "just")
+    (contact :channel bugs :method issue-tracker
+      :url "https://github.com/casey/just/issues"
+      :found-at "https://github.com/casey/just")))
+----
+
+The fixture adds a second artefact (GraalVM Community) that exercises every
+remaining term.
