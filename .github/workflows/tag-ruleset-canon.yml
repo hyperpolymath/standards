@@ -49,7 +49,7 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # WHICH App's credentials belong in vars.APP_ID / secrets.APP_PRIVATE_KEY:
+      # WHICH App's credentials belong in vars.RULESET_APP_ID / secrets.RULESET_APP_PRIVATE_KEY:
       # a DEDICATED App for this applier -- explicitly NOT OikosBot. Owner ruling
       # R-14 (2026-09-15). The reason is separation of duties, not style. The canon
       # body names `Integration:2538504` -- confirmed OikosBot, GET /apps/oikosbot
@@ -59,6 +59,12 @@ jobs:
       # applier credential are two different identities; neither substitutes for
       # the other. The dedicated App needs `administration: write` and must be
       # installed on BOTH owners (hyperpolymath and metadatastician).
+      #
+      # It is ALSO not the pin applier's App (vars.APP_ID, used by
+      # apply-workflow-pins, dependabot-lock-regen and signed-push-smoke). That App
+      # holds contents/workflows/pull-requests write; giving it administration:write
+      # would let the thing that re-points pins also rewrite the rulesets that gate
+      # it. Owner ruling 2026-10-08: two Apps, two slots.
 
       # An App installation token is scoped to ONE owner and carries its own
       # rate limit, so it is preferred over a PAT shared with everything else.
@@ -66,22 +72,22 @@ jobs:
       # and every ruleset write would 404.
       - name: Mint an App installation token for hyperpolymath
         id: tok-user
-        if: vars.APP_ID != ''
+        if: vars.RULESET_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         continue-on-error: true
         with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          app-id: ${{ vars.RULESET_APP_ID }}
+          private-key: ${{ secrets.RULESET_APP_PRIVATE_KEY }}
           owner: hyperpolymath
 
       - name: Mint an App installation token for metadatastician
         id: tok-org
-        if: vars.APP_ID != ''
+        if: vars.RULESET_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         continue-on-error: true
         with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          app-id: ${{ vars.RULESET_APP_ID }}
+          private-key: ${{ secrets.RULESET_APP_PRIVATE_KEY }}
           owner: metadatastician
 
       # A nonexistent secret resolves to an empty string in silence, and a sweep
@@ -105,14 +111,14 @@ jobs:
           refuses to run rather than report a clean sweep over nothing.
 
           Supply EITHER:
-            * vars.APP_ID + secrets.APP_PRIVATE_KEY for a GitHub App holding
-              administration:write, installed on hyperpolymath AND on
-              metadatastician. Preferred: the App is already the canonical
-              bypass actor, and an installation token has its own rate limit.
+            * vars.RULESET_APP_ID + secrets.RULESET_APP_PRIVATE_KEY for a
+              DEDICATED GitHub App holding administration:write, installed on
+              hyperpolymath AND on metadatastician. NOT OikosBot (the bypass
+              actor) and NOT the pin applier's vars.APP_ID App. Preferred:
+              an installation token has its own rate limit.
             * secrets.ESTATE_ADMIN_TOKEN — a PAT with repo administration.
 
-          Measured 2026-09-15: neither APP_ID nor APP_PRIVATE_KEY exists on
-          this repository, which is why signed-push-smoke.yml has never passed.
+          Measured 2026-09-15: no ruleset credential exists on this repository.
           MSG
           exit 3
 
