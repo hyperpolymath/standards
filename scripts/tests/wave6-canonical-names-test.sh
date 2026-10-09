@@ -52,6 +52,31 @@ git add "$f" 2>/dev/null
 bash "$CHK" HEAD >/dev/null 2>&1 && ok "canonical names pass" || bad "canonical names wrongly blocked"
 git reset -q "$f" 2>/dev/null; rm -f "$f"
 
+echo "== the frozen scorecard archive is excluded record by record =="
+# The real move: a record is renamed into the archive AND one line of it is
+# edited, so the diff carries a rename with a '+' line under the new path.
+old=".machine_readable/scorecards/probe.scorecard.a2ml"
+arc=".machine_readable/archive/scorecards-v1"
+mkdir -p "$(dirname "$old")" "$arc"
+printf '[scorecard]\nspec_id = "probe"\nversion = "0.1.0"\nassessor = "estate-audit"\nevidence = "x"\n' > "$old"
+git add "$old" && git commit -qm "scorecard fixture"
+git mv "$old" "$arc/probe.scorecard.a2ml"
+sed -i 's#^evidence = "x"$#evidence = ".machine_readable/6a2/STATE.a2ml"#' "$arc/probe.scorecard.a2ml"
+git add "$arc/probe.scorecard.a2ml"
+if bash "$CHK" HEAD >/dev/null 2>&1; then ok "archived scorecard record (moved + edited) excluded"; else bad "archived scorecard record wrongly blocked"; fi
+# Planted positives: the exclusion must not reach the archive's README or a
+# sibling archive. Without these, an exclusion of the whole tree would pass.
+printf 'see .machine_readable/6a2/STATE.a2ml\n' > "$arc/README.adoc"
+git add "$arc/README.adoc"
+if bash "$CHK" HEAD >/dev/null 2>&1; then bad "archive README escaped the guard"; else ok "archive README still guarded"; fi
+git rm -q --cached "$arc/README.adoc"; rm -f "$arc/README.adoc"
+sib=".machine_readable/archive/scorecards-v2"
+mkdir -p "$sib"
+printf 'evidence = ".machine_readable/6a2/STATE.a2ml"\n' > "$sib/probe.scorecard.a2ml"
+git add "$sib/probe.scorecard.a2ml"
+if bash "$CHK" HEAD >/dev/null 2>&1; then bad "sibling archive escaped the guard"; else ok "sibling archive still guarded"; fi
+git rm -q --cached "$sib/probe.scorecard.a2ml"; rm -rf "$sib"
+
 echo "== the guard excludes 0-canon/CANONICAL-NAMES.adoc itself =="
 grep -q '0-canon/CANONICAL-NAMES.adoc' "$CHK" && ok "mandate doc is excluded from the guard" || bad "mandate doc not excluded"
 

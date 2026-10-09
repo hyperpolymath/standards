@@ -36,5 +36,33 @@ ck "nested .machine_readable .a2ml directive fails"        1 sub/.machine_readab
 ck "clean directive file passes"                           0 .machine_readable/bot_directives/ok.deed
 ck "mixed set fails on the directive file alone"           1 docs/README.adoc .machine_readable/bot_directives/legacy.deed
 
+# The frozen scorecard archive (ruling R5, #837): its records name the tools
+# of their day and are skipped; its README and a sibling archive are not
+# (planted positives, so a skip of the whole archive tree would be caught).
+A=".machine_readable/archive/scorecards-v1"
+mkdir -p "$T/$A" "$T/.machine_readable/archive/scorecards-v2"
+printf 'evidence = "Codex"\n' > "$T/$A/k.scorecard.a2ml"
+printf 'Codex\n' > "$T/$A/README.adoc"
+printf 'evidence = "Codex"\n' > "$T/.machine_readable/archive/scorecards-v2/k.scorecard.a2ml"
+ck "archived scorecard record naming Codex passes"         0 "$A/k.scorecard.a2ml"
+ck "archive README is still checked"                       1 "$A/README.adoc"
+ck "sibling archive is still checked"                      1 .machine_readable/archive/scorecards-v2/k.scorecard.a2ml
+
+# cks NAME EXPECTED_EXIT DIR — run the hook in scan mode (no staged list) over
+# DIR and compare its exit code with EXPECTED_EXIT.
+cks() {
+  local name="$1" want="$2" dir="$3" out rc
+  out="$(INPUT_PATH="$dir" INPUT_STAGED_FILES="" bash "$HOOK" 2>&1)"; rc=$?
+  if [ "$rc" = "$want" ]; then printf '  ok    %s (exit %s)\n' "$name" "$rc"; pass=$((pass+1))
+  else printf '  FAIL  %s (expected exit %s, got %s) output=%s\n' "$name" "$want" "$rc" "${out:-<none>}"; fail=$((fail+1)); fi
+}
+
+S="$T/scan"
+mkdir -p "$S/$A"
+printf 'evidence = "Codex"\n' > "$S/$A/k.scorecard.a2ml"
+cks "scan: archived scorecard record passes"               0 "$S"
+printf '(bot codex)\n' > "$S/.machine_readable/live.deed"
+cks "scan: live directive beside the archive still fails"  1 "$S"
+
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] && [ "$pass" -gt 0 ]
