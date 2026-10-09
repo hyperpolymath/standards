@@ -65,6 +65,15 @@ fi
 is_fixture() {
   case "$1" in
     1-formats/k9/tools/fixtures/*) return 0 ;;
+    # 9-archive/ is a frozen district, not the live K9 corpus. It holds the
+    # LAST COPY of dead upstream trees, kept because the standards-map note
+    # says "ARCHIVE, do not delete" — its contents are historical record, not
+    # code this estate maintains. Validating it would mean either failing the
+    # archive for upstream's nonconformance or growing the debt ledger with
+    # entries no one can ever discharge. So: not validated, not ledgered.
+    # A grandfathered file moved here stops accruing debt rather than
+    # carrying it into the archive — which is the point of archiving it.
+    9-archive/*) return 0 ;;
   esac
   return 1
 }

@@ -407,7 +407,7 @@ check_l1() {
   # K9-S014 — a leash claim outside pedigree.security. Same rule as the L0
   # library check, but reachable from a component too: a file may carry the
   # envelope and still declare its level somewhere no host reads. This is the
-  # live shape of rhodium-standard-repositories/rsr-compliance-checklist.k9.ncl.
+  # live shape of 9-archive/rhodium-standard-repositories/rsr-compliance-checklist.k9.ncl.
   if [ -n "$(fact_get "$facts" leash)" ]; then
     err K9-S014 L1 "top-level 'leash = $(fact_get "$facts" leash)' outside pedigree.security; a leash declared there is read by nothing"
   fi

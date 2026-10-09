@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 GOVERNANCE="$ROOT/.github/workflows/governance-reusable.yml"
 FOCUSED="$ROOT/.github/workflows/allowlist-preflight-reusable.yml"
-RSR_SEED="$ROOT/rhodium-standard-repositories/.github/workflows/allowlist-preflight.yml"
+RSR_SEED="$ROOT/9-archive/rhodium-standard-repositories/.github/workflows/allowlist-preflight.yml"
 LOCK_HELPER="$ROOT/scripts/update-actions-lock.sh"
 LOCK_GATE="$ROOT/scripts/check-actions-lock-gate.sh"
 

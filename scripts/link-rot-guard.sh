@@ -6,7 +6,7 @@
 #
 # Rationale: the estate has repeatedly shipped docs that point at paths a
 # reorg moved (ADR-0003 and archetypes/README.adoc cite
-# rhodium-standard-repositories/spec/SCAFFOLD-LIFECYCLE.adoc; the spec now
+# 9-archive/rhodium-standard-repositories/spec/SCAFFOLD-LIFECYCLE.adoc; the spec now
 # lives at 0-canon/rsr/). The deed-pointer sweep (standards f5ba975) proved
 # the pattern works when done by hand; this makes it a standing check.
 #
@@ -21,13 +21,15 @@ set -uo pipefail
 ROOT="${1:-.}"
 FAIL=0
 
-# Archive exclusion: rhodium-standard-repositories/ is the LAST COPY of a
-# dead upstream (8 of 10 satellites have no external home; standards-map
-# note: "ARCHIVE, do not delete"). Its internal links are historical and
-# deliberately unmaintained; the guard polices live content.
+# Archive exclusion: the 9-archive/ district is frozen history — the LAST COPY
+# of dead upstream trees (8 of 10 rhodium satellites have no external home;
+# standards-map note: "ARCHIVE, do not delete"). Its internal links are
+# historical and deliberately unmaintained; the guard polices live content.
+# Pruning the district root rather than the tree inside it means anything else
+# archived later is covered without another edit here.
 EXCLUDES=()
 case "$(basename "$(cd "$ROOT" && pwd)")" in
-  standards) EXCLUDES+=("-path" "$ROOT/rhodium-standard-repositories" -prune -o) ;;
+  standards) EXCLUDES+=("-path" "$ROOT/9-archive" -prune -o) ;;
 esac
 
 check_target() {
