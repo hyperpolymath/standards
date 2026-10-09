@@ -39,7 +39,10 @@
 #                            repo-scoped and WILL NOT DO.
 #   CANON_FILE               optional. Default config/rulesets/immutable-tags.json
 #   ESTATE_ORGS              optional. Space-separated orgs to union in.
-#                            Default "metadatastician".
+#                            Default "metadatastician" when UNSET. Set but
+#                            empty means NO orgs: the hyperpolymath step of
+#                            tag-ruleset-canon.yml sets it to '' because its
+#                            App token cannot write metadatastician repos.
 #
 # Inputs (flags):
 #   --apply                  perform writes. WITHOUT IT THIS SCRIPT ONLY REPORTS.
@@ -51,7 +54,9 @@
 #                            `disabled`, which RE-ENABLES it. Off by default:
 #                            disabled is a deliberate human act, not drift.
 #   --no-verify              skip the real-tag-ref verification probe.
-#   --skip-user              do not enumerate user/repos; use only ESTATE_ORGS.
+#   --skip-user              do not enumerate the credential's own repositories
+#                            (user/repos, or installation/repositories under an
+#                            App token); use only ESTATE_ORGS.
 #                            An App installation token is scoped to ONE owner, so
 #                            covering a user and an org needs one run per
 #                            credential. This flag makes that composable.
@@ -75,7 +80,7 @@
 set -euo pipefail
 
 CANON_FILE="${CANON_FILE:-config/rulesets/immutable-tags.json}"
-ESTATE_ORGS="${ESTATE_ORGS:-metadatastician}"
+ESTATE_ORGS="${ESTATE_ORGS-metadatastician}"   # no colon: an explicit '' means no orgs
 APPLY=0 RECONCILE=0 VERIFY=1 LIMIT=0 SKIP_USER=0 REVIVE_DISABLED=0
 declare -a ONLY_REPOS=()
 
@@ -146,8 +151,19 @@ note "canon: actors=[$CANON_ACTORS] rules=[$CANON_RULES]"
 # is exempt from the limit and answered remaining=4999 while every other read 403'd.)
 # So classify the probe THREE ways, on the response body, never on gh's own verdict:
 #   authenticated / rate-limited-but-authenticated / genuinely-uncredentialled.
+INSTALLATION=0
 if [ -n "${GH_TOKEN:-}" ]; then
   note "credential: GH_TOKEN from the environment"
+  # An App installation token (GitHub prefix ghs_) belongs to ONE installation,
+  # on ONE owner. It cannot call user/repos at all: that endpoint needs a user
+  # identity, and an installation has none. It also cannot write any repo
+  # outside its installation. The workflow mints one such token per owner, so
+  # both the target list and the write probe below must come from the
+  # installation itself, never from a user endpoint or a fixed repo name.
+  case "$GH_TOKEN" in
+    ghs_*) INSTALLATION=1
+           note "credential: an App installation token; targets come from installation/repositories" ;;
+  esac
 else
   cred_probe=$(gh api user --jq '.login' 2>&1) || cred_probe_failed=1
   if [ "${cred_probe_failed:-0}" -eq 0 ] && [ -n "$cred_probe" ]; then
@@ -178,8 +194,33 @@ NOCRED
 fi
 
 probe_repo="${GITHUB_REPOSITORY:-hyperpolymath/standards}"
-probe_body=$(mktemp); probe_out=$(mktemp); api_err=$(mktemp)
-trap 'rm -f "$probe_body" "$probe_out" "$api_err"' EXIT
+probe_body=$(mktemp); probe_out=$(mktemp); api_err=$(mktemp); inst_file=$(mktemp)
+trap 'rm -f "$probe_body" "$probe_out" "$api_err" "$inst_file"' EXIT
+
+inst_listed=0
+
+# list_installation_repos — fill $inst_file with the non-archived full_names the
+# App installation behind GH_TOKEN can reach, one per line; die if GitHub will
+# not list them. Runs at most once: the write probe and the target enumeration
+# both need the same set. Call it in the main shell, never inside $(...), or
+# the once-only flag is lost with the subshell.
+list_installation_repos() {
+  [ "$inst_listed" -eq 1 ] && return 0
+  gh api --paginate 'installation/repositories?per_page=100' \
+    --jq '.repositories[] | select(.archived | not) | .full_name' > "$inst_file" \
+    || die "could not list installation/repositories with the App token; the installation's repos are NOT examined"
+  inst_listed=1
+}
+
+# tag_ruleset_id <repo> — echo the id of the first REPOSITORY-level tag ruleset
+# on <repo>, or nothing. An org-inherited ruleset is listed here too, but it is
+# written at /orgs/{org}/rulesets/{id}; a per-repo PUT of it 404s (#1032), and
+# the probe would then report a capable credential as unable to write.
+tag_ruleset_id() {
+  gh api "repos/$1/rulesets" --paginate 2>/dev/null \
+    | jq -r '.[]? | select(type == "object" and .target == "tag" and .source_type == "Repository") | .id' 2>/dev/null \
+    | head -1 || true
+}
 
 # Idempotent self-write: PUT this repository's own matching tag ruleset back
 # with the bytes it already has. Succeeds iff the credential holds
@@ -190,8 +231,23 @@ if [ "$APPLY" -eq 0 ]; then
   note "DRY RUN: skipping the write-capability probe; administration:write is UNVERIFIED in this run"
   probe_id=""
 else
-probe_id=$(gh api "repos/$probe_repo/rulesets" --paginate 2>/dev/null \
-  | jq -r '.[] | select(.target=="tag") | .id' | head -1 || true)
+# An installation token can write only its own installation's repos. When the
+# workflow's own repo (GITHUB_REPOSITORY) belongs to another owner, a self-PUT
+# there is refused whatever the credential holds, and the run would stop on a
+# false "cannot WRITE rulesets". So probe one of the installation's own repos.
+if [ "$INSTALLATION" -eq 1 ]; then
+  list_installation_repos
+  if ! grep -qxF -- "$probe_repo" "$inst_file"; then
+    note "probe: $probe_repo is outside this installation; probing one of the installation's own repos"
+    probe_repo=""
+    while read -r cand; do
+      [ -n "$cand" ] || continue
+      if [ -n "$(tag_ruleset_id "$cand")" ]; then probe_repo="$cand"; break; fi
+    done < "$inst_file"
+  fi
+fi
+probe_id=""
+[ -z "$probe_repo" ] || probe_id=$(tag_ruleset_id "$probe_repo")
 if [ -n "$probe_id" ] && [ "$probe_id" != "null" ]; then
   if ! gh api "repos/$probe_repo/rulesets/$probe_id" > "$probe_body" 2>"$probe_out"; then
     echo "FATAL: cannot even READ $probe_repo ruleset $probe_id:" >&2
@@ -209,7 +265,7 @@ if [ -n "$probe_id" ] && [ "$probe_id" != "null" ]; then
   rm -f "$probe_body.put"
   note "credential probe OK — administration:write confirmed by an idempotent self-PUT"
 else
-  note "WARNING: $probe_repo has no tag ruleset to probe with; write capability is UNPROVEN"
+  note "WARNING: ${probe_repo:-no repo in this installation} has no repo-level tag ruleset to probe with; write capability is UNPROVEN"
 fi
 fi
 
@@ -226,9 +282,17 @@ if [ "${#ONLY_REPOS[@]}" -gt 0 ]; then
   printf '%s\n' "${ONLY_REPOS[@]}" > "$repos_file"
   note "explicit target list: ${#ONLY_REPOS[@]} repo(s)"
 else
+  own_src="user/repos"
   if [ "$SKIP_USER" -eq 0 ]; then
-    gh api --paginate 'user/repos?affiliation=owner&per_page=100' \
-      --jq '.[] | select(.archived == false) | .full_name' >> "$repos_file"
+    if [ "$INSTALLATION" -eq 1 ]; then
+      own_src="installation/repositories"
+      list_installation_repos
+      cat "$inst_file" >> "$repos_file"
+    else
+      gh api --paginate 'user/repos?affiliation=owner&per_page=100' \
+        --jq '.[] | select(.archived == false) | .full_name' >> "$repos_file" \
+        || die "could not list user/repos; the owner's repos are NOT examined"
+    fi
   fi
   n_user=$(wc -l < "$repos_file")
   for org in $ESTATE_ORGS; do
@@ -237,7 +301,7 @@ else
       note "WARNING: could not list org $org"
   done
   sort -u -o "$repos_file" "$repos_file"
-  note "targets: $n_user from user/repos + orgs($ESTATE_ORGS) = $(wc -l < "$repos_file") unique non-archived repos"
+  note "targets: $n_user from $own_src + orgs($ESTATE_ORGS) = $(wc -l < "$repos_file") unique non-archived repos"
 fi
 [ -s "$repos_file" ] || die "target list is EMPTY — refusing to report a clean sweep over nothing"
 if [ "$LIMIT" -gt 0 ]; then
