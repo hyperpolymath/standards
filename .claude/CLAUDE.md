@@ -54,16 +54,36 @@
 
 ## Machine-Readable Artefacts
 
-Every Hyperpolymath repo must have `.machine_readable/` with these 6 A2ML files:
+**A2ML is retired** (owner rulings D99, D269c, D312, D313). Never create,
+restore, regenerate or extend a `.a2ml` file, and never write a "new" A2ML
+file in a different shape. Machine-readable repo metadata has three forms.
+Each has a normative grammar in this repository:
 
-- `STATE.a2ml` - Current project state and progress
-- `META.a2ml` - Architecture decisions and development practices
-- `ECOSYSTEM.a2ml` - Position in the ecosystem and related projects
-- `AGENTIC.a2ml` - AI agent interaction patterns
-- `NEUROSYM.a2ml` - Neurosymbolic integration config
-- `PLAYBOOK.a2ml` - Operational runbook
+| What | File | Grammar (normative) | Check |
+|---|---|---|---|
+| Repo facts: identity, state, meta, ecosystem, agentic, neurosym, playbook, and the `(bot-directives …)` and `(contractiles …)` clauses | `<repo>_chora.deed` at the repo root, one per repo (D312) | `1-formats/deed/spec/abnf/deed.abnf` (D308; prose: `1-formats/deed/spec/DEED-GRAMMAR-SPEC.adoc`) | `bun 1-formats/deed/tools/deed_lint.js FILE.deed` |
+| Contracts | `*.k9.ncl` | `1-formats/k9/spec/K9-CONTRACT-SPEC.adoc` | `1-formats/k9/tools/k9-validate.sh --strict FILE` |
+| Agent coordination | `coordination.k9` at the repo root: first line `K9!`, `schema_version: 1.1.1` | `2-protocols/k9-coordination/spec/abnf/coordination-k9-grammar_v1.1.abnf` (prose: `2-protocols/k9-coordination/spec/COORDINATION-K9-SPEC.adoc`) | No validator script exists yet, and a generic YAML parser does not conform. The generator is `2-protocols/k9-coordination/tools/k9-init/`. |
 
-See: https://github.com/hyperpolymath/standards
+- **Translating old content.** The mapping specs in `1-formats/deed/mappings/`,
+  one per former A2ML family, decide where its content goes. Anything a
+  mapping spec does not list does not translate.
+- **The worked model** is `rsr-template-repo_chora.deed` in
+  `hyperpolymath/rsr-template-repo`.
+- **No bulk conversion.** Do not hand-convert A2ML in bulk, and do not use the
+  Python converters in `1-formats/deed/tools/`. Conversion becomes kcX's first
+  front end (D313), and Python is banned.
+- **A deed is not TOML.** A file containing `key = value` or `[section]` is not
+  a deed. `(` is the only bracket. Booleans are `#t`/`#f`. Enums are symbols
+  (`:primary fv`, not `:primary "fv"`). UUIDs are `#u5"…"` literals.
+  `:schema-version` appears exactly once at the top level.
+- **Existing `.a2ml` files**, here and in other repos, are legacy awaiting
+  migration. You may delete content from one; never add a fact to one.
+
+`.machine_readable/descriptiles/` stays the directory for descriptive anchors
+that are not yet folded into the chora deed. The `.a2ml` files still in it are
+legacy. Anything new written there is a `.deed`, such as
+`provisioning_praxis.deed`, never a `.a2ml`.
 
 ---
 
@@ -99,7 +119,8 @@ for the canonical statement.
 | **Bash/POSIX Shell** | Scripts, automation | Keep minimal |
 | **JavaScript** | Only where AffineScript cannot | MCP protocol glue, runtime APIs (transitional; prefer .affine where possible) |
 | **Nickel** | Configuration language | For complex configs |
-| **A2ML** | State/meta files | STATE.a2ml, META.a2ml, etc. (TOML-like format) |
+| **deed** | Repo metadata (`<repo>_chora.deed`) | S-expression format; grammar `1-formats/deed/spec/abnf/deed.abnf`. Replaces A2ML, which is retired. See Machine-Readable Artefacts above. |
+| **k9** | Contracts (`*.k9.ncl`) and agent coordination (`coordination.k9`) | Grammars and validators in `1-formats/k9/` and `2-protocols/k9-coordination/`. |
 | **Julia** | Batch scripts, data processing | Per RSR |
 | **OCaml** | AffineScript compiler | Language-specific |
 | **Ada** (legacy) | Safety-critical systems where Rust/SPARK is not yet reachable | Rust/SPARK is absorbing most Ada work over time. Do not start new pure-Ada projects unless Rust/SPARK cannot reach. |
