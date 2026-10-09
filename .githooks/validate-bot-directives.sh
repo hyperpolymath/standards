@@ -21,9 +21,15 @@ validate_file() {
 # the same population scan mode checks below. Without this fence the grep ran
 # over every staged prose file, so any README naming the AI tool "Codex"
 # could not be committed (owner ruling D316).
+# Records in the frozen scorecard archive (ruling R5, #837) are skipped in
+# both modes: they are assessments that name the tools of their day, not live
+# directives. Only the records are skipped; nothing else under the archive is.
 if [ -n "$STAGED_FILES" ]; then
   while IFS=$'\n' read -r file; do
     [ -z "$file" ] && continue
+    case "$file" in
+      .machine_readable/archive/scorecards-v1/*.scorecard.a2ml) continue ;;
+    esac
     case "$file" in
       .machine_readable/*|*/.machine_readable/*) ;;
       *) continue ;;
@@ -42,7 +48,8 @@ else
   if [ -d "$MACHINE_READABLE" ]; then
     while IFS= read -r file; do
       validate_file "$file"
-    done < <(find "$MACHINE_READABLE" -type f \( -name '*.a2ml' -o -name '*.deed' -o -name '*.md' -o -name '*.txt' \) 2>/dev/null || true)
+    done < <(find "$MACHINE_READABLE" -type f \( -name '*.a2ml' -o -name '*.deed' -o -name '*.md' -o -name '*.txt' \) \
+      ! -path "$MACHINE_READABLE/archive/scorecards-v1/*.scorecard.a2ml" 2>/dev/null || true)
   fi
 fi
 

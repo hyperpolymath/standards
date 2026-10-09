@@ -27,11 +27,14 @@ fi
 declare -A REPL=( ["6a2"]="descriptiles" ["agent_instructions"]="bot_directives" )
 
 # Files that legitimately NAME the deprecated tokens (the mandate itself, this
-# guard, migration/charter docs). Excluded from the check.
+# guard, migration/charter docs, and frozen archives whose records cite the
+# paths of their day). Excluded from the check. The scorecard archive is
+# excluded record by record (ruling R5, #837): its README is still checked.
 is_excluded() {
   case "$1" in
     0-canon/CANONICAL-NAMES.adoc|scripts/check-canonical-names.sh|scripts/tests/*|\
     *MIGRATION*|*migration*|*CHANGELOG*|\
+    .machine_readable/archive/scorecards-v1/*.scorecard.a2ml|\
     standards-update/.machine_readable/6scm-archive/.machine_readable/6a2/*) return 0 ;;
   esac
   return 1
