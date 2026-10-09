@@ -1,150 +1,99 @@
 // SPDX-License-Identifier: CC-BY-SA-4.0
-= The Standards Registry — Verifiable Spec Index + Drift Automation
-:toc: macro
+= The Standards Registry — Retired 2026-10-09
 :icons: font
 
-toc::[]
+[IMPORTANT]
+====
+The verifiable spec registry, the generators that wrote it and the gates that
+checked it were *retired on 2026-10-09*. Nothing in this repository
+generates, reads or checks a registry any more. This page stays at this path
+so that existing links still resolve.
+====
 
-This document explains the *verifiable registry* that indexes every spec in
-this monorepo, and how it is wired into the live automation so that
-documentation drift becomes a *detected, routed finding* instead of
-something noticed sixty days later.
+== Why it was retired
 
-The registry is the machine half of the *front door*. If you are arriving
-here:
+The registry was a generated A2ML file, and A2ML is retired (owner rulings
+D99, D269c, D312 and D313). Descriptive metadata now lives in deed clauses
+(grammar: link:1-formats/deed/spec/abnf/deed.abnf[`deed.abnf`]), k9 contracts
+and the k9 coordination protocol (grammar:
+link:2-protocols/k9-coordination/spec/abnf/coordination-k9-grammar_v1.1.abnf[`coordination-k9-grammar_v1.1.abnf`]).
+A generator that kept writing A2ML, and a required check that failed whenever
+that output drifted, kept a retired format alive. They went together.
 
-* *Human?* Start at link:README.adoc[README.adoc].
-* *Agent?* Start at link:0-AI-MANIFEST.a2ml[0-AI-MANIFEST.a2ml].
-* *Want the raw index?* Read link:.machine_readable/REGISTRY.a2ml[`.machine_readable/REGISTRY.a2ml`].
+== What was retired
 
-== What the registry is
-
-link:.machine_readable/REGISTRY.a2ml[`.machine_readable/REGISTRY.a2ml`] is a
-generated A2ML file with one `[[spec]]` block per standard. Each block records:
-
-[cols="1,3", options="header"]
+[cols="2,3", options="header"]
 |===
-| Field | Meaning
+| Retired | What it did
 
-| `id` | Stable short identifier.
-| `name` | Human-readable name.
-| `stream` | One of `foundation`, `language`, `protocol`, `governance`, `readiness`, `integration`.
-| `home` | The canonical directory the spec lives in (verified to exist).
-| `canonical_doc` | The single doc to read first for that spec.
-| `source_hash` | `sha256` over `git ls-files -s <home>` — a content-addressed fingerprint of the whole home.
-| `route` | One-line "go here if you want X".
-|===
+| `.machine_readable/REGISTRY.a2ml`
+| The generated spec index: one `[[spec]]` block per standard (id, stream,
+  home, canonical doc, `source_hash`, route), plus pointers to specs whose
+  source of truth lives in another repo.
 
-The registry is *honest by construction*: the generator only emits a spec
-whose `home` directory actually exists, and reports a missing home to stderr
-rather than inventing one.
+| `scripts/build-registry.sh` and its test
+| Wrote the registry and `TOPOLOGY.adoc`. `--check` failed on drift.
 
-=== External pointers (specs whose SSOT lives in another repo)
+| `.github/workflows/registry-verify.yml`
+| The "Registry + topology in sync" check. It also ran the Mustfile PR gate,
+  which the required "K9-SVC contractile validation" check
+  (`k9-contractile.yml`) still runs with the same two commands, and
+  `build-scorecards.sh --check --strict --verify`, which nothing runs now
+  (see below).
 
-Some specs are *language/service-coupled*: their source-of-truth deliberately
-lives in another repo whose release cadence this monorepo must not own. The
-clearest example is the AffineScript v2 standards — `.affine` (faces / source
-documents), `.affex` (face-interop manifest) and `.affmap` (provenance) — whose
-SSOT is `hyperpolymath/affinescript`. For these the registry holds a *verified
-pointer, never a copy*; duplicating the normative text would create two sources
-of truth and guarantee drift.
+| `scripts/build-scorecards.sh` and its test
+| Wrote `0-canon/COMPLIANCE-DASHBOARD.adoc` from the per-spec scorecards.
+  `--verify` executed every scorecard pass row's `check`, so a claimed pass
+  that no longer held failed CI. That execution is retired with the
+  generator; the scorecards are frozen data until ruling R5 settles them.
 
-External entries carry `kind = "external"` and, in place of a local `home`:
+| `hypatia-rules/registry-staleness.a2ml`
+| Hypatia rule HYP-S006: registry staleness, and re-fetching external pointers.
 
-[cols="1,3", options="header"]
-|===
-| Field | Meaning
+| `hypatia-rules/implementation-inside-canon.a2ml`,
+  `scripts/check-implementation-inside-canon.sh`, and the 16 `HYP-S009`
+  entries in `.hypatia-baseline.json`
+| Hypatia rule HYP-S009: flagged product/build manifests below a local spec
+  home, as listed in the registry. Without the registry it had no input and
+  only printed a warning. The carve-out debts it baselined stay tracked in
+  https://github.com/hyperpolymath/standards/issues/687[#687].
 
-| `spec_kind` | `language-coupled` or `service-coupled`.
-| `owning_repo` | The repo that authors + versions the spec.
-| `canonical_url` | The upstream source-of-truth document (what HYP-S006 fetches).
-| `version_pin` | The upstream version/tag this pointer is pinned to.
-| `source_hash` | The *recorded* upstream hash, or the sentinel `PENDING-FIRST-SYNC` until upstream lands. NEVER fabricated; NEVER fetched at generation time.
-| `source_hash_algo` | `sha256` (md5/sha1 are rejected as unverified).
-| `media_type` / `lineage` | Provenance fields, consistent with the lineage convention.
-| `format_version` | Only for regenerable artefacts (e.g. `.affex`) whose format version is tracked *independently* of `version_pin`.
-|===
+| Justfile `registry`, `topology`, `registry-check`, `scorecards*`
+| Local entry points. `just validate` no longer depends on `registry-check`.
 
-Because the generator is offline and deterministic, an external entry's
-`source_hash` is *recorded* in the `EXTERNAL_SPECS` table in the generator and
-emitted verbatim, so `--check` stays a pure function of the committed tree. The
-network-side verification (re-fetching `canonical_url`) is HYP-S006's job, and
-re-pinning a pointer is capped to `:review` — an owner decision, never an
-auto-regen. (`.affcite.a2ml` is a CodeCite-profile A2ML artefact in the
-AffineScript repo, not a separate registry pointer.)
-
-== How `source_hash` works (and why it catches drift)
-
-`git ls-files -s <home>` lists every tracked file under a home together with
-its blob SHA and path. Hashing that listing yields a fingerprint that changes
-whenever *any* tracked file under the spec changes — content, addition, or
-removal. Recording it in the registry means a later recompute can prove
-whether a spec has moved underneath its documentation. (For external pointers,
-the recorded hash is instead checked against a fresh fetch of `canonical_url`.)
-
-== Regenerating (the generator)
-
-The registry and the *derived* topology map are produced by one generator:
-
-[source,bash]
-----
-just registry          # writes .machine_readable/REGISTRY.a2ml + TOPOLOGY.adoc
-just registry-check    # verify-only; non-zero exit on drift
-----
-
-Both `.machine_readable/REGISTRY.a2ml` and link:TOPOLOGY.adoc[TOPOLOGY.adoc] are
-*generated files — do not edit by hand*. The single source of truth is the
-`SPECS` table in link:scripts/build-registry.sh[`scripts/build-registry.sh`].
-Add a spec there and the hash, the registry entry, and the topology row all
-follow automatically. link:TOPOLOGY.adoc[TOPOLOGY.adoc] can therefore never
-freeze the way the old hand-maintained version did (it sat at `2026-04-04`
-claiming 80% while the integration layer read 0%).
-
-== The drift-detection loop
-
-Drift is caught at two layers that share the same hash algorithm:
-
-[cols="1,3", options="header"]
-|===
-| Layer | What it does
-
-| *In-repo* — link:.github/workflows/registry-verify.yml[`registry-verify.yml`]
-| Runs `build-registry.sh --check` on every push/PR and *fails the build* if the registry or topology is stale.
-
-| *Estate* — link:hypatia-rules/registry-staleness.a2ml[HYP-S006 `registry-staleness`]
-| Hypatia recomputes the hashes fleet-wide and emits a `doc.drift` Groove signal when a recorded hash is stale or a derived doc was hand-edited.
+| The registry block in `hooks/pre-commit`; the `registry-*` checks in the
+  Mustfile; the registry clause in `MUST.contractile`; the `registry-staleness`
+  entries in the Adjustfile and Dustfile
+| Local and contractile enforcement of the above.
 |===
 
-[source]
-----
-file tree + STATE.a2ml ──► scripts/build-registry.sh ──► REGISTRY.a2ml ──► TOPOLOGY.adoc
-                                      ▲                         │
-                                      │                         ▼
-                    just registry / registry-verify.yml    HYP-S006 (registry-staleness)
-                    (fails the build on drift)              emits doc.drift → router
-----
+== Where the old content is
 
-== The hybrid automation router
+The last tree that carried the registry is frozen at
+https://github.com/hyperpolymath/standards/tree/6d19ce0ebae047027dcfd594c7810bf35c642faa[`6d19ce0e`]:
 
-When HYP-S006 fires, the *hybrid automation router* decides what happens to
-the finding. Its strategy is declared in the rule's `@router` block:
+* https://github.com/hyperpolymath/standards/blob/6d19ce0ebae047027dcfd594c7810bf35c642faa/.machine_readable/REGISTRY.a2ml[the registry itself];
+* https://github.com/hyperpolymath/standards/blob/6d19ce0ebae047027dcfd594c7810bf35c642faa/scripts/build-registry.sh[its generator],
+  including the `EXTERNAL_SPECS` table of external pointers (owning repo,
+  canonical URL, version pin);
+* https://github.com/hyperpolymath/standards/blob/6d19ce0ebae047027dcfd594c7810bf35c642faa/REGISTRY.adoc[the previous version of this page],
+  which documents the fields and the drift automation.
 
-* *Default:* `auto_execute` — regenerating a derived file from the file tree
-  is mechanical and safe, so the router may run the `rebuild-registry` recipe.
-* *Hard cap:* any drift whose content overlaps a licence/SPDX token
-  (`SPDX-License-Identifier`, `PMPL`, `MPL-2.0`, `AGPL`, `Palimpsest`,
-  `licen[cs]e`) is *demoted to `:review`* and never auto-applied.
+== What stays, frozen
 
-This cap mirrors the estate Manual-Only licence guardrail
-(link:.claude/CLAUDE.md[`.claude/CLAUDE.md`]) and Hypatia's own
-`license_finding_strategy/0`: *agents flag licence drift, the owner edits it*
-(the rule that closed neurophone#99). Downstream pipelines MUST honour the
-cap.
+* link:TOPOLOGY.adoc[`TOPOLOGY.adoc`] and
+  link:0-canon/COMPLIANCE-DASHBOARD.adoc[`0-canon/COMPLIANCE-DASHBOARD.adoc`]
+  are kept as *frozen snapshots* of their last generation. Nothing
+  regenerates them. Read them as history, not as current state.
+* The per-spec scorecards under `.machine_readable/scorecards/` are not
+  touched by this retirement. Their fate is ruling R5 on
+  https://github.com/hyperpolymath/standards/issues/837[#837] (the mapping is
+  in https://github.com/hyperpolymath/standards/pull/845[#845]).
 
-== Adding or moving a spec
+== What replaces it
 
-1. Edit the `SPECS` table in link:scripts/build-registry.sh[`scripts/build-registry.sh`].
-2. Run `just registry`.
-3. Commit the regenerated `REGISTRY.a2ml` + `TOPOLOGY.adoc` alongside your change.
-
-CI will reject the PR if you change a spec's home without regenerating.
+Nothing yet: there is no live spec index in this repository today.
+link:standards-map.toml[`standards-map.toml`], checked by
+`scripts/check-standards-map.sh`, maps every tracked path to its district and
+gate, but it is not a spec catalogue. A deeds-era replacement is a separate
+decision.

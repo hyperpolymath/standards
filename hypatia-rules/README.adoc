@@ -3,7 +3,7 @@
 :status: Draft v0.3.0
 :updated: 2026-08-24
 
-Ten Hypatia rules specific to the standards-repo dogfooding loop.
+Eight Hypatia rules specific to the standards-repo dogfooding loop.
 Each rule is defined in A2ML, consumes VeriSimDB octads or the repo file
 tree, and emits Groove `compliance.finding.new` signals.
 
@@ -16,25 +16,14 @@ tree, and emits Groove `compliance.finding.new` signals.
 | HYP-S003 | `proof-freshness` | Alert when a proof hasn't been re-verified in > 30 days |
 | HYP-S004 | `rsr-self-compliance` | Validate standards repo against its own RSR definition |
 | HYP-S005 | `crg-overclaim-detector` | Alert when a self-declared CRG grade lacks v2.0 evidence artefacts |
-| HYP-S006 | `registry-staleness` | Alert when REGISTRY.a2ml source hashes go stale or a DERIVED doc (TOPOLOGY.adoc) drifts |
 | HYP-S007 | `profile-drift-detector` | Flag a descriptiles file whose content drifts from its declared A2ML `@profile` |
 | HYP-S008 | `workflow-allowlist-gap` | Flag a workflow `uses:` an action/reusable not permitted by the repo Actions allowlist (would `startup_failure`) |
-| HYP-S009 | `implementation-inside-canon` | Flag product/build manifests below a local (non-external) canonical spec home |
 | HYP-UUID-001 | `uuid-v7-estate-conformance` | Reject non-v7 UUID literals and untracked legacy identifiers across both estates |
 
 The CRG rule pair (S001 + S005) together enforce grade-honesty: S001
 catches backwards moves, S005 catches forwards-overshoots. Both read from
 `crg-grade` octads in VeriSimDB, but S005 also scans the repo file tree for
 evidence artefacts required by CRG v2.0 (STRICT).
-
-S006 closes the documentation-drift loop: it recomputes each spec's
-`source_hash` from the file tree (the same way `scripts/build-registry.sh`
-does) and emits a `doc.drift` signal when the recorded hash is stale or a
-generated file (TOPOLOGY.adoc) was hand-edited. Its `@router` block defaults
-to `auto_execute` (regenerate), but **caps any licence/SPDX-overlapping
-drift to `:review`** — honouring the Manual-Only licence guardrail in
-`.claude/CLAUDE.md`. This is the estate-side mirror of the in-repo
-`registry-verify.yml` workflow.
 
 HYP-S007 closes the dogfooding loop for the A2ML profile mechanism: every descriptiles
 file declares an `@profile(id=…)` (a2ml/SPEC.adoc Section 8), and this rule
@@ -52,14 +41,12 @@ so the gap is a legible finding, not a dark run. It is FLAG-ONLY
 workflow `GITHUB_TOKEN`; its recipe runs `scripts/check-allowed-actions.sh` and
 the paired `scripts/set-allowed-actions.sh` performs the admin fix.
 
-HYP-S009 is the recurrence guard for the standards carve-out campaign. It uses
-`.machine_readable/REGISTRY.a2ml` as the authoritative canon boundary and scans
-only local entries (those not marked `kind = "external"`); it does not guess
-from broad directory names or the mere presence of an A2ML file. Product/build
-manifests below a local spec home emit review-tier findings. The rule is
-deliberately flag-only:
-moving an implementation can cross history, ownership, and licence boundaries
-and therefore requires a reviewed carve-out rather than scanner autofix.
+HYP-S009 (`implementation-inside-canon`) was the recurrence guard for the
+standards carve-out campaign (#479/#498). It read
+`.machine_readable/REGISTRY.a2ml` as its canon boundary and flagged
+product/build manifests below a local spec home. It was retired on 2026-10-09
+with the registry (see link:../REGISTRY.adoc[REGISTRY.adoc]). Its baselined
+carve-out debts stay tracked in standards#687.
 
 == Implementation
 
@@ -87,7 +74,6 @@ Rules read from:
 - `a2ml/profiles/REGISTRY.a2ml` + `a2ml/profiles/*/PROFILE.a2ml` and the descriptiles
   files under `.machine_readable/` (HYP-S007)
 - `.github/workflows/*` and `rhodium-standard-repositories/actions-allowlist/allowed-actions.json` (HYP-S008)
-- `.machine_readable/REGISTRY.a2ml` LOCAL homes and their product/build manifests (HYP-S009)
 
 And emit:
 - Groove `compliance.finding.new` signals with the rule's ID

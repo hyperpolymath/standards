@@ -16,12 +16,12 @@ set -eo pipefail
 # (observed live in stapeln — 5a93d9d→d72fe5a→4ddc926 in ~30 min, three
 # forced 3-file bumps). The gate became a treadmill instead of a guard.
 #
-# The fix mirrors the estate's existing staleness idiom (Hypatia HYP-S006
-# `registry-staleness`, which tolerates drift for `stale_after_days` before it
-# escalates): a pin PASSES if it is a genuine ancestor of standards HEAD that
-# is *within a recency window* — at most STALENESS_WINDOW_COMMITS commits
-# behind HEAD, OR at most STALENESS_WINDOW_DAYS days old (union; either
-# qualifies).
+# The fix mirrored the staleness idiom of Hypatia HYP-S006
+# `registry-staleness` (retired 2026-10-09), which tolerated drift for
+# `stale_after_days` before it escalated. A pin PASSES if it is a genuine
+# ancestor of standards HEAD that is *within a recency window* — at most
+# STALENESS_WINDOW_COMMITS commits behind HEAD, OR at most
+# STALENESS_WINDOW_DAYS days old (union; either qualifies).
 #
 # ── Why age alone no longer FAILS (2026-07-21) ──────────────────────────────
 # The window was still a clock, just a slower one. standards moves ~2.6
@@ -61,7 +61,7 @@ set -eo pipefail
 #                               is available for ancestry/age math).
 #   STALENESS_WINDOW_COMMITS  — max commits-behind-HEAD a pin may be (default 50).
 #   STALENESS_WINDOW_DAYS     — max age in days a pin may be (default 14, matching
-#                               HYP-S006 stale_after_days). Advisory since
+#                               the retired HYP-S006 stale_after_days). Advisory since
 #                               2026-07-21: exceeding it emits a notice, not an
 #                               error.
 #   STALENESS_STANDARDS_NWO   — owner/repo a pin must belong to, used for the

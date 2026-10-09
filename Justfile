@@ -10,17 +10,6 @@
 default:
     @just --list
 
-# Regenerate the verifiable spec registry + DERIVED topology from the file tree
-registry:
-    @bash scripts/build-registry.sh
-
-# Alias: same generator also (re)writes TOPOLOGY.adoc
-topology: registry
-
-# Fail if REGISTRY.a2ml or TOPOLOGY.adoc has drifted from the file tree
-registry-check:
-    @bash scripts/build-registry.sh --check
-
 # Run the workflow-staleness gate against a repo (default: this one)
 staleness-check path=".":
     @bash scripts/check-workflow-staleness.sh "{{path}}"
@@ -103,23 +92,6 @@ debt-ratchet-down path=".machine_readable/Debtfile.a2ml":
 hooks-install:
     @bash hooks/install.sh
 
-# Regenerate the compliance dashboard from the per-spec scorecards
-scorecards:
-    @bash scripts/build-scorecards.sh
-
-# Fail if 0-canon/COMPLIANCE-DASHBOARD.adoc has drifted from the scorecards
-scorecards-check:
-    @bash scripts/build-scorecards.sh --check
-
-# Strict: also fail if any registered local spec lacks a scorecard
-scorecards-check-strict:
-    @bash scripts/build-scorecards.sh --check --strict
-
-# Ground-truth the dashboard: RUN every pass-row's executable `check`
-# (a claimed pass whose check fails is a hard error — DYADT on the scorecards)
-scorecards-verify:
-    @bash scripts/build-scorecards.sh --check --strict --verify
-
 # DYADT: verify a CLAIMS.a2ml against primary evidence (default: root CLAIMS.a2ml)
 verify-claims path="CLAIMS.a2ml":
     @bash scripts/verify-claims.sh "{{path}}"
@@ -145,12 +117,11 @@ language-guides-check:
 canonical-names-check base="origin/main":
     @bash scripts/check-canonical-names.sh "{{base}}"
 
-# Aggregate compliance gate: registry drift is the HARD gate (registry-check,
-# a hard dep). The RSR self-audit is INFORMATIONAL — a monorepo is not expected
-# to score Gold — but a *broken* audit (exit 4 / unexpected) must fail loudly
-# rather than pass silently under a blanket `|| true` (Wave-0 false-green fix).
-validate: registry-check
-    @echo "=== validate: registry drift (HARD GATE) — passed as a dependency above ==="
+# Aggregate compliance gate. The RSR self-audit is INFORMATIONAL — a monorepo
+# is not expected to score Gold — but a *broken* audit (exit 4 / unexpected)
+# must fail loudly rather than pass silently under a blanket `|| true`
+# (Wave-0 false-green fix).
+validate:
     @echo "=== validate: per-language testing guides (structural, HARD GATE) ==="
     @bash scripts/check-language-guide.sh
     @echo "=== validate: canonical-names reintroduction guard (vs origin/main) ==="
@@ -162,7 +133,6 @@ validate: registry-check
 # Print role-appropriate LLM warm-up context (machine front door)
 llm-context role="dev":
     @echo "# Front door: 0-AI-MANIFEST.a2ml (machine) + README.adoc (human)"
-    @echo "# Registry:   .machine_readable/REGISTRY.a2ml  ·  prose: REGISTRY.adoc"
     @cat "llm-warmup-{{role}}.md" 2>/dev/null || cat 0-AI-MANIFEST.a2ml
 
 # Build all sub-project artefacts

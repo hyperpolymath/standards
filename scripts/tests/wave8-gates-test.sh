@@ -7,7 +7,7 @@ set -uo pipefail
 # Every promoted gate must demonstrably BLOCK on bad input and PASS on good:
 #   * apply-baseline.sh blocking mode: unbaselined high/critical finding fails;
 #     baselined finding passes; EXPIRED baseline entry no longer suppresses.
-#   * Mustfile PR gate: the exact commands registry-verify.yml runs succeed on
+#   * Mustfile PR gate: the exact commands k9-contractile.yml runs succeed on
 #     this repo, and a broken Mustfile fails them (via the wave-1 runner).
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -54,7 +54,7 @@ EOF
 bash "$AB" "$TMP/low.json" "$TMP/empty-baseline.json" blocking >/dev/null 2>&1
 expect 0 $? "low-severity finding stays below blocking threshold"
 
-echo "== Mustfile PR gate (exact registry-verify.yml commands) =="
+echo "== Mustfile PR gate (exact k9-contractile.yml commands) =="
 ( cd "$ROOT" && bash scripts/check-mustfile-structure.sh >/dev/null 2>&1 )
 expect 0 $? "structural check passes on this repo"
 ( cd "$ROOT" && bash scripts/run-mustfile.sh >/dev/null 2>&1 )
