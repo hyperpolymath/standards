@@ -20,7 +20,7 @@ set -uo pipefail
 REPO="${1:-.}"
 LIVE_REPOSITORY="${2:-${RSR_REPOSITORY:-}}"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AUDIT="$SELF_DIR/../rhodium-standard-repositories/rsr-audit.sh"
+AUDIT="$SELF_DIR/../9-archive/rhodium-standard-repositories/rsr-audit.sh"
 
 if [ -n "$LIVE_REPOSITORY" ]; then
   bash "$SELF_DIR/check-actions-policy.sh" "$LIVE_REPOSITORY" || {

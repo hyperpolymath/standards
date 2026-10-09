@@ -11,7 +11,7 @@ set -uo pipefail
 # Covers:
 #   * a2ml/scripts/check-6scm.sh          (obsolete no-op / orphan drift / out-of-sync)
 #   * scripts/check-mustfile-structure.sh (valid Mustfile / hollow check)
-#   * rhodium-standard-repositories/rsr-audit.sh (bad format exits 4 / --format json works)
+#   * 9-archive/rhodium-standard-repositories/rsr-audit.sh (bad format exits 4 / --format json works)
 #   * audit-contractiles.sh               (retired; Hypatia owns this audit)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -45,7 +45,7 @@ bash "$MS" "$gf" >/dev/null 2>&1; expect 0 $? "verification-only check accepted"
 bash "$MS" "$TMP/nope.a2ml" >/dev/null 2>&1; expect 2 $? "missing Mustfile errors"
 
 echo "== rsr-audit.sh (standards#387 arg parsing) =="
-RSR="$ROOT/rhodium-standard-repositories/rsr-audit.sh"
+RSR="$ROOT/9-archive/rhodium-standard-repositories/rsr-audit.sh"
 # bad format -> exit 4 (no longer silently defaults to text)
 bash "$RSR" . --format xml >/dev/null 2>&1; expect 4 $? "invalid --format errors loudly"
 # documented --format json now produces JSON. Capture first: rsr-audit's exit
