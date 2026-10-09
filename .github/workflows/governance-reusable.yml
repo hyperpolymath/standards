@@ -1498,8 +1498,13 @@ jobs:
           # The gate delegates lockfile verification to the authoritative
           # verifier, staged into RUNNER_TEMP above.
           export ACTIONS_LOCK_VERIFIER="$RUNNER_TEMP/update-actions-lock.sh"
-          bash "$RUNNER_TEMP/check-actions-lock-gate.sh"
-          rc=$?
+          # The step runs under the runner's default `bash -e`, which `set -uo
+          # pipefail` above does not undo. A bare gate call followed by `rc=$?`
+          # therefore never reaches the capture: exit 3 killed the step before
+          # the ledger below was read, so no ledgered repository was ever
+          # excused. `|| rc=$?` keeps the gate's exit code for the ledger.
+          rc=0
+          bash "$RUNNER_TEMP/check-actions-lock-gate.sh" || rc=$?
 
           # Shrink-only exemption ledger (.machine_readable/lock-allow.txt in
           # standards, guarded by scripts/check-exemption-ratchet.sh so it can

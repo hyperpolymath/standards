@@ -4,7 +4,7 @@
 :toc-title: Contents
 :icons: font
 :doctype: article
-Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> v1.0, 2026-09-09
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk> v1.1, 2026-10-07
 
 [NOTE]
 ====
@@ -220,6 +220,36 @@ file. If the SHA in the anchor matches the parent of that commit and the commit
 verifies, the affirmation is anchored. If they do not match, the file is a draft
 and MUST be read as one.
 
+[[linear-history]]
+=== Landing in a linear-history repository
+
+Many estate repositories enforce `required_linear_history`, or allow squash as
+the only merge form. There, the owner's signed commit cannot reach the default
+branch unchanged. A squash merge creates a new commit with a new SHA, signed by
+the forge rather than by the owner. Rebase-merge is no better: it also rewrites
+the commit, and the estate disables it.
+
+In such a repository an affirmation landed by squash is *anchored* when all
+four of these hold. Write `A` for the anchor SHA, `S` for the owner's signed
+commit (the PR head), and `M` for the squash commit on the default branch.
+
+. `S` verifies as signed by the owner, and its parent is `A`.
+. `M` is on the default branch, and its first parent is `A`. Merge the PR only
+  while the default branch is still at `A`. If the branch has moved, re-anchor:
+  re-run the checks at the new head, update the anchor, and sign again.
+. `M` and `S` have the same tree, so the squash changed nothing the owner
+  signed.
+. `S` stays retrievable at `refs/pull/<N>/head`, which the forge keeps after the
+  PR branch is deleted.
+
+The owner's signature then covers exactly the content on the default branch,
+and the parent check ties it to the anchor. A repository that allows merge
+commits SHOULD still land the signed commit itself with a merge commit; the
+four conditions are the rule for repositories where that is impossible.
+
+`scripts/verify-affirmation-anchor.sh <owner/repo> <PR>` checks all four
+conditions and exits non-zero when any one fails.
+
 == Required format
 
 * AsciiDoc (`.adoc`) — not Markdown.
@@ -281,6 +311,9 @@ Do not::
   conclusion.
 * Write "all tests pass" without the command and the count.
 * Record an anchor SHA that is not the commit the checks actually ran against.
+* Squash an affirmation PR after the default branch has moved past its anchor.
+  The squash commit then has a parent the checks never ran against; see
+  <<linear-history>>.
 * Quietly drop a claim that was refuted. Refutations belong in *Outstanding /
   weak / refuted*; deleting them is the spin the genre exists to prevent.
 
