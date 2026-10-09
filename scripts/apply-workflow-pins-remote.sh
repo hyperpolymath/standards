@@ -301,15 +301,48 @@ refine_behind() {
   done < <(pin_shas "$1" | sort -u)
 }
 
+# list_repos — print every non-archived repository of the owners in OWNERS that
+# this credential can see, one full_name per line, sorted and deduplicated.
+#
+# Every credential gets each owner's PUBLIC listing. Under a GitHub App
+# installation token (prefix ghs_) the installation's own repositories are ADDED
+# to it: users/<o>/repos and orgs/<o>/repos return public repositories only to an
+# installation, so the private repositories the App can write never reached the
+# census. The installation listing never REPLACES the public one, because
+# GITHUB_TOKEN is ghs_ too and its installation is this one repository; a
+# replacement would shrink the audit-mode census to standards alone.
+#
+# Returns 1 and prints nothing when any listing fails. A rate-limited owner that
+# silently contributed zero repositories would read as an owner with nothing to
+# re-point, which is the same fail-open fetch_workflows was cured of.
 list_repos() {
-  local owner
+  local owner all part tok="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  all=$(mktemp); part=$(mktemp)
   for owner in ${OWNERS//,/ }; do
-    # /users/<o>/repos covers a user; if that 404s the owner is an org.
-    gh api "users/${owner}/repos" --paginate \
-      --jq '.[] | select(.archived == false) | .full_name' 2>/dev/null \
-    || gh api "orgs/${owner}/repos" --paginate \
-      --jq '.[] | select(.archived == false) | .full_name' 2>/dev/null
+    # users/<o>/repos covers a user; if that fails the owner may be an org.
+    if gh api "users/${owner}/repos" --paginate \
+         --jq '.[] | select(.archived == false) | .full_name' > "$part" \
+       || gh api "orgs/${owner}/repos" --paginate \
+         --jq '.[] | select(.archived == false) | .full_name' > "$part"; then
+      cat "$part" >> "$all"
+    else
+      log "FATAL: could not list the repositories of ${owner}: users/${owner}/repos and orgs/${owner}/repos both failed."; rm -f "$all" "$part"; return 1
+    fi
   done
+  case "$tok" in
+    ghs_*)
+      gh api --paginate 'installation/repositories?per_page=100' \
+        --jq '.repositories[] | select(.archived | not) | .full_name' > "$part" \
+        || { log "FATAL: an App installation token could not list installation/repositories."; rm -f "$all" "$part"; return 1; }
+      # One installation belongs to one account; keep only the owners being
+      # walked, so --owners narrows the census under an App token as well.
+      for owner in ${OWNERS//,/ }; do
+        awk -v o="${owner,,}/" 'index(tolower($0), o) == 1' "$part" >> "$all"
+      done
+      ;;
+  esac
+  sort -u "$all"
+  rm -f "$all" "$part"
 }
 
 # fetch_workflows <repo> <destdir> — download .github/workflows/*.y*ml.
@@ -480,7 +513,12 @@ main() {
 
   WORKDIR=$(mktemp -d); trap 'rm -rf "${WORKDIR:-}"' EXIT
   local repos n=0
-  if [ -n "$ONLY_REPO" ]; then repos="$ONLY_REPO"; else repos=$(list_repos); fi
+  if [ -n "$ONLY_REPO" ]; then
+    repos="$ONLY_REPO"
+  elif ! repos=$(list_repos); then
+    log "FATAL: repository enumeration failed for ${OWNERS}. Refusing to report a partial census."
+    exit 1
+  fi
   [ -n "$repos" ] || { log "FATAL: enumerated zero repositories for ${OWNERS} (rate limit or auth?). Refusing to report an empty census."; exit 1; }
 
   local repo
