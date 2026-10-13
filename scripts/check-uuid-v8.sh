@@ -16,7 +16,7 @@
 #
 # Retired A2ML files (*.a2ml, *.a2ml.in) are not scanned (owner ruling D320,
 # 2026-10-07). A2ML is dead and may not be hand-converted (D313); its
-# identifiers become v8 when kcX converts each file into deed, so checking
+# identifiers become v8 when kyX converts each file into deed, so checking
 # them here would only force edits to a format the estate is deleting.
 set -eu
 
