@@ -71,7 +71,7 @@ Each has a normative grammar in this repository:
 - **The worked model** is `rsr-template-repo_chora.deed` in
   `hyperpolymath/rsr-template-repo`.
 - **No bulk conversion.** Do not hand-convert A2ML in bulk, and do not use the
-  Python converters in `1-formats/deed/tools/`. Conversion becomes kcX's first
+  Python converters in `1-formats/deed/tools/`. Conversion becomes kyX's first
   front end (D313), and Python is banned.
 - **A deed is not TOML.** A file containing `key = value` or `[section]` is not
   a deed. `(` is the only bracket. Booleans are `#t`/`#f`. Enums are symbols
