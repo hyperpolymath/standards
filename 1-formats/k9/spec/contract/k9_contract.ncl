@@ -145,7 +145,7 @@ in
     # executed. In scope for §11 only.
     library = "k9-svc-library",
     # `K9!` envelope + YAML body. Governed by
-    # 2-protocols/k9-coordination/spec/abnf/coordination-k9-grammar_v1.1.abnf,
+    # 2-protocols/k9-coordination/spec/abnf/coordination-k9-grammar_v1.2.abnf,
     # NOT by this contract. Named here so a validator can route it instead of
     # misreporting it as a broken component.
     coordination = "k9-coordination",

@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: CC-BY-SA-4.0
 = K9 Coordination File Specification
 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-:revdate: 2026-10-06
-:revnumber: 1.1.1
+:revdate: 2026-10-13
+:revnumber: 1.2.0
 :description: Schema specification for coordination.k9 files
 :toc:
 
 == Status
 
-Stable — Version 1.1.1. Owner ruling D311 (2026-10-06) made the 1.1 line
-canonical; rulings D317 and D318 made the 1.1.1 grammar patch below.
+Stable — Version 1.2.0. Owner ruling D311 (2026-10-06) made the 1.1 line
+canonical; rulings D317 and D318 made the 1.1.1 grammar patch; an owner
+ruling of 2026-10-13 added the two optional sections of 1.2.0 below.
 
 The normative grammar is
-link:abnf/coordination-k9-grammar_v1.1.abnf[`coordination-k9-grammar_v1.1.abnf`].
+link:abnf/coordination-k9-grammar_v1.2.abnf[`coordination-k9-grammar_v1.2.abnf`].
+The v1.1 file is kept, marked superseded, so that existing links resolve.
 Where this prose, its examples or a generator disagree with the ABNF about
 syntax, the ABNF wins.
 
@@ -20,6 +22,11 @@ Every example in this document parses under that ABNF. Read them closely:
 `repo:`, `pattern:` and `languages:` items are bare tokens, while
 `alternatives_rejected:` items are quoted strings. Blank lines appear
 between sections, never inside one.
+
+NOTE: *Changes in 1.2.0.* Two optional sections, additive, so every 1.1.1
+file is a 1.2.0 file: `build_commands` (the commands an agent may run, each
+with its purpose) and `innervation` (the signals a repository emits and
+responds to, and the local guards it enforces).
 
 NOTE: *Changes in 1.1.1.* Two grammar fixes, both owner rulings of
 2026-10-06. (1) D317: `languages:` items are indented one level deeper than
@@ -52,7 +59,7 @@ Identity and versioning for the coordination file itself.
 ----
 metadata:
   schema: k9-coordination
-  schema_version: 1.1.1
+  schema_version: 1.2.0
   generated_by: k9-coordination-generator
   last_updated: 2026-04-03
 ----
@@ -98,8 +105,23 @@ Severity levels: `critical` (never violate), `high` (ask user first),
 === Optional Sections
 
 Optional sections appear in this fixed order, each at most once:
-`protected`, `architecture`, `do_not_create`, `terminology`, `ecosystem`,
-`coordination`.
+`build_commands` (between `project` and `invariants`), then after
+`invariants`: `protected`, `architecture`, `innervation`, `do_not_create`,
+`terminology`, `ecosystem`, `coordination`.
+
+==== `build_commands` (1.2.0)
+
+The commands an agent may run in this repository, each with its purpose. An
+agent should prefer these to commands it infers.
+
+[source,yaml]
+----
+build_commands:
+  - command: "just build"
+    purpose: "Build all sub-project artefacts"
+  - command: "just test"
+    purpose: "Run every sub-project test suite"
+----
 
 ==== `protected`
 
@@ -135,6 +157,37 @@ architecture:
     decision: "Deno orchestrates builds but npm used for ReScript compiler"
     reason: "ReScript compiler requires npm — this is the only exception"
 ----
+
+==== `innervation` (1.2.0)
+
+How the repository takes part in the wider estate. `afferent` lists the
+signals it emits and who consumes them; `efferent` the signals it responds
+to, and whether the response fixes things itself; `reflex` the local guards
+that need no central processing. Each subsection is optional, but the
+section needs at least one.
+
+[source,yaml]
+----
+innervation:
+  afferent:
+    - signal: "spec.updated"
+      description: "A specification document changed"
+      triggers_on: "push to spec/ directories"
+      consumers:
+        - hypatia
+        - verisimdb
+  efferent:
+    - signal: "hypatia.finding"
+      action: "Log the finding"
+      auto_fix: false
+  reflex:
+    - trigger: "pre-commit"
+      guard: "panic-attack assail"
+      action: "Block the commit on critical findings"
+----
+
+`consumers` items are bare tokens, one per line; `auto_fix` is `true` or
+`false`, unquoted.
 
 ==== `do_not_create`
 
@@ -225,8 +278,7 @@ rules a grammar cannot express (11–13).
 2. One or more `# SPDX-` header lines MUST immediately follow the magic line.
 3. `metadata`, `project` and `invariants` MUST appear, in that order.
 4. Optional sections MUST appear in the fixed order given above, each at
-   most once. `protected`, `architecture`, `do_not_create`, `terminology`,
-   `ecosystem` and `coordination` each need at least one entry when present;
+   most once. Every optional section needs at least one entry when present;
    `invariants` may be empty.
 5. Indentation is exactly two spaces per level; tabs are invalid.
 6. Blank lines and full-line `#` comments are permitted between sections,
