@@ -253,6 +253,12 @@ is_todo() { case "$1" in *TODO*|*FIXME*|*XXX*) return 0 ;; esac; return 1; }
 # ════════════════════════════════════════════════════════════════════════
 # L0 — ENVELOPE
 # ════════════════════════════════════════════════════════════════════════
+# Check the file at $1 for envelope and library-role violations, recording
+# them in FINDINGS and ERRORS. Set HAS_MAGIC and DIALECT after the NUL check.
+# Return 1 if the NUL check fails or the body is unclaimed; return 2 for the
+# coordination dialect, whose grammar is not validated here; otherwise
+# return 0. A zero status can still carry violations: callers must inspect
+# ERRORS to determine whether the file passed.
 check_l0() {
   local f="$1" first head5 body_start
 
