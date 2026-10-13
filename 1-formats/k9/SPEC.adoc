@@ -480,21 +480,29 @@ conformance by link:tools/k9-validate.sh[`tools/k9-validate.sh`].
   <magic priority="50">
     <match value="K9!" type="string" offset="0"/>
   </magic>
+  <glob pattern="*.k9.ncl"/>
+</mime-type>
+<mime-type type="application/vnd.k9.coordination">
+  <comment>K9 Coordination File</comment>
+  <magic priority="60">
+    <match value="K9!" type="string" offset="0">
+      <match value="&#10;metadata:" type="string" offset="3:1024"/>
+    </match>
+  </magic>
+  <glob pattern="coordination.k9" weight="60"/>
   <glob pattern="*.k9"/>
 </mime-type>
 ----
 
 Location: `/usr/share/mime/packages/k9.xml`
 
-[WARNING]
-====
-The `*.k9` glob and the `K9!` magic also match `coordination.k9`, which is
-a different format (the k9-coordination dialect, with a YAML-like body). This
-entry therefore labels coordination files as Nickel components. How the
-dialect should be labelled is an open decision that blocks the IANA filing.
-See link:IANA-MEDIA-TYPE-APPLICATION.adoc#open-decision[the media type
-application].
-====
+Both types open with `K9!`, so the magic alone cannot tell them apart.
+The globs decide first (`*.k9.ncl` is a component, `*.k9` a coordination
+file), and for a file without a recognised name the coordination entry adds
+a nested match: a line starting `metadata:` within the first kilobyte, which
+is how every coordination body begins and no Nickel component does. The
+authoritative classification remains the K9-E005 discriminator in
+link:spec/K9-CONTRACT-SPEC.adoc[the contract specification].
 
 === macOS (UTI)
 
@@ -506,14 +514,21 @@ application].
 <string>application/vnd.k9</string>
 ----
 
+The coordination type gets its own UTI, `org.k9-svc.coordination`, with
+`public.mime-type` `application/vnd.k9.coordination`.
+
 === Minix
 
 Static mapping in `/etc/mime.types`:
 
 [source]
 ----
-application/vnd.k9    k9
+application/vnd.k9.coordination    k9
 ----
+
+`/etc/mime.types` keys on a file's last extension only, so it cannot express
+`.k9.ncl` (that would be read as plain `.ncl`). Components are left to
+content detection there.
 
 == Philosophy
 

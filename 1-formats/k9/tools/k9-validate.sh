@@ -343,7 +343,7 @@ check_l0() {
   fi
 
   if [ "$DIALECT" = "coordination" ]; then
-    note "$f: dialect k9-coordination — governed by coordination-k9-grammar_v1.1.abnf, out of scope here"
+    note "$f: dialect k9-coordination — governed by coordination-k9-grammar_v1.2.abnf, out of scope here"
     return 2
   fi
 
@@ -864,7 +864,7 @@ EOF
   fi
 
   echo "== the dialect discriminator agrees with the coordination grammar (§4.3) =="
-  # coordination-k9-grammar_v1.1.abnf requires `K9!` and has no `---`
+  # coordination-k9-grammar_v1.2.abnf requires `K9!` and has no `---`
   # production (D318). So no file without the magic may be routed there, and
   # one with it is routed only to be rejected by that grammar.
   local disc
