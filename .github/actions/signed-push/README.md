@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: MPL-2.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # `signed-push` — verified commits from CI/AI tooling
 
 Estate composite action that pushes a branch's local commits as GitHub **Verified**
