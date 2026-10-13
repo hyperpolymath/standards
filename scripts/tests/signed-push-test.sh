@@ -75,7 +75,7 @@ run() { ( cd "$WORK/clone" && bash "$TARGET" b ) > "$WORK/out" 2>&1; }
 
 # 1. The planted positive: three commits, every change shape.
 fresh
-( cd "$WORK/clone"
+( cd "$WORK/clone" || exit 1
   printf 'hello\n' > keep.txt && head -c 300 /dev/urandom > bin.dat && git add -A && git commit -q -m "one: text and binary" -m "a body line"
   git rm -q gone.txt && git commit -q -m "two: delete"
   git mv from.txt sub/to.txt 2>/dev/null || { mkdir sub; git mv from.txt sub/to.txt; }
@@ -89,7 +89,7 @@ run; st=$?
   && ok "messages kept, in order" || bad "messages kept, in order"
 git -C "$WORK/remote.git" log --format=%b -1 'b~2' | grep -qx "a body line" && ok "commit body kept" || bad "commit body kept"
 [ "$(git -C "$WORK/clone" rev-parse b)" = "$(git -C "$WORK/remote.git" rev-parse b)" ] && ok "local branch reset to the remote" || bad "local branch reset to the remote"
-run; [ "$?" = 0 ] && grep -q "nothing to push" "$WORK/out" && [ "$(calls)" = 3 ] && ok "second run pushes nothing" || bad "second run pushes nothing"
+run && grep -q "nothing to push" "$WORK/out" && [ "$(calls)" = 3 ] && ok "second run pushes nothing" || bad "second run pushes nothing"
 
 # 2. Diverged remote: refused before any mutation.
 fresh
@@ -108,7 +108,7 @@ unset STUB_FAIL_ON_CALL
 # 4. Shapes createCommitOnBranch cannot express are refused before any mutation.
 for shape in exec symlink modechange merge; do
   fresh
-  ( cd "$WORK/clone"
+  ( cd "$WORK/clone" || exit 1
     case $shape in
       exec) printf '#!/bin/sh\n' > run.sh && chmod +x run.sh && git add run.sh && git commit -q -m exec ;;
       symlink) ln -s keep.txt link && git add link && git commit -q -m symlink ;;
