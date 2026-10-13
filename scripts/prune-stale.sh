@@ -201,8 +201,11 @@ fi
   }' "$TMP/new.lock" > "$TMP/new2.lock"
 
 # Drop each gone key with its items, again scoped to the workflows: section.
+# The gone list is told apart by FILENAME, not by NR == FNR: gone.txt is
+# usually EMPTY, and then NR == FNR holds for every line of the lock, which
+# swallowed the whole file and wrote the lock back empty.
 "$AWK" '
-  NR == FNR { gone[$0] = 1; next }
+  FILENAME == ARGV[1] { gone[$0] = 1; next }
   /^workflows:[[:space:]]*$/ { inwf = 1; skip = 0; print; next }
   /^[a-z_]+:/                { inwf = 0; skip = 0; print; next }
   inwf && match($0, /^    '\''([^'\'']+)'\'':/, m) {

@@ -87,6 +87,20 @@ printf 'workflows:\n    '\''.github/workflows/ci.yml'\'':\n        - '\''actions
 ! grep -qF "gone.yml" "$g/actions.lock" && grep -qxF "        - 'actions/checkout@$A'" "$g/actions.lock" \
   && ok "only a deleted workflow [] key stale: key dropped, live ref kept" || bad "only a deleted workflow [] key stale: key dropped, live ref kept — $(cat "$g/actions.lock")"
 
+# A stale ref with NO deleted workflow is the common case (a Dependabot bump).
+# The deleted-workflow pass then reads an empty list first, and an `NR == FNR`
+# guard is true for every line of the lock: the whole file was swallowed and
+# the lock overwritten empty. The suite above always deletes a workflow, so it
+# never reached this.
+v="$WORK/v/.github/workflows"; mkdir -p "$v"
+printf 'jobs:\n  a:\n    steps:\n      - uses: actions/checkout@%s\n' "$B" > "$v/ci.yml"
+printf "version: 'v0.0.2'\nworkflows:\n    '.github/workflows/ci.yml':\n        - 'actions/checkout@%s'\n        - 'actions/checkout@%s'\ndependencies:\n    'actions/checkout@%s':\n        commit: 'sha1-%s'\n" "$A" "$B" "$B" "$B" > "$v/actions.lock"
+(cd "$WORK/v" && bash "$TARGET") >/dev/null 2>&1
+grep -qxF "version: 'v0.0.2'" "$v/actions.lock" && grep -qxF "        - 'actions/checkout@$B'" "$v/actions.lock" \
+  && ! grep -qF "checkout@$A" "$v/actions.lock" && grep -qxF "        commit: 'sha1-$B'" "$v/actions.lock" \
+  && ok "stale ref, no deleted workflow: lock kept whole, only the stale ref pruned" \
+  || bad "stale ref, no deleted workflow: lock kept whole, only the stale ref pruned — $(wc -l < "$v/actions.lock") line(s) left"
+
 mkdir -p "$WORK/n/.github/workflows"; (cd "$WORK/n" && bash "$TARGET") >/dev/null 2>&1; st=$?
 [ "$st" = 1 ] && ok "no lockfile → exit 1" || bad "no lockfile → exit 1 (got $st)"
 
