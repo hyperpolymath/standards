@@ -253,6 +253,12 @@ is_todo() { case "$1" in *TODO*|*FIXME*|*XXX*) return 0 ;; esac; return 1; }
 # ════════════════════════════════════════════════════════════════════════
 # L0 — ENVELOPE
 # ════════════════════════════════════════════════════════════════════════
+# Check the file at $1 for envelope and library-role violations, recording
+# them in FINDINGS and ERRORS. Set HAS_MAGIC and DIALECT after the NUL check.
+# Return 1 if the NUL check fails or the body is unclaimed; return 2 for the
+# coordination dialect, whose grammar is not validated here; otherwise
+# return 0. A zero status can still carry violations: callers must inspect
+# ERRORS to determine whether the file passed.
 check_l0() {
   local f="$1" first head5 body_start
 
@@ -290,10 +296,18 @@ check_l0() {
   fi
 
   # K9-E005 — the dialect discriminator (§4.3). After the magic line and the
-  # comment header, the first significant line decides the dialect. `---` is
-  # the coordination dialect's document marker; `{`, `[`, `(`, `let`, a string,
-  # or a top-level `ident =` binding is a Nickel term; a bare `key:` line with
-  # no `=` is YAML that belongs to no K9 dialect at all.
+  # comment header, the first significant line decides the dialect. `{`, `[`,
+  # `(`, `let`, a string, or a top-level `ident =` binding is a Nickel term. A
+  # bare `key:` line (no `=`) or a `---` marker is YAML: with the magic line it
+  # is routed to the coordination dialect, without it it claims nothing.
+  #
+  # `---` is NOT a coordination construct. Ruling D318 (coordination grammar
+  # v1.1.1) keeps it invalid, so a magic-bearing file that opens with one is
+  # routed to that grammar to be REJECTED there, as a malformed coordination
+  # file rather than an unclaimed one. Before this fix a `---` file with no
+  # magic was routed too, though the grammar requires `K9!` and so could never
+  # accept it: every plain YAML document carrying a `.k9` suffix was waved
+  # through as "out of scope" instead of failing K9-E005.
   if [ "$HAS_MAGIC" -eq 1 ]; then
     body_start="$(sed -n '2,$p' "$f" | grep -vE '^[[:space:]]*#' | grep -vE '^[[:space:]]*$' | head -n 1)"
   else
@@ -301,7 +315,7 @@ check_l0() {
   fi
 
   if printf '%s' "$body_start" | grep -qE '^-{3}'; then
-    DIALECT="coordination"
+    if [ "$HAS_MAGIC" -eq 1 ]; then DIALECT="coordination"; else DIALECT="unclaimed"; fi
   elif printf '%s' "$body_start" | grep -qE '^(\{|\[|\(|let[[:space:]]|")'; then
     if [ "$HAS_MAGIC" -eq 1 ]; then DIALECT="component"; else DIALECT="library"; fi
   elif printf '%s' "$body_start" | grep -qE '^[A-Za-z_][A-Za-z0-9_."-]*[[:space:]]*='; then
@@ -704,6 +718,8 @@ t() { # t <desc> <expected> <actual>
 expect_ok()  { if "$@"; then t "$* accepted" ok ok; else t "$* accepted" ok no; fi; }
 expect_bad() { if "$@"; then t "$* rejected" no ok; else t "$* rejected" no no; fi; }
 
+# Run built-in assertions for contract mirrors, extraction, validation, and
+# dialect routing; return nonzero if any assertion fails.
 self_test() {
   local n tmp facts stripped
 
@@ -846,6 +862,25 @@ EOF
   else
     echo -e "${YEL}SKIP${NC} attribution assertions: $impostor not present"
   fi
+
+  echo "== the dialect discriminator agrees with the coordination grammar (§4.3) =="
+  # coordination-k9-grammar_v1.1.abnf requires `K9!` and has no `---`
+  # production (D318). So no file without the magic may be routed there, and
+  # one with it is routed only to be rejected by that grammar.
+  local disc
+  disc="$(mktemp --suffix=.k9)"
+  for case in "magic ---:coordination" "magic metadata::coordination" "plain ---:unclaimed" "plain metadata::unclaimed"; do
+    local shape="${case%:*}" want="${case##*:}" first
+    first="${shape#* }"
+    {
+      [ "${shape%% *}" = magic ] && printf 'K9!\n'
+      printf '# SPDX-License-Identifier: MPL-2.0\n%s\n' "$first"
+      printf '  schema: k9-coordination\n'
+    } > "$disc"
+    QUIET=1 validate_one "$disc" >/dev/null 2>&1
+    t "${shape%% *} file opening '$first' is $want" "$want" "$DIALECT"
+  done
+  rm -f "$disc"
 
   echo "== no Nickel reserved word is used as an identifier =="
   # D173 gives the body to Nickel's grammar rather than restating it in an
