@@ -12,9 +12,11 @@ merge** (e.g. `mergeStateStatus: BLOCKED`). The only reliable way for automation
 produce Verified commits is the GraphQL [`createCommitOnBranch`] mutation
 authenticated as a **GitHub App installation** — GitHub signs those commits itself.
 
-This action mints an App installation token and delegates the push to
-[`Asana/push-signed-commits`], which diffs local vs. remote and replays the local
-commits through `createCommitOnBranch`.
+This action mints an App installation token and runs
+[`push-verified.sh`](push-verified.sh) (bash, `gh` and `jq`), which diffs local
+vs. remote and replays the local commits through `createCommitOnBranch`, oldest
+first, each call naming the remote head it expects so that a concurrent push
+fails closed. On success the local branch is reset to the remote.
 
 ## Prerequisites (one-time, account owner)
 
@@ -54,10 +56,15 @@ jobs:
 
 ## Notes
 
-- Pinned to SHAs (`create-github-app-token` v3.2.0, `push-signed-commits` v1) per
-  estate supply-chain policy.
+- `create-github-app-token` is SHA-pinned (v3.2.0) per estate supply-chain policy.
+  The push itself is `push-verified.sh`, so no other third-party action runs. (It
+  replaced `Asana/push-signed-commits`, a Python action with no licence file.)
+- The remote branch must already exist: `createCommitOnBranch` commits onto an
+  existing ref.
+- `createCommitOnBranch` cannot express merge commits, symlinks, submodules or file
+  modes, so a push containing any of them is refused before anything is sent, and
+  the pushed tree is checked against the local one.
 - Run **after** local commits exist in the job — the action pushes the delta
   between your local branch and its remote.
 
 [`createCommitOnBranch`]: https://github.blog/changelog/2021-09-13-a-simpler-api-for-authoring-commits/
-[`Asana/push-signed-commits`]: https://github.com/Asana/push-signed-commits
