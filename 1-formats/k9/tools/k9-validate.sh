@@ -712,6 +712,8 @@ t() { # t <desc> <expected> <actual>
 expect_ok()  { if "$@"; then t "$* accepted" ok ok; else t "$* accepted" ok no; fi; }
 expect_bad() { if "$@"; then t "$* rejected" no ok; else t "$* rejected" no no; fi; }
 
+# Run built-in assertions for contract mirrors, extraction, validation, and
+# dialect routing; return nonzero if any assertion fails.
 self_test() {
   local n tmp facts stripped
 
