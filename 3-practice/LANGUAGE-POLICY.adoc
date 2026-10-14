@@ -28,13 +28,17 @@ Ordered preference. Reach for the first one that can do the job.
 
 | 2 | *pnpm*
 | Second. Only where an upstream toolchain requires a node_modules layout.
+  Also a generated compatibility target of every Bun package (§1.4).
 
 | 3 | *npm*
 | Last resort. Permitted, never preferred. Reaching for npm should be a
   deliberate, noted decision — not a default.
 
 | — | *Deno*
-| *BANNED.* Removed from the ordering 2026-09-22 — see §1.3.
+| *BANNED as an authoring target* (no `deno.json`). Removed from the
+  ordering 2026-09-22 — see §1.3. A generated `deno.lock` next to a
+  `package.json` is a compatibility output, not a Deno project (§1.4,
+  PROPOSED).
 |===
 
 === 1.1 What this replaced
@@ -140,6 +144,35 @@ The config file is the easy part. `bun run` does *not* read a `deno.json`
 Measured 2026-09-22 across the 23 tracked config files in the 11 ledgered
 repositories: *95* task definitions to port. That is the substantive work, and
 the reason this is a ledger rather than a flag day.
+
+=== 1.4 One manifest, three runtimes
+
+PROPOSED 2026-10-14, on the owner's direction ("bun is the main one from now
+on … a form of generative thing that always produces bun, deno, and pnpm
+outputs … the problem of more than one was making sure it was always working
+and up to date"; decision record
+`docs/decisions/2026-10-14-one-manifest-three-runtimes.adoc`).
+
+`package.json` is the only manifest. Bun, pnpm and Deno 2 all read it
+natively, so nothing is translated and no second manifest can drift. Each
+runtime's own tool writes its own lockfile: `bun.lock` (tier 1, required),
+`pnpm-lock.yaml` and `deno.lock` (generated compatibility locks, never
+hand-edited).
+
+Writer:: `scripts/js-runtimes.sh regen` is the only writer. It makes
+`package.json` I-JSON + JCS (D306, `ijson-jcs fix`) and regenerates all three
+locks. Run it after every `bun add` / `pnpm add`.
+Gate:: `.github/workflows/js-runtimes-reusable.yml` runs one job per runtime,
+each running `scripts/js-runtimes.sh check <runtime>`. Each job fails on a
+non-canonical `package.json`, a missing lock, a stale lock (the frozen install
+refuses it), or a failing `test` script under that runtime's runner.
+`scripts/tests/js-runtimes-test.sh` proves each failure.
+Scope of §1.3:: Unchanged for authoring: no `deno.json` / `deno.jsonc`, and no
+Deno-only APIs in the package. Changed for outputs: a generated `deno.lock`
+is not a Deno project.
+
+Test scripts must be runtime-neutral. A `test` script that calls one runtime
+by name passes on every leg while testing only that runtime.
 
 == 2. Package management
 

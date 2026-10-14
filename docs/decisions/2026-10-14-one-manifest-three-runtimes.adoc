@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: MPL-2.0
+= Decision – One package.json, three JavaScript runtimes
+:date: 2026-10-14
+:author: Jonathan D.A. Jewell (hyperpolymath)
+:status: PROPOSED (owner direction 2026-10-14; this PR is the mechanism for review)
+:scope: estate
+
+== Context
+
+The owner, 2026-10-14, verbatim:
+
+[quote]
+____
+bun is the main one from now on. but I wonder, is there a way of estate-wide
+making it so that there is a form of generative thing that always produces
+bun, deno, and pnpm outputs for these things - the problem of more than one
+was making sure it was always working and up to date - to do that opens up
+all three options I would be happy with rather than forcing one
+____
+
+and, asked whether to build it, "yes but ensure this is ijson-jcs" (D306:
+every `.json` is I-JSON, serialised by JCS).
+
+The problem the owner names is drift. When the estate had several runtimes,
+each with its own manifest, keeping them in step and keeping each one
+working was a manual job. That cost is part of why Deno was banned
+(LANGUAGE-POLICY §1.3).
+
+== Decision
+
+*One manifest, three runtimes.* `package.json` is the only manifest. Bun
+(tier 1), pnpm and Deno 2 all read it natively: dependencies through their
+installers, and `scripts` through `bun run`, `pnpm run` and `deno task`.
+Nothing is translated, so there is no second manifest to drift.
+
+What differs per runtime is the lockfile, and each runtime's own tool writes
+its own:
+
+[cols="1,2,2",options="header"]
+|===
+| Runtime | Lockfile | Role
+| Bun | `bun.lock` | Tier 1. The lock governance requires (`governance-reusable.yml`, npm/bun step).
+| pnpm | `pnpm-lock.yaml` | Generated compatibility lock. Tool-owned (YAML-POLICY §6).
+| Deno | `deno.lock` | Generated compatibility lock. No `deno.json`: Deno stays banned as an authoring target (§1.3).
+|===
+
+*The generator* is `scripts/js-runtimes.sh regen`. It is the only writer of
+`package.json` formatting and of the three locks. It:
+
+* runs `ijson-jcs fix package.json`;
+* regenerates `bun.lock` (`bun install --lockfile-only`), `pnpm-lock.yaml`
+(`pnpm install --lockfile-only`) and `deno.lock` (`deno install`);
+* re-canonicalises `package.json` in case a tool rewrote it.
+
+*The gate* is `.github/workflows/js-runtimes-reusable.yml`. It runs one job
+per runtime, each running `scripts/js-runtimes.sh check <runtime>`, which
+fails when:
+
+* `package.json` is not I-JSON + JCS;
+* the runtime's lockfile is missing;
+* a frozen install refuses the lockfile (it is stale against `package.json`);
+* the `test` script fails under that runtime's own runner.
+
+So "always working and up to date" is checked on every push, under each
+runtime.
+
+== Consequences
+
+* JSON-POLICY §6 left `package.json` open as a bot-written file: `bun add`
+rewrites it in its own layout, undoing JCS. Running `regen` after
+`bun add` / `pnpm add` puts it back, and the gate catches a forgotten run.
+That closes `package.json`'s part of §6.
+* Deno's ban changes in scope, not in force. A `deno.json` / `deno.jsonc`
+is still refused (ci-pipeline `deno` job, `.githooks`, ledger). A generated
+`deno.lock` next to a `package.json` is a compatibility output, not a Deno
+project.
+* Test scripts must not name one runtime. A `"test": "bun test"` passes on
+the pnpm and Deno legs only because it shells out to Bun. Use a
+runtime-neutral command, or restrict `runtimes:` for that repository.
+* Deno does not record `file:` dependencies in `deno.lock`, so a stale
+`file:` dependency is caught by the Bun and pnpm legs only. This was measured
+2026-10-14 with Deno 2.9.6. Registry dependencies are caught on all three
+legs (`scripts/tests/js-runtimes-test.sh`).
+* Pinned tool versions: Bun 1.4.2, pnpm 10.28.0, Deno 2.9.6, ijson-jcs
+`0fdeea71`. They are installed from the npm registry (and cargo, for
+ijson-jcs), so the gate adds no third-party action. They are pinned in two
+places, `js-runtimes-reusable.yml` and `self-test.yml`, which must be bumped
+together.
+
+== Not decided here
+
+* Whether the reusable joins `governance-reusable.yml`, or is opt-in per
+repository. As written it is opt-in.
+* Whether a repository may drop a runtime leg (the `runtimes:` input allows
+it) without an exemption record.

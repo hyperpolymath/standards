@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# One package.json, three runtimes (3-practice/LANGUAGE-POLICY.adoc §1.4).
+#
+# For a caller with a package.json, one job per runtime proves that:
+#   * package.json is I-JSON + JCS (owner ruling D306; ijson-jcs);
+#   * that runtime's lockfile exists and installs FROZEN, so a lock that has
+#     fallen behind package.json goes red;
+#   * the `test` script, if any, passes under that runtime's own runner.
+# The checks are scripts/js-runtimes.sh at this workflow's own commit; the
+# fix for any finding is `scripts/js-runtimes.sh regen`.
+#
+# Usage (caller):
+#   jobs:
+#     js-runtimes:
+#       uses: hyperpolymath/standards/.github/workflows/js-runtimes-reusable.yml@<sha>
+#       # with:
+#       #   working-directory: web          # default "."
+#       #   runtimes: '["bun","pnpm"]'      # default all three
+#
+# Runtimes come from the npm registry at pinned versions (npm checks each
+# tarball's integrity), so this workflow adds no third-party action.
+name: JS runtimes (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory holding package.json
+        type: string
+        default: "."
+      runtimes:
+        description: JSON array, a subset of ["bun","pnpm","deno"]
+        type: string
+        default: '["bun","pnpm","deno"]'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.runtime }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ${{ fromJSON(inputs.runtimes) }}
+    env:
+      BUN_VERSION: "1.4.2"
+      PNPM_VERSION: "10.28.0"
+      DENO_VERSION: "2.9.6"
+      IJSON_JCS_REV: 0fdeea716fd558e9807362acf6f8202d56d8d88f  # same pin as ijson-jcs.yml (JSON-POLICY §3)
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout standards for the checker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          # This reusable's own commit, so the checker is exactly what the
+          # caller pinned (the pattern governance-reusable uses).
+          ref: ${{ job.workflow_sha }}
+          path: .standards-js
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/js-runtimes.sh
+          sparse-checkout-cone-mode: false
+      - name: Install ${{ matrix.runtime }} and ijson-jcs
+        env:
+          RUNTIME: ${{ matrix.runtime }}
+        run: |
+          set -euo pipefail
+          case "$RUNTIME" in
+            bun)  npm install -g "bun@${BUN_VERSION}" ;;
+            pnpm) npm install -g "pnpm@${PNPM_VERSION}" ;;
+            deno) npm install -g "deno@${DENO_VERSION}" ;;
+            *)    echo "::error::unknown runtime '$RUNTIME'"; exit 1 ;;
+          esac
+          "$RUNTIME" --version
+          cargo install --git https://github.com/hyperpolymath/ijson-jcs --rev "$IJSON_JCS_REV" --locked ijson-jcs
+      - name: One manifest, ${{ matrix.runtime }}
+        env:
+          RUNTIME: ${{ matrix.runtime }}
+          WORKDIR: ${{ inputs.working-directory }}
+        run: |
+          set -uo pipefail
+          cp .standards-js/scripts/js-runtimes.sh "$RUNNER_TEMP/js-runtimes.sh"
+          rm -rf .standards-js
+          bash "$RUNNER_TEMP/js-runtimes.sh" check "$RUNTIME" "$WORKDIR"

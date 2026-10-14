@@ -177,7 +177,7 @@ for the canonical statement.
 | TypeScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
 | ReScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
 | **ReScript** | AffineScript | Banned in new code as of 2026-04-30. Existing `.res` files migrate to `.affine` directly (do not pass through ReScript). |
-| **Deno** | Bun | **Banned 2026-09-22.** Owner ruling: *"deno is over, we're prioritising bun, and using bunx."* `deno.json` task definitions must be ported to `package.json` scripts. Shrink-only ledger: `.machine_readable/deno-allow.txt`. |
+| **Deno** | Bun | **Banned 2026-09-22.** Owner ruling: *"deno is over, we're prioritising bun, and using bunx."* `deno.json` task definitions must be ported to `package.json` scripts. Shrink-only ledger: `.machine_readable/deno-allow.txt`. Banned as an *authoring* target only: a generated `deno.lock` beside a `package.json` (one manifest, three runtimes — `3-practice/LANGUAGE-POLICY.adoc` §1.4, PROPOSED 2026-10-14) is a compatibility output, not a Deno project. |
 | Node.js | Bun | Bun is Node-compatible; run the code, drop the runtime. |
 | npm | Bun | npm is tier 3 — *permitted, never preferred*, not banned. `package-lock.json` must still not be tracked (standards#67). |
 | yarn | Bun | yarn is not in the tier list at all. |
