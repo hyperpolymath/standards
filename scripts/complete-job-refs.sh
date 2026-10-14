@@ -14,7 +14,8 @@
 # (GitHub compares lock and YAML as LITERAL strings); complete-job-refs adds the
 # job-level reusable refs the tool cannot see, and the refs used through local
 # composite actions (standards#1122); close-lock adds a record for every
-# dangling edge; prune-stale drops per-workflow refs nothing uses.
+# dangling edge, and gives each job-level reusable ref's record the `uses:` of
+# the workflow it calls; prune-stale drops per-workflow refs nothing uses.
 set -euo pipefail
 WF="${1:-.github/workflows}"
 L="$WF/actions.lock"
