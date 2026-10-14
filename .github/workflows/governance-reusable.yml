@@ -77,6 +77,14 @@ jobs:
         run: |
           bash .standards-history/scripts/check-workflow-staleness.sh .
 
+  # ⚠ DEPRECATED NAME, kept for one migration (owner ruling 2026-10-14, the
+  # two-stage v8 rename). This job runs the same strict v8 check as
+  # uuid-v8-conformance below. It exists only because live rulesets still
+  # require "<caller> / UUID v7 conformance"; removing it before they are
+  # re-derived would leave that context waiting forever on every consumer.
+  # Stage 2: re-derive rulesets (scripts/apply-branch-gates.sh). Stage 3:
+  # delete this job once scripts/check-required-contexts.sh shows no
+  # consumer still requires it, and drop it from the frozen list.
   uuid-v7-conformance:
     name: UUID v7 conformance
     runs-on: ${{ inputs.runs-on }}
@@ -88,9 +96,6 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      # ADR-008 P2 dual-accept (v8 and v7 pass). The job id and name stay
-      # "UUID v7 conformance" so no caller's required context moves; v7
-      # acceptance retires at P4.
       - name: Checkout UUID validator (ESTATE-UUID-V8)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -104,6 +109,36 @@ jobs:
       # ADR-008 strict (owner ruling D320, 2026-10-07): v8 only. The job id and
       # name are unchanged so no required context moves. Rollback is dropping
       # --strict, which restores P2 dual-accept.
+      - name: Reject UUID literals that are not v8
+        run: |
+          chmod +x .standards-uuid/scripts/check-uuid-v8.sh
+          .standards-uuid/scripts/check-uuid-v8.sh --strict .
+
+  # The UUID gate under its true name (ADR-008: version 8 only). Added beside
+  # the deprecated uuid-v7-conformance job above; rulesets move to this
+  # context in stage 2, and the old job goes in stage 3.
+  uuid-v8-conformance:
+    name: UUID v8 conformance
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout UUID validator (ESTATE-UUID-V8)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: ${{ job.workflow_sha }}
+          path: .standards-uuid
+          sparse-checkout: scripts/check-uuid-v8.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # ADR-008 strict (owner ruling D320, 2026-10-07): v8 only.
       - name: Reject UUID literals that are not v8
         run: |
           chmod +x .standards-uuid/scripts/check-uuid-v8.sh
