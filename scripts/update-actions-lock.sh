@@ -77,7 +77,8 @@ is_advisory_category() {
   #
   # Discriminate by CATEGORY, never by severity. gh-actions-lock v0.1.6 labels
   # every finding `"severity": "warning"`, `stale` included, so a severity test
-  # would swallow real desyncs and turn this gate vacuous.
+  # would swallow real desyncs and turn this gate vacuous. v0.2.0 relabels
+  # `stale` as `"error"`: the severity is not stable across releases either.
   case "$1" in
     sha-as-ref) return 0 ;;
     *) return 1 ;;
@@ -85,8 +86,8 @@ is_advisory_category() {
 }
 
 verify_lock_coverage() {
-  # gh-actions-lock v0.1.6 does not recognise reusable-workflow `uses:`
-  # paths. GitHub's startup enforcement nevertheless requires callers to
+  # gh-actions-lock (v0.1.6, and still v0.2.0) does not recognise
+  # reusable-workflow `uses:` paths. GitHub's startup enforcement nevertheless requires callers to
   # carry the reusable repository and its transitive actions in actions.lock.
   # Accept only the tool's `stale` false positive when the named workflow
   # contains the exact owner/repo/.github/workflows/file@ref dependency.
