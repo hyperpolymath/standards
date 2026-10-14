@@ -1711,3 +1711,112 @@ jobs:
           fi
           bash "$RUNNER_TEMP/check-debt-ratchet.sh" \
             "${{ github.event.pull_request.base.sha }}"
+
+  # ───────────────────────────────────────────────────────────────────────
+  # One package.json, every JavaScript runtime (3-practice/LANGUAGE-POLICY.adoc
+  # §1.4; owner ruling 2026-10-14: Bun, then Deno, then pnpm, then npm, and
+  # "I want all to have it"). The checks live in tools/js-runtimes (Rust); the
+  # same jobs, with the same pins, are offered standalone as
+  # js-runtimes-reusable.yml. A repository with no package.json passes both
+  # with a notice naming the denominator (0).
+  # ───────────────────────────────────────────────────────────────────────
+  js-runtimes-provision:
+    name: JS runtimes — environment provisions Bun first
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Checkout standards for the checker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: ${{ job.workflow_sha }}
+          path: .standards-js
+          persist-credentials: false
+          sparse-checkout: |
+            tools/js-runtimes
+          sparse-checkout-cone-mode: false
+      - name: Build js-runtimes
+        run: |
+          set -euo pipefail
+          # Bootstrap rule (as debt-ratchet): standards builds the tool from
+          # the PR's own tree; every other caller from the pinned checkout,
+          # never from a same-named directory of its own.
+          if [ "${{ github.repository }}" = "hyperpolymath/standards" ]; then SRC=tools/js-runtimes; else SRC=.standards-js/tools/js-runtimes; fi
+          cargo install --quiet --locked --path "$SRC" --root "$RUNNER_TEMP/jsr"
+          rm -rf .standards-js
+      - name: Environment definitions provision Bun first
+        run: '"$RUNNER_TEMP/jsr/bin/js-runtimes" provision .'
+
+  js-runtimes:
+    name: JS runtimes — ${{ matrix.runtime }}
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [bun, deno, pnpm]
+    env:
+      # pnpm 10.28.0, pinned by its npm tarball's sha512 (hex of dist.integrity).
+      PNPM_PIN: pnpm@10.28.0+sha512.05df71d1421f21399e053fde567cea34d446fa02c76571441bfc1c7956e98e363088982d940465fd34480d4d90a0668bc12362f8aa88000a64e83d0b0e47be48
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Is there a package.json?
+        id: has
+        env:
+          RUNTIME: ${{ matrix.runtime }}
+        run: |
+          if [ -f package.json ]; then
+            echo "pkg=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pkg=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No package.json: 0 JavaScript manifests, nothing for the $RUNTIME leg to check."
+          fi
+      - name: Checkout standards for the checker
+        if: steps.has.outputs.pkg == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: ${{ job.workflow_sha }}
+          path: .standards-js
+          persist-credentials: false
+          sparse-checkout: |
+            tools/js-runtimes
+          sparse-checkout-cone-mode: false
+      - name: Set up Bun
+        if: steps.has.outputs.pkg == 'true' && matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.2"
+      - name: Set up Deno
+        if: steps.has.outputs.pkg == 'true' && matrix.runtime == 'deno'
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: "2.9.6"
+      - name: Set up pnpm (Corepack, hash-pinned)
+        if: steps.has.outputs.pkg == 'true' && matrix.runtime == 'pnpm'
+        run: corepack enable pnpm && corepack install -g "$PNPM_PIN"
+      - name: Build js-runtimes
+        if: steps.has.outputs.pkg == 'true'
+        run: |
+          set -euo pipefail
+          if [ "${{ github.repository }}" = "hyperpolymath/standards" ]; then SRC=tools/js-runtimes; else SRC=.standards-js/tools/js-runtimes; fi
+          cargo install --quiet --locked --path "$SRC" --root "$RUNNER_TEMP/jsr"
+          rm -rf .standards-js
+      - name: One manifest, ${{ matrix.runtime }}
+        if: steps.has.outputs.pkg == 'true'
+        env:
+          RUNTIME: ${{ matrix.runtime }}
+        run: '"$RUNNER_TEMP/jsr/bin/js-runtimes" check "$RUNTIME" .'
