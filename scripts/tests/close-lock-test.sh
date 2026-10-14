@@ -26,10 +26,17 @@ bad() { echo "FAIL: $1"; fail=$((fail + 1)); }
 
 # Stub: repos/<o>/<n> → "7 9"; commits/v1 → $C; anything under o/missing → an
 # HTTP error body on stdout, exit 1; anything under o/garbled → a truncated body
-# on stdout, exit 0 (the {"messa shape AGENTS.md §5 records).
+# on stdout, exit 0 (the {"messa shape AGENTS.md §5 records). A contents/ call
+# serves the file planted under $WORK/contents (its path with / ? = as _), or a
+# 404 body with exit 1 when none is planted.
+mkdir -p "$WORK/contents"
 cat > "$WORK/gh" <<EOF
 #!/usr/bin/env bash
 case "\$2" in
+  repos/o/garbled/contents/*) echo '{"messa'; exit 0 ;;
+  repos/*/contents/*)
+    f="$WORK/contents/\$(printf '%s' "\$2" | tr '/?=' '___')"
+    if [ -f "\$f" ]; then cat "\$f"; else echo '{"message":"Not Found","status":"404"}'; exit 1; fi ;;
   repos/o/missing*) echo '{"message":"Not Found","status":"404"}'; exit 1 ;;
   repos/o/garbled*) echo '{"messa'; exit 0 ;;
   repos/o/*/commits/v1) echo $C ;;
@@ -90,6 +97,122 @@ d=$(mklock t5 "o/garbled@$A" </dev/null); out=$(run "$d"); st=$?
 d=$(mklock t6 "o/c@nosuchtag" </dev/null); out=$(run "$d"); st=$?
 [ "$st" = 3 ] && ! grep -qF "o/c@nosuchtag':" "$d/actions.lock" \
   && ok "unresolvable tag → SKIP, exit 3, no record" || bad "unresolvable tag → SKIP, exit 3, no record — st=$st"
+
+# mkwf <dir> <uses-values...>: a caller workflow ci.yml with one job-level
+# reusable call per value.
+mkwf() {
+  local d="$WORK/$1/.github/workflows"; shift; mkdir -p "$d"
+  { echo 'jobs:'; i=0; for u in "$@"; do i=$((i + 1)); printf '  j%s:\n    uses: %s\n' "$i" "$u"; done; } > "$d/ci.yml"
+}
+# plant <owner/repo> <path> <ref>: serve stdin as that file at that ref.
+plant() { cat > "$WORK/contents/$(printf 'repos/%s/contents/%s?ref=%s' "$1" "$2" "$3" | tr '/?=' '___')"; }
+# record <lock> <key>: print the record for key, header to last line.
+record() { awk -v k="    '$2':" '/^dependencies:/{f=1} f && $0==k {p=1; print; next} f && p && /^    '\''/{p=0} p' "$1"; }
+
+plant o/r .github/workflows/w.yml "$A" <<EOF
+on: workflow_call
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: o/b@$B
+      - uses: "o/c/sub@$C" # a sub-path and a comment
+      - uses: ./local-action
+      - uses: docker://alpine:3
+EOF
+WANT_R="    'o/r@$A':
+        ref: '$A'
+        commit: 'sha1-$A'
+        owner_id: 7
+        repo_id: 9
+        uses:
+            - 'o/b@$B'
+            - 'o/c@$C'"
+
+echo "=== a reusable-workflow record lists its called workflow's uses: ==="
+d=$(mklock t8 "o/r@$A" </dev/null); mkwf t8 "o/r/.github/workflows/w.yml@$A"
+out=$(run "$d"); st=$?
+[ "$st" = 0 ] && [ "$(record "$d/actions.lock" "o/r@$A")" = "$WANT_R" ] \
+  && ok "new reusable record carries the external uses:, keyed owner/repo@ref" || bad "new reusable record carries the external uses: — st=$st $out"
+grep -qxF "    'o/b@$B':" "$d/actions.lock" && grep -qxF "    'o/c@$C':" "$d/actions.lock" \
+  && ok "the refs it lists are closed" || bad "the refs it lists are closed"
+cp "$d/actions.lock" "$WORK/t8.before"; out=$(run "$d")
+grep -qF 'dangling refs: 0' <<<"$out" && cmp -s "$WORK/t8.before" "$d/actions.lock" \
+  && ok "second run leaves the lock byte-identical" || bad "second run leaves the lock byte-identical — $out"
+
+echo "=== a leaf record left by an earlier run is completed ==="
+d=$(mklock t9 "o/r@$A" <<EOF
+    'o/r@$A':
+        ref: '$A'
+        commit: 'sha1-$A'
+        owner_id: 7
+        repo_id: 9
+EOF
+)
+mkwf t9 "o/r/.github/workflows/w.yml@$A"
+out=$(run "$d"); st=$?
+[ "$st" = 0 ] && [ "$(record "$d/actions.lock" "o/r@$A")" = "$WANT_R" ] && grep -qF "~ o/r@$A" <<<"$out" \
+  && ok "leaf reusable record completed and reported" || bad "leaf reusable record completed and reported — st=$st $out"
+grep -qxF "    'o/c@$C':" "$d/actions.lock" && ok "completed record's refs are closed" || bad "completed record's refs are closed"
+
+echo "=== a reusable called from a reusable is read too ==="
+plant o/r .github/workflows/w2.yml "$A" <<EOF
+jobs:
+  inner:
+    uses: o/r2/.github/workflows/v.yml@$B
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: o/b@$B
+EOF
+plant o/r2 .github/workflows/v.yml "$B" <<EOF
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: o/c@$C
+EOF
+d=$(mklock t10 "o/r@$A" </dev/null); mkwf t10 "o/r/.github/workflows/w2.yml@$A"
+out=$(run "$d"); st=$?
+[ "$st" = 0 ] && record "$d/actions.lock" "o/r@$A" | grep -qxF "            - 'o/r2@$B'" \
+  && record "$d/actions.lock" "o/r2@$B" | grep -qxF "            - 'o/c@$C'" \
+  && grep -qxF "    'o/c@$C':" "$d/actions.lock" \
+  && ok "nested reusable gets its own uses: list, and its refs are closed" || bad "nested reusable gets its own uses: list — st=$st $out"
+
+echo "=== a reusable that uses no external action stays a leaf ==="
+plant o/r .github/workflows/plain.yml "$A" <<EOF
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+EOF
+d=$(mklock t11 "o/r@$A" </dev/null); mkwf t11 "o/r/.github/workflows/plain.yml@$A"
+out=$(run "$d"); st=$?
+[ "$st" = 0 ] && grep -qxF "    'o/r@$A':" "$d/actions.lock" && ! grep -qF 'uses:' "$d/actions.lock" \
+  && ok "no external uses → leaf record (exit 0)" || bad "no external uses → leaf record — st=$st $out"
+
+echo "=== planted positives: an unreadable called workflow writes and changes nothing ==="
+d=$(mklock t12 "o/r@$A" </dev/null); mkwf t12 "o/r/.github/workflows/gone.yml@$A"
+out=$(run "$d"); st=$?
+[ "$st" = 3 ] && grep -qF "SKIP o/r@$A" <<<"$out" && ! grep -qxF "    'o/r@$A':" "$d/actions.lock" \
+  && ok "404 on the called file → SKIP, exit 3, no leaf record" || bad "404 on the called file → SKIP, exit 3, no leaf record — st=$st $out"
+d=$(mklock t13 "o/r@$A" <<EOF
+    'o/r@$A':
+        ref: '$A'
+        commit: 'sha1-$A'
+        owner_id: 7
+        repo_id: 9
+EOF
+)
+mkwf t13 "o/r/.github/workflows/gone.yml@$A"; cp "$d/actions.lock" "$WORK/t13.before"
+out=$(run "$d"); st=$?
+[ "$st" = 3 ] && cmp -s "$WORK/t13.before" "$d/actions.lock" \
+  && ok "unreadable called file leaves an existing record untouched (exit 3)" || bad "unreadable called file leaves an existing record untouched — st=$st $out"
+d=$(mklock t14 "o/garbled@$A" </dev/null); mkwf t14 "o/garbled/.github/workflows/w.yml@$A"
+out=$(run "$d"); st=$?
+[ "$st" = 3 ] && ! grep -qxF "    'o/garbled@$A':" "$d/actions.lock" \
+  && ok "malformed called file (exit 0, no jobs:) → SKIP, exit 3" || bad "malformed called file → SKIP, exit 3 — st=$st $out"
 
 echo "=== structural ==="
 mkdir -p "$WORK/t7/.github/workflows"
