@@ -1,0 +1,341 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+// Evidence snapshot compiled 2026-10-14 for docs/reorg/2026-10-14-tidy/README.adoc.
+// Authority class: historical. The GitHub issues, PRs and rulings it cites remain authoritative.
+// Converted mechanically from the audit notes; path quotes use canonical names (descriptiles, bot_directives).
+= Workflow audit: hyperpolymath/standards .github/workflows at 7d2041a2
+:toc: left
+:toclevels: 2
+
+
+Scope: `/home/user/standards/.github/workflows/` at HEAD `7d2041a` (= main, 2026-10-14 00:24 +0100):
+59 workflow files + `actions.lock`. Read-only audit. Run data was taken from the saved 60-run dump, the
+Actions API per workflow (30 most recent runs each), and job logs for the failures.
+
+*Live required checks on `main`* (read from `GET /repos/hyperpolymath/standards/rules/branches/main`,
+2026-10-14). There are three contexts, all in repo rulesets:
+
+[cols="1,1,1,1",options="header"]
+|===
+| Context | Workflow | Ruleset | Bypass
+| `governance / Actions lockfile verify` | governance.yml | Lock-Floor 24587723 | RepositoryRole 5 (admin), `always`
+| `uses ⊆ actions.lock` | actions-lock-gate.yml | Lock-Floor 24587723 | admin, `always`
+| `scan / gitleaks` | secret-scanner.yml | Secret-Scan-Floor 24309995 | admin, `always`
+|===
+
+
+The richer ruleset 23787415 ("main gate…") required 20 contexts, among them CodeQL, SPARK Theatre Gate,
+hypatia, rust-secrets, shell-secrets and 11 governance jobs. It has been *disabled* since 2026-10-05.
+`config/rulesets/base.json` carries `required_status_checks: []`. `gates.json` derives contexts from these workflow files:
+* base profile: governance.yml, secret-scanner.yml, hypatia-scan.yml and codeql.yml.
+* proof profile, detected through `spark-theatre-gate.yml`: that workflow.
+
+`codeql.yml` is listed both in `base.gate_workflows` and in `never_required_workflows`, so gates.json contradicts itself.
+
+'''
+
+=== A. Per-workflow table
+
+Kind values used below:
+* *SG*: self-gate.
+* *RE*: reusable for the estate (`workflow_call` only).
+* *BOTH*: reusable and also a self-gate.
+* *HK*: housekeeping, publishing or estate operations.
+* *DEAD*: disabled, never fires, or does nothing.
+
+Required values used below:
+* *LIVE*: required in a live ruleset.
+* *gates.json*: gates.json says it should be required, but it is not live.
+* *no*: not required.
+
+Triggers: P = push, PR = pull_request, S = schedule, C = workflow_call, D = workflow_dispatch, plus other events where named.
+
+[cols="1,1,1,1,1,1,1,1,1,1",options="header"]
+|===
+| file | display name | triggers | kind | checks / does | latest on main | required? | notes
+| actions-lock-gate.yml | Actions Lockfile Gate | P(main) PR D | SG | `.githooks/validate-actions-lock.sh`: every SHA `uses:` (workflows + composite actions) keyed in actions.lock | success 10-13 | *LIVE* (`uses ⊆ actions.lock`) | 1 of 4 PR-time lock gates. It went red on #1231, and #1231 merged anyway.
+| affinescript-verify.yml | AffineScript Verify | P PR | SG | builds the pinned affinescript compiler; checks changed `.affine` files (added = blocking, modified = advisory) | success 10-13 | no | Toolchain failure is advisory and skipped loudly.
+| allowlist-preflight-reusable.yml | Actions Policy Preflight Reusable | C | RE | tree + live Actions-allowlist policy | n/a (0 runs) | no | *A byte-equivalent copy is inlined in governance-reusable* (jobs `allowlist-preflight`, `actions-policy-live`). It has 0 local consumers.
+| apply-workflow-pins.yml | apply workflow pins | S(Sun) D | HK | audits and fixes (opens PRs) consumer pins of standards reusables | success 10-11 | no | Audit mode by default. Fix mode needs the `APP_ID` / `APP_PRIVATE_KEY` App credentials.
+| boj-build.yml | BoJ Server Build Trigger | P D | HK | POSTs to `BOJ_SERVER_URL`. A no-op if unset. | success 10-13 | no | *Fail-open* (`curl … \ | \ | echo`). 1,348 runs.
+| canon-spine-lockstep.yml | Canon / Spine Lockstep | P PR D (path-filtered) | SG | canon.lock ↔ rsr-template-repo lockstep; standards-map | success 10-09 | no | Watches `0-canon/rsr/rsr-criteria-v2.a2ml`, a retired format. Path-filtered, so it could never be required.
+| casket-pages.yml | GitHub Pages | P D | HK | builds casket-ssg from README.adoc and deploys Pages | *cancelled 10-13* (30/30 cancelled; last success 10-01) | no | Shares concurrency group `pages` with pages-archive and pages. Pin comments say v4/v3 for v7/v5 SHAs.
+| changelog-reusable.yml | (unnamed) | C | RE | git-cliff CHANGELOG.md; commit-back / pr-back modes | n/a | no | Checks standards out at `ref: main` (floating). 0 local consumers.
+| changelog.yml | Changelog | P(paths CHANGELOG.md) | *DEAD* | calls changelog-reusable | startup_failure 08-24 (its only run) | no | The repo has *CHANGELOG.adoc, not .md*, so the trigger never fires. The caller grants `contents: read` but the reusable job needs `write`, so it would startup-fail anyway.
+| check-suite-monitor.yml | 🟡 CHECK: Check Suite Monitor | check_suite, workflow_run | *DEAD* | logs the check-suite payload and makes no API calls ("would create an issue") | success 10-13 | no | *About 6–11 runs per push* (3,355 total). It watches `🔴 GATE: *`, but no workflow has that prefix. It lists a "Main Estate Audit" gate that does not exist here.
+| ci-pipeline.yml | CI Pipeline (reusable) | C | RE | ecosystem detect; Rust / Nickel / Haskell; ReScript; V; *Deno refusal*; embedded secret-scan | n/a (via self-ci) | no | Calls `secret-scanner-reusable` and `rust-ci-reusable` *@571cc734 (2026-08-29)* instead of the local copy. ReScript job uses `bun-version: latest`.
+| codeql-reusable.yml | CodeQL Security Analysis (reusable) | C | RE | CodeQL analyze for one language | n/a | no | 0 local consumers. The estate largely uses CodeQL default setup.
+| codeql.yml | CodeQL Security Analysis | P PR S(monthly) | SG | CodeQL JS/TS + actions | success 10-13 | gates.json (contradictory) | Was required in the disabled "main gate" ruleset.
+| debt-measure.yml | 📅 Debt measure | S(Mon) D | HK | re-measures Debtfile probes and opens or updates PR #1155 | *failure 10-12* (29/30 failing) | no | *Writes facts into `.machine_readable/Debtfile.a2ml`*, a retired format. See B.
+| deed-conformance.yml | deed-conformance | P PR (paths) C | BOTH | deed linter self-test, fixtures, committed `*.deed` | success 10-13 | no | 0 local consumers.
+| dependabot-lock-regen.yml | Dependabot lock regeneration | S(every 30 min) D | *DEAD* | regenerates actions.lock on Dependabot PRs | disabled_manually (last success 10-08) | no | 283 runs that warned and exited 0, because the App does not exist.
+| doc-format.yml | Documentation Format Enforcement | P PR | SG | duplicate .md/.adoc; derived README.md banner | success 10-13 | no | Checks `3-practice/SECURITY.md`, which is not a path GitHub reads. Partly overlaps governance's "Check documentation" step.
+| dyadt-verify.yml | DYADT Verify | P PR D | SG | DYADT + FFP conformance vectors; verifies `CLAIMS.a2ml` | success 10-13 | no | Gate input is *CLAIMS.a2ml*, a retired format.
+| echidna-verify.yml | ECHIDNA Proof Verification | P(paths) PR S D | *DEAD* | type-checks the Agda/Idris corpora | startup_failure 10-13 (#1231; stale) | no | Both corpora are *evicted* (`lol/proofs`, `avow-lib/src/abi` are absent). It runs presence guards on every PR and weekly.
+| elixir-ci-reusable.yml | Elixir CI (reusable) | C | RE | mix compile/test/credo/dialyzer | n/a | no | 0 local consumers.
+| elixir-ci.yml | Elixir CI | P PR | SG (vacuous) | calls elixir-ci-reusable | success 10-13 | no | The repo has no `mix.exs`, so "Compile + test" is *skipped* every run.
+| github-backup-mirror-reusable.yml | GitHub Backup Mirror (reusable) | C | RE | pushes to a GitHub backup org via a token | n/a (0 runs) | no | 0 consumers and no self-caller.
+| governance-reusable.yml | Governance Reusable Workflow | C | RE | 16 jobs: staleness, UUID (v8), allowlist, live policy, hypatia baseline, language, Guix, security, quality, well-known, workflow lint, lock verify, trusted base, licence, exemption + debt ratchets | n/a | — | Messages still say *"allowed: AffineScript, Deno"* and "Deno (tier 2)", which contradicts the 2026-09-22 Deno ban and ci-pipeline's refusal. The Debt ratchet reads Debtfile.a2ml.
+| governance.yml | Governance | P PR D | SG | calls governance-reusable (local `./`) | success 10-13 | *LIVE* (1 of 16 jobs) | 
+| hypatia-scan-reusable.yml | Hypatia Reusable Scan | C | RE | builds hypatia @51ab6496 and scans; SARIF | n/a | — | 
+| hypatia-scan.yml | Hypatia Security Scan | P(main/master/develop) PR S D | SG | calls hypatia-scan-reusable | success 10-13 | gates.json | 
+| ijson-jcs.yml | ijson-jcs conformance | P PR | SG | report-only JSON canonicality; the test step can fail | success 10-13 | no | `cargo install` on every run.
+| instant-sync.yml | Instant Sync | P release | *DEAD* | repository_dispatch to `.git-private-farm` | disabled_manually (last failure 07-20) | no | The farm says not to restore the dispatch trigger (R-F3).
+| k9-contractile.yml | K9-SVC Contractile Validation | P PR D | SG | Mustfile structure + run; contractile presence; nickel typecheck of k9 contract and fixtures | success 10-13 | no (header claims REQUIRED) | Presence check is driven by **`contractiles/INDEX.a2ml` and `*file.a2ml`**, a retired format.
+| label-triage.yml | Label Triage | issues D | HK | classifies issues with jq | success 10-13 | no | Also duplicated in cicd-suite.
+| labels.yml | Labels | P(paths) S(monthly) D | HK | syncs labels.json | success 10-01 | no | Also duplicated in cicd-suite.
+| launcher-standard-lockstep.yml | launcher-standard lock-step | PR(paths) | SG | deed and adoc edited together | PR success 10-01 | no | Path-filtered.
+| lock-selfcheck.yml | Lock Self-Check | P PR D | SG | `lock-selfcheck.sh`: the commit is safe to pin | success 10-13 | no (header: "intended REQUIRED") | Lock gate 2 of 4.
+| lock-sync-gate.yml | Lock Sync Gate | P PR | SG | `check-lock-sync.sh`: both directions plus job-level reusable refs | success 10-13 | no | Lock gate 3 of 4. It has no `uses:`, which makes it the most robust of the four.
+| lockfile-drift-detect.yml | Lockfile Drift Detect | S(Tue) D | HK | estate sweep that opens a tracking issue | success 10-13 | no | 
+| makefile-blocker.yml | Makefile Blocker | P PR (Makefile paths) | SG (dormant) | *always `exit 1` when triggered* | failure 08-24 (34/34 failures) | no | It fails even when a PR is *deleting* Makefiles. Governance language-policy already bans Makefiles.
+| mirror-reusable.yml | Mirror to Git Forges (reusable) | C | RE | SSH force-push to 6 forges; Radicle | n/a | — | Radicle step is `rad sync … \ | \ | echo` (*masked*). Disroot / SourceHut / Gitea have no default fingerprint.
+| mirror.yml | Mirror to Git Forges | P D | HK | calls mirror-reusable *@b935e639* (not `./`) | *failure 10-13* (30/30; last success 09-14) | never (gates.json) | See B.
+| no-js-scan.yml | No-JS Scan (warn-first) | P PR | SG | JS/TS count ratchet against `.github/no-js-baseline.txt` (20) | success 10-13 | no | Header says required; it is not live.
+| pages-archive.yml | GitHub Pages | P D | HK | same casket-ssg build as casket-pages (least-privilege variant) | *pending, then cancelled* 10-13; last success 10-01 | no | Run *36877198396* (10-01) has had its deploy job *queued for 13 days* and holds group `pages`.
+| pages.yml | GitHub Pages (Ddraig SSG) | P D | *DEAD* | Ddraig SSG in an idris2-pack container | disabled_manually; startup_failure 07-19 (its only run) | no | Third Pages deployer. Uses `README.md`, which this repo does not have.
+| propagate-hooks.yml | ⚙️ AUTO: Propagate Hook Updates | P(paths) D repository_dispatch | HK | copies `.githooks` to repos | *startup_failure 10-13*; 29 earlier failures | no | `ALL_REPOS=("hyperpolymath/standards")`: it propagates *to itself*. See B.
+| provisioning-check-reusable.yml | Provisioning Check Reusable | C | RE | caller's `build/just/*` matches canon | n/a (0 runs) | no | 0 local consumers.
+| readme-derive-reusable.yml | README Derive Reusable Workflow | C | RE | AsciiDoc → GFM README.md with vocab gate | n/a | — | Reads *ECOSYSTEM.a2ml* `[publishing.readme]` (retired format). *Declares a workflow-level `concurrency` group equal to its caller's*, which causes a deadlock. Clones standards@`main` (floating).
+| readme-derive.yml | README Derive | P PR (README.adoc) | SG | calls readme-derive-reusable | *failure 10-13; has never succeeded (36 runs)* | never (gates.json) | Would be a no-op here even if fixed: standards declares no `[publishing.readme]`.
+| rust-ci-reusable.yml | Rust CI (reusable) | C | RE | cargo check/clippy/fmt/test/audit/llvm-cov | n/a | — | `toolchain: stable` (floating).
+| scorecard-enforcer.yml | OpenSSF Scorecard Enforcer | P S D | SG | *second* Scorecard run with publish; min score 5; `3-practice/SECURITY.md` exists; grep for unpinned (warn) | success 10-13 | no | Duplicates scorecard.yml.
+| scorecard-reusable.yml | OSSF Scorecard Reusable Workflow | C | RE | Scorecard SARIF upload; PR variant | n/a | — | 
+| scorecard.yml | Scorecard | P PR S D | SG | calls scorecard-reusable | success 10-13 | never (gates.json) | 
+| secret-scanner-reusable.yml | Secret Scanner (reusable) | C | RE | gitleaks, rust-secrets, shell-secrets | n/a | — | 
+| secret-scanner.yml | Secret Scanner | P PR | SG | calls secret-scanner-reusable (local) | success 10-13 | *LIVE* (`scan / gitleaks`) | Self-CI runs the same scan again from the 571cc734 copy.
+| self-ci.yml | Self-CI | P PR S | SG | calls ci-pipeline (local) | success 10-13 | no | In standards it effectively runs only *Nickel + a duplicate secret scan*. Rust is skipped (no root Cargo.toml).
+| self-test.yml | Self Test | P PR D | SG | `run-shell-test-suite.sh` (all `scripts/tests/*.sh`, which includes `uuid-v8-test.sh`); KYAML ratchet; lock-gate pin freshness | success 10-13 | no | The most valuable non-required gate.
+| settings-drift-detect.yml | Settings Drift Detect | S(Mon) D | HK | estate settings sweep | *failure 10-12* (4/4) | no | Missing secret (see B).
+| signed-push-smoke.yml | signed-push smoke test | D | HK | end-to-end test of the signed-push action | failure 08-24 (from when it had a push trigger) | no | APP_ID / APP_PRIVATE_KEY are not held, so it cannot pass.
+| spark-theatre-gate.yml | SPARK Theatre Gate | P PR C | BOTH | detects SPARK proof-claims made without a prover | success 10-13 | gates.json (proof profile) | 3 Ada files in the repo. Was required in the disabled ruleset.
+| tag-ruleset-canon.yml | tag ruleset canon | S(Sun) D | HK | converges the immutable-tags ruleset estate-wide | *failure 10-11* (4/4) | no | No credential (see B).
+| tailscale-connect-reusable.yml | Tailscale connect (reusable) | C | RE | joins the tailnet | n/a (0 runs) | no | Reads `TS_OAUTH_*` without declaring `secrets:`, so it needs `inherit`. 0 consumers.
+| uuid-v7.yml | UUID v7 conformance | P PR | SG | *actually `check-uuid-v8.sh --strict` + `uuid-v8-test.sh`* | success 10-13 | no | Name kept "so no required context moves", but no live ruleset requires it. Duplicates governance's `UUID v7 conformance` job (also v8 strict) and self-test.
+|===
+
+
+*Counts by kind (59 files):*
+* SG: 23 (2 of them vacuous or dormant: elixir-ci, makefile-blocker)
+* RE: 15
+* BOTH: 2
+* HK: 13
+* DEAD: 6 (changelog, check-suite-monitor, dependabot-lock-regen, echidna-verify, instant-sync, pages)
+
+Further: 3 are live-required. 14 are red, cancelled or perpetually pending on main: mirror, readme-derive, casket-pages, pages-archive, echidna-verify, propagate-hooks, debt-measure, settings-drift-detect, tag-ruleset-canon, changelog, makefile-blocker, signed-push-smoke, pages, instant-sync.
+
+*Things checked and found clean:* No workflow references REGISTRY.a2ml or build-registry.sh any more (#1161 removed them). No Python, `setup-python`, Nix or `deno run` remains. The only Deno references are the refusal gate and the stale governance messages listed above.
+
+*Stale pin comments:* `checkout@3d3c42… # v4` (the SHA is v7.0.1) appears in casket-pages, doc-format, echidna-verify, launcher-standard-lockstep, makefile-blocker, no-js-scan and readme-derive-reusable. casket-pages also carries `cache … # v4` and `upload-pages-artifact … # v3`.
+
+'''
+
+=== B. Failed or cancelled on main: root causes
+
+==== 1. README Derive: this repo's bug (has never succeeded in 36 runs)
+* Run 38482953895 on 48e0ed9 ended in `failure` with *0 jobs* after 1 s. `gh run view` shows only "This run likely failed because of a workflow file issue".
+* Cause: a concurrency deadlock.
+** `readme-derive.yml` (the caller) and `readme-derive-reusable.yml` both declare a workflow-level `concurrency: group: ${{ github.workflow }}-${{ github.ref }}`.
+** Inside a called workflow, `github.workflow` evaluates to the *caller's* name. Both groups therefore resolve to `README Derive-refs/heads/main`.
+** GitHub detects the self-deadlock and kills the run before it creates any job.
+* Evidence:
+** It is the *only* caller/reusable pair in the repo with workflow-level concurrency on both sides. elixir-ci, scorecard, secret-scanner and codeql have it on the caller only, and they run.
+** The caller was created on 2026-07-28 with the colliding block (be51a134, "Generated by Mistral Vibe").
+** Every run since then: 8 `startup_failure`, early ones from a permissions mismatch fixed by #652, then 28 `failure` with jobs=0.
+* Fix: delete the `concurrency:` block from the reusable. A reusable should never key on `github.workflow`.
+* Even fixed, it does nothing in standards. The repo has no `[publishing.readme]`, and the reusable reads the retired `ECOSYSTEM.a2ml`.
+
+==== 2. Mirror to Git Forges: infra / unprovisioned destinations (red since 2026-09-15; last success 09-14)
+Run 38484072398 on 7d2041a: 5 of 7 jobs failed.
+
+[cols="1,1,1,1,1,1",options="header"]
+|===
+| Job | Result | Cause | Class
+| mirror-codeberg | failed | Host fingerprint verified, then push failed: "Forgejo: Push to create is not enabled". *`codeberg.org/hyperpolymath/standards` does not exist.* | unprovisioned destination
+| mirror-bitbucket | failed | Push failed: "You may not have access to this repository or it no longer exists". *`hyperpolymath-dev/standards` is missing, or the key has no access.* | unprovisioned destination
+| mirror-disroot | failed | `APPROVED_FINGERPRINT` is empty: var `DISROOT_SSH_FINGERPRINT` is unset, and the reusable has no default for this forge. | config (missing var)
+| mirror-sourcehut | failed | Same as Disroot: `SOURCEHUT_SSH_FINGERPRINT` is unset. | config (missing var)
+| mirror-gitea | failed | `GITEA_HOST` *and* `GITEA_SSH_FINGERPRINT` are unset, although `GITEA_MIRROR_ENABLED=true` and the key is present. | config (missing vars)
+| mirror-gitlab | success | — | —
+| mirror-radicle | "success", masked | `rad sync --announce \ | \ | echo "Radicle sync attempted"` is green by construction, after 2 m 13 s of `cargo install radicle-cli` on every push. | this repo's reusable
+|===
+
+
+* `mirror.yml` pins the reusable at `@b935e639` (2026-10-06). The only diff from HEAD is the dtolnay pin, so the pin is not the cause.
+* Classification: infra (destinations and vars). The Radicle mask is this repo's reusable.
+
+==== 3. GitHub Pages (casket-pages cancelled, pages-archive pending): stuck platform run plus this repo's design (no success since 2026-10-01 13:29)
+* Run *36877198396* (pages-archive, 2026-10-01 14:32): `build` succeeded, but `deploy` has sat *`queued` with no runner for 13 days*.
+** The group `pages` has `cancel-in-progress: false`, so this run holds the group.
+** Every later Pages run queues behind it. Each new one replaces the previous pending run, which leaves 100/100 casket-pages runs `cancelled` with 0 jobs.
+* Infra: the stuck job needs a manual (force-)cancel. I could not read the Pages or environment config: the proxy refuses the `/pages` API.
+* Repo design: *three* Pages deployers (pages, casket-pages, pages-archive) share one group. Two are near-identical and both fire on every push.
+
+==== 4. Dependabot #1231 incident (9164d76e, 2026-10-13 14:44): this repo's process
+* Dependabot bumped `uses:` in 13 workflows *without regenerating actions.lock*.
+* On the PR, actions-lock-gate, lock-sync-gate, lock-selfcheck, governance, hypatia-scan and scorecard all *failed* (runs 38408019532 and siblings, 13:48).
+* *The owner merged it anyway* (`merged_by: hyperpolymath`). This used the admin `always` bypass on Lock-Floor, the very floor that requires `uses ⊆ actions.lock`.
+* Consequences on main:
+** echidna-verify and propagate-hooks: `startup_failure`.
+** All lock gates, governance, hypatia and scorecard: red.
+* Repaired about 7 h later by #1232 (4c101fbb regenerated the lock, 21:49Z).
+* echidna-verify's main record still shows startup_failure because it is path-filtered and has not re-run on main since. Its PR runs are green.
+* Lock-Floor's `updated_at` is 14:43:53Z, *28 s before* the merge at 14:44:21Z. That fits the ruleset being edited, or bypassed, to let the PR through. I cannot see ruleset history.
+
+==== 5. propagate-hooks: infra credential plus a design bug in this repo
+* 29 consecutive failures (plus the #1231 startup_failure).
+* The "Identify repositories with .githooks" step fails in under 1 s after one `gh api` call made with `GH_TOKEN=${{ secrets.HYPATIA_SCAN_PAT }}`. The probe errors, so it "refuses to propagate blind".
+** I could not fetch the raw log line. The proxy blocks the log-blob host, and the MCP tail only returns the harden-runner teardown.
+** Cause: the credential is missing or invalid. That is infra.
+* Even with a working credential, `ALL_REPOS` is hard-coded to `("hyperpolymath/standards")`. The workflow can only "propagate" standards' hooks to standards. That is this repo's design bug.
+
+==== 6. Debt measure: this repo's data bug (1-line fix)
+* Run 38215462109: "5 holding · 1 paid-down · 2 resolved · 0 breached · *1 expired*".
+* Entry `shell-scripts-missing-spdx` in `.machine_readable/Debtfile.a2ml` has `count: 0` (resolved) but still carries `accepted-until: 2026-10-01`. The runner fails on the expired acceptance even though the debt is gone.
+* Fix: drop the `accepted-until` line, or set the ceiling to 0 and remove the acceptance.
+* The workflow also force-pushes `chore/debt-measure` and edits PR #1155 each week.
+
+==== 7. Settings Drift Detect: infra (missing secret)
+* Run 38217170559, step "Scan estate for settings drift": `gh api repos/…/actions/permissions` fails with the fallback `github.token`, so the step exits 2 as designed: "Set secret ESTATE_SETTINGS_READ_TOKEN". It has failed 4 of 4 weekly runs.
+
+==== 8. tag ruleset canon: infra (missing credential)
+* Run 38115578489: both App-token steps were skipped (`RULESET_APP_ID` is unset), and `ESTATE_ADMIN_TOKEN` is empty. "Assert a credential exists" exits 3. It has failed 4 of 4.
+
+==== 9. Lower-signal red
+* *changelog.yml*: its only run (08-24) was `startup_failure`. The caller grants `contents: read` and the reusable job requests `contents: write`. It has never fired since, because CHANGELOG.md does not exist.
+* *makefile-blocker.yml*: last main failure 08-24 (34 of 34 runs failed). It triggers on any Makefile path change, including deletions, and then exits 1 unconditionally. This repo's bug.
+* *signed-push-smoke.yml*: last failure 08-24, from when it had a push trigger. It is dispatch-only now, and `APP_ID` / `APP_PRIVATE_KEY` are not provisioned. Infra.
+* *pages.yml* (startup_failure 07-19, disabled), *instant-sync.yml* (38 failures without FARM_DISPATCH_TOKEN, disabled 07-20) and *dependabot-lock-regen.yml* (disabled 10-09) are all disabled.
+
+'''
+
+=== C. Reusable-workflow and composite-action inventory
+
+Consumer counts come from `grep` across the 6 non-standards repos cloned under /home/user (cicd-squabbler, cicd-suite, gitbot-fleet, hypatia, proven-tests-and-benches, rsr-template-repo). *They are a floor, not an estate census.* No consumer is pinned at HEAD.
+
+[cols="1,1,1,1",options="header"]
+|===
+| reusable / action | inputs | secrets / vars read | local consumers (repos) and pins
+| governance-reusable.yml | hypatia-ref, runs-on | HYPATIA_SCAN_PAT (declared, optional) | 5: da2c748a ×3, 8f2ee508, 71bb615e
+| hypatia-scan-reusable.yml | block-on-high, hypatia-ref | HYPATIA_SCAN_PAT, GITHUB_TOKEN | 5: da2c748a ×4, 71bb615e
+| secret-scanner-reusable.yml | runs-on | GITHUB_TOKEN | 6: 571cc734 ×2, 8f2ee508, 84355587, 74d2f66f, da2c748a. Also ci-pipeline internally @571cc734.
+| scorecard-reusable.yml | (none) | (none; OIDC) | 5: da2c748a ×5
+| mirror-reusable.yml | runs-on | 7 forge keys (declared) + 18 vars `*_MIRROR_ENABLED / *_ORG / *_SSH_FINGERPRINT / GITEA_HOST / MIRROR_ORG` | 5: 8f2ee508, 571cc734, 2479cf76, bd0df9ea, da2c748a. Also standards' own mirror.yml @b935e639.
+| rust-ci-reusable.yml | runs-on, enable_audit, enable_coverage, coverage_floor, clippy_args, test_args, check_args, working_directory, zig_version | (none) | 2: 8f2ee508, da2c748a. Also ci-pipeline @571cc734.
+| ci-pipeline.yml | runs-on, enable_coverage, coverage_floor, fail_on_no_ecosystem | (none) | 1: cicd-squabbler @ed5e3f65
+| elixir-ci-reusable.yml | runs-on, otp/elixir/rebar3 versions, github-token, enable_dialyzer, enable_credo, working_directory, postgres-image, arangodb-image | GITHUB_TOKEN | 0
+| codeql-reusable.yml | language, build-mode, runs-on | (none) | 0
+| changelog-reusable.yml | mode, runs-on, git-cliff-version | (none) | 0
+| readme-derive-reusable.yml | runs-on, threshold, standards-ref | (none) | 0
+| allowlist-preflight-reusable.yml | (none) | HYPATIA_SCAN_PAT (declared) | 0 (inlined in governance-reusable)
+| github-backup-mirror-reusable.yml | runs-on, destination-branch | BACKUP_MIRROR_TOKEN (declared); vars BACKUP_MIRROR_ENABLED / ORG / AUTOCREATE, MIRROR_ORG | 0
+| provisioning-check-reusable.yml | (none) | (none) | 0
+| tailscale-connect-reusable.yml | tags, ping, version, require | TS_OAUTH_CLIENT_ID / SECRET (*undeclared*, needs `secrets: inherit`) | 0
+| spark-theatre-gate.yml (both) | paths, enforce_zero_contract | (none) | 0 locally (header cites ambientops)
+| deed-conformance.yml (both) | require-files | (none) | 0
+| .github/actions/signed-push | app-id, private-key, branch | (inputs) | 0 external; signed-push-smoke.yml only
+| .github/actions/affirmation-check | is-template, required | (inputs) | *0*. cicd-suite carries its own *diverged* copy (`cicd-suite/actions/affirmation-check`), and that copy is what `main-estate-audit.yml` uses.
+|===
+
+
+The pins are spread widely. Five distinct SHAs exist just for secret-scanner, and no local consumer is on HEAD. That is the population `apply-workflow-pins.yml` (audit-only today) exists to converge.
+
+'''
+
+=== D. Overlap and duplication, with the survivor
+
+. *Four PR-time lock gates over one file:*
+** actions-lock-gate (`validate-actions-lock.sh`, *required*)
+** lock-sync-gate (`check-lock-sync.sh`, both directions plus job-level refs, no `uses:`)
+** lock-selfcheck (`lock-selfcheck.sh`, "safe to pin")
+** governance / Actions lockfile verify (`check-actions-lock-gate.sh` → `gh actions-lock --verify-local`, *required*)
+
+self-test adds lock-gate pin freshness. All four failed together on #1231, and it merged anyway.
+*Survive:* one standalone script and gate holding the union of the three standalone checks, run by `actions-lock-gate.yml` (its context is the live required one). Delete lock-sync-gate.yml and lock-selfcheck.yml once their predicates are inside that script. Keep governance's job as the consumer-facing gate. The bypass, not a missing gate, is the real hole.
+. *governance.yml vs self-ci.yml vs ci-pipeline.yml:* not duplicates in purpose. Governance is policy; ci-pipeline is ecosystem build/lint; self-ci dogfoods ci-pipeline. The real overlaps:
+** ci-pipeline embeds secret scanning, so standards runs gitleaks, rust-secrets and shell-secrets *twice* per event. The second run comes from a 6-week-old pin.
+** The Deno, ReScript and V policy is enforced in ci-pipeline (refusal) *and* in governance language-policy, and governance still tells users Deno is allowed.
+
+*Survive:* all three files. Remove `secret-scan` from ci-pipeline (secret-scanner.yml is the required base gate). Make ci-pipeline call its siblings by `./` (or the `job.workflow_sha` pattern) instead of @571cc734. Make governance own the language policy alone and fix its Deno text.
+. *codeql.yml vs codeql-reusable.yml:* a caller/reusable pair, not a duplicate. Keep both, but fix gates.json, which lists codeql.yml as both a gate and never-required.
+. *mirror.yml / mirror-reusable vs github-backup-mirror-reusable vs instant-sync (farm dispatch):* three mirroring paths.
+*Survive:* mirror-reusable, the only one with consumers. Delete github-backup-mirror-reusable (0 consumers, never run) or fold a GitHub-backup job into mirror-reusable. Delete instant-sync (disabled; R-F3 supersedes the farm dispatch). Point mirror.yml at `./`, as governance and secret-scanner already do.
+. *changelog.yml vs changelog-reusable.yml:* the caller is dead (wrong filename, insufficient grant). Delete changelog.yml. Keep the reusable only if an estate code search finds a consumer; none exist locally.
+. *uuid-v7.yml vs ADR-008 (v8):* uuid-v7.yml already runs the *v8 strict* checker. It duplicates governance's `UUID v7 conformance` job (also v8 strict) and self-test's `uuid-v8-test.sh`, and no live ruleset requires it.
+*Survive:* governance's job. Delete uuid-v7.yml now. Rename the governance context to "UUID v8 conformance" only together with the gates.json derivation (context freeze). `scripts/check-uuid-v7.sh` and `estate-uuid-v7-audit.sh` then become dead-script candidates.
+. *pages.yml vs pages-archive.yml vs casket-pages.yml:* three Pages deployers in one concurrency group. pages.yml is disabled (Ddraig); the other two are the same casket-ssg build.
+*Survive:* one file. Use pages-archive's body (job-level least privilege, correct pin comments) under the name `pages.yml`, and delete the other two. First decide whether standards needs a Pages site at all: the build concatenates raw AsciiDoc into Markdown, and `www/` is unused by it.
+. *scorecard.yml vs scorecard-enforcer.yml:* both run `ossf/scorecard-action` with publish on every main push.
+*Survive:* scorecard.yml. Move the min-score check into scorecard-reusable as an input. Drop the `3-practice/SECURITY.md` and grep-pin checks, which governance and the lock gates cover. Delete the enforcer.
+. *allowlist-preflight-reusable.yml vs governance-reusable `allowlist-preflight` + `actions-policy-live`:* identical copies.
+*Survive:* governance's inline jobs, since they are what consumers run. Delete the reusable, or have governance `uses:` it; one copy either way.
+. *doc-format.yml vs governance "Check documentation":* partial overlap on README and duplicate formats. Low priority. Consider folding doc-format's README-derived-banner rule into governance.
+. *makefile-blocker.yml vs governance language-policy (bans Makefiles):* the governance version is correct; the blocker fails even on removals. Delete the blocker.
+. *labels.yml and label-triage.yml are duplicated in cicd-suite; affirmation-check is duplicated (and diverged) in cicd-suite:* pick one home. cicd-suite is the live consumer for affirmation-check, so delete standards' copy.
+
+'''
+
+=== E. `.github/` hygiene
+
+* *FUNDING.yml and funding.yml:*
+** `FUNDING.yml` (SPDX, github/ko_fi/liberapay: hyperpolymath) is the file GitHub reads.
+** `funding.yml` (no SPDX, `github: metadatastician`) came in with 0ced540e, "estate-wide security compliance", 2026-07-26. It names the wrong owner for this repo, and on case-insensitive checkouts (macOS, Windows) the two collide.
+** *Delete funding.yml.*
+* *.github/ISSUES/ (7 files, 2026-06-05):* a roadmap plus 001–006, committed in #413 (2026-06-22).
+** *None were filed.* 0 title matches among all 424 standards issues, open and closed.
+** 006 is about `verisimdb#114`, a different repo.
+** Several recommendations are now contradicted by doctrine. 003 proposes path filters, and required gates deliberately carry none.
+** They also bypass the intake rule (`blank_issues_enabled: false`; Intake Spec rule 4).
+** *Delete the directory.* Re-file any still-live item through the `campaign` template.
+* *copilot/coding-agent.yml:* an MCP config running `npx -y @hyperpolymath/boj-server@latest` with `BOJ_URL: http://localhost:7700`.
+** It uses npx (Bun/bunx is the estate default), an *unpinned `@latest`*, and plain HTTP.
+** I could not confirm that GitHub reads this path. Copilot coding-agent MCP config is normally set in repository settings.
+** Added 2026-06-01 (c8fb89bd) and untouched since. *Delete it*, or move it to settings with a pinned version and bunx.
+* *label-classifier.json vs labels.json:* not duplicates, and they are consistent. labels.json holds 39 label definitions (for labels.yml). label-classifier.json holds the title→label rules (for label-triage.yml plus `.github/scripts/classify-issue.jq`). Every classifier label exists, and the `frozen` lists are identical.
+** Both say "regenerate with `scripts/gen-*-json.py`" *in .git-private-farm*. That generator is Python (banned) and lives outside this repo.
+** `frozen` still lists `gitar-approved` (gitar retired 2026-09-21) and `nix`.
+** *Keep both.* Port the generator to jq or bash, and prune the dead frozen labels.
+* *No PULL_REQUEST_TEMPLATE:* confirmed. Optional. If added, keep it short: Testing, contexts affected, and "actions.lock regenerated?", which is exactly the #1231 failure mode.
+* *CODEOWNERS:*
+** `3-practice/SECURITY.md` exists, but GitHub only recognises SECURITY.md at the root, `.github/` or `docs/`. The root `SECURITY.md` (1,304 B) also exists and is only covered by `*`. Two SECURITY.md files is doc duplication.
+** The `Makefile` line names a banned file type that is absent.
+** `.github/` comes *after* `.github/workflows/`, and the last match wins, so the workflows line is dead (harmless, since the owners are the same).
+** The header rationale says "Base ruleset sets `require_code_owner_review: true`", but `config/rulesets/base.json` says `false`, and no live ruleset has a `pull_request` rule at all.
+** *Keep the file.* Remove the Makefile line, drop or reorder the `.github/workflows/` line, name the root SECURITY.md explicitly, and correct the header.
+* *dependabot.yml:* the comment says "we want the PRs fast (daily)", but `interval: weekly`. Stale comment. More important: nothing regenerates the lock on Dependabot PRs, because dependabot-lock-regen is disabled. Keep the file.
+* *.github/scripts/* (`readme-vocab-gate.sh`, `classify-issue.jq`) and *no-js-baseline.txt* (20, matching the 20 tracked js/ts files) are fine.
+
+'''
+
+=== F. Ranked changes for better signal (≤15)
+
+. *Stop merging through red required gates.* Lock-Floor and Secret-Scan-Floor give admin `always` bypass, and #1231 used it to land a known-bad lock. Switch to `pull_request` bypass mode or drop the bypass. This is a ruleset change, but it is the top signal fix: every gate below is worthless if red merges anyway (Doctrine 5).
+. *Fix README Derive's deadlock.* Delete the workflow-level `concurrency:` from `readme-derive-reusable.yml`, which breaks every caller in the estate. Delete standards' own `readme-derive.yml`: it would be a no-op here. Repoint the reusable from ECOSYSTEM.a2ml to the chora deed (owner decision).
+. *Unjam Pages.* Force-cancel run 36877198396, and keep *one* Pages workflow (or none). Delete casket-pages.yml and pages.yml.
+. *Make mirror honest.*
+** Either provision codeberg `hyperpolymath/standards` and bitbucket `hyperpolymath-dev/standards`, and set the DISROOT / SOURCEHUT fingerprints and GITEA host + fingerprint,
+** or set `*_MIRROR_ENABLED=false` for those five.
+** Remove Radicle's `|| echo` mask, and call the reusable by `./`.
+. *Delete dead workflows:* check-suite-monitor (6–11 no-op runs per push), echidna-verify (corpus evicted), changelog.yml, instant-sync, pages.yml, makefile-blocker, dependabot-lock-regen (or re-enable it once the App exists).
+. *Collapse the 4 PR lock gates into 1* (actions-lock-gate running a union script), plus governance's consumer gate. Delete lock-sync-gate.yml and lock-selfcheck.yml.
+. *Fix or park the red crons.*
+** debt-measure: remove the expired `accepted-until` on the resolved SPDX entry (1 line).
+** settings-drift-detect and tag-ruleset-canon: provision `ESTATE_SETTINGS_READ_TOKEN` and the ruleset App, *or remove the schedule* until they exist. A weekly red that nobody actions is noise.
+. *propagate-hooks:* delete it, or rewrite discovery. Today it can only target standards itself, and its credential fails.
+. *Merge scorecard-enforcer into scorecard* (min-score as a reusable input). That removes a duplicate publish on every push.
+. *Delete uuid-v7.yml* (a triple-run of the v8 checker). Rename the governance context to v8 together with the gates derivation.
+. *ci-pipeline:* remove the embedded secret-scan job, replace the @571cc734 internal pins with local refs, and pin `bun-version`. *Governance:* delete the "Deno allowed / tier 2" messages.
+. *Delete zero-consumer reusables after an estate code search* confirms them: allowlist-preflight-reusable (inlined duplicate), github-backup-mirror-reusable, tailscale-connect-reusable, provisioning-check-reusable, codeql/elixir/changelog reusables. Also delete `.github/actions/affirmation-check` (superseded by cicd-suite). Note: apply-workflow-pins re-points callers to HEAD, so a file deleted at HEAD would break any hidden consumer.
+. *Reconcile the required-check story.*
+*** gates.json: codeql.yml is both a gate and never-required.
+*** The live rules (3 contexts) do not match gates.json (the base profile plus the spark-theatre proof profile).
+*** k9-contractile, lock-selfcheck and no-js-scan headers claim "REQUIRED".
+
+Either run `scripts/apply-branch-gates.sh --apply` or correct the claims.
+. *Retire retired-format gate inputs (owner decision, via the deed mapping specs, not bulk conversion).* The affected inputs:
+*** k9-contractile: INDEX.a2ml and `*file.a2ml`
+*** dyadt-verify: CLAIMS.a2ml
+*** debt-measure and governance's Debt ratchet: Debtfile.a2ml. debt-measure *writes facts into* an .a2ml, which CLAUDE.md forbids.
+*** readme-derive: ECOSYSTEM.a2ml
+*** canon-spine-lockstep: rsr-criteria-v2.a2ml
+. *Clean up .github/:* delete funding.yml, ISSUES/ and copilot/coding-agent.yml. Fix the CODEOWNERS lines and the stale `# v4/# v3` pin comments. Elixir CI's self-run is vacuous here (no mix.exs); keep it only as a reusable smoke test, labelled as such.

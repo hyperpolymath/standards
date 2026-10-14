@@ -1,0 +1,1148 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+// Evidence snapshot compiled 2026-10-14 for docs/reorg/2026-10-14-tidy/README.adoc.
+// Authority class: historical. The GitHub issues, PRs and rulings it cites remain authoritative.
+// Converted mechanically from the audit notes; path quotes use canonical names (descriptiles, bot_directives).
+= Issue triage C: #911 to #1037 (73 issues)
+:toc: left
+:toclevels: 2
+
+
+Measured 2026-10-14 against `origin/main` @ `7d2041a` (clone unshallowed for history). Issue bodies and comments were fetched through the REST API (`gh api repos/.../issues/N` and `/comments`). Every "last activity" date is 2026-09-30, the bulk relabel, except #1025 (2026-10-01). Read-only: nothing was posted, committed or edited.
+
+Context sources used throughout:
+* the rulings ledger #787 (D1–D331), whose comments were pulled to `scratchpad/787.txt`, and #1234 (D332+);
+* the deleted triage plans, recovered from git: `ULTRAPLAN-2026-09-24.adoc` @ `bd9313a6` and `ULTRAPLAN-2026-09-29.adoc` @ `3a845452`. Both were deleted in `3238461b`;
+* the owner-run close-out scripts `scripts/triage-2026-09-24-apply.sh` and `scripts/triage-2026-09-29-apply.sh`. They were *never executed*: the agent token lacked `issues:write`, and #808 is still open.
+
+What this session could not reach:
+* cross-repo REST, because the session is bound to standards and rsr-template-repo;
+* Actions logs and artefacts, because the blob host is denied by the proxy;
+* metadatastician org rulesets.
+
+Any estate-wide count below that is not re-measured is therefore quoted from the issue.
+
+Legend: Disposition ∈ {CLOSE-DONE, CLOSE-SUPERSEDED(#N), CLOSE-MOOT, MERGE-INTO(#N), OWNER-RULING, BOT-DO, ESTATE-CAMPAIGN, KEEP-OPEN-BLOCKED}.
+
+'''
+
+==== #911 — shell-e2e-reusable.yml has the repo's only 2 unpinned refs (owner's staged work: report only)
+. labels priority:p2,status:ready,scope:repo,security · last 2026-09-30 · 0 comments
+. LITERAL: When landing the staged work, the owner pins `actions/checkout@v7.0.1` and `mlugg/setup-zig@v2.2.1` in `.github/workflows/shell-e2e-reusable.yml` to SHAs.
+. GOLDEN: Yes, the literal reading is now absurd. The file was never committed: `git log --all -- .github/workflows/shell-e2e-reusable.yml` is empty and the file is absent at HEAD. It existed only as staged work on the owner's workstation, which was wiped on 2026-10-13.
+. MISCHIEF: The defect was unpinned refs in staged, uncommitted work. It no longer exists anywhere: `git grep` finds 0 unpinned `uses:` in live `.github/workflows/`.
+. STATE: Moot. The staged work is lost.
+. *CLOSE-MOOT*. The close note should say the staged file was never committed and was lost in the 2026-10-13 wipe; if it is ever re-authored, `validate-sha-pins.sh` will refuse unpinned refs.
+. RISK: none.
+
+==== #913 — 76 'uses: ../../...' relative refs in vendored seeds are invalid syntax and cause startup death
+. bug,priority:p2,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Rewrite 76 `uses: ../../` refs to `./` form, add a check that rejects `../` and `$/`, and prove the fix by a real dispatch.
+. GOLDEN: Partly. The issue is labelled scope:repo, but standards carried *0* such refs even at filing time: `git grep` at `4f7f02ca` finds none, and #864 (`000b9f6b`, 2026-09-19) had already repaired standards' own copies. The 76 sit in estate repos seeded from RSR templates (#808), so this is estate work.
+. MISCHIEF: Startup-dead workflows. Still partly live:
+** `.githooks/validate-sha-pins.sh:45-47` still *accepts* `../` as "this repo's own composite actions" and only rejects `$/` (lines 115-121), so AC3 is unmet;
+** the estate population is unverified from this session.
+. STATE: Partly done. Standards' copies were fixed by #864; the `$/` check landed in #931; `scripts/apply-workflow-pins-remote.sh --repair-illegal` exists and runs weekly in audit mode. #808 is still open, though the 09-24 triage script closes it into this issue.
+. *ESTATE-CAMPAIGN*
+. Steps:
+** (a) In standards, make `UNPINNED_FILTER` and `validate_file` in `.githooks/validate-sha-pins.sh` reject any `uses:` starting `../`, with a planted-positive test in `scripts/tests/validate-sha-pins-test.sh`.
+** (b) Dispatch `apply-workflow-pins.yml` with `mode: fix` and `repair-illegal: true`, then confirm the ILLEGAL class is 0 in the census.
+** (c) Verify one repaired repo has jobs > 0.
+** (d) Close #808 into this issue.
+
+Landing: standards plus the affected estate repos. Effort M. Tier: sonnet.
+. RISK: bulk sweep across repos; must use the applier, never `gh actions-lock` rewrite mode.
+
+==== #914 — 46 genuinely unpinned third-party refs in the vendored seed trees
+. priority:p2,status:ready,scope:repo,security · 2026-09-30 · 0
+. LITERAL: Pin 46 third-party refs (dtolnay ×9, setup-deno ×5, …) inside the vendored seed trees, and hand-edit actions.lock.
+. GOLDEN: Yes. The "vendored seed trees" are `rhodium-standard-repositories/`, which moved on 2026-10-09 to `9-archive/rhodium-standard-repositories/`. That tree is the LAST COPY and frozen. Its `.github/workflows` are nested, so GitHub never executes them. Editing them would mutate a frozen archive for no runtime effect.
+. MISCHIEF: Unpinned executable refs. Not live:
+** 72 unpinned `uses:` lines exist, all under `9-archive/` (dtolnay@stable ×9, setup-deno ×5 match the issue);
+** live `.github/workflows/` has 0;
+** `validate-sha-pins.sh` skips the tree via `VENDORED_MARK="rhodium-standard-repositories/"`;
+** Debtfile entry `vendored-mirror-unpinned-actions` already tracks the count (40).
+. STATE: Moot, archived and inert.
+. *CLOSE-MOOT*
+. RISK: touches frozen archive / vendored content if executed literally.
+
+==== #915 — ~138 files cannot carry a '#' SPDX header; 58 .json need REUSE sidecars
+. licensing,priority:p2,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Drop `*.json` from the `#`-header requirement; give JSON REUSE sidecars; triage the other ~80 files; keep a headerless `.sh` failing.
+. GOLDEN: The premise was already stale when filed. `*.json` had been removed from `is_source_file()` in #810 (`b1987eba`, 2026-09-15), and `.githooks/validate-spdx.sh:30-34` now says "*.json is NOT here and must never be re-added". Adding sidecars to 58 files is bulk licence labelling, which is owner-only.
+. MISCHIEF: A checker no file could satisfy. Fixed:
+** `bash scripts/tests/validate-spdx-test.sh` gives 17/17, including `bad.sh` failing as the denominator control;
+** 0 `*.license` sidecars exist.
+. STATE: Done for the checker, which is the issue's stated scope. The sidecars were never the agent's to add.
+. *CLOSE-DONE*. Cite `b1987eba` and the test. If the owner wants REUSE sidecars, that is a separate owner-run licence act.
+. RISK: licence/SPDX. Sidecar creation is owner-only; never sweep.
+
+==== #916 — setup-deno pins are inconsistent and some look fabricated: one SHA labelled four different tags
+. priority:p1,migration,scope:estate,tech-debt,status:ready · 2026-09-30 · 0
+. LITERAL: Resolve every `setup-deno` SHA upstream, report fabricated pins, fix the tag comments, and pin 167 floating lines.
+. GOLDEN: Yes. Deno has been banned since 2026-09-22, so repairing pins for a banned action is wasted work, and the issue's own last AC concedes this. The sensible reading is to *remove* setup-deno as part of Deno retirement while still recording any SHA that resolves to nothing.
+. MISCHIEF: Misleading pin comments and possibly fabricated SHAs, estate-wide. Standards itself has 0 live setup-deno uses; it appears only in 9-archive and in the allowlists `config/settings/actions-allowlist.json:11` and `rhodium-standard-repositories/actions-allowlist/allowed-actions.json:27`, which still permit `denoland/setup-deno@*`. The estate population is unverified.
+. STATE: Not started, but superseded in purpose by Deno retirement.
+. *MERGE-INTO(#919)*. Carry two things across:
+** the "report SHAs that don't resolve" check;
+** removal of `denoland/setup-deno@*` from both allowlists, done only after the last ledgered repo migrates, otherwise remaining users startup-fail.
+. RISK: none in standards. The estate removal is a bulk change.
+
+==== #917 — 234 .pre-commit-config.yaml files depend on Python, which LANGUAGE-POLICY bans
+. migration,scope:estate,priority:p2,status:ready · 2026-09-30 · 0
+. LITERAL: Re-measure, then replace each `.pre-commit-config.yaml` with native `.githooks/` or ledger it shrink-only; register the ledger in the exemption ratchet; print the denominator.
+. GOLDEN: No contradiction; Python is fully banned.
+. MISCHIEF: The banned Python tool sits in the commit path. Still exists, and *the template seeds it*: `rsr-template-repo/ci/.pre-commit-config.yaml` says "Install: pip install pre-commit". Local siblings carrying a config: rsr-template-repo, hypatia, gitbot-fleet, proven-tests-and-benches, cicd-squabbler. #1010 found 42–44 of the configs reference a2ml hooks.
+. STATE: Not started.
+. *ESTATE-CAMPAIGN*
+. Steps:
+** (1) Fix the template first: delete `ci/.pre-commit-config.yaml` from rsr-template-repo and point at `.githooks/install.sh`.
+** (2) Add a shrink-only ledger `.machine_readable/pre-commit-allow.txt` in standards and register it in `scripts/check-exemption-ratchet.sh`.
+** (3) Re-census via default branches.
+** (4) Remove each config repo by repo, one PR each.
+
+Acceptance: the census prints `pre-commit debt: N`, the template is clean, and N falls. Effort L. Tier: sonnet; haiku for the per-repo deletions.
+. RISK: bulk sweep across ~230 repos; do not touch forks or third-party repos.
+
+==== #918 — Mirror callers drifted across >=3 live SHAs (de-duplicate worktrees before counting)
+. scope:estate,tech-debt,priority:p2,status:ready · 2026-09-30 · 0
+. LITERAL: Census mirror callers via the API, converge them on one SHA, and re-run the census twice.
+. GOLDEN: No contradiction, but it fully duplicates #950 AC5 ("Caller pins converge on one ref"). The weekly applier `apply-workflow-pins.yml` (audit by default) is now the mechanism.
+. MISCHIEF: Pin drift means fixes never reach callers. Still exists: standards itself now pins `mirror-reusable.yml@b935e639` (#1169), and the estate spread is unverified.
+. STATE: Not started as a separate effort.
+. *MERGE-INTO(#950)*
+. RISK: none.
+
+==== #919 — Deno retirement sizing: 95 'deno task' definitions across 23 files in the 11 ledgered repos
+. priority:p1,migration,scope:estate,status:ready · 2026-09-30 · 0
+. LITERAL: Enumerate 95 `deno task` definitions per repo, port each to package.json/bun or keep it ledgered, shrink the ledger, and re-measure.
+. GOLDEN: No contradiction.
+. MISCHIEF: Deno is still used in 11 repos. Still exists: `.machine_readable/deno-allow.txt` is unchanged since `4f7f02ca` (2026-09-22) and lists ambientops, civic-connect, excel-economic-numbers-tool, proven, social-media-tools, burble, gossamer, selur, stapeln, svalinn and vordr.
+. STATE: Not started.
+. *ESTATE-CAMPAIGN*. This should become the single Deno-retirement umbrella, absorbing #916, the predecessor #658, and #706 (deno part).
+. Steps, per ledgered repo:
+** (1) port the `deno.json` `tasks` map to `package.json` scripts (`bun run`) and commit `bun.lock`;
+** (2) delete `deno.json`/`deno.lock` and setup-deno steps, with an `actions.lock` edit in the same commit;
+** (3) remove the slug from `deno-allow.txt` in standards.
+
+Acceptance: the ledger is empty, then setup-deno is dropped from the allowlists. Effort L. Tier: sonnet; `proven/bindings/deno` is a carve-out, so do not touch it.
+. RISK: bulk sweep; carve-out paths such as `*/bindings/deno/*` must be left alone.
+
+==== #921 — 55 agent-instruction files assert 'TypeScript IS PERMITTED under Bun', contradicting the 2026-08-27 ban
+. governance,priority:p1,scope:estate,status:ready · 2026-09-30 · 0
+. LITERAL: First settle LANGUAGE-POLICY vs CLAUDE.md at source, then correct 55 `.clinerules`/`.cursorrules`/`.windsurfrules` copies and add a check.
+. GOLDEN: Yes. *D164* (#787, on #659) rules that per-repo agent files carry a *pointer* to the canonical policy, never a duplicated copy, so "correct the 55 copies" should read "replace the copies with pointers". AC1, "spec/LANGUAGE-POLICY wins", is also stale: `.claude/CLAUDE.md` now says "this file governs".
+. MISCHIEF: Agents are instructed to write a banned language. Partly fixed and partly still live:
+** the template's rule files now read "TypeScript and ReScript are banned" (rsr-template-repo `.clinerules:32`);
+** but **`3-practice/LANGUAGE-POLICY.adoc:60` and rsr-template-repo `.github/copilot-instructions.md:57` still say "TypeScript is permitted *only where AffineScript cannot reach*"**, which `.claude/CLAUDE.md` (TIGHTENED 2026-08-27) calls "too permissive" and leaves as an unresolved owner decision against the TS-Exemptions table.
+. STATE: Partly done (template); the source conflict remains in a new form.
+. *MERGE-INTO(#659)*. #659 is the duplicated-language-policy umbrella that D164 governs. Raise the LANGUAGE-POLICY.adoc:60 versus TS-Exemptions collision as a #1234 decision row.
+. RISK: bulk sweep across ~19 repos; owner decision needed on the TS carve-out wording.
+
+==== #922 — No pinned Bun lint/format gate: staged JavaScript is a declared skip
+. cicd,priority:p2,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Add a read-only, pinned Bun-based lint + format `--check` for staged JS in `.githooks/`, with a denominator, a planted positive, mode 100755, and cmp-identical to the template.
+. GOLDEN: Partly:
+** Bun ships no linter or formatter, so "Bun-based" means picking a third-party tool run via `bunx` (Biome, Prettier, oxlint…), and that is a policy choice.
+** The premise "plain JS is the sanctioned language" is overstated: JavaScript is allowed only where AffineScript cannot reach (CLAUDE.md, NO-JAVASCRIPT-SOURCE-POLICY).
+. MISCHIEF: JS is the only staged ecosystem without a check. Still exists: `validate-lint-format.sh` has no JS arm, and `ci-pipeline.yml:210-218` detects Bun but reports it as detected-unsupported.
+. STATE: Not started.
+. *OWNER-RULING*. Question: *"Should Claude adopt Biome, as a pinned binary run as `bunx @biomejs/biome@<pinned> check` (format + lint, read-only), as the estate JS gate in `.githooks/validate-lint-format.sh` and `ci-pipeline.yml`, yes/no? If no, name the tool."* The recommended arm is Biome: one pinned tool for both checks and no Node/npm dependency.
+. After the ruling: BOT-DO, S, sonnet.
+. RISK: none.
+
+==== #923 — The Deno ruling is dated two ways across the estate (2026-08-26 vs 2026-09-22)
+. migration,scope:estate,decision,priority:p2,status:ready · 2026-09-30 · 0
+. LITERAL: Confirm the canonical date (2026-09-22), fix the wrong occurrences, keep 2026-08-26 where it is a genuinely different event, and state precedence.
+. GOLDEN: The precedence clause ("spec/LANGUAGE-POLICY wins") is stale, because CLAUDE.md now governs. There are two genuine events:
+** 2026-08-26, "deno is to go", standards#655, a removal/priority ruling;
+** 2026-09-22, "deno is over", the ban.
+. MISCHIEF: Mostly cured. The ban is dated 2026-09-22 in 23 places, including 0-canon/rsr/LANGUAGE-POLICY, 3-practice/LANGUAGE-POLICY §1.3, JS-RUNTIME-POLICY, ci-pipeline and the launcher deed. One wrong site remains: *`.githooks/validate-lint-format.sh:173`* prints "Deno is BANNED (owner ruling 2026-08-26 …)".
+. STATE: Mostly done.
+. *BOT-DO*
+. Steps: change `.githooks/validate-lint-format.sh:173` to "banned 2026-09-22 (removal ruled 2026-08-26, #655)", mirror the fix into the rsr-template-repo hook copy if it exists, then close. Effort S. Tier: haiku.
+. RISK: none.
+
+==== #924 — rsr-template-repo has 62 unpinned workflow refs, including two @main and one feature branch
+. priority:p1,scope:estate,status:ready,security · 2026-09-30 · 0
+. LITERAL: Pin all 62 refs to 40-hex SHAs with version comments, or cover them with a verified actions.lock; pin the `@main` and `@feat/` refs first; report the inherited population.
+. GOLDEN: This exposes an unresolved policy split. The template deliberately uses tag refs plus `actions.lock` as the pin authority (comment: "NOSONAR — pin authority is actions.lock"; see also #674, which says inline pinning would break CI in lockfile-enforced repos). Canon rule 10 and `validate-sha-pins.sh` demand inline 40-hex.
+. MISCHIEF: Floating refs in the template that seeds the estate. Still exists and has grown:
+** *64* unpinned lines at rsr-template-repo `64787ae`: checkout@v7.0.1 ×38, upload-artifact ×5, download-artifact ×3, and more;
+** `hyperpolymath/{deed,k9}-ecosystem/validate-action@main` ×4;
+** *actions.lock itself records `deed-ecosystem@main` and `k9-ecosystem@main`* (lines 13, 21, 22, 43, 231), so it pins nothing.
+. STATE: Not started.
+. *OWNER-RULING*. Question: *"In a repo with a GitHub-enforced actions.lock, is `uses: owner/repo@vX.Y.Z` plus a lock record an acceptable pin under canon rule 10, yes/no? If no, the template moves to inline 40-hex everywhere."* Whatever the answer, the four `@main` refs and the `@main` lock records are defects that must be pinned now.
+. After the ruling: ESTATE-CAMPAIGN on rsr-template-repo, M, sonnet.
+. RISK: touches the template that seeds every repo.
+
+==== #925 — check-ts-allowlist.deno.js cannot be deleted: 11 of the last 12 governance revisions still invoke it
+. scope:estate,tech-debt,priority:p2,status:ready · 2026-09-30 · 0
+. LITERAL: Enumerate the governance-reusable SHAs that callers pin, record which invoke the shim, and delete it only once none do; re-measure the 269-repo figure.
+. GOLDEN: No contradiction.
+. MISCHIEF: A Deno artefact kept alive by stale pins. Still exists:
+** `scripts/check-ts-allowlist.deno.js` is present, and the Debtfile entry `deno-artefacts` shows count 1;
+** measured: *every governance-reusable revision from `4f7f02ca` (2026-09-22) onward invokes it 0 times*, while `e13e2ea3` (2026-09-20) and older invoke it 3 times;
+** so the gate is "no caller pinned before 4f7f02ca". The caller census is unverifiable from here because the applier artefact download is blocked.
+. STATE: Not started; the precondition is measurable.
+. *ESTATE-CAMPAIGN*
+. Steps:
+** (1) Read the weekly `apply-workflow-pins.yml` census for governance callers pinned at commits that are not descendants of `4f7f02ca`.
+** (2) Run the applier in `mode: fix` to bump them, and verify the bumps landed.
+** (3) Delete `scripts/check-ts-allowlist.deno.js` in standards and set Debtfile `deno-artefacts` to 0.
+** (4) Keep `scripts/tests/check-ts-allowlist-test.sh` green.
+
+Effort M. Tier: sonnet.
+. RISK: destructive (deletion) once the gate passes; it breaks stale callers if done early.
+
+==== #926 — k9-coordination-protocol vendors a Deno test harness: 260 Deno API lines across 10 files
+. migration,testing,priority:p2,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Port `generator/*.js` to `bun test`, asserting the test count, with a mutant, or ledger it.
+. GOLDEN: Partly. `.claude/CLAUDE.md` names `2-protocols/k9-coordination/tools/k9-init/` (Rust) as *the* generator, so the Deno `generator/` is a second, likely stale implementation. The coordination grammar moved to v1.2.0 in #1233, and the README at lines 245 and 291-301 still documents `deno run … standards/k9-coordination-protocol/generator/generate.js`, a pre-reorg path. Retiring it may be more elegant than porting it.
+. MISCHIEF: Banned-runtime code in tracked content. Still exists: the 10 files are present with 260 `Deno.` lines (re-measured).
+. STATE: Not started.
+. *BOT-DO*
+. Steps:
+** (1) Diff `generator/generate.js` behaviour against `tools/k9-init` on the v1.2.0 fixtures.
+** (2) If k9-init is a superset, port the meaningful property, regression and mutation cases into `cargo test` for k9-init, delete `generator/`, and fix README lines 245 and 291-301 and line 418.
+** (3) Otherwise port to `bun test` and assert test count > 0.
+** (4) Either way, the Deno count must be 0 and a mutant must go red.
+
+Effort M. Tier: sonnet.
+. RISK: destructive if `generator/` is deleted; needs a parity check first.
+
+==== #928 — language-policy.scm v2.0.0 has no wired regression test (needs a decision on guile in CI)
+. bug,governance,priority:p1,performance,scope:repo · 2026-09-30 · 1 (RULING D167: yes, pinned guile in CI)
+. LITERAL: Add pinned guile to CI and commit the 44-assertion suite, keeping the v1.0.0 positive control.
+. GOLDEN: Yes, the literal reading is now absurd:
+** the module and its only consumer, `rsr-check.scm`, both now live in `9-archive/rhodium-standard-repositories/` (archived 2026-10-09, after D167 on 2026-09-30);
+** the 44-assertion suite lived only in `$CLAUDE_JOB_DIR/tmp` and is lost;
+** wiring a new CI toolchain to test a frozen archive file is pointless;
+** #1066 / D130 ("align language-policy.scm") targets the same archived file.
+. MISCHIEF: An unverified policy module. Not live: `git grep` finds no live consumer, and `0-canon/rsr/LANGUAGE-POLICY.adoc:578` links `../spec.scm/language-policy.scm`, a *dangling link*.
+. STATE: Moot (archived; suite lost).
+. *CLOSE-MOOT*. Note that D167 is overtaken by the 9-archive move. Small follow-up (haiku): fix the dangling links at `0-canon/rsr/LANGUAGE-POLICY.adoc:578` and `VERSION.adoc:230` to point into `9-archive/` or drop them.
+. RISK: none.
+
+==== #929 — Seed CLAUDE.md claims the estate uses GitLab and not GitHub (flag only, owner decision)
+. priority:p1,scope:repo · 2026-09-30 · 1 (RULING D168: stale; correct the six lines)
+. LITERAL: Correct the six "GitLab, never GitHub" lines.
+. GOLDEN: The file is now `9-archive/rhodium-standard-repositories/CLAUDE.md` (frozen). D168 still makes sense because the file is a *CLAUDE.md*: Claude Code loads it whenever an agent works in that directory, so its "❌ Use GitHub (always GitLab)" and "GitLab CI/CD (never GitHub Actions)" text actively misdirects agents.
+. MISCHIEF: Stale forge instructions to agents. Still exists at lines 80, 135, 142, 179, 711, 859 and 899 (seven hits now).
+. STATE: Ruled; not executed.
+. *BOT-DO*
+. Steps: apply D168 minimally. Reword the forge lines to "hosted on GitHub; GitLab and other forges are mirrors only", or prepend a 3-line "ARCHIVED — not current guidance; see /.claude/CLAUDE.md" banner if the owner prefers not to edit archive text. Effort S. Tier: haiku.
+. RISK: edits frozen-archive content, explicitly authorised by D168. No licence text.
+
+==== #930 — actions-lock gate's remedy text names a repo-relative path that exists in no consumer repo
+. bug,scope:estate,priority:p2,status:ready · 2026-09-30 · 0
+. LITERAL: Replace the four `scripts/update-actions-lock.sh` mentions in `check-actions-lock-gate.sh` with a consumer-runnable command (`gh actions-lock --no-narrow`), plus a de-pin warning and a control.
+. GOLDEN: No contradiction. D326 ("regenerate lock-only, YAML byte-for-byte unchanged") reinforces `--no-narrow`.
+. MISCHIEF: Advice that cannot be followed in consumers. Still exists at `scripts/check-actions-lock-gate.sh` lines 72, 151, 159 and 164. #935's one-line note was added (65d9af01), but the path was not changed.
+. STATE: Not started.
+. *BOT-DO*
+. Steps:
+** Reword the four strings to "Regenerate the lock only: `gh actions-lock --no-narrow --no-migrate-local-actions <workflow paths>`; verify the *.yml diff is empty (bare fix mode de-pins SHAs, marid#36)".
+** Add a test in `scripts/tests/` asserting that no emitted path is repo-relative.
+
+Effort S. Tier: haiku.
+. RISK: none.
+
+==== #932 — validate-lint-format.sh: Rust and Nickel arms ask a different question than their tool
+. bug,priority:p1,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Run cargo per crate (nearest Cargo.toml), report a missing manifest as a scope error, make the Nickel arm skip `K9!` files with a denominator, and stay read-only.
+. GOLDEN: No contradiction.
+. MISCHIEF: Partly cured:
+** *Nickel arm fixed*: it excludes `*.k9.ncl`, aligned with ci-pipeline (#1143 `b3075e04`, lines 54-90) and handles generated imports;
+** *Rust arm unchanged*: line 38 is `tracks 'Cargo.toml' '*/Cargo.toml'` followed by `cargo fmt --all --check` from the repo root (line 41), and there is no root Cargo.toml;
+** so any staged `.rs` is still rejected with a misnamed message.
+. STATE: Partly done.
+. *BOT-DO*
+. Steps: in `.githooks/validate-lint-format.sh` Rust arm:
+** group the staged `.rs` files by their nearest ancestor `Cargo.toml` dir, and in each run `(cd dir && cargo fmt --check)` plus clippy;
+** when no manifest is found, report `scope/tooling error: no Cargo.toml above <path>`;
+** exclude `9-archive/`;
+** add a test planting a clean `.rs` in a crate, which must pass.
+
+Effort S. Tier: sonnet.
+. RISK: none.
+
+==== #933 — All 12 Rust crates fail cargo fmt --check (pre-existing formatting debt)
+. tech-debt,priority:p3,status:blocked,scope:repo · 2026-09-30 · 0
+. LITERAL: `cargo fmt --all --check` exits 0 in all 12 crates; formatting-only commit; CI check-only; #932 first.
+. GOLDEN: Yes, partly. 8 of the 12 crates are now under `9-archive/` (frozen), so reformatting them contradicts the archive. The live scope is *4 crates*.
+. MISCHIEF: Formatting debt. Still exists in all 4 live crates (re-measured, read-only `--check`, rc=1 each): `.verisimdb/ecosystem-ingest`, `1-formats/sub-specs/inline-annotations/extractor`, `2-protocols/k9-coordination/tools/k9-init`, `hooks/playbook-to-recipe`.
+. STATE: Not started; blocked only on #932 by its own wording.
+. *BOT-DO*
+. Steps: after #932, run `cargo fmt` in each of the 4 crates as one formatting-only commit, confirm `--check` gives rc=0, and leave `9-archive/` untouched. Effort S. Tier: haiku.
+. RISK: none (archive excluded).
+
+==== #934 — 6 contractiles fail nickel typecheck: import path points one level off an existing file
+. bug,priority:p2,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Fix the `../k9/template-hunt.k9.ncl` imports so all 6 typecheck, and add a CI typecheck.
+. GOLDEN: No.
+. MISCHIEF: Fixed:
+** the six `*.k9.ncl` now import `../_base.ncl`, with a comment noting the old import "never resolved" (#1149 `aa1c4dd5`, M1 contractile pedigrees);
+** all carry `K9!`;
+** `.github/workflows/k9-contractile.yml` "K9 corpus conformance (ratcheted, L2)" checks the six contractiles at L2, and is green on main.
+. STATE: Done.
+. *CLOSE-DONE* (#1149 / `aa1c4dd5`; CI L2 in k9-contractile.yml).
+. RISK: none.
+
+==== #935 — actions-lock gate is permanently red on main, and its remediation contradicts canon rule 10
+. bug,priority:p0,status:ready,scope:repo · 2026-09-30 · 1
+. LITERAL: Decide whether sha-as-ref advises or blocks; reconcile the remedy text with rule 10; resolve the setup-deno EXPECTED_ABSENT contradiction; the gate exits 0 on clean main.
+. GOLDEN: No.
+. MISCHIEF: Fixed:
+** `is_advisory_category sha-as-ref` makes advisories non-blocking (`scripts/update-actions-lock.sh:70-83`, #946 `a2ff696a`);
+** `EXPECTED_ABSENT` is now empty, with the comment "setup-deno exception removed 2026-09-22";
+** `actions.lock` has 0 setup-deno records;
+** the rule-10 note was added to the gate (65d9af01);
+** the Actions Lockfile Gate is green on main.
+. STATE: Done.
+. *CLOSE-DONE* (#946 `a2ff696a`, `65d9af01`).
+. RISK: none.
+
+==== #937 — Hypatia content_patterns/http_in_docs: plain-HTTP URLs in prose (11 instances)
+. documentation,automation,priority:p3,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Remediate the 11 instances or renew the baseline ack (expires 2026-12-22).
+. GOLDEN: Partly. All 11 are intentional:
+** the speakup.io archive link (axel CoC);
+** `curl -I http://axel-protocol.org` and redirect demos;
+** TRUST-DEFAULTS-POLICY rule text *about* `http://`;
+** a detector-test example;
+** `LICENSES/MPL-2.0.txt:360` (licence text, untouchable);
+** 3 in 9-archive.
+. MISCHIEF: Possible insecure links. None real: all instances are examples, policy text or licence text.
+. STATE: Acknowledged in the baseline; not remediated.
+. *BOT-DO*
+. Steps:
+** Replace the 6 live baseline acks with line-scoped `// hypatia:ignore http_in_docs -- <reason>` AsciiDoc comments on the preceding line; content patterns honour the line form, not the file form.
+** Keep `LICENSES/MPL-2.0.txt` as a permanent baseline entry or `.hypatia-ignore` (never edit licence text).
+** Cover 9-archive by the archive-wide exclusion (see the cross-cutting notes).
+** Delete the 9 acks and close.
+
+Effort S. Tier: haiku.
+. RISK: licence text must not be edited (LICENSES/MPL-2.0.txt).
+
+==== #938 — Hypatia content_patterns/npx_in_workflow: npx/npm in CI config (9 instances, stale rule + vendored)
+. cicd,tech-debt,automation,priority:p3,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Remediate the 9 instances or renew the ack, and refresh the stale rule text, which recommends Deno.
+. GOLDEN: The rule's recommended cure ("use deno task") is now wrong; it should say bunx.
+. MISCHIEF:
+** 1 live instance: `.github/copilot/coding-agent.yml` runs `command: npx` with `@hyperpolymath/boj-server@latest`, which is both npx and an unpinned `@latest`, and has no SPDX header;
+** the other 8 are in 9-archive (inert).
+. STATE: Not started.
+. *BOT-DO*
+. Steps:
+** (1) Switch `.github/copilot/coding-agent.yml` to `command: bunx` and pin `@hyperpolymath/boj-server@<version>`, first confirming the Copilot agent image has bun; if not, keep npx but pin the version and add an inline allow with a reason.
+** (2) File upstream hyperpolymath/hypatia: npx_in_workflow message should recommend `bunx`/`bun run`.
+** (3) Cover the archive via the archive exclusion; delete the acks.
+
+Effort S. Tier: haiku.
+. RISK: none.
+
+==== #940 — Hypatia content_patterns/known_fake_action_sha in vendored satellite examples (6 instances)
+. priority:p3,status:ready,scope:repo,security · 2026-09-30 · 0
+. LITERAL: Replace the fabricated SHAs in vendored satellite example workflows or renew the ack.
+. GOLDEN: Yes. All 6 are now under `9-archive/rhodium-standard-repositories/` (frozen LAST COPY, nested workflows never execute). Repairing them means editing the archive.
+. MISCHIEF: Fabricated pins in live CI. Not live.
+. STATE: Moot.
+. *CLOSE-MOOT*. Cover the instances by the archive-wide Hypatia exclusion rather than 5 per-file acks.
+. RISK: frozen archive; vendored content.
+
+==== #941 — Hypatia RE001: adopt step-security/harden-runner estate-wide, or record WONTFIX (23 instances)
+. priority:p1,scope:estate,security · 2026-09-30 · 1 (RULING D131: adopt, egress audit mode, SHA-pinned, in actions.lock, via shared reusables on secret-touching jobs)
+. LITERAL: Add harden-runner to every secret-touching job.
+. GOLDEN: No contradiction, but a trap. Adding a new action to a `*-reusable.yml` makes every consumer's `actions.lock` need it first, or the consumer startup-fails with no check run. #1084 deliberately stopped short of the reusables for exactly this reason.
+. MISCHIEF: No egress monitoring. Partly fixed:
+** #1084 (`bd9c319f`) added harden-runner to 6 standards-only workflows, with propagate-hooks set to `egress-policy: block`;
+** 11 RE001 baseline entries remain: allowlist-preflight-reusable, boj-build, github-backup-mirror-reusable, governance-reusable, hypatia-scan-reusable, instant-sync, k9-contractile, label-triage, labels, mirror-reusable, tailscale-connect-reusable.
+. STATE: Partly done.
+. *ESTATE-CAMPAIGN*
+. Steps:
+** (1) Add the `step-security/harden-runner@<sha>` record to every consumer `actions.lock` first, via the dependabot-lock-regen / D326 lock-only regen path, and measure coverage.
+** (2) Only then add harden-runner (audit mode) to the secret-touching jobs in the reusables and the consumer-copied workflows, then bump consumer pins via the applier.
+** (3) Delete the RE001 acks.
+
+Acceptance: 0 RE001 findings and 0 startup_failure regressions in a sampled cohort. Effort L. Tier: opus (sequencing across ~368 callers).
+. RISK: bulk estate change; startup-kill risk if sequenced wrong.
+
+==== #943 — Hypatia workflow_hardening triage: secrets-inherit convention + WH013/WH006 false positives (7 instances)
+. cicd,research,automation,priority:p3,status:ready,scope:repo,security · 2026-09-30 · 0
+. LITERAL: Remediate the 7 or renew the ack.
+. GOLDEN: No.
+. MISCHIEF:
+** WH008 `secrets: inherit` ×4 is still present (governance.yml:20, hypatia-scan.yml:30, mirror.yml:18, secret-scanner.yml:49). Its real cure is #1141: reusables must declare the secrets they read so callers can forward named secrets.
+** WH013 ×2 (mirror pushes to foreign repos via PAT) and WH006 (a `uses:` caller job cannot carry `timeout-minutes`) are scanner false positives.
+. STATE: Not started.
+. *BOT-DO*
+. Steps:
+** (1) Move the WH008 part to #1141 and comment there.
+** (2) Replace the WH013/WH006 baseline acks with inline `# hypatia: allow workflow_hardening/WH013 -- push targets a foreign repo via PAT` (and the WH006 equivalent).
+** (3) File two upstream hypatia false-positive issues (WH013 cross-repo PAT push; WH006 on `uses:` caller jobs).
+** (4) Close.
+
+Effort S. Tier: sonnet.
+. RISK: none.
+
+==== #944 — Banned-language deed tools: port a2ml_to_deed.py + deed_lint.py off Python, or exempt permanently (2 files)
+. enhancement,priority:p1,migration,status:needs-ruling,scope:repo · 2026-09-30 · 0
+. LITERAL: Port both Python tools or exempt them permanently.
+. GOLDEN: Yes; the question is answered. *D313* (2026-10-06): "`a2ml_to_deed.py` is deleted"; conversion becomes kyX's front end. D320/D323: `deed_lint.js` (bun) is the sole authority. The `status:needs-ruling` label is stale.
+. MISCHIEF: Python in tree. Still exists:
+** both `.py` files are present and are the only 2 `*.py` in the repo;
+** the README says `deed_lint.py` is "kept only because a2ml_to_deed.py imports it";
+** `1-formats/deed/tools/migrate_a2ml_to_deed.sh` (`32d37263`, 2026-10-05, a direct push) plans "full conversion using a2ml_to_deed.py", which contradicts D313;
+** `deed_lint.js` is wired in `deed-conformance.yml` (#1164).
+. STATE: Ruled; deletion not executed.
+. *BOT-DO*
+. Steps:
+** Delete `1-formats/deed/tools/a2ml_to_deed.py`, `deed_lint.py` and `migrate_a2ml_to_deed.sh`.
+** Update `1-formats/deed/tools/README.adoc` (drop the .py sections) and `1-formats/deed/mappings/launcher-standard-to-praxis-deed.adoc:271`, which uses `python3 … deed_lint.py`, so it uses `bun 1-formats/deed/tools/deed_lint.js`.
+** Remove the 2 baseline entries (`.hypatia-baseline.json` ~lines 858 and 867).
+** Run `bun test 1-formats/deed/tools/`.
+
+Effort S. Tier: haiku.
+. RISK: destructive (file deletion), authorised by D313.
+
+==== #945 — Hypatia misc: scorecard DependencyPinning + SD022 k9 spec stale path (2 instances)
+. cicd,tech-debt,automation,priority:p3,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Clear or renew the two acks.
+. GOLDEN: The spec was renamed; the `COORDINATION-K9-SPEC_v1.adoc` path the ack names no longer exists.
+. MISCHIEF:
+** SD022: `2-protocols/k9-coordination/spec/COORDINATION-K9-SPEC.adoc:97,134` still reference `src/tea/`, which is illustrative example content;
+** DependencyPinning: upstream D175 says Hypatia should accept actions.lock-resolved SHAs (hypatia work).
+. STATE: Not started.
+. *BOT-DO*
+. Steps:
+** Mark the `src/tea/` example as illustrative with an inline `// hypatia: allow structural_drift/SD022 -- illustrative example path`, or rename it to an obviously-placeholder `src/<module>/`.
+** Re-point the SD022 ack's file path.
+** Drop the DependencyPinning ack if the current scan no longer emits it; otherwise link it to D175 (hypatia).
+
+Effort S. Tier: haiku.
+. RISK: none.
+
+==== #949 — Estate health: 87% of default branches are red (388 of 447) — a red branch is no longer a signal
+. governance,priority:p1,scope:estate,status:ready · 2026-09-30 · 0
+. LITERAL: The owner decides whether 87% red is accepted debt or a campaign; if a campaign, fix mirror first, then governance; re-run the census.
+. GOLDEN: The decision has been taken. *D256–D261* (2026-10-01, the estate health census) treat it as remediation:
+** D261 mirror: provision every forge;
+** D256 CodeQL: default setup;
+** D257 owner bypass;
+** D259 dead required contexts;
+** D260 hypatia warn→medium.
+. MISCHIEF: An unusable red signal. Still largely live (#803: lock drift in 163 repos on 2026-10-13; standards' own Mirror and README Derive are red), but every cluster now has its own carrier issue.
+. STATE: Superseded by the D256–D261 programme.
+. *CLOSE-SUPERSEDED(#950)*. Close noting the work continues in its children: mirror in #950, lock drift in #968/#803, governance reds in #1070/#994, CodeQL in #1031. Rulings are D256–D261 on #787.
+. RISK: none.
+
+==== #950 — Mirror fleet: 27% of estate CI failures — destinations unprovisioned, advisory doctrine not implemented, 3 live caller refs
+. enhancement,priority:p1,scope:estate,status:ready,security · 2026-09-30 · 0
+. LITERAL: Do the following:
+** a controlled observation of job-level `continue-on-error` versus check-run conclusion;
+** a destination-existence probe in `mirror-reusable.yml`;
+** a refuse-or-autocreate decision;
+** fix the header-claim disagreement;
+** converge pins;
+** re-census.
+. GOLDEN: *D261* answers the decision: "set every forge up properly; the owner provisions Gitea/Codeberg/Disroot/Bitbucket; verified by destination HEAD == GitHub HEAD; *no forge is to be quietly disabled*". Making jobs advisory must therefore not become a quiet disable. D303/D304 (bundle store host) remain open on #1234.
+. MISCHIEF: Still exists:
+** `mirror-reusable.yml` has no `gh api -i` probe;
+** only `mirror-gitlab` (line 71) has job-level `continue-on-error`;
+** the gitea arm has no empty-host guard, though the other 5 arms print `::error::Configure a valid …`;
+** no substantive change since 2026-09-20 (only Dependabot bumps);
+** Mirror to Git Forges is RED on standards main.
+. STATE: Not started (standards side); owner provisioning pending.
+. *BOT-DO*. Absorbs #918 and #1002.
+. Steps in standards `mirror-reusable.yml`:
+** (1) a per-forge destination probe modelled on `github-backup-mirror-reusable.yml` (200/404 split, refuse-not-guess, a named reason in the step summary);
+** (2) `::error::` when `vars.GITEA_HOST` or any `*_HOST` is empty;
+** (3) correct the header claim in `github-backup-mirror-reusable.yml` to match;
+** (4) bump `mirror.yml`'s pin;
+** (5) converge estate callers via the applier.
+
+Owner actions per D261 (Codeberg repo or push-to-create, Disroot key, GITEA_HOST) stay listed here. Effort M. Tier: sonnet.
+. RISK: must not disable forges (D261).
+
+==== #953 — debt paydown: gate-scripts-without-tests re-baselined 30->40, todo-fixme 76->80
+. tech-debt,priority:p3,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Pay down the untested gate scripts and to-do markers.
+. GOLDEN: No.
+. MISCHIEF: Untested gates. Partly paid:
+** `gate-scripts-without-tests` is now *32* (from 40; #1078 added 5 tests);
+** but `todo-fixme-markers` *rose* to 84, with its ceiling raised 80→85 in `4d606177`, a direct push;
+** #1080 notes the probe miscounts.
+. STATE: Partly done; ongoing.
+. *BOT-DO*
+. Steps: take the 32-list from the `run-debtfile.sh` probe (newest first: `scripts/link-rot-guard.sh`, `scripts/spine/*`, `scripts/sweep-classifiers/*`) and write known-answer tests, each with one planted mutant, under `scripts/tests/<name>-test.sh`. Run `bash scripts/run-debtfile.sh --write` so the ceiling follows. Target ≤ 20. Effort M. Tier: sonnet.
+. RISK: none.
+
+==== #955 — Debt ratchet red on every PR since #820 — run-debtfile.sh --write emits a file check-debtfile-structure.sh rejects
+. priority:p0,tech-debt,status:ready,scope:repo · 2026-09-30 · 1
+. LITERAL: Fix the writer/validator contradiction and add a test that grows a probe.
+. GOLDEN: Partly. The symptom was cured by #954, and an unnumbered "Decision D???" doc (`docs/decisions/2026-10-04-deno-residue-false-positives.adoc`, a Mistral Vibe direct push `a41f3692`) "accepts false positives". That doc addresses the probe, not the root cause.
+. MISCHIEF: Writer and validator contradict each other. Still exists:
+** `scripts/run-debtfile.sh:111-113` still appends counts when a probe grows, and `check-debtfile-structure.sh:79` still rejects count > ceiling. Neither script has changed since #947.
+** There is no growth test in `scripts/tests/run-debtfile-test.sh`.
+** New, measured today: `run-debtfile.sh` *FAILS* on main because `shell-scripts-missing-spdx` is RESOLVED (0) but its `accepted-until 2026-10-01` expired. A resolved entry should not fail on expiry, and `debt-measure.yml` runs this script.
+. STATE: Partly done; root cause open.
+. *BOT-DO*
+. Steps:
+** (1) In `run-debtfile.sh`, when measured > ceiling, do not write `count` (or write and exit 1 without saving), and print the reason.
+** (2) Skip the expiry check when measured == 0, or drop resolved entries on `--write`.
+** (3) Add a test that grows a probe and asserts the structure check accepts the written file, plus a resolved+expired case.
+** (4) Give the decision doc a real D-number or withdraw it.
+
+Effort S. Tier: sonnet.
+. RISK: Debtfile.a2ml is legacy A2ML. Values-only edits are allowed; add no new facts.
+
+==== #957 — PAT-refresh tripwire: live HYPATIA_SCAN_PAT will arm 6 unackable CSA findings in both gates
+. priority:p1,scope:repo,security · 2026-09-30 · 1 (RULING D133: exclude CSA live-alert echoes from static apply-baseline.sh; gate on alerts through the ruleset)
+. LITERAL: Exclude `code_scanning_alerts` in `apply-baseline.sh` (option 1).
+. GOLDEN: No.
+. MISCHIEF: Still exists:
+** `scripts/apply-baseline.sh` has no `code_scanning_alerts` filter;
+** `governance-reusable.yml:385` runs it in blocking mode on raw scan JSON;
+** only hypatia-scan-reusable avoids the echoes, by using SARIF.
+. STATE: Ruled; not executed.
+. *BOT-DO*
+. Steps:
+** In `scripts/apply-baseline.sh` blocking mode, drop findings whose `rule_module == "code_scanning_alerts"` before thresholding, and print the count dropped.
+** Add a test with a CSA001 fixture that must not block while a real `high` still blocks.
+** Note the change in `docs/HYPATIA-BASELINE-FORMAT.adoc`.
+
+Effort S. Tier: sonnet.
+. RISK: none.
+
+==== #958 — Debt-exception / Ratchet-exception trailers never survive the squash merge — 0 of 8 in the Debtfile's whole history
+. priority:p0,tech-debt,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Make the trailers durable via COMMIT_MESSAGES and/or a PR-body scan, add a squash regression test, and apply to the template.
+. GOLDEN: No.
+. MISCHIEF: Partly fixed:
+** `65d9af01` made `check-debt-ratchet.sh:74-90` and `check-exemption-ratchet.sh:122-138` read `.pull_request.body` from `GITHUB_EVENT_PATH`;
+** the repo setting is still `PR_TITLE`/`PR_BODY`, so a column-0 PR-body trailer survives the squash;
+** *no test* covers the PR-body path (`debt-ratchet-test.sh` and `exemption-ratchet-test.sh` have 0 `GITHUB_EVENT_PATH` cases);
+** rsr-template-repo carries no ratchet scripts, so the template AC is moot.
+. STATE: Partly done.
+. *BOT-DO*
+. Steps:
+** Add tests with a fake `GITHUB_EVENT_PATH` JSON: a PR body with a column-0 trailer passes, an indented one fails.
+** Document in `docs/DEBTFILE-SPEC.adoc` that the trailer goes at column 0 in the PR body.
+
+Effort S. Tier: sonnet.
+. RISK: none.
+
+==== #960 — D73-C downstream: 21 launcher descriptors + trigger/ still name the deleted launcher-standard.a2ml
+. migration,scope:estate,priority:p2,status:ready · 2026-09-30 · 9
+. LITERAL:
+** AC1: no writable repo names `launcher-standard.a2ml`;
+** AC2: decide on the 21 descriptors;
+** AC3: fix trigger;
+** AC4: add a currency gate.
+. GOLDEN: AC2 was ruled "migrate all 21 to `.deed`" on 2026-09-22. Since then:
+** D313 forbids bulk hand-conversion of A2ML (conversion is kyX's front end);
+** open rulings *#1225* (launcher metadata domains) and *#1226* (praxis field vocabulary, "before the 21-descriptor migration") gate it.
+. MISCHIEF: Dangling references. Mostly cured:
+** AC1: 19 PRs merged plus 5 exemptions;
+** AC3: trigger#14;
+** AC4: `scripts/check-launcher-standard-currency.sh`, wired in governance-reusable (lines 1104-1186), with CURRENT_VERSION now 0.6.0.
+. STATE: AC1, AC3 and AC4 done; AC2 execution blocked.
+. *KEEP-OPEN-BLOCKED* on owner rulings #1225 and #1226, and on the kyX front end (D313). Relabel `status:blocked`.
+. RISK: bulk conversion is forbidden until kyX exists.
+
+==== #963 — main is red: actions.lock omits a transitive dependency of asana/push-signed-commits (actions/setup-python@v2)
+. bug,priority:p0,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Record setup-python as a transitive dependency, or remove the asana step; no baseline entry.
+. GOLDEN: No.
+. MISCHIEF: Fixed:
+** #1233 (`0b1898e2`) replaced asana with native `push-verified.sh` (createCommitOnBranch);
+** #1238 (`7d2041a`, HEAD) dropped both orphan records;
+** `actions.lock` has 0 asana/setup-python records; Hypatia scan is green.
+** Leftover: the baseline entry `invalid_actions_lock` tracked by #963 (expires 2026-12-22) is now stale, and AC4 forbade it.
+. STATE: Done.
+. *CLOSE-DONE* (#1233, #1238). Haiku follow-up: delete the stale `invalid_actions_lock` ack from `.hypatia-baseline.json`.
+. RISK: none.
+
+==== #964 — governance-reusable.yml dupkey helper pin 317101e0 is stale by 45 files — and its sparse-checkout scope is too wide for #962's freshness guard
+. governance,scope:estate,tech-debt,priority:p2,status:ready · 2026-09-30 · 0
+. LITERAL: Narrow the sparse-checkout to the executed helpers, bump the pin, extend the freshness guard with a mutant, and bump all 3 sites.
+. GOLDEN: No.
+. MISCHIEF: Still exists:
+** `ref: 317101e03b8f…` at `governance-reusable.yml:438, 1279, 1386`;
+** site 438 still sparse-checks the whole `scripts` directory;
+** `scripts/check-lock-gate-pin-freshness.sh` exists but covers only the lock-gate step.
+. STATE: Not started.
+. *BOT-DO*
+. Steps:
+** (1) Enumerate the scripts the `.standards-checkout` consumers at 438+ actually execute, and set `sparse-checkout` to exactly those.
+** (2) Bump all 3 refs to a main commit containing current copies, watching #1137 (dupkey false positives on KYAML) when the dupkey helper moves.
+** (3) Parameterise the freshness guard by step name, and add the step to `scripts/tests/governance-reusable-contract-test.sh`.
+** (4) Mutant: reverting to `317101e0` must fail.
+
+Effort M. Tier: sonnet.
+. RISK: estate-visible (368 callers on their next pin bump).
+
+==== #967 — ci-pipeline detect is blind to 56 code-bearing repos (and probes Deno, not Bun)
+. bug,priority:p1,scope:estate,status:ready · 2026-09-30 · 2
+. LITERAL: Add manifest probes for Julia, Zig, Idris2, Elixir, Lean, Agda, Ada, Gleam and Bun; re-census; seed the ledger after extension; add controls.
+. GOLDEN: The issue's own comment corrects the Deno half: the Deno probe is the ban's refusal trigger, not a lint arm, so it must stay.
+. MISCHIEF: Fixed:
+** `ci-pipeline.yml:160-218` probes Julia, Zig, Idris2, Elixir, Lean, Agda, Ada and Gleam (manifest-keyed) plus Bun, and refuses "detected but unsupported" explicitly (line 295 cites #967);
+** pilot wave verified (comment 2);
+** `pipeline-allow.txt` deliberately unseeded.
+. STATE: Done (#970 `436a89b3`).
+. *CLOSE-DONE* (#970). The template-boilerplate residue continues in #976; the Bun lint arm in #922.
+. RISK: none.
+
+==== #968 — actions.lock step-level desync: 39 repos with silently dead CI (startup_failure)
+. bug,priority:p0,scope:estate,status:ready · 2026-09-30 · 1
+. LITERAL: For each of 39 repos: regenerate lock-only, verify, land the zero-`uses:` lock-sync gate, jobs > 0.
+. GOLDEN: No. D326 confirms the lock-only regen.
+. MISCHIEF: Startup-dead CI from Dependabot desync. *Worse now*: bot tracker #803 reports *163 repos with drift* on 2026-10-13, up from 15 on 2026-09-22. #1093 shows about 53 repos startup-dead from codeql 4.38.2 bumps.
+** Done in standards: `.github/workflows/lock-sync-gate.yml`, `scripts/check-lock-sync.sh`, clause 4 COVERAGE (a41f3692), and `dependabot-lock-regen.yml` (#1123), which regenerates locks on Dependabot PRs estate-wide.
+** Per the comment, 15 batch-1 repos were fixed.
+. STATE: Partly done; estate drift is growing.
+. *ESTATE-CAMPAIGN*. Make this the umbrella and fold in #1093 and the #803 tracker reference.
+. Steps:
+** (1) Verify `dependabot-lock-regen.yml` is actually installed and firing in consumer repos (measure on 5).
+** (2) Run the D326 lock-only regen (`gh actions-lock --no-narrow --no-migrate-local-actions`) per drifted repo from the #803 TSV, one PR each, with SPDX line 1 restored (#727).
+** (3) Land `lock-sync-gate.yml` where it is missing.
+
+Acceptance: #803 drift ≤ 5, and every sampled repo shows jobs > 0. Effort L. Tier: sonnet; haiku per-repo once the script is stable.
+. RISK: bulk sweep (one PR per repo); `gh actions-lock` fix mode can de-pin, so use `--no-narrow`.
+
+==== #969 — actions.lock omits job-level reusable refs in 159 repos (no runtime impact; tracks upstream #129)
+. scope:estate,tech-debt,priority:p3,status:ready · 2026-09-30 · 0
+. LITERAL: Wait for upstream gh-actions-lock #129, then regenerate 159 repos; no PRs until then.
+. GOLDEN: Partly contradicted. "No runtime impact" is challenged by #1169 (`8464935a`, 2026-10-06): standards' own `mirror.yml` was startup_failure because its job-level record lacked a nested `uses:` list and the callee's transitive action was unrecorded. Policy is being set in #993.
+. MISCHIEF: An incomplete lock. Live, but now a policy question, not a separate defect.
+. STATE: Not started (blocked upstream).
+. *MERGE-INTO(#993)*. Carry #1169's measured shape (job-level record with a nested `uses:` list) into #993's policy text.
+. RISK: none.
+
+==== #972 — pre-commit hands validators git-QUOTED paths, so non-ASCII filenames are silently skipped (6 validators)
+. bug,priority:p2,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL:
+** (1) `core.quotePath=false` at the shared callers;
+** (2) a path that is not on disk is an error, not a `continue`;
+** (3) a regression test that fails on the old code.
+. GOLDEN: No.
+. MISCHIEF: Partly fixed:
+** AC1 done: `.githooks/pre-commit:30,45,63` use `git -c core.quotePath=false` (1f099de9, a direct push);
+** AC2 not done: `[ -f "$file" ] || continue` remains in validate-actions-lock:131, bot-directives:42, k9:104, permissions:45, sha-pins:139, spdx-workflows:38 and spdx:92;
+** AC3: no test.
+. STATE: Partly done.
+. *BOT-DO*
+. Steps:
+** Replace the silent `continue` with an error (`missing staged path: <p>`; count it and fail) in the 7 validators, except for deletions, which ACM already filters.
+** Add `scripts/tests/pre-commit-nonascii-test.sh`, which stages `café.rs` and asserts the CHECKED denominator includes it. Run it against `1f099de9^` to show it fails there.
+
+Effort S. Tier: sonnet.
+. RISK: none.
+
+==== #975 — 21 baseline acks lapse on 2026-10-22 and 17 point at closed issues
+. governance,priority:p1,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: For each of 18 orphaned acks, re-point or delete; decide the 2026-10-22 cliff; add a closed-tracking-issue check; consider the 83 no-expiry entries.
+. GOLDEN: No. *This is urgent: the cliff lands in 8 days (2026-10-22).*
+. MISCHIEF: Still exists:
+** `.hypatia-baseline.json` has 21 entries `expires_at: 2026-10-21`;
+** 7 of them name files that *no longer exist*: `lol/…`, `scripts/check-ts-allowlist.ts`, `2-protocols/avow/…`, `repo-guardian-fs/…`, `scorecard.yml`;
+** *43* baseline entries overall name missing files;
+** 84 entries have no expiry.
+. STATE: Not started.
+. *BOT-DO* (do first).
+. Steps:
+** (1) Delete every ack whose `file` no longer exists, all 43, and prove main stays green.
+** (2) For the remaining 2026-10-21 acks:
+*** re-point #399/#492/#494/#378/#254/#496 to live successors (#493 and #124 are open; #1173 for new Hypatia findings);
+*** or delete if the defect is gone;
+*** stagger the expiries.
+** (3) Add `scripts/check-baseline-tracking.sh` (repo-scoped `gh api issues/N` state check; fails on a closed tracker) with a test.
+
+Effort S. Tier: sonnet.
+. RISK: none; each deletion must be shown green.
+
+==== #976 — detect: the Nickel probe matches RSR template boilerplate, silencing the zero-denominator refusal on 9 of 24 sampled repos
+. bug,priority:p1,scope:estate,status:ready · 2026-09-30 · 2
+. LITERAL: Make the template `.ncl` not lift TOTAL (julia-ecosystem must REFUSE); keep the positive controls (laminar, zerotier-k8s-link); separate template from own `.ncl` in the summary.
+. GOLDEN: No.
+. MISCHIEF: Partly fixed:
+** `*.k9.ncl` is excluded from `N_NICKEL` (`ci-pipeline.yml:131,386`), which removes the six k9 template files;
+** but rsr-template-repo still ships *11 non-k9 `.ncl`*: `.machine_readable/contractiles/*.ncl` ×7, `coaptation/*.ncl` ×3 and `arrival-pack/arrival-pack.ncl`;
+** so TOTAL is still lifted in template-seeded repos;
+** the generated-input typecheck problem is handled (`NCL_GENERATED_IMPORTS`, validate-lint-format.sh:126).
+. STATE: Partly done.
+. *BOT-DO*
+. Steps in standards `ci-pipeline.yml` detect:
+** count Nickel toward TOTAL only outside `.machine_readable/**` (template-owned), still linting all of them when the job runs;
+** print `nickel: N own, M template`.
+
+Separately, in rsr-template-repo, run `nickel format` on arrival-pack.ncl. Add controls per the ACs. Effort S. Tier: sonnet.
+. RISK: estate-visible gate semantics; must keep the positive controls.
+
+==== #980 — ci-pipeline.yml: the ledger pin's "same commit" invariant is unsatisfiable (12/12 merges are squash)
+. bug,scope:estate,priority:p2,status:ready · 2026-09-30 · 0
+. LITERAL: Fix the unsatisfiable `ref: a2ff696a` ledger pin invariant.
+. GOLDEN: No.
+. MISCHIEF: Fixed. The ledger is now read at `ref: ${{ job.workflow_sha }}` (`ci-pipeline.yml:938-967`, comment: "literally true rather than aspirational").
+. STATE: Done (#989 `ed5e3f65`).
+. *CLOSE-DONE* (#989).
+. RISK: none.
+
+==== #981 — validate-actions-lock prescribes a cure that can re-legitimise a blocked action version
+. bug,priority:p1,scope:estate,status:ready · 2026-09-30 · 0
+. LITERAL: On a missing ref, detect the two-sided case (the lock holds a different SHA for the same owner/repo), name both SHAs, do not prescribe bare regeneration, and add a regression test.
+. GOLDEN: The motivating example (codeql 4.38.1 "blocked") is itself refuted by #1093 ("4.38.1 was never broken"; the cause was lock drift). The general two-sided-drift defect is still valid.
+. MISCHIEF: Still exists. `.githooks/validate-actions-lock.sh:189,210` still always says "Regenerate with the LOCKFILE ONLY"; it has not changed since #1115.
+. STATE: Not started.
+. *BOT-DO*
+. Steps:
+** In `validate-actions-lock.sh`, when `ref` is missing but the lock has another SHA for the same `owner/repo`, print "two-sided drift: workflow wants <B>, lock holds <A> — reconcile the workflow to <A>, or change both deliberately" and skip the regen advice.
+** Add a test in `scripts/tests/` covering the two-sided case and the single-sided case unchanged, plus a mutant restoring the old text.
+
+Effort S. Tier: sonnet.
+. RISK: none.
+
+==== #987 — Phantom blob-pin: 18 refs across 7 repos pin standards reusable workflows at non-commit SHAs
+. bug,priority:p1,scope:estate,status:ready · 2026-09-30 · 1
+. LITERAL: Re-pin 18 refs (8 live per the comment), confirm jobs > 0, run the guard from outside, add a planted control, fix the template.
+. GOLDEN: The template AC is moot: `rsr-julia-library-template-repo` returns 404 (comment).
+. MISCHIEF: Dead callers. The detector now runs from outside: `scripts/apply-workflow-pins-remote.sh` classifies DEAD-REF via `sha_is_commit` (lines 289-300) and runs weekly from standards (`apply-workflow-pins.yml`, last success 2026-10-11 run 38118717637). Fix mode needs dispatch. The census result is unreadable here (artefact blob blocked).
+. STATE: Partly done (detection); re-pinning unverified.
+. *ESTATE-CAMPAIGN*
+. Steps:
+** Read the 2026-10-11 census artefact.
+** Dispatch `apply-workflow-pins.yml` with `mode: fix` for DEAD-REF rows: JuliaForChildren.jl, stateful-artefacts, tma-mark2 (archived?), trope-checker, ubicity, verisimdb, idaptik-ums, universal-modding-studio, common-signal, absolute-zero.
+** Verify `governance.yml` jobs > 0 on each.
+** Add a planted blob-SHA known-answer control if one is not already in `tests/test_apply_workflow_pins_remote.sh`.
+
+Effort M. Tier: sonnet.
+. RISK: bulk cross-repo PRs (via the signed applier).
+
+==== #991 — AC4 arming policy: retired-filename blocks, stale-version warns
+. governance,tech-debt,priority:p2,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Prove the wiring (red on retired filename, warn on stale version, rc=2 fails); require a blast-radius re-measure before each CURRENT_VERSION bump; owner picks (a) warn permanently or (b) promote/demote per bump.
+. GOLDEN: No.
+. MISCHIEF: The open policy question. Still open, and AC4 was already breached: `scripts/check-launcher-standard-currency.sh:65` is `CURRENT_VERSION="0.6.0"` (was 0.4.0) with *no re-measure posted* on this issue. The rc=2 fail-closed wiring is present (governance-reusable.yml:1157,1186).
+. STATE: Wiring done; ruling outstanding.
+. *OWNER-RULING*. Question: *"Should `stale-version` findings from the launcher-currency gate (a) warn permanently, or (b) be promoted to fail between version bumps and demoted on each bump?"* The recommended arm is (a): simplest, and no skipped-demote estate-wide red.
+. After the ruling: BOT-DO, S, haiku, to document the rule beside CURRENT_VERSION.
+. RISK: none.
+
+==== #992 — check-lock-sync.sh and GitHub startup disagree for job-level-reusable-only callers, and the gate's error text is inverted
+. bug,priority:p1,scope:estate,status:ready · 2026-09-30 · 0
+. LITERAL:
+** stop telling maintainers that `[]` causes zero jobs;
+** decide the intended lock shape for job-level-only callers and enforce it;
+** make the check advisory meanwhile.
+. GOLDEN: No.
+. MISCHIEF: Still exists:
+** `scripts/check-lock-sync.sh:153-157` prints "GitHub refuses such a run at startup: zero jobs are created" for every desync, including the `[]` shape measured to run 15 jobs;
+** the script has not changed since a41f3692 and #1154;
+** #1169's comment explicitly says the "gate-text inversion that #992 describes is a separate defect".
+. STATE: Not started.
+. *BOT-DO*
+. Steps:
+** Split the message by class: step-level miss gives the startup-death text, and a job-level-only key or `[]` gives an advisory note.
+** Accept `[]` *or* a record with a nested `uses:` list (#1169 shape) for job-level-only workflows.
+** Add tests for both shapes in `scripts/tests/check-lock-sync-test.sh`.
+** Align the result with #993's policy.
+
+Effort S. Tier: sonnet.
+. RISK: estate-propagated gate.
+
+==== #993 — actions.lock policy: job-level reusable refs are reported, never required — and the pin bump that disarms the latent blocker
+. governance,scope:estate,priority:p2,status:ready · 2026-09-30 · 1
+. LITERAL:
+** write the rule (step-level required, job-level reported) into prose;
+** document `is_advisory_category`;
+** repoint consumers off `8f2ee508`;
+** correct over-strict checkers;
+** add a regression control;
+** the comment adds: Form A (base-loaded) or Form B (head-run) lock-sync gate?
+. GOLDEN: #1169 refines the rule: a job-level record without its nested `uses:` list, plus an unrecorded callee action, does startup-kill. The prose must say what the record shape must be *if present*.
+. MISCHIEF: Two contradictory lock rules circulating. Still exists:
+** no policy prose found;
+** `lock-sync-gate.yml:62-64` is *Form B* (head-run, a PR can weaken its own judge).
+. STATE: Not started.
+. *OWNER-RULING*. Question: *"Should Claude standardise the estate lock-sync gate on Form A (checker loaded from the base commit, head copy used only when the base has none), yes/no?"* The recommended arm is Form A, because a gate a PR can disable is not a control. Absorbs #969.
+. After the ruling: BOT-DO, M, sonnet.
+** Add a "Job-level reusable refs" section to `docs/decisions/2026-10-04-actions-lock-enforcement.adoc` or the CICD canon covering the §1 rule, the #1169 record shape and `is_advisory_category`.
+** Convert `lock-sync-gate.yml` to the ruled form.
+** Propagate via the applier.
+. RISK: estate-propagated.
+
+==== #994 — Cross-cutting governance reds surfaced by the actions.lock cure — 9 classes across 17 PRs
+. governance,cicd,priority:p1,scope:estate,refactor,status:ready · 2026-09-30 · 1
+. LITERAL:
+** determine fix/retire/accept for each of 9 classes;
+** rule on the A2ML gate;
+** settle the Hypatia check-name question;
+** list main-red checks;
+** never mute.
+. GOLDEN: Partly overtaken:
+** the A2ML gate was retired via #1010 (13 PRs);
+** the per-repo triage lives in umbrella *#1070*;
+** #1056 holds the class determinations to fold here.
+. MISCHIEF:
+** The four Hypatia check names remain: `Hypatia neurosymbolic scan`, `scan / Hypatia Neurosymbolic Analysis`, `hypatia / …`, `governance / Validate Hypatia Baseline`.
+** The SPDX-below-gh-actions-lock-stamp false positive (#727) remains.
+. STATE: Partly done.
+. *OWNER-RULING*. Question: *"Should Claude converge the Hypatia scanner on ONE required-check context name estate-wide (proposed: `hypatia / Hypatia Neurosymbolic Analysis`), rebasing open PRs, yes/no?"*
+** The remaining class determinations fold into #1070.
+** The SPDX-stamp class takes arm (a): the checker accepts SPDX anywhere in the leading comment block (haiku).
+. RISK: renaming required contexts orphans open PRs; needs deliberate rollout.
+
+==== #998 — ci-pipeline.yml: standards does not call its own pipeline (AC6 of #986)
+. bug,priority:p2,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: A standards workflow `uses:` its own ci-pipeline.yml and is green.
+. GOLDEN: No.
+. MISCHIEF: Fixed. `.github/workflows/self-ci.yml` (header: "AC6 of #986") calls `./.github/workflows/ci-pipeline.yml`; Self-CI is green on main.
+. STATE: Done (`e59aad71`, a direct push).
+. *CLOSE-DONE*. Link a green Self-CI run when closing.
+. RISK: none.
+
+==== #999 — config.ncl cannot be evaluated: std.record.merge does not exist
+. bug,priority:p1,scope:repo · 2026-09-30 · 1 (RULING D169: native `&` merge, fix .schemas, add `nickel export` to CI)
+. LITERAL: Fix two palimpsest-license `config.ncl` copies and add `nickel export` to CI.
+. GOLDEN: Yes, partly. Both target files are now in `9-archive/…/satellites/palimpsest-license/` (frozen, and a stale snapshot of the real palimpsest-license repo, which is PMPL-register). Editing them contradicts the archive. D169's third clause, evaluate rather than only typecheck, is still the live mischief.
+. MISCHIEF: A gate green over unevaluable Nickel. Still exists:
+** `ci-pipeline.yml`'s nickel job runs only `format --check` and `typecheck`;
+** it does not exclude `9-archive/`;
+** `std.record.merge` survives in 9-archive only.
+. STATE: Ruled; not executed.
+. *BOT-DO*
+. Steps:
+** (1) In `ci-pipeline.yml` (Nickel job), add `nickel export` for non-k9 `.ncl` that are not generated-import files, ratcheted or advisory first.
+** (2) Exclude `9-archive/` from the Nickel pathspec, since frozen content should not be gated.
+** (3) Do not edit the archived copies; if hyperpolymath/palimpsest-license still carries `config.ncl`, open the D169 fix there.
+
+Effort M. Tier: sonnet.
+. RISK: palimpsest-license is a PMPL-register repo; code edit only, no licence text.
+
+==== #1000 — 8 of 16 *.k9.ncl files lack the K9! line-1 sentinel
+. bug,priority:p2,status:ready,scope:repo · 2026-09-30 · 0
+. LITERAL: Add `K9!` to the 8 files or declare the sentinel non-authoritative; audit the gates.
+. GOLDEN: No.
+. MISCHIEF: Fixed:
+** e59aad71 added the sentinel to the 8;
+** K9-CONTRACT-SPEC (#1143) makes the 3-octet envelope normative;
+** re-measured, all 36 non-archive `*.k9.ncl` carry `K9!` except 3 deliberate invalid fixtures (`L0-K9-E001-bad-magic`, `E003-crlf`, `E005`).
+. STATE: Done.
+. *CLOSE-DONE* (`e59aad71`, #1143).
+. RISK: none.
+
+==== #1001 — os_detect.ncl: 'Apple_Darwin falls through to the wildcard in deployment_priority
+. bug,priority:p1,scope:repo · 2026-09-30 · 1 (RULING D170: explicit 'Apple_Darwin arm, drop wildcard)
+. LITERAL: Add the arm, keeping all 3 copies byte-identical.
+. GOLDEN: Partly. The third copy is now in 9-archive (frozen), so the byte-identical AC must relax to the 2 live copies, which sit under `1-formats/a2ml/{agentic,neurosym}/ncl/lib/`: retired-A2ML tooling directories, though `.ncl` code is not A2ML content.
+. MISCHIEF: Still exists in both live copies at lines 23-29.
+. STATE: Ruled; not executed.
+. *BOT-DO*
+. Steps: in both live `os_detect.ncl`, add `'Apple_Darwin => "<owner-chosen>"` and remove `_ =>`. The value is not ruled, so use `"container_first"`, the current behaviour made explicit. Run `nickel typecheck` on both and leave the 9-archive copy. Effort S. Tier: haiku.
+. RISK: none.
+
+==== #1002 — Mirror to Git Forges: 3 of 7 forges failing, three different root causes
+. bug,priority:p2,status:blocked,scope:repo · 2026-09-30 · 0
+. LITERAL:
+** owner: create the Codeberg repo, authorise the Disroot key, decide on Gitea;
+** in-repo: `::error::` on an empty host variable, then bump the pin.
+. GOLDEN: D261 decides "set every forge up properly" (owner provisions).
+. MISCHIEF: Still exists. Mirror to Git Forges is RED on main, and the gitea arm (`mirror-reusable.yml:334-384`) has no empty-host guard, though the other 5 arms do.
+. STATE: Not started.
+. *MERGE-INTO(#950)*, which carries the same reusable changes and the D261 owner provisioning list. Keep Codeberg/Disroot/Gitea owner actions as #950 checklist items.
+. RISK: none.
+
+==== #1003 — rsr-template-repo: no ruleset requires pull requests on any branch
+. governance,scope:estate,priority:p2,status:ready · 2026-09-30 · 0
+. LITERAL: An active rsr-template-repo ruleset carries a `pull_request` rule, and the planner stops raising.
+. GOLDEN: No.
+. MISCHIEF: *Live again (regressed).*
+** #1008 recorded adding `pull_request` to Base 23218684 on 2026-09-22, but the live GET today shows Base = `deletion, required_signatures, code_scanning, copilot_code_review, non_fast_forward`. There is no `pull_request` rule.
+** Base was `updated_at 2026-10-01T23:23:22Z`.
+** Canon `config/rulesets/base.json` includes `pull_request`.
+. STATE: Regressed.
+. *MERGE-INTO(#1008)* (same ruleset, same repair).
+. RISK: ruleset write (admin).
+
+==== #1004 — Estate census: 124 of 456 repos carry retired or unsatisfiable ruleset rules (report only)
+. governance,scope:estate,refactor,priority:p3,status:ready · 2026-09-30 · 2
+. LITERAL: The owner decides on:
+** 7 retired-rule repos;
+** `code_scanning alerts_threshold: all` on 123 repos;
+** rulesets for evil-weevil and repo-guardian.
+
+Repairs go through a sanctioned applier.
+. GOLDEN: No. D300 (layered rulesets, nothing armed without a blast-radius list) and D257 (strip owner bypass) frame it.
+. MISCHIEF: Unverifiable estate-wide from here. rsr-template-repo (the census's positive control) still carries `alerts_threshold: all` for CodeQL and Hypatia (live GET).
+. STATE: Not started.
+. *OWNER-RULING*. Question: *"Should Claude trim `code_scanning` to `alerts_threshold: errors` / `security_alerts_threshold: high_or_higher` on the 123 repos (matching standards/main), via the sanctioned applier with a posted blast-radius list, yes/no?"* Secondary question: should evil-weevil (private) and repo-guardian get the L0 floor? The 7 retired-rule repos follow from #1008's repair recipe.
+. RISK: bulk ruleset writes (admin).
+
+==== #1006 — EstateTagging's workflows rule is vacuous (workflows: []), and no Integration can create a tag org-wide
+. enhancement,cicd,priority:p1,scope:estate,status:ready · 2026-09-30 · 0
+. LITERAL: Remove or populate the empty `workflows: []` rule; check applied ruleset parameters via the API; record the CI-tagging forward constraint.
+. GOLDEN: No. D116 moved tag authorisation to EstateTagging; #1234 A5 (D298) is the same class of metadatastician org-ruleset write needing `admin:org`.
+. MISCHIEF: Unverifiable here; the metadatastician org API is outside this session's scope.
+. STATE: Not started.
+. *KEEP-OPEN-BLOCKED*, on an owner `admin:org` write. Batch it with #1234 A5 (D298 Tag-Floor/Branch-Floor revert) in one blast-radius-listed PUT. Removing an empty rule needs no ruling, since vacuous gates are already ruled against.
+. RISK: org ruleset write.
+
+==== #1007 — EstatePushing is scoped ~ALL but binds to 6 of 68 repos — push rulesets reach private repos only
+. governance,priority:p1,scope:estate · 2026-09-30 · 1 (RULING D132: secret-scanning push protection plus a CI blob-size/extension gate via the shared reusables for the 62 public repos)
+. LITERAL: Record the reach limitation; protect public repos by another mechanism; measure attachment per repo.
+. GOLDEN: No.
+. MISCHIEF: Still exists:
+** governance-reusable's "Check for large files" (line 1057) is *advisory* (`::warning::`, >1M) with no extension block;
+** `config/settings/repo.json` enables push protection, but applier execution is unverified;
+** the reach note is not in `config/README.adoc`.
+. STATE: Ruled; not executed.
+. *BOT-DO*
+. Steps:
+** (1) Add a reach note to `config/README.adoc`: "push rulesets bind private/internal only".
+** (2) Add a blob-size (10 MB, matching EstatePushing `max_file_size`) and extension gate as a new governance-reusable job, advisory on first release with a ratchet to blocking.
+** (3) Verify `secret_scanning_push_protection` is applied on public repos via the settings applier (report-only census).
+
+Effort M. Tier: sonnet.
+. RISK: estate-visible gate in a reusable (368 callers), so roll out advisory first.
+
+==== #1008 — rsr-template-repo Base ruleset repaired; 5-8 error-severity alerts remain (threshold semantics undetermined), and copilot_code_review may be a fifth unsatisfiable rule type
+. governance,priority:p1,scope:estate · 2026-09-30 · 3 (RULING D171: measure the threshold with a paired control; drop copilot_code_review if shown unsatisfiable)
+. LITERAL: Decide on copilot_code_review; triage the 8 alerts; close #193/#192.
+. GOLDEN: The "repaired" premise is false today. The live ruleset has *regressed*:
+** Base 23218684 (updated 2026-10-01T23:23Z) lacks `pull_request`;
+** thresholds are back to `all` (CodeQL, Hypatia);
+** Scorecard has been dropped;
+** `copilot_code_review` is still present;
+** bypass is `RepositoryRole:5` + `Integration:4187077`, contrary to D257 (strip owner bypass) and D128.
+. MISCHIEF: Template PRs blocked by unsatisfiable or overly strict rules. Still exists (live GET); code-scanning alerts are 403 to this session; #1003 is the same defect.
+. STATE: Regressed / not done.
+. *ESTATE-CAMPAIGN* (lands on rsr-template-repo settings). Absorbs #1003.
+. Steps:
+** (1) Find what rewrote Base at 2026-10-01T23:23Z: candidates are the protection-floor or branch-gates appliers, or a manual edit. Stop it re-asserting.
+** (2) Run the D171 paired control: one PR with only warning-severity alerts against `errors` vs `all`.
+** (3) Re-converge Base to canon `config/rulesets/base.json` via the sanctioned applier, with a posted diff: `pull_request` present, thresholds errors/high_or_higher, `copilot_code_review` removed if the control shows it unsatisfiable, bypass per D257/D128.
+** (4) Close rsr-template-repo #192/#193 if they are still open.
+
+Effort M. Tier: opus.
+. RISK: ruleset write on the template (admin); outward-facing.
+
+==== #1010 — ci: retire the dead A2ML validation gate (13 repos — the renamed-action population)
+. priority:p1,scope:estate,refactor,status:ready · 2026-09-30 · 2
+. LITERAL: Remove the dead `a2ml-ecosystem/validate-action@main` job with its lock entry in the same commit, across the Population-A repos.
+. GOLDEN: The scope was corrected to 13 repos; Populations B and C are live DEED validators and must not be removed.
+. MISCHIEF: Fixed. ULTRAPLAN-0929 verified 11/11 public PRs MERGED (proven-servers#90 … stapeln#75). The 2 private PRs (boj-server-mk2#47, common-signal#7) are checked by `scripts/triage-2026-09-29-apply.sh`, which has never been run.
+. STATE: Done, pending confirmation of the 2 private merges.
+. *CLOSE-DONE*. Owner, or a session with private-repo access, confirms boj-server-mk2#47 and common-signal#7 merged. The optional follow-up (re-point the 13 repos to `deed-ecosystem/validate-action@<sha>`) is a separate small campaign only if wanted.
+. RISK: none.
+
+==== #1014 — governance: the Hypatia scanner pin predates the consumer fixes it scans for
+. governance,priority:p1,scope:estate,chore,automation,status:ready · 2026-09-30 · 0
+. LITERAL:
+** document the pin-bump policy;
+** measure the delta on sampled callers before a bump;
+** bump past `bc8812e`;
+** state that compiled-in suppression cannot cure a consumer;
+** emit the scanner commit in the summary.
+. GOLDEN: No.
+. MISCHIEF: Mostly fixed:
+** the scanner is now an input `hypatia-ref` defaulting to `51ab6496…` (hypatia#895, 2026-10-01), post-`bc8812e` (2026-09-14) (#1121 `71bb615e`, 2026-10-02);
+** the input description documents why it is pinned;
+** not found: the "compiled-in suppression cannot cure your gate; use baseline/.hypatia-ignore/inline" note, and an explicit bump policy (who, cadence, evidence).
+. STATE: Partly done.
+. *BOT-DO*
+. Steps: add a comment block beside `hypatia-ref` in both `governance-reusable.yml` and `hypatia-scan-reusable.yml` stating:
+** the bump policy: owner-approved, with a sampled-caller delta posted;
+** the three scanned-tree cure mechanisms.
+
+Ensure the resolved scanner SHA is echoed to `$GITHUB_STEP_SUMMARY`. Effort S. Tier: haiku.
+. RISK: none.
+
+==== #1015 — check-action-pins-resolve.sh scans prose: a documentation example SHA fails the gate
+. bug,scope:estate,priority:p2,status:ready · 2026-09-30 · 0
+. LITERAL: Restrict the scan to `*.yml`/`*.yaml`; add a two-direction regression control; note it in the header.
+. GOLDEN: No.
+. MISCHIEF: Fixed in code, but untested:
+** `scripts/check-action-pins-resolve.sh:110,119` now iterate only `"$WORKFLOW_DIR"/*.yml *.yaml` (#1115 yq rewrite);
+** `scripts/tests/check-action-pins-resolve-test.sh` has no README/prose case;
+** the header does not state the behaviour.
+. STATE: Partly done.
+. *BOT-DO*
+. Steps:
+** Add a test: a `README.adoc` in the workflows dir with a fabricated 40-hex `uses:` passes, while the same line in a `.yml` fails.
+** Add a one-line header note.
+
+Effort S. Tier: haiku.
+. RISK: none.
+
+==== #1018 — rust-ci-reusable: explicit ref refs/pull/N/merge dies when the PR merges mid-run
+. bug,scope:estate,priority:p2,status:ready · 2026-09-30 · 0
+. LITERAL: Replace `ref: ${{ github.ref }}` with `github.sha` (or omit it) in every checkout; add controls; bump caller pins.
+. GOLDEN: No.
+. MISCHIEF: Still exists at `.github/workflows/rust-ci-reusable.yml:145,171,224,273,309`.
+. STATE: Not started.
+. *BOT-DO*
+. Steps:
+** Change the 5 lines to `ref: ${{ github.sha }}`; on pull_request this is the merge commit, the same content.
+** Run actionlint.
+** The applier will carry the bump to absolute-zero and other callers.
+
+Effort S. Tier: haiku.
+. RISK: none.
+
+==== #1019 — CodeRabbit's unsigned pushes re-kill CI on every required_signatures repo
+. priority:p1,scope:estate,research,status:needs-ruling · 2026-09-30 · 0
+. LITERAL: Choose (a) make CodeRabbit sign, (b) stop it pushing, or (c) drop required_signatures; record the choice; add a check-suite probe.
+. GOLDEN: Already ruled, so the `needs-ruling` label is stale:
+** *D115*: (a), with fallback (b);
+** *D217*: "CodeRabbit commit-pushing is off", tracked in #1091;
+** *D230*: org overrides, checklist marid#66;
+** `docs/SIGNING-POLICY.adoc:54-55` already says "Turn that off".
+. MISCHIEF: Possibly still live. CodeRabbit commits still land: `b9e78cd4` "🔧 CodeRabbit CI Fix" (#1188, 2026-10-06), and rsr-template-repo `.coderabbit.yaml` has `finishing_touches.docstrings.enabled: true`.
+. STATE: Ruled; execution tracked in #1091.
+. *MERGE-INTO(#1091)*. Carry the check-suite `startup_failure` probe and the finishing_touches config note.
+. RISK: none.
+
+==== #1024 — KYAML step 5/6 — migrate estate-authored non-bot YAML
+. scope:estate,refactor,automation,priority:p3,status:blocked · 2026-09-30 · 0
+. LITERAL: Migrate non-bot YAML in reversible batches with no comment loss; exclude bots and lockfiles; re-measure.
+. GOLDEN: "Blocked by #1023" is stale: #1023 is closed and ruled by *D280/D307* ("non-workflow YAML migrates now"; estate config uses `.kyaml`).
+. MISCHIEF: Non-KYAML config. Partly done:
+** standards migrated 22 files (#1193 `63d2bbf6`);
+** the formatter `scripts/kyaml-format.sh` (#1117) exists, with the comment-preservation proof (#1067/#1021);
+** the estate population of ~11k–14k files is untouched.
+. STATE: Partly done (standards); estate not started.
+. *ESTATE-CAMPAIGN*. Relabel `status:ready`.
+. Steps:
+** Per D284, the next batch is the six stapeln-ecosystem repos.
+** Per repo: run `scripts/kyaml-format.sh` on estate-owned non-workflow, non-dependabot, non-lockfile YAML; rename to `.kyaml` where no tool demands the name; one revertible commit per repo; run the comment-preservation check.
+** Watch #1137 (dupkey false positives on KYAML).
+
+Effort L. Tier: sonnet (haiku per batch).
+. RISK: bulk sweep; exclude forks and third-party repos.
+
+==== #1025 — KYAML step 6/6 — workflows, only if step 4 rules them in scope
+. migration,scope:estate,priority:p3,status:blocked · 2026-10-01 · 1
+. LITERAL: Convert workflows only once ruled in scope, after Dependabot/gh-actions-lock dispositions, with a lock-coverage shim and a jobs ≥ 1 check.
+. GOLDEN: D280 put workflows in scope, but only after a yq-based lock-coverage check is a required context. CLAUDE.md: "leave them alone until then". `a695e379` (#1207) restored block YAML until the gates read KYAML; `7712ae15` (#1217) made the lock gate read `uses:` with yq.
+. MISCHIEF: N/A (future work).
+. STATE: Blocked.
+. *KEEP-OPEN-BLOCKED* until the yq-based lock-coverage shim is a *required* context (D280) and the per-workflow keying gap noted in the comment is closed.
+. RISK: startup-kill risk if done early.
+
+==== #1031 — CodeQL default setup and a committed advanced workflow cannot coexist — 3 metadatastician repos run both
+. bug,scope:estate,priority:p2,status:ready · 2026-09-30 · 1
+. LITERAL: Pick an estate rule (default or advanced); apply it to first-post, harvard-dehallucinator and metadatastician-governance after the AC5 coverage diff; add detection.
+. GOLDEN: Ruled. *D256* (2026-10-01): "Default setup. Retire `codeql*.yml` to `.github-retired/`; first re-point any required context only codeql.yml emits." This matches AC5's finding that default setup covers more: extended suite plus 4 more languages.
+. MISCHIEF: Unverifiable here (other repos). Note that standards itself still carries `codeql.yml` + `codeql-reusable.yml`, so D256's applicability to standards needs a line.
+. STATE: Ruled; execution not evidenced.
+. *ESTATE-CAMPAIGN*. Make this the D256 carrier: 57 repos, starting with these 3.
+. Steps per repo:
+** (1) list required contexts emitted only by codeql.yml and re-point or remove them via the applier;
+** (2) `git mv .github/workflows/codeql*.yml .github-retired/` and remove its `actions.lock` key in the *same commit*;
+** (3) verify default-setup analyses continue.
+
+Add the AC6 detection to governance (default setup enabled AND committed codeql workflow → warn). Effort M. Tier: sonnet.
+. RISK: bulk cross-repo; lock/key coupling (startup-kill if split).
+
+==== #1032 — O6 propagation: four contradictions between the ruling and the committed rulesets
+. governance,priority:p1,scope:estate · 2026-09-30 · 2 (RULING D128: remove AI integrations from bypass; reconcile base.json/README)
+. LITERAL: Resolve 4 items: (1) Integration bypass, (2) base.json required_status_checks, (3) tag-side `source_type`, (4) "zero is failure".
+. GOLDEN: Rulings interact:
+** *D128* removes AI integrations;
+** *D257* (later) strips *owner* bypass everywhere and keeps Dependabot 29110;
+** D17 originally listed claude/dependabot/github-actions/oikosbot.
+
+The canon must reconcile all three.
+. MISCHIEF: Items 3 and 4 fixed in `bd9313a6` (`apply-tag-ruleset-canon.sh` source_type, Property 14). Items 1 and 2 still exist:
+** `config/rulesets/gates-only.json` bypass still has claude 1236702 and oikosbot 2538504, plus 15368, 29110 and RepositoryRole:5;
+** `base.json` still carries `required_status_checks` and bypass integrations 347564, 46505, and others.
+. STATE: Partly done; D128 not executed.
+. *BOT-DO*
+. Steps:
+** Edit `config/rulesets/gates-only.json` and `base.json` to the combined D17+D128+D257 shape: AI integrations (1236702, 2538504 and any other AI apps) removed; RepositoryRole:5 removed per D257; 29110 kept in pull_request mode; github-actions 15368 decided explicitly.
+** Decide whether base.json keeps `required_status_checks` (item 2) and record the reasoning.
+** Update `config/README.adoc`.
+** Keep the paint-type `--no-integration-bypass` record consistent.
+** Run `scripts/tests/branch-gates-apply-test.sh`.
+
+Estate re-convergence via the applier is a follow-up. Effort S. Tier: opus (reconciling three rulings).
+. RISK: ruleset canon drives estate writes; outward-facing.
+
+==== #1033 — gates.json: never_required_contexts cannot catch default-setup CodeQL by name
+. bug,priority:p1,scope:estate · 2026-09-30 · 1 (RULING D172: exclude by source app id, not context name)
+. LITERAL: Exclude CodeQL default-setup contexts by the producing app id.
+. GOLDEN: No.
+. MISCHIEF: Still exists:
+** `config/rulesets/gates.json` `never_required_contexts` still lists the literal `"CodeQL (default setup)"`;
+** `scripts/apply-branch-gates.sh:173-189` matches by name only, with no app-id field.
+. STATE: Ruled; not executed.
+. *BOT-DO*
+. Steps:
+** Add `never_required_apps: [<github-advanced-security app id>]` to gates.json and have `apply-branch-gates.sh` drop any derived context whose check-run `app.id` is in it.
+** Keep the name list for workflow contexts.
+** Add a case to `scripts/tests/branch-gates-apply-test.sh` where `analyze (actions, none)` from the GHAS app is excluded.
+
+Effort S. Tier: sonnet.
+. RISK: none.
+
+==== #1035 — 27 Scorecard callers omit actions:read and will startup_failure on their next standards pin bump
+. meta:campaign,cicd,priority:p1,scope:estate,status:ready · 2026-09-30 · 1
+. LITERAL: All 27 callers carry an effective `actions: read`; census gives 0 LATENT-MISSING; no regressions; recurrence control; separate modshells diagnosis.
+. GOLDEN: No. D325 grants `actions: read` at job level on under-granting callers, for named instances.
+. MISCHIEF: Latent startup-kill. AC4 option (a) is done: `scorecard-reusable.yml` header (lines 9-14) documents the required caller scopes. The 27-repo sweep is unverified.
+. STATE: Partly done.
+. *ESTATE-CAMPAIGN*
+. Steps:
+** (1) Teach `apply-workflow-pins-remote.sh` to refuse, or co-fix, a bump whose callee job declares a permission the caller job lacks (a permission-ceiling check).
+** (2) PR `actions: read` into the job block of each of the 27 Scorecard callers.
+** (3) Re-census.
+** (4) Open a separate issue for modshells.
+
+Effort M. Tier: sonnet.
+. RISK: bulk cross-repo.
+
+==== #1036 — Scorecard reconciler fails correct repos: gh actions-lock --verify is blind to job-level reusable refs
+. bug,cicd,priority:p1,scope:estate,status:ready · 2026-09-30 · 1
+. LITERAL: Make the reconciler handle both directions of job-level blindness, with tests.
+. GOLDEN: No.
+. MISCHIEF: Fixed:
+** `scripts/reconcile-scorecard-actions-lock.rb:18,42-48` (`REUSABLE_REF`, `reusable_workflow_deps`) handles both directions (`bd9313a6`);
+** follow-ups `5a0891e9`/#1168 and `043496c2`/#1183 do per-file reconciliation;
+** `ruby scripts/tests/reconcile-scorecard-actions-lock-test.rb` gives 10 runs, 65 assertions, 0 failures (re-run today).
+. STATE: Done.
+. *CLOSE-DONE* (`bd9313a6`, #1168, #1183).
+. RISK: none.
+
+==== #1037 — 48 open Dependabot PRs re-introduce the codeql-action v4.38.1 startup-killer, and the dependabot.yml ignore rule is being bypassed in 15 repos
+. enhancement,cicd,priority:p1,scope:estate,status:needs-ruling · 2026-09-30 · 3
+. LITERAL: Close the 48 PRs; make the codeql hold effective (exclude from the group).
+. GOLDEN: Yes, the premise is refuted. *#1093* measured that "4.38.1 was never broken": the startup deaths came from `actions.lock` drift (Dependabot moves `uses:` and leaves the lock). The marid evidence (comment 3) shows the "ignore bypass" was a sub-action name mismatch (`github/codeql-action/init` versus a bare name).
+. MISCHIEF: Still live, but as lock drift: about 53 repos are startup-dead on 4.38.2. 23 PRs were closed and 2 await a manual close (gitbot-fleet#578, jtv-halting-islands-ct#24). `docs/DEPENDABOT-POLICY.adoc` documents the `/*` rule.
+. STATE: Done as literally asked; the premise is superseded.
+. *CLOSE-SUPERSEDED(#1093)*. The durable cure is lock regeneration (`dependabot-lock-regen.yml`, #968). D229's 4.38.2 hand-bump proof should also be recorded on #1093.
+. RISK: none.
+
+'''
+
+=== Cross-cutting findings
+
+. *Close-outs drafted and never run.* `scripts/triage-2026-09-24-apply.sh` and `-29-apply.sh` were never executed, so already-resolved items are still open. Examples: #808, which those scripts close into #913, and #1010, #963 and #967.
+. *The 9-archive move (2026-10-09) changed many issues.* It makes some moot and reshapes others: #914, #928, #940, #999, #1001 (3rd copy), #929, the archive halves of #937/#938, and 8 of 12 crates in #933. Yet the gates still treat the archive as live:
+** Hypatia scans `9-archive/` (dozens of baseline acks point there);
+** the ci-pipeline Nickel job lints it;
+** only validate-sha-pins (`VENDORED_MARK`) and validate-k9 exclude it.
+
+One rule ("9-archive is frozen and excluded from every gate", plus a `.hypatia-ignore`) would retire a whole class of acks. The archive also has no top-level banner. `9-archive/rhodium-standard-repositories/CLAUDE.md` is still auto-loaded by agents.
+. *Owner rulings are applied but not executed.* These are cheap bot work:
+** D128 (#1032), D132 (#1007), D133 (#957), D168 (#929), D169 (#999), D170 (#1001), D172 (#1033);
+** D313 (#944: both `.py` files are still present, and `migrate_a2ml_to_deed.sh` plans to call them);
+** D131 (only partly, #941).
+. *Unreviewed direct pushes and unratified decision documents.* Mistral Vibe pushed several commits straight to main with no PR: `65d9af01`, `a41f3692`, `4d606177`, `e59aad71`, `1f099de9` and `32d37263`.
+** They added two decision documents titled "Decision D???", which claim owner acceptance but carry no D-number and are not on #787 or #1234: `docs/decisions/2026-10-04-{actions-lock-enforcement,deno-residue-false-positives}.adoc`.
+** #1174 records another direct push breaking `kyaml-format.sh`.
+. *The actions.lock rules are spread across issues that contradict each other.* #969, #992, #993, #1036, #1093 and #1169 make conflicting measured claims. Lock drift grew from 15 repos to 163 (#803). One lock-shape spec is needed, plus a verified rollout of `dependabot-lock-regen`.
+. *Live regression: rsr-template-repo's Base ruleset 23218684.* It was rewritten on 2026-10-01T23:23Z and the #1008 repair is undone: `pull_request` is gone and the code-scanning threshold is back to `all`.
+. *Urgent: #975.* 21 baseline acknowledgements expire on 2026-10-21, and 43 baseline entries name files that no longer exist.
+. *The language-policy source still contradicts the agent instructions.* `3-practice/LANGUAGE-POLICY.adoc:60` still says "TypeScript is permitted only where AffineScript cannot reach", which `.claude/CLAUDE.md` calls too permissive. This is relevant to #921 and #659.
