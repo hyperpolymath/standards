@@ -26,10 +26,14 @@
 #     kept alive (nothing else is pruned);
 #   * dependency records in C-locale key order, as gh actions-lock writes them.
 #
+# A short pin that prefixes the target (as the applier leaves a FRESH one) is
+# current: its own short-keyed record is left alone.
+#
 # FAIL-CLOSED: it works on a copy and leaves the lock untouched (exit 1) when a
 # workflow still pins a standards reusable at another SHA, when the called
-# reusable is not in standards at TARGET, when the OLD record is missing, or
-# when a needed record is in neither lock. A lock with a dangling edge is
+# reusable is not in standards at TARGET, when the OLD record is missing,
+# when a needed record is in neither lock, or when a workflow's standards entries
+# would not name exactly the refs it pins. A lock with a dangling edge is
 # worse than a stale one: the stale one is at least reported by the gate.
 #
 # Usage: relock-standards-pin.sh --to <sha> [--standards <dir>] <workflows-dir>
@@ -46,7 +50,7 @@ while [ $# -gt 0 ]; do
     --to) TARGET="${2:-}"; shift 2 ;;
     --to=*) TARGET="${1#*=}"; shift ;;
     --standards) SROOT="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,41p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
     -*) echo "relock-standards-pin: unknown option $1" >&2; exit 2 ;;
     *) WF="$1"; shift ;;
   esac
@@ -67,13 +71,21 @@ shopt -s nullglob
 wfs=("$WF"/*.yml "$WF"/*.yaml)
 shopt -u nullglob
 pins=$(grep -hoE "$PIN_RE" "${wfs[@]}" 2>/dev/null | sort -u || true)
-stale=$(printf '%s\n' "$pins" | awk -F@ -v target="$TARGET" \
-  'NF > 1 && $NF != substr(target, 1, length($NF))')
-[ -z "$stale" ] || refuse "workflows still pin other standards commits: $(echo $stale)"
+# A short pin (7+ hex) that prefixes TARGET names TARGET: the applier counts it
+# FRESH and leaves it as written, and the lock keys it by that short ref in a
+# record of its own, which is left as it is. Only full pins feed TARGET's record.
+full="" stale=""
+for p in $pins; do
+  r=${p##*@}
+  if [ "$r" = "$TARGET" ]; then full="$full $p"
+  elif [ "${#r}" -lt 7 ] || [ "${TARGET:0:${#r}}" != "$r" ]; then stale="$stale $p"
+  fi
+done
+[ -z "$stale" ] || refuse "workflows still pin other standards commits:$stale"
 
 olds=$(grep -oE "'hyperpolymath/standards@[0-9a-f]{40}'" "$L" | tr -d "'" | sed 's/.*@//' | sort -u | grep -vx "$TARGET" || true)
 if [ -z "$olds" ]; then echo "relock-standards-pin: lock already keyed to standards@${TARGET:0:12}"; exit 0; fi
-[ -n "$pins" ] || refuse "lock names standards commits but no workflow calls a standards reusable"
+[ -n "$full" ] || refuse "lock names standards commits but no workflow pins standards@${TARGET:0:12} in full"
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 q="'"
@@ -85,7 +97,7 @@ rec_body() { awk -v k="    ${q}$1${q}:" '$0==k{f=1;print;next} f&&/^    [^ ]/{ex
 
 # Actions the called reusables use at TARGET, normalised to owner/repo@ref.
 : > "$tmp/uses"
-for p in $pins; do
+for p in $full; do
   path=${p#hyperpolymath/standards/}; path=${path%@*}
   git -C "$SROOT" show "${TARGET}:${path}" > "$tmp/reusable" 2>/dev/null || refuse "$path is not in standards at ${TARGET:0:12}"
   sed 's/[[:space:]]#.*$//' "$tmp/reusable" \
@@ -155,7 +167,17 @@ n=$(deps_line "$tmp/out")
 grep -oE "^ {8,12}- '[^']+'" "$tmp/out" | sed -E "s/^ +- '|'$//g" | LC_ALL=C sort -u > "$tmp/edges"
 tail -n +"$((n+1))" "$tmp/out" | grep -oE "^    '[^']+':" | sed -E "s/^    '|':$//g" | LC_ALL=C sort -u > "$tmp/recs"
 dangling=$(LC_ALL=C comm -23 "$tmp/edges" "$tmp/recs")
-[ -z "$dangling" ] || refuse "result would have dangling edges: $(echo $dangling)"
+[ -z "$dangling" ] || refuse "result would have dangling edges: ${dangling//$'\n'/ }"
+
+# Each workflow's standards entries must name exactly the refs its pins carry.
+# The gates match an entry to a `uses:` by its ref as written, so an entry
+# re-keyed to TARGET for a workflow that pins a short ref is a desync they reject.
+for w in "${wfs[@]}"; do
+  want=$(grep -oE "$PIN_RE" "$w" | sed 's#^hyperpolymath/standards/.*@#hyperpolymath/standards@#' | LC_ALL=C sort -u || true)
+  have=$(awk -v k="    '.github/workflows/${w##*/}':" '$0==k{f=1;next} f&&!/^        - /{exit} f' "$tmp/out" \
+    | grep -oE "'hyperpolymath/standards@[0-9a-fA-F]+'" | tr -d "'" | LC_ALL=C sort -u || true)
+  [ "$want" = "$have" ] || refuse "${w##*/}: lock entries [${have//$'\n'/ }] would not match its pins [${want//$'\n'/ }]"
+done
 
 cat "$tmp/out" > "$L"
 echo "relock-standards-pin: $L keyed to standards@${TARGET:0:12} (from $(echo $olds | sed 's/\([0-9a-f]\{12\}\)[0-9a-f]*/\1/g'))"

@@ -373,7 +373,10 @@ list_repos() {
 # without text are skipped; decoding failures remove the destination file
 # without changing the success status. In the REST fallback, returns 0 for
 # a missing directory (HTTP 404), and 1 for other listing or download failures;
-# files already downloaded remain in destdir on failure.
+# files already downloaded remain in destdir on failure. Only a 404 is "no
+# workflows": returning 0 on failure made a rate-limited repo vanish from the
+# census while `walked N` still counted it (measured 2026-10-02, shared
+# 5,000/h token exhausted mid-run).
 fetch_workflows() {
   local repo="$1" dest="$2" owner="${1%%/*}" name="${1##*/}" resp
   mkdir -p "$dest"

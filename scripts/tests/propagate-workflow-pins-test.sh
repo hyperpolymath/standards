@@ -158,7 +158,9 @@ set -e
 try "linked shallow worktree defers to server reachability" test "$RC" -eq 0
 try "linked shallow worktree does not report unreachable" not_contains "not reachable" "$OUT"
 
-# ── 11. A refused relock must not stage the rewritten pins ───────────────────
+# ── 11. A refused relock restores the workflows and stages nothing ──────────
+# The reusables are not in standards at the target, so the relock is refused.
+# New pins over the old lock must be left neither in the index nor in the tree.
 ROOT="$TEST_DIR/refused-many"
 R="$ROOT/refused"; mk_consumer "$R"
 cat > "$R/.github/workflows/actions.lock" <<EOF
@@ -183,6 +185,8 @@ git -C "$R" add .github/workflows/governance.yml
 printf '\n# unstaged edit\n' >> "$R/.github/workflows/governance.yml"
 git -C "$R" diff --cached --binary > "$TEST_DIR/index-before"
 cp "$R/.github/workflows/actions.lock" "$TEST_DIR/lock-before"
+cp "$R/.github/workflows/governance.yml" "$TEST_DIR/governance-before"
+cp "$R/.github/workflows/scorecard.yml" "$TEST_DIR/scorecard-before"
 mk_consumer "$ROOT/success"
 set +e
 OUT=$(bash "$PROP" --fix --to "$TARGET" "$ROOT" 2>&1)
@@ -196,6 +200,8 @@ try "refused relock preserves index without staging pins" cmp -s "$TEST_DIR/inde
 try "refused relock leaves branch unchanged" test "$(git -C "$R" branch --show-current)" = main
 try "refused relock retains staged workflow edit" file_has "$R/.github/workflows/governance.yml" '# staged edit'
 try "refused relock retains unstaged workflow edit" file_has "$R/.github/workflows/governance.yml" '# unstaged edit'
+try "refused relock restores an edited workflow byte for byte" cmp -s "$TEST_DIR/governance-before" "$R/.github/workflows/governance.yml"
+try "refused relock restores an unedited workflow byte for byte" cmp -s "$TEST_DIR/scorecard-before" "$R/.github/workflows/scorecard.yml"
 try "refused relock reports skipped staging" contains 'staging skipped' "$OUT"
 try "refused relock does not prevent other repo fixes" file_has "$ROOT/success/.github/workflows/governance.yml" "governance-reusable.yml@${TARGET}"
 

@@ -179,9 +179,10 @@ rewrite_file() {
 # local checkout's workflows; do nothing if its workflows directory is absent.
 # Under --fix, rewrite pins to TARGET_SHA and relock an existing actions.lock
 # when workflows change. A relock failure increments LOCK_REFUSED for the
-# script's final exit status and leaves rewritten workflows in place, but
-# skips branch selection and staging. Otherwise, branch/staging failures are
-# ignored; returns 0 after processing without committing or pushing.
+# script's final exit status, restores each rewritten workflow to its content
+# before this run (uncommitted edits included), and skips branch selection and
+# staging. Otherwise, branch/staging failures are ignored; returns 0 after
+# processing without committing or pushing.
 process_repo() {
   local repo="$1" name
   name="$(basename "$repo")"
@@ -189,7 +190,9 @@ process_repo() {
   [ -d "$wfdir" ] || return 0
 
   local total_behind=0 files_touched=0
-  local f base behind
+  local f base behind orig=""
+  # The originals of the files rewritten below, restored if the lock refuses.
+  if $FIX_MODE; then orig="$(mktemp -d)"; fi
   for f in "$wfdir"/*.yml "$wfdir"/*.yaml; do
     [ -f "$f" ] || continue
     grep -qE "$PIN_RE" "$f" || continue
@@ -200,6 +203,7 @@ process_repo() {
       total_behind=$((total_behind + behind))
       files_touched=$((files_touched + 1))
       if $FIX_MODE; then
+        cp -p "$f" "$orig/$base"
         rewrite_file "$f"
       fi
     else
@@ -217,10 +221,16 @@ process_repo() {
     else
       printf '%-30s\t%-28s\t%s\t-> %s\n' "$name" "actions.lock" "LOCK-REFUSED" "${TARGET_SHA:0:12}"
       LOCK_REFUSED=$((LOCK_REFUSED + 1))
-      # Leave this repo's index and branch untouched when the lock cannot follow.
+      # New pins over the old lock is the state the relock exists to prevent:
+      # put this repo's workflows back as they were, and leave its index and
+      # branch untouched.
+      cp -p "$orig"/* "$wfdir"/
+      rm -rf "$orig"
+      log "  [not staged] $name — lock refused; workflows restored"
       return 0
     fi
   fi
+  [ -z "$orig" ] || rm -rf "$orig"
 
   if $FIX_MODE && [ "$files_touched" -gt 0 ] && git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
     local current_branch
@@ -267,7 +277,7 @@ else
   echo "# Re-run with --fix to stage the bump on a branch (no commit/push)."
 fi
 if [ "$LOCK_REFUSED" -gt 0 ]; then
-  echo "# LOCK-REFUSED in $LOCK_REFUSED repo(s): their pins moved but actions.lock could not follow; staging skipped."
-  echo "# Do NOT commit those as they stand; see relock-standards-pin.sh's message above."
+  echo "# LOCK-REFUSED in $LOCK_REFUSED repo(s): actions.lock could not follow the pins; workflows restored, staging skipped."
+  echo "# See relock-standards-pin.sh's message above."
   exit 1
 fi
