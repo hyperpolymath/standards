@@ -37,6 +37,7 @@ for s in relock-sha-keys complete-job-refs prune-stale; do
 done
 printf '#!/usr/bin/env bash\nexit "${CLOSE_RC:-0}"\n' > "$TOOLS/close-lock.sh"
 printf '#!/usr/bin/env bash\nexit "${VERIFY_RC:-0}"\n' > "$TOOLS/update-actions-lock.sh"
+printf '#!/usr/bin/env bash\nexit "${SYNC_RC:-0}"\n' > "$TOOLS/check-lock-sync.sh"
 
 # The `gh` stub. `actions-lock` (update mode) applies $TOOL_ACTION to the cwd;
 # `api graphql` records its stdin payload and answers with a commit oid.
@@ -131,8 +132,12 @@ expect "an already-current lock is 'current' (idempotent second run)" current "$
 d="$(fixture nolock)"; git -C "$d" rm --quiet .github/workflows/actions.lock
 expect "a repo without actions.lock is skipped" no-lock "$(regen_lock "$d" 2>/dev/null)"
 
+# standards#1122: composite repos are no longer refused; the repair chain and
+# check-lock-sync.sh follow local composites, and the sync check decides.
 d="$(fixture composite)"; mkdir -p "$d/.github/actions/x"
-expect "a repo with local composite actions is refused" composite-unsupported "$(TOOL_ACTION=bump regen_lock "$d" 2>/dev/null)"
+expect "a repo with local composite actions is regenerated" changed "$(TOOL_ACTION=bump regen_lock "$d" 2>/dev/null)"
+d="$(fixture syncfail)"
+expect "a lock check-lock-sync rejects is unverified, not committed" unverified "$(TOOL_ACTION=bump SYNC_RC=1 regen_lock "$d" 2>/dev/null)"
 
 # Planted control for the dirty guard: a repair step that writes anything
 # besides the lock (after the restore has run) must stop the commit.
