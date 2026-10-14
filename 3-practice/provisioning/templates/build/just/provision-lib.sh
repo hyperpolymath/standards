@@ -24,7 +24,7 @@
 # Exit: 0 ok | 1 a FAIL was found / a step failed | 2 usage error
 set -uo pipefail
 
-PROVISION_LIB_VERSION="0.5.0"
+PROVISION_LIB_VERSION="0.6.0"
 ROOT="${PROVISION_ROOT:-$(pwd)}"
 cd "$ROOT" || exit 2
 DEED=".machine_readable/descriptiles/provisioning_praxis.deed"
@@ -135,13 +135,16 @@ lang_tools() {
     gleam)   echo "gleam erl" ;;
     ocaml)   echo "opam dune ocaml" ;;
     haskell) echo "ghc cabal" ;;
-    bun)     echo "bun" ;;
+    # One package.json, every runtime (LANGUAGE-POLICY §1.4): bun runs it, and
+    # `js-runtimes regen` needs deno and pnpm to write their locks too.
+    bun)     echo "bun deno pnpm" ;;
     docs)    echo "" ;;
   esac
 }
 # Guix package specs per language (verified 2026-09-30 against guix ae77aeb in
 # docker.io/metacall/guix). Guix has NO idris2, gleam, bun or lychee, and its
-# julia is 1.8.5: those come from mise, which Guix itself ships ("mise").
+# julia is 1.8.5: those come from mise, which Guix itself ships ("mise"). deno
+# and pnpm come from mise as well (their Guix packages were not measured).
 GUIX_BASE="git bash coreutils nss-certs just mise shellcheck"
 # Print the Guix package specifications for language $1, if available.
 lang_guix() {
@@ -160,7 +163,7 @@ lang_guix() {
 # Tools a Guix shell cannot supply, so mise (inside that shell) does.
 lang_guix_gap() {
   case "$1" in
-    idris2) echo "idris2 (via pack)" ;; julia) echo julia ;; gleam) echo gleam ;; bun) echo bun ;; docs) echo lychee ;;
+    idris2) echo "idris2 (via pack)" ;; julia) echo julia ;; gleam) echo gleam ;; bun) echo "bun deno pnpm" ;; docs) echo lychee ;;
   esac
 }
 # Print deduplicated base and detected-language Guix package specifications.
@@ -180,7 +183,7 @@ RECIPE_TOOLS="trivy"
 lang_mise() { case "$1" in
     rust) echo "rust" ;; zig) echo "zig" ;; julia) echo "julia" ;;
     elixir) echo "erlang elixir" ;; gleam) echo "erlang gleam" ;; ocaml) echo "opam" ;;
-    bun) echo "bun" ;; docs) echo "lychee" ;; esac; }
+    bun) echo "bun deno pnpm" ;; docs) echo "lychee" ;; esac; }
 # Print known recipe tools referenced outside comments in the repository Justfiles.
 recipe_tools() {
   local t f body=""
@@ -212,7 +215,7 @@ lang_remedy() {
     gleam)   echo "mise use gleam@latest erlang@latest" ;;
     ocaml)   echo "mise use opam@latest && opam init -y && opam switch create . --deps-only -y" ;;
     haskell) echo "ghcup: https://www.haskell.org/ghcup/  (or: just dev-shell, which uses Guix)" ;;
-    bun)     echo "mise use bun@latest" ;;
+    bun)     echo "mise use bun@latest deno@latest pnpm@latest" ;;
   esac
 }
 
@@ -339,7 +342,9 @@ has_recipe() { have just && just --summary 2>/dev/null | tr " " "\n" | grep -qx 
 version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
 
 # Tools that must never appear in a repo's toolchain (estate language policy).
-BANNED_TOOLS='python|deno|denojs|node|nodejs|npm|yarn|pnpm|typescript|rescript|make|black|ruff|pip|poetry|nix|go|golang|java|kotlin'
+# deno and pnpm are permitted runtimes since the 2026-10-14 ruling (Bun > Deno >
+# pnpm > npm); node stays banned, so npm, the last resort, is never provisioned.
+BANNED_TOOLS='python|node|nodejs|npm|yarn|typescript|rescript|make|black|ruff|pip|poetry|nix|go|golang|java|kotlin'
 BANNED_BACKENDS='npm|pipx|pip|go'
 
 # ---------------------------------------------------------------------------
@@ -546,7 +551,7 @@ cmd_doctor() {
   [ -f .tool-versions ] && warn "PV-W22 .tool-versions present — a second toolchain source; fold it into mise.toml"
   if [ -f mise.toml ] || [ -f .mise.toml ] || [ -f .tool-versions ]; then
     local bad; bad=$(mise_banned)
-    [ -z "$bad" ] && pass "the mise configs pin no banned tool" || warn "PV-W23 a mise config pins banned tool(s): $bad (language policy: bun, no python/deno/node/npm/make)"
+    [ -z "$bad" ] && pass "the mise configs pin no banned tool" || warn "PV-W23 a mise config pins banned tool(s): $bad (language policy: Bun > Deno > pnpm; no python/node/npm/make)"
   fi
   # hypatia guix_not_stub reads guix.scm AND build/guix.scm; an unfilled __PLACEHOLDER__ is a stub too.
   local g r gstub=""
@@ -571,14 +576,16 @@ cmd_doctor() {
 
   hdr "Estate policy drift"
   local f any=0
-  for f in deno.json deno.jsonc deno.lock import_map.json; do
-    [ -f "$f" ] && { warn "PV-W30 $f — Deno leftover; the estate runtime is bun (migration issue tracks it)"; any=1; }
+  # deno.lock is a generated lock every package carries (`js-runtimes regen`);
+  # authoring in Deno is permitted (tier 2), so its manifests are a notice only.
+  for f in deno.json deno.jsonc import_map.json; do
+    [ -f "$f" ] && info "PV-W30 $f — authored for Deno (permitted, tier 2); package.json stays the one manifest every runtime reads"
   done
   for f in flake.nix flake.lock shell.nix default.nix; do [ -f "$f" ] && { warn "PV-W31 $f — Nix is not an estate toolchain; Guix is"; any=1; }; done
   for f in Makefile GNUmakefile makefile; do [ -f "$f" ] && { warn "PV-W32 $f — Justfile is the only task runner"; any=1; }; done
   for f in requirements.txt pyproject.toml setup.py Pipfile; do [ -f "$f" ] && { warn "PV-W33 $f — Python is not an estate language"; any=1; }; done
-  for f in package-lock.json yarn.lock pnpm-lock.yaml tsconfig.json; do [ -f "$f" ] && { warn "PV-W34 $f — npm/yarn/pnpm/TypeScript leftover; bun only"; any=1; }; done
-  [ $any -eq 0 ] && pass "no deno / nix / make / python / npm leftovers"
+  for f in package-lock.json yarn.lock tsconfig.json; do [ -f "$f" ] && { warn "PV-W34 $f — npm/yarn/TypeScript leftover; package.json + bun.lock, deno.lock and pnpm-lock.yaml (js-runtimes regen)"; any=1; }; done
+  [ $any -eq 0 ] && pass "no nix / make / python / npm leftovers"
 
   local hook=build/just/doctor-local.sh
   if [ -f "$hook" ]; then
