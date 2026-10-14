@@ -44,8 +44,14 @@ done
 # Project.toml / JuliaProject.toml are not scanned, and neither is a Manifest
 # (every entry is a resolved dependency). Everything else in a project file,
 # including the package's own top-level `uuid =`, is still checked.
+#
+# A mint template is scanned under the rules of the file it becomes:
+# `Project.toml.in` renders to `Project.toml` (rsr-template-repo archetypes),
+# so its [extras] keep the same exemption and its own `uuid =` is still checked.
 scannable_text() {
-  case "${1##*/}" in
+  name=${1##*/}
+  name=${name%.in}
+  case "$name" in
     Manifest.toml|Manifest-v*.toml|JuliaManifest.toml|JuliaManifest-v*.toml) ;;
     Project.toml|JuliaProject.toml)
       awk '/^[[:space:]]*\[/ { t = $0; gsub(/[[:space:]]/, "", t); sub(/#.*/, "", t)
