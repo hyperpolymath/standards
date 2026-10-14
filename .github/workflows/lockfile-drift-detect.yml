@@ -65,6 +65,11 @@ jobs:
           set -euo pipefail
           : > drift-report.tsv
           printf 'repo\tworkflow\trequested\tlocked\n' >> drift-report.tsv
+          # Second report from the same clones: workflows that run their own
+          # gh-actions-lock beside governance's lockfile gate (the copied
+          # workflow-linter step). Owner decision 2026-10-14: drop them; the
+          # estate wave works this list. Lock-bearing repos only, as below.
+          printf 'repo\tworkflow\tpins\n' > copied-lock-step.tsv
 
           # Enumerate, then filter. `gh repo list` has a denominator we can
           # state; `gh search` does not. A count landing on a round number is a
@@ -80,7 +85,7 @@ jobs:
             mv r.tmp repos.txt
           fi
 
-          scanned=0; withlock=0; drifted=0; errors=0
+          scanned=0; withlock=0; drifted=0; errors=0; copied=0
           while read -r r; do
             scanned=$((scanned+1))
             # Cheap probe first: skip repos with no lockfile (that is failure
@@ -107,6 +112,14 @@ jobs:
               errors=$((errors+1))
               echo "::warning::$r: drift check errored (rc=$rc) — see drift-errors.log"
             fi
+            rc=0
+            bash scripts/check-copied-lock-step.sh _w "$r" >> copied-lock-step.tsv 2>> drift-errors.log || rc=$?
+            if [ "$rc" -eq 1 ]; then
+              copied=$((copied+1))
+            elif [ "$rc" -ne 0 ]; then
+              errors=$((errors+1))
+              echo "::warning::$r: copied-lock-step check errored (rc=$rc) — see drift-errors.log"
+            fi
             rm -rf _w
           done < repos.txt
 
@@ -122,15 +135,18 @@ jobs:
             echo "drifted=$drifted"
             echo "errors=$errors"
             echo "rows=$rows"
+            echo "copied=$copied"
           } >> "$GITHUB_OUTPUT"
-          echo "scanned=$scanned withlock=$withlock drifted=$drifted errors=$errors rows=$rows"
+          echo "scanned=$scanned withlock=$withlock drifted=$drifted errors=$errors rows=$rows copied=$copied"
 
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: lockfile-drift-report
-          path: drift-report.tsv
+          path: |
+            drift-report.tsv
+            copied-lock-step.tsv
           retention-days: 90
 
       - name: Step summary
@@ -150,6 +166,12 @@ jobs:
             echo
             echo '```'
             head -40 drift-report.tsv
+            echo '```'
+            echo
+            echo "Running their own gh-actions-lock (copied linter step): **${{ steps.sweep.outputs.copied }}** repo(s)"
+            echo
+            echo '```'
+            head -40 copied-lock-step.tsv
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -185,6 +207,7 @@ jobs:
             echo "| **with drift** | **${{ steps.sweep.outputs.drifted }}** |"
             echo "| check errors (rc≠0,1) | ${{ steps.sweep.outputs.errors }} |"
             echo "| drifted entries | ${{ steps.sweep.outputs.rows }} |"
+            echo "| running their own gh-actions-lock | ${{ steps.sweep.outputs.copied }} |"
           } > issue-body.md
           body="$(cat issue-body.md)"
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label lockfile-drift \
