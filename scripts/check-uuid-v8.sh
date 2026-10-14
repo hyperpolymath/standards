@@ -16,7 +16,7 @@
 #
 # Retired A2ML files (*.a2ml, *.a2ml.in) are not scanned (owner ruling D320,
 # 2026-10-07). A2ML is dead and may not be hand-converted (D313); its
-# identifiers become v8 when kcX converts each file into deed, so checking
+# identifiers become v8 when kyX converts each file into deed, so checking
 # them here would only force edits to a format the estate is deleting.
 set -eu
 
@@ -44,8 +44,17 @@ done
 # Project.toml / JuliaProject.toml are not scanned, and neither is a Manifest
 # (every entry is a resolved dependency). Everything else in a project file,
 # including the package's own top-level `uuid =`, is still checked.
+#
+# A mint template `<name>.in` becomes `<name>` when a repository is minted from
+# it, so it is scanned under <name>'s rules. rsr-template-repo's julia-library
+# archetype ships Project.toml.in; scanned as an unknown file, its [extras]
+# registry UUIDs failed the strict gate in the template itself (2026-10-14).
 scannable_text() {
-  case "${1##*/}" in
+  base=${1##*/}
+  case "$base" in
+    *.in) base=${base%.in} ;;
+  esac
+  case "$base" in
     Manifest.toml|Manifest-v*.toml|JuliaManifest.toml|JuliaManifest-v*.toml) ;;
     Project.toml|JuliaProject.toml)
       awk '/^[[:space:]]*\[/ { t = $0; gsub(/[[:space:]]/, "", t); sub(/#.*/, "", t)

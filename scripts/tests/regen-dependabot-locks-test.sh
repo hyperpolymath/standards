@@ -37,6 +37,7 @@ for s in relock-sha-keys complete-job-refs prune-stale; do
 done
 printf '#!/usr/bin/env bash\nexit "${CLOSE_RC:-0}"\n' > "$TOOLS/close-lock.sh"
 printf '#!/usr/bin/env bash\nexit "${VERIFY_RC:-0}"\n' > "$TOOLS/update-actions-lock.sh"
+printf '#!/usr/bin/env bash\nexit "${SYNC_RC:-0}"\n' > "$TOOLS/check-lock-sync.sh"
 
 # The `gh` stub. `actions-lock` (update mode) applies $TOOL_ACTION to the cwd;
 # `api graphql` records its stdin payload and answers with a commit oid.
@@ -74,6 +75,20 @@ if [ "$1 $2" = "api graphql" ]; then
   cat > "$GH_CAPTURE"
   echo 2222222222222222222222222222222222222222
   exit 0
+fi
+# Default-branch repair (REGEN_MAIN=1): repo metadata, heads, refs and PRs.
+if [ "$1" = api ] && [ "$2" = repos/o/r ] && [ "$3" = --jq ]; then echo "${DEFAULT_BRANCH:-main}"; exit 0; fi
+if [ "$1" = api ] && [ "$2" = repos/o/r/commits/chore/regenerate-actions-lock ]; then
+  [ -n "${LEFTOVER_MSG:-}" ] || exit 1
+  printf '%s\n' "$LEFTOVER_MSG"; exit 0
+fi
+if [ "$1" = api ] && [[ "$2" == repos/o/r/commits/* ]]; then echo "$MAIN_SHA"; exit 0; fi
+if [ "$1 $2 $3" = "api -X POST" ] && [[ "$4" == repos/*/git/refs ]]; then
+  echo "POST-REF $*" >> "$GH_LOG"; [ -n "${REF_EXISTS:-}" ] && exit 1; exit 0
+fi
+if [ "$1 $2 $3" = "api -X PATCH" ]; then echo "PATCH-REF $*" >> "$GH_LOG"; exit 0; fi
+if [ "$1 $2 $3" = "api -X POST" ] && [[ "$4" == repos/*/pulls ]]; then
+  echo "POST-PR $*" >> "$GH_LOG"; [ -n "${PR_FAIL:-}" ] && exit 1; echo 42; exit 0
 fi
 exit 1
 EOF
@@ -131,8 +146,12 @@ expect "an already-current lock is 'current' (idempotent second run)" current "$
 d="$(fixture nolock)"; git -C "$d" rm --quiet .github/workflows/actions.lock
 expect "a repo without actions.lock is skipped" no-lock "$(regen_lock "$d" 2>/dev/null)"
 
+# standards#1122: composite repos are no longer refused; the repair chain and
+# check-lock-sync.sh follow local composites, and the sync check decides.
 d="$(fixture composite)"; mkdir -p "$d/.github/actions/x"
-expect "a repo with local composite actions is refused" composite-unsupported "$(TOOL_ACTION=bump regen_lock "$d" 2>/dev/null)"
+expect "a repo with local composite actions is regenerated" changed "$(TOOL_ACTION=bump regen_lock "$d" 2>/dev/null)"
+d="$(fixture syncfail)"
+expect "a lock check-lock-sync rejects is unverified, not committed" unverified "$(TOOL_ACTION=bump SYNC_RC=1 regen_lock "$d" 2>/dev/null)"
 
 # Planted control for the dirty guard: a repair step that writes anything
 # besides the lock (after the restore has run) must stop the commit.
@@ -174,6 +193,63 @@ expect "no lock (404) is skipped silently" "" "$(CONTENTS=404 process_repo o/r t
 expect "a rate-limited lock probe is reported, not skipped" "o/r	api-error" "$(CONTENTS=403 process_repo o/r t 2>/dev/null)"
 expect "a failed PR listing is reported" "o/r	api-error" "$(PULLS_FAIL=1 process_repo o/r t 2>/dev/null)"
 expect "a repo with no open PRs prints nothing" "" "$(process_repo o/r t)"
+
+# --- repair_main: a stale lock that already landed on the default branch ----
+# Clone the local fixture instead of github.com; the rest is the real code.
+clone_branch() { git clone --quiet "$FIXTURE" "$1" 2>/dev/null; }
+export GH_LOG="$WORK/gh.log"
+oid=2222222222222222222222222222222222222222
+# fresh_main <name>: a new fixture as the default branch, an empty call log.
+fresh_main() { FIXTURE="$(fixture "$1")"; MAIN_SHA="$(git -C "$FIXTURE" rev-parse HEAD)"; export MAIN_SHA; : > "$GH_LOG"; rm -f "$GH_CAPTURE"; }
+
+fresh_main stale
+out="$(TOOL_ACTION=bump repair_main o/r '[]' 2>/dev/null)"
+expect "a stale default-branch lock opens one repair PR" "o/r@main	pr-opened #42 ($oid)" "$out"
+expect "…from the repair branch, created at the default head" 1 "$(grep -c "POST-REF .*ref=refs/heads/chore/regenerate-actions-lock .*sha=$MAIN_SHA" "$GH_LOG")"
+expect "…its commit is guarded by the default head" "$MAIN_SHA" "$(jq -r .variables.in.expectedHeadOid "$GH_CAPTURE")"
+expect "…lands on the repair branch" chore/regenerate-actions-lock "$(jq -r .variables.in.branch.branchName "$GH_CAPTURE")"
+expect "…carries the repair headline, not the Dependabot one" "$REPAIR_HEADLINE" "$(jq -r .variables.in.message.headline "$GH_CAPTURE")"
+expect "…writes only the lock" ".github/workflows/actions.lock" "$(jq -r '.variables.in.fileChanges.additions | map(.path) | join(",")' "$GH_CAPTURE")"
+expect "…and the PR goes from the repair branch to the default branch" 1 "$(grep -c 'POST-PR .*head=chore/regenerate-actions-lock .*base=main' "$GH_LOG")"
+
+fresh_main current
+expect "a current default-branch lock opens nothing" "o/r@main	current" "$(TOOL_ACTION=none repair_main o/r '[]' 2>/dev/null)"
+expect "…and touches no ref" 0 "$(grep -c . "$GH_LOG")"
+
+fresh_main dry
+expect "DRY_RUN reports the change" "o/r@main	changed" "$(DRY_RUN=1 TOOL_ACTION=bump repair_main o/r '[]' 2>/dev/null)"
+expect "…and writes nothing" 0 "$(grep -c . "$GH_LOG")"
+
+fresh_main unver
+expect "a lock the verifier rejects is not proposed" "o/r@main	unverified" "$(VERIFY_RC=1 TOOL_ACTION=bump repair_main o/r '[]' 2>/dev/null)"
+expect "…and no branch is created" 0 "$(grep -c . "$GH_LOG")"
+
+fresh_main moved
+expect "a default branch that moved under the clone is refused" "o/r@main	moved" "$(MAIN_SHA=4444444444444444444444444444444444444444 TOOL_ACTION=bump repair_main o/r '[]' 2>/dev/null)"
+
+fresh_main open
+open='[{"number":9,"draft":false,"user":{"login":"estate-applier[bot]"},"head":{"ref":"chore/regenerate-actions-lock","sha":"hhh","repo":{"full_name":"o/r"}},"base":{"repo":{"full_name":"o/r"}}}]'
+expect "an open repair PR is left to the PR sweep" "o/r@main	repair-pr-open" "$(TOOL_ACTION=bump repair_main o/r "$open" 2>/dev/null)"
+expect "…which selects it, because a bot opened it on the repair branch" "9	chore/regenerate-actions-lock	hhh" "$(printf '%s' "$open" | select_prs)"
+human='[{"number":10,"draft":false,"user":{"login":"someone"},"head":{"ref":"chore/regenerate-actions-lock","sha":"iii","repo":{"full_name":"o/r"}},"base":{"repo":{"full_name":"o/r"}}}]'
+expect "…but never a human's PR on that branch name" "" "$(printf '%s' "$human" | select_prs)"
+
+fresh_main foreign
+expect "an existing branch the script did not create is never moved" "o/r@main	repair-branch-exists" "$(REF_EXISTS=1 LEFTOVER_MSG='feat: someone else' TOOL_ACTION=bump repair_main o/r '[]' 2>/dev/null)"
+expect "…no PATCH, no commit" "0 no" "$(grep -c PATCH-REF "$GH_LOG") $([ -e "$GH_CAPTURE" ] && echo yes || echo no)"
+
+fresh_main leftover
+out="$(REF_EXISTS=1 LEFTOVER_MSG="$REPAIR_HEADLINE"$'\n\n'"body" TOOL_ACTION=bump repair_main o/r '[]' 2>/dev/null)"
+expect "a leftover repair branch of ours is reused" "o/r@main	pr-opened #42 ($oid)" "$out"
+expect "…by force-moving it to the default head" 1 "$(grep -c "PATCH-REF .*git/refs/heads/chore/regenerate-actions-lock .*sha=$MAIN_SHA .*force=true" "$GH_LOG")"
+
+fresh_main prfail
+expect "a refused PR creation is reported with the commit" "o/r@main	pr-refused ($oid)" "$(PR_FAIL=1 TOOL_ACTION=bump repair_main o/r '[]' 2>/dev/null)"
+
+fresh_main wired
+expect "process_repo runs the default-branch repair only with REGEN_MAIN=1" "o/r@main	pr-opened #42 ($oid)" "$(REGEN_MAIN=1 TOOL_ACTION=bump process_repo o/r t 2>/dev/null)"
+fresh_main unwired
+expect "…and not without it" "" "$(TOOL_ACTION=bump process_repo o/r t 2>/dev/null)"
 
 # --- missing credential ----------------------------------------------------
 out="$(REGEN_TOKENS='' main 2>&1)"; rc=$?

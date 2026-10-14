@@ -35,7 +35,8 @@ LOCK="$WF_DIR/actions.lock"
 #    subpath (github/codeql-action/init@sha), so index by owner/repo only.
 INLINE="$(mktemp)"
 TAGGED="$(mktemp)"
-trap 'rm -f "$INLINE" "$TAGGED" "$MAP" "$TMPLOCK"' EXIT
+MERGED=""
+trap 'rm -f "$INLINE" "$TAGGED" "$MAP" "$TMPLOCK" "$MERGED"' EXIT
 find "$WF_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 \
   | xargs -0 -r awk '
       match($0, /uses:[ \t]*[A-Za-z0-9_.-]+\/[A-Za-z0-9_.\/-]+@[0-9a-f]{40}/) {
@@ -121,7 +122,39 @@ awk -v mapfile="$MAP" '
 ' "$LOCK" > "$TMPLOCK" 2>"$MAP.count"
 count="$(cat "$MAP.count" 2>/dev/null || echo 0)"
 rm -f "$MAP.count"
-mv "$TMPLOCK" "$LOCK"
+
+# 4. Merge what the re-key made identical (standards#1122). When the lock
+#    already holds a SHA-keyed record for a commit and the tool added a
+#    tag-keyed record for the same commit, step 3 leaves TWO records under one
+#    key, and the lockfile reader rejects the file ("already defined"). Both
+#    describe the same commit, so the first is kept and the later one dropped
+#    with its body. A list (a workflow entry, a record's uses:) that now names
+#    the same ref twice keeps it once.
+MERGED="$(mktemp)"
+awk '
+  /^[a-z_]+:/ { sec = $0; skip = 0; delete items; print; next }
+  /^    \047[^\047]+\047:/ {
+    delete items
+    if (sec ~ /^dependencies:/) {
+      k = $0; sub(/:.*$/, "", k)
+      if (k in seen) { skip = 1; merged++; next }
+      seen[k] = 1
+    }
+    skip = 0; print; next
+  }
+  skip && /^        / { next }
+  { skip = 0 }
+  /^ +- \047[^\047]+\047[[:space:]]*$/ {
+    it = $0; sub(/[[:space:]]+$/, "", it)
+    if (it in items) next
+    items[it] = 1; print; next
+  }
+  { delete items; print }
+  END { print merged + 0 > "/dev/stderr" }
+' "$TMPLOCK" > "$MERGED" 2>"$MAP.merged"
+merged="$(cat "$MAP.merged" 2>/dev/null || echo 0)"
+rm -f "$MAP.merged" "$TMPLOCK"
+mv "$MERGED" "$LOCK"
 TMPLOCK=""
 
 echo "re-keyed ${count} entries:"
@@ -129,3 +162,4 @@ while IFS=$'\t' read -r old new; do
   [ -z "${old:-}" ] && continue
   printf '  %s -> @%s\n' "$old" "$(printf '%s' "${new##*@}" | cut -c1-12)"
 done < <(sort "$MAP")
+[ "$merged" = 0 ] || echo "merged ${merged} record(s) the re-key made duplicate"

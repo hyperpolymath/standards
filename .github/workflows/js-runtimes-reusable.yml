@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# One package.json, every JavaScript runtime (3-practice/LANGUAGE-POLICY.adoc
+# §1.4). Preference order: Bun, Deno, pnpm, npm (owner ruling 2026-10-14).
+#
+# For a caller with a package.json:
+#   * provision — every environment definition the repository carries
+#     (mise.toml, Containerfiles, Guix manifests) provisions Bun, or, where
+#     Bun is not always available (Guix), the best runtime it can;
+#   * one job per locked runtime (bun, deno, pnpm) — package.json is I-JSON +
+#     JCS (D306), that runtime's lock exists and installs FROZEN, and the
+#     `test` script passes under that runtime's own runner.
+# Every repository carries all three legs (owner: "I want all to have it").
+# A caller without a package.json passes with a notice that names the
+# denominator (0), never silently.
+#
+# The checker is tools/js-runtimes (Rust) at THIS workflow's own commit, so it
+# is exactly what the caller pinned. The fix for any lock or JCS finding is
+# `js-runtimes regen`.
+#
+# Usage (caller):
+#   jobs:
+#     js-runtimes:
+#       uses: hyperpolymath/standards/.github/workflows/js-runtimes-reusable.yml@<sha>
+#       # with:
+#       #   working-directory: web          # default "."
+#
+# Runtimes are pinned: Bun and Deno by SHA-pinned setup actions, pnpm by
+# Corepack with the tarball's sha512 (a wrong hash is refused).
+name: JS runtimes (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory holding package.json
+        type: string
+        default: "."
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    name: provision
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout standards for the checker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          # This reusable's own commit (the pattern governance-reusable uses).
+          ref: ${{ job.workflow_sha }}
+          path: .standards-js
+          persist-credentials: false
+          sparse-checkout: |
+            tools/js-runtimes
+          sparse-checkout-cone-mode: false
+      - name: Build js-runtimes
+        run: |
+          set -euo pipefail
+          cargo install --quiet --locked --path .standards-js/tools/js-runtimes --root "$RUNNER_TEMP/jsr"
+          rm -rf .standards-js
+      - name: Environment definitions provision Bun first
+        env:
+          WORKDIR: ${{ inputs.working-directory }}
+        run: '"$RUNNER_TEMP/jsr/bin/js-runtimes" provision "$WORKDIR"'
+
+  check:
+    name: ${{ matrix.runtime }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [bun, deno, pnpm]
+    env:
+      # pnpm 10.28.0, pinned by its npm tarball's sha512 (hex of dist.integrity).
+      PNPM_PIN: pnpm@10.28.0+sha512.05df71d1421f21399e053fde567cea34d446fa02c76571441bfc1c7956e98e363088982d940465fd34480d4d90a0668bc12362f8aa88000a64e83d0b0e47be48
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Is there a package.json?
+        id: has
+        env:
+          WORKDIR: ${{ inputs.working-directory }}
+          RUNTIME: ${{ matrix.runtime }}
+        run: |
+          if [ -f "$WORKDIR/package.json" ]; then
+            echo "pkg=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pkg=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No package.json in '$WORKDIR': 0 JavaScript manifests, nothing for the $RUNTIME leg to check."
+          fi
+      - name: Checkout standards for the checker
+        if: steps.has.outputs.pkg == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: ${{ job.workflow_sha }}
+          path: .standards-js
+          persist-credentials: false
+          sparse-checkout: |
+            tools/js-runtimes
+          sparse-checkout-cone-mode: false
+      - name: Set up Bun
+        if: steps.has.outputs.pkg == 'true' && matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.2"
+      - name: Set up Deno
+        if: steps.has.outputs.pkg == 'true' && matrix.runtime == 'deno'
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: "2.9.6"
+      - name: Set up pnpm (Corepack, hash-pinned)
+        if: steps.has.outputs.pkg == 'true' && matrix.runtime == 'pnpm'
+        run: corepack enable pnpm && corepack install -g "$PNPM_PIN"
+      - name: Build js-runtimes
+        if: steps.has.outputs.pkg == 'true'
+        run: |
+          set -euo pipefail
+          cargo install --quiet --locked --path .standards-js/tools/js-runtimes --root "$RUNNER_TEMP/jsr"
+          rm -rf .standards-js
+      - name: One manifest, ${{ matrix.runtime }}
+        if: steps.has.outputs.pkg == 'true'
+        env:
+          RUNTIME: ${{ matrix.runtime }}
+          WORKDIR: ${{ inputs.working-directory }}
+        run: '"$RUNNER_TEMP/jsr/bin/js-runtimes" check "$RUNTIME" "$WORKDIR"'

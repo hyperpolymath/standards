@@ -18,16 +18,34 @@ if command -v ruby >/dev/null 2>&1; then
       s = steps.find { |step| step["name"] == name } or abort("missing step: #{name}")
       abort("#{name} must not use if: always() (standards#1050)") if s["if"].to_s.include?("always()")
     end
+    pa_install = steps.find { |step| step["id"] == "panic-attack-install" } or abort("missing step: panic-attack-install")
+    pa_run = steps.find { |step| step["id"] == "panic-attack" } or abort("missing step: panic-attack")
+    fetch_filter = steps.index { |step| step["id"] == "fetch_filter" } or abort("missing step: fetch_filter")
+    abort "panic-attack must run before the standards checkout" unless steps.index(pa_run) < fetch_filter
     File.write(ARGV[1] + "/scan.sh", scan_runner.fetch("run"))
     File.write(ARGV[1] + "/validate.sh", validator.fetch("run"))
     File.write(ARGV[1] + "/gate.sh", gate.fetch("run"))
+    File.write(ARGV[1] + "/pa-install.sh", pa_install.fetch("run"))
+    File.write(ARGV[1] + "/pa-run.sh", pa_run.fetch("run"))
   ' "$repo/.github/workflows/hypatia-scan-reusable.yml" "$tmp"
 else
   awk -v out_dir="$tmp" '
     function flush_step() {
       if (step_name == "") return
+      step_n++
       seen[step_name] = 1
       step_if_map[step_name] = step_if
+      if (step_id == "panic-attack-install") {
+        pa_install_seen = 1
+        printf "%s", run_body > (out_dir "/pa-install.sh")
+        close(out_dir "/pa-install.sh")
+      }
+      if (step_id == "panic-attack") {
+        pa_run_idx = step_n
+        printf "%s", run_body > (out_dir "/pa-run.sh")
+        close(out_dir "/pa-run.sh")
+      }
+      if (step_id == "fetch_filter") fetch_filter_idx = step_n
       if (step_name == "Run Hypatia scan") {
         printf "%s", run_body > (out_dir "/scan.sh")
         close(out_dir "/scan.sh")
@@ -78,6 +96,14 @@ else
       flush_step()
       if (gate_if != "inputs.block-on-high") {
         print "blocking gate is not opt-in" > "/dev/stderr"
+        exit 1
+      }
+      if (!pa_install_seen || !pa_run_idx || !fetch_filter_idx) {
+        print "missing step: panic-attack-install, panic-attack or fetch_filter" > "/dev/stderr"
+        exit 1
+      }
+      if (pa_run_idx > fetch_filter_idx) {
+        print "panic-attack must run before the standards checkout" > "/dev/stderr"
         exit 1
       }
       split("Relativize finding paths|Filter SARIF through the baseline before upload|Upload SARIF to code scanning|Upload findings artifacts", req, "|")
@@ -234,3 +260,142 @@ adapter_check 'CLI adapter empty fixture produces zero-result SARIF and passes' 
 adapter_check 'CLI adapter warn fixture produces warning SARIF and passes' warn 0
 adapter_check 'CLI adapter high fixture produces error SARIF and blocks' high 1
 adapter_check 'CLI adapter crash fixture fails closed even if [] was written' crash 1
+
+# panic-attack controls. The step is advisory: it never fails the job, and it
+# never writes a bare `[]`. A skip or a failure must be an explicit status.
+export PANIC_ATTACK_SHA=2dc1393c0ac982dbad98ba07f78a580d319456a5
+fail() { printf 'FAIL: %s\n' "$1"; cat result.log; exit 1; }
+
+cat > "$tmp/fake-panic-attack" <<'PA'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1 $2 $3" = "assail . --output" ]] || { echo "unexpected args: $*" >&2; exit 64; }
+echo "Running assail analysis on: ."
+case "${PA_FIXTURE:-}" in
+  clean) printf '{"schema_version":"2.5","weak_points":[]}\n' > "$4" ;;
+  findings) printf '%s\n' '{"schema_version":"2.5","weak_points":[{"severity":"Critical"},{"severity":"High"},{"severity":"High","suppressed":true},{"severity":"Medium"},{"severity":"Low"}]}' > "$4" ;;
+  crash) echo "assail crashed" >&2; exit 3 ;;
+  timed-out) exit 124 ;;
+  no-report) ;;
+  bad-severity) printf '{"weak_points":[{"severity":"Severe"}]}\n' > "$4" ;;
+esac
+PA
+chmod +x "$tmp/fake-panic-attack"
+
+# pa_check NAME STATUS JQ_ASSERTION [VAR=VALUE ...]: run the scan step with the
+# given environment and check the envelope it writes.
+pa_check() {
+  local name=$1 status=$2 assertion=$3
+  shift 3
+  rm -f panic-attack-findings.json "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY"
+  env PA_BIN= PA_INSTALL_REASON= PA_FIXTURE= "$@" bash pa-run.sh > result.log 2>&1 \
+    || fail "$name: the panic-attack step must never fail the job"
+  jq -e --arg status "$status" --arg ref "$PANIC_ATTACK_SHA" \
+    "type == \"object\" and .status == \$status and .tool == \"panic-attack\" and .ref == \$ref and ($assertion)" \
+    panic-attack-findings.json > /dev/null 2>&1 \
+    || { cat panic-attack-findings.json >> result.log 2>&1; fail "$name: envelope"; }
+  grep -qx "status=$status" "$GITHUB_OUTPUT" || fail "$name: step output status=$status"
+  if [[ "$status" = ran ]]; then
+    if [[ "$assertion" = *'critical: 0, high: 0'* ]]; then
+      ! grep -q '^::warning' result.log || fail "$name: a clean scan must not warn"
+    else
+      grep -q '^::warning title=panic-attack findings (advisory)::' result.log || fail "$name: findings must warn"
+    fi
+    grep -q '^## panic-attack assail (advisory, does not gate)' "$GITHUB_STEP_SUMMARY" || fail "$name: summary"
+  else
+    grep -q '^::warning title=panic-attack \(NOT RUN\|ERROR\)::' result.log || fail "$name: a $status scan must warn"
+    grep -q 'this is \*\*not\*\* a pass' "$GITHUB_STEP_SUMMARY" || fail "$name: summary must say it is not a pass"
+  fi
+  printf 'PASS: %s\n' "$name"
+}
+pa_check 'panic-attack skip writes a not_run marker, not []' not_run \
+  '.reason == "cargo is not available on this runner" and .exit_code == null and .counts == null and .report == null' \
+  PA_INSTALL_REASON='cargo is not available on this runner'
+pa_check 'panic-attack skip without an install reason is still not_run' not_run \
+  '.reason == "panic-attack is not installed"'
+pa_check 'panic-attack missing binary path is not_run' not_run \
+  '.reason == "panic-attack is not installed"' PA_BIN="$tmp/no-such-binary"
+pa_check 'panic-attack clean scan records ran with zero counts' ran \
+  '.counts == {critical: 0, high: 0, medium: 0, low: 0} and .exit_code == 0 and .reason == null and .report.schema_version == "2.5"' \
+  PA_BIN="$tmp/fake-panic-attack" PA_FIXTURE=clean
+grep -qx 'critical=0' "$GITHUB_OUTPUT" && grep -qx 'high=0' "$GITHUB_OUTPUT" || fail 'clean scan outputs'
+pa_check 'panic-attack findings are counted without suppressed ones and do not gate' ran \
+  '.counts == {critical: 1, high: 1, medium: 1, low: 1} and (.report.weak_points | length) == 5' \
+  PA_BIN="$tmp/fake-panic-attack" PA_FIXTURE=findings
+pa_check 'panic-attack crash records error with its exit code' error \
+  '.exit_code == 3 and .reason == "panic-attack assail exited 3" and .report == null' \
+  PA_BIN="$tmp/fake-panic-attack" PA_FIXTURE=crash
+grep -q 'assail crashed' result.log || fail 'crash output must be shown in the log'
+pa_check 'panic-attack scan that hits the 5-minute cap records error' error \
+  '.exit_code == 124 and .reason == "panic-attack assail did not finish within 5 minutes"' \
+  PA_BIN="$tmp/fake-panic-attack" PA_FIXTURE=timed-out
+pa_check 'panic-attack exit 0 without a report records error' error \
+  '.exit_code == 0 and .reason == "panic-attack assail exited 0 without a valid report"' \
+  PA_BIN="$tmp/fake-panic-attack" PA_FIXTURE=no-report
+pa_check 'panic-attack report with an unknown severity records error' error \
+  '.reason == "panic-attack assail exited 0 without a valid report"' \
+  PA_BIN="$tmp/fake-panic-attack" PA_FIXTURE=bad-severity
+
+# Install step: PATH is a directory holding only the tools the step needs, so
+# "cargo is absent" and a fake cargo are both under the test's control.
+pa_bin_dir="$tmp/pa-path"
+mkdir -p "$pa_bin_dir"
+for tool in grep timeout mkdir chmod rm; do
+  ln -s "$(command -v "$tool")" "$pa_bin_dir/$tool"
+done
+# ins_check NAME EXPECTED_OUTPUT_LINE HOME_DIR
+ins_check() {
+  local name=$1 expected=$2 home=$3
+  rm -f "$GITHUB_OUTPUT"
+  env PATH="$pa_bin_dir" HOME="$home" "$BASH" pa-install.sh > result.log 2>&1 \
+    || fail "$name: the install step must never fail the job"
+  grep -qxF "$expected" "$GITHUB_OUTPUT" || { cat "$GITHUB_OUTPUT" >> result.log 2>&1; fail "$name: expected $expected"; }
+  if [[ "$expected" = reason=* ]]; then
+    grep -q '^::warning title=panic-attack not installed::' result.log || fail "$name: must warn"
+    ! grep -q '^bin=' "$GITHUB_OUTPUT" || fail "$name: must not output a binary"
+    [[ ! -e "$home/.panic-attack" ]] || fail "$name: a failed install must leave nothing to cache"
+  fi
+  printf 'PASS: %s\n' "$name"
+}
+ins_check 'install without cargo reports why' \
+  'reason=cargo is not available on this runner' "$tmp/home-empty"
+mkdir -p "$tmp/home-stale/.panic-attack/bin"
+cp "$tmp/fake-panic-attack" "$tmp/home-stale/.panic-attack/bin/panic-attack"
+printf '[v1]\n"panic-attack 2.5.5 (git+https://github.com/hyperpolymath/panic-attack?rev=%s#%s)" = ["panic-attack"]\n' \
+  0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 > "$tmp/home-stale/.panic-attack/.crates.toml"
+ins_check 'install does not trust a cached binary from another commit' \
+  'reason=cargo is not available on this runner' "$tmp/home-stale"
+mkdir -p "$tmp/home-cached/.panic-attack/bin"
+cp "$tmp/fake-panic-attack" "$tmp/home-cached/.panic-attack/bin/panic-attack"
+printf '[v1]\n"panic-attack 2.5.5 (git+https://github.com/hyperpolymath/panic-attack?rev=%s#%s)" = ["panic-attack"]\n' \
+  "$PANIC_ATTACK_SHA" "$PANIC_ATTACK_SHA" > "$tmp/home-cached/.panic-attack/.crates.toml"
+ins_check 'install uses a cached binary built from the pinned commit' \
+  "bin=$tmp/home-cached/.panic-attack/bin/panic-attack" "$tmp/home-cached"
+
+# A fake cargo: records its arguments, then fails, builds nothing, or installs.
+cat > "$pa_bin_dir/cargo" <<CARGO
+#!$BASH
+printf '%s\n' "\$@" > "$tmp/cargo-args"
+case "\$FAKE_CARGO" in
+  fail) exit 101 ;;
+  empty) exit 0 ;;
+esac
+while [ "\$#" -gt 0 ]; do
+  if [ "\$1" = --root ]; then root=\$2; fi
+  shift
+done
+mkdir -p "\$root/bin"
+printf '#!/bin/sh\n' > "\$root/bin/panic-attack"
+chmod +x "\$root/bin/panic-attack"
+CARGO
+chmod +x "$pa_bin_dir/cargo"
+FAKE_CARGO=fail ins_check 'install reports a failed source build' \
+  "reason=source build at $PANIC_ATTACK_SHA failed or exceeded 10 minutes" "$tmp/home-fail"
+FAKE_CARGO=empty ins_check 'install reports a build that left no binary' \
+  "reason=no binary after the source build at $PANIC_ATTACK_SHA" "$tmp/home-empty-build"
+FAKE_CARGO=ok ins_check 'install builds the pinned commit' \
+  "bin=$tmp/home-built/.panic-attack/bin/panic-attack" "$tmp/home-built"
+for arg in install --git https://github.com/hyperpolymath/panic-attack --rev "$PANIC_ATTACK_SHA" --locked --root; do
+  grep -qxF -- "$arg" "$tmp/cargo-args" || fail "cargo install must be called with $arg"
+done
+printf 'PASS: %s\n' 'install pins the commit and the lockfile'

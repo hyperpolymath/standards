@@ -87,6 +87,52 @@ printf 'workflows:\n    '\''.github/workflows/ci.yml'\'':\n        - '\''actions
 ! grep -qF "gone.yml" "$g/actions.lock" && grep -qxF "        - 'actions/checkout@$A'" "$g/actions.lock" \
   && ok "only a deleted workflow [] key stale: key dropped, live ref kept" || bad "only a deleted workflow [] key stale: key dropped, live ref kept — $(cat "$g/actions.lock")"
 
+# A stale ref with NO deleted workflow is the common case (a Dependabot bump).
+# The deleted-workflow pass then reads an empty list first, and an `NR == FNR`
+# guard is true for every line of the lock: the whole file was swallowed and
+# the lock overwritten empty. The suite above always deletes a workflow, so it
+# never reached this.
+v="$WORK/v/.github/workflows"; mkdir -p "$v"
+printf 'jobs:\n  a:\n    steps:\n      - uses: actions/checkout@%s\n' "$B" > "$v/ci.yml"
+printf "version: 'v0.0.2'\nworkflows:\n    '.github/workflows/ci.yml':\n        - 'actions/checkout@%s'\n        - 'actions/checkout@%s'\ndependencies:\n    'actions/checkout@%s':\n        commit: 'sha1-%s'\n" "$A" "$B" "$B" "$B" > "$v/actions.lock"
+(cd "$WORK/v" && bash "$TARGET") >/dev/null 2>&1
+grep -qxF "version: 'v0.0.2'" "$v/actions.lock" && grep -qxF "        - 'actions/checkout@$B'" "$v/actions.lock" \
+  && ! grep -qF "checkout@$A" "$v/actions.lock" && grep -qxF "        commit: 'sha1-$B'" "$v/actions.lock" \
+  && ok "stale ref, no deleted workflow: lock kept whole, only the stale ref pruned" \
+  || bad "stale ref, no deleted workflow: lock kept whole, only the stale ref pruned — $(wc -l < "$v/actions.lock") line(s) left"
+
+# Local composite actions (standards#1122). A workflow's entry lists the refs
+# its local composites use, nested ones included, because a local action has no
+# record of its own. Those refs must survive; a ref no file uses must not. The
+# composite refs have no literal match in the workflow file itself, so if the
+# oracles do not follow the composites, both agree to drop them.
+c="$WORK/c"; mkdir -p "$c/.github/workflows" "$c/.github/actions/outer" "$c/.github/actions/inner"
+cat > "$c/.github/workflows/ci.yml" <<EOF
+jobs:
+  a:
+    steps:
+      - uses: actions/checkout@$A
+      - uses: ./.github/actions/outer
+EOF
+printf 'runs:\n  using: composite\n  steps:\n    - uses: "o/direct@%s",\n    - uses: ./.github/actions/inner/\n' "$B" > "$c/.github/actions/outer/action.yml"
+printf 'runs:\n  using: composite\n  steps:\n    - uses: o/nested/sub@%s # v1\n' "$S" > "$c/.github/actions/inner/action.yaml"
+cat > "$c/.github/workflows/actions.lock" <<EOF
+workflows:
+    '.github/workflows/ci.yml':
+        - 'actions/checkout@$A'
+        - 'o/direct@$B'
+        - 'o/nested@$S'
+        - 'o/unused@$A'
+dependencies:
+EOF
+(cd "$c" && bash "$TARGET") >/dev/null 2>&1
+grep -qxF "        - 'o/direct@$B'" "$c/.github/workflows/actions.lock" \
+  && ok "ref used by a local composite kept (KYAML-quoted)" || bad "ref used by a local composite kept (KYAML-quoted)"
+grep -qxF "        - 'o/nested@$S'" "$c/.github/workflows/actions.lock" \
+  && ok "ref used by a nested local composite (action.yaml) kept" || bad "ref used by a nested local composite (action.yaml) kept"
+! grep -qF "o/unused@" "$c/.github/workflows/actions.lock" \
+  && ok "ref used by no workflow or composite still pruned" || bad "ref used by no workflow or composite still pruned"
+
 mkdir -p "$WORK/n/.github/workflows"; (cd "$WORK/n" && bash "$TARGET") >/dev/null 2>&1; st=$?
 [ "$st" = 1 ] && ok "no lockfile → exit 1" || bad "no lockfile → exit 1 (got $st)"
 

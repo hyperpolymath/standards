@@ -133,14 +133,15 @@ validate:
 # Print role-appropriate LLM warm-up context (machine front door)
 llm-context role="dev":
     @echo "# Front door: 0-AI-MANIFEST.a2ml (machine) + README.adoc (human)"
-    @cat "llm-warmup-{{role}}.md" 2>/dev/null || cat 0-AI-MANIFEST.a2ml
+    @cat "llm-warmup-{{role}}.adoc" 2>/dev/null || cat 0-AI-MANIFEST.a2ml
 
-# Build all sub-project artefacts
+# Build all sub-project artefacts. The canon ships specs, not products: the k9
+# Rust binding moved to hyperpolymath/k9-ecosystem (#491) and the groove ipv6t
+# reference is not in this tree, so there is nothing to compile here. Kept as a
+# recipe so `just build` stays a valid estate entry point (and says so).
 build:
     @echo "=== Standards Monorepo Build ==="
-    @echo "[2/3] k9 Rust binding — moved to hyperpolymath/k9-ecosystem (rs/) under #491"
-    @echo "[3/3] 2-protocols/groove/reference/ipv6t"
-    @cd 2-protocols/groove/reference/ipv6t && zig build 2>&1 || echo "  SKIP: zig not available"
+    @echo "nothing to build: specs only (k9 binding -> hyperpolymath/k9-ecosystem, #491)"
     @echo "=== Build complete ==="
 
 # Run all sub-project test suites
@@ -160,17 +161,14 @@ fmt:
     @echo "=== Standards Monorepo Format ==="
     @echo "=== Format complete ==="
 
-# Lint sub-projects
-lint:
-    @echo "=== Standards Monorepo Lint ==="
-    @echo "[1/2] Rust clippy"
-    @echo "[2/2] Deno lint"
-    @echo "=== Lint complete ==="
+# Lint. The repo's lint surface is the structural gates, not a per-language
+# linter run (there is no root crate; Deno is banned). Delegates to `validate`.
+lint: validate
 
 # Clean build artifacts
 clean:
     @echo "=== Cleaning ==="
-    @cd 2-protocols/groove/reference/ipv6t && rm -rf zig-out zig-cache .zig-cache 2>/dev/null || true
+    @rm -rf .cache/stale 2>/dev/null || true
     @echo "=== Clean complete ==="
 
 # Run panic-attacker pre-commit scan
@@ -179,7 +177,7 @@ assail:
 
 # Stable release gate audit
 v1-audit path=".":
-    @./release-pre-flight/v1-audit.sh "{{path}}"
+    @bash 3-practice/release-pre-flight/v1-audit.sh "{{path}}"
 
 # Self-diagnostic — checks dependencies, permissions, paths
 doctor:
@@ -233,17 +231,17 @@ help-me:
 
 # Print the current CRG grade (reads from READINESS.md '**Current Grade:** X' line)
 crg-grade:
-    @grade=$$(grep -oP '(?<=\*\*Current Grade:\*\* )[A-FX]' READINESS.md 2>/dev/null | head -1); \
-    [ -z "$$grade" ] && grade="X"; \
-    echo "$$grade"
+    @grade=$(grep -oP '(?<=\*\*Current Grade:\*\* )[A-FX]' READINESS.md 2>/dev/null | head -1); \
+    [ -z "$grade" ] && grade="X"; \
+    echo "$grade"
 
 # Generate a shields.io badge markdown for the current CRG grade
 # Looks for '**Current Grade:** X' in READINESS.md; falls back to X
 crg-badge:
-    @grade=$$(grep -oP '(?<=\*\*Current Grade:\*\* )[A-FX]' READINESS.md 2>/dev/null | head -1); \
-    [ -z "$$grade" ] && grade="X"; \
-    case "$$grade" in \
+    @grade=$(grep -oP '(?<=\*\*Current Grade:\*\* )[A-FX]' READINESS.md 2>/dev/null | head -1); \
+    [ -z "$grade" ] && grade="X"; \
+    case "$grade" in \
       A) color="brightgreen" ;; B) color="green" ;; C) color="yellow" ;; \
       D) color="orange" ;; E) color="red" ;; F) color="critical" ;; \
       *) color="lightgrey" ;; esac; \
-    echo "[![CRG $$grade](https://img.shields.io/badge/CRG-$$grade-$$color?style=flat-square)](https://github.com/hyperpolymath/standards/tree/main/component-readiness-grades)"
+    echo "[![CRG $grade](https://img.shields.io/badge/CRG-$grade-$color?style=flat-square)](https://github.com/hyperpolymath/standards/tree/main/component-readiness-grades)"

@@ -35,6 +35,13 @@
 # Disagreement means KEEP. A parser blind spot therefore cannot delete a needed
 # entry (scripts/tests/prune-stale-test.sh plants exactly that blind spot).
 #
+# ── Refs used through a LOCAL composite action count as used ────────────────
+# A local action (`uses: ./.github/actions/x`) has no dependency record of its
+# own, so the actions it uses are listed in the CALLING workflow's entry; that
+# is where `gh actions-lock` writes them. Both oracles therefore read the
+# workflow plus every local composite action file it reaches (transitively).
+# Reading the workflow alone dropped those refs (standards#1122).
+#
 # ── A key whose workflow file is gone is dropped whole ──────────────────────
 # Retiring a workflow is the limit case: every ref under its key is stale, and
 # the key itself names a file that does not exist, which check-lock-sync.sh
@@ -71,6 +78,51 @@ shopt -s nullglob
 mapfile -t WORKFLOWS < <(printf '%s\n' "$WF_DIR"/*.yml "$WF_DIR"/*.yaml | sort -u)
 [ "${#WORKFLOWS[@]}" -gt 0 ] || { echo "prune-stale: FATAL: no workflows under $WF_DIR" >&2; exit 1; }
 
+# ── local composite actions (identical block in check-lock-sync.sh, ─────────
+# ── prune-stale.sh and complete-job-refs.sh; they must agree) ─────────────────
+# reach_files WORKFLOW prints WORKFLOW and every local composite action file
+# (`uses: ./dir` -> dir/action.yml or dir/action.yaml) it reaches, transitively,
+# each once. A local reusable workflow (`./….yml`) is a lock entry of its own,
+# so it is not followed. Paths resolve from the repository root, as GitHub
+# resolves them from the workspace.
+LC_ROOT="$(cd "$WF_DIR/../.." 2>/dev/null && pwd)" || LC_ROOT=.
+# local_action_paths FILE: the path after `./` of every local `uses:` in FILE.
+local_action_paths() {
+  awk -v q="'" '{
+    line = $0; sub(/[[:space:]]+#.*$/, "", line)
+    if (!match(line, /^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*/)) next
+    raw = substr(line, RLENGTH + 1)
+    sub("[\"" q "],[[:space:]]*$", "", raw)
+    gsub("^[\"" q "]|[\"" q "]$", "", raw); sub(/[[:space:]]+$/, "", raw)
+    if (substr(raw, 1, 2) == "./") print substr(raw, 3)
+  }' "$1"
+}
+reach_files() {
+  local -A seen=()
+  local queue=("$1") f rel a
+  while [ "${#queue[@]}" -gt 0 ]; do
+    f="${queue[0]}"; queue=("${queue[@]:1}")
+    [ -n "${seen[$f]:-}" ] && continue
+    seen[$f]=1
+    printf '%s\n' "$f"
+    while IFS= read -r rel; do
+      rel="${rel%/}"
+      case "$rel" in *.yml|*.yaml) continue ;; esac
+      for a in "$LC_ROOT/$rel/action.yml" "$LC_ROOT/$rel/action.yaml"; do
+        if [ -f "$a" ]; then queue+=("$a"); break; fi
+      done
+    done < <(local_action_paths "$f")
+  done
+}
+# ── end of the shared block ───────────────────────────────────────────────────
+
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+# reach.tsv: "file<TAB>lock key" — each file whose uses: count for that entry.
+for wf in "${WORKFLOWS[@]}"; do
+  while IFS= read -r f; do printf '%s\t.github/workflows/%s\n' "$f" "${wf##*/}"; done < <(reach_files "$wf")
+done > "$TMP/reach.tsv"
+mapfile -t SCAN < <(cut -f1 "$TMP/reach.tsv" | LC_ALL=C sort -u)
+
 read -r -d '' CAND <<'AWK' || true
 function norm(r,   at, path, ref, n, parts) {
   at = 0
@@ -88,6 +140,9 @@ function ck(r,   at, s) {
   if (at == 0) return tolower(r)
   return tolower(substr(r, 1, at - 1)) substr(r, at)
 }
+BEGIN {
+  while ((getline l < mapfile) > 0) { split(l, mp, "\t"); owners[mp[1]] = owners[mp[1]] SUBSEP mp[2] }
+}
 FILENAME == lockfile {
   if ($0 ~ /^workflows:[[:space:]]*$/)    { inwf = 1; next }
   if ($0 ~ /^[a-z_]+:/)                   { inwf = 0; next }
@@ -98,14 +153,18 @@ FILENAME == lockfile {
   }
   next
 }
-FNR == 1 { wf = FILENAME; key = wf; sub(/.*\//, "", key); key = ".github/workflows/" key; pathof[wf] = key }
+# Every scanned file (a workflow, or a composite action it reaches) credits its
+# uses: to each lock key that reaches it.
+FNR == 1 { nown = split(substr(owners[FILENAME], 2), own, SUBSEP) }
 {
   line = $0
   sub(/[[:space:]]+#.*$/, "", line)
   if (match(line, /^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*(.+)$/, m)) {
-    raw = m[1]; gsub(/^["']|["']$/, "", raw); gsub(/[[:space:]]+$/, "", raw)
+    raw = m[1]
+    sub(/["'],[[:space:]]*$/, "", raw)   # KYAML comma after a quoted scalar, as in check-lock-sync.sh
+    gsub(/^["']|["']$/, "", raw); gsub(/[[:space:]]+$/, "", raw)
     n = norm(raw)
-    if (n != "") used[pathof[wf], ck(n)] = 1
+    if (n != "") for (i = 1; i <= nown; i++) used[own[i], ck(n)] = 1
   }
 }
 END {
@@ -116,8 +175,7 @@ END {
 }
 AWK
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-"$AWK" -v lockfile="$LOCK" "$CAND" "$LOCK" "${WORKFLOWS[@]}" | LC_ALL=C sort -u > "$TMP/cand.tsv"
+"$AWK" -v lockfile="$LOCK" -v mapfile="$TMP/reach.tsv" "$CAND" "$LOCK" "${SCAN[@]}" | LC_ALL=C sort -u > "$TMP/cand.tsv"
 
 # ── keys whose workflow file is gone. Both oracles must agree. ─────────────
 declare -A present=()
@@ -140,13 +198,22 @@ if [ ! -s "$TMP/cand.tsv" ] && [ ! -s "$TMP/gone.txt" ]; then
   exit 0
 fi
 
-# ── oracle 2: the literal grep. Disagreement => KEEP. ──────────────────────
+# ── oracle 2: the literal grep, over the workflow and every composite action ─
+# ── file it reaches. Disagreement => KEEP. ───────────────────────────────────
+# literal_hit KEY REF: print the first file credited to KEY that contains REF.
+literal_hit() {
+  local f k
+  while IFS=$'\t' read -r f k; do
+    [ "$k" = "$1" ] || continue
+    if [ -f "$f" ] && command grep -Fq -- "$2" "$f"; then printf '%s\n' "$f"; return 0; fi
+  done < "$TMP/reach.tsv"
+  return 1
+}
 : > "$TMP/drop.tsv"
 kept_by_oracle=0
 while IFS=$'\t' read -r path ref; do
-  wf="$WF_DIR/${path##*/}"
-  if [ -f "$wf" ] && command grep -Fq -- "$ref" "$wf"; then
-    printf '  ! oracle disagrees, KEEPING %s in %s (literal string present)\n' "$ref" "$path"
+  if hit="$(literal_hit "$path" "$ref")"; then
+    printf '  ! oracle disagrees, KEEPING %s in %s (literal string present in %s)\n' "$ref" "$path" "$hit"
     kept_by_oracle=$((kept_by_oracle + 1))
     continue
   fi
@@ -201,8 +268,11 @@ fi
   }' "$TMP/new.lock" > "$TMP/new2.lock"
 
 # Drop each gone key with its items, again scoped to the workflows: section.
+# The gone list is told apart by FILENAME, not by NR == FNR: gone.txt is
+# usually EMPTY, and then NR == FNR holds for every line of the lock, which
+# swallowed the whole file and wrote the lock back empty.
 "$AWK" '
-  NR == FNR { gone[$0] = 1; next }
+  FILENAME == ARGV[1] { gone[$0] = 1; next }
   /^workflows:[[:space:]]*$/ { inwf = 1; skip = 0; print; next }
   /^[a-z_]+:/                { inwf = 0; skip = 0; print; next }
   inwf && match($0, /^    '\''([^'\'']+)'\'':/, m) {

@@ -4,7 +4,7 @@
 # Proves check-uuid-v8.sh CAN FAIL, and fails for the right reasons, in both
 # its default (dual-accept, ADR-008 P2) and --strict (v8 only) modes.
 #
-# The checker runs over this very repository (uuid-v7.yml), so every UUID in
+# The checker runs over this very repository (uuid-v8.yml), so every UUID in
 # this file is ASSEMBLED AT RUNTIME from fragments. A literal non-conforming
 # UUID here would turn the real gate red on its own test.
 set -euo pipefail
@@ -82,6 +82,16 @@ fresh; printf '[deps]\nX = "%s"\n' "$V4" > "$WORK/t/deps.toml"
 expect 1 "a [deps] table outside a Julia project file is not exempt"
 fresh; mkdir -p "$WORK/t/docs"; printf '[[deps.X]]\nuuid = "%s"\n' "$V4" > "$WORK/t/docs/Manifest-v1.12.toml"
 expect 0 "a v4 in a Julia Manifest is accepted"
+fresh; printf 'name = "{{P}}"\nuuid = "{{U}}"\n\n[extras]\nTest = "%s"\n' "$V4" > "$WORK/t/Project.toml.in"
+expect 0 "a Project.toml.in mint template gets Project.toml's [extras] exemption"
+fresh; printf 'uuid = "%s"\n\n[extras]\nTest = "%s"\n' "$V4" "$V4" > "$WORK/t/Project.toml.in"
+expect 1 "a v4 package uuid in a Project.toml.in mint template is rejected"
+fresh; printf '[deps]\nX = "%s"\n' "$V4" > "$WORK/t/deps.toml.in"
+expect 1 "a [deps] table in a non-Julia .in template is not exempt"
+fresh; printf '[[deps.X]]\nuuid = "%s"\n' "$V4" > "$WORK/t/Manifest.toml.in"
+expect 0 "a v4 in a Manifest.toml.in template is accepted"
+fresh; printf '[deps]\nX = "%s"\n' "$V4" > "$WORK/t/Project.toml.inx"
+expect 1 "a near-miss suffix (Project.toml.inx) is not exempt"
 
 fresh; printf 'id = "%s"\n' "$V4" > "$WORK/t/CLADE.a2ml"
 expect 0 "a v4 in a retired .a2ml file is ignored (D320)"
@@ -106,6 +116,11 @@ expect 1 "a v7 UUID is rejected under --strict" --strict
 names "a.toml: non-v8 UUID literal ($V7_8)" "the --strict rejection names the v7 UUID"
 fresh; printf 'id = "%s"\n' "$V8_C" > "$WORK/t/a.toml"
 expect 1 "a bad variant is still rejected under --strict" --strict
+# The rsr-template-repo julia-library archetype: registry UUIDs (v5) under
+# [extras] of a Project.toml.in, with a v8 placeholder for the package's own.
+fresh; printf 'name = "P"\nuuid = "%s"\n\n[extras]\nAqua = "%s"\nTest = "%s"\n' \
+  "$V8_8" "$V5" "$V5" > "$WORK/t/Project.toml.in"
+expect 0 "registry UUIDs in a Project.toml.in [extras] pass under --strict" --strict
 
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

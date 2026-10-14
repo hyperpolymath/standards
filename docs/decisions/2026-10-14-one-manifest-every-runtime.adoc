@@ -1,0 +1,125 @@
+// SPDX-License-Identifier: MPL-2.0
+= Decision – One package.json, every JavaScript runtime
+:date: 2026-10-14
+:author: Jonathan D.A. Jewell (hyperpolymath)
+:status: ACCEPTED (owner, 2026-10-14)
+:scope: estate
+
+== Context
+
+The owner, 2026-10-14, verbatim, in order:
+
+[quote]
+____
+bun is the main one from now on. but I wonder, is there a way of estate-wide
+making it so that there is a form of generative thing that always produces
+bun, deno, and pnpm outputs for these things - the problem of more than one
+was making sure it was always working and up to date - to do that opens up
+all three options I would be happy with rather than forcing one
+____
+
+Asked whether to build it: "yes but ensure this is ijson-jcs". That means
+D306: every `.json` is I-JSON, serialised by JCS.
+
+Then, while it was being built:
+
+[quote]
+____
+deno does not need to be absolutely banned, just bun is preferred and pnpm is
+higher too
+
+ideally i do not want npm to be used but if that's the only option, even that
+is okay with me
+
+basically ideally in all cases bun, then pnpm/deno, finally npm. I Want all to
+have it but ideally do it via a rust thing, so I guess it would be bun, deno,
+pnpm, npm - my major worry as I say is constantly updating all of them to keep
+in sync and making sure that the preference order is satisfied if at all
+possible (including bunx or bun distribution as part of the environment/repo
+
+yes and that for everything that requires one of these things to operate,
+built into the repo/environment set up (e.g. containers, guix, mise, etc. etc.)
+____
+
+The owner's answers to the choices put to them (selector, 2026-10-14):
+
+[cols="2,3",options="header"]
+|===
+| Question | Answer
+| Order | Bun > Deno > pnpm > npm
+| A repository that authors in Deno (`deno.json`) | Notice only; retire the refusal ledger
+| Where the Rust tool lives | A crate in `standards/tools/`, beside `tools/uuid-v8`
+| How Bun is guaranteed | `mise.toml` pins, with `mise.lock` checksums
+| Opt-in or governance | Join governance now
+| Ruling text | Ratify (RULED, not PROPOSED)
+|===
+
+== Decision
+
+*One manifest, every runtime.*
+
+- `package.json` is the only manifest. Bun, Deno 2 and pnpm all read it
+natively: dependencies through their installers, scripts through `bun run`,
+`deno task` and `pnpm run`. Nothing is translated, so no second manifest can
+drift.
+- Each runtime that keeps a lock writes its own: `bun.lock` (tier 1),
+`deno.lock` and `pnpm-lock.yaml`.
+- npm, the last resort, keeps none (`package-lock.json` stays refused,
+standards#67).
+
+*The tool* is `tools/js-runtimes` (Rust). It uses the `ijson-jcs` crate
+in-process at a pinned rev.
+
+[cols="1,3",options="header"]
+|===
+| Command | What it does
+| `regen` | The only writer. Makes `package.json` JCS, then regenerates `bun.lock`, `deno.lock` and `pnpm-lock.yaml`, each with its own tool, then re-canonicalises.
+| `check bun\|deno\|pnpm` | The gate. Checks JCS, that the lock is present, a frozen install (a stale lock fails), and the `test` script under that runtime's runner.
+| `pick` / `run SCRIPT` | The most-preferred runtime on `PATH`, and a `package.json` script run with it. Scripts and tooling follow the order wherever the environment allows.
+| `provision` | Every environment definition the repository carries (`mise.toml`, each `Containerfile`, each Guix manifest) provisions Bun. mise and containers can always provide Bun, so settling for less there is a finding. For Guix, the best runtime it provisions is accepted and reported. A `package.json` that no environment definition provisions a runtime for fails.
+|===
+
+*The gate* runs in `governance-reusable.yml`: a provision job, and one check
+job each for Bun, Deno and pnpm. The same jobs are offered standalone in
+`js-runtimes-reusable.yml`. A repository without a `package.json` passes with
+a notice naming the denominator (0).
+
+*Deno* is tier 2 and is not gated (§1.3 of LANGUAGE-POLICY). The refusal job,
+the pre-commit refusal and the `deno-allow.txt` ledger are retired.
+
+== Consequences
+
+* *JSON-POLICY §6.* It left `package.json` open as a bot-written file:
+`bun add` rewrites it in its own layout, undoing JCS. `regen` after
+`bun add` / `pnpm add` puts it back, and the gate catches a forgotten run.
+* *Once callers bump their governance pin*, every repository with a
+`package.json` must carry all three locks and a JCS `package.json`.
+Repositories that don't will go red until `js-runtimes regen` is run and
+committed, and until their environment definitions pin Bun. The owner chose
+this knowingly ("Join governance now").
+* *Test scripts must be runtime-neutral.* Each check job installs only its own
+runtime, so a `"test": "bun test"` fails the Deno and pnpm legs where Bun is
+absent. Where Bun is present, it tests Bun, whatever the leg.
+* *Deno does not record `file:` dependencies in `deno.lock`.* A stale `file:`
+dependency is caught by the Bun and pnpm legs only (measured 2026-10-14,
+Deno 2.9.6). Registry dependencies are caught on all three legs.
+* *Pins.*
+** Bun 1.4.2 (`oven-sh/setup-bun` v2.2.0) and Deno 2.9.6 (`denoland/setup-deno`
+v2.0.5), both SHA-pinned setup actions already in estate locks.
+** pnpm 10.28.0, via Corepack pinned by its tarball's sha512. A wrong hash is
+refused.
+** ijson-jcs: the crate at `3a9a4ee`, and the CLI at `0fdeea71` for the
+self-test.
+** The pins appear in `js-runtimes-reusable.yml`, `governance-reusable.yml` and
+`self-test.yml`, and are bumped together.
+* *An earlier draft* installed the runtimes with `npm install -g`. Scorecard
+then raised four medium alerts, one per install line, and SonarCloud's
+new-code security rating fell to C. Its finding could not be read from the
+agent sandbox. The pinned setup replaced it.
+
+== Follow-ups
+
+* *rsr-template-repo:* pin Bun (and Deno and pnpm, for their legs) in the
+template's `mise.toml`, Containerfile and Guix templates, so every newly minted
+repository satisfies `js-runtimes provision`.
+* *Callers* bump their governance pin to a commit that carries these jobs.
