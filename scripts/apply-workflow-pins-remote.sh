@@ -504,6 +504,7 @@ commit_payload() {
 # and create remote branches, commits and PRs for changed workflows and locks.
 # Fetch, relock and PR failures become census statuses and processing continues;
 # a relock failure prevents that repository's changes from being submitted.
+# Recorded repository failures do not cause a non-zero exit status.
 # Exits 1 on failed controls, authentication, target validation/fetch or repository
 # enumeration, and 2 on an unknown option; --self-test exits with its test status.
 main() {
