@@ -31,7 +31,16 @@ jobs:
   scan:
     name: Hypatia Neurosymbolic Analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 30 + 10 + 5: the panic-attack build is capped at 10 minutes and its scan
+    # at 5, so a slow build or a hung scan records "not_run" or "error" instead
+    # of timing out, and so failing, the whole job.
+    timeout-minutes: 45
+    env:
+      # panic-attack v2.5.5, built from source at this commit (cargo --rev
+      # checks out exactly this object; --locked holds every dependency to the
+      # Cargo.lock checksums). There is no release binary to pin instead.
+      # The binary reports "2.1.0" for --version; that string is stale upstream.
+      PANIC_ATTACK_SHA: 2dc1393c0ac982dbad98ba07f78a580d319456a5
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -205,6 +214,155 @@ jobs:
             ' hypatia-findings.json > hypatia-findings.relativized.json
           fi
 
+      # panic-attack is ADVISORY: it never fails this job, because this
+      # reusable is called estate-wide and the owner has not made it a gate.
+      # It is never silent either. Until 2026-10 nothing installed it, so the
+      # old step wrote a bare `[]` that read exactly like a clean scan (the CRG
+      # "panic-attack assail passes" evidence). It runs before the standards
+      # checkout below so that it scans the caller's tree, not
+      # .standards-checkout/scripts.
+      - name: Restore panic-attack build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.panic-attack
+          key: panic-attack-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.PANIC_ATTACK_SHA }}
+
+      - name: Install panic-attack (pinned source build)
+        id: panic-attack-install
+        run: |
+          set -euo pipefail
+          # Every failure path sets `reason` and exits 0; the next step turns
+          # that into status "not_run" in panic-attack-findings.json.
+          root="$HOME/.panic-attack"
+          bin="$root/bin/panic-attack"
+          reason=""
+          # cargo records the installed source in .crates.toml as
+          # "...?rev=<sha>#<sha>". Use a restored binary only when it names the
+          # pinned commit; otherwise rebuild.
+          if [ -x "$bin" ] && grep -qF "#$PANIC_ATTACK_SHA" "$root/.crates.toml" 2>/dev/null; then
+            echo "panic-attack restored from cache at $PANIC_ATTACK_SHA"
+          elif ! command -v cargo >/dev/null 2>&1; then
+            reason="cargo is not available on this runner"
+          elif ! timeout 600 cargo install --git https://github.com/hyperpolymath/panic-attack \
+              --rev "$PANIC_ATTACK_SHA" --locked --force --root "$root" panic-attack; then
+            reason="source build at $PANIC_ATTACK_SHA failed or exceeded 10 minutes"
+          elif [ ! -x "$bin" ]; then
+            reason="no binary after the source build at $PANIC_ATTACK_SHA"
+          fi
+          if [ -n "$reason" ]; then
+            # Leave nothing for the cache to save from a failed build.
+            rm -rf "$root"
+            echo "::warning title=panic-attack not installed::$reason"
+            echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          else
+            echo "bin=$bin" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run panic-attack assail
+        id: panic-attack
+        env:
+          PA_BIN: ${{ steps.panic-attack-install.outputs.bin }}
+          PA_INSTALL_REASON: ${{ steps.panic-attack-install.outputs.reason }}
+        run: |
+          set -euo pipefail
+          # panic-attack-findings.json is a status ENVELOPE, never a bare array:
+          #   status     "ran" | "not_run" | "error"
+          #   tool, ref  "panic-attack" and the pinned commit
+          #   reason     why it did not run or failed; null when it ran
+          #   exit_code  the assail exit code; null when it never started
+          #   counts     unsuppressed {critical, high, medium, low}; null unless ran
+          #   report     panic-attack's own AssailReport; null unless ran
+          # Only status "ran" carries a result. Anything else is not a pass.
+          out=panic-attack-findings.json
+          marker() {
+            jq -n --arg status "$1" --arg reason "$2" --argjson exit_code "$3" \
+              --arg ref "$PANIC_ATTACK_SHA" '{status: $status, tool: "panic-attack",
+                ref: $ref, reason: $reason, exit_code: $exit_code, counts: null,
+                report: null}' > "$out"
+          }
+          status=ran
+          reason=""
+          if [ -z "${PA_BIN:-}" ] || [ ! -x "$PA_BIN" ]; then
+            status=not_run
+            reason="${PA_INSTALL_REASON:-panic-attack is not installed}"
+            marker not_run "$reason" null
+          else
+            report=$(mktemp)
+            log=$(mktemp)
+            rc=0
+            # The report goes to --output; stdout carries only a banner.
+            timeout 300 "$PA_BIN" assail . --output "$report" > "$log" 2>&1 || rc=$?
+            if [ "$rc" -eq 124 ]; then
+              status=error
+              reason="panic-attack assail did not finish within 5 minutes"
+              marker error "$reason" "$rc"
+            elif [ "$rc" -ne 0 ]; then
+              status=error
+              reason="panic-attack assail exited $rc"
+              marker error "$reason" "$rc"
+            elif ! jq -e -s 'length == 1 and (.[0] | type == "object" and
+                (.weak_points | type == "array") and all(.weak_points[]; type == "object" and
+                  (.severity as $s | ["Low", "Medium", "High", "Critical"] | index($s) != null)))' \
+                "$report" > /dev/null 2>&1; then
+              status=error
+              reason="panic-attack assail exited 0 without a valid report"
+              marker error "$reason" 0
+            else
+              jq --arg ref "$PANIC_ATTACK_SHA" '
+                [.weak_points[] | select(.suppressed != true) | .severity] as $s
+                | {status: "ran", tool: "panic-attack", ref: $ref, reason: null,
+                   exit_code: 0,
+                   counts: {critical: ($s | map(select(. == "Critical")) | length),
+                            high: ($s | map(select(. == "High")) | length),
+                            medium: ($s | map(select(. == "Medium")) | length),
+                            low: ($s | map(select(. == "Low")) | length)},
+                   report: .}' "$report" > "$out"
+            fi
+            if [ "$status" = error ]; then
+              echo "::group::panic-attack output"
+              cat "$log"
+              echo "::endgroup::"
+            fi
+          fi
+
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" = ran ]; then
+            critical=$(jq '.counts.critical' "$out")
+            high=$(jq '.counts.high' "$out")
+            medium=$(jq '.counts.medium' "$out")
+            low=$(jq '.counts.low' "$out")
+            {
+              echo "critical=$critical"
+              echo "high=$high"
+            } >> "$GITHUB_OUTPUT"
+            if [ $((critical + high)) -gt 0 ]; then
+              echo "::warning title=panic-attack findings (advisory)::$critical critical and $high high finding(s). This scan does not gate; see panic-attack-findings.json in the hypatia-scan-findings artifact."
+            fi
+            {
+              echo "## panic-attack assail (advisory, does not gate)"
+              echo ""
+              echo "| Severity | Count |"
+              echo "|----------|-------|"
+              echo "| Critical | $critical |"
+              echo "| High     | $high |"
+              echo "| Medium   | $medium |"
+              echo "| Low      | $low |"
+              echo ""
+              echo "Built from hyperpolymath/panic-attack@$PANIC_ATTACK_SHA. Findings panic-attack suppresses as likely false positives are not counted."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            if [ "$status" = error ]; then label=ERROR; else label="NOT RUN"; fi
+            echo "::warning title=panic-attack $label::$reason. panic-attack-findings.json records status $status, which is not a pass."
+            {
+              echo "## panic-attack assail: $label"
+              echo ""
+              echo "**Status \`$status\`:** $reason."
+              echo ""
+              echo "No scan result was produced, so this is **not** a pass."
+              echo "\`panic-attack-findings.json\` records \`\"status\": \"$status\"\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Check out standards for the SARIF baseline filter
         id: fetch_filter
         # ⚠ continue-on-error is on the CHECKOUT, never on the check. If the
@@ -273,16 +431,6 @@ jobs:
         with:
           sarif_file: hypatia.sarif
           category: hypatia
-
-      - name: Run panic-attack assail
-        run: |
-          if command -v panic-attack >/dev/null 2>&1; then
-            panic-attack assail . > panic-attack-findings.json 2>&1 || true
-            echo "panic-attack scan complete"
-          else
-            echo "panic-attack not available in CI — skipping"
-            echo "[]" > panic-attack-findings.json
-          fi
 
       - name: Upload findings artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
