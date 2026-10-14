@@ -21,8 +21,8 @@ write_policy() {
   local target=$1 extra=${2-}
   mkdir -p "$target/.claude"
   {
-    printf '%s\n' '### ALLOWED' '| **Bun** | JS runtime |'
-    printf '%s\n' '### BANNED' '| **Deno** | **Bun** |'
+    printf '%s\n' '### ALLOWED' '| **Bun** | JS runtime |' '| **Deno** | JS runtime, tier 2 |'
+    printf '%s\n' '### BANNED' '| **Python** | **Rust** |'
     printf '%s\n' "$extra"
   } > "$target/.claude/CLAUDE.md"
   git -C "$target" add .claude/CLAUDE.md
@@ -61,16 +61,23 @@ write_policy "$blank" '|  | replacement |'
 missing_bun="$fixture/missing-bun"
 init_fixture "$missing_bun"
 mkdir -p "$missing_bun/.claude"
-printf '%s\n' '### ALLOWED' '### BANNED' '| **Deno** | **Bun** |' > "$missing_bun/.claude/CLAUDE.md"
+printf '%s\n' '### ALLOWED' '### BANNED' '| **Python** | **Rust** |' > "$missing_bun/.claude/CLAUDE.md"
 git -C "$missing_bun" add .claude/CLAUDE.md
 (cd "$missing_bun" && expect_fail "$language_gate")
 
-missing_deno="$fixture/missing-deno"
-init_fixture "$missing_deno"
-mkdir -p "$missing_deno/.claude"
-printf '%s\n' '### ALLOWED' '| **Bun** | JS runtime |' '### BANNED' > "$missing_deno/.claude/CLAUDE.md"
-git -C "$missing_deno" add .claude/CLAUDE.md
-(cd "$missing_deno" && expect_fail "$language_gate")
+# Owner ruling 2026-10-14: Deno is tier 2, so a Deno row under BANNED is drift.
+deno_banned="$fixture/deno-banned"
+init_fixture "$deno_banned"
+mkdir -p "$deno_banned/.claude"
+printf '%s\n' '### ALLOWED' '| **Bun** | JS runtime |' '### BANNED' '| **Deno** | **Bun** |' > "$deno_banned/.claude/CLAUDE.md"
+git -C "$deno_banned" add .claude/CLAUDE.md
+(cd "$deno_banned" && expect_fail "$language_gate")
+
+# Deno listed as allowed (tier 2) with Bun present passes.
+deno_allowed="$fixture/deno-allowed"
+init_fixture "$deno_allowed"
+write_policy "$deno_allowed"
+(cd "$deno_allowed" && expect_pass "$language_gate")
 
 no_workflows="$fixture/no-workflows"
 init_fixture "$no_workflows"

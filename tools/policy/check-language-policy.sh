@@ -64,9 +64,10 @@ for file in "${files[@]}"; do
        ! grep -qiE '^[-*][[:space:]]+\*{0,2}Bun\*{0,2}([[:space:]]|$)' <<<"$live"; then
       fail "$file" 'No Bun entry appears in the allowed policy.'
     fi
-    if ! grep -qE '^\|[[:space:]]*\*{0,2}Deno\*{0,2}[[:space:]]*\|[[:space:]]*\*{0,2}Bun\*{0,2}[[:space:]]*\|' <<<"$live" &&
-       ! grep -qiE '^[-*][[:space:]]+Deno[[:space:]]*\(use Bun\)' <<<"$live"; then
-      fail "$file" 'Deno is not listed as banned with Bun as its replacement.'
+    # Owner ruling 2026-10-14: Deno is not banned (Bun, then Deno, then pnpm,
+    # then npm). A Deno row under a BANNED heading is now the drift.
+    if awk '/^### / { banned = ($0 ~ /^### BANNED/) } banned && /^\|[[:space:]]*\*{0,2}Deno\*{0,2}[[:space:]]*\|/ { found = 1 } END { exit !found }' <<<"$live"; then
+      fail "$file" 'Deno is listed as banned; it is tier 2 (owner ruling 2026-10-14).'
     fi
   fi
 done
