@@ -67,7 +67,7 @@ git -C "$S" add -A; git -C "$S" commit -q -m new; NEW=$(git -C "$S" rev-parse HE
 
 # A consumer whose caller was re-pointed to NEW but whose lock is still on OLD.
 consumer() {
-  local d="$T/$1/.github/workflows"; rm -rf "$T/$1"; mkdir -p "$d"
+  local d="$T/$1/.github/workflows"; rm -rf "${T:?}/${1:?}"; mkdir -p "$d"
   printf 'on: push\njobs:\n  call:\n    uses: hyperpolymath/standards/.github/workflows/x-reusable.yml@%s\n' "$NEW" > "$d/caller.yml"
   printf 'on: push\njobs:\n  b:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@1111111111111111111111111111111111111111\n' > "$d/own.yml"
   cat > "$d/actions.lock" <<Y
@@ -146,7 +146,8 @@ refuse_case() { # name mutate-command
 }
 refuse_case still-on-old 'sed -i "s/@$NEW/@$OLD/" "$d/caller.yml"'
 BAD_PREFIX="${NEW:0:11}"
-if [ "${NEW:11:1}" = 0 ]; then BAD_PREFIX+=1; else BAD_PREFIX+=0; fi
+# Appends a hex digit (a string, not arithmetic), so the 12th char differs from NEW's.
+if [ "${NEW:11:1}" = 0 ]; then BAD_PREFIX+="1"; else BAD_PREFIX+="0"; fi
 refuse_case different-prefix 'sed -i "s/@$NEW/@$BAD_PREFIX/" "$d/caller.yml"'
 refuse_case mixed-commits 'cp "$d/caller.yml" "$d/other.yml"; sed -i "s/@$NEW/@$BAD_PREFIX/" "$d/other.yml"'
 refuse_case overlong-pin 'sed -i "s/@$NEW/@${NEW}a/" "$d/caller.yml"'
