@@ -4,7 +4,8 @@
 #
 # complete-job-refs.sh — add job-level reusable-workflow refs, and the refs a
 # workflow uses through its local composite actions, to actions.lock.
-# `gh actions-lock` v0.1.6 is blind to job-level `uses:` (upstream #129), so the
+# `gh actions-lock` v0.1.6 is blind to job-level `uses:` (upstream #129; v0.2.0
+# still is, re-measured 2026-10-14), so the
 # entries it cannot write are written here. Idempotent; run from a repo root.
 #
 # Lock repair order (each step idempotent, run from a repo root):
@@ -14,7 +15,8 @@
 # (GitHub compares lock and YAML as LITERAL strings); complete-job-refs adds the
 # job-level reusable refs the tool cannot see, and the refs used through local
 # composite actions (standards#1122); close-lock adds a record for every
-# dangling edge; prune-stale drops per-workflow refs nothing uses.
+# dangling edge, and gives each job-level reusable ref's record the `uses:` of
+# the workflow it calls; prune-stale drops per-workflow refs nothing uses.
 set -euo pipefail
 WF="${1:-.github/workflows}"
 L="$WF/actions.lock"
