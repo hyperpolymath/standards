@@ -9,7 +9,7 @@
 #
 # Why this exists rather than `gh actions-lock --verify-local` alone:
 #   `gh actions-lock` v0.1.6 cannot see a job-level `uses:` (a reusable-workflow
-#   call). Measured on this repo, 2026-09-22:
+#   call); v0.2.0 still cannot (re-measured 2026-10-14). Measured on this repo, 2026-09-22:
 #     * mirror.yml's lock entry was stale by a whole SHA and died at startup with
 #       jobs=0, yet --verify-local reported "All 30 workflows have complete
 #       lockfile coverage" and fix mode did not repair it;
