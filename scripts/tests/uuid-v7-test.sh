@@ -3,7 +3,7 @@
 #
 # Proves check-uuid-v7.sh CAN FAIL, and fails for the right reasons.
 #
-# The checker runs over this very repository (uuid-v7.yml), so every UUID in
+# The checker runs over this very repository (uuid-v8.yml), so every UUID in
 # this file is ASSEMBLED AT RUNTIME from fragments. A literal non-v7 UUID here
 # would turn the real gate red on its own test.
 set -euo pipefail

@@ -4,7 +4,7 @@
 # Proves check-uuid-v8.sh CAN FAIL, and fails for the right reasons, in both
 # its default (dual-accept, ADR-008 P2) and --strict (v8 only) modes.
 #
-# The checker runs over this very repository (uuid-v7.yml), so every UUID in
+# The checker runs over this very repository (uuid-v8.yml), so every UUID in
 # this file is ASSEMBLED AT RUNTIME from fragments. A literal non-conforming
 # UUID here would turn the real gate red on its own test.
 set -euo pipefail

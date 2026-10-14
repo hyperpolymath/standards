@@ -51,6 +51,7 @@ Licence consistency
 Exemption ratchet
 Debt ratchet
 UUID v7 conformance
+UUID v8 conformance
 JS runtimes — environment provisions Bun first
 JS runtimes — \${{ matrix.runtime }}"
 ACTUAL=$(grep -P '^    name: ' "$F" | sed 's/^    name: //')
