@@ -54,6 +54,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 FIX_MODE=false
+LOCK_REFUSED=0
 TARGET_SHA="${STANDARDS_TARGET_SHA:-}"
 BRANCH="chore/bump-standards-pins"
 TARGET_PATH="."
@@ -174,6 +175,8 @@ rewrite_file() {
 # Per-repo processing
 # ---------------------------------------------------------------------------
 
+# process_repo REPO — audit, and under --fix rewrite, every standards pin in
+# REPO's workflows, relock its actions.lock to match, and stage the result.
 process_repo() {
   local repo="$1" name
   name="$(basename "$repo")"
@@ -198,6 +201,19 @@ process_repo() {
       printf '%-30s\t%-28s\tFRESH\t-> %s\n' "$name" "$base" "${TARGET_SHA:0:12}"
     fi
   done
+
+  # The lock must follow the pins. Rewriting `uses:` alone leaves actions.lock
+  # keyed to the old standards commit, which check-lock-sync.sh rejects and
+  # GitHub refuses at startup (jobs=0). relock-standards-pin.sh is fail-closed:
+  # it leaves the lock untouched and exits 1 when it cannot relock correctly.
+  if $FIX_MODE && [ "$files_touched" -gt 0 ] && [ -f "$wfdir/actions.lock" ]; then
+    if bash "$(dirname "${BASH_SOURCE[0]}")/relock-standards-pin.sh" --to "$TARGET_SHA" "$wfdir" >&2; then
+      printf '%-30s\t%-28s\t%s\t-> %s\n' "$name" "actions.lock" "RELOCKED" "${TARGET_SHA:0:12}"
+    else
+      printf '%-30s\t%-28s\t%s\t-> %s\n' "$name" "actions.lock" "LOCK-REFUSED" "${TARGET_SHA:0:12}"
+      LOCK_REFUSED=$((LOCK_REFUSED + 1))
+    fi
+  fi
 
   if $FIX_MODE && [ "$files_touched" -gt 0 ] && git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
     local current_branch
@@ -242,4 +258,9 @@ if $FIX_MODE; then
   echo "# --fix: review staged branches ('$BRANCH') and open DRAFT PRs."
 else
   echo "# Re-run with --fix to stage the bump on a branch (no commit/push)."
+fi
+if [ "$LOCK_REFUSED" -gt 0 ]; then
+  echo "# LOCK-REFUSED in $LOCK_REFUSED repo(s): their pins moved but actions.lock could not follow."
+  echo "# Do NOT commit those as they stand; see relock-standards-pin.sh's message above."
+  exit 1
 fi

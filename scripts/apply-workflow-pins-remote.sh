@@ -49,6 +49,11 @@
 #     (6 of 9 campaign heads unsigned). An unsigned applier opens PRs that can
 #     never merge, which is worse than opening none.
 #   * Shell-only: no Python, no Ruby.
+#   * THE LOCK FOLLOWS THE PINS. A repo's actions.lock is fetched with its
+#     workflows and re-keyed by scripts/relock-standards-pin.sh in the same
+#     commit; a lock that cannot follow (fail-closed refusal) means the repo is
+#     reported LOCK-REFUSED and not landed. Pins without their lock stop the
+#     workflows at startup, which is worse than leaving them behind.
 #
 # Usage:
 #   bash scripts/apply-workflow-pins-remote.sh [options]
@@ -76,6 +81,10 @@ ONLY_REPO=""
 OUT_FILE=""
 LIMIT=0
 BRANCH_NAME="chore/re-point-standards-workflow-pins"
+# The standards checkout this script runs from: the relock reads reusables and
+# standards' own actions.lock AT THE TARGET from it.
+STANDARDS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RELOCK="$(dirname "${BASH_SOURCE[0]}")/relock-standards-pin.sh"
 
 log() { printf '%s\n' "$*" >&2; }
 
@@ -260,6 +269,16 @@ self_test() {
     echo "  FAIL illegal repair did not yield a legal pin: $(cat "$d/illegal.yml")" >&2; rc=1
   fi
 
+  # The relock is what keeps a fix-mode PR from desyncing actions.lock; a
+  # missing relock must stop the run, not silently land pins without locks.
+  # Its own known-answer suite is scripts/tests/relock-standards-pin-test.sh.
+  echo "control: the lock relock is present"
+  if [ -f "$RELOCK" ] && bash -n "$RELOCK"; then
+    echo "  PASS $(basename "$RELOCK") present and parses"
+  else
+    echo "  FAIL $RELOCK missing or unparseable" >&2; rc=1
+  fi
+
   rm -rf "$d"
   return $rc
 }
@@ -379,7 +398,7 @@ fetch_workflows() {
     done < <(jq -r '
         (.data.repository.object.entries // [])[]
         | select(.type == "blob")
-        | select(.name | test("\\.ya?ml$"))
+        | select((.name | test("\\.ya?ml$")) or .name == "actions.lock")
         | select(.object.text != null)
         | "\(.name)\t\(.object.text | @base64)"' "$resp" 2>/dev/null)
     rm -f "$resp"
@@ -399,7 +418,7 @@ fetch_workflows() {
     case "$listing" in *"HTTP 404"*) return 0 ;; esac
     return 1
   fi
-  for fname in $(printf '%s\n' "$listing" | grep -E '\.ya?ml$'); do
+  for fname in $(printf '%s\n' "$listing" | grep -E '\.ya?ml$|^actions\.lock$'); do
     gh api "repos/${repo}/contents/.github/workflows/${fname}" \
        -H 'Accept: application/vnd.github.raw' > "${dest}/${fname}" 2>/dev/null \
       || { rm -f "${dest}/${fname}"; return 1; }
@@ -505,6 +524,12 @@ main() {
   TARGET_SHA=$(resolve_target)
   [ -n "$TARGET_SHA" ] || { log "FATAL: could not resolve a target SHA."; exit 1; }
   validate_target "$TARGET_SHA" || exit 1
+  # The relock reads the target's reusables and lock from this checkout; a
+  # shallow CI checkout may hold a different commit, so fetch it if needed.
+  if [ "$DO_FIX" -eq 1 ] && ! git -C "$STANDARDS_ROOT" cat-file -e "${TARGET_SHA}^{commit}" 2>/dev/null; then
+    git -C "$STANDARDS_ROOT" fetch -q --depth=1 origin "$TARGET_SHA" 2>/dev/null \
+      || { log "FATAL: ${TARGET_SHA} is not in ${STANDARDS_ROOT} and could not be fetched; the lock relock needs it."; exit 1; }
+  fi
   log "== target: ${TARGET_SHA} (reachable from ${STANDARDS_REPO} main) =="
   [ "$DO_FIX" -eq 1 ] && log "== MODE: --fix (will open PRs) ==" || log "== MODE: audit (writes nothing) =="
 
@@ -556,6 +581,23 @@ main() {
     done
     shopt -u nullglob
     [ "$found" -eq 0 ] && continue
+
+    # The lock must follow the pins. Re-pointing `uses:` alone leaves
+    # actions.lock keyed to the old standards commit: check-lock-sync.sh
+    # rejects it and GitHub refuses the run at startup (jobs=0). Measured
+    # 2026-10-14: 200 of 368 governance callers carry a lock, and this applier
+    # used to fetch and commit only *.yml, so every fix-mode PR to one of them
+    # would have stopped its reusable-calling workflows. relock is fail-closed;
+    # a repo whose lock cannot follow is reported and NOT landed.
+    if [ "$DO_FIX" -eq 1 ] && [ "${#changed[@]}" -gt 0 ] && [ -f "$rdir/actions.lock" ]; then
+      local lock_before; lock_before=$(cat "$rdir/actions.lock")
+      if ! bash "$RELOCK" --to "$TARGET_SHA" --standards "$STANDARDS_ROOT" "$rdir" >&2; then
+        log "  LOCK-REFUSED ${repo}: actions.lock cannot follow the new pins; NOT landed"
+        printf '%s\t-\tLOCK-REFUSED\t-\n' "$repo" >> "$tsv"
+        continue
+      fi
+      [ "$lock_before" != "$(cat "$rdir/actions.lock")" ] && changed+=("actions.lock")
+    fi
 
     if [ "$DO_FIX" -eq 1 ] && [ "${#changed[@]}" -gt 0 ]; then
       local url
