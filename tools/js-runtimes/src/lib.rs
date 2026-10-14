@@ -32,6 +32,7 @@ pub const ORDER: [Runtime; 4] = [Runtime::Bun, Runtime::Deno, Runtime::Pnpm, Run
 pub const LOCKED: [Runtime; 3] = [Runtime::Bun, Runtime::Deno, Runtime::Pnpm];
 
 impl Runtime {
+    /// The runtime's command-line binary name.
     pub fn name(self) -> &'static str {
         match self {
             Runtime::Bun => "bun",
@@ -41,6 +42,7 @@ impl Runtime {
         }
     }
 
+    /// Looks up a runtime by its binary name, e.g. `"bun"`.
     pub fn parse(s: &str) -> Option<Runtime> {
         ORDER.iter().copied().find(|r| r.name() == s)
     }
@@ -67,6 +69,7 @@ impl Runtime {
 }
 
 impl fmt::Display for Runtime {
+    /// Displays the runtime using its binary name.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
     }
@@ -131,6 +134,7 @@ pub enum EnvKind {
 }
 
 impl EnvKind {
+    /// The short label used in output, e.g. `"mise"`.
     pub fn name(self) -> &'static str {
         match self {
             EnvKind::Mise => "mise",
@@ -158,6 +162,7 @@ pub struct EnvDef {
 }
 
 impl EnvDef {
+    /// The most-preferred runtime this definition provisions, if any.
     pub fn best(&self) -> Option<Runtime> {
         pick(|r| self.provides.contains(&r))
     }
@@ -424,6 +429,7 @@ pub enum Verdict {
     None,
 }
 
+/// Classifies one environment definition against the preference order.
 pub fn verdict(def: &EnvDef) -> Verdict {
     match def.best() {
         Some(Runtime::Bun) => Verdict::Best,
@@ -437,6 +443,7 @@ pub fn verdict(def: &EnvDef) -> Verdict {
 mod tests {
     use super::*;
 
+    /// The preference order is Bun, Deno, pnpm, npm, and `pick` honours it.
     #[test]
     fn order_is_bun_deno_pnpm_npm() {
         assert_eq!(ORDER.map(Runtime::name), ["bun", "deno", "pnpm", "npm"]);
@@ -450,12 +457,14 @@ mod tests {
         assert_eq!(pick(|_| false), None);
     }
 
+    /// npm has no tracked lock; every `LOCKED` runtime does.
     #[test]
     fn npm_keeps_no_lock() {
         assert_eq!(Runtime::Npm.lockfile(), None);
         assert!(LOCKED.iter().all(|r| r.lockfile().is_some()));
     }
 
+    /// `canon` classifies documents the same way `ijson-jcs check` does.
     #[test]
     fn canon_matches_ijson_jcs_check() {
         assert_eq!(canon(b"{\"a\":1,\"b\":[true,null]}\n"), Canon::Canonical);
@@ -472,6 +481,7 @@ mod tests {
         assert!(matches!(canon(b"not json"), Canon::Invalid(_)));
     }
 
+    /// `has_test_script` finds a string `scripts.test`, and only that.
     #[test]
     fn test_script_lookup() {
         assert!(has_test_script(br#"{"scripts":{"test":"echo ok"}}"#));
@@ -480,6 +490,7 @@ mod tests {
         assert!(!has_test_script(br#"{}"#));
     }
 
+    /// Only the `[tools]` table of a mise.toml is read for runtimes.
     #[test]
     fn mise_tools_table_only() {
         let t = "[settings]\nbun = \"no\"\n[tools]\nzig = \"latest\"\nbun = \"1.4.2\" # js\n\"npm:pnpm\" = \"10\"\n[env]\ndeno = \"x\"\n";
@@ -491,6 +502,7 @@ mod tests {
         assert!(mise_provides("[tools]\njust = \"latest\"\n").is_empty());
     }
 
+    /// Provisioning requires a base/copied image or install step, not mere use.
     #[test]
     fn container_provisioning_not_mere_use() {
         assert_eq!(
@@ -523,6 +535,7 @@ mod tests {
         assert!(container_provides("# FROM oven/bun\nFROM alpine\n").is_empty());
     }
 
+    /// Guix package names are matched ignoring commented-out lines.
     #[test]
     fn guix_names_packages_ignoring_comments() {
         assert_eq!(
@@ -535,6 +548,7 @@ mod tests {
         );
     }
 
+    /// `verdict` covers the Best, Below, Fallback and None outcomes.
     #[test]
     fn verdicts() {
         let d = |kind, provides: Vec<Runtime>| EnvDef {

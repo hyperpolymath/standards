@@ -33,16 +33,20 @@ const USAGE: &str = "usage: js-runtimes regen [DIR] | check bun|deno|pnpm [DIR] 
 
 struct Fail(u8, String);
 
+/// An exit-code-1 failure: a finding was reported.
 fn finding(msg: impl Into<String>) -> Fail {
     Fail(1, msg.into())
 }
+/// An exit-code-2 failure: the check could not run at all.
 fn cannot(msg: impl Into<String>) -> Fail {
     Fail(2, msg.into())
 }
+/// Prints an informational line prefixed with the tool's name.
 fn note(msg: &str) {
     println!("js-runtimes: {msg}");
 }
 
+/// Whether `bin` is on `PATH` and executable.
 fn on_path(bin: &str) -> bool {
     let Some(paths) = env::var_os("PATH") else {
         return false;
@@ -53,16 +57,19 @@ fn on_path(bin: &str) -> bool {
     })
 }
 
+/// Whether the Unix permission bits mark this file executable.
 #[cfg(unix)]
 fn is_executable(m: &fs::Metadata) -> bool {
     use std::os::unix::fs::PermissionsExt;
     m.permissions().mode() & 0o111 != 0
 }
+/// Non-Unix platforms have no executable bit to check.
 #[cfg(not(unix))]
 fn is_executable(_: &fs::Metadata) -> bool {
     true
 }
 
+/// Requires `bin` to be on `PATH`, else a cannot-run failure.
 fn need(bin: &str) -> Result<(), Fail> {
     if on_path(bin) {
         Ok(())
@@ -88,6 +95,7 @@ fn quiet(dir: &Path, argv: &[&str]) -> Result<bool, Fail> {
     Ok(out.status.success())
 }
 
+/// Run with inherited stdout/stderr, e.g. for the `test` script.
 fn loud(dir: &Path, argv: &[&str]) -> Result<bool, Fail> {
     let st = Command::new(argv[0])
         .args(&argv[1..])
@@ -98,6 +106,7 @@ fn loud(dir: &Path, argv: &[&str]) -> Result<bool, Fail> {
     Ok(st.success())
 }
 
+/// Reads `package.json` from `dir`, or a cannot-run failure.
 fn manifest(dir: &Path) -> Result<(PathBuf, Vec<u8>), Fail> {
     let p = dir.join("package.json");
     match fs::read(&p) {
@@ -106,6 +115,7 @@ fn manifest(dir: &Path) -> Result<(PathBuf, Vec<u8>), Fail> {
     }
 }
 
+/// Rewrites `path` to its canonical JCS form if it is not already.
 fn canonicalise(path: &Path, bytes: &[u8]) -> Result<(), Fail> {
     match canon(bytes) {
         Canon::Canonical => Ok(()),
@@ -115,6 +125,8 @@ fn canonicalise(path: &Path, bytes: &[u8]) -> Result<(), Fail> {
     }
 }
 
+/// The only writer: canonicalises `package.json`, then regenerates each
+/// runtime's lock.
 fn regen(dir: &Path) -> Result<(), Fail> {
     let (path, bytes) = manifest(dir)?;
     for r in LOCKED {
@@ -148,6 +160,8 @@ fn regen(dir: &Path) -> Result<(), Fail> {
     Ok(())
 }
 
+/// The gate for one runtime: JCS, lock present, frozen install, then the
+/// `test` script.
 fn check(rt: Runtime, dir: &Path) -> Result<(), Fail> {
     let Some(lock) = rt.lockfile() else {
         return Err(cannot(format!(
@@ -192,6 +206,7 @@ fn check(rt: Runtime, dir: &Path) -> Result<(), Fail> {
     Ok(())
 }
 
+/// The most-preferred runtime on `PATH`, or a cannot-run failure.
 fn picked() -> Result<Runtime, Fail> {
     pick(|r| on_path(r.name())).ok_or_else(|| {
         cannot(format!(
@@ -201,6 +216,8 @@ fn picked() -> Result<Runtime, Fail> {
     })
 }
 
+/// Checks that every environment definition under `dir` provisions Bun, or
+/// the best runtime it can.
 fn provision(dir: &Path) -> Result<(), Fail> {
     if !dir.join("package.json").is_file() {
         note("no package.json: nothing here needs a JavaScript runtime (0 environment definitions examined)");
@@ -277,6 +294,7 @@ fn provision(dir: &Path) -> Result<(), Fail> {
     Ok(())
 }
 
+/// Dispatches the subcommand named by `args[0]`.
 fn real_main(args: &[String]) -> Result<(), Fail> {
     let dir_at = |i: usize| PathBuf::from(args.get(i).map(String::as_str).unwrap_or("."));
     match args.first().map(String::as_str) {
@@ -321,6 +339,7 @@ fn real_main(args: &[String]) -> Result<(), Fail> {
     }
 }
 
+/// Entry point: runs `real_main` and maps the result to an exit code.
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     match real_main(&args) {
