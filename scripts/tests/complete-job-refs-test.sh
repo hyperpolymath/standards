@@ -82,6 +82,38 @@ grep -qxF "    '.github/workflows/other.yml':" "$L" && grep -qxF "        - 'o/r
 [ "$(sed -n '/^dependencies:/=' "$L")" -gt "$(sed -n "/other.yml/=" "$L")" ] \
   && ok "created entry stays inside workflows:" || bad "created entry stays inside workflows:"
 
+echo "=== refs used through local composite actions (standards#1122) ==="
+c="$WORK/comp"; mkdir -p "$c/.github/workflows" "$c/.github/actions/outer" "$c/.github/actions/inner"
+cat > "$c/.github/workflows/ci.yml" <<EOF
+jobs:
+  a:
+    steps:
+      - uses: actions/checkout@$A
+      - uses: ./.github/actions/outer
+EOF
+printf 'runs:\n  using: composite\n  steps:\n    - uses: "o/direct@%s",\n    - uses: ./.github/actions/inner\n    - uses: docker://alpine:3\n' "$A" > "$c/.github/actions/outer/action.yml"
+printf 'runs:\n  using: composite\n  steps:\n    - uses: o/nested/sub@%s # v1\n' "$S" > "$c/.github/actions/inner/action.yml"
+printf "workflows:\n    '.github/workflows/ci.yml':\n        - 'actions/checkout@%s'\ndependencies:\n" "$A" > "$c/.github/workflows/actions.lock"
+out=$(run comp)
+grep -qxF "        - 'o/direct@$A'" "$c/.github/workflows/actions.lock" \
+  && ok "a local composite's ref is added to the calling workflow (KYAML-quoted)" || bad "a local composite's ref is added — $out"
+grep -qxF "        - 'o/nested@$S'" "$c/.github/workflows/actions.lock" \
+  && ok "a nested composite's subpath ref is added as owner/repo@ref" || bad "a nested composite's subpath ref is added — $out"
+! grep -qF "alpine" "$c/.github/workflows/actions.lock" \
+  && ok "a docker:// use in a composite is not added" || bad "a docker:// use in a composite is not added"
+cp "$c/.github/workflows/actions.lock" "$WORK/comp.before"; run comp >/dev/null
+cmp -s "$c/.github/workflows/actions.lock" "$WORK/comp.before" \
+  && ok "idempotent with composites" || bad "idempotent with composites"
+
+echo "=== the local-composite block is the same in all three scripts ==="
+block() { awk '/^# ── local composite actions \(identical block/{p=1} p{print} /^# ── end of the shared block/{exit}' "$1"; }
+b1="$(block "$SCRIPT_DIR/../complete-job-refs.sh")"
+if [ -n "$b1" ] && [ "$b1" = "$(block "$SCRIPT_DIR/../prune-stale.sh")" ] && [ "$b1" = "$(block "$SCRIPT_DIR/../check-lock-sync.sh")" ]; then
+  ok "complete-job-refs, prune-stale and check-lock-sync agree on what a workflow reaches"
+else
+  bad "the local-composite block differs between complete-job-refs, prune-stale and check-lock-sync"
+fi
+
 echo "=== structural ==="
 mkrepo t3; printf 'dependencies:\n' > "$WORK/t3/.github/workflows/actions.lock"
 run t3 >/dev/null; st=$?
