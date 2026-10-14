@@ -175,8 +175,13 @@ rewrite_file() {
 # Per-repo processing
 # ---------------------------------------------------------------------------
 
-# process_repo REPO — audit, and under --fix rewrite, every standards pin in
-# REPO's workflows, relock its actions.lock to match, and stage the result.
+# process_repo REPO — print an audit of matching standards SHA pins in the
+# local checkout's workflows; do nothing if its workflows directory is absent.
+# Under --fix, rewrite pins to TARGET_SHA and relock an existing actions.lock
+# when workflows change. A relock failure increments LOCK_REFUSED for the
+# script's final exit status and leaves rewritten workflows in place, but
+# skips branch selection and staging. Otherwise, branch/staging failures are
+# ignored; returns 0 after processing without committing or pushing.
 process_repo() {
   local repo="$1" name
   name="$(basename "$repo")"

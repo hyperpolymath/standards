@@ -79,6 +79,8 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 q="'"
 
 # rec_body KEY FILE — print the dependency record KEY (header and body) from FILE.
+# KEY is the unquoted owner/repo@ref. A missing record produces no output and
+# succeeds; a file read error propagates awk's non-zero status.
 rec_body() { awk -v k="    ${q}$1${q}:" '$0==k{f=1;print;next} f&&/^    [^ ]/{exit} f' "$2"; }
 
 # Actions the called reusables use at TARGET, normalised to owner/repo@ref.
@@ -123,6 +125,8 @@ while read -r u; do
 done < "$tmp/uses.s"
 
 # Prune candidates nothing references any more (to a fixed point).
+# deps_line FILE — print the one-based line number of each exact dependencies:
+# header. Returns non-zero if no header is found or the file cannot be read.
 deps_line() { grep -n '^dependencies:$' "$1" | cut -d: -f1; }
 while :; do
   n=$(deps_line "$tmp/lock")

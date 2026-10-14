@@ -364,14 +364,16 @@ list_repos() {
   rm -f "$all" "$part"
 }
 
-# fetch_workflows <repo> <destdir> — download .github/workflows/*.y*ml.
+# fetch_workflows <owner/repo> <destdir> — download .github/workflows/*.yml,
+# *.yaml and actions.lock, when present, into destdir.
 # The REMOTE content is the only evidence: a local checkout can be arbitrarily
 # stale, and reading one is what produced a false "285 callers track main"
 # census on 2026-09-15.
-# Returns non-zero when the answer is UNKNOWN (rate limit, 5xx, a file that
-# would not download). Only a 404 is "no workflows". Returning 0 on failure
-# made a rate-limited repo vanish from the census while `walked N` still
-# counted it (measured 2026-10-02, shared 5,000/h token exhausted mid-run).
+# Returns 0 for a successful GraphQL response, including an empty tree. Blobs
+# without text are skipped; decoding failures remove the destination file
+# without changing the success status. In the REST fallback, returns 0 for
+# a missing directory (HTTP 404), and 1 for other listing or download failures;
+# files already downloaded remain in destdir on failure.
 fetch_workflows() {
   local repo="$1" dest="$2" owner="${1%%/*}" name="${1##*/}" resp
   mkdir -p "$dest"
@@ -494,6 +496,13 @@ commit_payload() {
 # ---------------------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------------------
+# main [options] — audit remote standards pins and write a TSV census to
+# stdout, or to --out. Under --fix, fetch the target commit locally if needed
+# and create remote branches, commits and PRs for changed workflows and locks.
+# Fetch, relock and PR failures become census statuses and processing continues;
+# a relock failure prevents that repository's changes from being submitted.
+# Exits 1 on failed controls, authentication, target validation/fetch or repository
+# enumeration, and 2 on an unknown option; --self-test exits with its test status.
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
