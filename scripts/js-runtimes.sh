@@ -26,7 +26,7 @@
 # test); 2 cannot run (missing tool or manifest). A gate that cannot look
 # does not report a pass.
 #
-# Tools: ijson-jcs (on PATH or $IJSON_JCS) and the runtime(s) concerned.
+# Tools: ijson-jcs (on PATH or $IJSON_JCS), jq, and the runtime(s) concerned.
 set -uo pipefail
 
 IJSON_JCS="${IJSON_JCS:-ijson-jcs}"
@@ -46,13 +46,8 @@ lockfile_of() {
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is not on PATH (cannot run, not a pass)"; }
 
-has_test_script() { # has_test_script RUNTIME — read package.json with that runtime's engine
-  case "$1" in
-    deno) deno eval --quiet 'const p=JSON.parse(Deno.readTextFileSync("package.json"));Deno.exit(p.scripts&&typeof p.scripts.test==="string"?0:1)' ;;
-    # pnpm runs on Node, so Node is already present on a pnpm leg.
-    pnpm) node -e 'const p=JSON.parse(require("fs").readFileSync("package.json","utf8"));process.exit(p.scripts&&typeof p.scripts.test==="string"?0:1)' ;;
-    bun)  bun -e 'const p=JSON.parse(require("fs").readFileSync("package.json","utf8"));process.exit(p.scripts&&typeof p.scripts.test==="string"?0:1)' ;;
-  esac
+has_test_script() { # does package.json declare a string `scripts.test`?
+  jq -e '(.scripts.test | type) == "string"' package.json >/dev/null 2>&1
 }
 
 regen() {
@@ -79,7 +74,7 @@ check() {
   lock="$(lockfile_of "$rt")"
   cd -- "$dir" || die "no directory $dir"
   [ -f package.json ] || die "no package.json in $dir"
-  need "$IJSON_JCS"; need "$rt"
+  need "$IJSON_JCS"; need jq; need "$rt"
 
   rc=0; "$IJSON_JCS" check package.json >/dev/null 2>&1 || rc=$?
   case "$rc" in
@@ -96,7 +91,7 @@ check() {
   esac >/dev/null 2>&1 || die "$rt: $lock is stale against package.json (frozen install refused): run scripts/js-runtimes.sh regen" 1
   note "$rt installs frozen from $lock"
 
-  if has_test_script "$rt"; then
+  if has_test_script; then
     case "$rt" in
       bun)  bun run test ;;
       pnpm) pnpm run test ;;

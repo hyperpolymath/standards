@@ -19,8 +19,8 @@
 #       #   working-directory: web          # default "."
 #       #   runtimes: '["bun","pnpm"]'      # default all three
 #
-# Runtimes come from the npm registry at pinned versions (npm checks each
-# tarball's integrity), so this workflow adds no third-party action.
+# Runtimes are pinned: Bun and Deno by SHA-pinned setup actions, pnpm by
+# Corepack with the tarball's sha512 (a wrong hash is refused).
 name: JS runtimes (reusable)
 
 on:
@@ -48,9 +48,8 @@ jobs:
       matrix:
         runtime: ${{ fromJSON(inputs.runtimes) }}
     env:
-      BUN_VERSION: "1.4.2"
-      PNPM_VERSION: "10.28.0"
-      DENO_VERSION: "2.9.6"
+      # pnpm 10.28.0, pinned by its npm tarball's sha512 (hex of dist.integrity).
+      PNPM_PIN: pnpm@10.28.0+sha512.05df71d1421f21399e053fde567cea34d446fa02c76571441bfc1c7956e98e363088982d940465fd34480d4d90a0668bc12362f8aa88000a64e83d0b0e47be48
       IJSON_JCS_REV: 0fdeea716fd558e9807362acf6f8202d56d8d88f  # same pin as ijson-jcs.yml (JSON-POLICY §3)
     steps:
       - name: Checkout caller repository
@@ -69,17 +68,24 @@ jobs:
           sparse-checkout: |
             scripts/js-runtimes.sh
           sparse-checkout-cone-mode: false
-      - name: Install ${{ matrix.runtime }} and ijson-jcs
+      - name: Set up Bun
+        if: matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.2"
+      - name: Set up Deno
+        if: matrix.runtime == 'deno'
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: "2.9.6"
+      - name: Set up pnpm (Corepack, hash-pinned)
+        if: matrix.runtime == 'pnpm'
+        run: corepack enable pnpm && corepack install -g "$PNPM_PIN"
+      - name: Install ijson-jcs
         env:
           RUNTIME: ${{ matrix.runtime }}
         run: |
           set -euo pipefail
-          case "$RUNTIME" in
-            bun)  npm install -g "bun@${BUN_VERSION}" ;;
-            pnpm) npm install -g "pnpm@${PNPM_VERSION}" ;;
-            deno) npm install -g "deno@${DENO_VERSION}" ;;
-            *)    echo "::error::unknown runtime '$RUNTIME'"; exit 1 ;;
-          esac
           "$RUNTIME" --version
           cargo install --git https://github.com/hyperpolymath/ijson-jcs --rev "$IJSON_JCS_REV" --locked ijson-jcs
       - name: One manifest, ${{ matrix.runtime }}
