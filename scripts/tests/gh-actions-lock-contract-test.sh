@@ -17,7 +17,10 @@
 #      key on: sha-as-ref, ref-changed, stale (dangling) and stale (a
 #      reusable-workflow dependency the tool cannot see).
 #   5. scripts/update-actions-lock.sh --verify-local, driving the real binary,
-#      accepts reusable-workflow coverage and rejects a real desync.
+#      accepts the three v0.2.0 false positives (reusable-workflow `stale`,
+#      `not-pinned` for a workflow with nothing to pin, `local-action` for a
+#      ./ action present in the checkout) and rejects a real desync, an
+#      unlisted workflow with a remote action, and a missing ./ action.
 #
 # Offline: --verify-local makes no network call. Needs the binary in
 # $GH_ACTIONS_LOCK_BIN (self-test.yml downloads the pinned release and checks
@@ -149,6 +152,54 @@ fixture "$WORK/r" v0.0.3 desync
 if (cd "$WORK/r" && GH_BIN="$WORK/bin/gh" bash "$ROOT/scripts/update-actions-lock.sh" --verify-local) >"$WORK/log" 2>&1; then
   bad "a bumped-but-not-relocked tag was accepted"; sed 's/^/        /' "$WORK/log" | tail -8
 else ok "a bumped-but-not-relocked tag is rejected"; fi
+
+# A v0.1.6-written lock has no entry for a workflow with nothing to pin. v0.2.0
+# reports it `not-pinned` with no dependency; GitHub runs it regardless.
+fixture "$WORK/r" v0.0.2 clean
+printf 'on: push\npermissions: {}\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n' \
+  > "$WORK/r/.github/workflows/runonly.yml"
+printf 'on: workflow_call\npermissions: {}\njobs:\n  a:\n    uses: ./.github/workflows/runonly.yml\n' \
+  > "$WORK/r/.github/workflows/localcall.yml"
+verify "$WORK/r"
+if jq -e '[.findings[] | select(.category != "not-pinned" or .dependency != null)] == []' \
+     "$WORK/out.json" >/dev/null 2>&1; then
+  ok "an unlisted run-only or ./-only workflow yields at most not-pinned with no dependency"
+else bad "unexpected findings for unlisted workflows: $(head -c 300 "$WORK/out.json")"; fi
+if (cd "$WORK/r" && GH_BIN="$WORK/bin/gh" bash "$ROOT/scripts/update-actions-lock.sh" --verify-local) >"$WORK/log" 2>&1; then
+  ok "update-actions-lock.sh accepts workflows with nothing to pin"
+else bad "workflows with nothing to pin were rejected"; sed 's/^/        /' "$WORK/log" | tail -8; fi
+# A same-repository composite action. v0.2.0 calls `./` unsupported; the estate
+# runs it, and fails the `$/` rewrite instead (check-lock-sync.sh).
+printf 'on: push\npermissions: {}\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/upload-artifact@v7.0.1\n      - uses: ./.github/actions/thing\n' \
+  > "$WORK/r/.github/workflows/localaction.yml"
+# v0.2.0 flags `./` only in a workflow the lock lists, so list this one.
+awk -v q="'" '/^dependencies:/ {
+    print "    " q ".github/workflows/localaction.yml" q ":"
+    print "        - " q "actions/upload-artifact@v7.0.1" q
+  } { print }' "$WORK/r/.github/workflows/actions.lock" > "$WORK/lock.tmp" &&
+  mv "$WORK/lock.tmp" "$WORK/r/.github/workflows/actions.lock"
+verify "$WORK/r"
+if jq -e '[.findings[] | select(.category == "local-action" and .dependency == null)] | length == 1' \
+     "$WORK/out.json" >/dev/null 2>&1; then
+  ok "a listed workflow with a ./ action yields local-action with no dependency"
+else bad "a listed workflow with a ./ action did not yield local-action"; fi
+if (cd "$WORK/r" && GH_BIN="$WORK/bin/gh" bash "$ROOT/scripts/update-actions-lock.sh" --verify-local) >"$WORK/log" 2>&1; then
+  bad "a ./ action that does not exist was accepted"; sed 's/^/        /' "$WORK/log" | tail -8
+else ok "a ./ action that does not exist is rejected"; fi
+mkdir -p "$WORK/r/.github/actions/thing"
+printf 'name: thing\nruns:\n  using: composite\n  steps:\n    - run: echo ok\n      shell: bash\n' \
+  > "$WORK/r/.github/actions/thing/action.yml"
+if (cd "$WORK/r" && GH_BIN="$WORK/bin/gh" bash "$ROOT/scripts/update-actions-lock.sh" --verify-local) >"$WORK/log" 2>&1; then
+  ok "a ./ action present in the checkout is accepted"
+else bad "a ./ action present in the checkout was rejected"; sed 's/^/        /' "$WORK/log" | tail -8; fi
+if grep -q 'uses: ./.github/actions/thing' "$WORK/r/.github/workflows/localaction.yml"; then
+  ok "--verify-local left the ./ reference unrewritten"
+else bad "--verify-local rewrote the ./ reference"; fi
+printf 'on: push\npermissions: {}\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/upload-artifact@v7.0.1\n' \
+  > "$WORK/r/.github/workflows/remote.yml"
+if (cd "$WORK/r" && GH_BIN="$WORK/bin/gh" bash "$ROOT/scripts/update-actions-lock.sh" --verify-local) >"$WORK/log" 2>&1; then
+  bad "an unlisted workflow with a remote action was accepted"; sed 's/^/        /' "$WORK/log" | tail -8
+else ok "an unlisted workflow with a remote action is rejected"; fi
 
 echo
 echo "Total: $pass passed, $fail failed"
