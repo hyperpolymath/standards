@@ -32,9 +32,14 @@ set -uo pipefail
 IJSON_JCS="${IJSON_JCS:-ijson-jcs}"
 RUNTIMES=(bun pnpm deno)
 
+# die <message> [status] — write a diagnostic to stderr and exit the current
+# shell with status (default: 2).
 die()  { printf 'js-runtimes: %s\n' "$1" >&2; exit "${2:-2}"; }
+# note <message> — write a prefixed message and newline to stdout.
 note() { printf 'js-runtimes: %s\n' "$1"; }
 
+# lockfile_of <runtime> — print the lockfile name for bun, pnpm or deno.
+# An unknown runtime exits the current shell with status 2.
 lockfile_of() {
   case "$1" in
     bun)  echo bun.lock ;;
@@ -44,12 +49,22 @@ lockfile_of() {
   esac
 }
 
+# need <command> — return 0 if the command resolves, otherwise exit with 2.
+# Accepts a command name or an executable path, as used by IJSON_JCS.
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is not on PATH (cannot run, not a pass)"; }
 
+# Return 0 for a string scripts.test in the current directory's package.json,
+# including an empty string. Other values return non-zero, as do jq errors;
+# check treats either as no test script.
 has_test_script() { # does package.json declare a string `scripts.test`?
   jq -e '(.scripts.test | type) == "string"' package.json >/dev/null 2>&1
 }
 
+# regen [DIR] — canonicalise package.json and regenerate all three locks in
+# DIR (default: the current directory). Changes the shell's working directory;
+# Deno also populates node_modules. Earlier writes remain if a later step fails.
+# Exits with 2 for a missing directory, manifest or required tool; with 1 for
+# bun.lockb or a failed canonicalisation or dependency resolution command.
 regen() {
   local dir="${1:-.}"
   cd -- "$dir" || die "no directory $dir"
@@ -67,6 +82,13 @@ regen() {
   note "regenerated in $(pwd): package.json (JCS), bun.lock, pnpm-lock.yaml, deno.lock"
 }
 
+# check <runtime> [DIR] — require I-JSON + JCS package.json and the runtime's
+# lockfile, install frozen dependencies, then run a string test script, if any.
+# Runtime is bun, pnpm or deno; DIR defaults to the current directory. Changes
+# the shell's working directory and installs dependencies; test side effects
+# depend on the package. Returns 0 on success. Exits with 2 for an unknown
+# runtime or missing directory, manifest or tool; with 1 for any canonicality
+# check, lockfile, frozen install or test failure, replacing tool exit statuses.
 check() {
   local rt="$1" dir="${2:-.}" lock rc
   # Validate here: a die inside $(...) would only end the subshell.
