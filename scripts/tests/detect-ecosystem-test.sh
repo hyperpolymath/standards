@@ -139,7 +139,7 @@ check "names Bun"                "$(grep -qF 'Bun (2)' <<< "$OUT" && echo y || e
 check "refuses (verdict)"        "$R"   "true"
 check "job still exits 0"        "$RC"  "0"
 
-echo "== Fixture 6: deno.json still trips the BAN probe =="
+echo "== Fixture 6: deno.json trips the Deno probe (tier 2: reported, not refused) =="
 run_fixture true '' deno.json
 check "has_deno true"            "$(grep -qF 'has_deno=true' <<< "$OUT" && echo y || echo n)" "y"
 check "n_deno"                   "$(sed -n 's/^n_deno=//p' <<< "$OUT" | tail -1)" "1"
