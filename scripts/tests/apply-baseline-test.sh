@@ -284,55 +284,44 @@ else
 fi
 
 # --- The SHIPPED ledger, not a fixture -------------------------------------
-# #966: hypatia emits invalid_actions_lock from BOTH workflow_audit and
-# workflow_hardening for one defect. It was acked twice, which meant two
-# expiry dates for one decision — the shape in which a half-expired ack
-# silently reopens a gate. #971 made rule_module list-valued; this collapses
-# the pair into one entry. These assertions run against the real
-# .hypatia-baseline.json so that splitting it back, or narrowing the matcher,
-# reds this suite instead of quietly un-suppressing a live finding.
+# #963: the shipped ledger used to carry ONE invalid_actions_lock ack naming
+# both workflow_audit and workflow_hardening (`**actions.lock`), for
+# asana/push-signed-commits' floating transitive actions/setup-python@v2.
+# #1233 replaced the action and #1238 dropped both records from actions.lock,
+# so the ack was removed. While it stood, `**actions.lock` muted ANY new
+# invalid_actions_lock until 2026-12-22. These assertions run against the real
+# .hypatia-baseline.json so that restoring the ack reds this suite instead of
+# quietly muting the next lock defect.
 SHIPPED="$SCRIPT_DIR/../../.hypatia-baseline.json"
 if [ ! -f "$SHIPPED" ]; then
   echo "FAIL: shipped baseline not found at $SHIPPED"
   fail=$((fail + 1))
 else
-  # Exactly one entry, and it must name BOTH modules.
-  got=$(jq -r '[.[] | select(.type == "invalid_actions_lock")] as $e
-    | "\($e | length),\($e[0].rule_module | if type == "array" then length else 1 end)"' "$SHIPPED")
-  if [ "$got" = "1,2" ]; then
-    echo "PASS: shipped ledger holds ONE invalid_actions_lock ack naming TWO modules"
+  got=$(jq -r '[.[] | select(.type == "invalid_actions_lock")] | length' "$SHIPPED")
+  if [ "$got" = "0" ]; then
+    echo "PASS: shipped ledger holds NO invalid_actions_lock ack"
     pass=$((pass + 1))
   else
-    echo "FAIL: shipped invalid_actions_lock acks: expected 1 entry / 2 modules, got $got"
+    echo "FAIL: shipped invalid_actions_lock acks: expected 0, got $got"
     fail=$((fail + 1))
   fi
 
-  # ⚠ The two emissions carry DIFFERENT file values — `actions.lock` from
-  # workflow_audit and the full path from WH004 — so the surviving entry must
-  # match by file_pattern. An exact `file` key would suppress only one of
-  # them and the other would red main. Both, or the collapse is unsound.
+  # Both emission paths, with their DIFFERENT file values — `actions.lock`
+  # from workflow_audit and the full path from WH004 — must reach the gate.
   cat > "$WORK/findings-shipped-pair.json" <<'EOF'
 [{"severity":"high","rule_module":"workflow_audit","type":"invalid_actions_lock","file":"actions.lock"},
  {"severity":"high","rule_module":"workflow_hardening","type":"invalid_actions_lock","file":".github/workflows/actions.lock"}]
 EOF
-  assert_status "shipped ledger suppresses BOTH emission paths" \
-    "$WORK/findings-shipped-pair.json" "$SHIPPED" "2,0"
+  assert_status "shipped ledger KEEPS both emission paths" \
+    "$WORK/findings-shipped-pair.json" "$SHIPPED" "0,2"
 
-  # Over-match control: the collapse must not have turned the ack into a
-  # blanket amnesty for anything hypatia says about actions.lock.
+  # Nothing else hypatia says about actions.lock is muted either.
   cat > "$WORK/findings-shipped-other.json" <<'EOF'
 [{"severity":"high","rule_module":"workflow_audit","type":"shell_download","file":"actions.lock"},
  {"severity":"high","rule_module":"workflow_lint","type":"invalid_actions_lock","file":"actions.lock"}]
 EOF
-  got=$(bash "$APPLY" "$WORK/findings-shipped-other.json" "$SHIPPED" advisory \
-    | jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"')
-  if [ "$got" = "0,2" ]; then
-    echo "PASS: shipped ledger does NOT suppress other types or modules"
-    pass=$((pass + 1))
-  else
-    echo "FAIL: shipped ledger over-matches: expected 0,2 got $got"
-    fail=$((fail + 1))
-  fi
+  assert_status "shipped ledger does NOT suppress other types or modules" \
+    "$WORK/findings-shipped-other.json" "$SHIPPED" "0,2"
 fi
 
 assert_invalid_option "invalid mode" bypass high
