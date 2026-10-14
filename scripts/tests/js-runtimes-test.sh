@@ -22,6 +22,13 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 for t in bun pnpm deno cargo; do
   command -v "$t" >/dev/null 2>&1 || { echo "js-runtimes-test: $t is not on PATH (cannot run, not a pass)" >&2; exit 2; }
 done
+if [ -z "${JS_RUNTIMES:-}" ]; then
+  unit_log="$(mktemp)"
+  cargo test --quiet --locked --manifest-path "$ROOT/tools/js-runtimes/Cargo.toml" >"$unit_log" 2>&1 \
+    || { cat "$unit_log"; rm -f "$unit_log"; echo "js-runtimes-test: the unit tests failed" >&2; exit 1; }
+  rm -f "$unit_log"
+  echo "  ok    unit tests (cargo test)"
+fi
 BIN="${JS_RUNTIMES:-}"
 if [ -z "$BIN" ]; then
   cargo build --quiet --release --locked --manifest-path "$ROOT/tools/js-runtimes/Cargo.toml" \

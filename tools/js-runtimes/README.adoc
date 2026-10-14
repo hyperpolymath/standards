@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= js-runtimes
+
+One `package.json`, every JavaScript runtime. Owner ruling 2026-10-14 sets the
+preference order Bun > Deno > pnpm > npm. `3-practice/LANGUAGE-POLICY.adoc`
+§1.3–§1.4 is the authoritative policy.
+
+[cols="2,5",options="header"]
+|===
+| Command | Does
+| `js-runtimes regen [DIR]` | The only writer. It makes `package.json` I-JSON + JCS (D306, the `ijson-jcs` crate, in-process), then regenerates `bun.lock`, `deno.lock` and `pnpm-lock.yaml`, each with its own tool. npm keeps no tracked lock. Run it after every `bun add` / `pnpm add`.
+| `js-runtimes check bun\|deno\|pnpm [DIR]` | The gate. It checks that `package.json` is JCS, that the runtime's lock exists, and that a frozen install accepts it (a stale lock fails). It then runs the `test` script under that runtime's own runner.
+| `js-runtimes pick [DIR]` | Prints the most-preferred runtime on `PATH`.
+| `js-runtimes run SCRIPT [DIR]` | Runs a `package.json` script with that runtime (`bun run` / `deno task` / `pnpm run` / `npm run`).
+| `js-runtimes provision [DIR]` | Checks that every environment definition (`mise.toml`, each `Containerfile`, each Guix manifest) provisions Bun. mise and containers can always provide Bun, so settling for less there is a finding. For Guix, the best runtime it provisions is accepted and reported.
+|===
+
+Exit codes:
+
+* 0: pass.
+* 1: a finding.
+* 2: cannot run (a missing tool, manifest or argument). A gate that cannot look does not report a pass.
+
+Build and test:
+
+[source,bash]
+----
+cargo test --locked --manifest-path tools/js-runtimes/Cargo.toml
+bash scripts/tests/js-runtimes-test.sh   # needs bun, deno, pnpm and the npm registry
+----
+
+CI runs it through `governance-reusable.yml` (jobs `js-runtimes-provision`
+and `js-runtimes`) and the standalone `js-runtimes-reusable.yml`.
