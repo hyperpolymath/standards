@@ -54,19 +54,19 @@ REGEN_TOOLS="${REGEN_TOOLS:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 LOCK_PATH=.github/workflows/actions.lock
 
 # Print one outcome token for the checkout in $1, leaving actions.lock modified
-# only when the token is `changed`: no-lock | composite-unsupported |
-# tool-failed | unresolvable | corrupt | dirty | unverified | current | changed.
+# only when the token is `changed`: no-lock | tool-failed | unresolvable |
+# corrupt | dirty | unverified | current | changed.
 #
-# composite-unsupported: prune-stale reads only workflow files, so it drops the
-# per-workflow edges a local composite action (.github/actions/*) contributes,
-# and --verify-local still reports such a lock valid (measured 2026-10-02 on
-# standards' signed-push-smoke.yml; standards#1122). Left for a human.
+# Repos with local composite actions (.github/actions/*) are regenerated like
+# any other since standards#1122: complete-job-refs and prune-stale follow
+# `uses: ./…` into the composites, and check-lock-sync.sh, run after
+# --verify-local, fails a lock that is missing their refs. Before that, they
+# were refused as `composite-unsupported`.
 regen_lock() {
   local dir="$1" changed
   (
     cd "$dir" || exit 1
     [ -f "$LOCK_PATH" ] || { echo no-lock; exit 0; }
-    [ -d .github/actions ] && { echo composite-unsupported; exit 0; }
     # `gh actions-lock` exits non-zero whenever a workflow names a mutable
     # ref it will not auto-pin (e.g. hyperpolymath/cicd-suite/...@main, which
     # the template's dogfood-gate and main-estate-audit carry), even though it
@@ -94,6 +94,10 @@ regen_lock() {
     if ! GH_BIN="$GH_BIN" bash "$REGEN_TOOLS/update-actions-lock.sh" --verify-local >&2; then
       echo unverified; exit 0
     fi
+    # --verify-local cannot see refs used through local composite actions, or
+    # job-level reusable-workflow refs; check-lock-sync.sh is the authority on
+    # both, and it is the gate the PR will meet in CI.
+    if ! bash "$REGEN_TOOLS/check-lock-sync.sh" >&2; then echo unverified; exit 0; fi
     if [ -z "$changed" ]; then echo current; else echo changed; fi
   )
 }
