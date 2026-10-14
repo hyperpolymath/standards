@@ -212,6 +212,8 @@ process_repo() {
     else
       printf '%-30s\t%-28s\t%s\t-> %s\n' "$name" "actions.lock" "LOCK-REFUSED" "${TARGET_SHA:0:12}"
       LOCK_REFUSED=$((LOCK_REFUSED + 1))
+      # Leave this repo's index and branch untouched when the lock cannot follow.
+      return 0
     fi
   fi
 
@@ -260,7 +262,7 @@ else
   echo "# Re-run with --fix to stage the bump on a branch (no commit/push)."
 fi
 if [ "$LOCK_REFUSED" -gt 0 ]; then
-  echo "# LOCK-REFUSED in $LOCK_REFUSED repo(s): their pins moved but actions.lock could not follow."
+  echo "# LOCK-REFUSED in $LOCK_REFUSED repo(s): their pins moved but actions.lock could not follow; staging skipped."
   echo "# Do NOT commit those as they stand; see relock-standards-pin.sh's message above."
   exit 1
 fi

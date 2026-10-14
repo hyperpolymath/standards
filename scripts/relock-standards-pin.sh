@@ -67,7 +67,8 @@ shopt -s nullglob
 wfs=("$WF"/*.yml "$WF"/*.yaml)
 shopt -u nullglob
 pins=$(grep -hoE "$PIN_RE" "${wfs[@]}" 2>/dev/null | sort -u || true)
-stale=$(printf '%s\n' "$pins" | grep -v "@${TARGET}$" | grep . || true)
+stale=$(printf '%s\n' "$pins" | awk -F@ -v target="$TARGET" \
+  'NF > 1 && $NF != substr(target, 1, length($NF))')
 [ -z "$stale" ] || refuse "workflows still pin other standards commits: $(echo $stale)"
 
 olds=$(grep -oE "'hyperpolymath/standards@[0-9a-f]{40}'" "$L" | tr -d "'" | sed 's/.*@//' | sort -u | grep -vx "$TARGET" || true)

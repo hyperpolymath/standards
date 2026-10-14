@@ -128,6 +128,19 @@ cp "$D/actions.lock" "$T/once"; bash "$RELOCK" --to "$NEW" --standards "$S" "$D"
 cmp -s "$T/once" "$D/actions.lock" || fail "second run changed the lock"
 echo "  PASS idempotent"
 
+# Matching abbreviated and full pins can coexist without rewriting workflows.
+for length in 7 12 39; do
+  D=$(consumer "prefix-$length")
+  cp "$D/caller.yml" "$D/full.yml"
+  sed -i "s/@$NEW/@${NEW:0:length}/" "$D/caller.yml"
+  cp "$D/caller.yml" "$T/prefix-before"
+  bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null
+  grep -q "^    'hyperpolymath/standards@$NEW':\$" "$D/actions.lock" || fail "$length-character pin not relocked"
+  grep -q "$OLD" "$D/actions.lock" && fail "$length-character pin left OLD in lock"
+  cmp -s "$T/prefix-before" "$D/caller.yml" || fail "abbreviated pin was rewritten"
+  echo "  PASS matching $length-character and full pins"
+done
+
 # 3. Refusals leave the lock byte-identical.
 refuse_case() { # name mutate-command
   local d; d=$(consumer "$1"); eval "$2"; cp "$d/actions.lock" "$T/before"
@@ -136,6 +149,11 @@ refuse_case() { # name mutate-command
   echo "  PASS refused: $1"
 }
 refuse_case still-on-old 'sed -i "s/@$NEW/@$OLD/" "$d/caller.yml"'
+BAD_PREFIX="${NEW:0:11}"
+if [ "${NEW:11:1}" = 0 ]; then BAD_PREFIX+=1; else BAD_PREFIX+=0; fi
+refuse_case different-prefix 'sed -i "s/@$NEW/@$BAD_PREFIX/" "$d/caller.yml"'
+refuse_case mixed-commits 'cp "$d/caller.yml" "$d/other.yml"; sed -i "s/@$NEW/@$BAD_PREFIX/" "$d/other.yml"'
+refuse_case overlong-pin 'sed -i "s/@$NEW/@${NEW}a/" "$d/caller.yml"'
 # A pin whose reusable needs a record that neither lock has: a commit NEW2
 # whose reusable uses acme/tool at a ref standards' own lock does not record.
 sed -i "s#acme/tool/sub@3333333333333333333333333333333333333333#acme/tool/sub@5555555555555555555555555555555555555555#" "$S/.github/workflows/x-reusable.yml"
