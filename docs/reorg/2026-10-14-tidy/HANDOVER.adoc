@@ -1,0 +1,293 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Handover: running the tidy-up packets from fresh sessions
+Jonathan D.A. Jewell (hyperpolymath)
+v1.0.0, 2026-10-14
+:toc: left
+:toclevels: 2
+:sectnums:
+:icons: font
+
+[.lead]
+The plan in link:README.adoc[README.adoc] was written by one session, and
+its first packet (P1.1, #1244) was executed by a sonnet-tier worker under
+supervision. From here each packet runs in its own session. This note is
+what that session needs beyond the plan: the session rules, what P1.1
+taught, the environment it lands in, the gates that bite, the reviewer
+brief, and paste-ready prompts.
+
+Reading order for a packet session: `README.adoc` _Guardrails for every
+packet_, this note, the packet's own row, then the tier briefing in
+`3-practice/ai-instruction/`.
+
+== Session model
+
+* One packet, one session, one branch, one pull request. The branch is
+  `tidy/<packet id in lower case>` from the current `main` (so `tidy/p1-4`).
+  The PR title is `chore(tidy): P1.4 — <packet title>`.
+* The session ends when the PR is merged or the owner closes it. A merged
+  branch is finished: do not restart it and do not stack a second packet on
+  it. P1.1 restarted a merged branch and the Debt ratchet went red on a
+  trailer carried over from the merged history; a fresh branch cannot have
+  that problem.
+* The worker never merges, never force-pushes, never admin-overrides, and
+  never resolves a review thread it did not answer. The owner merges after
+  the reviewer approves.
+* The PR body carries: the packet id and a link to the plan; the authority
+  for each change (ruling id, map target, or "applied-unless-struck, D113"
+  with the (E) arm named); the packet's acceptance block with the result of
+  every line pasted verbatim; and a "not done" list. A green that did not
+  run is not green.
+* Concurrency cap, from
+  link:../../../3-practice/ai-instruction/opus.adoc[opus.adoc]: at most three
+  packet sessions open at once. Private-repo work is sequential; nothing in
+  Phase 1 or 2 touches a private repo.
+
+== Which packets can run side by side
+
+[cols="1,2,3",options="header"]
+|===
+| Group | Packets | Why
+
+| Parallel-safe now
+| P1.5, P1.8
+| Disjoint files: the mirror reusable and the mirror vars; the
+  community-health files and the map.
+
+| Serial, one session, in this order
+| P1.4, then P1.10, then P1.7
+| All three delete entries from `.hypatia-baseline.json`; parallel branches
+  would conflict on the JSON array. P1.4 also edits validators and
+  `ci-pipeline`.
+
+| Owner approval first
+| P1.2 then P1.9; P1.3
+| P1.2 closes or merges 63 issues on the strength of the dispositions table;
+  the owner says the table is approved before a bot closes anything. P1.3
+  only labels (reversible) but reads the same table. P1.9 follows P1.2.
+
+| Owner action first
+| P1.6
+| Needs an admin token to force-cancel the stuck Pages run, and the D341
+  ruling (Pages or docs-only).
+
+| Serial, after the Phase 1 file packets merge
+| P2.1 to P2.6, one session
+| Every Phase 2 packet edits `standards-map.toml` and the README routing.
+|===
+
+Phases 3 to 8 do not start until Phase 2 lands; their rows in the plan say
+what each waits on.
+
+== What P1.1 taught
+
+The worker got 186 of 188 dispositions right. The two it got wrong are the
+shapes to watch for, and the rest are the habits that caught them.
+
+* *Code-scanning acks are tripwires, not findings.* A baseline entry whose
+  rule id starts `CSA` echoes live alert state that cannot be re-verified
+  from the tree. It is kept (re-acked to #957) even when the file looks
+  clean. The worker deleted one as "unverifiable".
+* *A tracker must be an issue that will stay open.* The worker pointed four
+  acks at #1173, which the dispositions table marks for closure; #1243 was
+  opened instead. Before naming an issue as `tracking_issue`, check the
+  table.
+* *Verify against the file or the pinned rule, not the issue text.* The
+  plan's counts came from issue bodies written weeks earlier; the 21
+  "expiring" acks were all dead by the time the packet ran. Re-measure,
+  then act.
+* *The baseline format is byte-exact.* `.hypatia-baseline.json` must
+  round-trip through `jq -a --indent 1 .` unchanged, or the validator diff
+  is noise.
+* *Widening is declared, never absorbed.* P1.1 deleted 28 entries outside
+  its brief because a CI replay proved them dead; the PR body said so and
+  offered the block for revert. Widen only with proof, and say so.
+
+== The environment a session lands in
+
+* The cloud container has `git`, `jq`, `bash` and `bun`. It does not have
+  `just`, `nickel`, `shellcheck`, `actionlint`, or a working `yq` (the one
+  installed is a stub). Run recipes as `bash scripts/<script>.sh`, not
+  `just <recipe>`.
+* `bash scripts/run-shell-test-suite.sh` reports about 16 of 81 test files
+  failing for those missing tools. That is the environment, not the packet.
+  Run the tests the packet names; CI is the oracle for the rest.
+* Commits are unsigned here (the managed signing shim is a no-op). That is
+  not an action item: do not add keys or amend commits to chase it.
+* A non-fast-forward push is refused by the permission layer. Branch from
+  `main` once and never need one.
+* The `gh` CLI is absent; GitHub reads and writes go through the GitHub
+  tools the session exposes. Every comment or review ends with the
+  attribution footer the session rules give.
+
+== Gates that bite, by change type
+
+* *Any new root file*: a `standards-map.toml` entry and `entry_count`
+  (Gate D, `scripts/check-standards-map.sh`).
+* *Any `.adoc` or `.md` with links*: `bash scripts/link-rot-guard.sh .`;
+  every `link:`, `xref:` and markdown relative link must resolve.
+* *Any added line*: the canonical-names guard
+  (`scripts/check-canonical-names.sh`) blocks the two retired tokens it
+  names (the old descriptiles directory name and the old bot-directives
+  key); the launcher-currency gate blocks the retired `.a2ml` spelling of
+  the launcher standard anywhere in the tree, quoted evidence included; the
+  Hypatia baseline validator flags a plain-HTTP URL literal in docs
+  (`http_in_docs`) and a fixed temp-directory path in a script
+  (`hardcoded_tmp`). Reword evidence rather than ack it.
+* *Any `.hypatia-baseline.json` edit*: `bash
+  scripts/tests/apply-baseline-test.sh`, `bash
+  scripts/tests/wave8-gates-test.sh`, `bash
+  scripts/tests/exemption-ratchet-test.sh`; every `tracking_issue` open; no
+  expiry earlier than a month out; formatting byte-exact (above). The
+  exemption ratchet compares the ack count against `main`: it may fall, and
+  never rises without a declared reason.
+* *Any `.machine_readable/Debtfile.a2ml` edit, or a move that changes a
+  probe's count*: `bash scripts/run-debtfile.sh .machine_readable/Debtfile.a2ml`.
+  Removing an entry or raising a ceiling needs a `Debt-exception: <entry id>
+  — <why>` line in the commit message or the PR body. The ratchet also
+  rejects a declaration naming an entry that exists in neither base nor
+  head, so never carry such a trailer into a branch; a fresh branch does not.
+* *Any workflow edit*: `actions.lock` stays in sync
+  (`bash scripts/lock-selfcheck.sh`); a new `uses:` must be in the
+  allow-list; a retired workflow moves to `.github-retired/` with its lock
+  keys removed (D256).
+* *Any move of a canon artefact*: `canon.lock` bump in the same commit
+  (Gate A, `scripts/check-canon-lockstep.sh`).
+* *Before every push*: the full list in the plan's guardrails (map,
+  lockstep, Mustfile, Debtfile, link-rot, canonical names, `git diff
+  --check`, and `deed_lint.js` on any deed touched).
+
+== The reviewer
+
+One opus-tier session reviews packet PRs; it does not execute packets.
+Mode: supervisor (per `opus.adoc`), reviewing rather than briefing.
+Effort: high. Medium risks reading the PR body instead of the files, and
+the two P1.1 errors were visible only by re-opening the file and the
+pinned rule. Anything above high buys nothing on a bounded packet with an
+acceptance block.
+
+Per PR the reviewer:
+
+. Re-runs the packet's acceptance block and compares with the body. A line
+  the body claims green that the reviewer cannot reproduce is a blocking
+  finding.
+. Opens every file the diff touches and checks each change against the
+  packet row and the guardrails, not against the PR's description of
+  itself.
+. For baseline edits: every deleted entry's construct is really gone from
+  the file at the pinned scanner; every kept `CSA` entry is still present;
+  every tracker is open and not in the dispositions table's close list.
+. For moves: `git mv` only in the move commit; path repairs are separate
+  commits; map and lock updated in the same PR.
+. Checks the authority line for every change; an applied-unless-struck row
+  names its (E) arm.
+. Approves, or requests changes with the file and line. Never merges, and
+  never approves over a red check. The P1.1 red was a history artefact; a
+  reviewer does not learn from it that red is mergeable.
+. Escalates to the owner, both arms labelled and the elegant one first:
+  anything touching a licence file or header; anything in `9-archive/` or
+  `3-practice/outreach/`; any ruling the packet needs that is still on the
+  decision sheet; any widening beyond the packet row that the worker did
+  not prove.
+
+== Owner items that gate packets
+
+* Approve the dispositions table for P1.2 and P1.3 (one sentence on #1234
+  or on the P1.2 PR).
+* D341 (Pages or docs-only) and the admin-token cancel of the stuck Pages
+  run, before P1.6.
+* D261 destinations: P1.5 sets the five unprovisioned forges to disabled
+  until then; nothing to decide before it starts.
+* D350 (delete `docs/quick-reference.adoc`) before P2.6; the (E) arm is
+  delete.
+* Post the decision sheet (plan, _Owner decision sheet_) to #1234 so later
+  packets can cite ids.
+* `3-practice/ai-instruction/opus.adoc` still tells a session "Deno first"
+  and "A2ML checkpoint files"; both are retired rulings. The plan's
+  guardrails win where they conflict. A later packet rewrites the three
+  briefing files; until then every brief says so.
+
+== Paste-ready prompts
+
+Replace the angle-bracket fields. Each prompt is the whole brief; the
+session reads everything else from the repository.
+
+=== Worker (sonnet tier)
+
+----
+You are executing packet <P1.x> of docs/reorg/2026-10-14-tidy/README.adoc
+in hyperpolymath/standards.
+
+Read, in order: README.adoc "Guardrails for every packet",
+docs/reorg/2026-10-14-tidy/HANDOVER.adoc, your packet row, then
+3-practice/ai-instruction/sonnet.adoc. Where opus.adoc or sonnet.adoc say
+"Deno first" or "A2ML", the guardrails win: Deno and A2ML are retired.
+
+Branch tidy/<p1-x> from origin/main. One PR, title
+"chore(tidy): <P1.x> — <packet title>", draft until the acceptance block is
+green, then ready for review. Never merge, never force-push, never touch a
+licence file or header, 9-archive/ or 3-practice/outreach/.
+
+Do exactly the packet row. If you find the row's premise wrong (a count, a
+path, a construct already gone), re-measure, do what the row's intent
+requires, and say in the PR body what differed and why. Widen only with
+proof, and declare it.
+
+Before pushing, run every check in the guardrails list and the packet's
+acceptance block; paste the results verbatim in the PR body with the
+authority line for each change. Then watch the PR: fix red checks, answer
+review comments, and stop when it is merged or the owner closes it. Report
+faithfully; partial is partial.
+----
+
+=== Worker, the serial baseline session (sonnet tier)
+
+The worker prompt above, with the first paragraph replaced by: "You are
+executing packets P1.4, then P1.10, then P1.7, of
+docs/reorg/2026-10-14-tidy/README.adoc in hyperpolymath/standards, each as
+its own branch and PR from the then-current main; start the next only after
+the previous is merged. All three edit .hypatia-baseline.json; keep it
+byte-exact under `jq -a --indent 1`."
+
+=== Mechanical passes (haiku tier, after the owner approves the table)
+
+----
+You are executing packet <P1.2 or P1.3> of
+docs/reorg/2026-10-14-tidy/README.adoc in hyperpolymath/standards. The owner
+approved the dispositions table at <link>.
+
+Read README.adoc "Guardrails for every packet", HANDOVER.adoc, the packet
+row, and 3-practice/ai-instruction/haiku.adoc. The table in README.adoc
+"Issues: 220 dispositions" and the four issue-triage-*.adoc appendices are
+your only source; do not re-decide a disposition.
+
+For each row in your packet, perform the action the record specifies, with
+the comment text naming its authority (fixing PR, ruling id, or canonical
+issue). Produce one table at the end: issue, action taken, authority cited,
+link. Nothing else; no summaries. If a row's authority is missing, or the
+issue's state is not what the record says, skip it and list it under
+"skipped" with the reason.
+----
+
+=== Reviewer (opus tier, effort high)
+
+----
+You are the reviewer for the tidy-up packets in hyperpolymath/standards
+(docs/reorg/2026-10-14-tidy/). Mode: supervisor, reviewing only; you do not
+execute packets and you never merge.
+
+Read README.adoc "Guardrails for every packet", HANDOVER.adoc (especially
+"What P1.1 taught", "Gates that bite" and "The reviewer"), and
+3-practice/ai-instruction/opus.adoc. Where opus.adoc says "Deno first" or
+"A2ML", the guardrails win.
+
+For each open PR titled "chore(tidy): …": re-run the acceptance block, open
+every touched file and check each change against the packet row and the
+guardrails, verify the authority line per change, then approve or request
+changes with file and line. Never approve over a red check. Escalate to the
+owner, both arms labelled and the elegant one first, anything the HANDOVER
+"The reviewer" section lists for escalation.
+
+Report after each PR: packet, verdict, what you re-ran, what you could not
+reproduce, what you escalated.
+----
