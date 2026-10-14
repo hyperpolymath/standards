@@ -45,13 +45,16 @@ done
 # (every entry is a resolved dependency). Everything else in a project file,
 # including the package's own top-level `uuid =`, is still checked.
 #
-# A mint template is scanned under the rules of the file it becomes:
-# `Project.toml.in` renders to `Project.toml` (rsr-template-repo archetypes),
-# so its [extras] keep the same exemption and its own `uuid =` is still checked.
+# A mint template `<name>.in` becomes `<name>` when a repository is minted from
+# it, so it is scanned under <name>'s rules. rsr-template-repo's julia-library
+# archetype ships Project.toml.in; scanned as an unknown file, its [extras]
+# registry UUIDs failed the strict gate in the template itself (2026-10-14).
 scannable_text() {
-  name=${1##*/}
-  name=${name%.in}
-  case "$name" in
+  base=${1##*/}
+  case "$base" in
+    *.in) base=${base%.in} ;;
+  esac
+  case "$base" in
     Manifest.toml|Manifest-v*.toml|JuliaManifest.toml|JuliaManifest-v*.toml) ;;
     Project.toml|JuliaProject.toml)
       awk '/^[[:space:]]*\[/ { t = $0; gsub(/[[:space:]]/, "", t); sub(/#.*/, "", t)
