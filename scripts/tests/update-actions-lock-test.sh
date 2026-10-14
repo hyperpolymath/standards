@@ -41,6 +41,22 @@ if [ "${2:-}" = "--verify-local" ]; then
       printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/reusable.yml","category":"missing","dependency":"hyperpolymath/standards@abc123"}]}'
       exit 1
       ;;
+    not-pinned-nothing)
+      printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/runonly.yml","category":"not-pinned","dependency":null},{"workflow":".github/workflows/localcall.yml","category":"not-pinned","dependency":null}]}'
+      exit 1
+      ;;
+    not-pinned-remote)
+      printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/ci.yml","category":"not-pinned","dependency":null}]}'
+      exit 1
+      ;;
+    not-pinned-with-dependency)
+      printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/runonly.yml","category":"not-pinned","dependency":"actions/checkout@v7.0.1"}]}'
+      exit 1
+      ;;
+    local-action)
+      printf '%s\n' '{"valid":false,"findings":[{"workflow":".github/workflows/localaction.yml","category":"local-action","dependency":null}]}'
+      exit 1
+      ;;
     malformed-success)
       printf '%s\n' 'not valid JSON'
       exit 0
@@ -146,6 +162,71 @@ if FAKE_VERIFY_FINDING=reusable-non-stale GH_BIN="$WORK/bin/fake-gh" \
   exit 1
 fi
 echo "PASS: non-stale reusable-workflow finding remains blocking"
+
+# gh-actions-lock v0.2.0 reports `not-pinned` ("workflow has no lockfile entry",
+# dependency null) for a workflow a v0.1.6-written lock omits. That is a false
+# positive only when the workflow has nothing to pin: `run:` steps, or ./ calls.
+cat > .github/workflows/runonly.yml <<'EOF'
+# SPDX-License-Identifier: MPL-2.0
+on: push
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+EOF
+cat > .github/workflows/localcall.yml <<'EOF'
+# SPDX-License-Identifier: MPL-2.0
+on: push
+permissions: {}
+jobs:
+  a:
+    uses: ./.github/workflows/runonly.yml
+EOF
+FAKE_VERIFY_FINDING=not-pinned-nothing GH_BIN="$WORK/bin/fake-gh" \
+  bash "$UPDATE" --verify-local .github/workflows >/dev/null
+echo "PASS: a run-only or ./-only workflow with no lock entry is accepted"
+
+if FAKE_VERIFY_FINDING=not-pinned-remote GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: a workflow with a remote action and no lock entry was accepted" >&2
+  exit 1
+fi
+echo "PASS: a workflow with a remote action and no lock entry remains blocking"
+
+if FAKE_VERIFY_FINDING=not-pinned-with-dependency GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: a not-pinned dependency was accepted" >&2
+  exit 1
+fi
+echo "PASS: a not-pinned dependency remains blocking"
+rm -f .github/workflows/runonly.yml .github/workflows/localcall.yml
+
+# v0.2.0 also reports every `uses: ./…` as `local-action`. The estate runs
+# `./` (check-lock-sync.sh fails the `$/` rewrite instead), so the finding is
+# accepted only when each `./` path exists in the checkout.
+cat > .github/workflows/localaction.yml <<'EOF'
+# SPDX-License-Identifier: MPL-2.0
+on: push
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/thing
+EOF
+if FAKE_VERIFY_FINDING=local-action GH_BIN="$WORK/bin/fake-gh" \
+   bash "$UPDATE" --verify-local .github/workflows >/dev/null 2>&1; then
+  echo "FAIL: a ./ action that does not exist was accepted" >&2
+  exit 1
+fi
+echo "PASS: a ./ action that does not exist remains blocking"
+mkdir -p .github/actions/thing
+FAKE_VERIFY_FINDING=local-action GH_BIN="$WORK/bin/fake-gh" \
+  bash "$UPDATE" --verify-local .github/workflows >/dev/null
+echo "PASS: a ./ action that exists in the checkout is accepted"
+rm -rf .github/workflows/localaction.yml .github/actions
 
 # The same caller in KYAML (YAML-POLICY Y-3). A line matcher never saw the
 # quoted value, so the exact dependency was rejected; the parser reads it.
