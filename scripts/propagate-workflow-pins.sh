@@ -181,8 +181,10 @@ rewrite_file() {
 # when workflows change. A relock failure increments LOCK_REFUSED for the
 # script's final exit status, restores each rewritten workflow to its content
 # before this run (uncommitted edits included), and skips branch selection and
-# staging. Otherwise, branch/staging failures are ignored; returns 0 after
-# processing without committing or pushing.
+# staging. Otherwise, selects BRANCH and stages the entire workflows directory
+# when pins change in a Git checkout; branch/staging failures are ignored.
+# Returns 0 after processing without committing or pushing. Temporary directory
+# creation, workflow backup, rewrite or restoration errors terminate the script.
 process_repo() {
   local repo="$1" name
   name="$(basename "$repo")"
