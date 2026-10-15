@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MPL-2.0
+# HYP-S011 — Workflow uses refs are SHA-pinned
+# Fires when a `.github/workflows` `uses:` reference resolves to a version
+# tag (or any moving ref) instead of a full commit SHA.
+#
+# Root cause seen 2026-10-15 on hyperpolymath/choreographic-types (PR #33):
+# a governance-repair PR restored `actions/checkout@v7.0.1` — a tag — in
+# codeql.yml and proofs.yml, while the estate's pinning policy
+# (sha_pinning_required) and the actions.lock both speak in SHAs. A tag can
+# be re-pointed upstream at any time, which silently changes what the
+# workflow executes; the lock's identity checks (HYPATIA PI002/PI004)
+# compare SHA-to-comment, so a tag ref sidesteps them entirely.
+#
+# Tags remain welcome as *comments* (`@3d3c42e5…  # v7.0.1`) — the ref is
+# the SHA, the comment is the label. This rule enforces the content-level
+# invariant that PI001-PI005 assume but never state.
+
+@rule(version="1.0"):
+id: HYP-S011
+name: "Workflow uses refs are SHA-pinned"
+description: "Every `uses:` ref in .github/workflows must resolve to a full commit SHA (40 hex chars); version tags and moving refs are rejected at content level"
+severity: medium
+category: CiResilience
+auto_fixable: true            # rewriting @vX.Y.Z to the locked SHA is mechanical when the lock carries the entry
+source: standards/hypatia-rules
+
+@scanner(type="repo-tree"):
+dir: ".github/workflows"
+glob: "*.{yml,yaml}"
+@end
+
+@parameters:
+exempt_refs: [docker://]      # container refs use digests, not SHAs
+@end
+
+@must:
+- "every `uses:` ref is a full commit SHA (^[0-9a-f]{40}$), with the tag kept only as a trailing comment"
+- "a ref matching ^v?\d+(\.\d+)*$ (a version tag) or ^[a-z]+$ that is not a SHA (a moving ref: stable, latest, main) is a finding"
+- "the SHA agrees with the repo's actions.lock entry for the same action (defers to PI004 for the comparison itself)"
+- "local reusable workflows (`./…`) are exempt — they resolve within the repo"
+@end
+
+@query(engine="vcl"):
+workflow_uses(scan="repo-tree", dir=".github/workflows")
+  |> where("ref !~ '^[0-9a-f]{40}$' and ref !~ '^\\./' and ref !~ '^docker://'")
+  |> emit("compliance.finding.new", severity=medium, fix="resolve the tag to its commit SHA via the actions.lock and pin the ref, keeping the tag as a comment")
