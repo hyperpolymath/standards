@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: MPL-2.0
+= estate-uuid-v8
+
+The shared Rust implementation of the ESTATE-UUID-V8 generators in
+link:../../docs/decisions/ADR-008-uuid-v8-estate-standard.adoc[ADR-008]
+(phase P1, "shared profile T and C generators per estate language"). It
+produces the same ids as `scripts/uuid-v8.js`.
+
+[cols="1,3,2",options="header"]
+|===
+| Function | Produces | Use for
+| `profile_t()` | A library v7 with its version nibble set to `8`. Time-ordered, and strictly increasing within one process. | Records and events.
+| `profile_c(domain, name)` / `profile_c_bytes(domain, bytes)` | Bytes 0..15 of SHA-256(`domain ":" name`), version `8`, variant `10`. | Content ids. The name is often a value's JCS form.
+| `from_deed_body("domain:name")` | Profile C from a deed `#u8` body, split on the first `:`. | Deeds.
+| `from_v7(id)` | The profile T alias of a stored v7 id (the P2 nibble flip). | Reading old ids.
+|===
+
+`domain` must be registered, unique within the repository, non-empty
+printable ASCII (`0x21..=0x7e`), and free of `:`. A v8 value does not say
+which profile produced it, so the field holding it declares the profile.
+
+== Use
+
+[source,toml]
+----
+[dependencies]
+estate-uuid-v8 = { git = "https://github.com/hyperpolymath/standards", rev = "<commit>" }
+----
+
+Pin a commit, as with every estate git dependency. Profile T needs the
+`uuid` crate's v7 randomness, so on `wasm32-unknown-unknown` the caller
+supplies its own fallback.
+
+The command-line front end behaves like `scripts/uuid-v8.js`:
+`uuid-v8 t`, `uuid-v8 c <domain> <name>`, `uuid-v8 deed <domain:name>`.
+
+== Tests
+
+`cargo test` checks profile C against vectors from the independent
+`sha256sum` oracle in `scripts/tests/bun/uuid-v8-gen-test.sh`. It also
+checks the profile T layout, order and timestamp, and the domain rules.
+`scripts/tests/rust/uuid-v8-rs-test.sh` runs the binary against the same
+oracle, compares it with `scripts/uuid-v8.js` when bun is installed, and
+passes the output through `check-uuid-v8.sh --strict`. Both run in
+`deed-conformance.yml`.

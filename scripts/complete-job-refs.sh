@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
-# complete-job-refs.sh — add job-level reusable-workflow refs to actions.lock.
-# `gh actions-lock` v0.1.6 is blind to job-level `uses:` (upstream #129), so the
+# complete-job-refs.sh — add job-level reusable-workflow refs, and the refs a
+# workflow uses through its local composite actions, to actions.lock.
+# `gh actions-lock` v0.1.6 is blind to job-level `uses:` (upstream #129; v0.2.0
+# still is, re-measured 2026-10-14), so the
 # entries it cannot write are written here. Idempotent; run from a repo root.
 #
 # Lock repair order (each step idempotent, run from a repo root):
@@ -11,26 +13,80 @@
 #   →  scripts/close-lock.sh  →  scripts/prune-stale.sh
 # relock-sha-keys re-keys tag-spelled entries to the inline SHA the YAML pins
 # (GitHub compares lock and YAML as LITERAL strings); complete-job-refs adds the
-# job-level reusable refs the tool cannot see; close-lock adds a record for every
-# dangling edge; prune-stale drops per-workflow refs nothing uses.
+# job-level reusable refs the tool cannot see, and the refs used through local
+# composite actions (standards#1122); close-lock adds a record for every
+# dangling edge, and gives each job-level reusable ref's record the `uses:` of
+# the workflow it calls; prune-stale drops per-workflow refs nothing uses.
 set -euo pipefail
 WF="${1:-.github/workflows}"
 L="$WF/actions.lock"
 [ -f "$L" ] || { echo "complete-job-refs: no $L" >&2; exit 1; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 WANT="$TMP/want"; NEW="$TMP/new.lock"
-# 1. enumerate job-level refs actually present in the YAML, as "path<TAB>owner/repo@ref"
+# Local composite actions (standards#1122). A local action (`uses: ./dir`) has
+# no dependency record of its own, so the actions it uses belong in the CALLING
+# workflow's entry. gh actions-lock writes them there; prune-stale used to drop
+# them. Adding them here makes the chain produce them whatever the tool did.
+WF_DIR="$WF"
+# ── local composite actions (identical block in check-lock-sync.sh, ─────────
+# ── prune-stale.sh and complete-job-refs.sh; they must agree) ─────────────────
+# reach_files WORKFLOW prints WORKFLOW and every local composite action file
+# (`uses: ./dir` -> dir/action.yml or dir/action.yaml) it reaches, transitively,
+# each once. A local reusable workflow (`./….yml`) is a lock entry of its own,
+# so it is not followed. Paths resolve from the repository root, as GitHub
+# resolves them from the workspace.
+LC_ROOT="$(cd "$WF_DIR/../.." 2>/dev/null && pwd)" || LC_ROOT=.
+# local_action_paths FILE: the path after `./` of every local `uses:` in FILE.
+local_action_paths() {
+  awk -v q="'" '{
+    line = $0; sub(/[[:space:]]+#.*$/, "", line)
+    if (!match(line, /^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*/)) next
+    raw = substr(line, RLENGTH + 1)
+    sub("[\"" q "],[[:space:]]*$", "", raw)
+    gsub("^[\"" q "]|[\"" q "]$", "", raw); sub(/[[:space:]]+$/, "", raw)
+    if (substr(raw, 1, 2) == "./") print substr(raw, 3)
+  }' "$1"
+}
+reach_files() {
+  local -A seen=()
+  local queue=("$1") f rel a
+  while [ "${#queue[@]}" -gt 0 ]; do
+    f="${queue[0]}"; queue=("${queue[@]:1}")
+    [ -n "${seen[$f]:-}" ] && continue
+    seen[$f]=1
+    printf '%s\n' "$f"
+    while IFS= read -r rel; do
+      rel="${rel%/}"
+      case "$rel" in *.yml|*.yaml) continue ;; esac
+      for a in "$LC_ROOT/$rel/action.yml" "$LC_ROOT/$rel/action.yaml"; do
+        if [ -f "$a" ]; then queue+=("$a"); break; fi
+      done
+    done < <(local_action_paths "$f")
+  done
+}
+# ── end of the shared block ───────────────────────────────────────────────────
+
+# uses_values FILE: every `uses:` value in FILE, with a trailing comment, YAML
+# quotes and a KYAML trailing comma stripped.
+uses_values() {
+  sed 's/[[:space:]]\+#.*$//' "$1" \
+  | grep -E '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]' \
+  | sed -E 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+//' \
+  | tr -d '"'"'"'' | awk '{print $1}' | sed 's/,$//'
+}
+
+# 1. enumerate the refs each entry needs that gh actions-lock may not write, as
+#    "path<TAB>owner/repo@ref": the workflow's own job-level reusable refs, and
+#    every external ref used by a local composite action it reaches.
 : > "$WANT"
 for f in "$WF"/*.yml "$WF"/*.yaml; do
   [ -e "$f" ] || continue
   b=".github/workflows/$(basename "$f")"
   set +e
-  sed 's/[[:space:]]\+#.*$//' "$f" \
-  | grep -E '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]' \
-  | sed -E 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+//' \
-  | tr -d '"'"'"'' | awk '{print $1}' \
-  | grep -E '/\.github/workflows/' \
-  | while read -r u; do
+  {
+    uses_values "$f" | grep -E '/\.github/workflows/'
+    reach_files "$f" | tail -n +2 | while IFS= read -r a; do uses_values "$a"; done
+  } | while read -r u; do
       case "$u" in ./*|\$/*|docker://*|'') continue;; esac
       case "$u" in *@*) : ;; *) continue;; esac
       p="${u%@*}"; r="${u##*@}"

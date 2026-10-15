@@ -1,0 +1,547 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+// Evidence snapshot compiled 2026-10-14 for docs/reorg/2026-10-14-tidy/README.adoc.
+// Authority class: historical. The GitHub issues, PRs and rulings it cites remain authoritative.
+// Converted mechanically from the audit notes; path quotes use canonical names (descriptiles, bot_directives).
+= Wiring audit: standards and its seven sibling repositories
+:toc: left
+:toclevels: 2
+
+
+* *Audited:* 2026-10-14. Read-only: nothing was edited or committed.
+* *Standards:* `/home/user/standards` @ `7d2041a` (= `origin/main`), full history (1287 commits), so the commits-behind counts are exact.
+* *Siblings:* all are shallow clones (50–56 commits) on branch `claude/eager-noether-1seyvi`:
+** rsr-template-repo `64787ae`
+** hypatia `4be38c8`
+** gitbot-fleet `1894258`
+** proven-tests-and-benches `f0ee59c`
+** .git-private-farm `dd45a63`
+** cicd-squabbler `b34cd53`
+** cicd-suite `4f54042`
+* *Tool limits:*
+** The local `yq` is not Go yq ("yq 0.0.0"), so `scripts/lock-selfcheck.sh` reported every SHA as UNEXAMINED. I used an awk re-implementation of the same logic instead (case-folded, reusable calls skipped).
+** The local awk is mawk, so neither `check-lock-sync.sh` would run.
+** I made no remote GitHub calls.
+
+'''
+=== 1. CONSUMPTION MATRIX
+
+Columns, for each standards SHA: `type` = `git cat-file -t`; `behind` = `git rev-list --count <sha>..HEAD`; `@HEAD` = the workflow file still exists at HEAD; `chg` = the number of commits to that file since the pin (the blob differs from HEAD in every case except one).
+
+==== Distinct standards SHAs pinned by siblings (all are real commits that main reaches)
+
+[cols="1,1,1,1,1,1",options="header"]
+|===
+| SHA | date | behind | on first-parent? | lock-selfcheck (approx) | builds hypatia from
+| da2c748a | 2026-09-10 | 395 | no (reached via merge 5331019b) | self-consistent | *floating hypatia HEAD* (`git ls-remote … HEAD`)
+| 571cc734 | 2026-08-29 | 456 | yes | self-consistent | n/a (secret-scanner/mirror)
+| 2479cf76 | 2026-09-24 | 138 | yes ("ziz-drop" commit) | self-consistent | n/a (mirror)
+| 71bb615e | 2026-10-02 | 101 | yes | self-consistent | vetted `hypatia-ref` 51ab6496
+| 84355587 | 2026-08-27 | 474 | yes | self-consistent | *floating hypatia HEAD*
+| bd0df9ea | 2026-08-04 | 544 | yes | self-consistent | n/a (mirror)
+| 8f2ee508 | 2026-09-09 | 413 | yes | self-consistent | n/a (governance pins its own hypatia)
+| ed5e3f65 | 2026-09-22 | 162 | yes | self-consistent | n/a (ci-pipeline)
+| 74d2f66f | 2026-09-30 | 121 | yes | self-consistent | n/a (secret-scanner; blob == HEAD)
+|===
+
+
+*No phantom SHAs, blob SHAs or deleted PR heads (the issue #987 class).* Every pin is a commit, and main reaches all of them. No `actions.lock` record has a 40-hex `ref` that differs from its `commit`.
+
+The KNOWN_BAD_BEFORE fix `e9c88887` is an ancestor of every pin. All pins are outside the 50-commit window. Only 71bb615e (12 days old) is inside the 14-day window, and the age axis has been advisory since 2026-07-21.
+
+==== rsr-template-repo
+`actions.lock` coverage is complete: it keys `hyperpolymath/standards@da2c748` and `cicd-suite@55556cf`, plus the transitive `cicd-suite@0da816c`.
+
+[cols="1,1,1,1,1,1",options="header"]
+|===
+| caller (.github/workflows/) | callee | SHA | behind | @HEAD | chg
+| governance.yml:21 | governance-reusable.yml | da2c748a | 395 | yes | 25
+| hypatia-scan.yml:30 | hypatia-scan-reusable.yml | da2c748a | 395 | yes | 20
+| secret-scanner.yml:29 | secret-scanner-reusable.yml | da2c748a | 395 | yes | 4
+| scorecard.yml:19 | scorecard-reusable.yml | da2c748a | 395 | yes | 8
+| rust-ci.yml:19 | rust-ci-reusable.yml | da2c748a | 395 | yes | 5
+| mirror.yml:16 | mirror-reusable.yml | da2c748a | 395 | yes | 5
+| main-estate-audit.yml:20 | cicd-suite main-estate-audit.yml | 55556cf5 | 26 behind cicd-suite HEAD | yes | composites @0da816c (27 behind)
+|===
+
+
+Refs not pinned to a SHA:
+* `deed-ecosystem/validate-action@main` (deed-validate.yml:39, dogfood-gate.yml:47)
+* `k9-ecosystem/validate-action@main` (k9-validate.yml:43, dogfood-gate.yml:96)
+* `smtp-notify-action@v0.3.0`
+* dogfood-gate.yml:628-634 checks out *standards and hypatia at their default branch, with no ref*
+* dogfood-gate.yml:366 fetches canon.lock from `raw…/standards/main`
+
+==== hypatia
+In `actions.lock`, the five standards-calling workflows are keyed `[]` (lines 45, 48, 60, 94 and 95), so they are not covered.
+
+[cols="1,1,1,1,1",options="header"]
+|===
+| caller | callee | SHA | behind | chg
+| governance.yml:19 | governance-reusable | da2c748a | 395 | 25
+| hypatia-scan.yml:24 | hypatia-scan-reusable | da2c748a | 395 | 20
+| secret-scanner.yml:25 | secret-scanner-reusable | 571cc734 | 456 | 6
+| scorecard.yml:19 | scorecard-reusable | da2c748a | 395 | 8
+| mirror.yml:44 | mirror-reusable | 2479cf76 | 138 | 2
+| security-policy.yml:284 | checkout of standards `config/gitleaks/estate-baseline.toml` | 571cc734 | 456 | file exists at HEAD
+|===
+
+
+Also: three different standards SHAs in one repo; `deed-ecosystem` and `k9-ecosystem` `@main` (dogfood-gate.yml:50, 128); `smtp-notify-action@v0.5.0`.
+
+==== gitbot-fleet
+`actions.lock` coverage is complete.
+
+[cols="1,1,1,1",options="header"]
+|===
+| caller | callee | SHA | behind
+| governance.yml:38 | governance-reusable | da2c748a | 395
+| hypatia-scan.yml:34 | hypatia-scan-reusable | da2c748a | 395
+| secret-scanner.yml:27 | secret-scanner-reusable | 571cc734 | 456
+| scorecard.yml:21 | scorecard-reusable | da2c748a | 395
+| mirror.yml:18 | mirror-reusable | 571cc734 | 456
+|===
+
+
+Also: `deed-ecosystem` and `k9-ecosystem` `@main` (dogfood-gate.yml:50, 112); `smtp-notify-action@v0.5.0`.
+
+==== proven-tests-and-benches
+In `actions.lock`, the five standards callers are keyed `[]`. The lock also records `smtp-notify-action@v0.3.0` while push-email-notify.yml:44 uses `@v0.5.0` (desync).
+
+[cols="1,1,1,1,1",options="header"]
+|===
+| caller | callee | SHA | behind | chg
+| governance.yml:29 | governance-reusable | 71bb615e | 101 | 4
+| hypatia-scan.yml:36 | hypatia-scan-reusable | 71bb615e | 101 | 1
+| secret-scanner.yml:22 | secret-scanner-reusable | 84355587 | 474 | 6
+| scorecard.yml:28 | scorecard-reusable | da2c748a | 395 | 8
+| mirror.yml:23 | mirror-reusable | bd0df9ea | *544 (oldest pin)* | 8
+|===
+
+
+==== .git-private-farm
+In `actions.lock`, the five standards callers are keyed `[]`. The hypatia-scan caller's job id is `scan`, not `hypatia` (hypatia-scan.yml:26).
+
+All five callers (governance, hypatia-scan, secret-scanner, scorecard and mirror) pin *84355587 (474 behind)*. Other refs: `deed-ecosystem` and `k9-ecosystem` `@main` (dogfood-gate.yml:45, 95); `smtp-notify-action@v0.1.0`.
+
+==== cicd-squabbler
+`actions.lock` keys the standards SHAs, but it records `smtp-notify-action@v0.3.0` while the workflow uses `@v0.5.0` (desync).
+
+[cols="1,1,1,1,1",options="header"]
+|===
+| caller | callee | SHA | behind | chg
+| governance.yml:21 | governance-reusable | 8f2ee508 | 413 | 25
+| secret-scanner.yml:25 | secret-scanner-reusable | 8f2ee508 | 413 | 5
+| rust-ci.yml:19 | rust-ci-reusable | 8f2ee508 | 413 | 5
+| mirror.yml:16 | mirror-reusable | 8f2ee508 | 413 | 5
+| hypatia-scan.yml:30 | hypatia-scan-reusable | da2c748a | 395 | 20
+| scorecard.yml:19 | scorecard-reusable | da2c748a | 395 | 8
+| standards-pipeline.yml:42 | ci-pipeline.yml (deliberate dry-run observation) | ed5e3f65 | 162 | 7; nested calls go to standards@571cc734
+|===
+
+
+==== cicd-suite
+main-estate-audit.yml and secret-scanner.yml are absent from `actions.lock`. main-estate-audit.yml is deliberately "de-onboarded", as its header records.
+
+[cols="1,1,1,1",options="header"]
+|===
+| caller | callee | SHA | behind
+| secret-scanner.yml:27 | standards secret-scanner-reusable | 74d2f66f | 121 (blob identical to HEAD: the only byte-current pin)
+| main-estate-audit.yml:54-104 | 26 of its own composites `hyperpolymath/cicd-suite/actions/*@1aa6bfb` | 1aa6bfb6 | 1 behind its own HEAD
+|===
+
+
+`hyperpolymath/standards/.github/actions/*` (affirmation-check, signed-push) is consumed by *none* of the seven repos.
+
+'''
+=== 2. CANON PIN AND MACHINE-READABLE SUBSTRATE
+
+standards `canon.lock` [canon]:
+* `version = "2.1.2"`, status draft
+* `commit` = all-zero placeholder (:231); tag `canon-v2.1.2` is not present locally
+* The artefact hashes are verified to match the files at HEAD:
+** criteria `6a5aa885…`
+** gates `e70efd2f…`
+** applicability `1c5caa46…`
+** lifecycle `2f405c9e…`
+** constitution `be48496f…`
+
+[cols="1,1,1,1,1,1,1,1",options="header"]
+|===
+| repo | `<repo>_chora.deed` | (canon …) pin | coordination.k9 | legacy .a2ml (descriptiles/descriptiles) | total tracked .a2ml | *.k9.ncl (contractiles dir files) | root Mustfile
+| rsr-template-repo | *yes* | *2.1.2, criteria + gates sha match* (deed:32-40) | no; ships `coordination.k9.ncl` (Nickel `pedigree`, schema "1.0.0") | 0 | 0 | 18 (15) | no (Justfile)
+| hypatia | no | none; never reads canon.lock; fixture criteria are *2.0.0-draft* (d03f87d8) | no | 6 | 30 | 3 (6) | no (tasks/Mustfile)
+| gitbot-fleet | no | rhodibot `bots/rhodibot/canon/pin.toml`: label 2.1.1, criteria + gates sha *match*, vendored copies byte-match | no | 7 | 42 | 7 (3) | no (per-bot Mustfiles)
+| proven-tests-and-benches | no | none | no | 6 | 16 | 1 (0) | no
+| .git-private-farm | no | none | no | 3 | 10 | 1 (0) | no
+| cicd-squabbler | no | none | `coordination.k9` copied from the template (`schema_version = "1.0.0"`, :6) | 11 | 122 | 16 (28) | no
+| cicd-suite | no | none | no | 0 | 0 | 0 | no (no Justfile either)
+|===
+
+
+Standards against itself:
+* `.machine_readable/rsr-profile.a2ml:76` says `[canon] version = "2.1.0"` while canon.lock says 2.1.2 (the hashes match).
+* The standards root has no Mustfile either.
+
+'''
+=== 3. POLICY COPIES (agent instruction files)
+
+[cols="1,1,1",options="header"]
+|===
+| repo | files carrying policy | contradictions with standards (path:line)
+| rsr-template-repo | CLAUDE.md, .cursorrules, .windsurfrules, .github/copilot-instructions.md, GEMINI.md (pointer only), docs/onboarding/llm-warmup-*.adoc | CLAUDE.md:54 "Deny: *Nix, Python, Go, TypeScript, Deno, ReScript, AGPL*" and :66 "Never: … AGPL" contradict LICENCE-POLICY Rules 3/4/5. copilot-instructions.md:19 "Never use AGPL-3.0." copilot-instructions.md:57 "TypeScript is permitted only where AffineScript cannot reach" contradicts the 2026-08-27 TIGHTENED ruling in standards/.claude/CLAUDE.md. .windsurfrules:9 "Never AGPL-3.0. MPL-2.0 only as platform-required fallback" (PMPL-era wording; under Rule 1, MPL-2.0 is the default).
+| hypatia | .claude/CLAUDE.md, 0-AI-MANIFEST.a2ml | .claude/CLAUDE.md:74-79 lists `.machine_readable/descriptiles/*.a2ml` as the machine-readable artefacts (A2ML retired, D312). :227 scores against a stale criteria fixture. :301 "SPDX-License-Identifier: CC-BY-SA-4.0" for code, but 0 of 139 lib/*.ex files use it (code is MPL-2.0). The policy is also encoded in code: lib/rules/cicd_rules.ex:1637-1741 (see drift 1). language-blockers.yml duplicates the governance language-policy job.
+| gitbot-fleet | .claude/CLAUDE.md, 0-AI-MANIFEST.a2ml, robot-repo-automaton/.claude/CLAUDE.md, bots/*/CLAUDE.md | .claude/CLAUDE.md:74 "The seven canonical A2ML files … per the current estate-wide policy" (D312). 0-AI-MANIFEST.a2ml:46 "All code PMPL-1.0-or-later unless platform requires MPL-2.0" and :117 "License: PMPL-1.0-or-later" (not in the Rule 2 register; its own CLAUDE.md:66 says MPL-2.0). robot-repo-automaton/.claude/CLAUDE.md:32 bans pnpm (tier 2, permitted).
+| proven-tests-and-benches | AGENTS.adoc, 0-AI-MANIFEST.a2ml | no language or licence statements found
+| .git-private-farm | CLAUDE.md, GEMINI.md, copilot-instructions.md, 0-AI-MANIFEST.a2ml, llm-warmup-*.md | copilot-instructions.md:19 "Python — reject unless interfacing with Python-only libraries" (Python has no exceptions). :20 "JavaScript — use AffineScript or *TypeScript* instead". :80 "npm/yarn → pnpm" (Bun is tier 1). 0-AI-MANIFEST.a2ml:59 "License is MPL-2.0 (AGPL-3.0 is BANNED)". CLAUDE.md:3 points to `.machine_readable/INTENT.contractile` (a pre-k9 contractile form).
+| cicd-squabbler | CLAUDE.md, GEMINI.md, .github/copilot-instructions.md, .machine_readable/ai/.cursorrules, .windsurfrules, 0-AI-MANIFEST.a2ml (×3 copies) | CLAUDE.md:54 "Deny: *Guix, Node/npm, TypeScript, Python, Go, AGPL*. (Guix, not Guix.)": it denies the primary package manager, and the parenthetical is the fingerprint of a blind `s/Nix/Guix/`. It omits Deno and ReScript, and it denies npm (tier 3, permitted). copilot-instructions.md:39 "No Node.js / npm / bun (use Deno)". .cursorrules:26-27 "TypeScript -> use ReScript", "Node.js / npm / bun -> use Deno". .windsurfrules:27-28 says the same. .cursorrules:9 and .windsurfrules:9 say "Never AGPL … MPL-2.0 only as platform fallback". CLAUDE.md:28-40 gives an A2ML reading order (CLADE.a2ml…) and says it was "generated … from a2ml".
+| cicd-suite | none | none (no CLAUDE.md, deed or AGENTS file)
+|===
+
+
+Contradictions inside standards itself (they propagate):
+* *007 and licensing:*
+** .claude/CLAUDE.md:18 says 007 is "All Rights Reserved".
+** .machine_readable/licensing-policy.toml:51-54 says 007 is OUT-OF-SCOPE.
+** Both conflict with 3-practice/LICENCE-POLICY.adoc:133-143, Rule 4: "Current members: *007*" (AGPL-3.0-or-later).
+* *Palimpsest register:*
+** licensing-policy.toml:35 says "EXACTLY three repos" (revised 2026-06-04).
+** LICENCE-POLICY.adoc:47-53 registers five.
+* *Rules 4 and 5:* The .claude/CLAUDE.md five-way table has no row for Rule 4 (network services) or Rule 5 (games).
+* *TypeScript:* 3-practice/LANGUAGE-POLICY.adoc:26 says the Bun row offers "Native TypeScript execution", and :60 says "TypeScript is permitted only where AffineScript cannot reach". Both conflict with the 2026-08-27 TIGHTENED note in .claude/CLAUDE.md.
+* *Two LANGUAGE-POLICY documents:*
+** `0-canon/rsr/LANGUAGE-POLICY.adoc` (v1.6.0, 768 lines)
+** `3-practice/LANGUAGE-POLICY.adoc` (227 lines; standards-map.toml:700-708 makes it `canonical_doc`)
+** Siblings cite both: farm runtime-policy.yml:4 cites 0-canon; hypatia language-blockers.yml:16 cites 3-practice.
+* *Missing enforcement file:* .claude/CLAUDE.md:197 says the bans are enforced by `.github/workflows/language-policy.yml`, which does not exist.
+
+'''
+=== 4. SCRIPT COPIES (basename shared with standards/scripts or standards/hooks)
+
+[cols="1,1,1,1,1",options="header"]
+|===
+| sibling file | standards file | sha256
+| hypatia hooks/validate-{codeql,permissions,sha-pins,spdx}.sh | hooks/ same | *SAME* (×4)
+| gitbot-fleet bots/{rhodibot,seambot}/hooks/validate-*.sh | hooks/ | *SAME* (×8)
+| .git-private-farm hooks/validate-permissions.sh, validate-spdx.sh | hooks/ | SAME
+| .git-private-farm hooks/validate-sha-pins.sh | hooks/validate-sha-pins.sh | *DRIFTED*: the farm anchors the `uses:` regex (a bug fix not upstreamed)
+| .git-private-farm hooks/validate-codeql.sh | hooks/validate-codeql.sh | *DRIFTED*: the farm adds `\ | \ | true` pipefail guards (a fix not upstreamed)
+| rsr-template-repo scripts/check-lock-sync.sh (297 lines) | scripts/check-lock-sync.sh (164 lines) | *DRIFTED*: the sibling adds clause 3 (transitive closure) and a gawk guard
+| cicd-squabbler scripts/check-lock-sync.sh | same as rsr-template-repo (0b3c7a82) | DRIFTED from standards
+| gitbot-fleet scripts/check-lock-sync.sh (415 lines) | scripts/check-lock-sync.sh | DRIFTED (a third fork)
+| hypatia scripts/check-trusted-base.sh (59 lines, `hypatia: allow` contract) | scripts/check-trusted-base.sh (298 lines, proof-debt §a–d + TRUSTED:/AXIOM:) | *different policy, same name*
+| hypatia hooks/pre-commit | hooks/pre-commit | different (repo-specific)
+| rsr-template-repo .github/hooks/install.sh | hooks/install.sh | different purpose
+| gitbot-fleet docs/upstream-proposals/…/apply-baseline.sh | scripts/apply-baseline.sh | drifted (a proposal copy)
+|===
+
+
+Non-script copies:
+* *Rulesets:* rsr-template-repo `.github/rulesets/{base,branch-floor,require-linear-history,require-signed-commits}.json` are byte-identical to standards `config/rulesets/`. `Immutable-Tags.json` (rsr-template-repo and cicd-squabbler) *differs* from `immutable-tags.json`:
+** The sibling copy has `bypass_actors: []` and no `creation` rule.
+** The standards copy has admin + integration 2538504 `always` bypass and a `creation` rule.
+** `cicd-squabbler/.github/rulesets/Optimus-Branch.json` has no standards counterpart.
+* *lock-sync-gate.yml* exists in standards, rsr-template-repo, gitbot-fleet and cicd-squabbler, and all four differ (the standards copy calls itself the template).
+* *affirmation-check* exists in both standards/.github/actions and cicd-suite/actions, and all three files differ.
+
+'''
+=== 5. REVERSE WIRING (standards → siblings; excluding 9-archive)
+
+File counts by name: hypatia 204, rsr-template-repo 331 (238 of them in docs/proofs), gitbot-fleet 48, .git-private-farm 20, cicd-squabbler 9, proven-tests-and-benches 7, cicd-suite 6.
+
+*hypatia*
+* Role: the *oracle* (canon.lock [canon.roles]).
+* hypatia-scan-reusable and governance-reusable build the scanner from hypatia at the input `hypatia-ref`, default `51ab6496…` (hypatia #895, 13 commits behind hypatia HEAD). The pins older than 10e0b6ff (#1120, 2026-10-01) use floating HEAD.
+* `hypatia-rules/*.a2ml` (eight rules: HYP-S001–S005, S007, S008 and UUID-001) are standards-authored rules that hypatia's `RuleLoader` parses.
+* canon.lock:49 claims "hypatia → Hypatia.Rules.RsrConformance" reads it. *Hypatia does not reference canon.lock.*
+* The licence cap (`license_finding_strategy` :review, `license_finding_severity_cap` :warn) is wired as standards CLAUDE.md says.
+* `path_allow_prefixes` against the standards CLAUDE.md tables (which claim to mirror hypatia):
+
+[cols="1,1,1,1",options="header"]
+|===
+| rule | hypatia entries | standards table entries | difference
+| typescript_detected | 19 | 14 | hypatia adds `/adapter/` (BoJ cartridge adapters, #602), which standards does not document, plus 4 stale "(8) CLAUDE.md documented exemptions not yet in this list" entries (`a2ml/bindings/deno/`, `k9-svc/bindings/deno/`, `lol/test/vitest.config.ts`, `scripts/check-ts-allowlist.ts`)
+| rescript_detected / _interface | 14 / 14 | 14 | hypatia has `/panels/`; standards has `zotpress/*` (CLAUDE.md:294), which *hypatia lacks**
+| nodejs_detected | 20 | 19 | hypatia adds `/bindings/rescript/`
+| javascript_detected | 18 | 18 | same
+| javascript_jsx_detected | 17 | 18 (shared table) | hypatia lacks `affinescript-cli/`
+|===
+
+
+The V-lang lists (21, 9 and 9 entries) only partly correspond to the classes in the prose. Examples of each: TS `".d.ts"`, `"/bindings/deno/"`, `"/vscode/"`; npm `"tree-sitter-"`, `"/.lake/"`, `"/office-addin/"`; V `"echidna/examples/"`, `"/v-cartridge"`, `"polystack/"`.
+
+*gitbot-fleet*
+* Role: the *fleet*.
+* scripts/propagate-workflow-pins.sh stages bumps "for a human / gitbot-fleet to open a PR". check-workflow-staleness.sh names the "Hypatia sha_bump_propagation rule + gitbot-fleet". The UUID standard lists gitbot-fleet as a consumer.
+* The licence refusal gate in dispatch-runner.sh:356-381 and the `exit 1` banners in fix-license-{hygiene,file}.sh and fix-missing-spdx.sh are present, as standards CLAUDE.md requires.
+
+*rsr-template-repo*
+* Role: the *spine*. It reads canon.lock through the deed's (canon) clause. canon.lock [canon.lockstep] `order = spine-adopts-then-canon-releases`.
+* Rulesets are sourced from config/rulesets.
+* 238 docs/proofs files cite it.
+
+*.git-private-farm*
+* standards `instant-sync.yml:48` checks out `hyperpolymath/.git-private-farm`.
+* debt-measure.yml and lockfile-drift-detect.yml mention it.
+* The regularisation spec names its ci-deadlock-audit.sh as the §7.4 verifier core and its `_rsr_*` hookset as DROP.
+
+*cicd-squabbler*
+* docs/DEPENDABOT-POLICY.adoc:38,156 specifies `squabble bump/rollback` and a `dependency-update-reusable.yml`; neither exists, and the policy itself says "specified, not built".
+* scripts/close-lock.sh and regen-dependabot-locks.sh cite measurements taken on squabbler.
+* pipeline-allow.txt:57 records it as a dry-run observer. It appears on the estate board.
+
+*cicd-suite*
+* It appears on the estate board, YAML-POLICY.adoc:105, regen-dependabot-locks.sh and the regularisation spec, which rules it REMAKE·PERIODIC (keep as a library, drop as a gate). The spec rules rollout DROP, folds secrets-check and spdx-license-check, and says "11/26 cannot fail".
+
+*proven-tests-and-benches*
+* TESTING-TAXONOMY.adoc:39-64 says "draw from proven-tests-and-benches FIRST"; it is the reference test suite.
+* toolchain-readiness-grades/testing and the .github/ISSUES roadmap also cite it.
+* Note: `.machine_readable/integrations/proven.a2ml` is about the `proven` repo, not this one.
+
+'''
+=== 6. cicd-suite and cicd-squabbler against standards
+
+*What cicd-suite is.* cicd-suite holds 26 bash composite actions (`actions/<name>-check/action.yml`) plus `main-estate-audit.yml`. That workflow runs on push, pull_request and workflow_call, and calls all 26 composites remotely at a full SHA ("de-onboarded" from actions.lock; cross-repo matrix in the header at :23-46). The README classifies the actions as 15 enforcing, 9 advisory and 2 stubs (prat, semantic-audit).
+
+*What `rollout_estate.sh` does.* It has 14 lines, no SPDX header and no `set -euo pipefail`. It `cp`s cicd-suite's main-estate-audit.yml into every directory under the hard-coded path `/home/hyperpolymath/developer/hyper-repos/*`. It runs no checks and opens no PRs. The README says it reached 199 repos, 198 of them untracked.
+
+*Duplicate functions.* The 2026-09-02 regularisation spec (owner-approved) rules on these explicitly:
+* `secrets-check` duplicates `secret-scanner-reusable` (spec :104: "Drop cicd-suite/secrets-check (same job)").
+* `spdx-license-check` duplicates the governance `licence-consistency` job (spec :185, :511: FOLD).
+* `affirmation-check` is a fork of `standards/.github/actions/affirmation-check`.
+* `code-hygiene-check` (believe_me/sorry/admit) overlaps the governance `trusted-base` job.
+* `linguist-check` overlaps the governance `language-policy` job.
+* `vaulted-tokens-check` overlaps the secret scanner.
+* `manifest-check` and `contractile-validation-check` overlap deed-ecosystem/k9-ecosystem validate-action.
+* `formatting-check` (.md→.adoc) overlaps governance `quality`.
+* `rollout_estate.sh` is ruled DROP (:201); its distribution model (copy) conflicts with the template's thin-caller model.
+* The README is stale. :97 says "cicd-squabbler does not exist yet": it exists, but it has no `audit --semantic` subcommand (the CLI has fetch, diagnose, fight and chains). :122 says there is no permissions block and checkout is pinned by tag: both are now fixed.
+
+*What cicd-squabbler is.* It is a Rust and SPARK "fighter" that drives a stuck gate to a legitimate green. It reads rulesets and classic protection, attributes STARTUP_FAILURE, classifies reds (self-win, escalate or assign-owner), and maps cross-repo `chains`.
+
+*Overlap with standards' gate scripts:*
+* `scripts/check-required-contexts.sh` (unsatisfiable required contexts, file-derived) overlaps squabbler `gate_triage.rs`. It also overlaps farm `ci-deadlock-audit.sh` (the same phantom-context class): *three implementations*.
+* `scripts/apply-branch-gates.sh` (derives contexts from runs and writes `required_status_checks`) is the applier squabbler's "required-context reconcile" self-win will need. *Squabbler does not consume `config/rulesets/` or any standards script* and keeps its own `.github/rulesets/Optimus-Branch.json`.
+* `scripts/lock-selfcheck.sh`, `close-lock.sh` and `check-allowed-actions.sh` encode lessons measured on squabbler (#101). Squabbler's "reusable re-pin" self-win should call `lock-selfcheck.sh` before re-pinning.
+* These are complementary roles (canon definition, per-repo executor, estate verifier), but nothing links them. Squabbler pins no standards gate artefact.
+
+'''
+=== 7. .git-private-farm
+
+*What it does:*
+* *maintenance.sh* (37 lines) is a read-only estate report. It counts open Dependabot PRs and the code-scanning and Dependabot alerts for every repo in `repo-list.txt` (427 entries), and never approves or merges.
+* *farm-manifest.json* (v1.0.0, updated 2026-02-28) has 25 repos, 10 forges (github, gitlab, sourcehut, codeberg, bitbucket, radicle, gitea, forgejo, azure-devops, codecommit) and `default_forges` gitlab, sourcehut, codeberg and bitbucket. `propagate.yml` does `git clone --mirror` and pushes per forge on `repository_dispatch`.
+* *dispatch-templates/* contains `instant-sync.yml`, `notify-dependents.yml`, `receive-events.yml`, `budget-resume-sweep.yml`, `seed/` and `github-hookset/_rsr_{lint,policy,security,test}.yml`.
+* *Other scripts:*
+** `actuate.sh`: the privileged merge actuator ("hand"), which re-verifies the hypatia "brain"'s decisions and defaults to dry-run
+** `sha-bump-propagate.sh` + `.yml`: manual-only under ruling R-F3
+** `ci-deadlock-{audit,degate,realign,realign-rulesets}.sh`
+** `migrate-classic-to-rulesets.sh`
+** label tooling, *seven of whose scripts are Python*
+* *Billing:* GitHub Actions is blocked by account billing, per its CLAUDE.md.
+
+*Which standards policy it enforces or duplicates:*
+* *Mirror policy:* duplicates standards `mirror-reusable.yml` (7 forges: gitlab, bitbucket, codeberg, sourcehut, *disroot*, gitea, radicle; selected per repo with `vars.*_MIRROR_ENABLED`). The forge sets differ, and the farm itself also calls mirror-reusable@84355587. The spec rules mirror "OWNER?" and `instant-sync` DROP.
+* *SHA propagation:* duplicates standards `scripts/propagate-workflow-pins.sh` (audit-first, no commit or push) and the `check-workflow-staleness.sh` window. Rulings R-F1 and R-F3 are recorded only in the farm (its CLAUDE.md, REMEDIATION-2026-09-26.adoc:26,132), not in standards docs/decisions.
+* *Merge actuator:* has no standards-side policy document. It enforces doctrine 5 and 11 ("squabble, don't bypass"; "stop-first"). `actuate.sh` refuses rebase and veto cases.
+* *CI deadlock:* `ci-deadlock-audit.sh` is the spec's §7.4 verifier core (KEEP), and overlaps standards check-required-contexts.sh.
+* **Hookset `_rsr_*.yml`:** ruled DROP by the spec (:173, "0 callers, superseded by standards reusables"), but still present.
+* *Language and licence policy:* cited from `0-canon/rsr/LANGUAGE-POLICY.adoc v1.6.0` rather than the 3-practice copy. The farm still ships 8 Python files and a copilot file that recommends TypeScript and pnpm.
+
+'''
+=== 8. DRIFT LIST
+
+Severity: H = high, M = medium, L = low. "SSOT" names the source of truth that should win. Every licence item is FLAG-ONLY: owner approval is required, and no agent edits.
+
+. *H*: hypatia's licence tables contradict LICENCE-POLICY.
+** hypatia/lib/rules/cicd_rules.ex:1738 lists palimpsest repos `["palimpsest-license","palimpsest-plasma","consent-aware-http"]` (wrong name, and missing insolvency-tycoon and sim-public-relations).
+** :1656 `@pmpl_exception_repos ["paint-type"]`, but paint-type is AGPL under Rule 3 (LICENCE-POLICY.adoc:222).
+** :1649 the AGPL list covers only 3 repos; Rules 4/5 members are missing (007, chronicles-of-slavia, 688-attack-hub, f117a, f19, the-nash-equilibrium, paint-type).
+** :1637-1646 lists PMPL and AGPL as `@wrong_licenses`, so `validate_license/2` returns `:wrong_license` for register repos.
+** SSOT: 3-practice/LICENCE-POLICY.adoc (Rule 2 register; Rules 3–5 member tables).
+. *H*: standards contradicts itself on licensing.
+** .claude/CLAUDE.md:18 says 007 is ARR.
+** .machine_readable/licensing-policy.toml:51 says 007 is OUT-OF-SCOPE, and :35 says "EXACTLY three repos" (revised 2026-06-04).
+** Against both: LICENCE-POLICY.adoc:133-143 (Rule 4: 007 is AGPL) and :47-53 (five-repo register). CLAUDE.md's five-way table omits Rules 4 and 5.
+** SSOT: LICENCE-POLICY.adoc for the register. The 007 status is an *owner decision*.
+. *H*: the runtime and language policy is inverted in cicd-squabbler.
+** .github/copilot-instructions.md:39 "No Node.js / npm / bun (use Deno)".
+** .machine_readable/ai/.cursorrules:26-27 "TypeScript -> use ReScript" and "… -> use Deno"; .windsurfrules:27-28 says the same.
+** SSOT: 3-practice/LANGUAGE-POLICY.adoc §1 and §1.3.
+. *H*: cicd-squabbler/CLAUDE.md:54 "Deny: Guix, Node/npm, … (Guix, not Guix.)".
+** It denies the primary package manager, denies tier-3 npm, and omits Deno and ReScript. The text is an artefact of `s/Nix/Guix/`.
+** SSOT: regenerate it from the template generator against LANGUAGE-POLICY.
+. *H*: .git-private-farm tracks 8 Python files (scripts/{gen-classifier-json,gen-labels-json,label-apply-graphql,label-classify,label-migrate-graphql,label-sync-graphql,labelutil}.py and tests/test-classifier-parity.py).
+** copilot-instructions.md:19 invents a Python exception.
+** SSOT: LANGUAGE-POLICY ("fully banned, no exceptions").
+. *H*: 6 of 7 siblings build the Hypatia scanner from floating hypatia HEAD.
+** Their hypatia-scan pins (da2c748a, 84355587) predate 10e0b6ff/#1120, which introduced `hypatia-ref` default 51ab6496 (evidence: `git show da2c748:.github/workflows/hypatia-scan-reusable.yml:43`, `git ls-remote … HEAD`).
+** This is the 09-12..14 / 09-26..30 outage class. Only proven (71bb615e) is protected.
+** SSOT: standards main reusables, repinned through actions.lock after lock-selfcheck.
+. *M*: lock-coverage gap.
+** hypatia, proven-tests-and-benches and .git-private-farm key their standards-calling workflows as `[]` (e.g. hypatia/.github/workflows/actions.lock:45,48,60,94,95). cicd-suite omits main-estate-audit.yml and secret-scanner.yml.
+** None of these four has lock-sync-gate.yml. This is the job-level desync class that check-lock-sync.sh documents.
+** SSOT: standards check-lock-sync.sh plus the lock-sync-gate template.
+. *M*: Dependabot-bumped refs were not relocked.
+** proven-tests-and-benches push-email-notify.yml:44 uses `@v0.5.0`; lock:22,46 records `@v0.3.0`.
+** cicd-squabbler: workflow `@v0.5.0`, lock `@v0.3.0`.
+** SSOT: the workflow, with the lock regenerated.
+. *M*: three forks of check-lock-sync.sh.
+** standards has 164 lines and two clauses, and gives mawk syntax errors instead of a gawk guard.
+** rsr-template-repo and cicd-squabbler have 297 lines and add clause 3 (transitive closure).
+** gitbot-fleet has 415 lines.
+** SSOT: standards, after upstreaming the three-clause version (doctrine 14).
+. *M*: hypatia scores against stale criteria.
+*** test/fixtures/a2ml/rsr-criteria-v2.a2ml is 2.0.0-draft (d03f87d8); the canon is 6a5aa885, release 2.1.2.
+*** .claude/CLAUDE.md:227 and lib/mix/tasks/hypatia.rsr_score.ex:76-77 use or fall back to it.
+*** canon.lock:49 says hypatia reads canon.lock; it does not.
+*** SSOT: canon.lock [canon.artifacts].criteria.
+. *M*: only the spine pins the canon.
+*** rsr-template-repo is the only sibling with a deed and a (canon) clause (2.1.2; hashes match).
+*** Its canon-lockstep job (dogfood-gate.yml:354+) checks only the criteria hash, and fetches canon.lock from floating `main` (:366).
+*** hypatia (the oracle) and gitbot-fleet (the fleet) have no deed pin.
+*** SSOT: canon.lock.
+. *L*: canon version labels drift (the hashes are identical).
+*** standards .machine_readable/rsr-profile.a2ml:76 says "2.1.0"; gitbot-fleet bots/rhodibot/canon/pin.toml:29 says "2.1.1"; canon.lock:223 says 2.1.2.
+*** canon.lock `commit` is still all zeros (:231).
+*** SSOT: canon.lock.
+. *M*: hypatia's carve-outs do not match the standards CLAUDE.md tables, although the tables claim to mirror them.
+*** TS: 19 entries against 14. `/adapter/` is not documented in standards, and cicd_rules.ex:205-209 holds four stale "(8)" entries.
+*** ReScript: `/panels/` is only in hypatia, and `zotpress/**` (CLAUDE.md:294) is only in standards.
+*** npm: hypatia adds `/bindings/rescript/`.
+*** JSX: hypatia lacks `affinescript-cli/`.
+*** SSOT: hypatia `@blocked_patterns` is declared the SSOT, so update the tables. Ask the owner about `/adapter/`, `/panels/` and `zotpress`.
+. *M*: standards' own LANGUAGE-POLICY still advertises TypeScript.
+*** 3-practice/LANGUAGE-POLICY.adoc:26 "Native TypeScript execution" and :60 "TypeScript is permitted only where AffineScript cannot reach".
+*** Both conflict with the 2026-08-27 ruling in .claude/CLAUDE.md. The wording is copied into rsr-template-repo/.github/copilot-instructions.md:57.
+*** SSOT: the owner ruling (the exemptions question is still open).
+. *M*: two "canonical" LANGUAGE-POLICY documents exist.
+*** 0-canon/rsr/LANGUAGE-POLICY.adoc (v1.6.0) and 3-practice/LANGUAGE-POLICY.adoc (standards-map.toml:700-708).
+*** Farm runtime-policy.yml:4 and check-runtime-policy.sh:3 cite the 0-canon copy; hypatia language-blockers.yml:16 and rsr copilot:40 cite 3-practice.
+*** SSOT: 3-practice, per standards-map. Archive the other copy or turn it into a redirect.
+. *M*: blanket AGPL denials.
+*** rsr-template-repo: CLAUDE.md:54,66; .github/copilot-instructions.md:19; .windsurfrules:9 (which also calls MPL-2.0 a "fallback").
+*** Copied into cicd-squabbler CLAUDE.md:54, copilot:17, .cursorrules:9 and .windsurfrules:9, and into farm 0-AI-MANIFEST.a2ml:59.
+*** SSOT: LICENCE-POLICY Rules 1 and 3–5.
+. *M* (flag only): gitbot-fleet/0-AI-MANIFEST.a2ml:46,117 says "All code PMPL-1.0-or-later". gitbot-fleet is not in the register, and its own CLAUDE.md:66 says MPL-2.0. SSOT: LICENCE-POLICY Rules 1 and 2.
+. *M*: agent files still describe the A2ML era.
+*** gitbot-fleet/.claude/CLAUDE.md:74 calls "seven canonical A2ML files" the current policy.
+*** hypatia/.claude/CLAUDE.md:74-79 lists A2ML descriptiles.
+*** cicd-squabbler/CLAUDE.md:28-40 gives an A2ML reading order.
+*** No sibling except the template has a `<repo>_chora.deed`.
+*** SSOT: the standards Machine-Readable Artefacts section (D312) and deed.abnf.
+. *M*: the coordination file has the wrong shape.
+*** rsr-template-repo ships `coordination.k9.ncl` (Nickel, schema "1.0.0", :7). cicd-squabbler copies it as `coordination.k9` (:6).
+*** Standards requires `coordination.k9`, beginning `K9!`, with `schema_version: 1.2.0`.
+*** SSOT: 2-protocols/k9-coordination grammar v1.2 and the k9-init generator.
+. *M*: two trusted-base contracts run on hypatia.
+*** The governance-reusable `trusted-base` job uses standards scripts/check-trusted-base.sh.
+*** hypatia's verify-proofs.yml:322 runs hypatia/scripts/check-trusted-base.sh, which has the same name but a different contract (`hypatia: allow`).
+*** SSOT: the standards trusted-base policy and script.
+. *M*: immutable-tags rulesets have drifted.
+*** rsr-template-repo and cicd-squabbler `.github/rulesets/Immutable-Tags.json` have no bypass actors and no `creation` rule.
+*** standards config/rulesets/immutable-tags.json has two `always` bypass actors and a `creation` rule.
+*** squabbler's Optimus-Branch.json has no canon counterpart.
+*** SSOT: config/rulesets (the owner decides the bypass actors).
+. *M*: workflows that the owner-approved regularisation spec rules FOLD or DROP are still live.
+*** Inline codeql.yml in all 6 siblings; no sibling calls codeql-reusable (spec :117).
+*** static-analysis-gate.yml in rsr-template-repo and cicd-squabbler (:118).
+*** workflow-linter.yml in rsr-template-repo, farm and cicd-squabbler (:121).
+*** security-policy, runtime-policy, wellknown, estate-rules and guix-policy in rsr-template-repo, farm and cicd-squabbler, plus hypatia language-blockers (:125, "Delete the files").
+*** instant-sync.yml in gitbot-fleet, cicd-squabbler and farm dispatch-templates (:107).
+*** openssf-compliance.yml in cicd-squabbler (:104).
+*** Farm `_rsr_*` hookset (:173).
+*** rollout_estate.sh (:201).
+*** main-estate-audit run as a pull_request gate in rsr-template-repo (:127, "drop it as a gate").
+*** SSOT: docs/superpowers/specs/2026-09-02-cicd-regularisation-design.adoc.
+. *M*: cicd-suite `secrets-check` and `spdx-license-check` are still wired (main-estate-audit.yml:102 and :74). They duplicate secret-scanner-reusable and the governance `licence-consistency` job. SSOT: the spec (:104, :185, :511).
+. *M*: `affirmation-check` is forked.
+*** standards/.github/actions/affirmation-check (84ae82df; `is-template` input; no consumers among the seven).
+*** cicd-suite/actions/affirmation-check (72eaf99; signer verification).
+*** SSOT: a single copy, to be chosen by the owner. The cicd-suite copy is the one consumed.
+. *M*: SHA propagation is split.
+*** standards scripts/propagate-workflow-pins.sh and farm scripts/sha-bump-propagate.sh + .yml (R-F3) do the same job.
+*** check-workflow-staleness.sh:127-131 tracks only governance, hypatia-scan and scorecard. Secret-scanner, mirror, rust-ci and ci-pipeline pins are untracked (they range from 121 to 544 commits behind).
+*** R-F1 and R-F3 exist only in the farm.
+*** SSOT: standards. Record R-F* in standards docs/decisions.
+. *M*: two mirror systems.
+*** standards mirror-reusable has 7 forges including disroot.
+*** farm farm-manifest.json has 10 forges (azure-devops, codecommit and forgejo, but not disroot), 25 repos, and was last updated 2026-02-28.
+*** SSOT: an owner decision (the spec marks mirror "OWNER?").
+. *L*: three phantom-required-context detectors exist: standards check-required-contexts.sh, farm ci-deadlock-audit.sh and squabbler gate_triage.rs. SSOT: the farm verifier (spec §7.4) for estate audit; the standards script for definition.
+. *L*: the cicd-suite README is stale.
+*** :97 says "cicd-squabbler does not exist yet": it exists, but it has no `audit --semantic`.
+*** :122 claims there is no permissions block and a tag-pinned checkout: both are fixed.
+. *L*: cicd-suite rollout_estate.sh has no SPDX header and no `set -euo`, uses a hard-coded `/home/hyperpolymath/...` path, and does a verbatim copy. The spec says DROP.
+. *L*: cicd-suite hygiene.
+*** 24 of 26 action.yml files have no SPDX header (flag only).
+*** It has no deed, Justfile or SECURITY.md.
+*** It does not call governance, hypatia-scan or scorecard.
+. *L*: the farm's hypatia-scan caller job id is `scan` (hypatia-scan.yml:26). The standards convention, from propagate-hypatia-caller-id.sh, is `hypatia`.
+. *L* (flag only): hypatia/.claude/CLAUDE.md:301 says code SPDX is CC-BY-SA-4.0; the actual lib/*.ex headers are MPL-2.0.
+. *L*: other wrong tool guidance.
+*** Farm copilot-instructions.md:20 recommends TypeScript, and :80 recommends pnpm over npm.
+*** gitbot-fleet robot-repo-automaton/.claude/CLAUDE.md:32 bans pnpm.
+. *L*: hypatia is behind on retired rules.
+*** It still ships the HYP-S009 evaluator (lib/rules/implementation_inside_canon.ex) and the HYP-S006 fixture; standards retired both on 2026-10-09 (hypatia-rules/README.adoc:44-48).
+*** rule_loader.ex:11 says "HYP-S001..S009".
+*** The fixture rule copies differ from standards.
+. *L*: canon.lock [canon.workflows] (:313-323) omits rust-ci-reusable, ci-pipeline and elixir-ci-reusable, which siblings consume.
+. *L*: standards .claude/CLAUDE.md errors.
+*** :197 cites a nonexistent `.github/workflows/language-policy.yml`.
+*** ReScript is listed twice (:178-179).
+*** npm appears in the BANNED table although it is "not banned" (:182).
+. *L*: `@main` action refs.
+*** deed-ecosystem and k9-ecosystem validate-action are used `@main` in 4 siblings: rsr-template-repo (deed-validate.yml:39, k9-validate.yml:43, dogfood-gate.yml:47,96), hypatia (dogfood-gate.yml:50,128), gitbot-fleet (dogfood-gate.yml:50,112) and farm (dogfood-gate.yml:45,95).
+*** The locks resolve deed-ecosystem to 44f9c9f, but cicd-suite pins f9d999b: two different deed validators are in use.
+*** rsr-template-repo dogfood-gate.yml:628-634 checks out standards and hypatia without a ref.
+. *L*: farm hooks/validate-sha-pins.sh and validate-codeql.sh contain fixes that were never upstreamed to standards/hooks/. SSOT: standards, after upstreaming.
+. *L*: documentation-format duplicates.
+*** Farm: README.md (not .adoc); CONTRIBUTING.adoc alongside CONTRIBUTING.md; llm-warmup-*.md.
+*** proven: READINESS.adoc/.md and SECURITY.adoc/.md.
+. *L*: no repo, standards included, has a root Mustfile, although the rule is "All repositories use Mustfile/justfile".
+
+'''
+=== 9. IDEAL WIRING (proposal)
+
+The most elegant option, as the default:
+* *Standards is the only place where law, rules and gate logic live.* Siblings *pin* it; they never *copy* it.
+* *Each sibling holds three things only:* a deed pin, an actions.lock pin and thin callers.
+
+Proposed wiring:
+
+. *The canon identity is canon.lock.*
+** Release it properly: fill `commit` and create tag `canon-v<ver>`.
+** Every sibling carries `<repo>_chora.deed` with a `(canon :version :criteria-sha256 :gates-sha256 :applicability-sha256 :lifecycle-sha256 :constitution-sha256 :canon-commit)` clause.
+** Each sibling's canon-lockstep job reads canon.lock *at `:canon-commit`, never `main`*, and compares all five hashes.
+** The spine adopts first; hypatia and gitbot-fleet adopt next, because they consume the criteria.
+. *Reusable workflows: actions.lock is the pin.*
+** One standards "release SHA" per wave. Choose it only if `scripts/lock-selfcheck.sh` reports SELF-CONSISTENT.
+** Publish it in canon.lock [canon.workflows] as `pin = <sha>`, and list every reusable there (add rust-ci, elixir-ci, ci-pipeline and codeql).
+** Every sibling pins *all* standards reusables to that one SHA (no mixed SHAs per repo). The lock keys `hyperpolymath/standards@<sha>`, never `[]`.
+** Propagate only with `scripts/propagate-workflow-pins.sh` (audit-first; a human or gitbot-fleet opens the PR). Retire farm sha-bump-propagate as a duplicate, and move R-F1/R-F3 into standards docs/decisions.
+** Widen check-workflow-staleness STANDARDS_REUSABLES to every reusable.
+. *Lock hygiene lives in one place.*
+** Upstream the 3-clause, gawk-guarded check-lock-sync.sh to standards/scripts.
+** Ship lock-sync-gate either as a reusable (preferred) or as a byte-identical template.
+** Delete the sibling copies of the script.
+. *Hypatia rules.*
+** `standards/hypatia-rules/*.a2ml` (and later the deed or k9 form) is the rule SSOT, loaded at runtime from the scanned standards checkout. Hypatia keeps only evaluators.
+** Hypatia must source its licence register and carve-out lists from standards' machine form. Regenerate `.machine_readable/licensing-policy.toml` from LICENCE-POLICY.adoc, then hypatia reads it (owner approval required, because this touches licence logic).
+** Generate the `path_allow_prefixes` tables in CLAUDE.md from hypatia `@blocked_patterns`; do not hand-mirror them.
+** Delete the stale criteria fixture, or pin it by canon.lock hash.
+. *Policy text: one generator.*
+** Each sibling's CLAUDE.md, AGENTS, .cursorrules, .windsurfrules and copilot files are *generated* from its deed plus standards LANGUAGE-POLICY (3-practice, the single copy) and LICENCE-POLICY. Each says "licence per LICENCE-POLICY classification", never "Deny AGPL".
+** Delete hand-written policy copies (squabbler .cursorrules/.windsurfrules/copilot, farm copilot, gitbot 0-AI-MANIFEST licence lines) as duplicates. Archive 0-canon/rsr/LANGUAGE-POLICY.adoc or make it a redirect.
+. *Rulesets.* `config/rulesets/*.json` is the SSOT. The template carries byte-identical copies verified by sha256 in CI (including immutable-tags). Applied by `apply-branch-gates.sh` and `apply-protection-floor.sh`; squabbler invokes these and keeps no rulesets of its own.
+. *Roles, so nothing is duplicated:*
+** standards: definition and appliers.
+** cicd-squabbler: per-repo executor. It *calls* the standards appliers and lock-selfcheck, and replaces the `semantic-audit` stub's missing CLI.
+** .git-private-farm: estate verifier and actuator. It keeps ci-deadlock-audit, actuate.sh and maintenance.sh; it drops the `_rsr_*` hookset, instant-sync and the Python label tools (port them to bash, Rust or Julia).
+** cicd-suite: a PERIODIC library only. Drop rollout_estate.sh, secrets-check and spdx-license-check, and fold affirmation-check into one copy.
+. *Mirroring.* The owner picks one system. Recommended (the elegant arm): standards mirror-reusable as the only implementation, with farm-manifest.json reduced to the forge registry it reads through `vars`.
+. *Delete from siblings as duplicates:*
+** inline codeql.yml (replace with a thin codeql-reusable caller)
+** static-analysis-gate, workflow-linter, security, runtime, wellknown, estate-rules, guix and language-blockers workflows (all fold into governance)
+** instant-sync, openssf-compliance and hookset templates
+** forked hooks/validate-*.sh: upstream the farm fixes, then vendor nothing; fetch through governance

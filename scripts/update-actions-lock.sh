@@ -68,6 +68,40 @@ workflow_references_reusable_dependency() {
     '
 }
 
+# Succeeds when <workflow> has nothing for the lock to pin: every `uses:` is a
+# same-repository path (./… or $/…), or there is none. gh-actions-lock v0.2.0
+# reports such a workflow as `not-pinned` ("workflow has no lockfile entry")
+# when a v0.1.6-written lock omits it. v0.1.6 never asked for that entry, and
+# GitHub runs these workflows without one: measured 2026-10-14 on standards,
+# where lock-sync-gate.yml (only `run:` steps) and scorecard.yml,
+# secret-scanner.yml and self-ci.yml (only ./ reusable calls) all succeed with
+# no entry. A parse failure returns 1 -- the finding stays a failure.
+workflow_has_nothing_to_pin() {
+  workflow=$1
+  [[ -f "$workflow" ]] || return 1
+  refs=$(yq -r '.. | select(tag == "!!map") | select(has("uses")) | .uses | select(tag == "!!str")' "$workflow" 2>/dev/null) ||
+    return 1
+  ! printf '%s\n' "$refs" | grep -v -e '^$' -e '^\./' -e '^\$/' | grep -q .
+}
+
+# Succeeds when <workflow> uses at least one same-repository `./…` action or
+# reusable workflow and every one of them exists in this checkout (run from
+# the repository root). gh-actions-lock v0.2.0 reports any `./` action as
+# `local-action` ("not supported", rewrite to `$/…`). The estate measured the
+# opposite: check-lock-sync.sh fails the `$/` spelling as an invalid rewrite,
+# and v0.1.6 never flagged `./`. A missing path or a parse failure returns 1,
+# so the finding stays a failure.
+workflow_local_uses_resolve() {
+  workflow=$1
+  [[ -f "$workflow" ]] || return 1
+  refs=$(yq -r '.. | select(tag == "!!map") | select(has("uses")) | .uses | select(tag == "!!str")' "$workflow" 2>/dev/null) ||
+    return 1
+  local_refs=$(printf '%s\n' "$refs" | grep '^\./') || return 1
+  while IFS= read -r ref; do
+    [[ -e "${ref%%@*}" ]] || return 1
+  done <<< "$local_refs"
+}
+
 is_advisory_category() {
   # Advisory findings never affect the tool's own `valid` bit: a tree whose
   # only findings are `sha-as-ref` reports `"valid": true` (measured
@@ -77,7 +111,8 @@ is_advisory_category() {
   #
   # Discriminate by CATEGORY, never by severity. gh-actions-lock v0.1.6 labels
   # every finding `"severity": "warning"`, `stale` included, so a severity test
-  # would swallow real desyncs and turn this gate vacuous.
+  # would swallow real desyncs and turn this gate vacuous. v0.2.0 relabels
+  # `stale` as `"error"`: the severity is not stable across releases either.
   case "$1" in
     sha-as-ref) return 0 ;;
     *) return 1 ;;
@@ -85,11 +120,16 @@ is_advisory_category() {
 }
 
 verify_lock_coverage() {
-  # gh-actions-lock v0.1.6 does not recognise reusable-workflow `uses:`
-  # paths. GitHub's startup enforcement nevertheless requires callers to
-  # carry the reusable repository and its transitive actions in actions.lock.
-  # Accept only the tool's `stale` false positive when the named workflow
-  # contains the exact owner/repo/.github/workflows/file@ref dependency.
+  # gh-actions-lock (v0.1.6, and still v0.2.0) does not recognise
+  # reusable-workflow `uses:` paths. GitHub's startup enforcement nevertheless
+  # requires callers to carry the reusable repository and its transitive
+  # actions in actions.lock. Accept exactly three tool false positives:
+  #   - `stale`, when the named workflow contains the exact
+  #     owner/repo/.github/workflows/file@ref dependency;
+  #   - `not-pinned` with no dependency ("workflow has no lockfile entry",
+  #     v0.2.0), when the workflow has nothing to pin;
+  #   - `local-action` with no dependency (v0.2.0), when every `./` action
+  #     the workflow uses exists in this checkout.
   # Every other finding, including a wrong ref, remains blocking.
   command -v jq >/dev/null 2>&1 || {
     "$GH_BIN" actions-lock --verify-local
@@ -128,6 +168,14 @@ verify_lock_coverage() {
     elif [[ "$category" = stale ]] &&
        workflow_references_reusable_dependency "$workflow" "$dependency"; then
       echo "Accepted reusable-workflow lock coverage: $workflow -> $dependency"
+      accepted=$((accepted + 1))
+    elif [[ "$category" = not-pinned && -z "$dependency" ]] &&
+       workflow_has_nothing_to_pin "$workflow"; then
+      echo "Accepted workflow with nothing to pin: $workflow"
+      accepted=$((accepted + 1))
+    elif [[ "$category" = local-action && -z "$dependency" ]] &&
+       workflow_local_uses_resolve "$workflow"; then
+      echo "Accepted same-repository ./ action(s): $workflow"
       accepted=$((accepted + 1))
     else
       remaining=$((remaining + 1))

@@ -84,5 +84,47 @@ rm "$WF/unlocked.yml"
 rm "$WF/test.yml"
 expect 1 'deleted workflow lock entries remain failures'
 
+# Local composite actions (standards#1122): the refs a local composite uses,
+# nested composites included, are locked under the calling workflow.
+R="$TMP/r"
+WF="$R/.github/workflows"
+mkdir -p "$WF" "$R/.github/actions/push" "$R/.github/actions/token"
+cat > "$WF/smoke.yml" <<'YAML'
+jobs:
+  smoke:
+    steps:
+      - uses: actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - uses: ./.github/actions/push
+      - uses: ./.github/workflows/not-followed.yml
+YAML
+cat > "$R/.github/actions/push/action.yml" <<'YAML'
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/token
+    - uses: asana/push-signed-commits@cccccccccccccccccccccccccccccccccccccccc # v1
+YAML
+cat > "$R/.github/actions/token/action.yml" <<'YAML'
+runs:
+  using: composite
+  steps:
+    - uses: "actions/create-github-app-token@dddddddddddddddddddddddddddddddddddddddd",
+YAML
+cat > "$WF/actions.lock" <<'YAML'
+workflows:
+    '.github/workflows/smoke.yml':
+        - 'actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        - 'actions/create-github-app-token@dddddddddddddddddddddddddddddddddddddddd'
+        - 'asana/push-signed-commits@cccccccccccccccccccccccccccccccccccccccc'
+YAML
+expect 0 'refs used through local composites (nested, KYAML) count as used'
+cp "$WF/actions.lock" "$TMP/full.lock"
+# The planted negative from the issue: the two composite lines deleted.
+sed -i '/create-github-app-token/d; /push-signed-commits/d' "$WF/actions.lock"
+expect 1 'composite deps missing from the calling workflow entry fail'
+cp "$TMP/full.lock" "$WF/actions.lock"
+sed -i '/push-signed-commits/d' "$R/.github/actions/push/action.yml"
+expect 1 'a ref no composite uses any more is stale'
+
 printf '\ncheck-lock-sync regression: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

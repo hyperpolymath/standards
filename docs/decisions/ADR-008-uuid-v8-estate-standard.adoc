@@ -207,7 +207,8 @@ the pull request that carries this section.
 * The dogfood workflow (`uuid-v7.yml`) and the `uuid-v7-conformance` job of
   `governance-reusable.yml` both run the new checker. Their workflow, job ids
   and job names are left unchanged, so no required status context moves.
-  They are renamed at P4.
+  They are renamed in stages; see the two-stage rename amendment of
+  2026-10-14 below.
 
 *Superseded material and its retirement.*
 
@@ -297,6 +298,69 @@ is the profile C preimage `domain:name`), its linter and fixtures, and the
 shared profile T and C generators are the next standards increment. The
 gv-clade-index derivation change follows it. Each repository then migrates
 under P3 as before; strict only means a repository is red until it does.
+
+== Amendment: the profile C domain register (owner answer, 2026-10-14)
+
+Profile C requires a _registered_ domain, but there was no register. Asked
+where domains are registered, the owner chose one register in this
+repository over per-repository declarations in each chora deed. Per-repository
+declarations can only check uniqueness within one repository.
+
+*The register* is `docs/decisions/ADR-008-profile-c-domains.json`. It is
+I-JSON in JCS form (JSON-POLICY, D306), and each entry is
+`{domain, name, purpose, repos}`:
+
+* `name` says in words what is hashed after `domain:`.
+* `repos` lists every repository that mints ids in that domain.
+
+A domain shared by several repositories is a single registration. For
+example, `proof-goal` is the cross-tool content address of a proof goal,
+which echidnabot and proof-burrower compute the same way, so one goal has one
+id in both. Within that one registration the domain is still used for one
+purpose only, as ADR-008 requires.
+
+*The check* is `scripts/check-uuid-v8-domains.sh [--registry FILE]
+[DOMAIN...]`. It validates the register's bytes (one line, printable ASCII,
+JCS, one final LF), the entry shape, the domain rule and strict ordering, so
+no domain is registered twice. Given DOMAIN arguments, it also fails on any
+that is not registered. A repository that mints profile C ids runs it in CI
+against a pinned standards checkout with the domains it uses.
+`scripts/tests/check-uuid-v8-domains-test.sh` plants a defect for each rule and
+expects each one to fail, for its own reason.
+
+*First entries.* The domains of the P3 pilot repositories are registered
+from their current code:
+
+* `echidnabot-proof-obligation`;
+* `proof-goal`, shared by echidnabot and proof-burrower;
+* `prove-result`.
+
+`gv-clade-index` is registered as ruled in the D320 amendment.
+echidna has no content-id call site yet, so it registers none.
+`berrywiki-import` is left for berrywiki to register with its own name form.
+
+== Amendment: the gate takes its v8 name in two stages (owner answer, 2026-10-14)
+
+The gate has checked version 8 only since D320, but it still ran under the v7
+names, so a red read "UUID v7 conformance" for a v8 rule. The owner chose to
+rename it now, in stages, rather than wait for P4. A one-step rename would
+break consumers: live rulesets name `<caller> / UUID v7 conformance`, and a
+renamed job would leave that context waiting forever on each repository once
+its pin moved past the rename.
+
+. *Stage 1 (this change).* `governance-reusable.yml` gains job
+  `uuid-v8-conformance` ("UUID v8 conformance"), the same strict check beside
+  the old job, which stays as a deprecated alias. Both names are on the frozen
+  list in `tests/test_governance_reusable_shape.sh`. The dogfood workflow
+  becomes `uuid-v8.yml` ("UUID v8 conformance" / "Reject non-v8 UUID
+  literals"). It is not a gate workflow in `config/rulesets/gates.json`, so no
+  derived context moves.
+. *Stage 2.* As consumers move their pin past stage 1, re-derive their
+  rulesets with `scripts/apply-branch-gates.sh`, so that they require the new
+  context.
+. *Stage 3.* Once `scripts/check-required-contexts.sh` shows that no consumer
+  still requires "UUID v7 conformance", delete `uuid-v7-conformance` and take
+  it off the frozen list.
 
 == What this record does not do
 

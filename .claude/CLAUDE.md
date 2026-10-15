@@ -106,6 +106,7 @@ for the canonical statement.
 |---------------|----------|-------|
 | **AffineScript** | Primary application code | Compiles to typed-wasm; affine/linear types. Replaces ReScript across the estate (RS/TS/JS → AffineScript → typed-wasm). |
 | **Bun** | JS runtime & package management (tier 1) | Default for all new work. Runs compiled ESM/JS directly — no bundler step. Uses an npm-compatible `package.json` plus `bun.lock` — both are expected, not anti-patterns. |
+| **Deno** | JS runtime (tier 2) | Permitted, not gated (owner ruling 2026-10-14; order Bun > Deno > pnpm > npm). Reads the same `package.json`; every package carries a generated `deno.lock` (`tools/js-runtimes regen`, `3-practice/LANGUAGE-POLICY.adoc` §1.4). |
 | **Rust/SPARK** | Performance-critical, systems, WASM, CLI tools, safety-critical | "Rust" always means "Rust/SPARK" per terminology note above. Preferred over Ada where reachable. |
 | **Zig** | **APIs, FFIs, gateways, client SDKs (estate default 2026-05-28)**, memory-safe systems where Rust/SPARK is overkill | Zig is the estate-wide default for all API/FFI/gateway/client-SDK work unless explicitly special-cased; Idris2 owns ABIs. Completed V-lang→Zig migration 2026-05-28. |
 | **Idris2** | Formal verification (primary, ABI-style proofs) | ATS2 rejected. Proven-library status in `proven` repo. |
@@ -159,6 +160,8 @@ for the canonical statement.
 >
 > ReScript's ban is uncontested, and its migration destination is **AffineScript**.
 
+> **RULED 2026-10-14 — Deno is permitted again (tier 2).** The owner: *"deno does not need to be absolutely banned"*; the order is **Bun > Deno > pnpm > npm**, npm only as the last resort. The 2026-08-26 and 2026-09-22 rulings quoted below are **superseded**: Deno is back in ALLOWED, its refusal gate and the `deno-allow.txt` ledger are retired, and every package carries all the runtimes' locks through `tools/js-runtimes` (`3-practice/LANGUAGE-POLICY.adoc` §1.3–§1.4). Bun stays first everywhere, and each repository's environment (mise, containers, Guix) provisions it (`js-runtimes provision`).
+>
 > **SUPERSEDED 2026-08-26 — Deno is no longer tier 2.** The owner ruled:
 > *"deno is to go and bun is the way we are going, put it first everywhere unless not
 > possible and explain why if not."* The "Bun > Deno > pnpm > npm" ordering above described
@@ -177,9 +180,8 @@ for the canonical statement.
 | TypeScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
 | ReScript | AffineScript | RS/TS/JS → AffineScript → typed-wasm. |
 | **ReScript** | AffineScript | Banned in new code as of 2026-04-30. Existing `.res` files migrate to `.affine` directly (do not pass through ReScript). |
-| **Deno** | Bun | **Banned 2026-09-22.** Owner ruling: *"deno is over, we're prioritising bun, and using bunx."* `deno.json` task definitions must be ported to `package.json` scripts. Shrink-only ledger: `.machine_readable/deno-allow.txt`. |
 | Node.js | Bun | Bun is Node-compatible; run the code, drop the runtime. |
-| npm | Bun | npm is tier 3 — *permitted, never preferred*, not banned. `package-lock.json` must still not be tracked (standards#67). |
+| npm | Bun | npm is tier 4 — the last resort: *permitted, never preferred*, not banned. `package-lock.json` must still not be tracked (standards#67). |
 | yarn | Bun | yarn is not in the tier list at all. |
 | Go | Rust/SPARK | |
 | **Python** | AffineScript/Rust/SPARK/Julia | Fully banned, no exceptions (SaltStack exception removed 2026-01-03) |
@@ -241,7 +243,7 @@ Both are FOSS with independent governance (no Big Tech).
 
 - **Primary**: Guix (guix.scm)
 - **Nix**: retired — `flake.nix` is not accepted by Governance / Guix packaging policy; a repo with no `guix.scm` packages through a working Containerfile instead
-- **JS deps**: **Bun** (`package.json` + `bun.lock`); `bunx <tool>` to run one-off tooling
+- **JS deps**: **Bun** (`package.json` + `bun.lock`); `bunx <tool>` to run one-off tooling. `tools/js-runtimes regen` keeps `package.json` JCS and regenerates `bun.lock`, `deno.lock` and `pnpm-lock.yaml` together.
 
 ### Documentation Format
 

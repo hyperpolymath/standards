@@ -10,13 +10,20 @@
 # CREDENTIAL: the estate's dedicated applier App — vars.APP_ID and
 # secrets.APP_PRIVATE_KEY, the same slot apply-workflow-pins.yml and
 # signed-push read (owner ruling STD-R-3: NOT OikosBot, which is a ruleset
-# bypass actor). Needs Contents R/W, Workflows R/W, Pull requests R, and must
-# be installed on BOTH owners. Until it exists the run warns and exits 0.
+# bypass actor). Needs Contents R/W, Workflows R/W, Pull requests R/W (the
+# default-branch repair opens PRs), and must be installed on BOTH owners. Until
+# it exists the run warns and exits 0.
+#
+# DEFAULT-BRANCH REPAIR: the 04:41 UTC tick (or dispatch with main-repair) also
+# sets REGEN_MAIN=1, which opens one lock-only PR where a stale lock already
+# landed on the default branch (drift merged before this workflow could catch
+# it). Every other tick only repairs open Dependabot and applier PRs.
 name: Dependabot lock regeneration
 
 on:
   schedule:
     - cron: '23,53 * * * *'
+    - cron: '41 4 * * *'
   workflow_dispatch:
     inputs:
       repo:
@@ -25,6 +32,10 @@ on:
         default: ''
       dry-run:
         description: 'Regenerate and report, but commit nothing'
+        type: boolean
+        default: false
+      main-repair:
+        description: 'Also repair a stale actions.lock on each default branch (opens a PR)'
         type: boolean
         default: false
 
@@ -73,7 +84,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sudo apt-get install -y -qq gawk >/dev/null
-          gh extension install github/gh-actions-lock --pin v0.1.6
+          gh extension install github/gh-actions-lock --pin v0.2.0
 
       - name: Regenerate Dependabot PR lockfiles
         env:
@@ -81,6 +92,7 @@ jobs:
             hyperpolymath=${{ steps.tok-user.outputs.token }}
             metadatastician=${{ steps.tok-org.outputs.token }}
           DRY_RUN: ${{ inputs.dry-run && '1' || '0' }}
+          REGEN_MAIN: ${{ (github.event.schedule == '41 4 * * *' || inputs.main-repair) && '1' || '0' }}
           ONLY_REPO: ${{ inputs.repo }}
         run: |
           # A token is an empty string when the App is absent or not installed

@@ -18,8 +18,8 @@
 #     found" means a broken environment, not an exempt one. Skipping there
 #     would report success having examined nothing.
 #
-#   * DENO is neither: it is BANNED, so no Deno toolchain is ever summoned.
-#     Its section refuses rather than checks — see it below.
+#   * DENO is neither: no Deno toolchain is summoned. Deno is tier 2
+#     (permitted, not gated); its section records what it saw — see below.
 #
 #   * OPTIONAL LINTER MISSING (hlint, fourmolu) → reported as an explicit
 #     SKIP line, not as a pass, and CI remains the authority. These are add-ons
@@ -146,40 +146,18 @@ else
   LEDGER+=("nickel: not staged")
 fi
 
-# ── Deno (BANNED — a REFUSAL, not a lint) ───────────────────────────────
+# ── Deno (tier 2 — permitted, not gated) ────────────────────────────────
 #
-# Owner ruling: "deno is over, we're prioritising bun, and using bunx."
-#
-# This section used to install nothing and run `deno fmt --check` / `deno lint`
-# over staged JS in a tree that tracked a deno.json, behind a `warn`. That
-# lint-checked — and thereby blessed — the very thing the warning called
-# banned, and it summoned a banned toolchain to do it.
-#
-# It now refuses. The question it asks is deliberately NARROWER than CI's:
-#
-#   * CI asks "does this repository still carry Deno debt?", and answers it
-#     against the central shrink-only ledger
-#     `.machine_readable/deno-allow.txt` in `standards`.
-#   * This hook CANNOT ask that — it runs inside a caller's checkout and has
-#     no access to that ledger — and must not fake an answer. It asks instead
-#     "is THIS COMMIT ADDING Deno debt?", which is answerable right here.
-#
-# STAGED is `--diff-filter=ACM`, so a DELETED deno.json never appears: paying
-# the debt down is never blocked, only growing it. That is the same
-# shrink-only direction the central ledger enforces, reached without one.
+# Owner ruling 2026-10-14: Deno is not banned; the order is Bun, Deno, pnpm,
+# npm. From 2026-09-22 to 2026-10-14 this hook refused any commit that added
+# or modified a deno.json(c); the ruling retired that refusal along with the
+# central ledger. The hook now records what it saw and passes.
 DENO_CFG="$(staged_matching '(^|/)deno\.jsonc?$')"
 DENO_TRACKED="$(git ls-files -- 'deno.json' '*/deno.json' 'deno.jsonc' '*/deno.jsonc' | grep -c . || true)"
 if [ -n "$DENO_CFG" ]; then
-  fail "Deno is BANNED (owner ruling 2026-08-26 — Bun is the estate runtime). This commit ADDS or MODIFIES $(echo "$DENO_CFG" | grep -c .) Deno config file(s):"
-  while IFS= read -r cfg; do [ -n "$cfg" ] && echo "          - $cfg" >&2; done <<< "$DENO_CFG"
-  echo "        Port the deno.json 'tasks' map to package.json scripts run by" >&2
-  echo "        'bun run' — 'bun run' does NOT read a deno.json tasks map — and" >&2
-  echo "        delete the config. Deleting a deno.json is never blocked here." >&2
-  echo "        A genuinely grandfathered repository is exempted CENTRALLY, in" >&2
-  echo "        .machine_readable/deno-allow.txt in hyperpolymath/standards, not" >&2
-  echo "        by a local bypass." >&2
+  LEDGER+=("deno: $(echo "$DENO_CFG" | grep -c .) Deno config file(s) staged — permitted (tier 2; Bun preferred)")
 else
-  LEDGER+=("deno: no deno.json(c) added or modified (repo tracks ${DENO_TRACKED}; the ledgered CI gate is the authority on existing debt)")
+  LEDGER+=("deno: no deno.json(c) staged (repo tracks ${DENO_TRACKED})")
 fi
 
 # ⚠ Dropping the Deno lint leaves staged `.js`/`.jsx`/`.mjs`/`.cjs` with NO

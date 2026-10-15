@@ -9,7 +9,7 @@
 #
 # Why this exists rather than `gh actions-lock --verify-local` alone:
 #   `gh actions-lock` v0.1.6 cannot see a job-level `uses:` (a reusable-workflow
-#   call). Measured on this repo, 2026-09-22:
+#   call); v0.2.0 still cannot (re-measured 2026-10-14). Measured on this repo, 2026-09-22:
 #     * mirror.yml's lock entry was stale by a whole SHA and died at startup with
 #       jobs=0, yet --verify-local reported "All 30 workflows have complete
 #       lockfile coverage" and fix mode did not repair it;
@@ -19,6 +19,11 @@
 #   GitHub's own startup enforcement DOES check those refs (that is what killed
 #   mirror.yml), so the tool is wrong in both directions and cannot be the
 #   authority. This script is.
+#
+# A workflow's `uses:` set includes the `uses:` of every LOCAL composite action
+# it calls (`uses: ./.github/actions/x`), transitively: a local action has no
+# dependency record of its own, so its actions are locked under the calling
+# workflow, which is where `gh actions-lock` writes them (standards#1122).
 #
 # Exit 0 only when every workflow's `uses:` set equals its lockfile set exactly.
 # Any mismatch exits 1. There is no warn-only mode: a desync means GitHub will
@@ -41,7 +46,61 @@ if [ "${#WORKFLOWS[@]}" -eq 0 ]; then
   exit 1
 fi
 
-awk -v lockfile="$LOCK" '
+# ── local composite actions (identical block in check-lock-sync.sh, ─────────
+# ── prune-stale.sh and complete-job-refs.sh; they must agree) ─────────────────
+# reach_files WORKFLOW prints WORKFLOW and every local composite action file
+# (`uses: ./dir` -> dir/action.yml or dir/action.yaml) it reaches, transitively,
+# each once. A local reusable workflow (`./….yml`) is a lock entry of its own,
+# so it is not followed. Paths resolve from the repository root, as GitHub
+# resolves them from the workspace.
+LC_ROOT="$(cd "$WF_DIR/../.." 2>/dev/null && pwd)" || LC_ROOT=.
+# local_action_paths FILE: the path after `./` of every local `uses:` in FILE.
+local_action_paths() {
+  awk -v q="'" '{
+    line = $0; sub(/[[:space:]]+#.*$/, "", line)
+    if (!match(line, /^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*/)) next
+    raw = substr(line, RLENGTH + 1)
+    sub("[\"" q "],[[:space:]]*$", "", raw)
+    gsub("^[\"" q "]|[\"" q "]$", "", raw); sub(/[[:space:]]+$/, "", raw)
+    if (substr(raw, 1, 2) == "./") print substr(raw, 3)
+  }' "$1"
+}
+reach_files() {
+  local -A seen=()
+  local queue=("$1") f rel a
+  while [ "${#queue[@]}" -gt 0 ]; do
+    f="${queue[0]}"; queue=("${queue[@]:1}")
+    [ -n "${seen[$f]:-}" ] && continue
+    seen[$f]=1
+    printf '%s\n' "$f"
+    while IFS= read -r rel; do
+      rel="${rel%/}"
+      case "$rel" in *.yml|*.yaml) continue ;; esac
+      for a in "$LC_ROOT/$rel/action.yml" "$LC_ROOT/$rel/action.yaml"; do
+        if [ -f "$a" ]; then queue+=("$a"); break; fi
+      done
+    done < <(local_action_paths "$f")
+  done
+}
+# ── end of the shared block ───────────────────────────────────────────────────
+
+# reach map: "file<TAB>workflow" — each file whose uses: count for that workflow.
+MAP="$(mktemp)"; trap 'rm -f "$MAP"' EXIT
+for wf in "${WORKFLOWS[@]}"; do
+  while IFS= read -r f; do printf '%s\t%s\n' "$f" "$wf"; done < <(reach_files "$wf")
+done > "$MAP"
+mapfile -t SCAN < <(cut -f1 "$MAP" | LC_ALL=C sort -u)
+
+awk -v lockfile="$LOCK" -v mapfile="$MAP" '
+BEGIN {
+  # owners[file]: the workflows whose uses: set includes this file. WFS: the
+  # workflows themselves, in glob order (a workflow is its own first owner).
+  while ((getline l < mapfile) > 0) {
+    split(l, mp, "\t")
+    owners[mp[1]] = owners[mp[1]] SUBSEP mp[2]
+    if (mp[1] == mp[2]) WFS[++nw] = mp[2]
+  }
+}
 # owner/repo[/subpath...]@ref  ->  owner/repo@ref   ("" if not an external ref)
 function norm(r,   at, path, ref, n, parts) {
   at = 0
@@ -76,8 +135,9 @@ FILENAME == lockfile {
   next
 }
 
-# ---------- pass 2: the workflow YAML ----------
-FNR == 1 { wf = FILENAME }
+# ---------- pass 2: the workflow YAML and the local composites it reaches ----------
+# Each file credits its uses: to every workflow that reaches it.
+FNR == 1 { nown = split(substr(owners[FILENAME], 2), own, SUBSEP) }
 {
   line = $0
   sub(/[[:space:]]+#.*$/, "", line)              # strip trailing comment
@@ -88,17 +148,19 @@ FNR == 1 { wf = FILENAME }
     sub(/["\x27],[[:space:]]*$/, "", raw)
     gsub(/^["'"'"']|["'"'"']$/, "", raw)
     gsub(/[[:space:]]+$/, "", raw)
-    if (raw ~ /^\$\//) { dollar[wf] = dollar[wf] " " raw; next }   # known corruption
+    if (raw ~ /^\$\//) {                           # known corruption
+      for (i = 1; i <= nown; i++) dollar[own[i]] = dollar[own[i]] " " raw
+      next
+    }
     n = norm(raw)
-    if (n != "") { uses[wf, n] = 1; useslist[wf] = useslist[wf] " " n }
+    if (n != "") for (i = 1; i <= nown; i++) { uses[own[i], n] = 1; useslist[own[i]] = useslist[own[i]] " " n }
   }
 }
 
 END {
   bad = 0
-  for (i = 1; i < ARGC; i++) {
-    wf = ARGV[i]
-    if (wf == lockfile) continue
+  for (w = 1; w <= nw; w++) {
+    wf = WFS[w]
     key = wf
     sub(/.*\//, "", key)
     key = ".github/workflows/" key          # the lockfile always uses this canonical path
@@ -140,8 +202,8 @@ END {
   # --- lockfile entries for workflow files that no longer exist ---
   for (p in seen_path) {
     found = 0
-    for (i = 1; i < ARGC; i++) {
-      q = ARGV[i]; if (q == lockfile) continue
+    for (w = 1; w <= nw; w++) {
+      q = WFS[w]
       sub(/.*\//, "", q); q = ".github/workflows/" q
       if (q == p) { found = 1; break }
     }
@@ -159,6 +221,7 @@ END {
     exit 1
   }
   print "actions.lock is in sync: every uses: is locked under its own workflow path,"
-  print "and every lockfile entry is referenced. Job-level reusable-workflow refs included."
+  print "and every lockfile entry is referenced. Job-level reusable-workflow refs and"
+  print "refs used through local composite actions included."
 }
-' "$LOCK" "${WORKFLOWS[@]}"
+' "$LOCK" "${SCAN[@]}"

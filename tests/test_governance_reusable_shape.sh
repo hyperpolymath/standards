@@ -50,7 +50,10 @@ Trusted-base reduction policy
 Licence consistency
 Exemption ratchet
 Debt ratchet
-UUID v7 conformance"
+UUID v7 conformance
+UUID v8 conformance
+JS runtimes — environment provisions Bun first
+JS runtimes — \${{ matrix.runtime }}"
 ACTUAL=$(grep -P '^    name: ' "$F" | sed 's/^    name: //')
 if [ "$(printf '%s' "$FROZEN" | sort)" = "$(printf '%s' "$ACTUAL" | sort)" ]; then ok "job names match the frozen context list ($(printf '%s\n' "$ACTUAL" | wc -l) jobs)"
 else bad "job names drifted from the frozen list — renames create phantom contexts estate-wide"; diff <(printf '%s\n' "$FROZEN" | sort) <(printf '%s\n' "$ACTUAL" | sort); fi
