@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: MPL-2.0
+# HYP-S010 — CLADE Identity Coherence
+# Fires when a repository's CLADE.a2ml identity block does not cohere.
+#
+# Root cause seen 2026-10-15 on metadatastician/odraz (PR #19): the repo's
+# CLADE.a2ml was copied verbatim from the template, so its [identity] block
+# declared rsr-template-repo (owner, canonical-name, prefixed-name, forges,
+# born) while the minted uuid was recomputed for metadatastician/odraz —
+# two true facts pointing at different repositories. A reviewer bot then
+# aligned the uuid to the stale declaration, which was the wrong direction:
+# the declaration was the residue. Every CLADE must declare THIS repository
+# and carry the recomputable profile-C mint for that declaration, with
+# CLAUDE.md in agreement. This rule reifies the coherence invariant so the
+# direction of the fix is not a judgement call made under review pressure.
+
+@rule(version="1.0"):
+id: HYP-S010
+name: "CLADE identity coherence"
+description: "The [identity]/[forges] block of .machine_readable/descriptiles/CLADE.a2ml must declare THIS repository, and its uuid must be the recomputable UUIDv8 profile-C mint for the declared owner/name (domain gv-clade-index)"
+severity: high
+category: IdentityIntegrity
+auto_fixable: false           # the direction of the fix (declaration vs preimage) is an owner ruling, not a rewrite
+source: standards/hypatia-rules
+
+@scanner(type="file-tree"):
+target_repo: "any estate repo carrying .machine_readable/descriptiles/CLADE.a2ml"
+reference: "docs/decisions/ADR-008-uuid-v8-estate-standard.adoc"
+@end
+
+@parameters:
+profile_c_domains: docs/decisions/ADR-008-profile-c-domains.json
+identity_domains: [gv-clade-index, julia-package-identity]
+template_canonical_name: rsr-template-repo
+template_repo: hyperpolymath/rsr-template-repo
+@end
+
+@must:
+# the declaration is THIS repo, not the template it was instantiated from
+- "primary-owner + canonical-name identify the repository the file lives in (canonical-name == rsr-template-repo outside hyperpolymath/rsr-template-repo is template residue)"
+- "forges.github names the repository's actual home; empty rather than the template's forge"
+- "born does not predate the repository's first commit"
+# the uuid is recomputable from the declaration
+- "uuid == profile-C(domain=gv-clade-index, name=github.com/<primary-owner>/<canonical-name>)"
+- "the recorded preimage comment, the derivation note, and the uuid agree"
+# both metadata documents agree
+- "CLAUDE.md's identity line carries the same uuid, preimage, forge, and born as CLADE.a2ml"
+@end
+
+@query(engine="vcl"):
+clade_identity(scan="repo-tree", file=".machine_readable/descriptiles/CLADE.a2ml")
+  |> where("not declares_this_repository(identity, repo)")
+  |> or_where("uuid != profile_c_mint('gv-clade-index', identity.primary_owner, identity.canonical_name)")
+  |> or_where("disagrees_with(claude_md_identity_line)")
+  |> emit("compliance.finding.new", severity=high)
