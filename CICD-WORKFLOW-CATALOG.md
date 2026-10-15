@@ -225,6 +225,58 @@ Use sparingly - only when certain it's a false positive.
 
 ---
 
+## Pattern: Relevance-Gated Heavy Work (gate + skip)
+
+Heavy jobs — full test suites, proof checkers, expensive builds — do not need
+to run on every pull request, but their required checks must *post* on every
+pull request or branch protection deadlocks. This pattern resolves both.
+
+**The trap it prevents.** A required check from a path-filtered workflow
+never posts on a PR that matches no path (`on.pull_request.paths`), so the
+required context can never be satisfied and the PR is blocked with nothing
+red to look at. This has been sprung in the estate at least twice
+(MetaManifold-WebUI #39, and the occupancy checks on #116's squash).
+
+**The pattern.** Keep the workflow trigger unfiltered, add a cheap gate job
+that always runs and decides relevance from the changed paths, and give the
+heavy jobs `needs: [gate]` + `if: needs.<gate>.outputs.relevant == 'true'`.
+When the gate says not relevant, GitHub posts `skipped` for the heavy jobs,
+and **a skipped check satisfies a required check**. The gate itself must
+never be skipped — it is the check that vouches for the others' absence —
+so require it too.
+
+**Reference implementations** (copy the hardening, not just the shape):
+
+- `hyperpolymath/MetaManifold-WebUI` `.github/workflows/occupancy.yml` —
+  the `Occupancy relevance` gate (PR #125) and its two reading jobs.
+- `hyperpolymath/MetaManifold-WebUI` `.github/workflows/ci.yml` — the
+  `Code relevance` gate (PR #156) in front of `Julia tests` (~19 min) and
+  `Agda proofs`.
+
+**Hardening both reviews demanded:**
+
+- `git diff --no-renames --name-only -z`, read NUL-delimited
+  (`while IFS= read -r -d '' file`) — a file renamed out of a listed path
+  is reported as a deletion under its original name, and a pathname Git
+  would quote arrives raw.
+- The diff base reaches the script through `env:`, never `${{ }}`
+  interpolation inside `run:` (zizmor's template-injection rule).
+- Quote **every** pattern in the array: an unquoted `src/*` expands against
+  the checkout at assignment time; the glob must fire at `case` time,
+  against the diff.
+- The path list is the *positive* form (anything not listed is not
+  relevant), so a new directory joins the suite by being added, not
+  forgotten — and paths the tests themselves read (workflow files, shape
+  inputs, doc-shaped proof trees) must be listed even though they look
+  irrelevant.
+- The gate job's name is a stable identifier with no matrix, like every
+  other check a ruleset matches by display name.
+
+**When not to use it.** If the heavy work is the only check and cheap
+enough, or if the suite cannot distinguish relevant from irrelevant paths
+safely, run everything on everything — the deadlock only bites the
+combination *path-filtered trigger* + *required check*.
+
 ## Workflow Selection Guide
 
 ### Minimum Required (All Repos)
