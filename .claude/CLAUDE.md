@@ -4,8 +4,8 @@
 
 **Owner directive 2026-06-02 (verbatim):**
 
-> "mpl-2.0 is for my sole repos, all rights reserved is for 007,
-> agpl-3.0-or-later is for those shared with my son, and leave other
+> "mpl-2.0 (code) and CC-SA-BY-4.0 (prose) is for my sole repos, 
+> exceptions for those shared with my son (follow his scheme), and leave other
 > people's forked stuff alone … only palimpsest license for obvious
 > reasons should be talking about palipsest and palimpsest plasma, and
 > metadatastician/consent-aware-web, but in that case prospectively"
