@@ -102,6 +102,20 @@ describe("extra rules", () => {
   test("filename matching no pattern", () => {
     expect(verdict(HDR + '(repo-deed :schema-version "1")\n', "x.deed")).toMatch(/no deed dispatch pattern/);
   });
+  test("canonical machine manifest selects repo-deed", () => {
+    expect(verdict(HDR + '(repo-deed :schema-version "1")\n', "0-AI-MANIFEST.deed")).toBeNull();
+    for (const head of ["estate-deed", "estate-atlas-deed", "praxis-deed"]) {
+      expect(verdict(HDR + `(${head} :schema-version "1")\n`, "0-AI-MANIFEST.deed")).toMatch(/mismatch/);
+    }
+  });
+  test("machine manifest filename is exact and case-sensitive", () => {
+    for (const name of ["0-ai-manifest.deed", "0-AI-MANIFEST-copy.deed", "1-AI-MANIFEST.deed"]) {
+      expect(verdict(HDR + '(repo-deed :schema-version "1")\n', name)).toMatch(/no deed dispatch pattern/);
+    }
+  });
+  test("machine manifest clauses still require named fields", () => {
+    expect(verdict(HDR + '(repo-deed :schema-version "1" (purpose "text"))\n', "0-AI-MANIFEST.deed")).toMatch(/expected field/);
+  });
   test("estate_chora.deed needs estate-deed", () => {
     expect(verdict(HDR + '(estate-deed :schema-version "1")\n', "estate_chora.deed")).toBeNull();
     expect(verdict(HDR + '(repo-deed :schema-version "1")\n', "estate_chora.deed")).toMatch(/mismatch/);
@@ -157,6 +171,12 @@ function cli(...args) {
 }
 
 describe("CLI", () => {
+  test("canonical machine manifest passes with its real filename", () => {
+    const manifest = join(HERE, "../../../0-AI-MANIFEST.deed");
+    const r = cli(manifest);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`OK   ${manifest}`);
+  });
   test("valid fixture exits 0", () => {
     const p = join(FIX, "valid", "minimal_chora.deed");
     const r = cli(p);
