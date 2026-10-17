@@ -75,16 +75,17 @@ uses_values() {
   | tr -d '"'"'"'' | awk '{print $1}' | sed 's/,$//'
 }
 
-# 1. enumerate the refs each entry needs that gh actions-lock may not write, as
-#    "path<TAB>owner/repo@ref": the workflow's own job-level reusable refs, and
-#    every external ref used by a local composite action it reaches.
+# 1. enumerate each workflow's direct refs as well as reusable/composite refs.
+# This completes workflow membership for actions already resolved elsewhere in
+# the lock; it never resolves or changes a dependency digest. Offline verification
+# must still reject any reference without its own dependency entry.
 : > "$WANT"
 for f in "$WF"/*.yml "$WF"/*.yaml; do
   [ -e "$f" ] || continue
   b=".github/workflows/$(basename "$f")"
   set +e
   {
-    uses_values "$f" | grep -E '/\.github/workflows/'
+    uses_values "$f"
     reach_files "$f" | tail -n +2 | while IFS= read -r a; do uses_values "$a"; done
   } | while read -r u; do
       case "$u" in ./*|\$/*|docker://*|'') continue;; esac

@@ -120,15 +120,30 @@ fi
 # per-file verdicts coming from a single process rather than N slightly
 # different environments.
 REPORT="$(mktemp)"
+trap 'rm -f "$REPORT"' EXIT
+STRICT_ARGS=()
+case "$LAYER" in L2|L3|all) STRICT_ARGS=(--strict) ;; esac
 set +e
-bash "$VALIDATOR" --layer "$LAYER" --json --quiet "${FILES[@]}" > "$REPORT" 2>/dev/null
+bash "$VALIDATOR" "${STRICT_ARGS[@]}" --layer "$LAYER" --json --quiet "${FILES[@]}" > "$REPORT"
+VALIDATOR_RC=$?
 set -e
+if [ -n "${K9_JSON_REPORT:-}" ]; then cp "$REPORT" "$K9_JSON_REPORT"; fi
+RESULTS=$(grep -cE '"verdict":"(pass|fail|error|routed)"' "$REPORT" || true)
+if [ "$RESULTS" -ne "${#FILES[@]}" ]; then
+  echo "[validate-k9] ERROR: expected ${#FILES[@]} file results, received $RESULTS (validator exit $VALIDATOR_RC)" >&2
+  exit 2
+fi
+case "$VALIDATOR_RC" in 0|1) ;; *)
+  echo "[validate-k9] ERROR: validator incomplete or unavailable (exit $VALIDATOR_RC)" >&2
+  exit "$VALIDATOR_RC" ;;
+esac
 
-CHANGED="$STAGED_FILES"
+CHANGED="${K9_CHANGED_FILES:-$STAGED_FILES}"
 HARD=0
 ADVISORY=0
 CONFORMING=0
 STALE=0
+ROUTED=0
 
 while IFS= read -r line; do
   [ -z "$line" ] && continue
@@ -140,7 +155,10 @@ while IFS= read -r line; do
   rules="$(printf '%s' "$line" | grep -oE '"rule":"K9-[ESNC][0-9]+"' | sed 's/.*:"//; s/"//' | sort -u | tr '\n' ' ' | sed 's/ $//' || true)"
 
   case "$verdict" in
-    pass|routed)
+    routed)
+      ROUTED=$((ROUTED + 1))
+      continue ;;
+    pass)
       CONFORMING=$((CONFORMING + 1))
       if in_ledger "$file"; then
         # A conforming file must not keep its exemption: that is how a ledger
@@ -166,13 +184,18 @@ while IFS= read -r line; do
 done < "$REPORT"
 rm -f "$REPORT"
 
+if [ "$VALIDATOR_RC" -ne 0 ] && [ "$HARD" -eq 0 ] && [ "$ADVISORY" -eq 0 ]; then
+  echo "[validate-k9] ERROR: validator failed without attributed violations" >&2
+  exit 2
+fi
+
 if [ "$STALE" -gt 0 ] || [ "$HARD" -gt 0 ]; then
   echo -e "${RED}[validate-k9] $HARD violation(s), $STALE stale ledger entr(ies)${NC}" >&2
   echo -e "${RED}[validate-k9] spec: 1-formats/k9/spec/K9-CONTRACT-SPEC.adoc · plan: 1-formats/k9/spec/MIGRATION-1058.adoc${NC}" >&2
   exit 1
 fi
 
-echo -e "${GRN}[validate-k9]${NC} $CONFORMING conforming, $ADVISORY grandfathered (layer $LAYER, contract v1.0.0)"
+echo -e "${GRN}[validate-k9]${NC} $CONFORMING conforming, $ADVISORY grandfathered, $ROUTED routed out of scope (layer $LAYER, contract v1.0.0)"
 if [ "$LAYER" = "L0" ] || [ "$LAYER" = "L1" ]; then
   # Say out loud what was NOT checked. A lexical pass is not a conformance
   # result, and the difference is the whole point of §12.

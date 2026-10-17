@@ -45,6 +45,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: K9-SVC Validation
         run: |
@@ -119,147 +123,61 @@ jobs:
           echo "${NICKEL_SHA256}  ${RUNNER_TEMP}/nickel" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/nickel"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          echo "K9_REPORT=$RUNNER_TEMP/k9-report.md" >> "$GITHUB_ENV"
 
-      # Each step mirrors its output into $GITHUB_STEP_SUMMARY as well as
-      # stdout. The PR then shows the verdict without anyone opening a raw log,
-      # and `gh api repos/{o}/{r}/check-runs/{job_id} --jq .output.summary`
-      # reads it back — which matters on a machine that cannot reach the log
-      # blob host. `set -uo pipefail` without `-e` so a failing validator still
-      # reaches the tee and its own status is what the step exits with.
-      - name: K9 normative contract typecheck
-        run: |
-          set -uo pipefail
-          # Its own step, ahead of the fixtures. `nickel typecheck` stops at the
-          # first error, and when the contract is broken every fixture verdict
-          # downstream is void — reported as five "non-conforming" positive
-          # controls rather than one broken contract. Twice now that cost a run
-          # to diagnose (`Record`, then `Any`: neither is a Nickel type).
-          set +e
-          out="$(nickel typecheck 1-formats/k9/spec/contract/k9_contract.ncl 2>&1)"; rc=$?
-          set -e
-          {
-            echo '## K9 normative contract typecheck'
-            echo '```'
-            [ $rc -eq 0 ] && echo 'k9_contract.ncl typechecks' || printf '%s\n' "$out"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          if [ $rc -ne 0 ]; then
-            printf '%s\n' "$out" | head -20 | while IFS= read -r line; do
-              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
-              [ -n "$esc" ] && printf '::error title=k9_contract.ncl does not typecheck::%s\n' "$esc"
-            done
-          fi
-          exit $rc
+      - name: Install reporting runtime
+        if: ${{ always() }}
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
-      - name: K9 contract self-test
-        run: |
-          set -uo pipefail
-          # Asserts the validator's bash mirrors still agree with the normative
-          # contract, the capability arithmetic, the structural extractor, and
-          # the envelope strip. Runs before the fixtures so a broken validator
-          # is reported as a broken validator rather than as a broken corpus.
-          {
-            echo '## K9 contract self-test'
-            echo '```'
-            bash 1-formats/k9/tools/k9-validate.sh --self-test 2>&1
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          exit "${PIPESTATUS[0]}"
+      - name: Reporting regression tests
+        run: bun test 1-formats/k9/tools/conformance-report.test.mjs
 
-      - name: K9 conformance fixtures (positive AND negative controls)
-        run: |
-          set -uo pipefail
-          # --strict: with Nickel on PATH every format layer (L0-L2) must
-          # actually run, so a missing toolchain cannot report a pass. The 21
-          # negative controls are the load-bearing half — a validator that
-          # accepts everything satisfies the positive half trivially.
-          set +e
-          out="$(bash 1-formats/k9/tools/k9-validate.sh --strict \
-            --fixtures 1-formats/k9/tools/fixtures 2>&1)"; rc=$?
-          set -e
-          {
-            echo '## K9 conformance fixtures'
-            echo '```'
-            printf '%s\n' "$out"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          # A failing gate also raises a check-run annotation. Annotations are
-          # readable through `gh api repos/{o}/{r}/check-runs/{job}/annotations`
-          # from machines that cannot reach the log blob host, which is where
-          # the first two runs of this workflow had to be diagnosed from.
-          # Workflow-command escaping: % first, then CR and LF.
-          if [ $rc -ne 0 ]; then
-            # One annotation per failure, not one multi-kilobyte annotation: a
-            # whole-report message never reached the check-run API, and a
-            # per-failure annotation is what a reader wants anyway.
-            printf '%s\n' "$out" | grep -E '^(FAIL|ERROR)' | head -20 | while IFS= read -r line; do
-              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
-              printf '::error title=K9 conformance fixture::%s\n' "$esc"
-            done
-          fi
-          exit $rc
-
-      - name: K9 corpus conformance (ratcheted, L2)
-        env:
-          # MIGRATION-1058 M7's first step. The hook's own default stays L1: a
-          # pre-commit hook that fails because a laptop lacks a toolchain
-          # teaches people to pass --no-verify, which is how a gate gets
-          # deleted. CI has the pinned binary, so here the corpus is checked at
-          # L2 as well. The six contractiles and the two axel config files that
-          # M1/M4 fixed had never been evaluated against K9.Component, and the
-          # closed record contracts in k9_contract.ncl rejected exactly the
-          # extension fields §5.5 permits. Ledger entries stay advisory, so the
-          # four svc templates and the rsr checklist are reported, not failed,
-          # until their own items land.
-          K9_VALIDATE_LAYER: all
-        run: |
-          set -uo pipefail
-          # The whole tracked corpus, through the same gate the pre-commit hook
-          # uses, so CI and the hook cannot disagree about what a K9 file is.
-          # .machine_readable/k9-contract-debt.txt grandfathers the files
-          # that predate the contract; it is shrink-only (a conforming file
-          # left in it fails), and it does not protect a file this PR touches.
-          set +e
-          out="$(bash .githooks/validate-k9.sh 2>&1)"; rc=$?
-          set -e
-          {
-            echo '## K9 corpus conformance (L2)'
-            echo '```'
-            printf '%s\n' "$out"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY" "$K9_REPORT"
-          if [ $rc -ne 0 ]; then
-            printf '%s\n' "$out" | grep -E '^(FAIL|ERROR)' | head -20 | while IFS= read -r line; do
-              esc="$(printf '%s' "$line" | sed 's/%/%25/g' | tr -d '\r\n')"
-              printf '::error title=K9 corpus conformance::%s\n' "$esc"
-            done
-          fi
-          exit $rc
-
-      - name: Publish the K9 verdict to the pull request
-        # always(): a failing gate is exactly when the detail is needed, and a
-        # skipped step would publish nothing.
+      - name: Read previous compact report
         if: ${{ always() && github.event_name == 'pull_request' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          set -uo pipefail
-          [ -s "$K9_REPORT" ] || { echo "no K9 report produced"; exit 0; }
-          {
-            echo '<!-- k9-contractile-report: regenerated on every run -->'
-            echo '# K9 contract conformance'
-            echo
-            echo "_run_ $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            cat "$K9_REPORT"
-          } > "$RUNNER_TEMP/body.md"
-          # Always post; never PATCH. Creating a comment is the one path this
-          # step has been observed to complete, and two runs were lost
-          # diagnosing an update that could not be read back. Stacked reports
-          # cost a little noise on the PR and buy a result that actually
-          # arrives, which is the right trade while the log host is
-          # unreachable. Newest comment wins; each one names its run.
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body-file "$RUNNER_TEMP/body.md" >/dev/null
-          echo "published the K9 verdict to #$PR_NUMBER"
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            | jq -r '[.[][] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- k9-contractile-report:")))] | last | .body // ""' \
+            > "$RUNNER_TEMP/k9-previous.md"
+
+      - name: Collect DEED and K9 evidence
+        if: ${{ always() }}
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || 'local' }}
+          K9_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          K9_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          K9_PREVIOUS_REPORT: ${{ runner.temp }}/k9-previous.md
+        run: |
+          set -euo pipefail
+          if command -v bun >/dev/null; then
+            bun 1-formats/k9/tools/conformance-report.mjs
+          else
+            node 1-formats/k9/tools/conformance-report.mjs
+          fi
+
+      - name: Archive dated conformance evidence
+        if: ${{ always() && env.K9_REPORT_DIR != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conformance-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.K9_REPORT_DIR }}
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Update the compact PR verdict
+        if: ${{ always() && github.event_name == 'pull_request' && env.K9_REPORT_DIR != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          comment_id="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            | jq -r '[.[][] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- k9-contractile-report:")))] | last | .id // ""')"
+          jq -n --rawfile body "$K9_REPORT_DIR/report.md" '{body: $body}' > "$RUNNER_TEMP/k9-comment.json"
+          if [ -n "$comment_id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" --input "$RUNNER_TEMP/k9-comment.json" >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --input "$RUNNER_TEMP/k9-comment.json" >/dev/null
+          fi
