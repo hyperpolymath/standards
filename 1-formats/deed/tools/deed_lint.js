@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // SPDX-License-Identifier: MPL-2.0
 // Port of deed_lint.py to plain JavaScript (bun, zero dependencies).
-const DOC = String.raw`deed-lint — conformance validator for the DEED grammar (deed.abnf v1.1.0).
+const DOC = String.raw`deed-lint — conformance validator for the DEED grammar (deed.abnf v1.2.0).
 
 Stdlib-only. Implements the normative grammar faithfully:
   * header = 1* spdx-line                 (";;" SP "SPDX-" …)
@@ -410,7 +410,17 @@ export function validate(text, filename = null) {
   return [head, items];
 }
 
-/** estate-file exact-first; stems may contain dots (split on the final suffix). */
+/**
+ * Check a parsed doc-head against the case-sensitive basename of `filename`.
+ * Exact names take precedence: estate_chora.deed requires estate-deed,
+ * ATLAS.deed requires estate-atlas-deed, and 0-AI-MANIFEST.deed requires
+ * repo-deed. Otherwise, _praxis.deed selects praxis-deed and _chora.deed
+ * selects repo-deed; stems may contain dots (split on the final suffix).
+ * Returns undefined on success.
+ * @throws {LintError} At line 1 for an unrecognised filename, an empty or
+ * illegal _chora.deed stem (only ASCII letters, digits, hyphens, dots and
+ * underscores are allowed), or a doc-head mismatch.
+ */
 export function checkFilenameDispatch(filename, head) {
   const base = basename(filename);
   let want;
@@ -418,6 +428,8 @@ export function checkFilenameDispatch(filename, head) {
     want = "estate-deed";
   } else if (base === "ATLAS.deed") {
     want = "estate-atlas-deed";
+  } else if (base === "0-AI-MANIFEST.deed") {
+    want = "repo-deed";
   } else if (base.endsWith("_praxis.deed")) {
     want = "praxis-deed";
   } else if (base.endsWith("_chora.deed")) {
@@ -428,7 +440,7 @@ export function checkFilenameDispatch(filename, head) {
   } else {
     throw new LintError(
       `filename ${pyRepr(base)} matches no deed dispatch pattern ` +
-        "(estate_chora.deed | ATLAS.deed | <stem>_chora.deed | <stem>_praxis.deed)",
+        "(estate_chora.deed | ATLAS.deed | 0-AI-MANIFEST.deed | <stem>_chora.deed | <stem>_praxis.deed)",
       1,
     );
   }
