@@ -63,10 +63,14 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 # quietly widen to cover an accident. An entry that stops being used is
 # reported as stale, so it cannot rot either.
 EXPECTED_ABSENT=(
-  # Empty: the denoland/setup-deno exception was removed 2026-09-22 after
-  # the last consumer went away (the validator itself reported it stale).
-  # Estate doctrine is still bun-only; if a deno ref ever returns, the
-  # cure is to remove the consumer, not to re-add an exception.
+  # Estate doctrine is bun-only; deno is banned. Keying it would make a
+  # BANNED runtime a required lockfile key for every caller of
+  # governance-reusable.yml. The cure is to remove the consumer -- port the
+  # governance scripts to bun -- not to satisfy it.
+  "denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed"
+  # A2ML is dead. security-gate-pr-target.yml still calls its
+  # secrets-check-action; locking it in would connect new machinery to it.
+  "hyperpolymath/a2ml-ecosystem@f7a40a4d5cc82b2e73f861119baa6818d77a448d"
 )
 
 if [ ! -f "$LOCKFILE" ]; then
@@ -100,6 +104,11 @@ if [ "${#LOCK_KEYS[@]}" -eq 0 ]; then
   exit 1
 fi
 
+# Look up whether a single 'owner/repo@sha' key is present in LOCK_KEYS.
+# Arguments:
+#   $1 - the lowercase 'owner/repo@sha' key to search for.
+# Returns:
+#   0 if the key is found in LOCK_KEYS, 1 otherwise.
 lock_has() {
   local needle="$1" k
   for k in "${LOCK_KEYS[@]}"; do
@@ -113,34 +122,13 @@ CHECKED=0
 declare -a SEEN_ABSENT=()
 
 # Collect every SHA-pinned uses: ref across all workflow files.
-#
-# Read with yq, never grep (YAML-POLICY Y-1). A line grep for `uses:` only
-# sees block style: on a KYAML file (`uses: "owner/repo@sha", # v1`) it
-# captured the quote and comma into the ref and reported a pinned, locked
-# action as missing. The parser returns the scalar VALUE whatever the style,
-# and never matches a `uses:` that is text inside a `run:` body.
-# Measured 2026-10-01: same 29-ref set as the old grep on the block tree.
-if ! command -v yq >/dev/null 2>&1; then
-  echo -e "${RED}[validate-actions-lock] ERROR: yq not found -- it reads the workflows (YAML-POLICY Y-1)${NC}" >&2
-  exit 1
-fi
-declare -a UNPARSED=()
 mapfile -t RAW < <(
-  for f in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml \
-           "$ACTIONS_DIR"/*/action.yml "$ACTIONS_DIR"/*/action.yaml; do
-    [ -f "$f" ] || continue
-    yq -r '.. | select(tag == "!!map") | select(has("uses")) | .uses | select(tag == "!!str")' "$f" \
-      || printf '\001UNPARSED\001%s\n' "$f"
-  done | grep -E $'@[0-9a-fA-F]{40}$|^\001UNPARSED\001' | sort -u
+  grep -rhoE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*[^[:space:]#]+@[0-9a-fA-F]{40}' \
+    "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml \
+    "$ACTIONS_DIR"/*/action.yml "$ACTIONS_DIR"/*/action.yaml 2>/dev/null \
+  | sed -E 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*//' \
+  | sort -u
 )
-# A file yq cannot parse is a file whose refs went unchecked: fail closed.
-for ref in "${RAW[@]}"; do
-  case "$ref" in $'\001UNPARSED\001'*) UNPARSED+=("${ref#$'\001UNPARSED\001'}") ;; esac
-done
-if [ "${#UNPARSED[@]}" -gt 0 ]; then
-  echo -e "${RED}[validate-actions-lock] ERROR: yq could not parse: ${UNPARSED[*]}${NC}" >&2
-  exit 1
-fi
 
 # A zero-input pass is the classic fake green: if ref extraction ever breaks,
 # this script would report success having checked nothing. If the lockfile
@@ -174,7 +162,7 @@ for ref in "${RAW[@]}"; do
   norm="$(printf '%s/%s@%s' "$owner" "$repo" "$sha" | tr '[:upper:]' '[:lower:]')"
 
   skip=0
-  for ex in ${EXPECTED_ABSENT[@]+"${EXPECTED_ABSENT[@]}"}; do
+  for ex in "${EXPECTED_ABSENT[@]}"; do
     ex_lc="$(printf '%s' "$ex" | tr '[:upper:]' '[:lower:]')"
     if [ "$norm" = "$ex_lc" ]; then
       SEEN_ABSENT+=("$ex_lc")
@@ -194,7 +182,7 @@ done
 
 # A doctrine exception that is no longer used must be removed, or the list
 # becomes a place where real coverage gaps can hide.
-for ex in ${EXPECTED_ABSENT[@]+"${EXPECTED_ABSENT[@]}"}; do
+for ex in "${EXPECTED_ABSENT[@]}"; do
   ex_lc="$(printf '%s' "$ex" | tr '[:upper:]' '[:lower:]')"
   found=0
   for s in ${SEEN_ABSENT[@]+"${SEEN_ABSENT[@]}"}; do
