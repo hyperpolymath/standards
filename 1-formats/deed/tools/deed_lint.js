@@ -410,7 +410,17 @@ export function validate(text, filename = null) {
   return [head, items];
 }
 
-/** estate-file exact-first; stems may contain dots (split on the final suffix). */
+/**
+ * Check a parsed doc-head against the case-sensitive basename of `filename`.
+ * Exact names take precedence: estate_chora.deed requires estate-deed,
+ * ATLAS.deed requires estate-atlas-deed, and 0-AI-MANIFEST.deed requires
+ * repo-deed. Otherwise, _praxis.deed selects praxis-deed and _chora.deed
+ * selects repo-deed; stems may contain dots (split on the final suffix).
+ * Returns undefined on success.
+ * @throws {LintError} At line 1 for an unrecognised filename, an empty or
+ * illegal _chora.deed stem (only ASCII letters, digits, hyphens, dots and
+ * underscores are allowed), or a doc-head mismatch.
+ */
 export function checkFilenameDispatch(filename, head) {
   const base = basename(filename);
   let want;
