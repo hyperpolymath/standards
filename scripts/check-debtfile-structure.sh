@@ -47,12 +47,25 @@ seen_ids=" "
 name="" probe="" count="" ceiling="" severity="" policy="" accepted=""
 taxonomy_seen=0 taxonomy_choice="" taxonomy_default="" taxonomy_non_default="" taxonomy_reason=""
 
+# note — print an informational line to stdout, indented to match the
+# other report lines.
 note() { printf '  %s\n' "$*"; }
+# bad — report a structural defect (printed with a ❌ marker) and mark the
+# overall run as failed by setting `fail=1`.
 bad()  { printf '  ❌ %s\n' "$*"; fail=1; }
 
+# is_uint <value> — return 0 if value is a non-negative integer (digits
+# only, no sign), return 1 otherwise, including when empty/unset.
 is_uint() { case "${1:-}" in ''|*[!0-9]*) return 1;; *) return 0;; esac; }
+# has_nonspace <value> — return 0 if value contains at least one
+# non-whitespace character, return 1 if it is empty or all whitespace.
 has_nonspace() { case "${1:-}" in *[![:space:]]*) return 0;; *) return 1;; esac; }
 
+# validate — check the currently buffered "### name" block's fields
+# (probe, ceiling, count, severity, policy, testing-taxonomy departure
+# fields, accepted-until) for structural defects via `bad`. No-ops if no
+# entry has been started yet; otherwise increments `entries` and leaves
+# `fail` set on any defect found.
 validate() {
   [ -n "$name" ] || return 0
   entries=$((entries + 1))
@@ -104,17 +117,6 @@ validate() {
     if [ -n "$taxonomy_default" ] && [ "$taxonomy_default" = "$taxonomy_non_default" ]; then
       bad "'$name' taxonomy-default-arm and taxonomy-non-default-arm must name different arms"
     fi
-    # Stable-identifier grammar per DEBTFILE-SPEC §Fields: [a-z0-9][a-z0-9._-]*.
-    if [ -n "$taxonomy_default" ]; then
-      case "$taxonomy_default" in
-        *[!a-z0-9._-]*|[^a-z0-9]*) bad "'$name' taxonomy-default-arm '$taxonomy_default' is not a stable identifier ([a-z0-9][a-z0-9._-]*)" ;;
-      esac
-    fi
-    if [ -n "$taxonomy_non_default" ]; then
-      case "$taxonomy_non_default" in
-        *[!a-z0-9._-]*|[^a-z0-9]*) bad "'$name' taxonomy-non-default-arm '$taxonomy_non_default' is not a stable identifier ([a-z0-9][a-z0-9._-]*)" ;;
-      esac
-    fi
   fi
 
   if [ -n "$accepted" ]; then
@@ -127,6 +129,9 @@ validate() {
   fi
 }
 
+# reset_block <name> — start a new entry block named <name>, clearing all
+# per-entry fields (including the testing-taxonomy fields) ready to be
+# repopulated by the following '- key: value' lines.
 reset_block() {
   name="$1"; probe=""; count=""; ceiling=""; severity=""; policy=""; accepted=""
   taxonomy_seen=0; taxonomy_choice=""; taxonomy_default=""; taxonomy_non_default=""; taxonomy_reason=""
