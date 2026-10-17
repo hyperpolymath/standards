@@ -23,7 +23,7 @@
 ### Hard rules for agents
 
 - **NEVER generate licence-change PRs without prior owner approval.** Manual,
-  per-file, owner-only. Triggered by neurophone#99 (auto-PR reverting PMPL →
+  per-file, restricted to registered codeowner-admins. Triggered by neurophone#99 (auto-PR reverting PMPL →
   MPL-2.0 across ~140 files; closed by owner 2026-06-02).
 - **NEVER sweep SPDX headers in bulk.** Every prior LLM sweep has scrambled
   identifiers, mis-licensed third-party code, or reverted owner decisions.
