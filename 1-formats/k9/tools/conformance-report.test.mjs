@@ -81,3 +81,21 @@ test('the actual corpus shell gate rejects empty output and unattributed failure
     }
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
+test('lock membership generator adds direct references and is idempotent', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'k9-lock-'));
+  try {
+    const wf = path.join(tmp, '.github/workflows');
+    fs.mkdirSync(wf, { recursive: true });
+    fs.writeFileSync(path.join(wf, 'test.yml'), 'jobs:\n  test:\n    steps:\n      - uses: owner/action@' + 'a'.repeat(40) + '\n');
+    const lock = path.join(wf, 'actions.lock');
+    fs.writeFileSync(lock, "version: 'v0.0.2'\nworkflows:\n    '.github/workflows/test.yml': []\ndependencies: {}\n");
+    const script = new URL('../../../scripts/complete-job-refs.sh', import.meta.url).pathname;
+    const r = spawnSync('bash', [script, wf], { cwd: tmp, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const first = fs.readFileSync(lock, 'utf8');
+    assert.ok(first.includes('owner/action@' + 'a'.repeat(40)));
+    const again = spawnSync('bash', [script, wf], { cwd: tmp, encoding: 'utf8' });
+    assert.equal(again.status, 0, again.stderr);
+    assert.equal(fs.readFileSync(lock, 'utf8'), first);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});

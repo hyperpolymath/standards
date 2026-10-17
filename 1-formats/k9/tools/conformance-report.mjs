@@ -57,6 +57,7 @@ export function corpusItems(text, expected, ledger, changed) {
     const warnings = r.findings.filter(f => f.severity === 'warning');
     const reason = r.findings.map(f => `${f.rule}: ${f.message}`).join('; ');
     if (r.verdict === 'routed') rows.push(item(r.file, 'not_applicable', 'Routed to another dialect; not validated as a K9 contract.'));
+    else if (errors.some(f => f.rule === 'K9-N002') && !errors.some(f => f.rule !== 'K9-N002')) rows.push(item(r.file, 'indeterminate', reason));
     else if (errors.length || r.verdict === 'fail' || r.verdict === 'error') rows.push(item(r.file, 'fail', reason, ledger.has(r.file) && !changed.has(r.file)));
     else if (unavailable.length) rows.push(item(r.file, 'indeterminate', reason));
     else if (ledger.has(r.file)) rows.push(item(r.file, 'fail', 'Stale debt exemption: this file now conforms.'));
@@ -89,6 +90,8 @@ export function collect(root, directory, env = process.env) {
   const deeds = files.filter(f => !f.startsWith('9-archive/') && !f.includes('/fixtures/') && f.endsWith('.deed'));
   if (!deeds.some(f => /^[^/]+_chora\.deed$/.test(f))) deeds.push('__missing_repo_deed__');
   const runtime = env.BUN_BIN || 'bun';
+  const tools = { runtime: process.version, bun: execute(root, runtime, ['--version']).output.trim(), nickel: execute(root, 'nickel', ['--version']).output.trim() };
+  fs.writeFileSync(path.join(directory, 'tools.json'), JSON.stringify(tools, null, 2) + '\n');
   const deedRows = [];
   for (const f of deeds) {
     if (f === '__missing_repo_deed__') { deedRows.push(item('repo deed', 'indeterminate', 'No tracked root <repo>_chora.deed found.')); continue; }
@@ -112,7 +115,7 @@ export function collect(root, directory, env = process.env) {
   for (const name of names) if (!controls.some(r => r.id === name || r.id.startsWith(name + ' '))) controls.push(item(name, 'indeterminate', 'Expected control has no result.'));
   if (new Set(names).size !== names.length) controls.push(item('fixture identity', 'indeterminate', 'Duplicate fixture basenames cannot be attributed uniquely.'));
   if (state(categories.find(c => c.id === 'typecheck').items) !== 'green') {
-    controls = controls.map(i => i.status === 'pass' ? item(i.id, 'indeterminate', 'Normative contract did not typecheck; fixture verdict is not established.') : i);
+    controls = controls.map(i => item(i.id, 'indeterminate', 'Normative contract did not typecheck; fixture verdict is not established. See fixtures.log.'));
   }
   add('fixtures', controls);
   const expected = files.filter(f => /\.(k9|k9\.ncl)$/.test(f) && !f.startsWith('9-archive/') && !f.startsWith('1-formats/k9/tools/fixtures/'));
@@ -130,31 +133,36 @@ export function collect(root, directory, env = process.env) {
   if (!baseResolved) corpus.push(item('change scope', 'indeterminate', 'Cannot resolve the PR base/head range; debt exemptions cannot be determined.'));
   if (cr.code !== 0 && !corpus.some(i => i.status === 'indeterminate' || i.status === 'fail' && !i.advisory)) corpus.push(item('corpus gate', 'indeterminate', `Gate exited ${cr.code}; inspect corpus.log.`));
   add('corpus', corpus);
-  const profileFiles = [contract, validator, '.githooks/validate-k9.sh', '1-formats/deed/tools/deed_lint.js', '1-formats/k9/tools/conformance-report.mjs'];
-  const profile = crypto.createHash('sha256').update(profileFiles.map(f => f + '\0' + read(path.join(root, f))).join('\0') + JSON.stringify({ fixtures: names.sort(), expected: expected.sort(), deeds: deeds.sort() })).digest('hex');
+  const profileFiles = [contract, validator, '.githooks/validate-k9.sh', '1-formats/deed/tools/deed_lint.js', '1-formats/deed/spec/abnf/deed.abnf', '1-formats/k9/tools/conformance-report.mjs'];
+  const fixtureDefinitions = fixtures.sort().map(f => path.relative(root, f) + '\0' + read(f)).join('\0');
+  const profile = crypto.createHash('sha256').update(profileFiles.map(f => f + '\0' + read(path.join(root, f))).join('\0') + fixtureDefinitions + (fs.existsSync(ledgerFile) ? read(ledgerFile) : '') + JSON.stringify({ tools, fixtures: names.sort(), expected: expected.sort(), deeds: deeds.sort() })).digest('hex');
   const all = categories.flatMap(c => c.items);
-  return { schema: VERSION, profile, generated: new Date().toISOString(), sha: env.K9_HEAD_SHA || execute(root, 'git', ['rev-parse', 'HEAD']).output.trim(), run: env.GITHUB_RUN_ID || 'local', pr: env.PR_NUMBER || 'local', url: env.GITHUB_RUN_ID ? `https://github.com/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}` : '', categories, state: state(all), counts: counts(all) };
+  const dirty = execute(root, 'git', ['diff', '--quiet', 'HEAD']).code !== 0;
+  return { schema: VERSION, profile, tools, dirty, generated: new Date().toISOString(), sha: env.K9_HEAD_SHA || execute(root, 'git', ['rev-parse', 'HEAD']).output.trim(), run: env.GITHUB_RUN_ID || 'local', pr: env.PR_NUMBER || 'local', url: env.GITHUB_RUN_ID ? `https://github.com/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}` : '', categories, state: state(all), counts: counts(all) };
 }
 const escape = s => String(s).replace(/[&<>|`]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '|': '&#124;', '`': '&#96;' }[c])).replace(/\r?\n/g, ' ');
 export function delta(current, previous, category) {
   if (!previous || previous.schema !== VERSION || previous.profile !== current.profile || previous.sha === current.sha || previous.pr !== current.pr) return '— no comparable baseline';
   const before = previous.categories.find(c => c.id === category.id);
   if (!before || before.counts.indeterminate || category.counts.indeterminate) return '— indeterminate';
+  if (before.counts.not_applicable !== category.counts.not_applicable) return '— scope changed';
   const a = before.counts.failed, b = category.counts.failed;
-  return b < a ? `↑ improved (${a - b} fewer failures)` : b > a ? `↓ regressed (${b - a} more failures)` : '↔ unchanged';
+  if (a !== b) return b < a ? `↑ improved (${a - b} fewer failures)` : `↓ regressed (${b - a} more failures)`;
+  const aw = before.counts.advisory, bw = category.counts.advisory;
+  return bw < aw ? '↑ fewer advisories' : bw > aw ? '↓ more advisories' : '↔ unchanged';
 }
 export function render(report, previous = null) {
   const labels = { red: '🔴 failing', orange: '🟠 indeterminate', yellow: '🟡 advisory', green: '🟢 conformant', grey: '⚪ not applicable' };
   const colour = { red: 'red', orange: 'orange', yellow: 'yellow', green: 'brightgreen', grey: 'lightgrey' };
-  const badge = `https://img.shields.io/badge/DEED%E2%80%93K9-${encodeURIComponent(report.state)}-${colour[report.state]}`;
-  let out = `${marker}\n![DEED–K9 ${report.state}](${badge})\n\n${labels[report.state]} · commit \`${escape(report.sha.slice(0, 12))}\` · ${report.url ? `[run ${escape(report.run)}](${report.url})` : 'local run'}\n\n`;
+  const badge = `https://img.shields.io/badge/DEED_syntax_%2B_K9_L0%E2%80%93L2-${encodeURIComponent(report.state)}-${colour[report.state]}`;
+  let out = `${marker}\n![DEED–K9 ${report.state}](${badge})\n\n${labels[report.state]} · commit \`${escape(report.sha.slice(0, 12))}\` · ${report.url ? `[run ${escape(report.run)}](${report.url})` : 'local run'}${report.dirty ? ' · working tree modified' : ''}\n\n`;
   out += '| Category | Status | Pass | Fail | Indeterminate | N/A | Since previous revision |\n|---|---|---:|---:|---:|---:|---|\n';
   for (const c of report.categories) out += `| ${c.title} | ${labels[c.state]} | ${c.counts.passed} | ${c.counts.failed}${c.counts.advisory ? ` (${c.counts.advisory} advisory)` : ''} | ${c.counts.indeterminate} | ${c.counts.not_applicable} | ${delta(report, previous, c)} |\n`;
   for (const c of report.categories) {
     const findings = c.items.filter(i => i.status !== 'pass' || i.advisory);
     if (!findings.length) continue;
     out += `\n<details>\n<summary>${c.title}: ${findings.length} finding(s) / scope notes</summary>\n\n`;
-    for (const i of findings.slice(0, 20)) out += `- **${escape(i.id)}** — ${escape(i.status)}${i.advisory ? ' (advisory)' : ''}: ${escape(i.reason).slice(0, 1200)}\n`;
+    for (const i of findings.slice(0, 20)) out += `- **${escape(i.id).slice(0, 240)}** — ${escape(i.status)}${i.advisory ? ' (advisory)' : ''}: ${escape(i.reason).slice(0, 280)}\n`;
     if (findings.length > 20) out += `- ${findings.length - 20} more; see the structured report and logs.\n`;
     out += '\n</details>\n';
   }
