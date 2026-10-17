@@ -82,33 +82,13 @@ echo "$BASELINE_JSON" | jq -e 'type == "array"' >/dev/null || {
 SCHEMA_ERRORS="$(jq -r '
   def known: ["severity","rule_module","type","file","file_pattern",
               "severity_override","expires_at","note","tracking_issue"];
-  # Scanner vocabulary, mirroring the hypatia-scan-reusable validator: the
-  # research rules emit `warn` (ranked with medium) and some rules emit
-  # `informational`. Without these, research findings can never be
-  # acknowledged and the baseline gate can never go green on them.
-  def sevs: ["critical","high","medium","warn","low","info","informational"];
+  def sevs: ["critical","high","medium","low","info"];
   [ to_entries[] | .key as $i | .value as $e |
     if ($e|type) != "object" then "entry[\($i)]: not an object"
     else (
-      (["severity","type"][]
+      (["severity","rule_module","type"][]
         | select(($e[.]|type) != "string")
         | "entry[\($i)]: required key \(.) missing or not a string"),
-      # `rule_module` is the one key that admits a LIST as well as a string
-      # (standards#966: one defect, two emitting modules, one acknowledgement).
-      # Validated separately rather than being dropped from the required set —
-      # a key that is merely absent from every check is not validated, it is
-      # unchecked.
-      (if ($e.rule_module|type) as $t | $t != "string" and $t != "array"
-       then "entry[\($i)]: required key rule_module missing or not a string/array"
-       else empty end),
-      (if ($e.rule_module|type) == "array" and ($e.rule_module|length) == 0
-       then "entry[\($i)]: rule_module list is empty — an entry that names no module matches nothing"
-       else empty end),
-      (if ($e.rule_module|type) == "array"
-       then ($e.rule_module[]
-             | select(type != "string")
-             | "entry[\($i)]: rule_module list member is not a string: \(tojson)")
-       else empty end),
       (if (($e|has("file")) == ($e|has("file_pattern")))
        then "entry[\($i)]: exactly one of file / file_pattern is required"
        else empty end),
@@ -117,12 +97,6 @@ SCHEMA_ERRORS="$(jq -r '
         | "entry[\($i)]: unknown key \(.)"),
       (if ($e.severity|type) == "string" and ((sevs|index($e.severity))|not)
        then "entry[\($i)]: invalid severity \($e.severity)" else empty end),
-      (if ($e.rule_module|type) == "array"
-       then ($e.rule_module[]
-             | select(type == "string")
-             | select((test("^[a-z][a-z0-9_]*$"))|not)
-             | "entry[\($i)]: rule_module list member fails pattern: \(.)")
-       else empty end),
       (if ($e.rule_module|type) == "string"
           and (($e.rule_module|test("^[a-z][a-z0-9_]*$"))|not)
        then "entry[\($i)]: rule_module fails pattern: \($e.rule_module)"
@@ -206,35 +180,12 @@ ANNOTATED="$(jq -n \
   #   referencing `.file_pattern` there would error with "Cannot index
   #   string". Capture the entry pattern first, then reference $pat
   #   inside the test() regex argument.
-  # Hypatia emitted `warn` for advisory findings until hypatia#895
-  # (2026-10-01), which now emits them as `medium`. Baselines written before
-  # then acknowledge `warn`; treating the two as one tier keeps those
-  # acknowledgements matching instead of re-reporting every one as new.
-  def sev_tier: if . == "warn" then "medium" else . end;
   def match_entry(f):
     f as $finding
     | $baseline
     | map(select(
-        (.severity | sev_tier) == ($finding.severity | sev_tier)
-        # `rule_module` is a string OR a list of strings.
-        #
-        # ⚠ THE LIST FORM EXISTS BECAUSE ONE DEFECT CAN BE EMITTED BY TWO
-        # MODULES. Hypatia raises `invalid_actions_lock` from BOTH
-        # `workflow_audit` and `workflow_hardening` for a single desynced
-        # lockfile. Under exact string equality an acknowledgement could
-        # only ever name one of them, so the other stayed unsuppressed and
-        # went on blocking — and it did, on `main`. The symptom is
-        # especially misleading: the entry looks correct, the file matches,
-        # the severity matches, and the finding is still kept.
-        #
-        # Normalising to a list here rather than duplicating the entry keeps
-        # ONE acknowledgement per defect, which is what `expires_at` and
-        # `tracking_issue` are actually about. Two entries for one defect
-        # means two expiry dates for one decision.
-        and (
-          (.rule_module | if type == "array" then . else [.] end)
-          | any(. == $finding.rule_module)
-        )
+        .severity == $finding.severity
+        and .rule_module == $finding.rule_module
         and .type == $finding.type
         and (
           (.file? // null) == $finding.file
@@ -277,8 +228,9 @@ ANNOTATED="$(jq -n \
 KEPT="$(jq '[.[] | select(.baseline_status != "acknowledged")]' <<<"$ANNOTATED")"
 SUPPRESSED="$(jq '[.[] | select(.baseline_status == "acknowledged")]' <<<"$ANNOTATED")"
 
-# Severity rank for blocking decision.
-# Unknown severities are treated as critical to fail-safe.
+# Severity rank for blocking decision. `warn` and `informational` are treated
+# as aliases of `medium` and `info` respectively (Hypatia's research rules use
+# `warn` at medium rank). Unknown severities are treated as critical to fail-safe.
 rank() {
   case "$1" in
     critical) echo 5 ;;
@@ -293,11 +245,9 @@ rank() {
 
 THRESHOLD_RANK="$(rank "$BLOCKING_THRESHOLD")"
 MAX_KEPT_RANK=0
-BLOCKING_COUNT=0  # kept findings at or above the threshold (the gate message names these, not all kept)
 while IFS= read -r sev; do
   r="$(rank "$sev")"
   if (( r > MAX_KEPT_RANK )); then MAX_KEPT_RANK=$r; fi
-  if (( r >= THRESHOLD_RANK )); then BLOCKING_COUNT=$((BLOCKING_COUNT + 1)); fi
 done < <(jq -r '.[].severity' <<<"$KEPT")
 
 KEPT_COUNT="$(jq 'length' <<<"$KEPT")"
@@ -336,7 +286,7 @@ if [[ "$MODE" == "advisory" ]]; then
 fi
 
 if (( MAX_KEPT_RANK >= THRESHOLD_RANK )); then
-  echo "::error::Gate failed: $BLOCKING_COUNT unfiltered finding(s) at or above '$BLOCKING_THRESHOLD' ($KEPT_COUNT kept in total)." >&2
+  echo "::error::Gate failed: $KEPT_COUNT unfiltered finding(s) at or above '$BLOCKING_THRESHOLD'." >&2
   exit 1
 fi
 
