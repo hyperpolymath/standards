@@ -108,6 +108,38 @@ lock_has() {
   return 1
 }
 
+# Leaf action entries in `dependencies:` whose `ref:` equals their own 40-hex
+# SHA pin fail GitHub runner lockfile verification during `Set up job`
+# ("Unable to resolve action ...: invalid lockfile pin", standards#1271).
+mapfile -t SELF_SHA_KEYS < <(
+  awk '
+    /^dependencies:/ { in_dep = 1; next }
+    /^[a-z_]+:/      { in_dep = 0; cur = ""; next }
+    !in_dep { next }
+    /^    \x27[^\x27]+\x27:$/ {
+      cur = $0; sub(/^    \x27/, "", cur); sub(/\x27:$/, "", cur)
+      next
+    }
+    cur != "" && /^        ref: \x27[^\x27]+\x27$/ {
+      r = $0; sub(/^        ref: \x27/, "", r); sub(/\x27$/, "", r)
+      n = index(cur, "@")
+      pin = (n > 0) ? substr(cur, n + 1) : ""
+      if (length(r) == 40 && r ~ /^[0-9a-fA-F]+$/ && tolower(r) == tolower(pin)) {
+        print tolower(cur)
+      }
+      cur = ""
+    }
+  ' "$LOCKFILE" | sort -u
+)
+
+lock_has_self_sha() {
+  local needle="$1" k
+  for k in ${SELF_SHA_KEYS[@]+"${SELF_SHA_KEYS[@]}"}; do
+    [ "$k" = "$needle" ] && return 0
+  done
+  return 1
+}
+
 ERRORS=0
 CHECKED=0
 declare -a SEEN_ABSENT=()
@@ -188,6 +220,10 @@ for ref in "${RAW[@]}"; do
   if ! lock_has "$norm"; then
     echo -e "${RED}[validate-actions-lock] ERROR: not in actions.lock: ${ref}${NC}" >&2
     echo "    normalised to: $norm" >&2
+    ERRORS=$((ERRORS + 1))
+  elif lock_has_self_sha "$norm"; then
+    echo -e "${RED}[validate-actions-lock] ERROR: self-SHA ref in actions.lock dependencies: ${norm}${NC}" >&2
+    echo "    leaf action entries must carry a tag/branch ref, not their own commit SHA (standards#1271)" >&2
     ERRORS=$((ERRORS + 1))
   fi
 done

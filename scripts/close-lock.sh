@@ -178,8 +178,14 @@ for pass in 1 2 3 4 5 6; do
     if ! printf '%s' "$sha" | grep -qxE '[0-9a-f]{40}'; then
       echo "  SKIP $k (cannot resolve commit)"; skipped=$((skipped + 1)); continue
     fi
+    rec_ref="$ref"
+    if printf '%s' "$ref" | grep -qxE '[0-9a-f]{40}' && ! grep -qxF "$k$TAB" "$SC/owed"; then
+      tag_ref=$("$GH_BIN" api "repos/$owner/$name/tags?per_page=100" --jq '.[] | select(.commit.sha == "'"$sha"'") | .name' 2>/dev/null \
+        | awk '/^[A-Za-z0-9._\/-]+$/ && !(length($0) == 40 && $0 ~ /^[0-9a-f]+$/) { if (!first) first = $0; if ($0 ~ /^v?[0-9]+\.[0-9]+\.[0-9]+/) { print $0; found = 1; exit } } END { if (!found && first) print first }') || tag_ref=""
+      [ -n "$tag_ref" ] && rec_ref="$tag_ref"
+    fi
     { printf "    '%s':\n        ref: '%s'\n        commit: 'sha1-%s'\n        owner_id: %s\n        repo_id: %s\n" \
-        "$k" "$ref" "$sha" "${ids%% *}" "${ids##* }"
+        "$k" "$rec_ref" "$sha" "${ids%% *}" "${ids##* }"
       uses_block "$k"; } >> "$SC/new"
     echo "  + $k"
   done < "$SC/miss"

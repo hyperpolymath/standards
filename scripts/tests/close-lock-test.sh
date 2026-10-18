@@ -39,6 +39,7 @@ case "\$2" in
     if [ -f "\$f" ]; then cat "\$f"; else echo '{"message":"Not Found","status":"404"}'; exit 1; fi ;;
   repos/o/missing*) echo '{"message":"Not Found","status":"404"}'; exit 1 ;;
   repos/o/garbled*) echo '{"messa'; exit 0 ;;
+  repos/o/leaf/tags*) printf 'v4\nv4.38.0\n' ;;
   repos/o/*/commits/v1) echo $C ;;
   repos/o/*/commits/*) echo '{"message":"No commit found"}'; exit 1 ;;
   repos/o/*) echo '7 9' ;;
@@ -70,6 +71,14 @@ d=$(mklock t2 "o/b@v1" </dev/null)
 run "$d" >/dev/null
 grep -qxF "        ref: 'v1'" "$d/actions.lock" && grep -qxF "        commit: 'sha1-$C'" "$d/actions.lock" \
   && ok "tag ref recorded with its resolved commit" || bad "tag ref recorded with its resolved commit"
+
+echo "=== resolves a leaf SHA ref to its upstream semver tag (standards#1271) ==="
+d=$(mklock t2b "o/leaf@$A" </dev/null)
+run "$d" >/dev/null
+grep -qxF "    'o/leaf@$A':" "$d/actions.lock" && grep -qxF "        ref: 'v4.38.0'" "$d/actions.lock" \
+  && grep -qxF "        commit: 'sha1-$A'" "$d/actions.lock" \
+  && ok "leaf SHA ref records upstream semver tag in ref: ('v4.38.0')" \
+  || bad "leaf SHA ref records upstream semver tag in ref:"
 
 echo "=== closes a nested edge of an existing record ==="
 d=$(mklock t3 "o/a@$A" <<EOF

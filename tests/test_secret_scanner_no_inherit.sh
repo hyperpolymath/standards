@@ -219,6 +219,37 @@ while IFS= read -r pin; do
     || fail "scanner reusable uses $pin but actions.lock does not key it — callers pinned to this commit will fail lock validation at startup"
 done <<< "$checkout_pin"
 
+# --- 8. hypatia-scan-reusable declares HYPATIA_SCAN_PAT & actions.lock has no leaf self-SHA refs ---
+HYPATIA_REUSABLE="$WF_DIR/hypatia-scan-reusable.yml"
+if [ -r "$HYPATIA_REUSABLE" ]; then
+  grep -vE '^[[:space:]]*#' "$HYPATIA_REUSABLE" | grep -qE '^[[:space:]]+HYPATIA_SCAN_PAT:' \
+    || fail "hypatia-scan-reusable.yml does not declare HYPATIA_SCAN_PAT under on.workflow_call.secrets — callers passing secrets.HYPATIA_SCAN_PAT will fail at startup"
+fi
+
+self_sha_leaves="$(awk '
+  /^dependencies:/ { in_dep = 1; next }
+  /^[a-z_]+:/      { in_dep = 0; cur = ""; next }
+  !in_dep { next }
+  /^    \x27[^\x27]+\x27:$/ {
+    cur = $0; sub(/^    \x27/, "", cur); sub(/\x27:$/, "", cur)
+    next
+  }
+  cur != "" && /^        ref: \x27[^\x27]+\x27$/ {
+    r = $0; sub(/^        ref: \x27/, "", r); sub(/\x27$/, "", r)
+    n = index(cur, "@")
+    nwo = (n > 0) ? substr(cur, 1, n - 1) : cur
+    pin = (n > 0) ? substr(cur, n + 1) : ""
+    if (tolower(nwo) != "hyperpolymath/standards" && length(r) == 40 && r ~ /^[0-9a-fA-F]+$/ && tolower(r) == tolower(pin)) {
+      print cur
+    }
+    cur = ""
+  }
+' "$LOCKFILE")"
+if [ -n "$self_sha_leaves" ]; then
+  fail "actions.lock contains leaf action entries with ref equal to their own SHA pin (standards#1271):"
+  printf '%s\n' "$self_sha_leaves" | sed 's/^/    /'
+fi
+
 # --- Verdict ---------------------------------------------------------------
 if [ "$fails" -gt 0 ]; then
   echo "::error::no-inherit: $fails check(s) failed"
