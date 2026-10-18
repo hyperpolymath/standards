@@ -152,17 +152,38 @@ done
 # when the caller was narrowed one commit before the declaration
 # landed). For each standards wrapper that passes named secrets to a
 # LOCAL reusable, every passed name must be declared in that reusable's
-# workflow_call block.
-check_declared() { # caller reusable secret-name
-  local caller="$1" reusable="$2" name="$3"
+# workflow_call.secrets mapping. These workflows use two-space indentation;
+# inspect only direct secret keys, not inputs or nested metadata.
+check_declared() { # caller reusable
+  local caller="$1" reusable="$2" name declared
   [ -r "$caller" ] && [ -r "$reusable" ] || return 0
-  grep -vE '^[[:space:]]*#' "$caller" | grep -qE "^[[:space:]]+${name}:" || return 0
-  if ! awk '/workflow_call:/{f=1} f && /^permissions:/{exit} f{print}' "$reusable"        | grep -qE "^[[:space:]]+${name}:"; then
-    fail "$(basename "$caller") passes secret $name but $(basename "$reusable") does not declare it in workflow_call.secrets — every run startup-fails"
-  fi
+  declared="$(awk '
+    /^[[:space:]]*(#|$)/ { next }
+    /^  workflow_call:/ { call=1; next }
+    call && /^ {0,2}[^ ]/ { exit }
+    call && /^    secrets:[[:space:]]*(#.*)?$/ { secrets=1; next }
+    secrets && /^    [^ ]/ { exit }
+    secrets && /^      [A-Za-z_][A-Za-z0-9_]*:/ {
+      sub(/^      /, ""); sub(/:.*/, ""); print
+    }
+  ' "$reusable")"
+  while IFS= read -r name; do
+    if ! grep -qxF -- "$name" <<< "$declared"; then
+      fail "$(basename "$caller") passes secret $name but $(basename "$reusable") does not declare it in workflow_call.secrets — every run startup-fails"
+    fi
+  done < <(awk '
+    /^[[:space:]]*(#|$)/ { next }
+    /^jobs:/ { jobs=1; next }
+    jobs && /^[^ ]/ { exit }
+    jobs && /^    secrets:[[:space:]]*(#.*)?$/ { secrets=1; next }
+    secrets && /^ {0,4}[^ ]/ { secrets=0 }
+    secrets && /^      [A-Za-z_][A-Za-z0-9_]*:/ {
+      sub(/^      /, ""); sub(/:.*/, ""); print
+    }
+  ' "$caller")
 }
-check_declared "$WF_DIR/hypatia-scan.yml" "$WF_DIR/hypatia-scan-reusable.yml" "HYPATIA_SCAN_PAT"
-check_declared "$WF_DIR/governance.yml"  "$WF_DIR/governance-reusable.yml"  "HYPATIA_SCAN_PAT"
+check_declared "$WF_DIR/hypatia-scan.yml" "$WF_DIR/hypatia-scan-reusable.yml"
+check_declared "$WF_DIR/governance.yml"  "$WF_DIR/governance-reusable.yml"
 
 # --- 3. No live `secrets: inherit` directive outside the supported list -
 supported_path() {
