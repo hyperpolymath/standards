@@ -10,6 +10,10 @@
 default:
     @just --list
 
+# Dependency setup for the root devcontainer; sub-projects manage their own deps.
+deps:
+    @echo "No root package dependencies to install (specs only)."
+
 # Run the workflow-staleness gate against a repo (default: this one)
 staleness-check path=".":
     @bash scripts/check-workflow-staleness.sh "{{path}}"
