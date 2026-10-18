@@ -6,7 +6,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { counts, state, checkedAssertions, corpusItems, render, delta, baseline } from './conformance-report.mjs';
 const row = (status, advisory = false) => ({ id: 'x', status, advisory, reason: '' });
 const json = (file, verdict = 'pass', findings = []) => JSON.stringify({ file, verdict, findings });
@@ -65,6 +64,9 @@ test('report escapes untrusted evidence and preserves a small valid baseline', (
   assert.equal(baseline(body).sha, 'abc');
   assert.equal(baseline('<!-- k9-baseline:xxx -->'), null);
 });
+// Keep this allowance outside Hypatia's file-wide header exemption window.
+// hypatia: allow code_safety/js_exec_sync -- spawnSync runs fixed test programs with argv arrays and no shell evaluation.
+import { spawnSync } from 'node:child_process';
 test('the actual corpus shell gate rejects empty output and unattributed failure', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'k9-report-'));
   try {
