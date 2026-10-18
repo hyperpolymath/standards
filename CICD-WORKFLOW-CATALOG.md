@@ -333,7 +333,12 @@ These should **call** the reusable workflow instead of copying:
 ```yaml
 jobs:
   governance:
+    # Grant exactly what the callee declares (governance-reusable asks for
+    # actions: read + contents: read). A called workflow can never exceed
+    # its caller's grant, and a job-level block REPLACES the workflow-level
+    # one — under-granting here rejects the run at startup.
     permissions:
+      actions: read
       contents: read
     uses: hyperpolymath/standards/.github/workflows/governance-reusable.yml@<full-40-char-commit-sha>
     # Add a `secrets:` block ONLY when the callee declares named secrets
