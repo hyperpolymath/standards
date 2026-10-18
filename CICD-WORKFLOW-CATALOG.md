@@ -333,8 +333,14 @@ These should **call** the reusable workflow instead of copying:
 ```yaml
 jobs:
   governance:
-    uses: hyperpolymath/standards/.github/workflows/governance-reusable.yml@main
-    secrets: inherit
+    permissions:
+      contents: read
+    uses: hyperpolymath/standards/.github/workflows/governance-reusable.yml@<full-40-char-commit-sha>
+    # Add a `secrets:` block ONLY when the callee declares named secrets
+    # under `workflow_call.secrets`, passing each by name. Never use
+    # `secrets: inherit` — it forwards every repo/org secret the caller
+    # can see (standards#1108 §6b). Most reusables (e.g. the secret
+    # scanner) declare none and need no `secrets:` line at all.
 ```
 
 ### For Non-Reusable Workflows
