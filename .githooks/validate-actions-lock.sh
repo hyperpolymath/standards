@@ -132,6 +132,8 @@ mapfile -t SELF_SHA_KEYS < <(
   ' "$LOCKFILE" | sort -u
 )
 
+# Check a normalized owner/repo@sha key against the parsed self-SHA entries.
+# Return 0 if its dependency ref equals its own SHA pin, or 1 if absent.
 lock_has_self_sha() {
   local needle="$1" k
   for k in ${SELF_SHA_KEYS[@]+"${SELF_SHA_KEYS[@]}"}; do

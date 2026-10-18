@@ -154,7 +154,10 @@ done
 # LOCAL reusable, every passed name must be declared in that reusable's
 # workflow_call.secrets mapping. These workflows use two-space indentation;
 # inspect only direct secret keys, not inputs or nested metadata.
-check_declared() { # caller reusable
+# check_declared CALLER REUSABLE: report each named caller secret missing from
+# the reusable's workflow_call.secrets via fail, incrementing the failure count.
+# Skip the comparison if either file is unreadable.
+check_declared() {
   local caller="$1" reusable="$2" name declared
   [ -r "$caller" ] && [ -r "$reusable" ] || return 0
   declared="$(awk '
