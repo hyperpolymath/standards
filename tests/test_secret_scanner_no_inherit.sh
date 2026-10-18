@@ -271,7 +271,7 @@ checkout_pin="$(grep -vE '^[[:space:]]*#' "$REUSABLE" | grep -oE 'actions/checko
 # Look the pin up inside the scanner reusable's OWN lock section, not the
 # whole file: checkout is keyed under nearly every workflow, so a global
 # search would pass even if the scanner's section lost its record.
-lock_section="$(awk "/^    '\\.github\\/workflows\\/secret-scanner-reusable\\.yml':/{f=1;next} /^    '\\.github\\/workflows\\//{f=0} f{print}" "$LOCKFILE")"
+lock_section="$(awk "/^    '\\.github\\/workflows\\/secret-scanner-reusable\\.yml':/{f=1;next} /^    '\\.github\\/workflows\\//{f=0} /^dependencies:/{f=0} f{print}" "$LOCKFILE")"
 [ -n "$lock_section" ] || fail "actions.lock has no section for secret-scanner-reusable.yml — regenerate with \`gh actions-lock\`"
 while IFS= read -r pin; do
   [ -n "$pin" ] || continue
