@@ -270,4 +270,42 @@ Y
   echo "  PASS $length-hex pin prefixing the target: left as it is, full record from full pins only"
 done
 
+
+# 6. GitHub's lockfile parser folds owner/repo case: 'ACME/tool@<sha>' and
+# 'acme/tool@<sha>' are one key, and two records for it with different
+# metadata are a parse error ("duplicate action key ... after
+# canonicalization"), which fails every run. A record the consumer already
+# holds under another owner/repo spelling is the needed record: it is kept,
+# never copied a second time. Measured on hyperpolymath/januskey, whose
+# 'Swatinem/rust-cache@6323deb…' met standards' 'swatinem/rust-cache@6323deb…'.
+# case_variant DIR REF — give DIR's lock a 'ACME/Tool' spelling of the record
+# NEW's reusable needs, with ref: REF.
+case_variant() {
+  cat >> "$1/actions.lock" <<Y
+    'ACME/Tool@3333333333333333333333333333333333333333':
+        ref: '$2'
+        commit: 'sha1-3333333333333333333333333333333333333333'
+        owner_id: 30
+        repo_id: 31
+Y
+}
+# acme_keys LOCK — count the dependency keys naming acme/tool@333…, any case.
+acme_keys() { grep -ciE "^    'acme/tool@3333333333333333333333333333333333333333':\$" "$1" || true; }
+D=$(consumer case-kept); case_variant "$D" 'v3.0.1'
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null || fail "case variant: relock refused"
+L="$D/actions.lock"
+[ "$(acme_keys "$L")" = 1 ] || fail "case variant: the record is keyed $(acme_keys "$L") times (the parser rejects a duplicate)"
+grep -q "^    'ACME/Tool@3333333333333333333333333333333333333333':\$" "$L" || fail "case variant: the consumer's spelling was not kept"
+grep -q "ref: 'v3.0.1'" "$L" || fail "case variant: the consumer's symbolic ref was overwritten"
+echo "  PASS record held under another owner/repo case is kept, not duplicated"
+
+D=$(consumer case-self-sha); case_variant "$D" '3333333333333333333333333333333333333333'
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null || fail "case variant self-SHA: relock refused"
+L="$D/actions.lock"
+[ "$(acme_keys "$L")" = 1 ] || fail "case variant self-SHA: the record is keyed $(acme_keys "$L") times"
+grep -q "ref: '3333333333333333333333333333333333333333'" "$L" && fail "case variant self-SHA: the self-SHA ref survived"
+awk "/^    'ACME\\/Tool@3333333333333333333333333333333333333333':\$/{f=1;next} f&&/^    [^ ]/{exit} f" "$L" | grep -qx "        ref: 'v3'" \
+  || fail "case variant self-SHA: not repaired to standards' symbolic ref"
+echo "  PASS self-SHA record held under another owner/repo case is repaired in place"
+
 echo "PASS: relock-standards-pin.sh"
