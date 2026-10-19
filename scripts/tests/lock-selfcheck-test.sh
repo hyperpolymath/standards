@@ -112,6 +112,37 @@ expect "a uses: inside a run: body is not a ref" "$sha" 0 "VERDICT: SELF-CONSIST
 sha=$(printf '{\n  jobs: {\n' | commit_ci)
 expect "an unparseable workflow is UNEXAMINED, not consistent" "$sha" 1 "VERDICT: UNEXAMINED"
 
+cat > "$WF/actions.lock" <<EOF
+version: 'v0.0.2'
+workflows:
+    '.github/workflows/ci.yml':
+        - 'actions/checkout@$LOCKED'
+dependencies:
+    'actions/checkout@$LOCKED':
+        ref: '$LOCKED'
+        commit: 'sha1-$LOCKED'
+        owner_id: 1
+        repo_id: 2
+EOF
+sha=$(commit_ci <<EOF
+jobs:
+  a:
+    steps:
+      - uses: actions/checkout@$LOCKED # v7.0.1
+EOF
+)
+expect "self-SHA ref in dependencies is POISON (standards#1271)" "$sha" 1 "self-SHA ref  actions/checkout@$LOCKED"
+
+sed -i "s/ref: '$LOCKED'/ref: 'v7.0.1'/" "$WF/actions.lock"
+sha=$(commit_ci <<EOF
+jobs:
+  a:
+    steps:
+      - uses: actions/checkout@$LOCKED # v7.0.1
+EOF
+)
+expect "symbolic tag ref in dependencies is SELF-CONSISTENT" "$sha" 0 "VERDICT: SELF-CONSISTENT"
+
 echo
 echo "lock-selfcheck: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

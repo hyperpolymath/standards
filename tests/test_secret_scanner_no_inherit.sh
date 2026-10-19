@@ -154,7 +154,10 @@ done
 # LOCAL reusable, every passed name must be declared in that reusable's
 # workflow_call.secrets mapping. These workflows use two-space indentation;
 # inspect only direct secret keys, not inputs or nested metadata.
-check_declared() { # caller reusable
+# check_declared CALLER REUSABLE: report each named caller secret missing from
+# the reusable's workflow_call.secrets via fail, incrementing the failure count.
+# Skip the comparison if either file is unreadable.
+check_declared() {
   local caller="$1" reusable="$2" name declared
   [ -r "$caller" ] && [ -r "$reusable" ] || return 0
   declared="$(awk '
@@ -271,7 +274,7 @@ checkout_pin="$(grep -vE '^[[:space:]]*#' "$REUSABLE" | grep -oE 'actions/checko
 # Look the pin up inside the scanner reusable's OWN lock section, not the
 # whole file: checkout is keyed under nearly every workflow, so a global
 # search would pass even if the scanner's section lost its record.
-lock_section="$(awk "/^    '\\.github\\/workflows\\/secret-scanner-reusable\\.yml':/{f=1;next} /^    '\\.github\\/workflows\\//{f=0} f{print}" "$LOCKFILE")"
+lock_section="$(awk "/^    '\\.github\\/workflows\\/secret-scanner-reusable\\.yml':/{f=1;next} /^    '\\.github\\/workflows\\//{f=0} /^dependencies:/{f=0} f{print}" "$LOCKFILE")"
 [ -n "$lock_section" ] || fail "actions.lock has no section for secret-scanner-reusable.yml — regenerate with \`gh actions-lock\`"
 while IFS= read -r pin; do
   [ -n "$pin" ] || continue
@@ -279,6 +282,31 @@ while IFS= read -r pin; do
 ' "$lock_section" | grep -qF "'$pin'" \
     || fail "scanner reusable uses $pin but its actions.lock section does not key it — callers pinned to this commit will fail lock validation at startup"
 done <<< "$checkout_pin"
+
+# --- 8. actions.lock has no leaf self-SHA refs ---------------------------
+self_sha_leaves="$(awk '
+  /^dependencies:/ { in_dep = 1; next }
+  /^[a-z_]+:/      { in_dep = 0; cur = ""; next }
+  !in_dep { next }
+  /^    \x27[^\x27]+\x27:$/ {
+    cur = $0; sub(/^    \x27/, "", cur); sub(/\x27:$/, "", cur)
+    next
+  }
+  cur != "" && /^        ref: \x27[^\x27]+\x27$/ {
+    r = $0; sub(/^        ref: \x27/, "", r); sub(/\x27$/, "", r)
+    n = index(cur, "@")
+    nwo = (n > 0) ? substr(cur, 1, n - 1) : cur
+    pin = (n > 0) ? substr(cur, n + 1) : ""
+    if (tolower(nwo) != "hyperpolymath/standards" && length(r) == 40 && r ~ /^[0-9a-fA-F]+$/ && tolower(r) == tolower(pin)) {
+      print cur
+    }
+    cur = ""
+  }
+' "$LOCKFILE")"
+if [ -n "$self_sha_leaves" ]; then
+  fail "actions.lock contains leaf action entries with ref equal to their own SHA pin (standards#1271):"
+  printf '%s\n' "$self_sha_leaves" | sed 's/^/    /'
+fi
 
 # --- Verdict ---------------------------------------------------------------
 if [ "$fails" -gt 0 ]; then

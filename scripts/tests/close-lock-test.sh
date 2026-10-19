@@ -39,6 +39,14 @@ case "\$2" in
     if [ -f "\$f" ]; then cat "\$f"; else echo '{"message":"Not Found","status":"404"}'; exit 1; fi ;;
   repos/o/missing*) echo '{"message":"Not Found","status":"404"}'; exit 1 ;;
   repos/o/garbled*) echo '{"messa'; exit 0 ;;
+  repos/o/untagged/tags*) exit 0 ;;
+  repos/o/tagerror/tags*) echo 'v1.2.3'; exit 1 ;;
+  repos/o/badtag/tags*) echo '{"message":"bad response"}'; exit 0 ;;
+  repos/o/laterpage/tags*)
+    case " \$* " in *' --paginate '*) echo 'v2.3.4' ;; *) exit 0 ;; esac ;;
+  repos/o/a/tags*|repos/o/b/tags*|repos/o/c/tags*) echo 'v1.0.0' ;;
+  repos/o/buildmeta/tags*) echo 'v1.2.3+build.4' ;;
+  repos/o/leaf/tags*) printf 'v4\nv4.38.0\n' ;;
   repos/o/*/commits/v1) echo $C ;;
   repos/o/*/commits/*) echo '{"message":"No commit found"}'; exit 1 ;;
   repos/o/*) echo '7 9' ;;
@@ -70,6 +78,33 @@ d=$(mklock t2 "o/b@v1" </dev/null)
 run "$d" >/dev/null
 grep -qxF "        ref: 'v1'" "$d/actions.lock" && grep -qxF "        commit: 'sha1-$C'" "$d/actions.lock" \
   && ok "tag ref recorded with its resolved commit" || bad "tag ref recorded with its resolved commit"
+
+echo "=== resolves a leaf SHA ref to its upstream semver tag (standards#1271) ==="
+d=$(mklock t2b "o/leaf@$A" </dev/null)
+run "$d" >/dev/null
+grep -qxF "    'o/leaf@$A':" "$d/actions.lock" && grep -qxF "        ref: 'v4.38.0'" "$d/actions.lock" \
+  && grep -qxF "        commit: 'sha1-$A'" "$d/actions.lock" \
+  && ok "leaf SHA ref records upstream semver tag in ref: ('v4.38.0')" \
+  || bad "leaf SHA ref records upstream semver tag in ref:"
+
+echo "=== accepts a version tag with build metadata ==="
+d=$(mklock buildmeta "o/buildmeta@$A" </dev/null)
+out=$(run "$d"); st=$?
+[ "$st" = 0 ] && grep -qxF "        ref: 'v1.2.3+build.4'" "$d/actions.lock" \
+  && ok "build metadata tag is preserved" || bad "build metadata: st=$st $out"
+
+echo "=== leaf tag resolution fails closed ==="
+for fixture in untagged tagerror badtag; do
+  d=$(mklock "tag-$fixture" "o/$fixture@$A" </dev/null)
+  cp "$d/actions.lock" "$WORK/tag-before"
+  out=$(run "$d"); st=$?
+  [ "$st" = 3 ] && cmp -s "$WORK/tag-before" "$d/actions.lock" \
+    && ok "$fixture: exit 3 and no poisoned record" || bad "$fixture: st=$st $out"
+done
+d=$(mklock laterpage "o/laterpage@$A" </dev/null)
+out=$(run "$d"); st=$?
+[ "$st" = 0 ] && grep -qxF "        ref: 'v2.3.4'" "$d/actions.lock" \
+  && ok "tag beyond first page is resolved" || bad "pagination: st=$st $out"
 
 echo "=== closes a nested edge of an existing record ==="
 d=$(mklock t3 "o/a@$A" <<EOF

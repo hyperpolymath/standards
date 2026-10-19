@@ -131,6 +131,22 @@ if command -v gawk >/dev/null 2>&1; then
 fi
 echo "  PASS known answer (re-key, record rebuilt, needed record copied, OLD-only records pruned transitively, unrelated orphan kept)"
 
+# Copied self-SHA leaf refs must not survive a repin to repaired Standards.
+D=$(consumer stale-leaf)
+sed -i "s/ref: 'v1'/ref: '1111111111111111111111111111111111111111'/" "$D/actions.lock"
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null
+grep -q "ref: '1111111111111111111111111111111111111111'" "$D/actions.lock" && fail "copied self-SHA leaf survived repin"
+grep -q "ref: 'v1'" "$D/actions.lock" || fail "corrected symbolic ref missing"
+echo "  PASS copied self-SHA leaf refreshed from defining lock"
+
+D=$(consumer stale-identity)
+sed -i "s/ref: 'v1'/ref: '1111111111111111111111111111111111111111'/; s/repo_id: 11$/repo_id: 999/" "$D/actions.lock"
+cp "$D/actions.lock" "$T/identity-before"
+if bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >"$T/identity-log" 2>&1; then fail "identity mismatch accepted"; fi
+cmp -s "$D/actions.lock" "$T/identity-before" || fail "refusal changed consumer lock"
+grep -q 'identity mismatch' "$T/identity-log" || fail "wrong refusal reason"
+echo "  PASS identity mismatch refused without changing lock"
+
 # 2. Idempotent.
 D=$(consumer idem); bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null
 cp "$D/actions.lock" "$T/once"; bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null
