@@ -207,6 +207,16 @@ check "a corpus that gained a file is not compared" yes "$(grep -q 'K9 live corp
 check "baseline of garbage is null" null "$(printf 'no marker here\n' > "$WORK/garbage"; bash "$GRID" baseline "$WORK/garbage")"
 check "baseline of a corrupt marker is null" null "$(printf '<!-- k9-baseline:bm90anNvbg== -->\n' > "$WORK/corrupt"; bash "$GRID" baseline "$WORK/corrupt")"
 check "baseline of a real report round-trips" 7 "$(bash "$GRID" baseline "$WORK/o11a/report.md" | jq -r .pr)"
+# A marker is whatever the last comment held: two objects, or an object with
+# trailing junk, must still yield exactly one value (null), never two.
+two=$(printf '{"categories":[]}{"categories":[]}' | base64 -w0)
+printf '<!-- k9-baseline:%s -->\n' "$two" > "$WORK/two-objects"
+check "baseline of two objects is one null" "null" "$(bash "$GRID" baseline "$WORK/two-objects" | tr '\n' '|' | sed 's/|$//')"
+junk="$(printf '{"categories":[]}' | base64 -w0)="
+printf '<!-- k9-baseline:%s -->\n' "$junk" > "$WORK/trailing-junk"
+check "baseline with trailing junk is one value" 1 "$(bash "$GRID" baseline "$WORK/trailing-junk" | wc -l)"
+render "$WORK/o11l" --results "$WORK/r-clean" --expected "$WORK/expected" "${good_evidence[@]}" --sha 2222222222222222222222222222222222222222 --pr 7 --previous "$WORK/two-objects"
+check "a forged two-object baseline still renders" yes "$(grep -q 'no comparable baseline' "$WORK/o11l/report.md" && echo yes || echo no)"
 
 # 12. Usage errors exit 2.
 check "missing --results exits 2" 2 "$(bash "$GRID" render --out "$WORK/o12" >/dev/null 2>&1; echo $?)"

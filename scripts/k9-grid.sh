@@ -96,12 +96,19 @@ baseline_of() {
   b64=$( { grep -o '<!-- k9-baseline:[A-Za-z0-9+/=]* -->' "$file" || true; } | tail -n1 \
         | sed 's/^<!-- k9-baseline://; s/ -->$//')
   if [ -z "$b64" ] || [ "${#b64}" -gt 32000 ]; then echo null; return; fi
-  printf '%s' "$b64" | base64 -d 2>/dev/null | jq -c '
-    if type == "object" and (.categories | type) == "array"
+  # Exactly one JSON value comes out, whatever the marker holds: the decoded
+  # text is slurped and accepted only as a single object, and any decode or
+  # validation failure is one null (not a value followed by a null). The
+  # caller feeds this to --argjson, which rejects two values.
+  local out
+  out=$(printf '%s' "$b64" | base64 -d 2>/dev/null | jq -c -s '
+    (if length == 1 then .[0] else null end)
+    | if type == "object" and (.categories | type) == "array"
        and all(.categories[]; . as $c | ($c.id | type) == "string" and ($c.counts | type) == "object"
          and all(["passed", "failed", "indeterminate", "not_applicable", "advisory", "warnings"][]; . as $k
            | ($c.counts | has($k)) and ($c.counts[$k] | type) == "number" and $c.counts[$k] >= 0))
-    then . else null end' 2>/dev/null || echo null
+    then . else null end' 2>/dev/null) || out=null
+  printf '%s\n' "${out:-null}"
 }
 
 cmd="${1:-}"; shift || true

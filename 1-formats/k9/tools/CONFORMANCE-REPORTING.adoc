@@ -84,10 +84,16 @@ nickel typecheck 1-formats/k9/spec/contract/k9_contract.ncl > typecheck.log; ech
 # and the archive is out of scope.
 git ls-files -- "*.k9.ncl" "*.k9" "*.k9.lock" \
   | { grep -v -E "^(9-archive/|1-formats/k9/tools/fixtures/)" || [ $? -eq 1 ]; } | sort > expected
-while read -r f; do bash 1-formats/k9/tools/k9-validate.sh --strict --layer L2 --json --quiet "$f"; done < expected > results.jsonl
+# The lane also records the validator's worst exit status over the corpus.
+corpus_code=0
+while read -r f; do
+  rc=0
+  bash 1-formats/k9/tools/k9-validate.sh --strict --layer L2 --json --quiet "$f" || rc=$?
+  [ "$rc" -le "$corpus_code" ] || corpus_code=$rc
+done < expected > results.jsonl
 bash scripts/k9-grid.sh render --out grid --results results.jsonl --expected expected \
   --ledger .machine_readable/k9-contract-debt.txt --selftest selftest.log --selftest-code "$(cat selftest.code)" \
-  --typecheck typecheck.log --typecheck-code "$(cat typecheck.code)"
+  --typecheck typecheck.log --typecheck-code "$(cat typecheck.code)" --corpus-code "$corpus_code"
 # On a pull request the lane also passes --changed (the merge-base diff),
 # --ledger-growth (undeclared ledger additions) and --previous (the last
 # posted grid, for the delta column); see the workflow's enumerate step.
