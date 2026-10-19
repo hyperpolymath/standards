@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 = Work orders, 2026-10-19: the first execution wave
 Jonathan D.A. Jewell (hyperpolymath)
-v1.2.0, 2026-10-19
+v1.4.3, 2026-10-19
 :toc: left
 :toclevels: 2
 :sectnums:
@@ -11,8 +11,8 @@ v1.2.0, 2026-10-19
 [.lead]
 Eight work orders for a sonnet-tier executor, planned at the top tier so
 the executor never has to rediscover a fact. Every fact below was measured
-against `main` at `75bd5994` on 2026-10-19, and re-checked against the
-first two reviews of this file. Each order names its goal, its authority, the
+against `main` at `75bd5994` on 2026-10-19, and re-checked against every
+review posted on this file's pull request. Each order names its goal, its authority, the
 files, the steps, the acceptance commands, and the exact conditions under
 which the executor stops and asks instead of deciding.
 
@@ -48,17 +48,35 @@ which is what CI uses (see _Session mechanics_ for why the name matters).
   `bash scripts/check-canon-lockstep.sh`,
   `bash scripts/run-mustfile.sh .machine_readable/contractiles/must/Mustfile.a2ml`,
   `bash scripts/run-debtfile.sh .machine_readable/Debtfile.a2ml`,
-  `bash scripts/link-rot-guard.sh .`,
-  `bash scripts/link-rot-guard.sh <each directory you touched>`,
+  `bash scripts/link-rot-guard.sh .` from a checkout named `standards`
+  (its exit status is 1 at the baseline, which is accepted; before your
+  first edit save its output, `before=$(mktemp)` then
+  `bash scripts/link-rot-guard.sh . > "$before" || true`, and the gate is
+  `! { diff "$before" <(bash scripts/link-rot-guard.sh . || true) || true; } |
+  grep -q '^>'`, which exits 0 exactly when no `>` line exists, that is,
+  no new BROKEN line anywhere (a bare `grep '^>'` would exit 1 in the
+  desired state, and without the `|| true` on `diff`, whose own status is
+  1 whenever the two outputs differ, `set -o pipefail` would report that
+  1 in place of grep's verdict, so the inverted gate would pass a new
+  BROKEN line); lines that disappear are repairs, listed in the PR body;
+  a touched file may keep the old broken links it already had, as
+  `3-practice/ai-instruction/README.adoc` does with six others beside the
+  manifest one), `bash scripts/link-rot-guard.sh <dir>` for each directory you
+  touched other than the root and `9-archive/` (a root-level touch is
+  covered by the repository-wide run; the archive is pruned by that run
+  and is never scanned on its own, see WO-4),
   `bash scripts/check-canonical-names.sh origin/main`,
   `bash scripts/check-launcher-standard-currency.sh --root .`,
-  `git diff --check`, plus the order's own acceptance block.
-* *Two known reds on `main` that are not yours to sweep.* The Debtfile
+  `git diff --check`, plus the locally runnable lines of the order's own
+  acceptance block. Lines marked "after push", "On the PR" or "after
+  merge" are not part of the pre-push gate: they are checked once that
+  state exists and pasted into the PR body as they land.
+* *Three known reds on `main` that are not yours to sweep.* The Debtfile
   probe `deno-residue` is BREACHED (3 against a ceiling of 1) since #1249;
   WO-8 retires it and runs first, and until WO-8 merges every other order
   records that breach in its PR body instead of being blocked by it. The
   repo-wide link-rot guard reports 443 broken internal links (exit 1) on `main`
-  (439 before #1272 added four; 285 under `docs/`) when run from a
+  (440 before #1272 added three; 285 under `docs/`) when run from a
   checkout whose directory is named `standards`, as CI's is: the guard
   prunes `9-archive/` only under that basename (`link-rot-guard.sh` line
   31), and from a directory of any other name it reports 684, the extra
@@ -67,11 +85,26 @@ which is what CI uses (see _Session mechanics_ for why the name matters).
   never across the two. Record the repository-wide output, finding count
   and exit status in the PR body against that baseline, alongside the
   touched-directory results; investigate any new findings. The 443 are
-  a packet of their own; leave those existing broken links alone.
+  a packet of their own; leave those existing broken links alone. The
+  Hypatia gate (`scan / Hypatia Neurosymbolic Analysis` and `governance /
+  Validate Hypatia Baseline`) is red on `main` since #1300 regenerated
+  `actions.lock` in `gh actions-lock` format v0.0.3, which the scanner
+  rejects (`invalid_actions_lock`, two findings, severity high). The fix
+  takes two steps: hyperpolymath/hypatia#927 or #928 merges, and then the
+  `hypatia-ref` default in both `governance-reusable.yml` and
+  `hypatia-scan-reusable.yml` advances to a commit at or after that fix.
+  Both defaults are vetted SHAs (`51ab6496` in the governance reusable at
+  this baseline); neither local caller overrides them, and only an
+  explicit `HEAD` floats, so the scanner stays on the rejecting commit
+  until the pins move. The pin bump is a two-line pull request in this
+  repository that changes no `uses:` line and so leaves `actions.lock`
+  alone. Until both steps have happened, record the red in the PR body;
+  never acknowledge it in the baseline.
 * *PR body:* the order id, the authority line per change, the acceptance
   block with every result pasted verbatim, a "not done" list. Open as a
-  draft; mark ready when the acceptance block is green; watch CI; fix
-  reds; stop at merge.
+  draft; mark ready when every locally runnable acceptance line is green
+  and the post-push lines are recorded; watch CI; fix reds; stop at
+  merge.
 * *Stop and ask* whenever an order's _Escalate if_ condition is met. A
   stop is a one-paragraph message naming the order, the condition, both
   arms with the elegant one first, and what you did meanwhile.
@@ -98,7 +131,9 @@ _Session model_ section also claims the repo-wide link-rot guard reports
 two findings (it reports 443 from a checkout named `standards`; see
 _Session mechanics_). The plan's `README.adoc` has rows whose
 premise was the Deno ban (the P2.3 acceptance line, the contradictions
-register). In `.machine_readable/Debtfile.a2ml`, `deno-residue` (line 92)
+register), and one statement outside any row: line 69, in the definition
+of the _Golden_ reading, lists "Deno and Python banned" among the current
+facts. In `.machine_readable/Debtfile.a2ml`, `deno-residue` (line 92)
 counts `denoland/setup-deno`, `deno run`, `deno test`, `deno fmt` and
 `deno lint` in workflows and scripts; it measures 3 against a ceiling of
 1 because #1249 added exactly those uses, which the ruling permits.
@@ -115,7 +150,9 @@ as permitted tier-2 configuration and only emits a notice.
   the known baseline, alongside checks on touched directories.
 . In the plan, do not rewrite history: add a dated one-line note under
   each affected row ("2026-10-19: Deno is tier 2 since #1249; this row's
-  Deno clause is withdrawn").
+  Deno clause is withdrawn"). Line 69 is not a row but a live definition,
+  so it is rewritten in place: "Python banned, Deno permitted at tier 2
+  since #1249".
 . Retire both Debtfile entries, `deno-residue` and `deno-artefacts`: the
   condition they measured is no longer debt. Do not re-scope them to
   `deno.json`, which #1249 permits. Do not delete
@@ -130,6 +167,7 @@ as permitted tier-2 configuration and only emits a notice.
 *Acceptance.*
 ----
 grep -n -i 'deno' docs/reorg/2026-10-14-tidy/HANDOVER.adoc    -> no line says retired or banned
+grep -n -i 'deno' docs/reorg/2026-10-14-tidy/README.adoc      -> no live claim that Deno is banned or retired (line 69 rewritten); issue-triage rows such as #706, #919 and #923 keep their recorded titles, and each affected row carries its dated withdrawal note
 bash scripts/run-debtfile.sh .machine_readable/Debtfile.a2ml  -> 0 breached, 0 broken-probe
 bash scripts/check-debtfile-structure.sh .machine_readable/Debtfile.a2ml  -> structure OK
 bash scripts/link-rot-guard.sh docs/reorg/2026-10-14-tidy     -> all links resolve
@@ -208,7 +246,19 @@ on its push step (line 126), so a GitLab failure shows green with a
 warning. Line 441 is `rad sync --announce || echo "Radicle sync
 attempted"`, which turns a failed sync into a green step. The caller in
 this repository is `.github/workflows/mirror.yml`, pinned to the
-reusable at `427eb35c`.
+reusable at `427eb35c`. Each forge job also ends in a notice-only
+`Skipped (<FORGE>_SSH_KEY not configured)` step (seven in all, GitLab's
+at lines 135 to 138, Radicle's at 442) that runs when the variable is
+`true` but the secret is empty, so an enabled forge without its key is
+green with a `::notice::`. The reusable's own comment on the Radicle job
+calls the secret the second switch (the variable asks whether the mirror
+is wanted, the secret whether it is configured), and
+`docs/superpowers/specs/2026-09-02-cicd-regularisation-design.adoc` line
+107 counts 142 estate callers skipping this way, with the question
+marked `OWNER?`. On this repository the six git forges' keys are
+present (their host-verify or push steps, gated on the key, ran);
+Radicle's job succeeded, which either path produces, so read which step
+ran from the run.
 
 *Steps.*
 . Read the failing steps' logs for the five red jobs and record the
@@ -220,30 +270,32 @@ reusable at `427eb35c`.
   the force-push; that is a real failure and must show red, with the
   owner action the comment already names. GitLab passes today, so this
   does not redden `main` by itself.
-. Add a destination probe to each forge job, before its push step,
-  guarded by the same key-presence check: run `git ls-remote "$REMOTE_URL"`
-  with no ref argument and capture its stderr. Exit 0 means reachable,
-  including an empty repository awaiting its first push (do not add
-  `--exit-code`, which fails on an empty repository), so the push
-  proceeds. The probe skips the push, with a `::notice::` naming the
-  forge and D261, in exactly one case: a non-zero exit accompanied by
-  forge-specific evidence that the repository is absent. Record that
-  evidence and its source in the PR body; for example, an authenticated
-  forge API check with access sufficient to distinguish an absent
-  repository from a private one. Generic stderr such as `not found`,
-  `does not exist` or GitLab's `could not be found` is insufficient:
-  GitLab can use the same wording for a missing repository and denied
-  access. An API 404 alone is likewise insufficient if the forge masks
-  denied access that way. If the probe cannot distinguish absence from
-  denied access, print the captured stderr and fail the job red. Every
-  other non-zero exit, including a refused or revoked key, a host-key
-  problem, a transport failure or a DNS miss, also prints the captured
-  stderr and fails the job red. `git ls-remote` returns the same status
-  (128) for all of these; neither that status nor ambiguous wording
-  proves absence, and the default without conclusive evidence is red. A
-  reachable destination that refuses the push stays red.
+. Add a destination probe to each forge job that pushes with git, before
+  its push step and guarded by the same key-presence check: run
+  `git ls-remote "$REMOTE_URL"` with no ref argument (no `--exit-code`:
+  an empty repository awaiting its first push has no refs and must count
+  as reachable) and print its captured stderr into the log. The probe is
+  a diagnostic, never a gate: it names the failure at the top of the job
+  and the job proceeds to the push whatever the probe returned. It never
+  skips the push. A deploy key cannot tell an absent repository from one
+  it is not allowed to see (GitLab says `could not be found` in both
+  cases, and `git ls-remote` exits 128 for both, as it does for a refused
+  key, a host-key problem or a transport failure), so there is no honest
+  skip to write. A missing destination stays red until D261 provisions
+  it or the owner flips that forge's `*_MIRROR_ENABLED` variable to
+  `false`, which is the one legitimate skip and already exists. An
+  earlier revision of this step skipped on a matched `not found` message
+  and a later one asked for forge-specific evidence of absence; both are
+  withdrawn, the first because the message is ambiguous, the second
+  because it needs a second credential per forge for a question the
+  variable already answers.
 . Add an empty-host guard: when the resolved mirror organisation or host
   is empty, skip with a `::notice::`, never push to an empty path.
+. Keep the seven `Skipped (<FORGE>_SSH_KEY not configured)` steps as
+  they are. An enabled forge without its key is the second legitimate
+  skip, visible as a `::notice::` on the run. Whether it should fail red
+  instead is an estate decision (the 142 callers above) and a new owner
+  item, not this order's.
 . Keep the SSH fingerprint verification exactly as strict as it is.
 . Do not edit `actions.lock` unless a `uses:` line changed; if one did,
   regenerate with the repository's own relock tooling, never by hand.
@@ -257,12 +309,16 @@ reusable at `427eb35c`.
 *Acceptance.*
 ----
 test "$(grep -c '|| *echo' .github/workflows/mirror-reusable.yml)" -eq 0            -> no matches (exit 0)
-test "$(grep -c 'continue-on-error' .github/workflows/mirror-reusable.yml)" -eq 0   -> no matches (exit 0)
+test "$(grep -c '^[[:space:]]*continue-on-error:' .github/workflows/mirror-reusable.yml)" -eq 0   -> no key left (exit 0; the comment at line 121 naming the owner action stays, and is not a key)
+grep -c 'not configured)' .github/workflows/mirror-reusable.yml         -> 7 (the key skips stay)
 bash scripts/check-workflow-duplicate-keys.sh                       -> clean
+grep -c 'git ls-remote' .github/workflows/mirror-reusable.yml       -> one per forge job that pushes with git
 bash scripts/lock-selfcheck.sh "$(git rev-parse HEAD)"               -> SELF-CONSISTENT (after push)
 Mirror to Git Forges on main after merge: GitLab and Radicle green; every
-other forge skipped with a notice (once the variables are flipped) or red
-with a named reason, never green on a failure.
+other forge skipped by its variable (once the variables are flipped), or
+skipped by its absent key with the notice step (no git forge on this
+repository is in that state today), or red with the probe's stderr
+naming the reason; never green on a failure.
 ----
 
 *Escalate if* any forge fails on a host-key fingerprint mismatch (a
@@ -305,8 +361,7 @@ Markdown; applied-unless-struck (D113).
 ----
 bash scripts/check-standards-map.sh                 -> GATE D PASSED
 grep -c -E '^(cff-version|message|title|authors):' CITATION.cff  -> 4 (the keys CFF 1.2.0 requires)
-link_rot="$(bash scripts/link-rot-guard.sh .)" || test "$?" -eq 1
-printf '%s\n' "$link_rot" | awk '/^BROKEN/ {n++} END {print n+0}'  -> the same count as on origin/main in this checkout (443 when it is named standards)
+! { diff "$before" <(bash scripts/link-rot-guard.sh . || true) || true; } | grep -q '^>'  -> exit 0 (no new BROKEN line; $before saved before the first edit, see Session mechanics)
 bash scripts/run-debtfile.sh .machine_readable/Debtfile.a2ml  -> docs-md-not-adoc unchanged
 GitHub community profile after merge: all items present, and the repository
 page shows "Cite this repository" (GitHub renders it only for a valid file).
@@ -336,20 +391,27 @@ offers no path-exclusion input. There is no `9-archive/README.adoc`; the
 district holds `REORGANIZATION-PLAN.adoc` and
 `rhodium-standard-repositories/`, both mapped. In `ci-pipeline.yml` the
 `detect` job counts files with a `count` helper built on git pathspecs
-(around line 129); the per-language jobs reuse the same pathspecs. Ten
+(around line 129); the per-language jobs reuse the same pathspecs. Eleven
 local gate scripts walk this tree without an archive exclusion:
 `check-canon-lockstep.sh`, `check-descriptile-policy.sh`,
 `check-inline-python.sh`, `check-launcher-standard-currency.sh`,
-`check-licence-consistency.sh`, `check-trusted-base.sh`,
-`check-ts-allowlist.sh`, `fix-workflow-duplicates.sh`,
-`kyaml-migrate.sh`, `verify-claims.sh`. Two of the ten write:
-`kyaml-migrate.sh` rewrites every YAML file it reformats unless given
-`--check`, and `fix-workflow-duplicates.sh` generates wrapper workflows
-under every nested `.github/workflows/` it finds, with no dry-run flag.
-An earlier revision of this order listed `scripts/registry-readiness.sh`
-as an eleventh; it is not a validator of this tree but a licence-rewriting
-remediation meant to be run inside a Julia package (its header says so),
-and the never-list forbids running it here. The `language-policy` job of
+`check-licence-consistency.sh`, `check-package-policy.sh`,
+`check-trusted-base.sh`, `check-ts-allowlist.sh`,
+`fix-workflow-duplicates.sh`, `kyaml-migrate.sh`, `verify-claims.sh`.
+Two of the eleven write: `kyaml-migrate.sh` rewrites every YAML file it
+reformats unless given `--check`, and `fix-workflow-duplicates.sh`
+generates wrapper workflows under every nested `.github/workflows/` it
+finds, with no dry-run flag. `check-package-policy.sh` is the one the
+governance job "Enforce Guix-only packaging policy" copies into every
+caller and runs against the caller's root; its `find` walks prune `.git`,
+`node_modules`, `deps`, `.lake` and `vendor` (the `PRUNE` array near
+line 103) but not the archive, and the archive holds ten `manifest.scm`,
+`guix.scm` and `Containerfile` files that could satisfy the policy on
+the root's behalf if the root artefact ever went missing. An earlier
+revision of this order listed `scripts/registry-readiness.sh` instead;
+it is not a validator of this tree but a licence-rewriting remediation
+meant to be run inside a Julia package (its header says so), and the
+never-list forbids running it here. The `language-policy` job of
 `governance-reusable.yml` also gathers candidates repo-wide: `git
 ls-files` for the banned languages at lines 609 to 638, `find` for the
 package anti-patterns at lines 662 to 665. It is a reusable workflow, so
@@ -370,31 +432,60 @@ scanners (`secret-scanner-reusable.yml`, the security policy step in
 . Create `9-archive/README.adoc`, the one write under the archive this
   wave permits (granted in the never-list above), with one paragraph:
   frozen, not edited, excluded from policy validators, still
-  secret-scanned; pointers to the plan and the map entries. The link-rot
-  guard prunes the archive in CI, so check that file's links by eye.
-. Discover without mutating. Run the eight check-only scripts against
+  secret-scanned; pointers to the plan and the map entries. In
+  `standards-map.toml`, raise `files` on the `9-archive` district entry
+  from 1136 to 1137: Gate D does not count files, but the map must stay
+  true. Never run the link-rot guard on `9-archive/` itself: the prune
+  keys on the root's basename, so a scoped run from that directory scans
+  the whole archive and reports its 272 old findings. The gate for this
+  write is the repository-wide run from a checkout named `standards`,
+  which prunes the archive, plus the new file's links checked by eye.
+. Discover without mutating. Run the nine check-only scripts against
   `main`: `check-canon-lockstep.sh`, `check-descriptile-policy.sh`,
   `check-inline-python.sh`, `check-launcher-standard-currency.sh --root .`,
-  `check-licence-consistency.sh`, `check-trusted-base.sh`,
-  `check-ts-allowlist.sh`, `verify-claims.sh`. Run
-  `bash scripts/kyaml-migrate.sh --check` and nothing else from that
+  `check-licence-consistency.sh`, `check-package-policy.sh .`,
+  `check-trusted-base.sh`, `check-ts-allowlist.sh`, `verify-claims.sh`.
+  Run `bash scripts/kyaml-migrate.sh --check` and nothing else from that
   script. Do not run `fix-workflow-duplicates.sh`; read its `find` (the
   function near line 60 that lists nested `.github/workflows/`
   directories) and judge from the text whether it reaches the archive.
   Then `git status --porcelain` must be empty before you edit anything.
   Where a script reports a finding whose path is under `9-archive/`, or
-  the generator's walk reaches it, add the exclusion in that script's own
-  idiom (a `:!9-archive/**` pathspec, or a prune on the `find`) and
-  record it. Where one reports nothing under the archive, leave it alone
-  and record that too. Put the ten-row table in the PR body. Never touch
-  the secret scanners.
-. Give `governance-reusable.yml` an opt-in input,
-  `policy_exclude_pathspec` (type string, default empty), and append it
-  to each `git ls-files` call of the banned-language block (lines 609 to
-  638). The empty default keeps every other caller exactly as strict as
-  today. In `governance.yml`, which calls the reusable by local path so
-  both halves land in one PR, pass
-  `policy_exclude_pathspec: ':!9-archive/**'`. Leave the three `find`
+  a walk of its could be satisfied by an archive file (the generator's
+  directory listing; `check-package-policy.sh`'s `find_first`, which
+  would accept an archive manifest in place of a missing root one), add
+  the exclusion in that script's own idiom (a `:!9-archive/**` pathspec
+  on a `git ls-files`, a prune on a `find` that only this repository
+  runs) and record it. For `check-package-policy.sh` the idiom is the
+  opt-in hook in the next step, never a bare `-o -name 9-archive` in its
+  shared `PRUNE` array: the governance job copies that script into every
+  caller, and a caller with a live directory of that name would lose its
+  packaging checks beneath it (a `flake.nix` there would stop being a
+  violation). Where one reports nothing under the archive and no walk can
+  be satisfied there, leave it alone and record that too. Put the
+  eleven-row table in the PR body. Never touch the secret scanners.
+. Give `governance-reusable.yml` one opt-in input, `policy_exclude_dir`
+  (type string, default empty: the name of one directory at the caller's
+  root), and consume it in two places. In the banned-language block
+  (lines 609 to 638) derive a pathspec and add it to each `git ls-files`
+  call only when the input is non-empty: git rejects an empty string as a
+  pathspec (`fatal: empty string is not a valid pathspec`), so appending
+  a quoted default verbatim would fail every caller that does not pass
+  the input. Use a bash array (`excl=(); [ -n "$POLICY_EXCLUDE_DIR" ] &&
+  excl=(":!$POLICY_EXCLUDE_DIR/**")`, then `"${excl[@]}"` at the end of
+  each call), with the input exported to `POLICY_EXCLUDE_DIR` through
+  `env:`. In the "Enforce Guix-only packaging policy" step, export the
+  same input as `PKG_PRUNE_DIRS` to `check-package-policy.sh`, and teach
+  the script to add `-o -name "$d"` to `PRUNE` for each name in that
+  variable and nothing when it is unset, so the copy every other caller
+  runs behaves exactly as today. Prove both default arms before pushing:
+  run the block's `git ls-files` lines locally with `POLICY_EXCLUDE_DIR`
+  empty and set, and run `bash scripts/check-package-policy.sh .` with
+  `PKG_PRUNE_DIRS` unset and set to `9-archive`; paste all four results.
+  The empty runs must equal plain `git ls-files` with the same patterns
+  and `main`'s script respectively. In `governance.yml`, which calls the
+  reusable by local path so both halves land in one PR, pass
+  `policy_exclude_dir: 9-archive`. Leave the three `find`
   calls of the package anti-pattern block (lines 662 to 665) as they are:
   they match only lockfile names, the frozen archive holds none, and a
   second idiom for the same input is not worth its lines; record them in
@@ -415,13 +506,19 @@ jq '[.[] | select((.file // .path // "") | startswith("9-archive/"))] | length' 
 test ! -f .hypatia-ignore
 git status --porcelain (right after the discovery step, before any edit)  -> empty
 bash scripts/check-workflow-duplicate-keys.sh                       -> clean
-grep -c 'policy_exclude_pathspec' .github/workflows/governance-reusable.yml  -> at least 2 (the input and its use)
-grep -c "policy_exclude_pathspec: ':!9-archive/\*\*'" .github/workflows/governance.yml  -> 1
-On the PR: ci-pipeline, hypatia-scan, Validate Hypatia Baseline, Exemption ratchet and
-governance / Language / package anti-pattern policy green; the ten-row validator table in the body.
+grep -c 'policy_exclude_dir' .github/workflows/governance-reusable.yml  -> at least 3 (the input and its two uses)
+grep -c 'policy_exclude_dir: 9-archive' .github/workflows/governance.yml  -> 1
+grep -c 'PKG_PRUNE_DIRS' scripts/check-package-policy.sh             -> at least 2 (read, then applied to PRUNE)
+test "$(grep -c '9-archive' scripts/check-package-policy.sh)" -eq 0  -> nothing hard-coded in the shared script (exit 0)
+grep -c 'files *= *1137' standards-map.toml                         -> 1
+bash scripts/check-standards-map.sh                                 -> GATE D PASSED
+The four default-arm results (git ls-files with the input empty and set; check-package-policy.sh with PKG_PRUNE_DIRS unset and set) pasted in the PR body; the empty runs identical to today's behaviour.
+On the PR: ci-pipeline, hypatia-scan, Validate Hypatia Baseline, Exemption ratchet,
+governance / Language / package anti-pattern policy and governance / Enforce Guix-only
+packaging policy green; the eleven-row validator table in the body.
 ----
 
-*Escalate if* any of the ten scripts reports an archive finding that
+*Escalate if* any of the eleven scripts reports an archive finding that
 its idiom cannot exclude without changing what it checks elsewhere, if a
 per-language job's pathspec is shared with a consumer input, or if the
 new reusable input changes any job's behaviour for a caller that does
@@ -460,8 +557,11 @@ evidence measured with the Python tool.
   `deed_lint.js` or marked as historical evidence from the retired tool.
   Never claim the JS validator was mutated unless you ran the mutant.
 . Remove the two acks from the baseline, byte-identical formatting.
-. Run the JS tests the way the README says; if it does not say, run
-  `bun 1-formats/deed/tools/deed_lint.test.js` and record the command.
+. Run the JS tests the way the README says (line 16 today:
+  `bun test 1-formats/deed/tools/`); if the rewrite drops that line, run
+  `bun test 1-formats/deed/tools/deed_lint.test.js` and record the
+  command. The file imports `describe` from `bun:test`, so it runs only
+  under Bun's test runner; `bun <file>` fails before any test runs.
 
 *Acceptance.*
 ----
@@ -486,7 +586,11 @@ CODEOWNERS, and a pull-request template with the lockfile checkbox.
 *Authority.* Plan row P1.7; applied-unless-struck (D113).
 
 *Facts measured.* `.github/ISSUES/` holds seven Markdown drafts dated
-2026-06-05, never filed. `.github/copilot/coding-agent.yml` configures a
+2026-06-05, never filed: the roadmap at the top marks itself `DRAFT`,
+`001` and `006` under `cicd-optimization/` mark themselves `IN PROGRESS`,
+and `002` to `005` mark themselves `TODO`. Every one therefore describes
+work it calls unfinished, which is the owner's call, not the executor's.
+`.github/copilot/coding-agent.yml` configures a
 Copilot coding agent with an unpinned `npx … @latest` and a plain-HTTP
 localhost URL; the baseline carries one ack for it. `CODEOWNERS` line 2
 reads `SPFX-License-Identifier: CC-SA-BY-4.0` (two typos in an SPDX
@@ -497,9 +601,13 @@ HOLD comment on `codeql-action`; nothing in it contradicts the weekly
 interval on a first reading. There is no pull-request template.
 
 *Steps.*
-. `git rm -r .github/ISSUES/`. Before that, list the seven titles in the
-  PR body; any item still live is re-filed by the owner through the
-  campaign template, not by the executor.
+. The seven drafts, by the owner's answer, draft by draft: list them in
+  the PR body (file, status line, title) and in the owner items; "discard"
+  means `git rm` that file; "file" means the owner files it through the
+  campaign template and then it is removed too; no answer by the time the
+  rest is ready means push everything else, leave the directory as it is,
+  and say so. The default on silence is defer, never delete. The
+  directory goes only when its last draft has.
 . `coding-agent.yml`, by the owner's answer: "not in use" means delete it
   and its baseline ack; "in use" means pin the package to a version and
   keep the ack; no answer by the time the rest is ready means push
@@ -519,14 +627,17 @@ interval on a first reading. There is no pull-request template.
 
 *Acceptance.*
 ----
-test ! -d .github/ISSUES && test -f .github/PULL_REQUEST_TEMPLATE.md
+test -f .github/PULL_REQUEST_TEMPLATE.md
+git diff --quiet origin/main -- .github/ISSUES   -> exit 0 while any draft awaits the owner (the directory is untouched and the PR body says which drafts wait)
+After the owner has disposed of all seven, and not part of the pre-push gate before then: test ! -d .github/ISSUES
 git diff --unified=0 origin/main -- .github/CODEOWNERS | awk '/^[+-].*License-Identifier/ {print; found=1} END {exit found}'  -> empty (exit 0)
 bash scripts/tests/apply-baseline-test.sh                           -> pass
 On the PR: labels and label-triage workflows green; Validate Hypatia Baseline green.
 ----
 
-*Escalate if* any of the seven drafts describes work that is still open
-and unfiled (list them; the owner decides).
+*Escalate if* a draft's disposition is ambiguous (the owner's answer names
+a draft that does not exist, or names fewer than seven); the defer rule
+above covers silence without a stop.
 
 == WO-7: follow the manifest rename through (after #1272)
 
@@ -540,20 +651,29 @@ are allowed by the plan's guardrails. Everything estate-facing is the
 owner's (see bucket B).
 
 *Facts measured.* Sixty-three files outside `9-archive/` still name the
-old file. The rename also added four broken links to the repo-wide
-link-rot count. They fall into three buckets.
+old file. The repo-wide link-rot guard, from a checkout named
+`standards`, reports four BROKEN lines naming the manifest:
+`QUICKSTART-DEV.adoc`, `EXPLAINME.adoc` and `TOPOLOGY.adoc`, which #1272
+broke, and `3-practice/ai-instruction/README.adoc`, whose `../` target
+never resolved. They fall into three buckets.
 
 * *Bucket A, fix now: this repository's own pointers to its own file.*
   `Justfile` lines 139 and 140 (the fallback `cat` now names a missing
-  file), `AGENTS.adoc` 4, `EXPLAINME.adoc` 11 (a link), `ROADMAP.adoc`
-  103, `QUICKSTART-DEV.adoc` 10, 62 and 113, `llm-warmup-dev.adoc` 4,
+  file), `AGENTS.adoc` 4, `EXPLAINME.adoc` 11 (a link),
+  `QUICKSTART-DEV.adoc` 10, 62 and 113, `llm-warmup-dev.adoc` 4,
   `llm-warmup-user.adoc` 4, `3-practice/ai-instruction/README.adoc` 73 (a
   link whose target must become `../../0-AI-MANIFEST.deed`: the file sits
   two directories down, and its present `../` target never resolved),
-  `docs/wikis/README.adoc` 27, `TOPOLOGY.adoc` 18 (a link).
+  `docs/wikis/README.adoc` 27. Not `TOPOLOGY.adoc` 18: `AGENTS.adoc`
+  lines 15 to 17 declare it a frozen snapshot never to be edited directly,
+  and plan row P2.4 moves it into the archive, so its broken link leaves
+  with the file (bucket C). Not `ROADMAP.adoc` 103: that row describes the
+  AI Gatekeeper Protocol's manifest enforcement, an estate-facing claim
+  the protocol's own specification still makes in the old name (bucket B).
 * *Bucket B, do not touch; put to the owner as the D338 follow-through:*
   anything that tells the estate what file to have or grades it on
-  having one: `0-canon/rsr/rsr-criteria-v2.a2ml` criterion 2.3.1,
+  having one: `ROADMAP.adoc` 103 (the protocol row),
+  `0-canon/rsr/rsr-criteria-v2.a2ml` criterion 2.3.1,
   `0-canon/GOVERNANCE.adoc` 56, `0-canon/TEMPLATE-APPLICABILITY-POLICY.adoc`,
   `.machine_readable/template-capability-gates.toml`,
   `scripts/registry-readiness.sh`, `scripts/check-manifest-ply.sh` and its
@@ -572,7 +692,8 @@ link-rot count. They fall into three buckets.
   the owner: accept both names estate-wide during the transition, or
   revert #1272 until the manifest family has its ruling (D338 proposed
   manifest clauses on the repo deed, not a standalone file).
-* *Bucket C, leave: historical and spec text.* The AI-gatekeeper protocol
+* *Bucket C, leave: historical, frozen and spec text.* `TOPOLOGY.adoc`
+  (frozen snapshot, archived by P2.4), the AI-gatekeeper protocol
   documents and examples, the ensaid specification, the overlay
   specification, `docs/reorg/` (dated records), `docs/archive/`,
   `.machine_readable/archive/`, `standards-update/`.
@@ -592,9 +713,9 @@ link-rot count. They fall into three buckets.
 *Acceptance.*
 ----
 for f in <bucket A files>; do test "$(grep -c '0-AI-MANIFEST\.a2ml' "$f")" -eq 0 || exit 1; done   -> no old-name references (exit 0)
-link_rot="$(bash scripts/link-rot-guard.sh .)" || test "$?" -eq 1
-printf '%s\n' "$link_rot" | awk '/^BROKEN/ {n++} END {print n+0}'  -> 439 or fewer from a checkout named standards (the four from #1272 gone; 680 or fewer from any other name)
-test "$(printf '%s\n' "$link_rot" | grep -c '0-AI-MANIFEST')" -eq 0  -> no broken manifest links (exit 0)
+! { diff "$before" <(bash scripts/link-rot-guard.sh . || true) || true; } | grep -q '^>'  -> exit 0 (no new BROKEN line)
+{ diff "$before" <(bash scripts/link-rot-guard.sh . || true) || true; } | grep -c '^<'   -> 3, exit 0 (the repaired manifest links; 440 BROKEN in all from a checkout named standards)
+{ bash scripts/link-rot-guard.sh . || true; } | grep '0-AI-MANIFEST'  -> exactly one line, TOPOLOGY.adoc (frozen; leaves with P2.4; the guard's own exit 1 at 440 is neutralised so grep decides)
 bash scripts/check-launcher-standard-currency.sh --root .          -> no stale references
 bash scripts/run-mustfile.sh .machine_readable/contractiles/must/Mustfile.a2ml  -> 14 passed
 ----
@@ -611,6 +732,10 @@ urgent, and the PR body says which gate is red).
   provision the forges under D261.
 . Answer the Copilot coding-agent question (WO-6): delete, or pin and
   keep. Silence means the file stays.
+. Dispose of the seven drafts in `.github/ISSUES/` (WO-6), each as "file"
+  or "discard"; all seven call themselves draft, to-do or in progress,
+  so none can be deleted on the executor's judgement. Silence means they
+  stay.
 . Fix the SPDX header typo on `CODEOWNERS` line 2 yourself (WO-6 flags
   it; agents do not edit SPDX headers).
 . Answer the D338 follow-through (WO-7): both manifest names estate-wide
@@ -623,7 +748,21 @@ urgent, and the PR body says which gate is red).
   archive become a packet of their own (241 more sit inside the frozen
   archive, where the guard prunes them in CI and nothing can be fixed).
 . Prefer an arm for the archive carve-out in `governance-reusable.yml`
-  (WO-4): the opt-in `policy_exclude_pathspec` input, a new surface on a
+  (WO-4): the opt-in `policy_exclude_dir` input with its
+  `PKG_PRUNE_DIRS` hook in `check-package-policy.sh`, a new surface on a
   reusable every estate repository calls but a no-op by default, or no
   change because the archive matches nothing today. The order ships the
   input unless you say otherwise.
+. After hyperpolymath/hypatia#927 or #928 merges, advance the
+  `hypatia-ref` defaults in both reusables (or say which session does
+  it); until then the Hypatia gate stays red on every pull request here.
+. Decide whether an enabled forge without its key (`*_MIRROR_ENABLED`
+  `true`, the `*_SSH_KEY` secret empty) stays a notice-only skip or
+  fails red (WO-2). The elegant arm is red: the variable is the one
+  switch, and `true` without a key is a misconfiguration. The order
+  departs from it and keeps the skip, because the reusable's own comment
+  names the secret as the second switch, the regularisation design (line
+  107) counts 142 callers that skip this way and marks the question
+  `OWNER?`, and a caller that advances its pin would turn red without
+  having chosen to. Say "red" and WO-2 turns the seven notice steps into
+  `::error::` plus `exit 1`.
