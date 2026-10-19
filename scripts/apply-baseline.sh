@@ -82,13 +82,39 @@ echo "$BASELINE_JSON" | jq -e 'type == "array"' >/dev/null || {
 SCHEMA_ERRORS="$(jq -r '
   def known: ["severity","rule_module","type","file","file_pattern",
               "severity_override","expires_at","note","tracking_issue"];
-  def sevs: ["critical","high","medium","low","info"];
+  # Baseline severity vocabulary mirrors both the scanner validator and the
+  # authoritative schema. `warn` is retained for old records; matching treats
+  # it as the same tier as current scanner `medium` output.
+  def sevs: ["critical","high","medium","warn","low","info","informational"];
+  # Overrides are a distinct schema contract: aliases are valid source
+  # severities, not valid override targets.
+  def override_sevs: ["critical","high","medium","low","info","advisory"];
   [ to_entries[] | .key as $i | .value as $e |
     if ($e|type) != "object" then "entry[\($i)]: not an object"
     else (
-      (["severity","rule_module","type"][]
+      (["severity","type"][]
         | select(($e[.]|type) != "string")
         | "entry[\($i)]: required key \(.) missing or not a string"),
+      # `rule_module` is the one key that admits a LIST as well as a string
+      # (standards#966: one defect, two emitting modules, one acknowledgement).
+      # Validated separately rather than being dropped from the required set —
+      # a key that is merely absent from every check is not validated, it is
+      # unchecked.
+      (if ($e.rule_module|type) as $t | $t != "string" and $t != "array"
+       then "entry[\($i)]: required key rule_module missing or not a string/array"
+       else empty end),
+      (if ($e.rule_module|type) == "array" and ($e.rule_module|length) == 0
+       then "entry[\($i)]: rule_module list is empty — an entry that names no module matches nothing"
+       else empty end),
+      (if ($e.rule_module|type) == "array"
+          and (($e.rule_module | unique | length) != ($e.rule_module | length))
+       then "entry[\($i)]: rule_module list contains duplicate members"
+       else empty end),
+      (if ($e.rule_module|type) == "array"
+       then ($e.rule_module[]
+             | select(type != "string")
+             | "entry[\($i)]: rule_module list member is not a string: \(tojson)")
+       else empty end),
       (if (($e|has("file")) == ($e|has("file_pattern")))
        then "entry[\($i)]: exactly one of file / file_pattern is required"
        else empty end),
@@ -97,6 +123,12 @@ SCHEMA_ERRORS="$(jq -r '
         | "entry[\($i)]: unknown key \(.)"),
       (if ($e.severity|type) == "string" and ((sevs|index($e.severity))|not)
        then "entry[\($i)]: invalid severity \($e.severity)" else empty end),
+      (if ($e.rule_module|type) == "array"
+       then ($e.rule_module[]
+             | select(type == "string")
+             | select((test("^[a-z][a-z0-9_]*$"))|not)
+             | "entry[\($i)]: rule_module list member fails pattern: \(.)")
+       else empty end),
       (if ($e.rule_module|type) == "string"
           and (($e.rule_module|test("^[a-z][a-z0-9_]*$"))|not)
        then "entry[\($i)]: rule_module fails pattern: \($e.rule_module)"
@@ -123,14 +155,17 @@ SCHEMA_ERRORS="$(jq -r '
        then "entry[\($i)]: file_pattern must be a non-empty string"
        else empty end),
       (if ($e|has("severity_override"))
-          and (((sevs + ["advisory"])|index($e.severity_override))|not)
-       then "entry[\($i)]: invalid severity_override \($e.severity_override)"
+          and ((($e.severity_override|type) != "string")
+               or ((override_sevs|index($e.severity_override))|not))
+       then "entry[\($i)]: invalid severity_override \($e.severity_override|tojson)"
        else empty end),
       (if ($e|has("expires_at"))
           and ((($e.expires_at|type) != "string")
                or (($e.expires_at|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))|not))
        then "entry[\($i)]: expires_at must be an ISO date (YYYY-MM-DD)"
        else empty end),
+      (if ($e|has("note")) and (($e.note|type) != "string")
+       then "entry[\($i)]: note must be a string" else empty end),
       (if ($e|has("tracking_issue"))
           and ((($e.tracking_issue|type) != "string")
                or (($e.tracking_issue|test("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$"))|not))
@@ -180,12 +215,34 @@ ANNOTATED="$(jq -n \
   #   referencing `.file_pattern` there would error with "Cannot index
   #   string". Capture the entry pattern first, then reference $pat
   #   inside the test() regex argument.
+  # Hypatia emitted `warn` for advisory findings until hypatia#895
+  # (2026-10-01), which now emits them as `medium`. Normalize only this
+  # historical transition; all other severity labels remain distinct.
+  def sev_tier: if . == "warn" then "medium" else . end;
   def match_entry(f):
     f as $finding
     | $baseline
     | map(select(
-        .severity == $finding.severity
-        and .rule_module == $finding.rule_module
+        (.severity | sev_tier) == ($finding.severity | sev_tier)
+        # `rule_module` is a string OR a list of strings.
+        #
+        # ⚠ THE LIST FORM EXISTS BECAUSE ONE DEFECT CAN BE EMITTED BY TWO
+        # MODULES. Hypatia raises `invalid_actions_lock` from BOTH
+        # `workflow_audit` and `workflow_hardening` for a single desynced
+        # lockfile. Under exact string equality an acknowledgement could
+        # only ever name one of them, so the other stayed unsuppressed and
+        # went on blocking — and it did, on `main`. The symptom is
+        # especially misleading: the entry looks correct, the file matches,
+        # the severity matches, and the finding is still kept.
+        #
+        # Normalising to a list here rather than duplicating the entry keeps
+        # ONE acknowledgement per defect, which is what `expires_at` and
+        # `tracking_issue` are actually about. Two entries for one defect
+        # means two expiry dates for one decision.
+        and (
+          (.rule_module | if type == "array" then . else [.] end)
+          | any(. == $finding.rule_module)
+        )
         and .type == $finding.type
         and (
           (.file? // null) == $finding.file
@@ -228,9 +285,8 @@ ANNOTATED="$(jq -n \
 KEPT="$(jq '[.[] | select(.baseline_status != "acknowledged")]' <<<"$ANNOTATED")"
 SUPPRESSED="$(jq '[.[] | select(.baseline_status == "acknowledged")]' <<<"$ANNOTATED")"
 
-# Severity rank for blocking decision. `warn` and `informational` are treated
-# as aliases of `medium` and `info` respectively (Hypatia's research rules use
-# `warn` at medium rank). Unknown severities are treated as critical to fail-safe.
+# Severity rank for blocking decision.
+# Unknown severities are treated as critical to fail-safe.
 rank() {
   case "$1" in
     critical) echo 5 ;;
@@ -245,9 +301,11 @@ rank() {
 
 THRESHOLD_RANK="$(rank "$BLOCKING_THRESHOLD")"
 MAX_KEPT_RANK=0
+BLOCKING_COUNT=0  # kept findings at or above the threshold (the gate message names these, not all kept)
 while IFS= read -r sev; do
   r="$(rank "$sev")"
   if (( r > MAX_KEPT_RANK )); then MAX_KEPT_RANK=$r; fi
+  if (( r >= THRESHOLD_RANK )); then BLOCKING_COUNT=$((BLOCKING_COUNT + 1)); fi
 done < <(jq -r '.[].severity' <<<"$KEPT")
 
 KEPT_COUNT="$(jq 'length' <<<"$KEPT")"
@@ -286,7 +344,7 @@ if [[ "$MODE" == "advisory" ]]; then
 fi
 
 if (( MAX_KEPT_RANK >= THRESHOLD_RANK )); then
-  echo "::error::Gate failed: $KEPT_COUNT unfiltered finding(s) at or above '$BLOCKING_THRESHOLD'." >&2
+  echo "::error::Gate failed: $BLOCKING_COUNT unfiltered finding(s) at or above '$BLOCKING_THRESHOLD' ($KEPT_COUNT kept in total)." >&2
   exit 1
 fi
 
