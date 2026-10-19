@@ -154,7 +154,10 @@ done
 # LOCAL reusable, every passed name must be declared in that reusable's
 # workflow_call.secrets mapping. These workflows use two-space indentation;
 # inspect only direct secret keys, not inputs or nested metadata.
-check_declared() { # caller reusable
+# check_declared CALLER REUSABLE: report each named caller secret missing from
+# the reusable's workflow_call.secrets via fail, incrementing the failure count.
+# Skip the comparison if either file is unreadable.
+check_declared() {
   local caller="$1" reusable="$2" name declared
   [ -r "$caller" ] && [ -r "$reusable" ] || return 0
   declared="$(awk '
@@ -271,7 +274,7 @@ checkout_pin="$(grep -vE '^[[:space:]]*#' "$REUSABLE" | grep -oE 'actions/checko
 # Look the pin up inside the scanner reusable's OWN lock section, not the
 # whole file: checkout is keyed under nearly every workflow, so a global
 # search would pass even if the scanner's section lost its record.
-lock_section="$(awk "/^    '\\.github\\/workflows\\/secret-scanner-reusable\\.yml':/{f=1;next} /^    '\\.github\\/workflows\\//{f=0} f{print}" "$LOCKFILE")"
+lock_section="$(awk "/^    '\\.github\\/workflows\\/secret-scanner-reusable\\.yml':/{f=1;next} /^    '\\.github\\/workflows\\//{f=0} /^dependencies:/{f=0} f{print}" "$LOCKFILE")"
 [ -n "$lock_section" ] || fail "actions.lock has no section for secret-scanner-reusable.yml — regenerate with \`gh actions-lock\`"
 while IFS= read -r pin; do
   [ -n "$pin" ] || continue
