@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 = Work orders, 2026-10-19: the first execution wave
 Jonathan D.A. Jewell (hyperpolymath)
-v1.4.2, 2026-10-19
+v1.4.3, 2026-10-19
 :toc: left
 :toclevels: 2
 :sectnums:
@@ -246,7 +246,19 @@ on its push step (line 126), so a GitLab failure shows green with a
 warning. Line 441 is `rad sync --announce || echo "Radicle sync
 attempted"`, which turns a failed sync into a green step. The caller in
 this repository is `.github/workflows/mirror.yml`, pinned to the
-reusable at `427eb35c`.
+reusable at `427eb35c`. Each forge job also ends in a notice-only
+`Skipped (<FORGE>_SSH_KEY not configured)` step (seven in all, GitLab's
+at lines 135 to 138, Radicle's at 442) that runs when the variable is
+`true` but the secret is empty, so an enabled forge without its key is
+green with a `::notice::`. The reusable's own comment on the Radicle job
+calls the secret the second switch (the variable asks whether the mirror
+is wanted, the secret whether it is configured), and
+`docs/superpowers/specs/2026-09-02-cicd-regularisation-design.adoc` line
+107 counts 142 estate callers skipping this way, with the question
+marked `OWNER?`. On this repository the six git forges' keys are
+present (their host-verify or push steps, gated on the key, ran);
+Radicle's job succeeded, which either path produces, so read which step
+ran from the run.
 
 *Steps.*
 . Read the failing steps' logs for the five red jobs and record the
@@ -279,6 +291,11 @@ reusable at `427eb35c`.
   variable already answers.
 . Add an empty-host guard: when the resolved mirror organisation or host
   is empty, skip with a `::notice::`, never push to an empty path.
+. Keep the seven `Skipped (<FORGE>_SSH_KEY not configured)` steps as
+  they are. An enabled forge without its key is the second legitimate
+  skip, visible as a `::notice::` on the run. Whether it should fail red
+  instead is an estate decision (the 142 callers above) and a new owner
+  item, not this order's.
 . Keep the SSH fingerprint verification exactly as strict as it is.
 . Do not edit `actions.lock` unless a `uses:` line changed; if one did,
   regenerate with the repository's own relock tooling, never by hand.
@@ -292,13 +309,16 @@ reusable at `427eb35c`.
 *Acceptance.*
 ----
 test "$(grep -c '|| *echo' .github/workflows/mirror-reusable.yml)" -eq 0            -> no matches (exit 0)
-test "$(grep -c 'continue-on-error' .github/workflows/mirror-reusable.yml)" -eq 0   -> no matches (exit 0)
+test "$(grep -c '^[[:space:]]*continue-on-error:' .github/workflows/mirror-reusable.yml)" -eq 0   -> no key left (exit 0; the comment at line 121 naming the owner action stays, and is not a key)
+grep -c 'not configured)' .github/workflows/mirror-reusable.yml         -> 7 (the key skips stay)
 bash scripts/check-workflow-duplicate-keys.sh                       -> clean
 grep -c 'git ls-remote' .github/workflows/mirror-reusable.yml       -> one per forge job that pushes with git
 bash scripts/lock-selfcheck.sh "$(git rev-parse HEAD)"               -> SELF-CONSISTENT (after push)
 Mirror to Git Forges on main after merge: GitLab and Radicle green; every
-other forge skipped by its variable (once the variables are flipped) or
-red with the probe's stderr naming the reason, never green on a failure.
+other forge skipped by its variable (once the variables are flipped), or
+skipped by its absent key with the notice step (no git forge on this
+repository is in that state today), or red with the probe's stderr
+naming the reason; never green on a failure.
 ----
 
 *Escalate if* any forge fails on a host-key fingerprint mismatch (a
@@ -695,7 +715,7 @@ never resolved. They fall into three buckets.
 for f in <bucket A files>; do test "$(grep -c '0-AI-MANIFEST\.a2ml' "$f")" -eq 0 || exit 1; done   -> no old-name references (exit 0)
 ! { diff "$before" <(bash scripts/link-rot-guard.sh . || true) || true; } | grep -q '^>'  -> exit 0 (no new BROKEN line)
 { diff "$before" <(bash scripts/link-rot-guard.sh . || true) || true; } | grep -c '^<'   -> 3, exit 0 (the repaired manifest links; 440 BROKEN in all from a checkout named standards)
-bash scripts/link-rot-guard.sh . | grep '0-AI-MANIFEST'             -> exactly one line, TOPOLOGY.adoc (frozen; leaves with P2.4)
+{ bash scripts/link-rot-guard.sh . || true; } | grep '0-AI-MANIFEST'  -> exactly one line, TOPOLOGY.adoc (frozen; leaves with P2.4; the guard's own exit 1 at 440 is neutralised so grep decides)
 bash scripts/check-launcher-standard-currency.sh --root .          -> no stale references
 bash scripts/run-mustfile.sh .machine_readable/contractiles/must/Mustfile.a2ml  -> 14 passed
 ----
@@ -736,3 +756,13 @@ urgent, and the PR body says which gate is red).
 . After hyperpolymath/hypatia#927 or #928 merges, advance the
   `hypatia-ref` defaults in both reusables (or say which session does
   it); until then the Hypatia gate stays red on every pull request here.
+. Decide whether an enabled forge without its key (`*_MIRROR_ENABLED`
+  `true`, the `*_SSH_KEY` secret empty) stays a notice-only skip or
+  fails red (WO-2). The elegant arm is red: the variable is the one
+  switch, and `true` without a key is a misconfiguration. The order
+  departs from it and keeps the skip, because the reusable's own comment
+  names the secret as the second switch, the regularisation design (line
+  107) counts 142 callers that skip this way and marks the question
+  `OWNER?`, and a caller that advances its pin would turn red without
+  having chosen to. Say "red" and WO-2 turns the seven notice steps into
+  `::error::` plus `exit 1`.
