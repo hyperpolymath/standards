@@ -147,6 +147,33 @@ cmp -s "$D/actions.lock" "$T/identity-before" || fail "refusal changed consumer 
 grep -q 'identity mismatch' "$T/identity-log" || fail "wrong refusal reason"
 echo "  PASS identity mismatch refused without changing lock"
 
+# Empty grep matches used to trigger `set -e` before the fail-closed refusal.
+D=$(consumer missing-local-identity)
+sed -i "s/ref: 'v1'/ref: '1111111111111111111111111111111111111111'/; /commit: 'sha1-1111111111111111111111111111111111111111'/d; /owner_id: 10$/d; /repo_id: 11$/d" "$D/actions.lock"
+cp "$D/actions.lock" "$T/missing-local-before"
+if bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >"$T/missing-local-log" 2>&1; then fail "missing local identity accepted"; fi
+cmp -s "$D/actions.lock" "$T/missing-local-before" || fail "missing local identity refusal changed consumer lock"
+grep -q 'identity mismatch' "$T/missing-local-log" || fail "missing local identity did not reach refusal"
+echo "  PASS missing local identity refused without changing lock"
+
+# Exercise the other grep assignment too: a target Standards record with no
+# identity fields must reach the same explicit refusal, not exit on grep status.
+cp "$S/.github/workflows/actions.lock" "$T/source-lock-with-identity"
+sed -i "/commit: 'sha1-1111111111111111111111111111111111111111'/d; /owner_id: 10$/d; /repo_id: 11$/d" "$S/.github/workflows/actions.lock"
+git -C "$S" add .github/workflows/actions.lock
+git -C "$S" commit -q -m missing-source-identity
+NEW_WITHOUT_ID=$(git -C "$S" rev-parse HEAD)
+NEW_SAVE=$NEW; NEW=$NEW_WITHOUT_ID
+D=$(consumer missing-source-identity)
+sed -i "s/ref: 'v1'/ref: '1111111111111111111111111111111111111111'/" "$D/actions.lock"
+cp "$D/actions.lock" "$T/missing-source-before"
+if bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >"$T/missing-source-log" 2>&1; then fail "missing source identity accepted"; fi
+cmp -s "$D/actions.lock" "$T/missing-source-before" || fail "missing source identity refusal changed consumer lock"
+grep -q 'identity mismatch' "$T/missing-source-log" || fail "missing source identity did not reach refusal"
+NEW=$NEW_SAVE
+cp "$T/source-lock-with-identity" "$S/.github/workflows/actions.lock"
+echo "  PASS missing source identity refused without changing lock"
+
 # 2. Idempotent.
 D=$(consumer idem); bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null
 cp "$D/actions.lock" "$T/once"; bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null
