@@ -185,7 +185,7 @@ for pass in 1 2 3 4 5 6; do
       tag_ref=""
       if "$GH_BIN" api "repos/$owner/$name/tags?per_page=100" --paginate \
           --jq '.[] | select(.commit.sha == "'"$sha"'") | .name' > "$SC/tags" 2>/dev/null; then
-        tag_ref=$(awk '/^[A-Za-z0-9._+\/-]+$/ && !(length($0) == 40 && $0 ~ /^[0-9a-f]+$/) { if (!first) first = $0; if (!preferred && $0 ~ /^v?[0-9]+\.[0-9]+\.[0-9]+/) preferred = $0 } END { if (preferred) print preferred; else if (first) print first }' "$SC/tags")
+        tag_ref=$(awk '/^[A-Za-z0-9._+@\/-]+$/ && !(length($0) == 40 && $0 ~ /^[0-9a-f]+$/) { if (!first) first = $0; if (!preferred && $0 ~ /^v?[0-9]+\.[0-9]+\.[0-9]+/) preferred = $0 } END { if (preferred) print preferred; else if (first) print first }' "$SC/tags")
       fi
       if [ -z "$tag_ref" ]; then
         echo "  SKIP $k (cannot resolve a symbolic tag for leaf SHA)"
