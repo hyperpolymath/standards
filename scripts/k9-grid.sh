@@ -77,10 +77,12 @@ results_json() {
 }
 
 canon_json() {
+  # ijson-jcs canon emits the JCS bytes with no final newline; the policy
+  # wants exactly one. sed adds one only when it is missing.
   if command -v ijson-jcs >/dev/null 2>&1; then
-    ijson-jcs canon
+    ijson-jcs canon | sed -e '$a\'
   else
-    jq -S -c .
+    jq -S -c . | sed -e '$a\'
   fi
 }
 
