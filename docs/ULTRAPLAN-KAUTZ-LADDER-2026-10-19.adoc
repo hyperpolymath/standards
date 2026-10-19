@@ -1,0 +1,1286 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Ultraplan: climbing the Kautz ladder — from paid review bots to an estate-native neurosymbolic quality system
+Jonathan D.A. Jewell (hyperpolymath)
+v0.1.0, 2026-10-19
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:status: DRAFT — for owner review; nothing here is ruled
+
+[.lead]
+This document does four things. It inventories what the commercial
+code-quality and PR-review tools sell, and sorts every feature into
+*symbolic* (a rule, a grammar, a dataflow, a metric) or *neural* (needs a
+learned model). It reads the estate's own quality machinery — Hypatia, the
+gitbot-fleet, panic-attack, pons-asinorum, VeriSimDB, cicd-squabbler,
+cicd-suite, feedback-o-tron, ECHIDNA, the proof and type repositories, the
+scaffolding and container tooling — and says, with file-level evidence, which
+rung of Kautz's neurosymbolic ladder each of them actually stands on today.
+It names what is missing between here and the top rung. And it lays out a
+multi-year programme in waves, the first of which is cheap: take back the
+formulaic checks the paid bots are eating credit on, route them through the
+estate's own symbolic layer, and leave the paid neural reviewers only the
+slice that genuinely needs a model.
+
+Every claim about an estate repository cites a repo-relative path. Every
+claim about a vendor cites a URL in <<sources>>. Figures that could not be
+verified from inside this session are marked as such. Where a number is a
+vendor's own claim it says so.
+
+== Verdict in one page
+
+*Where we are.* The estate is a *Symbolic[Neuro]* machine (Kautz type 2) in
+design and a *purely symbolic* machine in operation. Hypatia's 35 Elixir rule
+modules own the loop; its eight neural networks are consulted only to
+_demote_ confidence or route novel findings to humans, and they are trained on
+an outcome log that is 99% synthetic successes (`hypatia/.claude/CLAUDE.md`
+Known Gaps 7; `hypatia/docs/architecture/NEURAL-ARCHITECTURE.adoc`). The one
+actuator that could close the learning loop — the gitbot-fleet — has every
+mutation path interlocked with `exit 78`
+(`gitbot-fleet/docs/AUTOMATION-QUARANTINE.adoc`). The only neural components
+that _act_ on estate PRs today are CodeRabbit and Codex, bolted on from
+outside at Kautz type 1, unconnected to any estate database, and metered:
+CodeRabbit's Advanced plan grants one included review per hour and reports
+"0 remain" on an ordinary standards PR
+(hyperpolymath/standards#1295 review thread). So the neural pools we own sit
+unused and the neural reviews we rent are rationed.
+
+*What we lack, ranked.*
+
+. *A truthful outcome signal.* Fleet "success" is recorded when a fix script
+  exits 0, without a rescan (`gitbot-fleet/audits/fleet-wiring-2026-09-26.md`
+  §1, §7). Nothing learned from that log is real. Everything above type 2
+  depends on fixing this first.
+. *A reachable records store.* The live store is a git repository of flat
+  files; `verisim-api` ships in-memory, with auth hard-wired off, cross-request
+  transactions returning 501 and the Groove/feedback router never mounted
+  (`verisimdb/rust-core/verisim-api/src/{auth.rs,lib.rs,groove.rs}`,
+  `KNOWN-ISSUES.adoc` #29, #30). The standards-side Hypatia rules in
+  `hypatia-rules/` are written against a VeriSimDB instance on port 8097 that
+  does not exist.
+. *One findings bus.* SARIF is emitted by Hypatia, panic-attack, pons,
+  oikosbot, cipherbot, seambot and accessibilitybot, and ingested by nobody
+  in the estate. cicd-suite's 30 bash gates emit nothing structured at all.
+  The verdict grid (`docs/VERDICT-GRID-SPEC.adoc`) is the right surface; it
+  has three permanent rows and no fleet report-backs feeding it yet.
+. *Stable rule identity.* panic-attack's SARIF exporter and its aggregate
+  module disagree on which PA number each category carries
+  (`panic-attack/src/report/sarif.rs:118-147` vs
+  `src/aggregate/mod.rs:816-835`). A learning system cannot learn against a
+  moving key.
+. *The symbolic "floor-raising" layer.* The repository-hygiene, prose, link,
+  template and asset rules that would replace most of what CodeRabbit
+  charges for exist in pons only as 18 fixture corpora under
+  `pons-asinorum/deferred/rookie-fixtures/`; `main` implements 10 code-smell
+  rules in 5 languages.
+. *A model anywhere that is ours.* ECHIDNA's Julia ranker has no trained
+  weights (its roadmap Stage 2); feedback-o-tron's "synthesis" is regex and
+  YAML; oikosbot's Datalog policy engine "has never executed"
+  (`oikosbot/DEBT.adoc`). The estate has no learned component with a
+  measured lift.
+
+*Where we are going.* Kautz's sixth category, Neuro[Symbolic], is unclaimed
+by anyone in the literature (Sarker et al. 2021 found zero papers; van
+Bekkum et al. 2021 decline to interpret it). The honest target for this
+programme is not to be the first. It is to run a *type 2 machine with real
+learned proposers*, add *type 3 learned front-ends* that emit symbolic IR
+(Trope IR, taint specs, kanren facts) for exact reasoners, use provers and
+executors as *type 4 data generators* for those proposers, and keep the
+"distil to dumb rules" arrow that is Hypatia's founding idea as a measured,
+falsifiable loop. Section <<ladder>> defines six estate rungs, K0–K6, each
+with a falsifier, so "what level are we at" stops being a matter of opinion.
+
+*What to do first (Wave 0 and Wave 1, roughly one quarter).* Make outcomes
+true; deploy VeriSimDB with auth and persistence; mount Groove; fix the
+PatternQuery bug that makes ingested scans invisible; freeze PA identifiers;
+build the formulaic-check eater on top of pons and a SARIF adapter so that
+docstring coverage, container-file lint, Guix manifests, link rot, template
+placeholders, formatting, commit-message shape and pre-merge conventions are
+all estate checks reporting into the verdict grid; then pin CodeRabbit and
+Codex to the neural slice only (summaries, intent-vs-implementation,
+naming) by path and event, and measure the credit saved.
+
+== What the market sells, and what is formulaic
+
+=== The feature inventory, classified
+
+The full per-tool inventory with sources is in <<appendix-tools>>. The
+pattern across the market is uniform enough to state once:
+
+* *The symbolic half is commodity.* Every vendor's rule engine, taint
+  analysis, duplication, complexity, coverage arithmetic, secret regexes,
+  dependency pinning, IaC lint and container lint is either an OSS linter
+  under the hood or a proprietary reimplementation of one. CodeRabbit
+  bundles 59 OSS tools (ruff, biome, eslint, clippy, shellcheck, hadolint,
+  yamllint, actionlint, markdownlint, semgrep, gitleaks, checkov, trivy,
+  osv-scanner, …) and its "pre-merge docstring coverage check" is a function
+  count. Codacy wraps ESLint, Semgrep, PMD, RuboCop, ShellCheck, Hadolint,
+  Checkov and Trivy. Codeac is a pure aggregator. Codecov does no analysis of
+  its own: it ingests the coverage and JUnit files your toolchain already
+  produces and sells the diff arithmetic and the comment. Qlty, Trunk and
+  MegaLinter are explicitly orchestrators of 70–100+ linters; MegaLinter is
+  AGPL and free.
+* *The exceptions are Sonar and DeepSource*, whose analysers (Sonar's
+  interprocedural taint engine and cognitive-complexity metric in
+  particular) are genuinely in-house. Semgrep's paid moat is interfile taint,
+  curated rules, reachability SCA and the LLM "Assistant".
+* *The neural slice is narrow and is also where the complaints are.*
+  Genuinely model-dependent features: PR walkthroughs and sequence-diagram
+  extraction; intent-vs-implementation mismatch against the title or linked
+  issue; naming and readability judgements; cross-file architectural
+  suggestions; natural-language rule authoring; learned triage of false
+  positives (Semgrep Assistant and Memories, Codacy Smart FP Triage,
+  CodeRabbit learnings); semantic autofix and test generation. The sentiment
+  data concentrates on that slice: CodeRabbit "40+ inline comments on large
+  refactors, most noise", throttling "to a few reviews per hour" even on paid
+  tiers; Greptile "pretty much pure noise"; Copilot code review at ~35%
+  precision in third-party benchmarks; Semgrep's 60%-auto-triage figure is
+  vendor-reported and an AppSec analyst warns suppression must be measured
+  separately from recall.
+* *Pricing follows the neural slice.* Seats, credits, "premium requests",
+  per-run billing (Bugbot moved to ~$1–1.50 per run in 2026), hourly review
+  caps. Lines-of-code pricing (Sonar) is the other recurring gripe.
+
+=== What the estate actually runs today
+
+Measured on hyperpolymath/standards#1304 and #1295 and gitbot-fleet#615
+(check-run and comment listings fetched 2026-10-19):
+
+[cols="2,1,3",options="header"]
+|===
+|Reporter |Kind |What it does on an estate PR
+
+|CodeRabbit (Advanced plan, "CHILL" profile in gitbot-fleet, "ASSERTIVE"
+in standards)
+|Neural + 59 bundled linters
+|Walkthrough, merge-risk and "security architecture risk" paragraphs,
+docstring-coverage pre-merge check (28.57% on gitbot-fleet#615, threshold
+80, pinned to `mode: warning` estate-wide in `.coderabbit.yaml`),
+finishing-touch docstring and unit-test generation (both failed with
+"Coding task failed" on #615), autofix ("Timed out"). "1 included review
+per hour; 0 remain." Does not auto-review repos with fewer than 10 stars.
+
+|Codex (chatgpt-codex-connector)
+|Neural
+|Review on open / ready-for-review / `@codex review`; posts suggestions or a
+thumbs-up.
+
+|SonarCloud
+|Symbolic (proprietary)
+|Quality gate; configured via `sonar-project.properties` in rsr-template-repo
+and cicd-squabbler; most estate languages (Idris2, Zig, Elixir,
+AffineScript) have no analyser, so the analysable surface is shell and JS.
+
+|Semgrep Cloud Platform
+|Symbolic (+ Assistant, unused here)
+|`semgrep-cloud-platform/scan` check run.
+
+|GitGuardian
+|Symbolic
+|Secret scanning check run.
+
+|CodeQL, OSSF Scorecard, Dependabot
+|Symbolic
+|GitHub-native.
+
+|Estate-native (standards reusables)
+|Symbolic
+|Roughly 60 of the 69 check runs on #1304: governance (≈20 jobs: actions
+lockfile, UUID v8, licence consistency, JS runtimes, Guix policy, debt
+ratchet, workflow security linter, …), Hypatia scan + baseline validation,
+K9-SVC contractile validation, canonical-JSON probes, trusted-base
+reduction, AffineScript verify, SPARK theatre gate, proof-change detection,
+gitleaks / shell-secrets / rust-secrets.
+|===
+
+Two observations follow. First, the estate already out-produces every
+vendor on *symbolic* checks; the governance reusable alone is a larger rule
+set than Codeac's whole product. Second, the three paid or rationed neural
+reviewers are doing exactly two things the estate cannot yet do — prose
+summaries and intent judgement — and one thing it can (docstring counting),
+and they are doing the latter badly (CodeRabbit "8 skipped: 8 unsupported"
+languages on #615). This is the credit leak.
+
+=== The formulaic checks to take back
+
+Each row is implementable without a model. The "estate home" column is
+where the check should live so that its output reaches the verdict grid as
+SARIF and its outcome reaches VeriSimDB. "Under the hood" names the OSS tool
+to wrap rather than rewrite, where one exists; pons implements the rows
+where the semantics are estate-specific or where tree-sitter already gives
+pons the parse.
+
+[cols="3,2,2,3",options="header"]
+|===
+|Check |Estate home |Under the hood |Status today
+
+|Docstring presence and coverage on changed functions (Rust `///`, Elixir
+`@doc`, Idris2 `\|\|\|`, Zig `///`, Julia docstrings, shell header blocks)
+|pons (new T0 rule `missing-doc-comment`, diff-scoped)
+|tree-sitter queries; pons already parses Rust and JS/TS; add Elixir, Zig,
+Julia grammars
+|CodeRabbit does it for 7 of 15 functions on a typical PR and skips the
+estate languages
+
+|Container file correctness (`Containerfile`, Podman not Docker, Chainguard
+base, pinned digests, no `latest`, `USER` set, HEALTHCHECK present)
+|cicd-suite composite + hadolint; stapeln's `gap_analyzer.ex` for stack-level
+|hadolint, plus estate rules as Semgrep YAML or pons `.scm`
+|hadolint is run by CodeRabbit only; the estate has no Containerfile gate
+
+|Guix manifest sanity (`guix.scm` parses, declares a licence, `(license #f)`
+absent, package names resolve; Nix absent)
+|governance reusable (extend `Guix packaging policy (Nix retired)`)
+|`guile -c` parse + a small Scheme walker
+|Hypatia DEBT-REGISTER L-3 found `(license #f)` by hand
+
+|Link rot in `.adoc`/`.md` (internal and external), anchors, placeholders
+|pons (deferred rules `document-reference-missing`,
+`document-anchor-missing`, `document-reference-placeholder`)
+|`lychee` for external; pons for internal with evidence class
+|`scripts/link-rot-guard.sh` exists only in standards and reports 443 on main
+
+|Template placeholders left behind (double-curly owner and repo tokens, "replace me" notes,
+boilerplate GOVERNANCE text)
+|pons (`template-placeholder`), plus `fix-stale-template-placeholders.sh`
+|pons fixtures exist
+|Hypatia HYP-DOG-001 detects; fix script exists; both idle under quarantine
+
+|Formatting (rustfmt, mix format, zig fmt, biome, kyaml-format)
+|cicd-suite `formatting-check` → SARIF
+|the formatters themselves (`--check`)
+|exists as pass/fail only
+
+|Commit-message and PR-title shape, linked issue, PR size, "not done" list
+present
+|a Danger-style estate rule set in cicd-suite, SARIF out
+|commitlint / gitlint; a 40-line jq
+|CodeRabbit title/description checks (neural, noisy)
+
+|SPDX header presence (detect only; never edit)
+|Hypatia `root_hygiene`, pons `license-identifier-typo`
+|`reuse lint`
+|exists; licence edits are owner-only by policy and must stay flag-only
+
+|Dependency pinning, lockfile presence and drift, `package-lock.json`
+tracked
+|Hypatia `supply_chain` SC001–SC013; `fix-tracked-package-lock.sh`
+|cargo-deny, osv-scanner
+|exists
+
+|Workflow hygiene (unpinned `uses:`, missing `timeout-minutes`, `permissions`,
+`continue-on-error` on gates, fake gates that cannot fail)
+|Hypatia `workflow_hardening` WH001–012, `research_extensions` RE001–010,
+oikosbot `infallible_gate_candidates`
+|actionlint for syntax
+|exists; this is the estate's strongest area
+
+|Syntax and sequencing errors in config (YAML/KYAML, JSON canonical form,
+Nickel, deed, k9)
+|governance reusable (I-JSON/JCS probes exist), `deed_lint.js`,
+`k9-validate.sh`
+|yq, `ijson-jcs`
+|exists for JSON and deed; k9 coordination has no validator yet
+
+|Duplication, dead code, unused imports, complexity
+|pons T1 (`dead-store`, `read-before-init` exist for Python); clippy / credo
+/ mix xref for the rest
+|jscpd, lizard, cargo-udeps, knip
+|partial; Hypatia has no Credo or Dialyzer gate (DEBT-REGISTER C-2)
+
+|Coverage delta and patch coverage
+|rust-ci reusable (llvm-cov → Codecov exists for Rust); add `excoveralls`
+for Elixir
+|diff-cover, octocov
+|Rust only; "no coverage figure currently exists for any language" in
+Hypatia (T-2)
+
+|Flaky-test detection
+|oikosbot telemetry (workflow intervals exist) + JUnit history in VeriSimDB
+|a 100-line query over stored runs
+|absent
+
+|Copying "x from one place to another" (versions, SHAs, counts, names that
+must agree across files)
+|Hypatia `sha_bump_propagation`; januskey `dashboard-check`
+(claims-vs-STATE); a general *consistency-pair* rule in pons
+|none; this is estate-specific
+|two point solutions; no general rule
+|===
+
+The last row deserves a name because it is the most common thing the paid
+reviewers get credit for and the easiest to make exact: a declared pair of
+locations that must agree (a count in CLAUDE.md and `ls lib/**/*.ex | wc
+-l`; a SHA in a caller and in `actions.lock`; a version in `Cargo.toml` and
+`CITATION.cff`). Hypatia's DEBT-REGISTER D-1 is a catalogue of such pairs
+that drifted "by 3–16×". A pons rule that reads pairs from the repo deed and
+checks them is symbolic, cheap, and exactly the kind of thing no vendor
+sells.
+
+== The estate as a Kautz machine
+
+=== The ladder, as Kautz drew it
+
+Kautz's six categories (AAAI-20 Engelmore lecture; _AI Magazine_ 43(1), 2022)
+are, in his order:
+
+. *symbolic Neuro symbolic* — symbols in, symbols out, all processing
+  neural. Every LLM, including CodeRabbit and Codex, by construction.
+. *Symbolic[Neuro]* — a symbolic solver owns the loop and calls a network as
+  a subroutine. AlphaGo; AlphaProof; "most autonomous vehicles".
+. *Neuro | Symbolic* — a neural front-end turns raw input into symbols that
+  a separate exact reasoner then processes.
+. *Neuro: Symbolic → Neuro* — symbolic knowledge generates training data; the
+  rules are compiled away at training time.
+. *Neuro_Symbolic* — logic compiled into the structure or loss of the
+  network (Logic Tensor Networks, DeepProbLog, neural theorem provers).
+. *Neuro[Symbolic]* — the "holy grail": a neural engine that contains an
+  exact reasoner and learns when to invoke it (Kahneman's System 1 calling
+  System 2). No accepted example exists.
+
+The 2025–26 code-analysis literature keeps the symbolic engine as the
+authority and uses the model either to *write the symbolic program* (IRIS
+infers taint specs for CodeQL; QLCoder and ARQ synthesise CodeQL queries;
+Lemur proposes loop invariants and an SMT solver checks them; AutoVerus and
+APOLLO write Verus and Lean proofs that the kernel checks) or to *triage its
+output* (BugLens, Semgrep Assistant). None of them is type 6. The strongest
+are type 2 with a learned proposer — which is the shape Hypatia, panic-attack
+and ECHIDNA already have on paper. The literature is on our side; the gap is
+operational, not architectural.
+
+=== Subsystem by subsystem
+
+[cols="2,1,4",options="header"]
+|===
+|Component |Kautz type (design / operation) |Evidence
+
+|*Hypatia* rules (`lib/rules/`, 35 modules, ID families PA SC WF WH BH BP RE
+SD SSA CSA DA DR GS HYP-DOG ERR)
+|Symbolic / symbolic
+|`hypatia/docs/rules/catalogue.adoc` (generated). HYP-01 gives every finding
+a `support` (pattern / observed / mechanical re-check), `evidence` and a
+derived `level` ∈ {sound, epi, belief}; a pattern match can never be
+reported `sound` (`hypatia/schema/findings.ncl`, `src/Hypatia/ABI/Verdict.idr`).
+This is the estate's epistemic ladder and it is already machine-checked.
+
+|*Hypatia* neural pools (`lib/neural/`, 8 networks on an ETS blackboard in 6
+phases: RBF novelty → PageRank trust + GNN → MoE confidence → ESN trajectory
++ LSM anomaly → VAE clustering → sequence model)
+|Type 2 / inert advisor
+|`lib/pattern_analyzer.ex:270-330`: neural output can only _demote_ (novel →
+`:control`; `min(recipe_conf, neural_conf)`), and only once the MoE output
+leaves the untrained band 0.70–0.76. Training reads `verisim-data/outcomes/`
+which is ~99% success (synthetic Strategy A rebalancing in
+`lib/neural/rebalancer.ex`); ESN "has been learning from a shape it no
+longer receives" (CLAUDE.md Known Gaps 5). `lib/kin/gate.ex` asks the
+coordinator for consensus but the safety GenServers it would enforce
+(`lib/safety/`) are called by no dispatch path. Verdict: the pools exist, are
+wired, and have nothing true to learn from.
+
+|*Hypatia* `ProverRecommender` (`lib/neural/prover_recommender.ex`)
+|Type 2 / untrained
+|6-dimensional RBF over `proof_attempts` rows from `verisim-api` — the one
+network written against real post-V4 data. The API it reads is not deployed.
+
+|*Hypatia* "dumb rules from smart learning" (`lib/recipe_generator.ex`,
+`lib/pattern_registry.ex`)
+|The inverse of type 4 (Neuro → Symbolic distillation) / template transfer
+only
+|Recipes are generated by category template at confidence 0.50; no learned
+pattern has yet become a rule. The founding idea has no executed instance.
+
+|*Hypatia* VCL layer (`lib/vcl/`)
+|Symbolic / local-only
+|`FileExecutor` over flat files; "the `verisim-api` REST server is not yet
+deployed" (`lib/vcl/README.adoc`); `proof_resolver.ex` is orphaned
+(DEBT-REGISTER C-5).
+
+|*Hypatia* reviewer mode (`lib/hypatia/reviewer.ex`)
+|Symbolic / advisory
+|Runs rule modules over a PR diff and emits inline comments; comments but
+never approves. This is the estate's own PR reviewer and it is not wired to
+any workflow.
+
+|*panic-attack* (`src/assail/analyzer.rs` 8,321 lines, 49 heuristic
+analysers; `src/kanren/` 2,961 lines)
+|Symbolic / symbolic
+|kanren holds 4 derivation rules and 13 suppression rules; `rules.rs` loads a
+catalogue file that does not exist. `aggregate/` folds Agda, Idris2, Rocq,
+Lean, Isabelle and SMT certificates into findings as Backed / Corroborated /
+Contradicted via `@covers` annotations. `attestation/` is an intent →
+evidence → seal hash chain with optional Ed25519. NEUROSYM.a2ml says the
+"neural substrate" is the 49 analysers, i.e. there is none. Idris2 proofs
+(`src/abi/*.idr`, all `%default total`) are checked by no workflow.
+
+|*pons-asinorum* (`crates/pons-core`, `pons-rules`, `pons-cli`)
+|Symbolic / symbolic
+|10 rules (8 T0 heuristic, 2 T1 dataflow for Python), tree-sitter for
+Python, JS, TS, TSX, Rust; SARIF 2.1.0 with `evidenceClass` and `rank`;
+SPECULATIVE findings demoted to `note`. `pons-protocols` is a one-line stub;
+suppression is a 3-line stub. The 18 repository/prose/asset rules are
+fixtures only.
+
+|*ECHIDNA* (`src/rust/`, 120k lines; Julia ranker 12k; 141 `ProverKind`s, 12
+Tier-1 exposed)
+|Type 2 / untrained
+|"The ML suggestion path can only ever accelerate a proof attempt — never
+substitute for one." Certificate checking (Alethe, DRAT/LRAT, TSTP, kernels),
+axiom tracker (`believe_me` → Reject), portfolio cross-check, three arbiters.
+`echidna prove --output json` emits a JCS-canonical result with
+`trust.axioms[]` and `trust.confidence` — always `null` on the prove path
+("receipt, not warrant"). Roadmap: Stage 2 "MRR moves off 0.66 baseline"
+needs a training run; Stage 3b "hypatia strategy loop wired" open.
+
+|*gitbot-fleet* (11 bot slots; 61 `fix-*.sh`; `robot-repo-automaton` Rust
+CLI; `shared-context` crate)
+|Actuator / quarantined
+|`dispatch-runner.sh` exits 78 before reading the manifest;
+`fleet-coordinator.sh` returns 78 from `process_findings`, `deploy_bots`,
+`generate_rules`; `robot-repo-automaton` allows only scan/catalog/status
+(`src/main.rs:153`). Licence refusal gate at `dispatch-runner.sh:356-383`
+is correct and must survive. `sustainabot` slot is empty but graded B.
+481 findings wait in `shared-context/findings/pending/`. `PRIVATE_FARM_TOKEN`
+"CURRENTLY MISSING". No `*_chora.deed`, no `coordination.k9`; NEUROSYM.a2ml
+has an empty `[symbolic-rules]`.
+
+|*cicd-squabbler* (5 crates, 16k Rust; SPARK gate machine)
+|Symbolic / proposes only
+|Proves `Green ⇔ non-empty ∧ all Passed` (`spark/src/gate_machine.ads`);
+`fight` classifies stuck gates into self-win / escalate / assign-owner;
+`--apply` handles one move (strip an `on.*.paths` filter) and never commits;
+no webhook leg. Recognises Hypatia SARIF upload steps
+(`crates/squabble-fight/src/gate_triage.rs:370-411`); proposes an
+`EvidenceStore` (LMDB → VeriSim). Directive says robot-repo-automaton is
+primary and the squabbler "MUST NOT assume hypatia exists".
+
+|*cicd-suite* (30 composite bash actions; `main-estate-audit.yml`)
+|Symbolic / pass-fail only
+|No SARIF, no structured output; `semantic-audit-check` is an echo stub
+whose intended body is `cicd-squabbler audit --semantic`; four prover gates
+(rust, creusot, spark, kanren) with planted controls returning VOID when a
+prover cannot refuse — a good design, "not yet witnessed live".
+
+|*feedback-o-tron* (Elixir MCP server; 14 channel adapters; consent
+capability)
+|Symbolic / no model, human-gated by design
+|MCP tools `research_feedback`, `synthesize_feedback`, `submit_feedback`;
+`submit_feedback` "never sends" — a 256-bit one-time capability is minted
+only after a person types `y` (`consent.ex`). No SARIF, CSAF, YARA or
+machine-consumable intake schema. The 2026-09-07 stocktake names "no model"
+as "the largest gap". Zig FFI references Idris files that do not exist.
+
+|*VeriSimDB* (8 modalities; `verisim-api` 12k Rust; 14 Elixir federation
+adapters; Coq proofs)
+|Store / unreachable
+|Auth `enabled: false` by default; GHCR image built without the `persistent`
+feature; `groove_router()` (which already implements a feedback-o-tron
+receiver at `/.well-known/groove/feedback`) is not mounted;
+`PatternQuery` reads only the ETS written in the _failure_ branch of
+`ScanIngester`, so successfully ingested scans are invisible
+(`elixir-orchestration/lib/verisim/hypatia/scan_ingester.ex:76-90,146-151`).
+`formal/Planner.v` says Q1 is a theorem since 2026-07-28; `ULTRAPLAN` and
+STATE still call it an axiom.
+
+|*oikosbot* (10 crates; DEA; fake-gate detector)
+|Symbolic / policy engine never run
+|`infallible_gate_candidates` is the estate's fake-gate detector and should
+feed CICD-SIGNAL-DISCIPLINE directly. Energy/carbon rows carry no
+calibration receipt. OTel export "does not exist", ASPIRATIONAL.
+
+|*trope-checker* (Idris2/Lean/Agda; Rust fast core)
+|Exact reasoner awaiting a front-end
+|`check : TropeIR → Verdict`; 10/10 conformance; the spec says a static
+analyser MAY emit Trope IR (`spec/calculus.adoc:536`). No production
+front-end exists. CO-1 (`fix`/lfp subject reduction) open.
+
+|*januskey*, *absolute-zero*, *echo-types*, *epistemic-types*,
+*residual-evidence-types*
+|Proof assets
+|januskey: `crates/dashboard-check` fails CI when a hand dashboard diverges
+from STATE — a working claims-vs-evidence gate; E-1 and G-3 OPEN.
+absolute-zero: Certified Null Operations and Observational Null Disclosure,
+Agda + Idris2 + Z3, zero-axiom OND-1..5; it is _not_ the Absolute Zero
+Reasoner (no self-play), and it carries both a `_chora.deed` and a
+`coordination.k9` with critical invariants such as
+`no-new-axioms-to-close-goals` — the model deed-migrated repo in this set.
+Hypatia's `Retraction.idr` is transcribed from residual-evidence-types
+`Revision.agda`: the type work already underwrites a Hypatia invariant.
+
+|*CodeRabbit*, *Codex*, *Copilot review*
+|Type 1 / rationed
+|Outside every estate database. Their "learnings" live in the vendor.
+
+|*.git-private-farm* (private; could not be attached this session because
+its name begins with a dot)
+|Propagation / token missing
+|Characterised from `gitbot-fleet/docs/TOKEN-ARCHITECTURE.adoc` and
+`INBOX-STEWARD-AUTOMATION.adoc`: farm-manifest, dispatch templates, one API
+call fans out across the estate; `PRIVATE_FARM_TOKEN` absent; the inbox
+steward that closes the farm → hypatia loop was neutered 2026-06-16.
+|===
+
+=== The broken seams — the E-R diagrams that are not connected
+
+The user's phrase "our e-r diagrams not connected to each other, or
+unreachable from the outside, or where an additional line could change
+things" is literally true. These are the seams, each with the one line that
+would connect it:
+
+[cols="3,3",options="header"]
+|===
+|Seam |The line
+
+|Hypatia neural ← outcomes
+|`OutcomeTracker` must record `verified` only after a rescan shows the
+finding gone (`gitbot-fleet` audit §7). Until then `record_outcome/2`
+teaches the pools a lie.
+
+|Hypatia → verisim-api (`proof_attempts`, octads, port 8097)
+|Deploy `verisim-api` with `AuthState.enabled = true` and `FEATURES=persistent`;
+point `HYPATIA_VERISIM_URL`; the `ProverRecommender` and the ten
+`hypatia-rules/*.a2ml` rules come alive.
+
+|VeriSimDB `PatternQuery` ← `ScanIngester`
+|Read from the store, not the error-branch ETS.
+
+|VeriSimDB ← feedback-o-tron, ← Groove peers
+|`.route(groove_router())` in `verisim-api/src/lib.rs`.
+
+|panic-attack `/api/v1/scan`
+|The manifest advertises it; the route returns 404 (`src/groove.rs:135-155`).
+
+|SARIF producers → anything
+|One ingest step in `hypatia-scan-reusable.yml` that reads every reporter's
+SARIF from the run's artifacts into the verdict grid _and_ into VeriSimDB
+`compliance-scan` octads. cicd-suite composites gain `--format sarif`.
+
+|Hypatia `Reviewer` → PR
+|A workflow that posts `Reviewer.review_pr/3` comments under the verdict
+grid marker; the estate's own inline reviewer, symbolic, free.
+
+|Hypatia → echidnabot `submitProofObligation`
+|Wired (`lib/echidnabot_obligation.ex`); needs `HYPATIA_ECHIDNABOT_URL` and
+a running echidnabot; the result contract (`echidna.prove.result/1`) needs
+a consumer that writes `proof-status` octads.
+
+|hypatia-rules HYP-S005 → deed-migrated repos
+|The rule globs `STATE.a2ml`, which no longer exists where the deed landed
+(rsr-template-repo, absolute-zero); re-target to `(status)` in
+`<repo>_chora.deed` via `scripts/deed-field.sh`.
+
+|rsr-template-repo deed → contractiles
+|D312 requires a `(contractiles …)` clause; the deed has only
+`:contractiles_required` inside `(policies …)`. `(neurosym)` is empty with
+commented examples. The template is what every new repo copies.
+
+|gitbot-fleet ↔ .git-private-farm
+|`PRIVATE_FARM_TOKEN`; and the farm needs a deed and a `coordination.k9`
+like everything else, which it cannot get while sessions cannot clone it.
+
+|cicd-suite `semantic-audit-check` → cicd-squabbler
+|`cicd-squabbler audit --semantic` does not exist; either build the
+subcommand or retire the stub honestly.
+|===
+
+[[ladder]]
+== The estate ladder: K0–K6 with falsifiers
+
+Kautz's categories classify architectures. To run a programme we need rungs
+that classify *capabilities*, each with a test that would show we are not
+there. These are estate-local definitions; they map to Kautz's types but add
+the operational conditions his taxonomy leaves implicit.
+
+[cols="1,2,4,4",options="header"]
+|===
+|Rung |Kautz |Capability |Falsifier (the test that says "not yet")
+
+|K0
+|—
+|Symbolic checks, enforced. Every reporter emits SARIF; findings carry
+HYP-01 `support`/`evidence`/`level`; the verdict grid is the one PR surface;
+a check that cannot fail is caught (oikosbot `infallible_gate_candidates`).
+|A PR merges with a red grid row; a reporter has zero lifetime failures and
+no `grey` reason; two reporters disagree on a rule ID for one finding.
+
+|K1
+|1
+|Neural proposers outside the loop, _measured_. CodeRabbit/Codex comments
+are classified per PR as reproducible-by-K0 vs genuinely neural, and the
+cost per genuinely-neural comment is tracked.
+|No month-over-month figure for "credit spent on comments a K0 rule could
+have made".
+
+|K2
+|2
+|Symbolic[Neuro] with real data. Hypatia's pools train on rescan-verified
+outcomes; neural demotion changes a dispatch tier at least once a week with
+a recorded reason; `ProverRecommender` MRR beats the 0.66 baseline on
+held-out `proof_attempts`.
+|Replay last quarter's outcomes with and without `enhance_with_neural/1`:
+if dispatch precision is unchanged (±1%) the pools are inert.
+
+|K3
+|3
+|Learned front-ends emit symbolic IR for exact reasoners. A model proposes
+taint source/sink/sanitiser specs that kanren consumes (IRIS pattern);
+proposes `@covers` annotations that `aggregate/` checks; lowers a function
+to Trope IR that trope-checker verdicts.
+|Every proposal is accepted (the exact reasoner is not refusing anything) or
+every proposal is rejected (the front-end is noise).
+
+|K4
+|4 and its inverse
+|Provers and executors generate training data (pons falsifier corpora grown
+by executor-verified self-play; ECHIDNA `proof_attempts`), and learned
+patterns are distilled back into `lib/rules/` modules with a falsifier
+corpus each ("dumb rules from smart learning" executed).
+|No rule in `lib/rules/` can point at the outcome rows it was distilled from.
+
+|K5
+|5
+|Logic in the model. k9 invariants and MUST contractiles become
+differentiable constraints on the confidence estimators (LTN-style), so a
+prediction that violates an invariant is penalised in training, not filtered
+after.
+|Removing the constraint term changes nothing measurable.
+
+|K6
+|6
+|A learned invocation policy for exact reasoning, inside one trained
+system: a small estate-trained model (TRM/HRM-class, trained on estate
+outcomes) decides, per finding, whether to answer from pattern, call kanren,
+call ECHIDNA, or hold for a human — and the decision policy is learned, not
+scripted.
+|The policy, ablated to a fixed rule, performs as well. (If it does, we are
+at K2 with extra steps, and should say so.)
+|===
+
+Honest position: the estate is at *K0 with holes* (SARIF not ingested, IDs
+unstable, fake gates present) and has *K1 unmeasured*. K2 is one quarter
+away once outcomes are true and VeriSimDB is reachable. K3 and K4 are
+where the proof and type repositories pay off. K5 is research with a clear
+recipe. K6 is research without one; the plan reaches for it only after K4
+has produced data to learn a policy from.
+
+== The programme, in waves
+
+Each wave names its deliverables, the repositories they land in, the
+experiment that proves it worked, and what it unblocks. Waves overlap; the
+numbering is dependency order, not calendar.
+
+=== Wave 0 — truth and plumbing (weeks)
+
+. *True outcomes.* `OutcomeTracker.record_outcome/2` accepts `verified` only
+  from a rescan; `dispatch-runner.sh` calls `mix hypatia.record_outcome`
+  with the rescan result; `fleet-coordinator.sh` stops writing `success` for
+  generated-but-unrun scripts. Mark the historical log `unverified` rather
+  than deleting it. _Experiment E1_: replay the log; report the fraction of
+  "success" rows a rescan would have confirmed.
+. *VeriSimDB reachable.* Build the GHCR image with `FEATURES=persistent`;
+  make `AuthState` configurable and default-on outside localhost; mount
+  `groove_router()`; fix `PatternQuery`; implement or honestly remove
+  transactions (#30). Deploy one instance (owner decision: Fly.io as the
+  Intentfile says, or a stapeln bundle on owned hardware — see
+  <<decisions>>). _Experiment E2_: `mix hypatia.rsr_score` against the live
+  store for 10 pilot repos; the ten `hypatia-rules` rules fire.
+. *Stable identifiers.* One PA table, generated from `src/types.rs`, consumed
+  by `sarif.rs`, `aggregate/mod.rs`, Hypatia `pattern_registry.ex` and the
+  verdict grid; a test that fails when they drift (the januskey
+  `dashboard-check` pattern, reused).
+. *SARIF in, grid out.* The reusable ingests every reporter's SARIF; cicd-suite
+  composites emit SARIF; fleet bots' report-backs (cipherbot, seambot,
+  accessibilitybot, oikosbot already emit it) become grid rows.
+  _Experiment E3_: on 20 recent PRs across 5 repos, count distinct findings
+  visible on the grid vs in raw logs.
+. *Deed hygiene for the machine.* Add the `(contractiles …)` clause and a
+  populated `(neurosym)` to `rsr-template-repo_chora.deed`; re-target
+  HYP-S005; give gitbot-fleet, hypatia, feedback-o-tron, cicd-squabbler and
+  panic-attack their deeds (one each, D312) so the ladder has an address per
+  repo to record its rung in. No A2ML is created or extended.
+
+=== Wave 1 — the formulaic eater (one quarter, overlapping Wave 0)
+
+Goal: every row of the "checks to take back" table is an estate check with
+SARIF output and HYP-01 evidence, so the paid reviewers can be confined to
+the neural slice.
+
+Three ways to build it; rated by the owner's two axes.
+
+[cols="1,3,2,2",options="header"]
+|===
+|Option |Shape |Elegance / correctness |Dependability / privacy
+
+|*A — pons-native (the elegant arm)*
+|Port the 18 deferred rules from branch `172f455`, add the docstring,
+consistency-pair and container-file rules as tree-sitter queries, ship
+`pons catalogue` so docs stop drifting from code. One scanner, one evidence
+model, one SARIF shape.
+|Highest. Everything carries an evidence class and a falsifier corpus;
+nothing is a wrapper.
+|Medium. Grammar coverage is the long pole (Elixir, Zig, Julia, Idris2,
+AsciiDoc grammars to pin); months before parity with 59 linters.
+
+|*B — OSS linter container under a SARIF adapter*
+|MegaLinter (or a hand-picked set: hadolint, yamllint, actionlint,
+markdownlint, lychee, gitleaks, osv-scanner, jscpd, lizard, commitlint)
+in a Chainguard image, each output normalised to SARIF with an estate
+`evidenceClass: HEURISTIC` and posted through reviewdog-style diff
+filtering into the grid.
+|Low. It reproduces what CodeRabbit does and inherits every linter's own
+false-positive profile; no estate semantics.
+|Highest. Mature tools, no model, runs on our runners, days to ship. Note
+MegaLinter is AGPL — fine to _run_, not to vendor into an MPL repo.
+
+|*C — hybrid (recommended)*
+|B for commodity rows (formatting, Containerfile syntax, YAML, external link
+rot, secrets, SCA, duplication); A for estate-semantic rows (docstrings in
+estate languages, consistency pairs, template placeholders, internal links
+with anchors, deed/k9/Guix sanity, prose-vs-code contradictions). The
+adapter is a single `scripts/sarif-normalise.jq` in cicd-suite; pons owns
+every rule that needs a parse.
+|High where it matters: the rules that encode estate doctrine live in pons
+with evidence classes; commodity checks are not reimplemented.
+|High: ships in weeks, degrades gracefully (a missing linter is `orange`,
+never green), no vendor data path.
+|===
+
+Recommendation: *C*, departing from the elegant arm A for one reason: A
+alone leaves CodeRabbit in place for a further two quarters, and the credit
+leak is the problem being solved. C ships the symbolic floor in weeks and
+grows pons underneath it; every B row is a candidate to migrate to A once
+pons has the grammar.
+
+Deliverables:
+
+* pons: `missing-doc-comment`, `consistency-pair`, `document-reference-*`,
+  `template-placeholder`, `readme-language-contradiction`,
+  `manifest-license-contradiction` (detect-only), `pons catalogue`; Elixir,
+  Zig, Julia grammars pinned; `--diff-base` scoping.
+* cicd-suite: `--format sarif` on every composite; the normaliser;
+  Containerfile, Guix, commit-shape, PR-convention checks.
+* standards: `hypatia-scan-reusable.yml` ingest; `.coderabbit.yaml` profile
+  that disables bundled linters and pre-merge docstring checks (`reviews.
+  tools.*.enabled: false`, `pre_merge_checks.docstrings.mode: off`) and
+  restricts review to source paths; `path_filters` excluding `.machine_
+  readable/`, workflows and docs, where the estate's own checks are
+  stronger. The same for Codex via its repo settings.
+* gitbot-fleet: unquarantine a *named allowlist* of idempotent, rescan-
+  verified fix scripts (first ten: `fix-workflow-timeout-minutes`,
+  `fix-workflow-permissions`, `fix-unpinned-actions`,
+  `fix-stale-template-placeholders`, `fix-tracked-package-lock`,
+  `fix-gitattributes-eol`, `fix-dependabot-coverage`, `fix-http-to-https`,
+  `fix-tmp-paths`, `fix-shell-quoting`) behind the Kin gate, in `review`
+  tier (draft PRs) only, never `auto_execute`, with the licence refusal gate
+  untouched. Everything else stays at exit 78 until the policy interpreter
+  exists (fleet ULTRAPLAN Wave 1, #264).
+
+_Experiment E4 (the credit experiment)_: for the last 50 PRs in standards,
+gitbot-fleet and panic-attack, classify every CodeRabbit and Codex comment
+as (a) reproducible by a Wave-1 check, (b) genuinely neural and useful,
+(c) genuinely neural and noise. Report counts and the review-credit spent
+per (b). Re-run monthly. This is the number that decides whether to keep
+paying.
+
+=== Wave 2 — learning that is real (one to two quarters)
+
+* Fix ESN training-data schema drift; retrain all eight pools on
+  rescan-verified outcomes only; publish `mix hypatia.strategy_effectiveness`
+  as a grid row.
+* Promote neural output from demote-only to *tier recommendation with
+  reason*, still symbolic-gated by Kin; the Kin gate's "neural consensus"
+  check becomes real.
+* ECHIDNA Stage 2: a training run on estate `proof_attempts` so MRR leaves
+  0.66; Stage 3b: Hypatia's `proof_strategy_selection.ex` reads
+  `ProverRecommender`.
+* First executed distillation: pick the three most frequent PA categories
+  with no recipe, mine `observed-patterns.jsonl` for the co-occurring file
+  features, write each as a `lib/rules/` module *with a falsifier fixture*,
+  and record the outcome rows it came from in the module doc. This is K4's
+  inverse arrow, done once, measurably.
+* _Experiment E5_: the K2 replay (with vs without neural); _E6_: held-out MRR.
+
+=== Wave 3 — proof routes (two quarters, in parallel with Wave 2)
+
+This is where the type and trope work stops being adjacent and becomes
+load-bearing.
+
+* *Obligations from findings.* Every PA category gets a declared obligation
+  shape (panic-attack `PROOF-NEEDS.adoc` already lists bridge reachability
+  and kanren taint soundness as open). Hypatia routes it through
+  `EchidnabotObligation`; ECHIDNA's result lands as a `proof-status` octad;
+  `aggregate/` reconciles it against the finding via `@covers`; HYP-01 level
+  becomes `sound` only on a confirming mechanical re-check. This closes the
+  loop the Verdict/Retraction ABI was written for.
+* *Trope IR front-end.* A pons T2 rule class lowers protocol/typestate
+  findings (`protocols/linear-egg.toml` is the seed) to Trope IR;
+  trope-checker returns `p-sufficient`/`p-insufficient` with a witness edge.
+  First K3 instance; the falsifier is the one in the ladder table.
+* *Loss-with-residue as the evidence algebra.* echo-types and
+  residual-evidence-types already underwrite `Retraction.idr`. Extend: a
+  finding's `evidence` becomes a residue term, quarantine is retraction,
+  and the grid's "since previous revision" column is a residue diff rather
+  than a count diff.
+* *absolute-zero as the gate for "does nothing".* CNO/OND certificates for
+  the fix scripts in the allowlist: a fix script that is proven to change
+  nothing outside its declared files is a candidate for `auto_execute`.
+  This is the principled route out of quarantine.
+* *januskey for reversibility.* Every fleet mutation goes through
+  `reversible-core` so `batch_rollback.ex` has something real to call.
+* _Experiment E7_: for 100 findings in three categories, fraction whose
+  obligation ECHIDNA closes, fraction refuted, fraction indeterminate; time
+  per obligation.
+
+=== Wave 4 — feedback-o-tron as the bus (two quarters)
+
+feedback-o-tron is the right place for the human and machine conversations
+along a supply chain, and its consent design is the right constraint. What
+it lacks is a machine-readable intake and an outbound vocabulary.
+
+* *Intake:* accept SARIF 2.1.0 (findings), CSAF 2.0 / OpenVEX (advisories
+  and "not affected" statements), in-toto attestation bundles (from
+  panic-attack's seal, from stapeln's cerro-torre), and Groove
+  `compliance.finding.new` signals. Each becomes a `Feedback` draft with
+  provenance.
+* *Outbound to machines:* publish the estate's own detections as
+  interchange artefacts: Semgrep YAML and YARA-X rules for the pattern
+  subset of Hypatia/pons rules (YARA is in maintenance in favour of YARA-X;
+  target the latter), Sigma for workflow-log patterns, OpenVEX for the
+  phantom-dependency verdicts panic-attack's bridge already classifies as
+  Informational. A downstream consumer that runs our rules gets our findings
+  without running our stack.
+* *Outbound to humans:* keep the 14 channels; add an issue-template
+  hydration for SARIF-sourced drafts; keep `submit_feedback` human-gated.
+* *The model question:* the "largest gap" is honest, but the first model in
+  feedback-o-tron should be a *classifier*, not a generator: usefulness /
+  hostility / duplicate, trained on the estate's own issue history, small,
+  local. Generation of prose can stay with a rented model behind the
+  consent gate for now.
+* VeriSimDB's `groove.rs` feedback receiver becomes the store side.
+* _Experiment E8_: round-trip a panic-attack SARIF through feedback-o-tron to
+  a draft issue on a sandbox repo, with the attestation chain intact, and
+  verify the seal.
+
+=== Wave 5 — git-logistics-office and the fleet refined (ongoing)
+
+The farm becomes an *office* when it stops being a propagation engine and
+becomes the place where estate-wide intent is turned into bounded,
+reversible, attested work orders. Concretely:
+
+* *Rename and re-home.* A repository name that begins with a dot cannot be
+  attached by agent sessions; the office needs a plain name and a deed.
+* *Work orders as data.* The standards reorg already writes work orders
+  (`docs/reorg/2026-10-14-tidy/WORK-ORDERS-2026-10-19.adoc`) with authority,
+  acceptance and escalation conditions. Make that shape a k9 contract the
+  office emits and the fleet consumes; the policy interpreter the fleet
+  quarantine demands (#264) is this contract's evaluator.
+* *One executor.* Collapse `fleet-coordinator.sh`, `run-fleet.sh`,
+  `dispatch-runner.sh` and the Rust CLI into one path: office work order →
+  Kin gate → `robot-repo-automaton` (Rust) → rescan → outcome. Shell fix
+  scripts become `robot-repo-automaton` fixers or stay as leaves it calls.
+* *Thin bots, as the invariant says.* Each bot is a reporter with a SARIF
+  row and a report-back; `sustainabot`'s empty slot is either filled by
+  oikosbot's SARIF report-back or deleted from `READINESS.adoc`.
+* *Local and off-estate.* `robot-repo-automaton scan` plus `pons scan` plus
+  `panic-attack assail` already run anywhere; package them as one `just
+  doctor`-style local pre-push (Codacy Guardrails does exactly this with an
+  MCP server, without a model), so an external developer gets the estate's
+  K0 floor on their laptop. This is also how pons "raises the general level"
+  beyond the estate: a single binary, SARIF out, evidence classes in.
+* *Squabbler gets its hands.* Implement the remaining self-wins
+  (required-context reconcile, reusable re-pin) as office work orders;
+  the webhook leg lives in the office, not in the squabbler.
+
+=== Wave 6 — new technology, placed honestly
+
+* *NCM.* The acronym most plausibly refers to *Next-Concept Modeling*
+  (Stanford Hazy Research / Together AI, arXiv:2610.14162, 12 October 2026):
+  a two-stage generation scheme — a multiscale residual VQ-VAE tokenises text
+  into coarse-to-fine "concept" codes, and a transformer generates one level
+  at a time, all codes in a level in parallel. It is post-autoregressive,
+  not post-transformer, and its claims (10–31× faster than masked-diffusion
+  LMs at matched quality, 4–5× fewer training tokens) are self-reported
+  with no replication yet. Its relevance here is narrow: faster _generation_
+  of prose (summaries, draft issues) if the estate ever hosts its own
+  generator. It does not change the symbolic plan. (If "NCM" meant
+  something else, the second candidate is "Neural Code Models", the SE
+  research term for any neural model over code, which is not a new
+  architecture.)
+* *Small reasoning models.* The Hierarchical Reasoning Model (27M
+  parameters) and the Tiny Recursive Model (7M) learn puzzle-class reasoning
+  from ~1k examples. They are the right size for a K6 _invocation policy_
+  trained on estate outcomes, and small enough to run on a CI runner. They
+  are not code reviewers.
+* *Executor-verified self-play.* The Absolute Zero Reasoner paradigm (one
+  model proposes and solves its own tasks, rewarded by an executor) is a
+  K4 data generator for pons: propose candidate falsifier programs for a
+  rule, keep the ones the rule and the executor disagree on. No external
+  data, no vendor.
+* *LLM proposes, solver checks.* Lemur/LLMDFA/IRIS-style loops are the K3
+  recipe: a rented model proposes taint specs or invariants; kanren,
+  ECHIDNA or Z3 checks; only checked results enter the store. The rented
+  model never touches the verdict.
+* *Diffusion and SSM code models* (Mercury, Gemini Diffusion, Mamba-3,
+  Titans) matter only if the estate hosts a generator; defer.
+
+=== Observability, templates, scaffolding — the carriers
+
+* *Deed refinement.* The deed is the right substrate and the grammar is
+  normative (`1-formats/deed/spec/abnf/deed.abnf`), but the spec README
+  still says "Nothing in this document is deployed" and the typing chapter
+  is PROPOSED. Add to the vocabulary: a `(ladder :rung K2 :falsifier "…"
+  :measured "2026-…")` clause under `(neurosym)`, so each repo records where
+  it stands and the grid can show it. The `(contractiles …)` clause gap in
+  the template is Wave 0.
+* *Telemetry standard.* There is none (Prometheus appears in examples;
+  OpenTelemetry only in oikosbot's aspirational config). Write a short
+  `3-practice/OBSERVABILITY-POLICY.adoc`: every long-running estate service
+  exposes `/metrics` (Prometheus text) and `/health`; traces are OTLP;
+  the names of the five counters every reporter must emit (findings by
+  level, outcomes by verification state, dispatch by tier, gate colour by
+  lane, cost per neural comment). PanLL remains the lens; VeriSimDB remains
+  the store.
+* *scaffoldia / launch-scaffolder / reposystem / stapeln.* scaffoldia's
+  engine does not exist (5%); launch-scaffolder has a working deed parser in
+  Rust (`deed` module) that scaffoldia should reuse rather than reinvent;
+  reposystem's `rsr-certified` has the estate's only live `/metrics`; stapeln
+  can emit the whole verified-deployment bundle for VeriSimDB (`compose.toml`,
+  `.gatekeeper.yaml`, `manifest.toml`, `ct-build.sh`) and its
+  `supply_chain_analyzer.ex` already maps pipelines to SLSA levels. Use
+  stapeln for the Wave-0 deployment and it becomes the first stack it
+  designed that actually runs.
+
+== Experiments and benches before bigger work
+
+Per the owner's standing preference, nothing above Wave 1 should be
+committed to until these have numbers.
+
+[cols="1,3,3,2",options="header"]
+|===
+|Id |Question |Method |Decides
+
+|E1
+|How much of the historical fix-outcome "success" is true?
+|Sample 200 rows from `gitbot-fleet/shared-context/learning/fix-outcomes.jsonl`;
+rescan the repo at the recorded commit; count confirmations.
+|Whether any current neural weight is salvageable, or all pools restart.
+
+|E2
+|Does the standards rule set fire against a live store?
+|Deploy `verisim-api` (persistent, auth on); ingest 10 pilot repos' scans;
+run the ten `hypatia-rules` rules.
+|Wave-0 deployment target; whether `hypatia-rules` needs re-targeting.
+
+|E3
+|How many findings are invisible today?
+|20 PRs × 5 repos: findings in raw logs vs on the grid.
+|Priority of SARIF ingest.
+
+|E4
+|What are we paying for?
+|Classify every CodeRabbit/Codex comment on the last 50 PRs into
+reproducible-by-K0 / neural-useful / neural-noise; cost per neural-useful.
+|Whether to keep, restrict or cancel each vendor.
+
+|E5
+|Do the neural pools change anything?
+|Replay a quarter's dispatches with and without `enhance_with_neural/1`;
+precision of tier assignment against rescan truth.
+|Whether K2 is reached.
+
+|E6
+|Does ECHIDNA's ranker learn?
+|Train on estate `proof_attempts`; held-out MRR vs 0.66.
+|Stage 2/3 investment.
+
+|E7
+|Can findings be discharged?
+|100 findings × 3 categories through `EchidnabotObligation`; closed /
+refuted / indeterminate; seconds per obligation.
+|Which PA categories get obligation shapes first.
+
+|E8
+|Does the bus round-trip?
+|SARIF → feedback-o-tron → draft issue with attestation seal verified.
+|Wave-4 intake design.
+
+|B1
+|What does the floor cost?
+|Bench pons + the SARIF adapter on the 20 largest estate repos: wall time,
+findings per rule, false-positive rate on a 100-finding hand-labelled sample.
+|Which Wave-1 rules ship at `warn` vs `error`.
+|===
+
+== Beyond this repository
+
+Things this plan needs that are not in `hyperpolymath/standards`, for the
+estate's tracking list:
+
+* *Vendor accounts:* restrict CodeRabbit to the neural slice (`.coderabbit.
+  yaml` lives per repo, but the org-level "Organization UI" profile used on
+  standards#1295 overrides it — change it there); decide Codex's trigger
+  policy; SonarCloud and Semgrep Cloud projects exist per repo and are
+  mostly idle on estate languages.
+* *Secrets and tokens:* `PRIVATE_FARM_TOKEN`, `VERISIM_API_TOKEN`,
+  `HYPATIA_ECHIDNABOT_URL`, `VERISIMDB_PAT` (used by
+  `panic-attack/.github/workflows/scan-and-report.yml`).
+* *Hosting:* one VeriSimDB instance; one echidnabot; optionally one
+  feedback-o-tron HTTP intake (today loopback only).
+* *The farm's name.* Rename `.git-private-farm` before anything else can
+  read it.
+* *Research to watch:* SARIF 2.2/3.0 at OASIS; OpenVEX 0.2; CycloneDX 1.7
+  (ECMA-424 2nd ed.); YARA-X; the NCM paper's first independent replication;
+  TRM/HRM follow-ups.
+* *Licences to respect:* MegaLinter and Renovate are AGPL (run, do not
+  vendor); Semgrep's registry rules carry the Semgrep Rules License v1.0
+  since December 2024 (Opengrep is the LGPL fork); the licence refusal gate
+  in `dispatch-runner.sh` and the no-sweep rule stay exactly as they are.
+
+[[decisions]]
+== Decisions for the owner
+
+Put through the selector, not as prose; recorded here so the ledger has the
+arms.
+
+. *Wave-1 build shape.* A pons-native (elegant); B OSS-linter adapter
+  (dependable); C hybrid (recommended, departs from A for speed of closing
+  the credit leak).
+. *Paid neural reviewers.* Keep CodeRabbit restricted to the neural slice
+  and measure (recommended); cancel now and rely on Codex only; leave both
+  as they are until E4 reports.
+. *VeriSimDB deployment target.* stapeln bundle on owned hardware
+  (recommended: dogfoods the container stack, data stays home); Fly.io per
+  the Intentfile; stay on git flat files another quarter.
+. *Unquarantine policy.* Named allowlist of ten rescan-verified fix scripts
+  in `review` tier behind Kin (recommended); build the full policy
+  interpreter first and keep exit 78 until then; unquarantine nothing until
+  absolute-zero CNO certificates exist for a script.
+
+[[appendix-tools]]
+== Appendix A — per-vendor feature inventory (S = symbolic, N = neural, H = hybrid)
+
+.SonarQube Cloud / Server
+[cols="3,1,4",options="header"]
+|===
+|Feature |S/N/H |Notes
+|Bug and code-smell rules, ~6k, 40+ languages |S |Proprietary AST analysers
+|Taint analysis (interprocedural) |S |Cloud/Server only, not Community Build
+|Security hotspots |S |Deterministic flags, manual review workflow
+|Secrets detection |S |Regex and entropy
+|Quality gates, Clean-as-You-Code |S |Threshold conditions; staff call aggregate cognitive-complexity gate conditions "arbitrary"
+|Duplication (CPD), cyclomatic + cognitive complexity |S |OSS equivalents: jscpd, PMD CPD, lizard, radon, eslint-plugin-sonarjs
+|Coverage ingestion |S |lcov, Cobertura, JaCoCo
+|PR decoration, technical-debt ratings |S |Fixed remediation-cost formula
+|SCA + licence policies |S |"Advanced Security"
+|AI CodeFix |N |GPT-4o / Claude / Bedrock / self-hosted; a select rule set in Java, JS, TS, Python, HTML, CSS, C#, C++
+|AI Code Assurance |H |Heuristic detection of AI-generated code + symbolic gate
+|MCP server |S |Plumbing
+|===
+
+.Codacy
+[cols="3,1,4",options="header"]
+|===
+|Feature |S/N/H |Notes
+|Static analysis, 40+ languages |S |ESLint, Semgrep, PMD, Checkstyle, RuboCop, Pylint/Bandit, ShellCheck, Hadolint, Checkov, Trivy
+|Duplication, complexity, file metrics |S |
+|Coverage ingestion and gates |S |
+|SAST, secrets, IaC, SCA, licence |S |Semgrep, Trivy, Checkov
+|Smart False-Positive Triage |N |OpenAI models; Business tier; enabled via support
+|"AI Reviewer" |N |Third-party descriptions only; not verified against Codacy docs
+|Codacy Guardrails (IDE + MCP) |H |"Not a large language model": local CLI scan of agent output, fed back to the user's agent
+|===
+
+.Codeac.io
+[cols="3,1,4",options="header"]
+|===
+|Feature |S/N/H |Notes
+|Per-commit static analysis |S |ESLint, PMD, RuboCop, Detekt and others
+|Security linters |S |Bandit, tfsec, OSV-Scanner
+|IaC/config lint |S |Docker, Terraform, Kubernetes, Bash, CloudFormation, Ansible
+|Duplication, complexity, unused code |S |
+|AI features |— |None found; thinnest-sourced vendor, few public reviews since 2021
+|===
+
+.CodeRabbit
+[cols="3,1,4",options="header"]
+|===
+|Feature |S/N/H |Notes
+|Line-by-line review comments |N |Core
+|PR walkthrough, changed-files table |N |
+|Sequence diagrams (Mermaid) |N |Extraction is neural; rendering symbolic
+|Poem |N |Novelty
+|Suggested labels / reviewers |H |
+|Pre-merge checks: docstring coverage |S |A function count; `mode: warning`, threshold 80 estate-wide
+|Pre-merge checks: title, description, linked issue, custom NL checks |N |
+|Finishing touches: docstring and unit-test generation |N |Both failed on gitbot-fleet#615
+|Code graph analysis |H |Symbolic graph as LLM context
+|Learnings |N |Vendor-stored; silently fail if data retention off; stale ones removed by chat
+|Path instructions / filters |S+N |Glob → NL guidance
+|59 bundled OSS linters |S |ruff, biome, eslint, flake8, pylint, phpstan, golangci-lint, clippy, cppcheck, swiftlint, detekt, pmd, rubocop, brakeman, luacheck, sqlfluff, htmlhint, buf, regal, shellcheck, hadolint, yamllint, actionlint, markdownlint, languagetool, semgrep, gitleaks, checkov, trivy, osv-scanner, dotenv-linter, ast-grep, …
+|Linter-output triage |H |
+|Security add-on, IDE/CLI review, agentic chat |N |
+|===
+
+.Semgrep
+[cols="3,1,4",options="header"]
+|===
+|Feature |S/N/H |Notes
+|Pattern/AST rules (CE, LGPL-2.1) |S |Intraprocedural taint in CE
+|Community rules registry |S |Semgrep Rules License v1.0 since Dec 2024; Opengrep fork
+|Pro engine: interfile taint |S |Proprietary; free ≤10 contributors
+|Supply Chain: reachability, SBOM, licence, malicious deps |S |Rust gets version-only reachability
+|Secrets with live validation |S |
+|Assistant: auto-triage |N |Vendor: ~60% auto-triaged, 96% agreement
+|Assistant: autofix PRs, Memories, component tagging, NL rule drafting |N |
+|SARIF/JSON export |S |Full fields Platform-only after relicense
+|===
+
+.Codecov
+[cols="3,1,4",options="header"]
+|===
+|Feature |S/N/H |Notes
+|Coverage ingestion and merge |S |
+|Project and patch coverage statuses |S |
+|Flags, carryforward flags, components |S |
+|Bundle analysis |S |
+|Test analytics: failed/flaky, slowest |S |Statistical over JUnit XML
+|AI PR review / test generation |N |Superseded by Sentry Seer ($40/active contributor)
+|===
+
+.Others, briefly
+[cols="2,3,1",options="header"]
+|===
+|Tool |What |Core
+|Qlty |Rust CLI over 70+ plugins; cloud gates; AI autofixes |S (+N)
+|DeepSource |20+ proprietary analysers; Autofix AI single-file |S (+N)
+|Snyk Code |DeepCode learned rule mining + symbolic dataflow; AI Fix |H
+|Dependabot / Renovate |Version and security updates; Renovate has regex grouping and built-in automerge; AGPL |S
+|Greptile |Whole-repo-indexed LLM reviewer |N
+|Cursor Bugbot |Bug-only LLM reviewer; usage-billed since May 2026 |N
+|GitHub Copilot code review |13 premium requests per review → AI Credits |N
+|Graphite |Stacked PRs + agent reviewer; Cursor acquiring |N + S
+|Qodo Merge / PR-Agent |OSS self-host + hosted multi-agent review |N
+|Ellipsis, Bito |NL style guides; review line quotas |N
+|Trunk Check |Linter orchestrator, hold-the-line, flaky quarantine, merge queue |S
+|MegaLinter |100+ linters in one container; AGPL |S
+|reviewdog, Danger |Post linter output as PR comments; scriptable PR-convention rules |S
+|===
+
+.Pricing (October 2026; verify on vendor pages before quoting)
+[cols="2,2,4",options="header"]
+|===
+|Tool |Model |Tiers
+|SonarQube Cloud |Per LOC (private); free public |Team "from $34/mo" ≤100k LOC (promo); Enterprise quote
+|Codacy |Per seat |Team $18/dev/mo annual; Business custom; Guardrails free
+|Codeac |Per seat |Pro ≈$21/user/mo annual
+|CodeRabbit |Per seat + agent minutes |Essentials $24, Team $48 (8 reviews/hr), Advanced $72/dev/mo annual; self-host 500-seat minimum
+|Semgrep |Per contributor per module |Teams ≈$30 Code + $30 Supply Chain + $15 Secrets; free ≤10 contributors
+|Codecov |Per seat + uploads |Team $5, Pro $12/user/mo; Seer $40/active contributor
+|Qlty / DeepSource / Snyk |Per dev |$24 / $24 / $25 per dev/mo
+|Greptile / Bugbot / Copilot review |Seat / per run / credits |$30/dev; ≈$1–1.50 per run; 13 premium requests per review
+|Trunk / MegaLinter / reviewdog / Danger / Renovate |Seat / free |Trunk ≈$18/seat; the rest free (MegaLinter and Renovate AGPL)
+|===
+
+[[sources]]
+== Sources
+
+Vendor and literature claims above rest on these, fetched by search
+2026-10-19 (the session proxy refused direct fetches of arxiv.org and several
+vendor sites, so paper-level claims should be spot-checked against the PDFs
+before being quoted externally).
+
+*Kautz and the taxonomy.* Kautz, "The Third AI Summer", AI Magazine 43(1)
+2022, https://ojs.aaai.org/index.php/aimagazine/article/view/19122 ·
+Kokel, "The 6 Types of Neuro-Symbolic Systems" (2020 digest) ·
+Sarker, Zhou, Eberhart, Hitzler, "Neuro-Symbolic AI: Current Trends",
+https://arxiv.org/abs/2105.05330 · Garcez & Lamb, "Neurosymbolic AI: the
+3rd Wave", https://arxiv.org/abs/2012.05876 · van Bekkum et al., "Modular
+Design Patterns for Hybrid Learning and Reasoning Systems",
+https://arxiv.org/abs/2102.11965 · Hitzler et al., National Science Review
+9(6) 2022, https://pmc.ncbi.nlm.nih.gov/articles/PMC9166567 · Badreddine et
+al., Logic Tensor Networks, https://arxiv.org/abs/2012.13635 · Manhaeve et
+al., DeepProbLog, https://arxiv.org/abs/1805.10872.
+
+*NCM and new architectures.* Next-Concept Modeling,
+https://arxiv.org/abs/2610.14162 and
+https://hazyresearch.stanford.edu/blog/2026-10-12-ncm · Neural Code Models
+(Palacio et al.), https://arxiv.org/abs/2302.03788 · HRM
+https://arxiv.org/abs/2506.21734 · TRM https://arxiv.org/abs/2510.04871 ·
+Absolute Zero Reasoner https://arxiv.org/abs/2505.03335 · Mamba-3
+https://arxiv.org/abs/2603.15569 · Titans https://arxiv.org/abs/2501.00663 ·
+Energy-Based Transformers https://arxiv.org/abs/2507.02092 · CTM
+https://arxiv.org/abs/2505.05522 · Mercury https://arxiv.org/abs/2506.17298 ·
+Gemini Diffusion
+https://blog.google/technology/google-deepmind/gemini-diffusion/ ·
+AlphaProof, Nature 2025, DOI 10.1038/s41586-025-09833-y · AlphaEvolve
+https://deepmind.google/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/
+· LILO https://arxiv.org/abs/2310.19791.
+
+*Neurosymbolic static analysis.* IRIS (ICLR 2025),
+https://github.com/iris-sast/iris · QLCoder https://arxiv.org/abs/2511.08462 ·
+ARQ https://arxiv.org/abs/2608.20637 · BugLens https://arxiv.org/abs/2504.11711
+· InferFix https://arxiv.org/abs/2303.07263 · Lemur
+https://arxiv.org/abs/2310.04870 · LLMDFA https://arxiv.org/abs/2402.10754 ·
+AutoVerus https://arxiv.org/abs/2409.13082 · Clover
+https://popl24.sigplan.org/details/dafny-2024-papers/1/CLOVER-Closed-Loop-Verifiable-Code-Generation
+· Vericoding https://github.com/Beneficial-AI-Foundation/vericoding · Baldur
+https://arxiv.org/abs/2303.04910 · APOLLO https://arxiv.org/abs/2505.05758 ·
+Copilot Autofix for CodeQL,
+https://docs.github.com/en/code-security/concepts/code-scanning/copilot-autofix-for-code-scanning
+· AWS Automated Reasoning checks,
+https://aws.amazon.com/about-aws/whats-new/2025/08/automated-reasoning-checks-amazon-bedrock-guardrails.
+
+*Interchange formats.* SARIF 2.1.0
+https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/ · YARA / YARA-X
+https://github.com/virustotal/yara · Sigma https://github.com/SigmaHQ/sigma ·
+OpenSCAP https://github.com/OpenSCAP/openscap · CSAF 2.0
+https://docs.oasis-open.org/csaf/csaf/v2.0/os/csaf-v2.0-os.html · OpenVEX
+https://github.com/openvex/spec · SPDX 3.0.1
+https://spdx.github.io/spdx-spec/v3.0.1/ · CycloneDX
+https://cyclonedx.org/specification/overview/ · in-toto attestation
+https://github.com/in-toto/attestation/blob/main/spec/README.md · SLSA
+https://slsa.dev/spec/v1.0/.
+
+*Vendors.* Sonar: https://www.sonarsource.com/products/SonarQube/,
+https://docs.sonarsource.com/sonarqube-cloud/standards/managing-rules/security-related-rules,
+https://www.sonarsource.com/blog/ai-codefix-is-now-generally-available/,
+https://community.sonarsource.com/t/quality-gate-failed-because-cognitive-complexity/7826,
+https://g2.com/products/sonarqube/reviews · Codacy:
+https://docs.codacy.com/getting-started/supported-languages-and-tools,
+https://docs.codacy.com/codacy-ai/codacy-ai/,
+https://blog.codacy.com/introducing-codacy-guardrails,
+https://docs.codacy.com/release-notes/cloud/cloud-2025-10/,
+https://www.g2.com/products/codacy/reviews · Codeac:
+https://europeanpurpose.com/tool/codeac, https://ca.trustpilot.com/review/codeac.io
+· CodeRabbit: https://docs.coderabbit.ai/tools/reference,
+https://docs.coderabbit.ai/reference/configuration.md,
+https://docs.coderabbit.ai/knowledge-base/learnings,
+https://kb.coderabbit.ai/articles/1240714200-troubleshoot-learnings-do-not-appear-in-the-learnings-dashboard-after-coderabbit-says-it-stored-them,
+https://www.usagepricing.com/blueprint/coderabbit,
+https://aws.amazon.com/marketplace/reviews/reviews-list/prodview-oaef6upnscxge,
+https://codepulsehq.com/guides/ai-code-review-bots-2026 · Semgrep:
+https://docs.semgrep.dev/semgrep-pro-vs-oss,
+https://docs.semgrep.dev/semgrep-assistant/overview,
+https://semgrep.dev/blog/2025/announcing-ai-noise-filtering-and-triage-memories,
+https://www.darkreading.com/application-security/code-scanning-tool-s-license-at-heart-of-security-breakup,
+https://g2.com/products/semgrep/reviews · Codecov:
+https://docs.codecov.com/docs/carryforward-flags,
+https://about.codecov.io/product/feature/test-analytics,
+https://docs.sentry.io/product/ai-in-sentry/seer/ai-code-review/,
+https://community.codecov.io/t/project-coverage-drops-1-and-unable-to-pass-the-check/104
+· Others: https://qlty.sh/pricing, https://snyk.io/platform/deepcode-ai/,
+https://cursor.com/en/bugbot,
+https://docs.github.com/en/copilot/reference/copilot-billing/request-based-billing-legacy/copilot-requests,
+https://docs.trunk.io/code-quality/overview/how-does-it-work,
+https://news.ycombinator.com/item?id=46777079,
+https://news.ycombinator.com/item?id=46766961,
+https://docs.mend.io/wsk/common-practices-for-renovate-configuration.
+
+*Estate evidence* is cited inline by repo-relative path; the repositories
+read were hyperpolymath/{standards, hypatia, gitbot-fleet, panic-attack,
+pons-asinorum, verisimdb, rsr-template-repo, cicd-squabbler, cicd-suite,
+feedback-o-tron, echidna, oikosbot, januskey, absolute-zero, trope-checker,
+scaffoldia, launch-scaffolder, reposystem, MetaManifold-WebUI} and
+metadatastician/stapeln at their 2026-10-19 heads; `.git-private-farm` could
+not be read.
