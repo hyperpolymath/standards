@@ -2,14 +2,14 @@
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 = Work orders, 2026-10-19: the first execution wave
 Jonathan D.A. Jewell (hyperpolymath)
-v1.4.3, 2026-10-19
+v1.5.0, 2026-10-19
 :toc: left
 :toclevels: 2
 :sectnums:
 :icons: font
 
 [.lead]
-Eight work orders for a sonnet-tier executor, planned at the top tier so
+Ten work orders for a sonnet-tier executor, planned at the top tier so
 the executor never has to rediscover a fact. Every fact below was measured
 against `main` at `75bd5994` on 2026-10-19, and re-checked against every
 review posted on this file's pull request. Each order names its goal, its authority, the
@@ -724,6 +724,113 @@ bash scripts/run-mustfile.sh .machine_readable/contractiles/must/Mustfile.a2ml  
 than a self-reference (move it to bucket B), or if any bucket B tool
 is red on `main` because of the rename (then the owner's answer is
 urgent, and the PR body says which gate is red).
+
+== WO-9: the template's contractiles conform to K9 v1.0.0 (standards#1058)
+
+*Goal.* `hyperpolymath/rsr-template-repo` validates its deed and its
+contractiles with the two canonical reusables, pinned to one standards
+commit, and every contractile it ships passes contract v1.0.0. Every
+repository instantiated from the template then inherits a working lane.
+
+*Authority.* D173 (K9 contract v1.0.0), D312 (contractiles as k9
+contracts the deed attests to), the owner's instruction of 2026-10-19
+("fix the template first, then propagate"; k9iser retired estate-wide),
+and `docs/CONTRACTILE-DESCRIPTILE-VALIDATION.adoc`.
+
+*Facts measured (2026-10-19).* The template's six contractiles
+(`.machine_readable/contractiles/{intend,must,trust,adjust,dust,bust}/*.k9.ncl`)
+share `_base.ncl` and all fail v1.0.0 at L1 (K9-S002/S003/S007/S009/S010:
+no `schema_version`, `component_type`, `semantics`,
+`security.capabilities`, `side_effects`) and L2 (K9-N001). Its
+`dogfood-gate.yml` validates K9 with the `k9-ecosystem` validate action
+at `@main`, not the canonical validator; `k9-validate.yml` greps. Its
+`hypatia-scan.yml` calls the reusable but posts no grid. Placeholder
+files (`template-*.k9.ncl`, `examples/*.k9.ncl`, `coapt`, `claude-md`,
+`deploy`, `methodology-guard`, `session/custom-checks`) are not contracts
+anyone evaluates.
+
+*Steps.*
+. Migrate `_base.ncl` and the six verb files: add `schema_version`,
+  `component_type = "contractile:<verb>"`, `semantics`,
+  `security.capabilities`, `side_effects`; keep the leash at `Yard` unless
+  a verb genuinely executes, in which case it needs a signature block for
+  `Hunt`. Validate each with
+  `bash 1-formats/k9/tools/k9-validate.sh --strict --layer L2 --json FILE`
+  from a standards checkout at the pinned SHA.
+. Delete the placeholder K9 files, or make each a real contract. A file
+  that stays must pass. Route `coordination.k9.ncl` (rename to
+  `coordination.k9`, first line `K9!`) so the validator routes it instead
+  of failing it.
+. Replace the deed and K9 steps in `dogfood-gate.yml` with
+  `deed-conformance.yml@<sha>` and `k9-conformance.yml@<sha>` (both with
+  `require-files: true`); delete `k9-validate.yml`. Add the verdict
+  posting job (K9 and Hypatia grids) and the badges job from
+  `docs/VERDICT-GRID-SPEC.adoc` _Posting from a caller_.
+. Repair `actions.lock` with the chain, in CI if the local `gh` cannot
+  resolve (see the echidna and panic-attack lock PRs of 2026-10-19 for
+  the one-off job pattern). Never hand-edit the lock.
+. Update the template's `CLAUDE.md` and `rsr-template-repo_chora.deed`
+  `(contractiles …)` clause if a file was renamed or removed.
+
+*Acceptance.*
+----
+for f in .machine_readable/contractiles/*/*.k9.ncl; do bash <standards>/1-formats/k9/tools/k9-validate.sh --strict --layer L2 "$f"; done  -> every file: exit 0
+bun <standards>/1-formats/deed/tools/deed_lint.js rsr-template-repo_chora.deed  -> exit 0
+grep -rn 'k9-ecosystem\|k9iser' .github/ Justfile justfile 2>/dev/null  -> no hits
+bash <standards>/scripts/check-lock-sync.sh .github/workflows  -> in sync
+On the PR: deed-conformance green, k9-conformance green with a 🟢 K9 grid comment, hypatia grid comment present.
+----
+
+*Escalate if* a verb's contract cannot be expressed in v1.0.0 without a
+new capability name, or if a contractile needs `Hunt`: the signing key
+and verifier are owner-held.
+
+== WO-10: install the lanes across the first wave, and retire k9iser
+
+*Goal.* `echidna`, `echidnabot`, `proof-burrower`, `hypatia` and
+`panic-attack` each call `deed-conformance.yml`, `k9-conformance.yml`
+and `hypatia-scan-reusable.yml` at one standards SHA, post the grids,
+carry contractiles that pass v1.0.0 (or a shrink-only ledger with an
+issue per line), and carry no k9iser residue.
+
+*Authority.* As WO-9. One PR per repository, each independently
+reviewable (owner norm: stacked, small PRs). Run after WO-9 merges so the
+fixed contractiles can be copied from the template rather than re-derived.
+
+*Facts measured (2026-10-19).* `hypatia` has `k9iser.toml`, a `ci.yml`
+job and a `check-k9iser-paths` check; `echidna` has `k9iser.toml`;
+`panic-attack` removed `generated/k9iser/` and `k9iser.toml` in
+hyperpolymath/panic-attack#223 and its `dogfood-gate.yml` messages now
+point at the K9 spec. Of the 53 consumer `.k9.ncl` files reachable, 44
+fail v1.0.0; the failures are the same five L1 rules as the template's.
+
+*Steps, per repository.*
+. Copy the migrated contractiles from the template; keep each
+  repository's own `semantics` and `metadata`.
+. Install the three reusable calls, the verdict posting job and the
+  badges job; delete the in-tree validators and every k9iser file, job
+  and check. Where a required status check names a job that disappears,
+  rename the new job to the required name in the same PR or tell the
+  owner which branch-protection entry to change.
+. Repair `actions.lock` with the chain.
+. For any contract that cannot be fixed in the PR: one line in
+  `.machine_readable/k9-contract-debt.txt`, one `Ratchet-exception:`
+  line in the PR body naming the ledger, one issue per line.
+. `echidnabot` is also checked into `echidna/echidnabot/`; land the
+  `.machine_readable/` change in both (dual-truth note in its CLAUDE.md).
+
+*Acceptance (each repository).*
+----
+grep -rln 'k9iser' . --exclude-dir=.git  -> no hits
+grep -n 'hyperpolymath/standards/' .github/workflows/*.yml | grep -o '@[0-9a-f]*' | sort -u | wc -l  -> 1
+k9-conformance job green or yellow; the K9 grid comment names every ledgered file as advisory and no file as indeterminate
+deed-conformance green; hypatia grid comment present
+----
+
+*Escalate if* a repository's required checks are owner-managed branch
+protection the PR cannot satisfy, or if a repository's contractiles
+encode behaviour the template's `semantics` do not cover (then write
+them, do not copy).
 
 == Owner items this wave depends on
 

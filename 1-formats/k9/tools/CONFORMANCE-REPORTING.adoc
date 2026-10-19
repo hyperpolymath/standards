@@ -62,6 +62,24 @@ bun test 1-formats/k9/tools/conformance-report.test.mjs
 bun 1-formats/k9/tools/conformance-report.mjs
 ----
 
+The reusable lane (`.github/workflows/k9-conformance.yml`, which a consumer
+calls at a pinned standards SHA) renders the same five-state grid with
+`scripts/k9-grid.sh` and `scripts/lib/k9-grid.jq` (bash and jq, no runtime to
+install) and writes `report.json` and `badge.json` as I-JSON/JCS. Its rules are
+those above; `scripts/tests/k9-grid-test.sh` checks them. To reproduce what the
+lane posts for a consumer:
+
+[source,bash]
+----
+bash 1-formats/k9/tools/k9-validate.sh --self-test > selftest.log; echo $? > selftest.code
+nickel typecheck 1-formats/k9/spec/contract/k9_contract.ncl > typecheck.log; echo $? > typecheck.code
+git ls-files -- "*.k9.ncl" "*.k9" "*.k9.lock" | sort > expected
+while read -r f; do bash 1-formats/k9/tools/k9-validate.sh --strict --layer L2 --json --quiet "$f"; done < expected > results.jsonl
+bash scripts/k9-grid.sh render --out grid --results results.jsonl --expected expected \
+  --ledger .machine_readable/k9-contract-debt.txt --selftest selftest.log --selftest-code "$(cat selftest.code)" \
+  --typecheck typecheck.log --typecheck-code "$(cat typecheck.code)"
+----
+
 Exit 0 means green, yellow or explicit N/A; exit 1 means a blocking failure;
 exit 2 means evidence could not establish the verdict. CI retains its required
 job name. Existing structural/Mustfile checks still run and can fail the job
