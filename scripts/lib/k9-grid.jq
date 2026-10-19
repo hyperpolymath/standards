@@ -7,9 +7,13 @@
 # This is a port of the item, state and delta rules in
 # 1-formats/k9/tools/conformance-report.mjs (the DEED–K9 lane that runs in
 # this repository), so the two K9 lanes grade one result the same way. Where
-# the two disagree, the .mjs is the reference rendering and this file is a bug.
-# It is jq rather than JavaScript so the estate's authored-JavaScript surface
-# does not grow (docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc).
+# the two disagree on a rule they share, the .mjs is the reference rendering
+# and this file is a bug. Two rules are this lane's own, because its evidence
+# differs, and are marked "(this lane)" below: the corpus exit status here is
+# the raw validator's, not the ledger-aware hook's; and the caller's ledger is
+# compared with the PR base, so an entry added without a Ratchet-exception
+# buys no exemption. It is jq rather than JavaScript so the estate's
+# authored-JavaScript surface does not grow (docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc).
 #
 # Input (one object, assembled by scripts/k9-grid.sh):
 #   { identity:  {lane, sha, run, url, pr, repo, dirty, generated, canon_ref},
@@ -18,6 +22,7 @@
 #     results:   [ one k9-validate.sh --json record per file, or
 #                  {malformed: "<line>"} for a line that was not JSON ],
 #     ledger:    [ "path" ... ],          # .machine_readable/k9-contract-debt.txt
+#     ledger_growth: [ "path" ... ],      # ledger entries this PR adds with no Ratchet-exception
 #     changed:   [ "path" ... ],          # files this PR touches
 #     base_resolved: bool,                # false when the PR range could not be diffed
 #     selftest:  {code: int|null, output: "..."},
@@ -34,7 +39,8 @@ def counts:
     failed:         ([.[] | select(.status == "fail")] | length),
     indeterminate:  ([.[] | select(.status == "indeterminate")] | length),
     not_applicable: ([.[] | select(.status == "not_applicable")] | length),
-    advisory:       ([.[] | select(.status == "fail" and .advisory)] | length) };
+    advisory:       ([.[] | select(.status == "fail" and .advisory)] | length),
+    warnings:       ([.[] | select(.status == "pass" and .advisory)] | length) };
 
 # Precedence: red > orange > yellow > green; grey only when every item is grey.
 def state:
@@ -70,33 +76,39 @@ def typecheck_items(tc; contract):
          (if tc.code == 0 then "" else (tc.output // "" | sub("\\s+$"; "")) end)) ];
 
 # One live-corpus item per validator record (conformance-report.mjs corpusItems).
-def corpus_items(results; expected; ledger; changed):
+# A ledger entry exempts a file only when the entry was already in the ledger
+# at the PR base, or the PR declares the growth (this lane): an undeclared
+# addition is listed in `growth`, gets a failing row of its own, and the file
+# it names is graded as if it were not in the ledger.
+def corpus_items(results; expected; ledger; growth; changed):
   (ledger | map({key: ., value: true}) | from_entries) as $ledger
+  | (growth | map({key: ., value: true}) | from_entries) as $growth
   | (changed | map({key: ., value: true}) | from_entries) as $changed
   | (expected | map({key: ., value: true}) | from_entries) as $expected
   | reduce results[] as $r ({seen: {}, rows: []};
       if ($r | has("malformed")) then
         .rows += [item("validator output"; "indeterminate"; "Malformed JSON result.")]
-      elif ($expected[$r.file] | not) or (.seen[$r.file] // false)
+      elif (($r.file | type) != "string") or ($expected[$r.file] | not) or (.seen[$r.file] // false)
            or (($r.verdict // "") | IN("pass", "fail", "error", "routed") | not)
            or (($r.findings | type) != "array") then
-        .rows += [item(($r.file // "validator output"); "indeterminate"; "Unexpected, duplicate or invalid result.")]
+        .rows += [item((if ($r.file | type) == "string" then $r.file else "validator output" end); "indeterminate"; "Unexpected, duplicate or invalid result.")]
       else
         .seen[$r.file] = true
         | ([$r.findings[] | select(.severity == "skipped")]) as $unavailable
         | ([$r.findings[] | select(.severity == "error")]) as $errors
         | ([$r.findings[] | select(.severity == "warning")]) as $warnings
         | ([$r.findings[] | "\(.rule): \(.message)"] | join("; ")) as $reason
+        | (($ledger[$r.file] // false) and (($growth[$r.file] // false) | not)) as $listed
         | .rows += [
             if $r.verdict == "routed" then
               item($r.file; "not_applicable"; "Routed to another dialect; not validated as a K9 contract.")
             elif ($errors | any(.rule == "K9-N002")) and ($errors | any(.rule != "K9-N002") | not) then
               item($r.file; "indeterminate"; $reason)
             elif ($errors | length) > 0 or $r.verdict == "fail" or $r.verdict == "error" then
-              item($r.file; "fail"; $reason; (($ledger[$r.file] // false) and (($changed[$r.file] // false) | not)))
+              item($r.file; "fail"; $reason; ($listed and (($changed[$r.file] // false) | not)))
             elif ($unavailable | length) > 0 then
               item($r.file; "indeterminate"; $reason)
-            elif ($ledger[$r.file] // false) then
+            elif $listed then
               item($r.file; "fail"; "Stale debt exemption: this file now conforms.")
             else
               item($r.file; "pass"; (if ($warnings | length) > 0 then $reason else "" end); (($warnings | length) > 0))
@@ -105,6 +117,11 @@ def corpus_items(results; expected; ledger; changed):
   | . as $acc
   | $acc.rows
     + [ expected[] | select(($acc.seen[.] // false) | not) | item(.; "indeterminate"; "Validator did not return a result for this file.") ]
+    # A ledger entry that names no tracked K9 file exempts nothing and is debt
+    # the ledger must shed (this lane): the shrink-only rule has no other way
+    # to see it.
+    + [ ledger[] | select(($expected[.] // false) | not) | item(.; "fail"; "Stale debt exemption: this path is not a tracked K9 file.") ]
+    + [ growth[] | item("ledger + \(.)"; "fail"; "Added to the debt ledger in this PR with no Ratchet-exception naming the ledger; the entry exempts nothing.") ]
     + (if (expected | length) == 0 then [item("live corpus"; "not_applicable"; "No tracked K9 contracts or routing files.")] else [] end);
 
 def titles: { typecheck: "K9 contract typecheck", selftest: "K9 validator self-test", corpus: "K9 live corpus (L0–L2)" };
@@ -114,10 +131,15 @@ def category(id; items): { id: id, title: titles[id], items: items, counts: (ite
 def build:
   . as $in
   | ("1-formats/k9/spec/contract/k9_contract.ncl") as $contract
-  | (corpus_items($in.results // []; $in.expected // []; $in.ledger // []; $in.changed // [])
+  | (corpus_items($in.results // []; $in.expected // []; $in.ledger // []; $in.ledger_growth // []; $in.changed // [])
      + (if $in.base_resolved == false then [item("change scope"; "indeterminate"; "Cannot resolve the PR base/head range; debt exemptions cannot be determined.")] else [] end)) as $corpus0
+  # The exit status is the raw validator's worst over the corpus, so a
+  # ledgered (advisory) failure explains it as well as a blocking one does
+  # (this lane; the .mjs reads the ledger-aware hook, where only a blocking
+  # row can). Only an exit that no fail or indeterminate row accounts for is
+  # missing evidence.
   | ($corpus0
-     + (if ($in.corpus_code // 0) != 0 and ($corpus0 | any(.[]; .status == "indeterminate" or (.status == "fail" and (.advisory | not))) | not)
+     + (if ($in.corpus_code // 0) != 0 and ($corpus0 | any(.[]; .status == "indeterminate" or .status == "fail") | not)
         then [item("corpus gate"; "indeterminate"; "Validator exited \($in.corpus_code); inspect corpus.log.")] else [] end)) as $corpus
   | [ category("typecheck"; typecheck_items($in.typecheck // {code: null, output: ""}; $contract)),
       category("selftest"; selftest_items($in.selftest // {code: null, output: ""})),
@@ -142,6 +164,8 @@ def delta(prev; report):
          else "↓ regressed (\($c.counts.failed - $b.counts.failed) more failures)" end)
       elif $c.counts.advisory < $b.counts.advisory then "↑ fewer advisories"
       elif $c.counts.advisory > $b.counts.advisory then "↓ more advisories"
+      elif ($c.counts.warnings // 0) < ($b.counts.warnings // 0) then "↑ fewer warnings"
+      elif ($c.counts.warnings // 0) > ($b.counts.warnings // 0) then "↓ more warnings"
       else "↔ unchanged" end end;
 
 def state_label: {red: "🔴 failing", orange: "🟠 indeterminate", yellow: "🟡 advisory", green: "🟢 conformant", grey: "⚪ not applicable"}[.];
@@ -162,7 +186,7 @@ def render(prev):
   + (if $r.dirty then " · working tree modified" else "" end) + "\n\n"
   + "| Category | Status | Pass | Fail | Indeterminate | N/A | Since previous revision |\n|---|---|---:|---:|---:|---:|---|\n"
   + ([ $r.categories[]
-       | "| \(.title) | \(.state | state_label) | \(.counts.passed) | \(.counts.failed)\(if .counts.advisory > 0 then " (\(.counts.advisory) advisory)" else "" end) | \(.counts.indeterminate) | \(.counts.not_applicable) | \(delta(prev; $r)) |\n" ] | add // "")
+       | "| \(.title) | \(.state | state_label) | \(.counts.passed)\(if .counts.warnings > 0 then " (\(.counts.warnings) with warnings)" else "" end) | \(.counts.failed)\(if .counts.advisory > 0 then " (\(.counts.advisory) advisory)" else "" end) | \(.counts.indeterminate) | \(.counts.not_applicable) | \(delta(prev; $r)) |\n" ] | add // "")
   + ([ $r.categories[]
        | ([.items[] | select(.status != "pass" or .advisory)]) as $f
        | select(($f | length) > 0)

@@ -5,8 +5,10 @@
 # k9-grid-test.sh — the conformance-family grid for the K9 lane never turns
 # missing, skipped or unreadable evidence into a clean row, honours the
 # shrink-only debt ledger exactly as CONFORMANCE-REPORTING.adoc states it,
-# keeps routed files and an empty corpus grey, compares revisions only under
-# one profile, and writes I-JSON/JCS artifacts. docs/VERDICT-GRID-SPEC.adoc
+# keeps routed files and an empty corpus grey, refuses an exemption the PR
+# adds without a Ratchet-exception, compares revisions only under one profile
+# (renderer, validator commit, ledger, lane, corpus), and writes I-JSON/JCS
+# artifacts. docs/VERDICT-GRID-SPEC.adoc
 # and 1-formats/k9/tools/CONFORMANCE-REPORTING.adoc are the contracts under test.
 #
 # Run: bash scripts/tests/k9-grid-test.sh
@@ -123,11 +125,34 @@ render "$WORK/o7f" --results "$WORK/r-clean" --expected "$WORK/expected" "${good
 check "a validator exit status with no finding to explain it is orange" orange "$(state "$WORK/o7f")"
 check "a validator exit status explained by a red row stays red" red "$(render "$WORK/o7g" --results "$WORK/r-fail" --expected "$WORK/expected" "${good_evidence[@]}" --corpus-code 1; state "$WORK/o7g")"
 
+# 7g. A validator exit status explained by a ledgered (advisory) failure is
+#     yellow, not orange: the exit is the raw validator's, which fails
+#     ledgered files too.
+render "$WORK/o7h" --results "$WORK/r-fail" --expected "$WORK/expected" --ledger "$WORK/ledger-b" "${good_evidence[@]}" --corpus-code 1
+check "a validator exit status explained by an advisory row stays yellow" yellow "$(state "$WORK/o7h")"
+# 7i. A result without a file key is invalid evidence, never an abort.
+{ rec a.k9.ncl pass '[]'; jq -nc '{verdict: "pass", findings: []}'; } > "$WORK/r-nofile"
+render "$WORK/o7i" --results "$WORK/r-nofile" --expected "$WORK/expected" "${good_evidence[@]}"
+check "a result with no file key is orange" orange "$(state "$WORK/o7i")"
+check "a result with no file key is reported as validator output" "Unexpected, duplicate or invalid result." "$(reason "$WORK/o7i" "validator output")"
+
+# 7j. Ledger growth without a Ratchet-exception buys no exemption: red.
+render "$WORK/o7j" --results "$WORK/r-fail" --expected "$WORK/expected" --ledger "$WORK/ledger-b" --ledger-growth "$WORK/ledger-b" "${good_evidence[@]}"
+check "an undeclared ledger addition is red" red "$(state "$WORK/o7j")"
+check "the undeclared addition is a finding of its own" yes "$(reason "$WORK/o7j" "ledger + b.k9.ncl" | grep -q '^Added to the debt ledger in this PR with no Ratchet-exception' && echo yes || echo no)"
+check "the file the addition names is graded as unledgered" false "$(jq -r '[.categories[].items[] | select(.id == "b.k9.ncl")][0].advisory' "$WORK/o7j/report.json")"
+# 7k. A ledger path that is not a tracked K9 file is a stale exemption: red.
+printf '%s\n' b.k9.ncl gone.k9.ncl > "$WORK/ledger-gone"
+render "$WORK/o7k" --results "$WORK/r-fail" --expected "$WORK/expected" --ledger "$WORK/ledger-gone" "${good_evidence[@]}"
+check "a ledger path outside the corpus is red" red "$(state "$WORK/o7k")"
+check "the untracked ledger path is named" "Stale debt exemption: this path is not a tracked K9 file." "$(reason "$WORK/o7k" gone.k9.ncl)"
+
 # 8. Warnings are advisory: yellow, counted but not failed.
 { rec a.k9.ncl pass "$W_ONE"; rec b.k9.ncl pass '[]'; } > "$WORK/r-warn"
 render "$WORK/o8" --results "$WORK/r-warn" --expected "$WORK/expected" "${good_evidence[@]}"
 check "a warning is yellow" yellow "$(state "$WORK/o8")"
 check "a warning does not count as failed" 0 "$(jq -r '.counts.failed' "$WORK/o8/report.json")"
+check "a warning is counted" 1 "$(jq -r '.counts.warnings' "$WORK/o8/report.json")"
 
 # 9. Routed files and an empty corpus are explicit scope exclusions: grey rows.
 { rec a.k9.ncl routed '[]'; } > "$WORK/r-routed"
@@ -162,6 +187,13 @@ render "$WORK/o11d" --results "$WORK/r-clean" --expected "$WORK/expected" "${goo
 check "another PR is not compared" yes "$(grep -q 'no comparable baseline' "$WORK/o11d/report.md" && echo yes || echo no)"
 render "$WORK/o11e" --results "$WORK/r-clean" --expected "$WORK/expected" "${good_evidence[@]}" --sha 2222222222222222222222222222222222222222 --pr 7 --lane other --previous "$WORK/o11a/report.md"
 check "another profile is not compared" yes "$(grep -q 'no comparable baseline' "$WORK/o11e/report.md" && echo yes || echo no)"
+render "$WORK/o11f" --results "$WORK/r-warn" --expected "$WORK/expected" "${good_evidence[@]}" --sha 1111111111111111111111111111111111111111 --pr 7
+render "$WORK/o11g" --results "$WORK/r-clean" --expected "$WORK/expected" "${good_evidence[@]}" --sha 2222222222222222222222222222222222222222 --pr 7 --previous "$WORK/o11f/report.md"
+check "delta reports a cleared warning" yes "$(grep -q 'K9 live corpus.*| ↑ fewer warnings' "$WORK/o11g/report.md" && echo yes || echo no)"
+printf '%s\n' a.k9.ncl b.k9.ncl c.k9.ncl > "$WORK/expected-abc"
+{ rec a.k9.ncl pass '[]'; rec b.k9.ncl pass '[]'; rec c.k9.ncl pass '[]'; } > "$WORK/r-clean-abc"
+render "$WORK/o11h" --results "$WORK/r-clean-abc" --expected "$WORK/expected-abc" "${good_evidence[@]}" --sha 2222222222222222222222222222222222222222 --pr 7 --previous "$WORK/o11a/report.md"
+check "a corpus that gained a file is not compared" yes "$(grep -q 'K9 live corpus.*| — no comparable baseline' "$WORK/o11h/report.md" && echo yes || echo no)"
 check "baseline of garbage is null" null "$(printf 'no marker here\n' > "$WORK/garbage"; bash "$GRID" baseline "$WORK/garbage")"
 check "baseline of a corrupt marker is null" null "$(printf '<!-- k9-baseline:bm90anNvbg== -->\n' > "$WORK/corrupt"; bash "$GRID" baseline "$WORK/corrupt")"
 check "baseline of a real report round-trips" 7 "$(bash "$GRID" baseline "$WORK/o11a/report.md" | jq -r .pr)"

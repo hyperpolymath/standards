@@ -12,6 +12,8 @@
 #       --results FILE        k9-validate.sh --json output, one record per line
 #       --expected FILE       the files the lane set out to check, one per line
 #       --ledger FILE         the caller's .machine_readable/k9-contract-debt.txt
+#       --ledger-growth FILE  ledger entries the PR adds with no Ratchet-exception
+#                             naming the ledger, one per line: they exempt nothing
 #       --changed FILE        files the PR touches, one per line
 #       --base-unresolved     the PR base/head range could not be diffed
 #       --selftest LOG --selftest-code N     validator --self-test evidence
@@ -42,10 +44,11 @@ JQ_LIB="$SCRIPT_DIR/lib/k9-grid.jq"
 
 usage() { sed -n '5,34p' "$0" >&2; exit 2; }
 
-# A path list file to a JSON array; a missing file is an empty list.
+# A path list file to a JSON array; a missing file is an empty list, and so
+# is a file of comments and blanks (grep's no-match exit is not an error).
 list_json() {
   if [ -n "${1:-}" ] && [ -f "$1" ]; then
-    grep -vE '^[[:space:]]*(#|$)' "$1" | jq -R . | jq -s .
+    { grep -vE '^[[:space:]]*(#|$)' "$1" || true; } | jq -R . | jq -s .
   else
     echo '[]'
   fi
@@ -95,7 +98,7 @@ baseline_of() {
   printf '%s' "$b64" | base64 -d 2>/dev/null | jq -c '
     if type == "object" and (.categories | type) == "array"
        and all(.categories[]; . as $c | ($c.id | type) == "string" and ($c.counts | type) == "object"
-         and all(["passed", "failed", "indeterminate", "not_applicable", "advisory"][]; . as $k
+         and all(["passed", "failed", "indeterminate", "not_applicable", "advisory", "warnings"][]; . as $k
            | ($c.counts | has($k)) and ($c.counts[$k] | type) == "number" and $c.counts[$k] >= 0))
     then . else null end' 2>/dev/null || echo null
 }
@@ -107,7 +110,7 @@ case "$cmd" in
     baseline_of "$1"
     ;;
   render)
-    out="" results="" expected="" ledger="" changed="" prev="" lane="k9"
+    out="" results="" expected="" ledger="" growth="" changed="" prev="" lane="k9"
     selftest="" selftest_code="" typecheck="" typecheck_code="" corpus_code=""
     base_resolved=true sha="" run="local" url="" pr="local" repo="" canon=""
     while [ $# -gt 0 ]; do
@@ -116,6 +119,7 @@ case "$cmd" in
         --results) results="$2"; shift 2 ;;
         --expected) expected="$2"; shift 2 ;;
         --ledger) ledger="$2"; shift 2 ;;
+        --ledger-growth) growth="$2"; shift 2 ;;
         --changed) changed="$2"; shift 2 ;;
         --base-unresolved) base_resolved=false; shift ;;
         --selftest) selftest="$2"; shift 2 ;;
@@ -142,9 +146,12 @@ case "$cmd" in
     [ -n "$prev" ] && previous=$(baseline_of "$prev")
 
     # The profile names what produced the grid: this renderer, the standards
-    # commit that supplied validator and contract, the ledger and the lane.
-    # Two revisions compare only under the same profile.
-    profile=$( { cat "$0" "$JQ_LIB"; [ -n "$ledger" ] && [ -f "$ledger" ] && cat "$ledger"; printf '%s\n' "$canon" "$lane"; } | sha256sum | cut -d' ' -f1)
+    # commit that supplied validator and contract, the ledger, the lane and
+    # the corpus the lane set out to check (as conformance-report.mjs does).
+    # Two revisions compare only under the same profile, so a corpus that
+    # gained or lost a file is never read as fewer or more failures.
+    profile=$( { cat "$0" "$JQ_LIB"; [ -n "$ledger" ] && [ -f "$ledger" ] && cat "$ledger";
+                 printf '%s\n' "$canon" "$lane"; list_json "$expected" | jq -c 'sort'; } | sha256sum | cut -d' ' -f1)
 
     dirty=false
     if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -156,13 +163,13 @@ case "$cmd" in
     [ -n "$corpus_code" ] && corpus_json="$corpus_code"
 
     jq -n --argjson results "$(results_json "$results")" --argjson expected "$(list_json "$expected")" \
-      --argjson ledger "$(list_json "$ledger")" --argjson changed "$(list_json "$changed")" \
+      --argjson ledger "$(list_json "$ledger")" --argjson growth "$(list_json "$growth")" --argjson changed "$(list_json "$changed")" \
       --argjson base_resolved "$base_resolved" --argjson selftest "$(evidence_json "$selftest" "$selftest_code")" \
       --argjson typecheck "$(evidence_json "$typecheck" "$typecheck_code")" --argjson corpus_code "$corpus_json" \
       --arg profile "$profile" --arg lane "$lane" --arg sha "$sha" --arg run "$run" --arg url "$url" \
       --arg pr "$pr" --arg repo "$repo" --argjson dirty "$dirty" --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       --arg canon "$canon" \
-      '{results: $results, expected: $expected, ledger: $ledger, changed: $changed, base_resolved: $base_resolved,
+      '{results: $results, expected: $expected, ledger: $ledger, ledger_growth: $growth, changed: $changed, base_resolved: $base_resolved,
         selftest: $selftest, typecheck: $typecheck, corpus_code: $corpus_code, profile: $profile,
         identity: {lane: $lane, sha: $sha, run: $run, url: $url, pr: $pr, repo: $repo, dirty: $dirty,
                    generated: $generated, canon_ref: $canon}}' \
