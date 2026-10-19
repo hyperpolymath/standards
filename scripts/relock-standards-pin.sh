@@ -140,8 +140,8 @@ while read -r u; do
       symbolic=$(printf '%s\n' "$repaired" | sed -n "s/^        ref: '\([^']*\)'$/\1/p")
       [ -n "$symbolic" ] && [[ ! "$symbolic" =~ ^[0-9a-fA-F]{40}$ ]] \
         || refuse "no symbolic repair for $u in target Standards lock"
-      local_identity=$(printf '%s\n' "$existing" | grep -E '^        (commit|owner_id|repo_id):')
-      source_identity=$(printf '%s\n' "$repaired" | grep -E '^        (commit|owner_id|repo_id):')
+      local_identity=$(printf '%s\n' "$existing" | grep -E '^        (commit|owner_id|repo_id):' || true)
+      source_identity=$(printf '%s\n' "$repaired" | grep -E '^        (commit|owner_id|repo_id):' || true)
       [ "$local_identity" = "$source_identity" ] && [ "$(printf '%s\n' "$source_identity" | wc -l)" -eq 3 ] \
         || refuse "identity mismatch while repairing $u"
       awk -v k="    '$u':" -v replacement="        ref: '$symbolic'" '
