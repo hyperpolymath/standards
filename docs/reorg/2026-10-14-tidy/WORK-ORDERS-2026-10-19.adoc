@@ -52,9 +52,11 @@ which is what CI uses (see _Session mechanics_ for why the name matters).
   (its exit status is 1 at the baseline, which is accepted; before your
   first edit save its output, `before=$(mktemp)` then
   `bash scripts/link-rot-guard.sh . > "$before" || true`, and the gate is
-  that `diff "$before" <(bash scripts/link-rot-guard.sh . || true) |
-  grep '^>'` prints nothing: no new BROKEN line anywhere; lines that
-  disappear are repairs, listed in the PR body; a touched file may keep
+  `! diff "$before" <(bash scripts/link-rot-guard.sh . || true) |
+  grep -q '^>'`, which exits 0 exactly when no `>` line exists, that is,
+  no new BROKEN line anywhere (a bare `grep '^>'` would exit 1 in the
+  desired state); lines that disappear are repairs, listed in the PR
+  body; a touched file may keep
   the old broken links it already had, as
   `3-practice/ai-instruction/README.adoc` does with six others beside the
   manifest one), `bash scripts/link-rot-guard.sh <dir>` for each directory you
@@ -337,7 +339,7 @@ Markdown; applied-unless-struck (D113).
 ----
 bash scripts/check-standards-map.sh                 -> GATE D PASSED
 grep -c -E '^(cff-version|message|title|authors):' CITATION.cff  -> 4 (the keys CFF 1.2.0 requires)
-diff "$before" <(bash scripts/link-rot-guard.sh . || true) | grep '^>'  -> nothing (no new BROKEN line; $before saved before the first edit, see Session mechanics)
+! diff "$before" <(bash scripts/link-rot-guard.sh . || true) | grep -q '^>'  -> exit 0 (no new BROKEN line; $before saved before the first edit, see Session mechanics)
 bash scripts/run-debtfile.sh .machine_readable/Debtfile.a2ml  -> docs-md-not-adoc unchanged
 GitHub community profile after merge: all items present, and the repository
 page shows "Cite this repository" (GitHub renders it only for a valid file).
@@ -689,7 +691,8 @@ never resolved. They fall into three buckets.
 *Acceptance.*
 ----
 for f in <bucket A files>; do test "$(grep -c '0-AI-MANIFEST\.a2ml' "$f")" -eq 0 || exit 1; done   -> no old-name references (exit 0)
-diff "$before" <(bash scripts/link-rot-guard.sh . || true)          -> exactly three '<' lines (the repaired manifest links) and no '>' line; 440 BROKEN in all from a checkout named standards
+! diff "$before" <(bash scripts/link-rot-guard.sh . || true) | grep -q '^>'  -> exit 0 (no new BROKEN line)
+diff "$before" <(bash scripts/link-rot-guard.sh . || true) | grep -c '^<'   -> 3 (the repaired manifest links; 440 BROKEN in all from a checkout named standards)
 bash scripts/link-rot-guard.sh . | grep '0-AI-MANIFEST'             -> exactly one line, TOPOLOGY.adoc (frozen; leaves with P2.4)
 bash scripts/check-launcher-standard-currency.sh --root .          -> no stale references
 bash scripts/run-mustfile.sh .machine_readable/contractiles/must/Mustfile.a2ml  -> 14 passed
