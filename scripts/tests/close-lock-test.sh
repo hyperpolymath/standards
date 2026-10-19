@@ -45,6 +45,7 @@ case "\$2" in
   repos/o/laterpage/tags*)
     case " \$* " in *' --paginate '*) echo 'v2.3.4' ;; *) exit 0 ;; esac ;;
   repos/o/a/tags*|repos/o/b/tags*|repos/o/c/tags*) echo 'v1.0.0' ;;
+  repos/o/buildmeta/tags*) echo 'v1.2.3+build.4' ;;
   repos/o/leaf/tags*) printf 'v4\nv4.38.0\n' ;;
   repos/o/*/commits/v1) echo $C ;;
   repos/o/*/commits/*) echo '{"message":"No commit found"}'; exit 1 ;;
@@ -85,6 +86,12 @@ grep -qxF "    'o/leaf@$A':" "$d/actions.lock" && grep -qxF "        ref: 'v4.38
   && grep -qxF "        commit: 'sha1-$A'" "$d/actions.lock" \
   && ok "leaf SHA ref records upstream semver tag in ref: ('v4.38.0')" \
   || bad "leaf SHA ref records upstream semver tag in ref:"
+
+echo "=== accepts a version tag with build metadata ==="
+d=$(mklock buildmeta "o/buildmeta@$A" </dev/null)
+out=$(run "$d"); st=$?
+[ "$st" = 0 ] && grep -qxF "        ref: 'v1.2.3+build.4'" "$d/actions.lock" \
+  && ok "build metadata tag is preserved" || bad "build metadata: st=$st $out"
 
 echo "=== leaf tag resolution fails closed ==="
 for fixture in untagged tagerror badtag; do
