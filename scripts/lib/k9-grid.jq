@@ -112,7 +112,8 @@ def corpus_items(results; expected; ledger; growth; changed; require_files):
         .rows += [item("validator output"; "indeterminate"; "Malformed JSON result.")]
       elif (($r.file | type) != "string") or ($expected[$r.file] | not) or (.seen[$r.file] // false)
            or (($r.verdict // "") | IN("pass", "fail", "error", "routed") | not)
-           or (($r.findings | type) != "array") then
+           or (($r.findings | type) != "array")
+           or (($r.findings | type) == "array" and ($r.findings | any(type != "object"))) then
         .rows += [item((if ($r.file | type) == "string" then $r.file else "validator output" end); "indeterminate"; "Unexpected, duplicate or invalid result.")]
       else
         .seen[$r.file] = true
@@ -213,8 +214,15 @@ def state_label: {red: "🔴 failing", orange: "🟠 indeterminate", yellow: "�
 def colour: {red: "red", orange: "orange", yellow: "yellow", green: "brightgreen", grey: "lightgrey"}[.];
 def word: {red: "failing", orange: "indeterminate", yellow: "advisory", green: "conformant", grey: "not_applicable"}[.];
 # Escape text for grid cells and finding summaries, flattening line breaks.
+# Ids and reasons carry contributor-controlled file names and validator text,
+# and the comment is posted by the lane's own account: every character that
+# could start Markdown or HTML syntax becomes an entity, so a file named
+# `![x](https://e.invalid/i).k9.ncl` is shown, not rendered. Entities display as
+# the character itself in a GitHub table cell.
 def esc: tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | gsub("\\|"; "&#124;")
-         | gsub("`"; "&#96;") | gsub("\r?\n"; " ");
+         | gsub("`"; "&#96;") | gsub("\\\\"; "&#92;") | gsub("\\["; "&#91;") | gsub("\\]"; "&#93;")
+         | gsub("\\("; "&#40;") | gsub("\\)"; "&#41;") | gsub("\\*"; "&#42;") | gsub("_"; "&#95;")
+         | gsub("!"; "&#33;") | gsub("~"; "&#126;") | gsub("\r?\n"; " ");
 def grid_label: "K9 L0–L2";
 def badge_url(st): "https://img.shields.io/badge/\(grid_label | @uri)-\(st | word | @uri)-\(st | colour)";
 

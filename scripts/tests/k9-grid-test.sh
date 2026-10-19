@@ -218,6 +218,24 @@ check "baseline with trailing junk is one value" 1 "$(bash "$GRID" baseline "$WO
 render "$WORK/o11l" --results "$WORK/r-clean" --expected "$WORK/expected" "${good_evidence[@]}" --sha 2222222222222222222222222222222222222222 --pr 7 --previous "$WORK/two-objects"
 check "a forged two-object baseline still renders" yes "$(grep -q 'no comparable baseline' "$WORK/o11l/report.md" && echo yes || echo no)"
 
+# 13. A findings array that holds something other than objects is not a
+# gradeable record (orange), never a jq error that leaves no report.
+{ rec a.k9.ncl pass '[]'; jq -nc '{file: "b.k9.ncl", verdict: "pass", findings: ["bad"]}'; } > "$WORK/r-bad-finding"
+render "$WORK/o13a" --results "$WORK/r-bad-finding" --expected "$WORK/expected" "${good_evidence[@]}"
+check "a non-object finding element is orange" orange "$(state "$WORK/o13a")"
+check "the non-object finding names its file" "Unexpected, duplicate or invalid result." "$(reason "$WORK/o13a" b.k9.ncl)"
+
+# 14. Contributor-controlled ids and validator text cannot write Markdown or
+# HTML into the lane's own comment.
+evil='![x](https://e.invalid/i)_[y]*.k9.ncl'
+printf '%s\n' "$evil" > "$WORK/expected-evil"
+rec "$evil" fail '[{"severity":"error","rule":"K9-S002","layer":"L1","message":"see <b>here</b> [z](https://e.invalid) \\ `x`"}]' > "$WORK/r-evil"
+render "$WORK/o14" --results "$WORK/r-evil" --expected "$WORK/expected-evil" "${good_evidence[@]}"
+check "markdown image syntax is escaped in the id" no "$(grep -q '!\[x\](' "$WORK/o14/report.md" && echo yes || echo no)"
+check "the escaped id is still legible" yes "$(grep -q '&#33;&#91;x&#93;&#40;https://e.invalid/i&#41;&#95;&#91;y&#93;&#42;.k9.ncl' "$WORK/o14/report.md" && echo yes || echo no)"
+check "markdown link syntax is escaped in the reason" no "$(grep -q '\[z\](https' "$WORK/o14/report.md" && echo yes || echo no)"
+check "html and backslashes are escaped in the reason" yes "$(grep -q '&lt;b&gt;here&lt;/b&gt; &#91;z&#93;&#40;https://e.invalid&#41; &#92; &#96;x&#96;' "$WORK/o14/report.md" && echo yes || echo no)"
+
 # 12. Usage errors exit 2.
 check "missing --results exits 2" 2 "$(bash "$GRID" render --out "$WORK/o12" >/dev/null 2>&1; echo $?)"
 check "unknown subcommand exits 2" 2 "$(bash "$GRID" frobnicate >/dev/null 2>&1; echo $?)"

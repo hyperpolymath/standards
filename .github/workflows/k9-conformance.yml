@@ -22,8 +22,10 @@ name: k9-conformance
 # the PR base: an entry the PR adds exempts nothing unless a commit message or
 # the PR body carries `Ratchet-exception: .machine_readable/k9-contract-debt.txt
 # — <why>` (the governance exemption ratchet's form; it watches this ledger
-# too). On a pull request the checkout is full so the changed-file list is the
-# merge-base diff and the PR's commit messages are readable.
+# too). The checkout is full so the changed-file list is the merge-base diff
+# and the commit messages are readable; on a push the range is the push's own
+# (`before`..`sha`), so a direct push to a ledgered contract, or a direct
+# ledger addition, is ratcheted exactly as a pull request is.
 #
 # Outputs: the `k9-grid` artifact (report.json and badge.json as I-JSON/JCS,
 # report.md, the validator logs) and the `verdict` output. The caller posts
@@ -49,7 +51,6 @@ on:
     paths:
       - '**.k9.ncl'
       - '**.k9'
-      - '**.k9.lock'
       - '1-formats/k9/**'
       - 'scripts/k9-grid.sh'
       - 'scripts/lib/k9-grid.jq'
@@ -60,7 +61,6 @@ on:
     paths:
       - '**.k9.ncl'
       - '**.k9'
-      - '**.k9.lock'
       - '1-formats/k9/**'
       - 'scripts/k9-grid.sh'
       - 'scripts/lib/k9-grid.jq'
@@ -112,10 +112,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # Full history on a pull request: the changed-file list is the
-          # merge-base diff, and the ledger ratchet reads the PR's commit
-          # messages. Strings, not numbers: a bare 0 is falsy in an expression.
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          # Full history: the changed-file list is the merge-base diff and the
+          # ledger ratchet reads the commit messages, on a pull request (base
+          # ..head) and on a push (the push's before..sha) alike.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: checkout the K9 validator, contract and renderer at this workflow's commit
@@ -186,17 +186,20 @@ jobs:
           echo "TYPECHECK_CODE=$?" >> "$GITHUB_ENV"
           cat "$RUNNER_TEMP/typecheck.log"
 
-      - name: Enumerate the committed K9 files, the PR's changed files and ledger growth
+      - name: Enumerate the committed K9 files, the changed files and ledger growth
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # A pull request compares with its base; a push with the commit the
+          # push replaced (all zeros when the ref is new: nothing to compare).
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           LEDGER: .machine_readable/k9-contract-debt.txt
         run: |
           set -euo pipefail
           # Tracked files only: an untracked file is not a committed contract.
+          # The two extensions K9-CONTRACT-SPEC.adoc reserves, nothing else.
           # A caller with no K9 file at all is a legitimate (grey) corpus, so
           # grep's no-match exit is not an error here.
-          git ls-files -z -- '*.k9.ncl' '*.k9' '*.k9.lock' \
+          git ls-files -z -- '*.k9.ncl' '*.k9' \
             | tr '\0' '\n' \
             | { grep -v -E '^(\.k9-canon/|9-archive/|1-formats/k9/tools/fixtures/)' || [ $? -eq 1 ]; } \
             | sort > "$RUNNER_TEMP/expected"
@@ -204,14 +207,16 @@ jobs:
           : > "$RUNNER_TEMP/changed"
           : > "$RUNNER_TEMP/ledger-growth"
           echo "BASE_UNRESOLVED=" >> "$GITHUB_ENV"
+          case "$BASE_SHA" in *[!0]*) ;; *) BASE_SHA="" ;; esac
           [ -n "$BASE_SHA" ] || exit 0
 
           # The PR's own changes are those since its merge base, not since the
           # base branch tip: a file the base branch changed after the PR
-          # branched is not this PR's edit. The full checkout already holds
-          # the base commit; the fetch is a fallback only, and runs without
-          # credentials (persist-credentials is off), so it serves public
-          # repositories.
+          # branched is not this PR's edit. On a push the merge base of
+          # before and sha is before itself (or the fork point of a force
+          # push). The full checkout already holds the base commit; the fetch
+          # is a fallback only, and runs without credentials
+          # (persist-credentials is off), so it serves public repositories.
           if { git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --quiet origin "$BASE_SHA" 2>/dev/null; } \
              && merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null) \
              && git diff --name-only "$merge_base" "$HEAD_SHA" > "$RUNNER_TEMP/changed" 2>/dev/null; then
@@ -260,7 +265,9 @@ jobs:
           worst=0
           while IFS= read -r f; do
             [ -n "$f" ] || continue
-            bash "$CANON/1-formats/k9/tools/k9-validate.sh" --strict --layer L2 --json --quiet "$f" >> "$RUNNER_TEMP/results.jsonl" 2>> "$RUNNER_TEMP/corpus.log"
+            # `--` ends the options: a tracked file whose name starts with `-`
+            # is a path, not a flag.
+            bash "$CANON/1-formats/k9/tools/k9-validate.sh" --strict --layer L2 --json --quiet -- "$f" >> "$RUNNER_TEMP/results.jsonl" 2>> "$RUNNER_TEMP/corpus.log"
             rc=$?
             [ "$rc" -gt "$worst" ] && worst=$rc
           done < "$RUNNER_TEMP/expected"
