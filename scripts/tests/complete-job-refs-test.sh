@@ -129,7 +129,7 @@ dependencies:
 EOF
 run t5 >/dev/null; st=$?
 L5="$WORK/t5/.github/workflows/actions.lock"
-[ "$st" = 0 ] && grep -qxF "        - 'swatinem/rust-cache@v2'" "$L5" && ! grep -qF "'Swatinem/rust-cache@v2'" "$L5" \
+[[ "$st" = 0 ]] && grep -qxF "        - 'swatinem/rust-cache@v2'" "$L5" && ! grep -qF "'Swatinem/rust-cache@v2'" "$L5" \
   && ok "owner case differs only → existing entry kept, no second spelling" \
   || bad "owner case differs only → existing entry kept, no second spelling (st=$st)"
 grep -qxF "        - 'o/r@V3'" "$L5" && grep -qxF "        - 'o/r@v3'" "$L5" \
@@ -151,7 +151,7 @@ dependencies:
 EOF
 run t6 >/dev/null; st=$?
 L6="$WORK/t6/.github/workflows/actions.lock"
-[ "$st" = 0 ] && grep -qxF "        - 'swatinem/rust-cache@v2'" "$L6" && ! grep -qF "'Swatinem/rust-cache@v2'" "$L6" \
+[[ "$st" = 0 ]] && grep -qxF "        - 'swatinem/rust-cache@v2'" "$L6" && ! grep -qF "'Swatinem/rust-cache@v2'" "$L6" \
   && ok "both spellings present → the dependency-backed one survives" \
   || bad "both spellings present → the dependency-backed one survives (st=$st)"
 
@@ -166,7 +166,7 @@ dependencies:
 EOF
 run t7 >/dev/null; st=$?
 L7="$WORK/t7/.github/workflows/actions.lock"
-[ "$st" = 0 ] && grep -qxF "        - 'o/r@Release@2026'" "$L7" && grep -qxF "        - 'o/r@release@2026'" "$L7" \
+[[ "$st" = 0 ]] && grep -qxF "        - 'o/r@Release@2026'" "$L7" && grep -qxF "        - 'o/r@release@2026'" "$L7" \
   && ok "o/r@Release@2026 and o/r@release@2026 are different refs → both kept" \
   || bad "o/r@Release@2026 and o/r@release@2026 are different refs → both kept (st=$st)"
 
