@@ -1,0 +1,248 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Verdict Grid (VG) v1.0 — compact PR verdicts for conformance and findings lanes
+:toc: left
+:toclevels: 3
+:sectnums:
+:date: 2026-10-19
+
+A verdict grid is the one-screen report a CI lane posts on a pull request:
+a badge, an identity line, a table with one row per thing that was checked,
+an accordion of detail under it, a scope footer, and an embedded baseline so
+the next revision can say what moved. The DEED–K9 lane has rendered one since
+standards#1058 (link:../1-formats/k9/tools/CONFORMANCE-REPORTING.adoc[]).
+This document names the design so the Hypatia lane, and any gitbot-fleet
+member that reports back to a pull request, renders the same shape with the
+grading family that fits what it measures.
+
+It is local reporting policy. It adds no conformance rule, no security
+claim and no new readiness grade (link:BADGE-CRITERIA-SPEC.adoc[] §Non-goals
+still applies: a grid state is never a fifth grade).
+
+== Anatomy
+
+Every grid has exactly these parts, in this order.
+
+[cols="1,3",options="header"]
+|===
+|Part |Content
+
+|Marker
+|An HTML comment naming the lane, e.g. `<!-- verdict-grid:hypatia regenerated on every run -->`. The posting step finds its own previous comment by this marker and updates it in place; one comment per lane per PR.
+
+|Badge line
+|One shields.io static badge: `<lane label>` – `<state word>` – `<state colour>`. It restates the overall state and nothing else.
+
+|Identity line
+|The overall state label, the commit (12 hex), the run link, the scanner commits where a tool is pinned, and `working tree modified` when rendered locally on a dirty tree.
+
+|Grid
+|One table. Conformance lanes: `Category · Status · Pass · Fail · Indeterminate · N/A · Since previous revision`. Findings lanes: `Reporter · Status · Critical · High · Medium · Minor · Since previous revision`. Counts are results, files or findings, never lines of log.
+
+|Accordion
+|One `<details>` block per row that has anything to show: every non-passing item or finding, worst first, at most 20, with a count of the rest. A row whose evidence is missing shows its reason here too.
+
+|Scope footer
+|What green means in this lane, what orange and grey mean, and where the full evidence is (the dated artifact on the linked run).
+
+|Baseline
+|`<!-- <lane>-baseline:BASE64 -->` (`k9-baseline` for the K9 lane, `verdict-grid-baseline` for findings lanes): schema, profile hash, PR, commit, and per-row counts and status. Small, validated on read, ignored when garbled.
+|===
+
+== Two grading families
+
+A lane grades either *conformance* (did the thing pass the rules it must
+pass?) or *findings* (what did a scanner report, and how bad is the worst of
+it?). The two families share orange and grey and nothing else; mixing them
+in one row is an error.
+
+=== Conformance family (DEED–K9 lane)
+
+[cols="1,1,4",options="header"]
+|===
+|State |Colour |Meaning
+|red |`red` |At least one blocking conformance failure is known.
+|orange |`orange` |Required evidence is incomplete, unavailable, interrupted or malformed — including a validator whose self-test failed.
+|yellow |`yellow` |Checks completed with permitted advisory debt or warnings.
+|green |`brightgreen` |Every applicable check in the declared scope completed and passed.
+|grey |`lightgrey` |Explicitly not applicable, with a reason. Never a synonym for "not run".
+|===
+
+Precedence: red > orange > yellow > green; grey only when every item is
+grey. Red outranks orange so that missing evidence cannot hide a known
+failure. Reference rendering: `1-formats/k9/tools/conformance-report.mjs`.
+
+=== Findings family (Hypatia lane, fleet report-backs)
+
+[cols="1,1,4",options="header"]
+|===
+|State |Colour |Meaning
+|purple |`blueviolet` |The reporter ran and its worst finding is *critical*.
+|red |`red` |The reporter ran and its worst finding is *high*.
+|orange |`orange` |The reporter did not run, errored, produced no readable result, or its self-test failed. Also an enrolled fleet member that sent no report-back.
+|yellow |`yellow` |The reporter ran and its worst finding is *medium* (Hypatia's `warn` ranks here).
+|blue |`blue` |The reporter ran and reported only *low* or *info* findings: present, minor.
+|green |`brightgreen` |The reporter ran and reported nothing.
+|grey |`lightgrey` |The reporter is explicitly not relevant to this repository, with a reason (enrolment manifest), or declared itself not applicable in its report-back.
+|===
+
+Precedence: purple > red > orange > yellow > blue > green; grey only when
+every row is grey; an empty grid is orange. As in the conformance family, a
+known critical or high finding outranks missing evidence, and missing
+evidence outranks anything milder than high: a scanner that did not run is
+never reported as a clean scan, and never hides a finding another row
+produced.
+
+Severity words are normalised on input: `critical`; `high` or `error`;
+`medium`, `warn` or `warning`; `low`; `info`, `informational`, `note` or
+`suggestion`. Anything else makes the whole row orange with the reason
+"a finding carries a severity the grid does not recognise". Findings a tool
+itself suppresses as likely false positives (panic-attack `suppressed: true`)
+are not counted.
+
+== Rows of a findings lane
+
+A findings grid has one row per *reporter*. Three are always present in the
+Hypatia lane; the rest come from the fleet.
+
+[cols="1,2,3",options="header"]
+|===
+|Row |Evidence read |How it goes orange
+
+|Hypatia scan
+|`hypatia-findings.relativized.json`: one JSON array of findings with `severity`, `rule_module`, `type`, `file`, `line`, `reason`.
+|File absent, not JSON, not one array of objects, or a severity the grid does not know. The reusable's "Validate findings" step failing is exactly this case.
+
+|panic-attack assail
+|`panic-attack-findings.json`, the status envelope the reusable already writes: `status` `ran` / `not_run` / `error`, `ref`, `reason`, `report.weak_points[]` with `category`, `file`, `severity`, `description`, optional `suppressed`.
+|`status` other than `ran`, or `ran` without a readable `report`.
+
+|pons asinorum
+|`pons-findings.json`, the same envelope around `pons scan --format json` (`report.findings[]` with `rule_id`, `severity` `ERROR`/`WARN`/`INFO`, `tier`, `evidence`, `location.file`, `location.line_start`, `message`). The tier and evidence class are carried into the message, so a heuristic is never read as a proof.
+|As above.
+
+|One row per gitbot-fleet member
+|`.gitbot-fleet/report-backs/<member>.json` in the scanned tree, each a report-back envelope (below), and `.gitbot-fleet/enrolment.json` naming which members apply to this repository.
+|An enrolled member with no report-back is orange ("enrolled, but no report-back was received"); a member marked not enrolled is grey with the manifest's reason; a member with a report-back but no enrolment entry gets a row from its report-back alone. An unreadable manifest is one orange row named `gitbot-fleet enrolment`.
+|===
+
+=== The report-back envelope
+
+A fleet member reports back by writing one JSON object:
+
+[source,json]
+----
+{ "reporter": "rhodibot", "title": "rhodibot (RSR compliance)",
+  "status": "ran",                     // ran | not_run | error | not_applicable
+  "reason": null,                      // required unless ran
+  "ref": "<bot commit or version>",
+  "findings": [ { "rule_id": "RSR-001", "severity": "error",
+                  "file": "README.adoc", "line": 1, "message": "…" } ] }
+----
+
+`severity` uses the fleet's own words (`error`, `warning`, `info`,
+`suggestion` — `shared-context/src/finding.rs`) or the scanner words above;
+both normalise. `not_applicable` must carry a reason and renders grey.
+
+=== The enrolment manifest
+
+[source,json]
+----
+{ "schema": 1,
+  "reporters": {
+    "rhodibot":  { "title": "rhodibot (RSR compliance)", "enrolled": true },
+    "glambot":   { "enrolled": false, "reason": "no served HTML surface" } } }
+----
+
+Enrolment is a statement by the repository about which members apply. It is
+what lets a row be grey instead of orange, and it is hashed into the profile,
+so changing it ends comparisons with earlier revisions.
+
+== Comparison
+
+"Since previous revision" compares the current grid with the baseline
+embedded in the lane's previous comment on the same PR, and only when the
+schema and the *profile* match and the commit differs. The profile is a
+SHA-256 over the renderer, the enrolment manifest and the pinned tool
+commits; a changed tool or scope yields `— no comparable baseline`, never an
+apparent improvement. A row whose status changed (a scanner that ran last
+time and not this time) reads `— evidence changed`. Rows that ran both times
+compare blocking findings (critical + high) first, then medium, then minor:
+`↑ improved (n fewer blocking)`, `↓ regressed (n more blocking)`,
+`↑ fewer medium`, `↔ unchanged`, and so on.
+
+== Badges
+
+Each lane publishes its state three ways, all derived from one `report.json`:
+
+. In the comment, the shields static badge on the badge line.
+. In the artifact, `badge.json` in the shields *endpoint* schema
+  (`{"schemaVersion":1,"label":…,"message":…,"color":…}`), so a repository
+  that chooses to publish it (for example to a `governance-badges` branch
+  on pushes to `main`) can show a live README badge through
+  `https://img.shields.io/endpoint?url=…`.
+. As the job output `verdict` of the reusable workflow, for callers that gate
+  or comment in their own job.
+
+A badge asserts the lane's state at one commit and nothing more. It is not
+a readiness grade (link:BADGE-CRITERIA-SPEC.adoc[]) and not a security
+certification; the scope footer says so in every rendering.
+
+== Where it runs
+
+[cols="1,2,2",options="header"]
+|===
+|Lane |Renderer |Workflow
+|DEED–K9 (conformance) |`1-formats/k9/tools/conformance-report.mjs` (tests: `conformance-report.test.mjs`) |`k9-contractile.yml`, which also posts the comment.
+|Hypatia (findings) |`scripts/verdict-grid.sh` + `scripts/lib/verdict-grid.jq` (tests: `scripts/tests/verdict-grid-test.sh`) |`hypatia-scan-reusable.yml` renders the grid into the job summary and the `verdict-grid` artifact and exposes the `verdict` output. It does not post the comment: it declares only the permissions every existing caller already grants, and a reusable may not request more than its caller. The caller posts (see below).
+|===
+
+=== Posting from a caller
+
+[source,yaml]
+----
+jobs:
+  hypatia:
+    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@<sha>
+    permissions: { actions: read, contents: read, security-events: write }
+    secrets: { HYPATIA_SCAN_PAT: ${{ secrets.HYPATIA_SCAN_PAT }} }
+  verdict:
+    needs: hypatia
+    if: always() && github.event_name == 'pull_request'
+    permissions: { pull-requests: write, contents: read }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@<pinned> # name: verdict-grid
+      - run: |  # find the marked comment, PATCH it, else POST (same pattern as k9-contractile.yml)
+----
+
+The reusable reads the previous comment only to fill the delta column; that
+read is best-effort and a missing previous comment means `— no comparable
+baseline`.
+
+== Reproduce locally
+
+[source,bash]
+----
+bash scripts/tests/verdict-grid-test.sh
+HYPATIA_FORMAT=json hypatia scan . --exit-zero > hypatia-findings.json
+bash scripts/verdict-grid.sh render --out verdict-grid \
+  --hypatia hypatia-findings.json --panic panic-attack-findings.json --pons pons-findings.json \
+  --report-backs .gitbot-fleet/report-backs --enrolment .gitbot-fleet/enrolment.json
+----
+
+Exit 0 means a grid was rendered, whatever its state; exit 2 is a usage
+error. Gating is the workflow's decision, taken from `report.json`.
+
+== Non-goals
+
+* No composite score across lanes, and no averaging within one: a grid is
+  worst-of, and two lanes are two comments.
+* No change to what any scanner finds. The grid reads results; it does not
+  filter them. Baseline suppression (`.hypatia-baseline.json`) remains the
+  gate's business and is not applied to the grid, so the grid shows the
+  repository's standing debt as well as new findings; the delta column is
+  what isolates a PR's effect.
+* No JavaScript. The findings renderer is bash and jq so it adds nothing to
+  the estate's authored-JavaScript surface (`docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc`). The K9 lane's `.mjs` renderer predates this
+  document; migrating it onto `verdict-grid.jq` is follow-up work, not part of this specification.
