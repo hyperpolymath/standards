@@ -110,6 +110,7 @@ for SHA in "$@"; do
   # Parse the lock into "<workflow-path>\t<owner/repo@sha>" pairs.
   awk '
     /^workflows:/ { in_wf = 1; next }
+    /^[a-z_]+:/   { in_wf = 0; next }
     !in_wf { next }
     # A workflow key line:  \x27.github/workflows/foo.yml\x27:
     /^[[:space:]]+\x27[^\x27]+\x27:/ {
@@ -128,6 +129,27 @@ for SHA in "$@"; do
     }
   ' "$TMP/lock" | sort -u > "$TMP/locked"
 
+  # Parse dependencies: entries whose `ref:` equals their own 40-hex SHA pin
+  # (self-SHA ref; rejected by the GitHub runner during Set up job, standards#1271).
+  awk '
+    /^dependencies:/ { in_dep = 1; next }
+    /^[a-z_]+:/      { in_dep = 0; cur = ""; next }
+    !in_dep { next }
+    /^    \x27[^\x27]+\x27:$/ {
+      cur = $0; sub(/^    \x27/, "", cur); sub(/\x27:$/, "", cur)
+      next
+    }
+    cur != "" && /^        ref: \x27[^\x27]+\x27$/ {
+      r = $0; sub(/^        ref: \x27/, "", r); sub(/\x27$/, "", r)
+      n = index(cur, "@")
+      pin = (n > 0) ? substr(cur, n + 1) : ""
+      if (length(r) == 40 && r ~ /^[0-9a-fA-F]+$/ && tolower(r) == tolower(pin)) {
+        print tolower(cur)
+      }
+      cur = ""
+    }
+  ' "$TMP/lock" | sort -u > "$TMP/self_sha_deps"
+
   locked_pairs=$(wc -l < "$TMP/locked")
   locked_wfs=$(cut -f1 "$TMP/locked" | sort -u | wc -l)
 
@@ -144,6 +166,7 @@ for SHA in "$@"; do
   tr 'A-Z' 'a-z' < "$TMP/locked" > "$TMP/locked.lc"
 
   : > "$TMP/missing"
+  : > "$TMP/self_sha_used"
   : > "$TMP/unkeyed_wf"
   : > "$TMP/scanned"
   : > "$TMP/unparsed"
@@ -189,6 +212,8 @@ for SHA in "$@"; do
             printf '%s\t%s\n' "$wf" "$key" >> "$TMP/unkeyed_wf"
           elif ! /usr/bin/grep -qF "$(printf '%s\t%s' "$wf_lc" "$key_lc")" "$TMP/locked.lc"; then
             printf '%s\t%s\n' "$wf" "$key" >> "$TMP/missing"
+          elif /usr/bin/grep -qxF "$key_lc" "$TMP/self_sha_deps"; then
+            printf '%s\t%s\n' "$wf" "$key" >> "$TMP/self_sha_used"
           fi
         done
   done < "$TMP/wfs"
@@ -196,6 +221,7 @@ for SHA in "$@"; do
   n_actions=$(/usr/bin/grep -c 'ACTION$' "$TMP/scanned" 2>/dev/null || echo 0)
   n_reusable=$(/usr/bin/grep -c 'REUSABLE-CALL$' "$TMP/scanned" 2>/dev/null || echo 0)
   n_missing=$(sort -u "$TMP/missing" 2>/dev/null | wc -l)
+  n_self_sha=$(sort -u "$TMP/self_sha_used" 2>/dev/null | wc -l)
   n_unkeyed=$(sort -u "$TMP/unkeyed_wf" 2>/dev/null | wc -l)
   n_unkeyed_wf=$(cut -f1 "$TMP/unkeyed_wf" 2>/dev/null | sort -u | wc -l)
 
@@ -211,18 +237,28 @@ for SHA in "$@"; do
     echo "  VERDICT: UNEXAMINED — yq could not parse $(sort -u "$TMP/unparsed" | wc -l) workflow(s); their refs were not checked:"
     sort -u "$TMP/unparsed" | sed 's/^/             /'
     overall_rc=1
-  elif [ "$n_missing" -eq 0 ]; then
+  elif [ "$n_missing" -eq 0 ] && [ "$n_self_sha" -eq 0 ]; then
     echo "  VERDICT: SELF-CONSISTENT — every action ref used is keyed in this SHA's own lock."
     echo "           (Reachability at the remote is NOT proven by this check.)"
   else
-    echo "  VERDICT: POISON — ${n_missing} action ref(s) used but NOT keyed in this SHA's own lock."
-    echo "           Any caller pinned here dies at startup with 0 jobs and no stated reason."
-    sort -u "$TMP/missing" | while IFS=$'\t' read -r wf key; do
-      echo "             ${wf}"
-      echo "               uses  ${key}"
-      locked_for=$(/usr/bin/grep -F "$(printf '%s\t' "$wf")" "$TMP/locked" | cut -f2 | sort -u | tr '\n' ' ')
-      echo "               lock keys for this workflow: ${locked_for:-<none>}"
-    done
+    if [ "$n_missing" -gt 0 ]; then
+      echo "  VERDICT: POISON — ${n_missing} action ref(s) used but NOT keyed in this SHA's own lock."
+      echo "           Any caller pinned here dies at startup with 0 jobs and no stated reason."
+      sort -u "$TMP/missing" | while IFS=$'\t' read -r wf key; do
+        echo "             ${wf}"
+        echo "               uses  ${key}"
+        locked_for=$(/usr/bin/grep -F "$(printf '%s\t' "$wf")" "$TMP/locked" | cut -f2 | sort -u | tr '\n' ' ')
+        echo "               lock keys for this workflow: ${locked_for:-<none>}"
+      done
+    fi
+    if [ "$n_self_sha" -gt 0 ]; then
+      echo "  VERDICT: POISON — ${n_self_sha} action ref(s) carry a self-SHA ref: in dependencies: (standards#1271)."
+      echo "           GitHub runner verification fails at Set up job ('invalid lockfile pin')."
+      sort -u "$TMP/self_sha_used" | while IFS=$'\t' read -r wf key; do
+        echo "             ${wf}"
+        echo "               self-SHA ref  ${key}"
+      done
+    fi
     overall_rc=1
   fi
 done

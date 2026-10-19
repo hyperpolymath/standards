@@ -39,11 +39,12 @@ MERGED=""
 trap 'rm -f "$INLINE" "$TAGGED" "$MAP" "$TMPLOCK" "$MERGED"' EXIT
 find "$WF_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 \
   | xargs -0 -r awk '
-      match($0, /uses:[ \t]*[A-Za-z0-9_.-]+\/[A-Za-z0-9_.\/-]+@[0-9a-f]{40}/) {
+      match($0, /uses:[ \t]*[A-Za-z0-9_.-]+\/[A-Za-z0-9_.\/-]+@[0-9a-f]+/) {
         s = substr($0, RSTART, RLENGTH)
         sub(/^uses:[ \t]*/, "", s)
         n = split(s, parts, "@")
         path = parts[1]; sha = parts[2]
+        if (length(sha) != 40) next
         split(path, seg, "/")
         print tolower(seg[1] "/" seg[2]) "\t" sha
       }' | sort -u > "$INLINE"
@@ -63,7 +64,7 @@ find "$WF_DIR" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0
         sub(/^uses:[ \t]*/, "", s)
         n = index(s, "@")
         path = substr(s, 1, n - 1); ref = substr(s, n + 1)
-        if (ref ~ /^[0-9a-f]{40}$/) next
+        if (length(ref) == 40 && ref ~ /^[0-9a-f]+$/) next
         split(path, seg, "/")
         print tolower(seg[1] "/" seg[2]) "\t" ref
       }' | sort -u > "$TAGGED"
@@ -82,16 +83,16 @@ awk -v inline="$INLINE" -v tagged="$TAGGED" '
     n = index(key, "@")
     action = substr(key, 1, n - 1); ref = substr(key, n + 1)
     # already SHA-keyed: nothing to do
-    if (ref ~ /^[0-9a-f]{40}$/) { cur = ""; next }
+    if (length(ref) == 40 && ref ~ /^[0-9a-f]+$/) { cur = ""; next }
     # still written as this tag somewhere: keep the tag key (see 1b)
     if ((tolower(action) SUBSEP ref) in intag) { cur = ""; next }
     cur = key; curaction = action; next
   }
   # its body carries    commit: '\''sha1-<sha>'\''
-  cur != "" && match($0, /commit:[ \t]*'\''sha1-[0-9a-f]{40}'\''/) {
+  cur != "" && match($0, /commit:[ \t]*'\''sha1-[0-9a-f]+'\''/) {
     c = substr($0, RSTART, RLENGTH)
     sub(/.*sha1-/, "", c); sub(/'\''.*/, "", c)
-    if ((tolower(curaction) SUBSEP c) in seen) print cur "\t" curaction "@" c
+    if (length(c) == 40 && ((tolower(curaction) SUBSEP c) in seen)) print cur "\t" curaction "@" c
     cur = ""
   }
 ' "$LOCK" > "$MAP"
@@ -127,18 +128,39 @@ rm -f "$MAP.count"
 #    already holds a SHA-keyed record for a commit and the tool added a
 #    tag-keyed record for the same commit, step 3 leaves TWO records under one
 #    key, and the lockfile reader rejects the file ("already defined"). Both
-#    describe the same commit, so the first is kept and the later one dropped
-#    with its body. A list (a workflow entry, a record's uses:) that now names
-#    the same ref twice keeps it once.
+#    describe the same commit, so prefer the record whose `ref:` is symbolic
+#    (tag/branch) over a self-SHA `ref:` (which fails GitHub runner lockfile
+#    verification; standards#1271) and drop the duplicate with its body. A list
+#    (a workflow entry, a record's uses:) that now names the same ref twice
+#    keeps it once.
 MERGED="$(mktemp)"
 awk '
+  NR == FNR {
+    if ($0 ~ /^[a-z_]+:/) { p1_sec = $0; p1_k = ""; next }
+    if (p1_sec ~ /^dependencies:/ && $0 ~ /^    \047[^\047]+\047:/) {
+      p1_k = $0; sub(/:.*$/, "", p1_k)
+      occ[p1_k]++
+      p1_i = occ[p1_k]
+      if (!(p1_k in chosen)) chosen[p1_k] = p1_i
+      next
+    }
+    if (p1_sec ~ /^dependencies:/ && p1_k != "" && $0 ~ /^        ref: \047[^\047]+\047$/) {
+      r = $0; sub(/^        ref: \047/, "", r); sub(/\047$/, "", r)
+      is_sym = !(length(r) == 40 && r ~ /^[0-9a-f]+$/)
+      if (is_sym && !chosen_sym[p1_k]) {
+        chosen[p1_k] = p1_i
+        chosen_sym[p1_k] = 1
+      }
+    }
+    next
+  }
   /^[a-z_]+:/ { sec = $0; skip = 0; delete items; print; next }
   /^    \047[^\047]+\047:/ {
     delete items
     if (sec ~ /^dependencies:/) {
       k = $0; sub(/:.*$/, "", k)
-      if (k in seen) { skip = 1; merged++; next }
-      seen[k] = 1
+      seen[k]++
+      if (seen[k] != chosen[k]) { skip = 1; merged++; next }
     }
     skip = 0; print; next
   }
@@ -151,7 +173,7 @@ awk '
   }
   { delete items; print }
   END { print merged + 0 > "/dev/stderr" }
-' "$TMPLOCK" > "$MERGED" 2>"$MAP.merged"
+' "$TMPLOCK" "$TMPLOCK" > "$MERGED" 2>"$MAP.merged"
 merged="$(cat "$MAP.merged" 2>/dev/null || echo 0)"
 rm -f "$MAP.merged" "$TMPLOCK"
 mv "$MERGED" "$LOCK"

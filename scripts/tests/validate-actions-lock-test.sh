@@ -116,6 +116,26 @@ reset_repo
 printf '{\n  jobs: {\n' > "$WORK/repo/.github/workflows/ci.yml"
 expect "an unparseable workflow fails closed" 1 "ci.yml"
 
+reset_repo
+cat >> "$WORK/repo/.github/workflows/actions.lock" <<EOF
+dependencies:
+    'actions/checkout@$LOCKED':
+        ref: '$LOCKED'
+        commit: 'sha1-$LOCKED'
+        owner_id: 1
+        repo_id: 2
+EOF
+cat > "$WORK/repo/.github/workflows/ci.yml" <<EOF
+jobs:
+  a:
+    steps:
+      - uses: actions/checkout@$LOCKED # v7.0.1
+EOF
+expect "self-SHA ref in dependencies is rejected (standards#1271)" 1 "self-SHA ref in actions.lock dependencies: actions/checkout@$LOCKED"
+
+sed -i "s/ref: '$LOCKED'/ref: 'v7.0.1'/" "$WORK/repo/.github/workflows/actions.lock"
+expect "symbolic tag ref in dependencies passes" 0 "1 SHA-pinned ref(s) found"
+
 echo
 echo "validate-actions-lock: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
