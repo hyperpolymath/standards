@@ -111,7 +111,7 @@ BEGIN { while ((getline l < want) > 0) { split(l, w, "\t"); WANT[w[1]] = WANT[w[
 # existing `swatinem/rust-cache@v2` entry therefore already covers
 # `uses: Swatinem/rust-cache@v2`; adding the second spelling left a ref that
 # close-lock then tried to resolve as a new repository.
-function ck(s,   i) { i = match(s, /@[^@]*$/); return i ? tolower(substr(s, 1, i - 1)) substr(s, i) : s }
+function ck(s,   i) { i = index(s, "@"); return i ? tolower(substr(s, 1, i - 1)) substr(s, i) : s }
 # keep: add ref a to out unless a case spelling of it is already there; of two
 # spellings, the one with a dependency record wins (a lock written before the
 # case fix can hold both, sorted capitalised-first).
