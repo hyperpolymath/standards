@@ -1,0 +1,354 @@
+# This workflow is managed by gh actions-lock.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+name: k9-conformance
+
+# Conformance lane for K9 contracts (standards#1058, ruling D173). The
+# canonical validator is 1-formats/k9/tools/k9-validate.sh; the grid it
+# reports through is scripts/k9-grid.sh (docs/VERDICT-GRID-SPEC.adoc,
+# conformance family). docs/CONTRACTILE-DESCRIPTILE-VALIDATION.adoc says
+# where this lane sits beside the DEED lane and the Hypatia lane.
+#
+# In this repo (push / pull_request) it checks the validator's self-test,
+# the contract's own typecheck, and every committed K9 file.
+#
+# As a reusable (workflow_call) it validates the CALLER's committed K9 files
+# with the validator, contract and renderer at THIS workflow's own commit
+# (job.workflow_sha), so a caller pinned to a standards SHA gets exactly
+# that validator. Layers L0–L2 run; L3 (signature) is outside this lane and
+# the grid says so. The caller's shrink-only debt ledger
+# (.machine_readable/k9-contract-debt.txt) is honoured as
+# 1-formats/k9/tools/CONFORMANCE-REPORTING.adoc states it, and compared with
+# the PR base: an entry the PR adds exempts nothing unless a commit message or
+# the PR body carries `Ratchet-exception: .machine_readable/k9-contract-debt.txt
+# — <why>` (the governance exemption ratchet's form; it watches this ledger
+# too). On a pull request the checkout is full so the changed-file list is the
+# merge-base diff and the PR's commit messages are readable.
+#
+# Outputs: the `k9-grid` artifact (report.json and badge.json as I-JSON/JCS,
+# report.md, the validator logs) and the `verdict` output. The caller posts
+# report.md to its pull request and publishes badge.json itself: a reusable
+# cannot ask for more permissions than it is given, and this one asks for
+# `contents: read` plus `pull-requests: read` (to read the grid comment it
+# posted last time, for the "since previous revision" column).
+#
+# Caller:
+#   jobs:
+#     k9:
+#       uses: hyperpolymath/standards/.github/workflows/k9-conformance.yml@<sha>
+#       permissions:
+#         contents: read
+#         pull-requests: read
+#       with:
+#         require-files: true          # fail when the caller has no K9 file at all
+#         fail-on-indeterminate: true  # orange fails the job too (default: only red fails)
+#         grid-author: github-actions[bot]  # the account whose grid comment is the delta baseline
+
+on:
+  push:
+    paths:
+      - '**.k9.ncl'
+      - '**.k9'
+      - '**.k9.lock'
+      - '1-formats/k9/**'
+      - 'scripts/k9-grid.sh'
+      - 'scripts/lib/k9-grid.jq'
+      - 'scripts/tests/k9-grid-test.sh'
+      - '.machine_readable/k9-contract-debt.txt'
+      - '.github/workflows/k9-conformance.yml'
+  pull_request:
+    paths:
+      - '**.k9.ncl'
+      - '**.k9'
+      - '**.k9.lock'
+      - '1-formats/k9/**'
+      - 'scripts/k9-grid.sh'
+      - 'scripts/lib/k9-grid.jq'
+      - 'scripts/tests/k9-grid-test.sh'
+      - '.machine_readable/k9-contract-debt.txt'
+      - '.github/workflows/k9-conformance.yml'
+  workflow_call:
+    inputs:
+      require-files:
+        description: "Fail when the caller has no committed K9 file (a zero-file run is otherwise grey, not red)."
+        type: boolean
+        required: false
+        default: false
+      fail-on-indeterminate:
+        description: "Fail the job on an orange grid as well as a red one."
+        type: boolean
+        required: false
+        default: false
+      grid-author:
+        description: "The account that posts the grid comment in the caller; only its comment is read as the previous revision's baseline, so a contributor's comment cannot pose as one."
+        type: string
+        required: false
+        default: github-actions[bot]
+    outputs:
+      verdict:
+        description: "Grid state: red, orange, yellow, green or grey."
+        value: ${{ jobs.validate.outputs.verdict }}
+
+permissions: {}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      verdict: ${{ steps.grid.outputs.state }}
+    env:
+      # In this repo the PR's own validator is in the first checkout; a caller
+      # gets validator, contract and renderer from the canon checkout at
+      # job.workflow_sha.
+      CANON: ${{ github.repository == 'hyperpolymath/standards' && '.' || '.k9-canon' }}
+      NICKEL_VERSION: '1.18.0'
+      NICKEL_SHA256: '9cba4dd65ae9915ec61f73033aafcff307a377665a83fd8f530df086763318cb'
+      IJSON_JCS_REV: '0fdeea716fd558e9807362acf6f8202d56d8d88f'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history on a pull request: the changed-file list is the
+          # merge-base diff, and the ledger ratchet reads the PR's commit
+          # messages. Strings, not numbers: a bare 0 is falsy in an expression.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          persist-credentials: false
+
+      - name: checkout the K9 validator, contract and renderer at this workflow's commit
+        if: github.repository != 'hyperpolymath/standards'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: ${{ job.workflow_sha }}
+          path: .k9-canon
+          persist-credentials: false
+          sparse-checkout: "1-formats/k9\nscripts/k9-grid.sh\nscripts/lib/k9-grid.jq\n"
+          sparse-checkout-cone-mode: false
+
+      - name: Record which standards commit supplies validator, contract and renderer
+        env:
+          # The job context is not available to job-level env, so the canon
+          # ref is recorded here. A caller gets this workflow's own commit.
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$GITHUB_REPOSITORY" = "hyperpolymath/standards" ]; then
+            echo "CANON_REF=$HEAD_SHA" >> "$GITHUB_ENV"
+          else
+            echo "CANON_REF=$WORKFLOW_SHA" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install Nickel (pinned, sha256-verified; one version estate-wide)
+        run: |
+          set -euo pipefail
+          URL="https://github.com/tweag/nickel/releases/download/${NICKEL_VERSION}/nickel-x86_64-linux"
+          curl -sSfL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -o "$RUNNER_TEMP/nickel" "$URL"
+          echo "${NICKEL_SHA256}  ${RUNNER_TEMP}/nickel" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/nickel"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Cache the ijson-jcs canonicaliser
+        id: jcs-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/ijson-jcs
+          key: ijson-jcs-${{ env.IJSON_JCS_REV }}-${{ runner.os }}
+
+      - name: Install ijson-jcs (3-practice/JSON-POLICY.adoc, D306)
+        if: steps.jcs-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          # Best effort: the renderer falls back to jq's sorted compact form,
+          # byte-identical for its ASCII integer-only documents, and the grid
+          # records which serialiser ran.
+          cargo install --quiet --git https://github.com/hyperpolymath/ijson-jcs --rev "$IJSON_JCS_REV" --locked ijson-jcs \
+            || echo "::warning::ijson-jcs did not install; report.json falls back to jq -S -c"
+
+      - name: Renderer regression tests
+        if: github.repository == 'hyperpolymath/standards'
+        run: bash scripts/tests/k9-grid-test.sh
+
+      - name: Validator self-test
+        run: |
+          set +e
+          bash "$CANON/1-formats/k9/tools/k9-validate.sh" --self-test > "$RUNNER_TEMP/selftest.log" 2>&1
+          echo "SELFTEST_CODE=$?" >> "$GITHUB_ENV"
+          tail -n 5 "$RUNNER_TEMP/selftest.log"
+
+      - name: Contract typecheck
+        run: |
+          set +e
+          nickel typecheck "$CANON/1-formats/k9/spec/contract/k9_contract.ncl" > "$RUNNER_TEMP/typecheck.log" 2>&1
+          echo "TYPECHECK_CODE=$?" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/typecheck.log"
+
+      - name: Enumerate the committed K9 files, the PR's changed files and ledger growth
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          LEDGER: .machine_readable/k9-contract-debt.txt
+        run: |
+          set -euo pipefail
+          # Tracked files only: an untracked file is not a committed contract.
+          # A caller with no K9 file at all is a legitimate (grey) corpus, so
+          # grep's no-match exit is not an error here.
+          git ls-files -z -- '*.k9.ncl' '*.k9' '*.k9.lock' \
+            | tr '\0' '\n' \
+            | { grep -v -E '^(\.k9-canon/|9-archive/|1-formats/k9/tools/fixtures/)' || [ $? -eq 1 ]; } \
+            | sort > "$RUNNER_TEMP/expected"
+          echo "$(wc -l < "$RUNNER_TEMP/expected") committed K9 file(s)"
+          : > "$RUNNER_TEMP/changed"
+          : > "$RUNNER_TEMP/ledger-growth"
+          echo "BASE_UNRESOLVED=" >> "$GITHUB_ENV"
+          [ -n "$BASE_SHA" ] || exit 0
+
+          # The PR's own changes are those since its merge base, not since the
+          # base branch tip: a file the base branch changed after the PR
+          # branched is not this PR's edit. The full checkout already holds
+          # the base commit; the fetch is a fallback only, and runs without
+          # credentials (persist-credentials is off), so it serves public
+          # repositories.
+          if { git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --quiet origin "$BASE_SHA" 2>/dev/null; } \
+             && merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null) \
+             && git diff --name-only "$merge_base" "$HEAD_SHA" > "$RUNNER_TEMP/changed" 2>/dev/null; then
+            echo "$(wc -l < "$RUNNER_TEMP/changed") file(s) changed since the merge base $merge_base"
+          else
+            echo "::warning::could not resolve the PR base/head range; debt exemptions are reported as indeterminate"
+            echo "BASE_UNRESOLVED=--base-unresolved" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          # The ledger is shrink-only. Entries present at HEAD and absent at
+          # the merge base are growth; growth exempts nothing unless a commit
+          # message in the PR or the PR body declares it in the exemption
+          # ratchet's form, naming this ledger:
+          #     Ratchet-exception: .machine_readable/k9-contract-debt.txt — <why>
+          #     Ratchet-exception(.machine_readable/k9-contract-debt.txt): <why>
+          # Read ledger paths from stdin and emit sorted unique entries,
+          # excluding comments and blank lines; an empty ledger succeeds.
+          entries() { { grep -vE '^[[:space:]]*(#|$)' || [ $? -eq 1 ]; } | sort -u; }
+          head_entries=$RUNNER_TEMP/ledger-head
+          base_entries=$RUNNER_TEMP/ledger-base
+          if [ -f "$LEDGER" ]; then entries < "$LEDGER" > "$head_entries"; else : > "$head_entries"; fi
+          { git show "$merge_base:$LEDGER" 2>/dev/null || true; } | entries > "$base_entries"
+          comm -13 "$base_entries" "$head_entries" > "$RUNNER_TEMP/ledger-growth"
+          [ -s "$RUNNER_TEMP/ledger-growth" ] || exit 0
+          declared=no
+          if git log --format=%B "$merge_base..$HEAD_SHA" | grep -iE '^Ratchet-exception' | grep -qF "$LEDGER"; then
+            declared=yes
+          elif [ -f "${GITHUB_EVENT_PATH:-}" ] \
+               && jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" | grep -iE '^Ratchet-exception' | grep -qF "$LEDGER"; then
+            declared=yes
+          fi
+          n=$(wc -l < "$RUNNER_TEMP/ledger-growth")
+          if [ "$declared" = yes ]; then
+            echo "::notice::$LEDGER grew by $n entr(y/ies) under a declared Ratchet-exception"
+            : > "$RUNNER_TEMP/ledger-growth"
+          else
+            echo "::error::$LEDGER grew by $n entr(y/ies) with no Ratchet-exception naming it; the new entries exempt nothing"
+            sed 's/^/  + /' "$RUNNER_TEMP/ledger-growth"
+          fi
+
+      - name: Validate every committed K9 file (L0–L2, strict)
+        run: |
+          set +e
+          : > "$RUNNER_TEMP/results.jsonl"
+          worst=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            bash "$CANON/1-formats/k9/tools/k9-validate.sh" --strict --layer L2 --json --quiet "$f" >> "$RUNNER_TEMP/results.jsonl" 2>> "$RUNNER_TEMP/corpus.log"
+            rc=$?
+            [ "$rc" -gt "$worst" ] && worst=$rc
+          done < "$RUNNER_TEMP/expected"
+          echo "CORPUS_CODE=$worst" >> "$GITHUB_ENV"
+          echo "validator worst exit status: $worst"
+
+      - name: Read the grid comment from the previous revision (delta column)
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENTS_URL: ${{ github.event.pull_request.comments_url }}
+          MARKER: '<!-- verdict-grid:k9 regenerated on every run -->'
+          GRID_AUTHOR: ${{ inputs.grid-author || 'github-actions[bot]' }}
+        run: |
+          set -euo pipefail
+          # Best effort: the caller's posting account writes the grid under
+          # this marker and regenerates it in place, so its last comment
+          # carrying the marker is the previous revision's grid and baseline.
+          # Only that account's comments count: anyone who can comment could
+          # otherwise plant a marker and a forged baseline. Any failure here
+          # only costs the "since previous revision" column.
+          : > "$RUNNER_TEMP/previous.md"
+          page=1
+          while [ "$page" -le 10 ]; do
+            if ! curl -sSf --retry 2 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                 "$COMMENTS_URL?per_page=100&page=$page" > "$RUNNER_TEMP/comments.json"; then
+              echo "::notice::could not read the pull request comments; the delta column reports no comparable baseline"
+              break
+            fi
+            jq -r --arg m "$MARKER" --arg a "$GRID_AUTHOR" \
+              '[.[] | select((.user.login // "") == $a and ((.body // "") | contains($m)))] | last | .body // empty' \
+              "$RUNNER_TEMP/comments.json" > "$RUNNER_TEMP/previous-page.md"
+            [ -s "$RUNNER_TEMP/previous-page.md" ] && mv "$RUNNER_TEMP/previous-page.md" "$RUNNER_TEMP/previous.md"
+            [ "$(jq length "$RUNNER_TEMP/comments.json")" -eq 100 ] || break
+            page=$((page + 1))
+          done
+          [ -s "$RUNNER_TEMP/previous.md" ] && echo "previous grid found" || echo "no previous grid"
+
+      - name: Render the verdict grid
+        id: grid
+        env:
+          REQUIRE_FILES: ${{ inputs.require-files || false }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'local' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ledger=.machine_readable/k9-contract-debt.txt
+          args=(--out "$RUNNER_TEMP/k9-grid" --results "$RUNNER_TEMP/results.jsonl" --expected "$RUNNER_TEMP/expected"
+                --changed "$RUNNER_TEMP/changed" --selftest "$RUNNER_TEMP/selftest.log" --selftest-code "$SELFTEST_CODE"
+                --typecheck "$RUNNER_TEMP/typecheck.log" --typecheck-code "$TYPECHECK_CODE" --corpus-code "$CORPUS_CODE"
+                --sha "$HEAD_SHA" --run "$GITHUB_RUN_ID" --url "$RUN_URL" --pr "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+                --canon-ref "$CANON_REF")
+          [ -f "$ledger" ] && args+=(--ledger "$ledger")
+          [ -s "$RUNNER_TEMP/ledger-growth" ] && args+=(--ledger-growth "$RUNNER_TEMP/ledger-growth")
+          [ -s "$RUNNER_TEMP/previous.md" ] && args+=(--previous "$RUNNER_TEMP/previous.md")
+          [ -n "${BASE_UNRESOLVED:-}" ] && args+=("$BASE_UNRESOLVED")
+          # With require-files the empty corpus is a failing row in the grid
+          # itself, so report.md and badge.json carry the red the job reports.
+          [ "$REQUIRE_FILES" = "true" ] && args+=(--require-files)
+          bash "$CANON/scripts/k9-grid.sh" render "${args[@]}"
+          cp "$RUNNER_TEMP/selftest.log" "$RUNNER_TEMP/typecheck.log" "$RUNNER_TEMP/results.jsonl" "$RUNNER_TEMP/k9-grid/"
+          [ -f "$RUNNER_TEMP/corpus.log" ] && cp "$RUNNER_TEMP/corpus.log" "$RUNNER_TEMP/k9-grid/"
+
+      - name: Archive the grid and its evidence
+        if: ${{ always() && steps.grid.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k9-grid
+          path: ${{ runner.temp }}/k9-grid
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Gate
+        env:
+          STATE: ${{ steps.grid.outputs.state }}
+          FAIL_ON_INDETERMINATE: ${{ inputs.fail-on-indeterminate || false }}
+        run: |
+          set -euo pipefail
+          echo "K9 verdict grid: $STATE"
+          case "$STATE" in
+            red) echo "::error::K9 conformance failed; see the k9-grid artifact and the step summary"; exit 1 ;;
+            orange)
+              if [ "$FAIL_ON_INDETERMINATE" = "true" ]; then
+                echo "::error::K9 conformance is indeterminate and fail-on-indeterminate is set"; exit 1
+              fi
+              echo "::warning::K9 conformance is indeterminate: evidence is missing, not clean" ;;
+            yellow) echo "::notice::K9 conformance passes with ledgered debt or warnings" ;;
+            green|grey) ;;
+            *) echo "::error::no verdict was produced"; exit 1 ;;
+          esac

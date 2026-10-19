@@ -1,0 +1,152 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Validating the contractile–descriptile system
+Jonathan D.A. Jewell (hyperpolymath)
+v1.0.0, 2026-10-19
+:toc: left
+:toclevels: 2
+:sectnums:
+:icons: font
+
+[.lead]
+Every estate repository carries two kinds of machine-readable metadata:
+the *descriptiles* (what the repository is, in its `<repo>_chora.deed`)
+and the *contractiles* (what it promises, as K9 contracts under
+`.machine_readable/contractiles/<verb>/`). This document fixes which
+machinery validates each, where that machinery runs, how its verdict is
+shown, and what a consuming repository has to install. It records the
+determinations made on 2026-10-19 (standards#1058) after the second
+edition of both grammars landed.
+
+== The two families, and their validators
+
+[cols="1,2,2,2",options="header"]
+|===
+|Family |Files |Grammar (normative) |Validator (canonical)
+|Descriptile (descriptive: what is)
+|`<repo>_chora.deed`, one per repository (D312); `.machine_readable/descriptiles/*.deed` for anchors not yet folded in
+|`1-formats/deed/spec/abnf/deed.abnf` (D308)
+|`1-formats/deed/tools/deed_lint.js`, run by the reusable `deed-conformance.yml`
+|Contractile (normative: what must hold)
+|`.machine_readable/contractiles/<verb>/<verb>.k9.ncl` for the verbs `intend`, `must`, `trust`, `adjust`, `dust`, `bust`; any other `*.k9.ncl`; `coordination.k9` (routed, not validated as a contract)
+|`1-formats/k9/spec/K9-CONTRACT-SPEC.adoc` v1.0.0 (D173) and its contract `1-formats/k9/spec/contract/k9_contract.ncl`
+|`1-formats/k9/tools/k9-validate.sh`, run by the reusable `k9-conformance.yml`
+|===
+
+The deed attests to the contractiles (`:contractiles_required` and a
+`(contractiles …)` clause). The deed linter checks that attestation is
+well-formed; the K9 validator checks that each attested contract is a
+valid K9 component. Neither validator reads the other's files, and a
+green from one says nothing about the other. That separation is
+deliberate: a deed that names six contractiles is true even while one of
+them fails to typecheck, and the grid shows both facts side by side.
+
+== Determinations (2026-10-19)
+
+. *The "interface panel" is the verdict grid.* The compact comment the
+  owner piloted on MetaManifold-WebUI pull requests, and the one
+  `k9-contractile.yml` posts in this repository, are the two families of
+  the grid in `docs/VERDICT-GRID-SPEC.adoc`: the conformance family
+  (red / orange / yellow / green / grey, for DEED and K9) and the findings
+  family (for Hypatia). There is no third interface.
+. *No consumer was calling the canonical validators.* Before this
+  change, `deed-conformance.yml` had the `workflow_call` entry point and
+  no caller, and K9 had no reusable at all: consumers ran the
+  `k9-ecosystem` action from `@main` or grepped for a `contract` line.
+  Measured on 2026-10-19, 44 of the 53 consumer `.k9.ncl` files reachable
+  from this session fail contract v1.0.0, including every contractile in
+  `rsr-template-repo`, which every new repository is instantiated from.
+  The fix is at the source: the template first, then each repository.
+. *k9iser is retired.* It generated K9 files from TOML manifests in a
+  shape the v1.0.0 contract rejects (no `schema_version`, no
+  `component_type`, no `semantics`), and nothing consumed its output
+  except the `generated/k9iser/` directories it wrote. Contracts are
+  authored, not generated; `K9-CONTRACT-SPEC.adoc` is the authoring
+  guide. Repositories that still carry `k9iser.toml`, `generated/k9iser/`
+  or a `check-k9iser-paths` job remove them in their install PR.
+. *One validator per family, pinned by the caller.* A consumer calls the
+  reusable at a standards commit SHA and gets the validator, the contract
+  and the renderer at exactly that commit (`job.workflow_sha`). Nothing in
+  the consumer's own tree validates these files; a second validator is
+  the defect this document closes.
+. *Layers.* CI certifies K9 layers L0–L2 (envelope, structure, Nickel
+  semantics against the contract). L3, the Ed25519 signature, needs a
+  verifier the validator deliberately does not embed; the grid's scope
+  line says L3 is not certified. A `Hunt`-leash contract therefore gets
+  no execution licence from a green grid.
+. *Debt is a shrink-only ledger, honoured in the grid.* A file named in
+  the consumer's `.machine_readable/k9-contract-debt.txt` and untouched
+  by the pull request fails as _advisory_ (yellow). Touch it and it must
+  conform (red). Fix it and leave it in the ledger and the grid is red
+  with "Stale debt exemption" until the line is removed, as is a ledger
+  line that names no tracked K9 file. Growing the ledger needs a
+  `Ratchet-exception:` line naming it in a commit or the PR body (owner
+  norm, 2026-10-14): the lane compares the ledger with the PR's merge base
+  and an undeclared addition exempts nothing (red), and the governance
+  exemption ratchet rejects the growth as well.
+. *Artifacts are I-JSON serialised as JCS.* `report.json` and
+  `badge.json` go through `ijson-jcs canon` (D306) when it is installed,
+  else jq's sorted compact form, which is byte-identical for these
+  documents; one final LF either way. The workflow files stay YAML until
+  the standards#1025 step-6 gate admits KYAML workflows (D280).
+
+== Where each lane runs
+
+[cols="1,2,2",options="header"]
+|===
+|Lane |Reusable |What the caller does
+|DEED |`.github/workflows/deed-conformance.yml@<sha>` with `require-files: true` |Nothing more: the job fails on a lint error. (A grid for this lane is a follow-up; the linter's own output is the evidence today.)
+|K9 |`.github/workflows/k9-conformance.yml@<sha>` with `require-files: true`, granting `contents: read` and `pull-requests: read`; `grid-author` names the posting account when it is not `github-actions[bot]` |Downloads the `k9-grid` artifact in a second job and posts `report.md` to the pull request (marker `<!-- verdict-grid:k9 regenerated on every run -->`), and publishes `badge.json` where its README badge reads it. The reusable reads the previous grid comment for its delta column but asks for no write permission, so it cannot post.
+|Hypatia |`.github/workflows/hypatia-scan-reusable.yml@<sha>` with the explicit `HYPATIA_SCAN_PAT` secret |Same posting job, artifact `verdict-grid`, marker `<!-- verdict-grid:hypatia regenerated on every run -->`.
+|===
+
+The posting pattern is in `docs/VERDICT-GRID-SPEC.adoc` (_Posting from a
+caller_). MetaManifold-WebUI's `governance.yml` is the worked example:
+one job per lane, one verdict job that posts all the grids, one badges
+job that commits `badge.json` files to a `governance-badges` branch.
+
+== Install checklist for a repository
+
+. Pin: every `uses: hyperpolymath/standards/…@<sha>` in the repository
+  moves to one SHA, and `actions.lock` is repaired with the chain
+  (`gh actions-lock`, `relock-sha-keys`, `complete-job-refs`,
+  `close-lock`, `prune-stale`; never by hand).
+. Replace any in-tree deed or K9 validation (`k9-ecosystem` action,
+  `grep contract`, `nickel typecheck` of `*.k9.ncl` outside the reusable,
+  k9iser jobs) with the two reusable calls above.
+. Add the verdict posting job and the badges job from the worked example.
+. Migrate the six contractiles to contract v1.0.0: add `schema_version`,
+  `component_type` (`contractile:<verb>`), `semantics`,
+  `security.capabilities` and `side_effects`; a `Hunt` leash needs a
+  signature block. Route `coordination.k9` by its dialect line instead of
+  validating it as a component. Delete placeholder `template-*` and
+  `examples/` K9 files that will never be real contracts.
+. Run the validator locally before pushing:
+  `bash 1-formats/k9/tools/k9-validate.sh --strict --layer L2 --json FILE`
+  from a standards checkout, and `bash scripts/k9-grid.sh render …` to
+  see the grid the lane will post (`scripts/tests/k9-grid-test.sh` shows
+  every flag).
+. Put any contract that cannot be fixed in the same PR into
+  `.machine_readable/k9-contract-debt.txt` with a `Ratchet-exception:`
+  line, and open the issue that will shrink it.
+
+The repositories in the first wave, in order: `rsr-template-repo` (the
+source every other repository is instantiated from), then `echidna`,
+`echidnabot`, `proof-burrower`, `hypatia`, `panic-attack`, and this
+repository's own self-run. The work orders are WO-9 and WO-10 in
+`docs/reorg/2026-10-14-tidy/WORK-ORDERS-2026-10-19.adoc`.
+
+== What a green grid means, and does not
+
+A green K9 grid says: the validator's own self-test passed, the contract
+typechecked, and every committed K9 file is a valid component at L0–L2
+under contract v1.0.0 at the named standards commit, with no skipped
+check. It does not say the contract's semantics are true of the
+repository (that is Hypatia's lane and the Mustfile's), that L3 holds, or
+that a routed `coordination.k9` conforms to its own grammar (no validator
+exists for it yet; `2-protocols/k9-coordination/` says so).
+
+Orange is missing evidence (a skipped layer, a malformed validator record,
+an unresolved PR range), never a pass. Grey is an explicit scope
+exclusion (routed files only, or no K9 files at all when `require-files`
+is off). The rules are tested in `scripts/tests/k9-grid-test.sh`.
