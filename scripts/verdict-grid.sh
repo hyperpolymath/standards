@@ -50,7 +50,7 @@ source_record() {
 baseline_of() {
   local file="$1" b64
   [ -s "$file" ] || { echo null; return; }
-  b64=$(grep -o '<!-- verdict-grid-baseline:[A-Za-z0-9+/=]* -->' "$file" | tail -n1 \
+  b64=$( { grep -o '<!-- verdict-grid-baseline:[A-Za-z0-9+/=]* -->' "$file" || true; } | tail -n1 \
         | sed 's/^<!-- verdict-grid-baseline://; s/ -->$//')
   if [ -z "$b64" ] || [ "${#b64}" -gt 32000 ]; then echo null; return; fi
   printf '%s' "$b64" | base64 -d 2>/dev/null | jq -c '
