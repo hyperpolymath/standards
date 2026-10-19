@@ -136,6 +136,25 @@ grep -qxF "        - 'o/r@V3'" "$L5" && grep -qxF "        - 'o/r@v3'" "$L5" \
   && ok "ref case differs → both refs kept (refs are case-sensitive)" \
   || bad "ref case differs → both refs kept (refs are case-sensitive)"
 
+echo "=== a lock that already holds both spellings keeps the one with a record ==="
+mkdir -p "$WORK/t6/.github/workflows"
+cp "$WORK/t5/.github/workflows/c.yml" "$WORK/t6/.github/workflows/c.yml"
+cat > "$WORK/t6/.github/workflows/actions.lock" <<EOF
+workflows:
+    '.github/workflows/c.yml':
+        - 'Swatinem/rust-cache@v2'
+        - 'o/r@v3'
+        - 'swatinem/rust-cache@v2'
+dependencies:
+    'swatinem/rust-cache@v2':
+        ref: 'v2'
+EOF
+run t6 >/dev/null; st=$?
+L6="$WORK/t6/.github/workflows/actions.lock"
+[ "$st" = 0 ] && grep -qxF "        - 'swatinem/rust-cache@v2'" "$L6" && ! grep -qF "'Swatinem/rust-cache@v2'" "$L6" \
+  && ok "both spellings present → the dependency-backed one survives" \
+  || bad "both spellings present → the dependency-backed one survives (st=$st)"
+
 echo "=== structural ==="
 mkrepo t3; printf 'dependencies:\n' > "$WORK/t3/.github/workflows/actions.lock"
 run t3 >/dev/null; st=$?

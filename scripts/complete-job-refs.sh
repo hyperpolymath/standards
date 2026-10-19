@@ -22,7 +22,7 @@ WF="${1:-.github/workflows}"
 L="$WF/actions.lock"
 [ -f "$L" ] || { echo "complete-job-refs: no $L" >&2; exit 1; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-WANT="$TMP/want"; NEW="$TMP/new.lock"
+WANT="$TMP/want"; NEW="$TMP/new.lock"; DEPS="$TMP/deps"
 # Local composite actions (standards#1122). A local action (`uses: ./dir`) has
 # no dependency record of its own, so the actions it uses belong in the CALLING
 # workflow's entry. gh actions-lock writes them there; prune-stale used to drop
@@ -97,24 +97,39 @@ for f in "$WF"/*.yml "$WF"/*.yaml; do
   set -e
 done | LC_ALL=C sort -u >> "$WANT"
 
+# The dependency keys already recorded. When one workflow entry holds two
+# case spellings of the same owner/repo@ref, the one with a record is kept.
+awk -v q="'" '/^dependencies:/ { d = 1; next }
+  d && index($0, "    " q) == 1 && substr($0, length($0) - 1) == q ":" { print substr($0, 6, length($0) - 7) }' "$L" > "$DEPS"
+
 # 2. rewrite the workflows: section, merging wanted job refs into each path entry
-LC_ALL=C awk -v want="$WANT" '
-BEGIN { while ((getline l < want) > 0) { split(l, w, "\t"); WANT[w[1]] = WANT[w[1]] SUBSEP w[2] } }
+LC_ALL=C awk -v want="$WANT" -v deps="$DEPS" '
+BEGIN { while ((getline l < want) > 0) { split(l, w, "\t"); WANT[w[1]] = WANT[w[1]] SUBSEP w[2] }
+        while ((getline l < deps) > 0) DEP[l] = 1 }
 # ck: the dedup key of a ref. GitHub owner/repository names are
 # case-insensitive; refs are not (the same rule as check-lock-sync.sh). An
 # existing `swatinem/rust-cache@v2` entry therefore already covers
 # `uses: Swatinem/rust-cache@v2`; adding the second spelling left a ref that
 # close-lock then tried to resolve as a new repository.
 function ck(s,   i) { i = match(s, /@[^@]*$/); return i ? tolower(substr(s, 1, i - 1)) substr(s, i) : s }
+# keep: add ref a to out unless a case spelling of it is already there; of two
+# spellings, the one with a dependency record wins (a lock written before the
+# case fix can hold both, sorted capitalised-first).
+function keep(a,   k) {
+  if (a == "") return
+  k = ck(a)
+  if (!(k in seen)) { seen[k] = ++c; out[c] = a }
+  else if ((a in DEP) && !(out[seen[k]] in DEP)) out[seen[k]] = a
+}
 # flush: write the current workflow entry, merged with its wanted refs, sorted and deduplicated.
-function flush(   i, n, arr, j, k, seen, out, c) {
+function flush(   i, n, arr, j, k) {
   if (cur == "") return
   SEEN[cur] = 1
   n = split(items, arr, SUBSEP)
   c = 0; delete seen; delete out
-  for (i = 1; i <= n; i++) if (arr[i] != "" && !(ck(arr[i]) in seen)) { seen[ck(arr[i])] = 1; out[++c] = arr[i] }
+  for (i = 1; i <= n; i++) keep(arr[i])
   if (cur in WANT) { n = split(WANT[cur], arr, SUBSEP)
-    for (i = 1; i <= n; i++) if (arr[i] != "" && !(ck(arr[i]) in seen)) { seen[ck(arr[i])] = 1; out[++c] = arr[i] } }
+    for (i = 1; i <= n; i++) keep(arr[i]) }
   if (c == 0) { printf "    '\''%s'\'': []\n", cur; cur = ""; items = ""; return }
   for (i = 1; i < c; i++) for (j = i + 1; j <= c; j++) if (out[j] < out[i]) { k = out[i]; out[i] = out[j]; out[j] = k }
   printf "    '\''%s'\'':\n", cur
