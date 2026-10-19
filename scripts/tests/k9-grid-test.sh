@@ -235,6 +235,10 @@ check "markdown image syntax is escaped in the id" no "$(grep -q '!\[x\](' "$WOR
 check "the escaped id is still legible" yes "$(grep -q '&#33;&#91;x&#93;&#40;https://e.invalid/i&#41;&#95;&#91;y&#93;&#42;.k9.ncl' "$WORK/o14/report.md" && echo yes || echo no)"
 check "markdown link syntax is escaped in the reason" no "$(grep -q '\[z\](https' "$WORK/o14/report.md" && echo yes || echo no)"
 check "html and backslashes are escaped in the reason" yes "$(grep -q '&lt;b&gt;here&lt;/b&gt; &#91;z&#93;&#40;https://e.invalid&#41; &#92; &#96;x&#96;' "$WORK/o14/report.md" && echo yes || echo no)"
+rec '@hyperpolymath/owners.k9.ncl' fail '[{"severity":"error","rule":"K9-S002","layer":"L1","message":"ping @someone"}]' > "$WORK/r-mention"
+printf '%s\n' '@hyperpolymath/owners.k9.ncl' > "$WORK/expected-mention"
+render "$WORK/o14b" --results "$WORK/r-mention" --expected "$WORK/expected-mention" "${good_evidence[@]}"
+check "an @-mention in an id or a reason is not live" no "$(grep -q '@hyperpolymath\|@someone' "$WORK/o14b/report.md" && echo yes || echo no)"
 
 # 12. Usage errors exit 2.
 check "missing --results exits 2" 2 "$(bash "$GRID" render --out "$WORK/o12" >/dev/null 2>&1; echo $?)"

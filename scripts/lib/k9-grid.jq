@@ -216,13 +216,13 @@ def word: {red: "failing", orange: "indeterminate", yellow: "advisory", green: "
 # Escape text for grid cells and finding summaries, flattening line breaks.
 # Ids and reasons carry contributor-controlled file names and validator text,
 # and the comment is posted by the lane's own account: every character that
-# could start Markdown or HTML syntax becomes an entity, so a file named
+# could start Markdown or HTML syntax, or an @-mention, becomes an entity, so a file named
 # `![x](https://e.invalid/i).k9.ncl` is shown, not rendered. Entities display as
 # the character itself in a GitHub table cell.
 def esc: tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | gsub("\\|"; "&#124;")
          | gsub("`"; "&#96;") | gsub("\\\\"; "&#92;") | gsub("\\["; "&#91;") | gsub("\\]"; "&#93;")
          | gsub("\\("; "&#40;") | gsub("\\)"; "&#41;") | gsub("\\*"; "&#42;") | gsub("_"; "&#95;")
-         | gsub("!"; "&#33;") | gsub("~"; "&#126;") | gsub("\r?\n"; " ");
+         | gsub("!"; "&#33;") | gsub("~"; "&#126;") | gsub("@"; "&#64;") | gsub("\r?\n"; " ");
 def grid_label: "K9 L0–L2";
 def badge_url(st): "https://img.shields.io/badge/\(grid_label | @uri)-\(st | word | @uri)-\(st | colour)";
 

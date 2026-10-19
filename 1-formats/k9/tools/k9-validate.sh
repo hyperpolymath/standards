@@ -663,14 +663,19 @@ check_l3() {
 validate_one() {
   F="$1"; DIALECT=""; HAS_MAGIC=0
   ERRORS=0; WARNINGS=0; SKIPS=0; FINDINGS=()
+  # F is the logical name (JSON, messages); FP is the path the checks hand to
+  # cmp, head, sed, grep and dirname. A name that starts with `-` would be read
+  # as an option by those, so it is given a ./ prefix here and nowhere else.
+  local FP="$F"
+  case "$FP" in -*) FP="./$FP" ;; esac
 
-  if [ ! -f "$F" ]; then
+  if [ ! -f "$FP" ]; then
     err K9-E000 L0 "no such file"
     if [ "$JSON" -eq 1 ]; then emit_json "error"; else emit_findings; fi
     return 1
   fi
 
-  check_l0 "$F"
+  check_l0 "$FP"
   local rc=$?
   if [ $rc -eq 2 ]; then
     # Routed out of scope: examined, and handed to the spec that governs it.
@@ -683,9 +688,9 @@ validate_one() {
     return 1
   fi
 
-  layer_reached L1 && check_l1 "$F"
-  layer_reached L2 && check_l2 "$F"
-  layer_reached L3 && check_l3 "$F"
+  layer_reached L1 && check_l1 "$FP"
+  layer_reached L2 && check_l2 "$FP"
+  layer_reached L3 && check_l3 "$FP"
 
   local verdict="pass"
   [ "$ERRORS" -gt 0 ] && verdict="fail"

@@ -212,13 +212,15 @@ jobs:
 
           # The PR's own changes are those since its merge base, not since the
           # base branch tip: a file the base branch changed after the PR
-          # branched is not this PR's edit. On a push the merge base of
-          # before and sha is before itself (or the fork point of a force
-          # push). The full checkout already holds the base commit; the fetch
+          # branched is not this PR's edit. A push compares with `before`
+          # itself, never a merge base: after a force push the fork point is
+          # not the state the push replaced, and a ledger entry the old tip
+          # had removed would come back unseen. The full checkout already
+          # holds the base commit; the fetch
           # is a fallback only, and runs without credentials
           # (persist-credentials is off), so it serves public repositories.
           if { git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --quiet origin "$BASE_SHA" 2>/dev/null; } \
-             && merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null) \
+             && merge_base=$(if [ "$GITHUB_EVENT_NAME" = pull_request ]; then git merge-base "$BASE_SHA" "$HEAD_SHA"; else git rev-parse --verify "$BASE_SHA^{commit}"; fi 2>/dev/null) \
              && git diff --name-only "$merge_base" "$HEAD_SHA" > "$RUNNER_TEMP/changed" 2>/dev/null; then
             echo "$(wc -l < "$RUNNER_TEMP/changed") file(s) changed since the merge base $merge_base"
           else
