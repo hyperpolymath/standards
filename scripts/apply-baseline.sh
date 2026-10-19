@@ -82,11 +82,13 @@ echo "$BASELINE_JSON" | jq -e 'type == "array"' >/dev/null || {
 SCHEMA_ERRORS="$(jq -r '
   def known: ["severity","rule_module","type","file","file_pattern",
               "severity_override","expires_at","note","tracking_issue"];
-  # Scanner vocabulary, mirroring the hypatia-scan-reusable validator: the
-  # research rules emit `warn` (ranked with medium) and some rules emit
-  # `informational`. Without these, research findings can never be
-  # acknowledged and the baseline gate can never go green on them.
+  # Baseline severity vocabulary mirrors both the scanner validator and the
+  # authoritative schema. `warn` is retained for old records; matching treats
+  # it as the same tier as current scanner `medium` output.
   def sevs: ["critical","high","medium","warn","low","info","informational"];
+  # Overrides are a distinct schema contract: aliases are valid source
+  # severities, not valid override targets.
+  def override_sevs: ["critical","high","medium","low","info","advisory"];
   [ to_entries[] | .key as $i | .value as $e |
     if ($e|type) != "object" then "entry[\($i)]: not an object"
     else (
@@ -103,6 +105,10 @@ SCHEMA_ERRORS="$(jq -r '
        else empty end),
       (if ($e.rule_module|type) == "array" and ($e.rule_module|length) == 0
        then "entry[\($i)]: rule_module list is empty — an entry that names no module matches nothing"
+       else empty end),
+      (if ($e.rule_module|type) == "array"
+          and (($e.rule_module | unique | length) != ($e.rule_module | length))
+       then "entry[\($i)]: rule_module list contains duplicate members"
        else empty end),
       (if ($e.rule_module|type) == "array"
        then ($e.rule_module[]
@@ -149,14 +155,17 @@ SCHEMA_ERRORS="$(jq -r '
        then "entry[\($i)]: file_pattern must be a non-empty string"
        else empty end),
       (if ($e|has("severity_override"))
-          and (((sevs + ["advisory"])|index($e.severity_override))|not)
-       then "entry[\($i)]: invalid severity_override \($e.severity_override)"
+          and ((($e.severity_override|type) != "string")
+               or ((override_sevs|index($e.severity_override))|not))
+       then "entry[\($i)]: invalid severity_override \($e.severity_override|tojson)"
        else empty end),
       (if ($e|has("expires_at"))
           and ((($e.expires_at|type) != "string")
                or (($e.expires_at|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))|not))
        then "entry[\($i)]: expires_at must be an ISO date (YYYY-MM-DD)"
        else empty end),
+      (if ($e|has("note")) and (($e.note|type) != "string")
+       then "entry[\($i)]: note must be a string" else empty end),
       (if ($e|has("tracking_issue"))
           and ((($e.tracking_issue|type) != "string")
                or (($e.tracking_issue|test("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$"))|not))
@@ -207,9 +216,8 @@ ANNOTATED="$(jq -n \
   #   string". Capture the entry pattern first, then reference $pat
   #   inside the test() regex argument.
   # Hypatia emitted `warn` for advisory findings until hypatia#895
-  # (2026-10-01), which now emits them as `medium`. Baselines written before
-  # then acknowledge `warn`; treating the two as one tier keeps those
-  # acknowledgements matching instead of re-reporting every one as new.
+  # (2026-10-01), which now emits them as `medium`. Normalize only this
+  # historical transition; all other severity labels remain distinct.
   def sev_tier: if . == "warn" then "medium" else . end;
   def match_entry(f):
     f as $finding

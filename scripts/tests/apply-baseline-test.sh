@@ -21,12 +21,13 @@ trap 'rm -rf "$WORK"' EXIT
 
 pass=0
 fail=0
+COUNTS_JQ='"\(.findings_suppressed | length),\(.findings_kept | length)"'
 
 assert_status() {
   local label="$1" findings="$2" baseline="$3" expected="$4"
   local got
   got=$(bash "$APPLY" "$findings" "$baseline" advisory \
-    | jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"')
+    | jq -r "$COUNTS_JQ")
   if [ "$got" = "$expected" ]; then
     echo "PASS: $label  (suppressed,kept=$got)"
     pass=$((pass + 1))
@@ -80,6 +81,131 @@ assert_status "medium acknowledgement matches a warn finding" \
   "$WORK/findings2b-warn.json" "$WORK/baseline2b-medium.json" "1,0"
 assert_status "a different tier does not match" \
   "$WORK/findings2b.json" "$WORK/baseline2b-high.json" "0,1"
+
+# Exercise baseline mode too: aliases must suppress before thresholding, but
+# only `warn`/`medium` are compatibility-equivalent. `info` and
+# `informational` remain distinct emitted labels.
+printf '[]\n' > "$WORK/empty.json"
+assert_gate() {
+  local label="$1" findings="$2" baseline="$3" threshold="$4" expected_status="$5" expected_counts="$6"
+  local status=0 got
+  BLOCKING_THRESHOLD="$threshold" bash "$APPLY" "$findings" "$baseline" blocking \
+    >"$WORK/gate.out" 2>"$WORK/gate.err" || status=$?
+  got=$(jq -r "$COUNTS_JQ" "$WORK/gate.out")
+  if [[ "$status" -eq "$expected_status" && "$got" == "$expected_counts" ]]; then
+    echo "PASS: $label (exit=$status, suppressed/kept=$got)"
+    pass=$((pass + 1))
+  else
+    echo "FAIL: $label expected exit=$expected_status counts=$expected_counts; got exit=$status counts=$got"
+    cat "$WORK/gate.err"
+    fail=$((fail + 1))
+  fi
+}
+
+assert_gate "legacy warn ack suppresses current medium at blocking threshold" \
+  "$WORK/findings2b.json" "$WORK/baseline2b-warn.json" high 0 "1,0"
+assert_gate "legacy medium ack suppresses warn at blocking threshold" \
+  "$WORK/findings2b-warn.json" "$WORK/baseline2b-medium.json" high 0 "1,0"
+cat > "$WORK/findings-informational.json" <<'EOF'
+[{"severity":"informational","rule_module":"research_extensions","type":"RE001","file":"ci.yml"}]
+EOF
+cat > "$WORK/baseline-info.json" <<'EOF'
+[{"severity":"info","rule_module":"research_extensions","type":"RE001","file":"ci.yml"}]
+EOF
+cat > "$WORK/baseline-informational.json" <<'EOF'
+[{"severity":"informational","rule_module":"research_extensions","type":"RE001","file":"ci.yml"}]
+EOF
+assert_status "informational baseline severity is accepted and matches exactly" \
+  "$WORK/findings-informational.json" "$WORK/baseline-informational.json" "1,0"
+assert_gate "info and informational are not conflated" \
+  "$WORK/findings-informational.json" "$WORK/baseline-info.json" info 1 "0,1"
+printf '%s\n' '[{"severity":"warn"}]' > "$WORK/findings-warn.json"
+printf '%s\n' '[{"severity":"informational"}]' > "$WORK/findings-informational-only.json"
+assert_gate "warn blocks at medium threshold" \
+  "$WORK/findings-warn.json" "$WORK/empty.json" medium 1 "0,1"
+assert_gate "warn does not block at high threshold" \
+  "$WORK/findings-warn.json" "$WORK/empty.json" high 0 "0,1"
+assert_gate "informational blocks at info threshold" \
+  "$WORK/findings-informational-only.json" "$WORK/empty.json" info 1 "0,1"
+assert_gate "informational does not block at low threshold" \
+  "$WORK/findings-informational-only.json" "$WORK/empty.json" low 0 "0,1"
+
+# Source severities and override targets are separate schema enums. A valid
+# downgrade is carried through the output and then ranked for the gate.
+cat > "$WORK/findings-override.json" <<'EOF'
+[{"severity":"high","rule_module":"cicd_rules","type":"banned_language_file","file":"src/Legacy.kt"}]
+EOF
+cat > "$WORK/baseline-override-low.json" <<'EOF'
+[{"severity":"high","rule_module":"cicd_rules","type":"banned_language_file","file":"src/Legacy.kt","severity_override":"low"}]
+EOF
+assert_gate "low override downgrades a matching high finding" \
+  "$WORK/findings-override.json" "$WORK/baseline-override-low.json" high 0 "0,1"
+if [[ "$(jq -r '.findings_kept[0] | [.severity,.baseline_status] | join(",")' "$WORK/gate.out")" == "low,downgraded" ]]; then
+  echo "PASS: low override is visible as a downgraded finding"
+  pass=$((pass + 1))
+else
+  echo "FAIL: low override was not preserved in output"
+  fail=$((fail + 1))
+fi
+cat > "$WORK/baseline-override-info.json" <<'EOF'
+[{"severity":"high","rule_module":"cicd_rules","type":"banned_language_file","file":"src/Legacy.kt","severity_override":"info"}]
+EOF
+assert_gate "info override blocks at info but not low threshold" \
+  "$WORK/findings-override.json" "$WORK/baseline-override-info.json" info 1 "0,1"
+assert_gate "info override remains below low threshold" \
+  "$WORK/findings-override.json" "$WORK/baseline-override-info.json" low 0 "0,1"
+cat > "$WORK/baseline-override-advisory.json" <<'EOF'
+[{"severity":"high","rule_module":"cicd_rules","type":"banned_language_file","file":"src/Legacy.kt","severity_override":"advisory"}]
+EOF
+assert_gate "advisory override does not block info threshold" \
+  "$WORK/findings-override.json" "$WORK/baseline-override-advisory.json" info 0 "0,1"
+for override in warn informational 7; do
+  jq -n --arg override "$override" '[{severity:"high",rule_module:"cicd_rules",type:"banned_language_file",file:"src/Legacy.kt",severity_override:$override}]' > "$WORK/baseline-invalid-override.json"
+  status=0
+  bash "$APPLY" "$WORK/findings-override.json" "$WORK/baseline-invalid-override.json" advisory >/dev/null 2>&1 || status=$?
+  if [[ "$status" -eq 2 ]]; then
+    echo "PASS: invalid severity_override rejected with schema exit 2: $override"
+    pass=$((pass + 1))
+  else
+    echo "FAIL: severity_override $override returned $status (expected 2)"
+    fail=$((fail + 1))
+  fi
+done
+
+assert_invalid_baseline() {
+  local label="$1" content="$2" status=0
+  printf '%s\n' "$content" > "$WORK/baseline-invalid.json"
+  bash "$APPLY" "$WORK/findings-override.json" "$WORK/baseline-invalid.json" advisory >/dev/null 2>&1 || status=$?
+  if [[ "$status" -eq 2 ]]; then
+    echo "PASS: invalid baseline rejected with schema exit 2: $label"
+    pass=$((pass + 1))
+  else
+    echo "FAIL: invalid baseline $label returned $status (expected 2)"
+    fail=$((fail + 1))
+  fi
+}
+assert_invalid_baseline "duplicate rule_module array member" \
+  '[{"severity":"high","rule_module":["cicd_rules","cicd_rules"],"type":"banned_language_file","file":"src/Legacy.kt"}]'
+assert_invalid_baseline "non-string note" \
+  '[{"severity":"high","rule_module":"cicd_rules","type":"banned_language_file","file":"src/Legacy.kt","note":1}]'
+assert_invalid_baseline "unknown source severity" \
+  '[{"severity":"urgent","rule_module":"cicd_rules","type":"banned_language_file","file":"src/Legacy.kt"}]'
+
+# The gate message counts only findings at/above the threshold, while still
+# reporting how many total findings remain for context.
+printf '%s\n' '[{"severity":"high"},{"severity":"info"}]' > "$WORK/findings-mixed.json"
+echo '[]' > "$WORK/empty-baseline.json"
+if BLOCKING_THRESHOLD=high bash "$APPLY" "$WORK/findings-mixed.json" "$WORK/empty-baseline.json" blocking >"$WORK/gate.out" 2>"$WORK/gate.err"; then
+  echo "FAIL: high finding did not block"
+  fail=$((fail + 1))
+elif grep -Fq "1 unfiltered finding(s) at or above 'high' (2 kept in total)" "$WORK/gate.err"; then
+  echo "PASS: blocking diagnostic distinguishes threshold findings from total kept"
+  pass=$((pass + 1))
+else
+  echo "FAIL: blocking diagnostic count is inaccurate"
+  cat "$WORK/gate.err"
+  fail=$((fail + 1))
+fi
 
 # === Case 3: file_pattern MUST NOT match unrelated file (regression
 # against the always-matches bug from `.file_pattern` inside test()) ===
@@ -146,7 +272,7 @@ done
 assert_invalid_option() {
   local label="$1" mode="$2" threshold="$3" status=0
   BLOCKING_THRESHOLD="$threshold" bash "$APPLY" "$WORK/findings1.json" "$WORK/empty.json" "$mode" > "$WORK/invalid.out" 2> "$WORK/invalid.err" || status=$?
-  if [ "$status" -eq 2 ]; then
+  if [[ "$status" -eq 2 ]]; then
     echo "PASS: $label rejected as invalid configuration"
     pass=$((pass + 1))
   else
@@ -236,7 +362,7 @@ elif ! bash -n "$MUTANT" 2>/dev/null; then
 else
   # Non-first member must now be MISSED.
   mutant_got=$(bash "$MUTANT" "$WORK/findings-mod2only.json" "$WORK/baseline-2mod.json" advisory \
-    | jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"')
+    | jq -r "$COUNTS_JQ")
   if [ "$mutant_got" = "0,1" ]; then
     echo "PASS: MUTANT (first element only) misses the non-first module — any() IS load-bearing"
     pass=$((pass + 1))
@@ -247,7 +373,7 @@ else
   # And the two-module case must regress to half-suppressed: exactly the
   # #966 symptom, reproduced on demand.
   mutant_both=$(bash "$MUTANT" "$WORK/findings-2mod.json" "$WORK/baseline-2mod.json" advisory \
-    | jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"')
+    | jq -r "$COUNTS_JQ")
   if [ "$mutant_both" = "1,1" ]; then
     echo "PASS: MUTANT reproduces the #966 symptom (half-suppressed, entry looks correct)"
     pass=$((pass + 1))
