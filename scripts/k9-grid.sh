@@ -43,6 +43,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 JQ_LIB="$SCRIPT_DIR/lib/k9-grid.jq"
 
+# Print the invocation summary to stderr and terminate with status 2.
 usage() { sed -n '5,34p' "$0" >&2; exit 2; }
 
 # A path list file to a JSON array; a missing file is an empty list, and so
@@ -56,6 +57,8 @@ list_json() {
 }
 
 # A log file plus exit status to {code, output}; a missing log is null code.
+# An omitted status is also null; a status in a present log that jq cannot
+# parse as a number causes an error to reach the caller.
 evidence_json() {
   local log="${1:-}" code="${2:-}"
   if [ -n "$log" ] && [ -f "$log" ]; then
@@ -80,6 +83,8 @@ results_json() {
   done < "$file" | jq -s .
 }
 
+# Serialise JSON from stdin to stdout with one final LF, preferring ijson-jcs
+# and falling back to jq's sorted compact form. Serialiser errors propagate.
 canon_json() {
   # ijson-jcs canon emits the JCS bytes with no final newline; the policy
   # wants exactly one. sed adds one only when it is missing.
@@ -90,6 +95,10 @@ canon_json() {
   fi
 }
 
+# Print one baseline object from the last matching marker in the supplied
+# comment file. Missing or empty files, absent markers, payloads over 32000
+# encoded characters, decoding errors and invalid category counts yield null.
+# Schema, profile and revision comparability are checked later by delta.
 baseline_of() {
   local file="$1" b64
   [ -s "$file" ] || { echo null; return; }

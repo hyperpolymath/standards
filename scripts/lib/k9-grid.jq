@@ -35,10 +35,14 @@
 #     corpus_code: int|null }             # the validator's own exit status
 # Output: the structured report; `render` turns it into Markdown.
 
+# Normalise a row's id and reason to text; null or false reasons become empty.
+# The three-argument form creates a row without advisory status.
 def item(id; status; reason; advisory):
   { id: (id | tostring), status: status, reason: (reason // "" | tostring), advisory: advisory };
 def item(id; status; reason): item(id; status; reason; false);
 
+# Summarise item rows. Advisory failures also count as failed; warnings count
+# passing advisory rows, rather than individual validator findings.
 def counts:
   { passed:         ([.[] | select(.status == "pass")] | length),
     failed:         ([.[] | select(.status == "fail")] | length),
@@ -48,6 +52,7 @@ def counts:
     warnings:       ([.[] | select(.status == "pass" and .advisory)] | length) };
 
 # Precedence: red > orange > yellow > green; grey only when every item is grey.
+# An empty item array is orange because there is no evidence to grade.
 def state:
   if length == 0 then "orange"
   elif any(.[]; .status == "fail" and (.advisory | not)) then "red"
@@ -63,6 +68,8 @@ def assertions(output):
     | item(.rest; (if .k == "ok" then "pass" elif .k == "FAIL" then "fail" else "indeterminate" end);
            (if .k == "ok" then "" else .rest end)) ];
 
+# Return assertion rows, adding indeterminate evidence when none were found
+# or when all passed but the process status is nonzero or missing.
 def checked_assertions(output; code):
   assertions(output) as $rows
   | $rows
@@ -70,17 +77,27 @@ def checked_assertions(output; code):
   + (if code != 0 and ($rows | all(.[]; .status == "pass")) and ($rows | length) > 0
      then [item("check execution"; "indeterminate"; "Process exited \(code // "without a status") despite passing assertion lines.")] else [] end);
 
+# Grade self-test evidence, requiring the completion text as well as assertion
+# rows when the recorded process status is zero.
 def selftest_items(st):
   checked_assertions(st.output; st.code)
   + (if st.code == 0 and ((st.output // "") | contains("self-test: all assertions passed") | not)
      then [item("completion"; "indeterminate"; "Missing self-test completion evidence.")] else [] end);
 
+# Grade the named contract from its recorded typecheck status: zero passes,
+# null is indeterminate and any other value fails, retaining diagnostic text.
 def typecheck_items(tc; contract):
   [ item(contract;
          (if tc.code == 0 then "pass" elif tc.code == null then "indeterminate" else "fail" end);
          (if tc.code == 0 then "" else (tc.output // "" | sub("\\s+$"; "")) end)) ];
 
-# One live-corpus item per validator record (conformance-report.mjs corpusItems).
+# Grade validator records against the expected corpus (conformance-report.mjs
+# corpusItems). Invalid, duplicate and missing results are indeterminate.
+# Routed files are not applicable; K9-N002-only errors are indeterminate.
+# Other errors fail; skipped findings make otherwise passing results
+# indeterminate. Failures for ledgered files are advisory only when the PR
+# leaves the file untouched; stale ledger entries fail.
+# An empty expected corpus is not applicable unless require_files is true.
 # A ledger entry exempts a file only when the entry was already in the ledger
 # at the PR base, or the PR declares the growth (this lane): an undeclared
 # addition is listed in `growth`, gets a failing row of its own, and the file
@@ -134,8 +151,13 @@ def corpus_items(results; expected; ledger; growth; changed; require_files):
 
 def titles: { typecheck: "K9 contract typecheck", selftest: "K9 validator self-test", corpus: "K9 live corpus (L0–L2)" };
 
+# Group item rows with their display title, counts and aggregate verdict.
 def category(id; items): { id: id, title: titles[id], items: items, counts: (items | counts), state: (items | state) };
 
+# Build the structured report from the assembled evidence object, preserving
+# run identity and aggregating typecheck, self-test and corpus verdicts.
+# An unresolved PR range or unexplained nonzero corpus exit adds
+# indeterminate evidence.
 def build:
   . as $in
   | ("1-formats/k9/spec/contract/k9_contract.ncl") as $contract
@@ -160,6 +182,11 @@ def build:
       categories: $categories, state: ($all | state), counts: ($all | counts) };
 
 # One category's movement since the previous revision of the same PR.
+# Input is the current category; report supplies its profile, PR and revision.
+# Compare only schema 1 baselines with the same profile and PR but a different
+# commit. Missing categories or indeterminate counts prevent grading movement;
+# changed not-applicable counts signal a scope change. Blocking failures take
+# precedence over total failures, advisories and warnings.
 def delta(prev; report):
   . as $c
   | if prev == null or prev.schema != 1 or prev.profile != report.profile or prev.sha == report.sha or prev.pr != report.pr
@@ -185,11 +212,16 @@ def delta(prev; report):
 def state_label: {red: "🔴 failing", orange: "🟠 indeterminate", yellow: "🟡 advisory", green: "🟢 conformant", grey: "⚪ not applicable"}[.];
 def colour: {red: "red", orange: "orange", yellow: "yellow", green: "brightgreen", grey: "lightgrey"}[.];
 def word: {red: "failing", orange: "indeterminate", yellow: "advisory", green: "conformant", grey: "not_applicable"}[.];
+# Escape text for grid cells and finding summaries, flattening line breaks.
 def esc: tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | gsub("\\|"; "&#124;")
          | gsub("`"; "&#96;") | gsub("\r?\n"; " ");
 def grid_label: "K9 L0–L2";
 def badge_url(st): "https://img.shields.io/badge/\(grid_label | @uri)-\(st | word | @uri)-\(st | colour)";
 
+# Render the input report as Markdown, comparing categories with prev or null.
+# Include at most 20 findings or scope notes per category, truncating escaped
+# ids to 240 characters and reasons to 280, and embed counts for the next
+# baseline.
 def render(prev):
   . as $r
   | "<!-- verdict-grid:\($r.lane) regenerated on every run -->\n"
@@ -212,6 +244,7 @@ def render(prev):
   + "\n<!-- k9-baseline:\({schema: $r.schema, profile: $r.profile, pr: $r.pr, sha: $r.sha,
         categories: [$r.categories[] | {id, counts}]} | tojson | @base64) -->\n";
 
+# Produce a shields.io endpoint document for the input report's overall verdict.
 def badge: {schemaVersion: 1, label: grid_label, message: (.state | word | gsub("_"; " ")), color: (.state | colour)};
 
 # Entry point: $mode selects build (input: the assembled object), render
