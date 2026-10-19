@@ -663,14 +663,19 @@ check_l3() {
 validate_one() {
   F="$1"; DIALECT=""; HAS_MAGIC=0
   ERRORS=0; WARNINGS=0; SKIPS=0; FINDINGS=()
+  # F is the logical name (JSON, messages); FP is the path the checks hand to
+  # cmp, head, sed, grep and dirname. A name that starts with `-` would be read
+  # as an option by those, so it is given a ./ prefix here and nowhere else.
+  local FP="$F"
+  case "$FP" in -*) FP="./$FP" ;; esac
 
-  if [ ! -f "$F" ]; then
+  if [ ! -f "$FP" ]; then
     err K9-E000 L0 "no such file"
     if [ "$JSON" -eq 1 ]; then emit_json "error"; else emit_findings; fi
     return 1
   fi
 
-  check_l0 "$F"
+  check_l0 "$FP"
   local rc=$?
   if [ $rc -eq 2 ]; then
     # Routed out of scope: examined, and handed to the spec that governs it.
@@ -683,9 +688,9 @@ validate_one() {
     return 1
   fi
 
-  layer_reached L1 && check_l1 "$F"
-  layer_reached L2 && check_l2 "$F"
-  layer_reached L3 && check_l3 "$F"
+  layer_reached L1 && check_l1 "$FP"
+  layer_reached L2 && check_l2 "$FP"
+  layer_reached L3 && check_l3 "$FP"
 
   local verdict="pass"
   [ "$ERRORS" -gt 0 ] && verdict="fail"
@@ -781,6 +786,19 @@ EOF
   t "line count is preserved" "$(wc -l < "$tmp" | tr -d ' ')" "$(wc -l < "$stripped" | tr -d ' ')"
   t "schema_version stays on line 5" '    schema_version = "1.0.0",' "$(sed -n '5p' "$stripped")"
   rm -f "$tmp" "$facts" "$stripped"
+
+  echo "== a name that starts with '-' is a path, not an option =="
+  # The checks hand file names to cmp, head, sed, grep and dirname. A tracked
+  # `-x.k9.ncl` must reach the same verdict as `x.k9.ncl`, and the JSON must
+  # carry the name as given.
+  local dashdir dashjson
+  dashdir="$(mktemp -d)"
+  cp "$SCRIPT_DIR/fixtures/valid/kennel-data.k9.ncl" "$dashdir/-dash.k9.ncl"
+  dashjson="$(cd "$dashdir" && LAYER=L1 JSON=1 QUIET=1 validate_one "-dash.k9.ncl" 2>/dev/null || true)"
+  t "dash-leading name: no L0 failure" "" "$(printf '%s' "$dashjson" | grep -o 'K9-E00[0-9]' | head -n 1)"
+  t "dash-leading name: verdict pass at L1" 1 "$(printf '%s' "$dashjson" | grep -c '"verdict":"pass"')"
+  t "dash-leading name: JSON keeps the logical name" 1 "$(printf '%s' "$dashjson" | grep -c '"file":"-dash.k9.ncl"')"
+  rm -rf "$dashdir"
 
   echo "== L3: signature presence is not verification (§10) =="
   # No fixture can make a verifier appear, so the three verdicts a host can
