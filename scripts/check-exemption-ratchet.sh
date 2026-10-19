@@ -149,6 +149,9 @@ LEDGERS=(
   ".machine_readable/root-allow.txt"
   ".machine_readable/lock-allow.txt"
   ".machine_readable/pipeline-allow.txt"
+  # The K9 debt ledger (1-formats/k9/tools/CONFORMANCE-REPORTING.adoc): the
+  # k9-conformance lane also refuses an undeclared addition on its own.
+  ".machine_readable/k9-contract-debt.txt"
 )
 
 echo "Exemption ratchet — comparing against ${BASE_REF}"

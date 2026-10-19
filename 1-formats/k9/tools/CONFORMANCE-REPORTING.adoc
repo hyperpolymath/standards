@@ -62,6 +62,43 @@ bun test 1-formats/k9/tools/conformance-report.test.mjs
 bun 1-formats/k9/tools/conformance-report.mjs
 ----
 
+The reusable lane (`.github/workflows/k9-conformance.yml`, which a consumer
+calls at a pinned standards SHA) renders the same five-state grid with
+`scripts/k9-grid.sh` and `scripts/lib/k9-grid.jq` (bash and jq, no runtime to
+install) and writes `report.json` and `badge.json` as I-JSON/JCS. Its rules are
+those above, plus two of its own because its evidence differs: the validator's
+raw exit status is explained by a ledgered (advisory) failure as well as a
+blocking one, and a ledger entry the pull request adds exempts nothing unless
+a commit message or the PR body declares it in the exemption ratchet's form
+(`Ratchet-exception: .machine_readable/k9-contract-debt.txt — <why>`); a
+ledger path that names no tracked K9 file is a stale exemption. The
+"since previous revision" column compares only under one profile (renderer,
+validator commit, ledger, lane and the corpus itself). `scripts/tests/k9-grid-test.sh`
+checks them. To reproduce what the lane posts for a consumer:
+
+[source,bash]
+----
+bash 1-formats/k9/tools/k9-validate.sh --self-test > selftest.log; echo $? > selftest.code
+nickel typecheck 1-formats/k9/spec/contract/k9_contract.ncl > typecheck.log; echo $? > typecheck.code
+# The same exclusions as the lane: the fixture corpus is deliberately invalid
+# and the archive is out of scope.
+git ls-files -- "*.k9.ncl" "*.k9" "*.k9.lock" \
+  | { grep -v -E "^(9-archive/|1-formats/k9/tools/fixtures/)" || [ $? -eq 1 ]; } | sort > expected
+# The lane also records the validator's worst exit status over the corpus.
+corpus_code=0
+while read -r f; do
+  rc=0
+  bash 1-formats/k9/tools/k9-validate.sh --strict --layer L2 --json --quiet "$f" || rc=$?
+  [ "$rc" -le "$corpus_code" ] || corpus_code=$rc
+done < expected > results.jsonl
+bash scripts/k9-grid.sh render --out grid --results results.jsonl --expected expected \
+  --ledger .machine_readable/k9-contract-debt.txt --selftest selftest.log --selftest-code "$(cat selftest.code)" \
+  --typecheck typecheck.log --typecheck-code "$(cat typecheck.code)" --corpus-code "$corpus_code"
+# On a pull request the lane also passes --changed (the merge-base diff),
+# --ledger-growth (undeclared ledger additions) and --previous (the last
+# posted grid, for the delta column); see the workflow's enumerate step.
+----
+
 Exit 0 means green, yellow or explicit N/A; exit 1 means a blocking failure;
 exit 2 means evidence could not establish the verdict. CI retains its required
 job name. Existing structural/Mustfile checks still run and can fail the job
