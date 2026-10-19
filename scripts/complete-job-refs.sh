@@ -106,7 +106,8 @@ awk -v q="'" '/^dependencies:/ { d = 1; next }
 LC_ALL=C awk -v want="$WANT" -v deps="$DEPS" '
 BEGIN { while ((getline l < want) > 0) { split(l, w, "\t"); WANT[w[1]] = WANT[w[1]] SUBSEP w[2] }
         while ((getline l < deps) > 0) DEP[l] = 1 }
-# ck: the dedup key of a ref. GitHub owner/repository names are
+# ck: the dedup key of a ref, split at the FIRST @ (owner/repo cannot contain
+# one; a tag such as `release@2026` can). GitHub owner/repository names are
 # case-insensitive; refs are not (the same rule as check-lock-sync.sh). An
 # existing `swatinem/rust-cache@v2` entry therefore already covers
 # `uses: Swatinem/rust-cache@v2`; adding the second spelling left a ref that

@@ -155,6 +155,21 @@ L6="$WORK/t6/.github/workflows/actions.lock"
   && ok "both spellings present → the dependency-backed one survives" \
   || bad "both spellings present → the dependency-backed one survives (st=$st)"
 
+echo "=== a tag containing @ keeps its case (split at the first @) ==="
+mkdir -p "$WORK/t7/.github/workflows"
+printf 'jobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: o/r@Release@2026\n' > "$WORK/t7/.github/workflows/c.yml"
+cat > "$WORK/t7/.github/workflows/actions.lock" <<EOF
+workflows:
+    '.github/workflows/c.yml':
+        - 'o/r@release@2026'
+dependencies:
+EOF
+run t7 >/dev/null; st=$?
+L7="$WORK/t7/.github/workflows/actions.lock"
+[ "$st" = 0 ] && grep -qxF "        - 'o/r@Release@2026'" "$L7" && grep -qxF "        - 'o/r@release@2026'" "$L7" \
+  && ok "o/r@Release@2026 and o/r@release@2026 are different refs → both kept" \
+  || bad "o/r@Release@2026 and o/r@release@2026 are different refs → both kept (st=$st)"
+
 echo "=== structural ==="
 mkrepo t3; printf 'dependencies:\n' > "$WORK/t3/.github/workflows/actions.lock"
 run t3 >/dev/null; st=$?
