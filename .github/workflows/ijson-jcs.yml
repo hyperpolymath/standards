@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MPL-2.0
 # Local dogfood gate for 3-practice/JSON-POLICY.adoc (owner ruling D306):
 # every .json / .jsonl is I-JSON (RFC 7493) + JCS (RFC 8785) canonical.
-# REPORT-ONLY: the scan lists non-canonical files and exits 0. The test step
-# is what can fail, and it proves the scan can tell the three verdicts apart.
+# The repo-wide scan is REPORT-ONLY: it lists non-canonical files and exits 0.
+# Its test step can fail, and proves the scan can tell the three verdicts apart.
+# The converted-stay-canonical job BLOCKS, but only on files already converted.
 name: ijson-jcs conformance
 
 on:
@@ -30,3 +31,19 @@ jobs:
       - run: cargo install --git https://github.com/hyperpolymath/ijson-jcs --rev 0fdeea716fd558e9807362acf6f8202d56d8d88f --locked ijson-jcs
       - run: bash scripts/tests/check-ijson-jcs-test.sh
       - run: scripts/check-ijson-jcs.sh .
+
+  # BLOCKING, for converted files only (JSON-POLICY §6). A file listed here was
+  # canonicalised under an owner ruling and must not drift back to an indented
+  # layout on its next jq edit. The report-only scan above cannot catch that.
+  # Fix a failure with `ijson-jcs fix <file>`.
+  converted-stay-canonical:
+    name: Converted JSON stays canonical
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pinned to a commit: ijson-jcs has no releases yet.
+      - run: cargo install --git https://github.com/hyperpolymath/ijson-jcs --rev 0fdeea716fd558e9807362acf6f8202d56d8d88f --locked ijson-jcs
+      - run: scripts/check-ijson-jcs.sh --enforce .hypatia-baseline.json
