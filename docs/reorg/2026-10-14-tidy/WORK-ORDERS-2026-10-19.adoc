@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 = Work orders, 2026-10-19: the first execution wave
 Jonathan D.A. Jewell (hyperpolymath)
-v1.3.0, 2026-10-19
+v1.4.0, 2026-10-19
 :toc: left
 :toclevels: 2
 :sectnums:
@@ -49,10 +49,15 @@ which is what CI uses (see _Session mechanics_ for why the name matters).
   `bash scripts/run-mustfile.sh .machine_readable/contractiles/must/Mustfile.a2ml`,
   `bash scripts/run-debtfile.sh .machine_readable/Debtfile.a2ml`,
   `bash scripts/link-rot-guard.sh .` from a checkout named `standards`
-  (its exit status is 1 at the baseline, which is accepted; what must
-  hold is that the BROKEN count equals the count on `origin/main` in the
-  same checkout, 443 today, and that no BROKEN line names a file you
-  touched), `bash scripts/link-rot-guard.sh <dir>` for each directory you
+  (its exit status is 1 at the baseline, which is accepted; before your
+  first edit save its output, `before=$(mktemp)` then
+  `bash scripts/link-rot-guard.sh . > "$before" || true`, and the gate is
+  that `diff "$before" <(bash scripts/link-rot-guard.sh . || true) |
+  grep '^>'` prints nothing: no new BROKEN line anywhere; lines that
+  disappear are repairs, listed in the PR body; a touched file may keep
+  the old broken links it already had, as
+  `3-practice/ai-instruction/README.adoc` does with six others beside the
+  manifest one), `bash scripts/link-rot-guard.sh <dir>` for each directory you
   touched other than the root and `9-archive/` (a root-level touch is
   covered by the repository-wide run; the archive is pruned by that run
   and is never scanned on its own, see WO-4),
@@ -80,11 +85,17 @@ which is what CI uses (see _Session mechanics_ for why the name matters).
   Hypatia gate (`scan / Hypatia Neurosymbolic Analysis` and `governance /
   Validate Hypatia Baseline`) is red on `main` since #1300 regenerated
   `actions.lock` in `gh actions-lock` format v0.0.3, which the scanner
-  rejects (`invalid_actions_lock`, two findings, severity high): the fix
-  is in hyperpolymath/hypatia (#927 or #928), the governance job resolves
-  the scanner at hypatia `HEAD` on every run, so nothing in this
-  repository changes for it. Until one of them merges, record the red in
-  the PR body; never acknowledge it in the baseline.
+  rejects (`invalid_actions_lock`, two findings, severity high). The fix
+  takes two steps: hyperpolymath/hypatia#927 or #928 merges, and then the
+  `hypatia-ref` default in both `governance-reusable.yml` and
+  `hypatia-scan-reusable.yml` advances to a commit at or after that fix.
+  Both defaults are vetted SHAs (`51ab6496` in the governance reusable at
+  this baseline); neither local caller overrides them, and only an
+  explicit `HEAD` floats, so the scanner stays on the rejecting commit
+  until the pins move. The pin bump is a two-line pull request in this
+  repository that changes no `uses:` line and so leaves `actions.lock`
+  alone. Until both steps have happened, record the red in the PR body;
+  never acknowledge it in the baseline.
 * *PR body:* the order id, the authority line per change, the acceptance
   block with every result pasted verbatim, a "not done" list. Open as a
   draft; mark ready when every locally runnable acceptance line is green
@@ -152,7 +163,7 @@ as permitted tier-2 configuration and only emits a notice.
 *Acceptance.*
 ----
 grep -n -i 'deno' docs/reorg/2026-10-14-tidy/HANDOVER.adoc    -> no line says retired or banned
-grep -n -i 'deno' docs/reorg/2026-10-14-tidy/README.adoc      -> no line says retired or banned except inside a dated withdrawal note
+grep -n -i 'deno' docs/reorg/2026-10-14-tidy/README.adoc      -> no live claim that Deno is banned or retired (line 69 rewritten); issue-triage rows such as #706, #919 and #923 keep their recorded titles, and each affected row carries its dated withdrawal note
 bash scripts/run-debtfile.sh .machine_readable/Debtfile.a2ml  -> 0 breached, 0 broken-probe
 bash scripts/check-debtfile-structure.sh .machine_readable/Debtfile.a2ml  -> structure OK
 bash scripts/link-rot-guard.sh docs/reorg/2026-10-14-tidy     -> all links resolve
@@ -326,8 +337,7 @@ Markdown; applied-unless-struck (D113).
 ----
 bash scripts/check-standards-map.sh                 -> GATE D PASSED
 grep -c -E '^(cff-version|message|title|authors):' CITATION.cff  -> 4 (the keys CFF 1.2.0 requires)
-link_rot="$(bash scripts/link-rot-guard.sh .)" || test "$?" -eq 1
-printf '%s\n' "$link_rot" | awk '/^BROKEN/ {n++} END {print n+0}'  -> the same count as on origin/main in this checkout (443 when it is named standards)
+diff "$before" <(bash scripts/link-rot-guard.sh . || true) | grep '^>'  -> nothing (no new BROKEN line; $before saved before the first edit, see Session mechanics)
 bash scripts/run-debtfile.sh .machine_readable/Debtfile.a2ml  -> docs-md-not-adoc unchanged
 GitHub community profile after merge: all items present, and the repository
 page shows "Cite this repository" (GitHub renders it only for a valid file).
@@ -420,29 +430,38 @@ scanners (`secret-scanner-reusable.yml`, the security policy step in
   a walk of its could be satisfied by an archive file (the generator's
   directory listing; `check-package-policy.sh`'s `find_first`, which
   would accept an archive manifest in place of a missing root one), add
-  the exclusion in that script's own idiom (a `:!9-archive/**` pathspec,
-  or `-o -name 9-archive` in the `PRUNE` array) and record it. Where one
-  reports nothing under the archive and no walk can be satisfied there,
-  leave it alone and record that too. Put the eleven-row table in the PR
-  body. The `check-package-policy.sh` prune is estate-wide, since the
-  governance job copies the script into every caller; a directory named
-  `9-archive` is frozen history by this repository's own convention, so
-  say so in the PR body. Never touch the secret scanners.
-. Give `governance-reusable.yml` an opt-in input,
-  `policy_exclude_pathspec` (type string, default empty), and add it to
-  each `git ls-files` call of the banned-language block (lines 609 to
-  638) only when it is non-empty: git rejects an empty string as a
+  the exclusion in that script's own idiom (a `:!9-archive/**` pathspec
+  on a `git ls-files`, a prune on a `find` that only this repository
+  runs) and record it. For `check-package-policy.sh` the idiom is the
+  opt-in hook in the next step, never a bare `-o -name 9-archive` in its
+  shared `PRUNE` array: the governance job copies that script into every
+  caller, and a caller with a live directory of that name would lose its
+  packaging checks beneath it (a `flake.nix` there would stop being a
+  violation). Where one reports nothing under the archive and no walk can
+  be satisfied there, leave it alone and record that too. Put the
+  eleven-row table in the PR body. Never touch the secret scanners.
+. Give `governance-reusable.yml` one opt-in input, `policy_exclude_dir`
+  (type string, default empty: the name of one directory at the caller's
+  root), and consume it in two places. In the banned-language block
+  (lines 609 to 638) derive a pathspec and add it to each `git ls-files`
+  call only when the input is non-empty: git rejects an empty string as a
   pathspec (`fatal: empty string is not a valid pathspec`), so appending
-  the quoted default verbatim would fail every caller that does not pass
-  the input. Use a bash array (`excl=(); [ -n "$POLICY_EXCLUDE" ] &&
-  excl=("$POLICY_EXCLUDE")`, then `"${excl[@]}"` at the end of each
-  call), with the input exported to `POLICY_EXCLUDE` through `env:`.
-  Prove the default arm before pushing: run the block's `git ls-files`
-  lines locally with `POLICY_EXCLUDE` empty and with the archive
-  pathspec, and paste both listings; the empty run must equal plain
-  `git ls-files` with the same patterns. In `governance.yml`, which calls
-  the reusable by local path so both halves land in one PR, pass
-  `policy_exclude_pathspec: ':!9-archive/**'`. Leave the three `find`
+  a quoted default verbatim would fail every caller that does not pass
+  the input. Use a bash array (`excl=(); [ -n "$POLICY_EXCLUDE_DIR" ] &&
+  excl=(":!$POLICY_EXCLUDE_DIR/**")`, then `"${excl[@]}"` at the end of
+  each call), with the input exported to `POLICY_EXCLUDE_DIR` through
+  `env:`. In the "Enforce Guix-only packaging policy" step, export the
+  same input as `PKG_PRUNE_DIRS` to `check-package-policy.sh`, and teach
+  the script to add `-o -name "$d"` to `PRUNE` for each name in that
+  variable and nothing when it is unset, so the copy every other caller
+  runs behaves exactly as today. Prove both default arms before pushing:
+  run the block's `git ls-files` lines locally with `POLICY_EXCLUDE_DIR`
+  empty and set, and run `bash scripts/check-package-policy.sh .` with
+  `PKG_PRUNE_DIRS` unset and set to `9-archive`; paste all four results.
+  The empty runs must equal plain `git ls-files` with the same patterns
+  and `main`'s script respectively. In `governance.yml`, which calls the
+  reusable by local path so both halves land in one PR, pass
+  `policy_exclude_dir: 9-archive`. Leave the three `find`
   calls of the package anti-pattern block (lines 662 to 665) as they are:
   they match only lockfile names, the frozen archive holds none, and a
   second idiom for the same input is not worth its lines; record them in
@@ -463,12 +482,13 @@ jq '[.[] | select((.file // .path // "") | startswith("9-archive/"))] | length' 
 test ! -f .hypatia-ignore
 git status --porcelain (right after the discovery step, before any edit)  -> empty
 bash scripts/check-workflow-duplicate-keys.sh                       -> clean
-grep -c 'policy_exclude_pathspec' .github/workflows/governance-reusable.yml  -> at least 2 (the input and its use)
-grep -c "policy_exclude_pathspec: ':!9-archive/\*\*'" .github/workflows/governance.yml  -> 1
-grep -c '9-archive' scripts/check-package-policy.sh                 -> 1 (the PRUNE entry)
+grep -c 'policy_exclude_dir' .github/workflows/governance-reusable.yml  -> at least 3 (the input and its two uses)
+grep -c 'policy_exclude_dir: 9-archive' .github/workflows/governance.yml  -> 1
+grep -c 'PKG_PRUNE_DIRS' scripts/check-package-policy.sh             -> at least 2 (read, then applied to PRUNE)
+test "$(grep -c '9-archive' scripts/check-package-policy.sh)" -eq 0  -> nothing hard-coded in the shared script (exit 0)
 grep -c 'files *= *1137' standards-map.toml                         -> 1
 bash scripts/check-standards-map.sh                                 -> GATE D PASSED
-The two git ls-files listings (empty input, archive input) pasted in the PR body; the empty one identical to plain git ls-files.
+The four default-arm results (git ls-files with the input empty and set; check-package-policy.sh with PKG_PRUNE_DIRS unset and set) pasted in the PR body; the empty runs identical to today's behaviour.
 On the PR: ci-pipeline, hypatia-scan, Validate Hypatia Baseline, Exemption ratchet,
 governance / Language / package anti-pattern policy and governance / Enforce Guix-only
 packaging policy green; the eleven-row validator table in the body.
@@ -584,7 +604,8 @@ interval on a first reading. There is no pull-request template.
 *Acceptance.*
 ----
 test -f .github/PULL_REQUEST_TEMPLATE.md
-test ! -d .github/ISSUES   -> only once the owner has disposed of all seven; otherwise the directory is unchanged and the PR body says which drafts wait
+git diff --quiet origin/main -- .github/ISSUES   -> exit 0 while any draft awaits the owner (the directory is untouched and the PR body says which drafts wait)
+After the owner has disposed of all seven, and not part of the pre-push gate before then: test ! -d .github/ISSUES
 git diff --unified=0 origin/main -- .github/CODEOWNERS | awk '/^[+-].*License-Identifier/ {print; found=1} END {exit found}'  -> empty (exit 0)
 bash scripts/tests/apply-baseline-test.sh                           -> pass
 On the PR: labels and label-triage workflows green; Validate Hypatia Baseline green.
@@ -668,9 +689,8 @@ never resolved. They fall into three buckets.
 *Acceptance.*
 ----
 for f in <bucket A files>; do test "$(grep -c '0-AI-MANIFEST\.a2ml' "$f")" -eq 0 || exit 1; done   -> no old-name references (exit 0)
-link_rot="$(bash scripts/link-rot-guard.sh .)" || test "$?" -eq 1
-printf '%s\n' "$link_rot" | awk '/^BROKEN/ {n++} END {print n+0}'  -> 440 from a checkout named standards (three manifest links repaired; 681 from any other name)
-printf '%s\n' "$link_rot" | grep '0-AI-MANIFEST'                     -> exactly one line, TOPOLOGY.adoc (frozen; leaves with P2.4)
+diff "$before" <(bash scripts/link-rot-guard.sh . || true)          -> exactly three '<' lines (the repaired manifest links) and no '>' line; 440 BROKEN in all from a checkout named standards
+bash scripts/link-rot-guard.sh . | grep '0-AI-MANIFEST'             -> exactly one line, TOPOLOGY.adoc (frozen; leaves with P2.4)
 bash scripts/check-launcher-standard-currency.sh --root .          -> no stale references
 bash scripts/run-mustfile.sh .machine_readable/contractiles/must/Mustfile.a2ml  -> 14 passed
 ----
@@ -703,7 +723,11 @@ urgent, and the PR body says which gate is red).
   archive become a packet of their own (241 more sit inside the frozen
   archive, where the guard prunes them in CI and nothing can be fixed).
 . Prefer an arm for the archive carve-out in `governance-reusable.yml`
-  (WO-4): the opt-in `policy_exclude_pathspec` input, a new surface on a
+  (WO-4): the opt-in `policy_exclude_dir` input with its
+  `PKG_PRUNE_DIRS` hook in `check-package-policy.sh`, a new surface on a
   reusable every estate repository calls but a no-op by default, or no
   change because the archive matches nothing today. The order ships the
   input unless you say otherwise.
+. After hyperpolymath/hypatia#927 or #928 merges, advance the
+  `hypatia-ref` defaults in both reusables (or say which session does
+  it); until then the Hypatia gate stays red on every pull request here.
