@@ -114,6 +114,28 @@ else
   bad "the local-composite block differs between complete-job-refs, prune-stale and check-lock-sync"
 fi
 
+echo "=== owner/repo case: an existing entry covers a differently cased uses: ==="
+mkdir -p "$WORK/t5/.github/workflows"
+printf 'jobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: Swatinem/rust-cache@v2\n      - uses: o/r@V3\n' \
+  > "$WORK/t5/.github/workflows/c.yml"
+cat > "$WORK/t5/.github/workflows/actions.lock" <<EOF
+workflows:
+    '.github/workflows/c.yml':
+        - 'o/r@v3'
+        - 'swatinem/rust-cache@v2'
+dependencies:
+    'swatinem/rust-cache@v2':
+        ref: 'v2'
+EOF
+run t5 >/dev/null; st=$?
+L5="$WORK/t5/.github/workflows/actions.lock"
+[ "$st" = 0 ] && grep -qxF "        - 'swatinem/rust-cache@v2'" "$L5" && ! grep -qF "'Swatinem/rust-cache@v2'" "$L5" \
+  && ok "owner case differs only → existing entry kept, no second spelling" \
+  || bad "owner case differs only → existing entry kept, no second spelling (st=$st)"
+grep -qxF "        - 'o/r@V3'" "$L5" && grep -qxF "        - 'o/r@v3'" "$L5" \
+  && ok "ref case differs → both refs kept (refs are case-sensitive)" \
+  || bad "ref case differs → both refs kept (refs are case-sensitive)"
+
 echo "=== structural ==="
 mkrepo t3; printf 'dependencies:\n' > "$WORK/t3/.github/workflows/actions.lock"
 run t3 >/dev/null; st=$?

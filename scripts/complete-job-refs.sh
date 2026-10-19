@@ -100,15 +100,21 @@ done | LC_ALL=C sort -u >> "$WANT"
 # 2. rewrite the workflows: section, merging wanted job refs into each path entry
 LC_ALL=C awk -v want="$WANT" '
 BEGIN { while ((getline l < want) > 0) { split(l, w, "\t"); WANT[w[1]] = WANT[w[1]] SUBSEP w[2] } }
+# ck: the dedup key of a ref. GitHub owner/repository names are
+# case-insensitive; refs are not (the same rule as check-lock-sync.sh). An
+# existing `swatinem/rust-cache@v2` entry therefore already covers
+# `uses: Swatinem/rust-cache@v2`; adding the second spelling left a ref that
+# close-lock then tried to resolve as a new repository.
+function ck(s,   i) { i = match(s, /@[^@]*$/); return i ? tolower(substr(s, 1, i - 1)) substr(s, i) : s }
 # flush: write the current workflow entry, merged with its wanted refs, sorted and deduplicated.
 function flush(   i, n, arr, j, k, seen, out, c) {
   if (cur == "") return
   SEEN[cur] = 1
   n = split(items, arr, SUBSEP)
   c = 0; delete seen; delete out
-  for (i = 1; i <= n; i++) if (arr[i] != "" && !(arr[i] in seen)) { seen[arr[i]] = 1; out[++c] = arr[i] }
+  for (i = 1; i <= n; i++) if (arr[i] != "" && !(ck(arr[i]) in seen)) { seen[ck(arr[i])] = 1; out[++c] = arr[i] }
   if (cur in WANT) { n = split(WANT[cur], arr, SUBSEP)
-    for (i = 1; i <= n; i++) if (arr[i] != "" && !(arr[i] in seen)) { seen[arr[i]] = 1; out[++c] = arr[i] } }
+    for (i = 1; i <= n; i++) if (arr[i] != "" && !(ck(arr[i]) in seen)) { seen[ck(arr[i])] = 1; out[++c] = arr[i] } }
   if (c == 0) { printf "    '\''%s'\'': []\n", cur; cur = ""; items = ""; return }
   for (i = 1; i < c; i++) for (j = i + 1; j <= c; j++) if (out[j] < out[i]) { k = out[i]; out[i] = out[j]; out[j] = k }
   printf "    '\''%s'\'':\n", cur
