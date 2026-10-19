@@ -21,12 +21,13 @@ trap 'rm -rf "$WORK"' EXIT
 
 pass=0
 fail=0
+COUNTS_JQ='"\(.findings_suppressed | length),\(.findings_kept | length)"'
 
 assert_status() {
   local label="$1" findings="$2" baseline="$3" expected="$4"
   local got
   got=$(bash "$APPLY" "$findings" "$baseline" advisory \
-    | jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"')
+    | jq -r "$COUNTS_JQ")
   if [ "$got" = "$expected" ]; then
     echo "PASS: $label  (suppressed,kept=$got)"
     pass=$((pass + 1))
@@ -90,8 +91,8 @@ assert_gate() {
   local status=0 got
   BLOCKING_THRESHOLD="$threshold" bash "$APPLY" "$findings" "$baseline" blocking \
     >"$WORK/gate.out" 2>"$WORK/gate.err" || status=$?
-  got=$(jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"' "$WORK/gate.out")
-  if [ "$status" -eq "$expected_status" ] && [ "$got" = "$expected_counts" ]; then
+  got=$(jq -r "$COUNTS_JQ" "$WORK/gate.out")
+  if [[ "$status" -eq "$expected_status" && "$got" == "$expected_counts" ]]; then
     echo "PASS: $label (exit=$status, suppressed/kept=$got)"
     pass=$((pass + 1))
   else
@@ -139,7 +140,7 @@ cat > "$WORK/baseline-override-low.json" <<'EOF'
 EOF
 assert_gate "low override downgrades a matching high finding" \
   "$WORK/findings-override.json" "$WORK/baseline-override-low.json" high 0 "0,1"
-if [ "$(jq -r '.findings_kept[0] | [.severity,.baseline_status] | join(",")' "$WORK/gate.out")" = "low,downgraded" ]; then
+if [[ "$(jq -r '.findings_kept[0] | [.severity,.baseline_status] | join(",")' "$WORK/gate.out")" == "low,downgraded" ]]; then
   echo "PASS: low override is visible as a downgraded finding"
   pass=$((pass + 1))
 else
@@ -162,7 +163,7 @@ for override in warn informational 7; do
   jq -n --arg override "$override" '[{severity:"high",rule_module:"cicd_rules",type:"banned_language_file",file:"src/Legacy.kt",severity_override:$override}]' > "$WORK/baseline-invalid-override.json"
   status=0
   bash "$APPLY" "$WORK/findings-override.json" "$WORK/baseline-invalid-override.json" advisory >/dev/null 2>&1 || status=$?
-  if [ "$status" -eq 2 ]; then
+  if [[ "$status" -eq 2 ]]; then
     echo "PASS: invalid severity_override rejected with schema exit 2: $override"
     pass=$((pass + 1))
   else
@@ -175,7 +176,7 @@ assert_invalid_baseline() {
   local label="$1" content="$2" status=0
   printf '%s\n' "$content" > "$WORK/baseline-invalid.json"
   bash "$APPLY" "$WORK/findings-override.json" "$WORK/baseline-invalid.json" advisory >/dev/null 2>&1 || status=$?
-  if [ "$status" -eq 2 ]; then
+  if [[ "$status" -eq 2 ]]; then
     echo "PASS: invalid baseline rejected with schema exit 2: $label"
     pass=$((pass + 1))
   else
@@ -271,7 +272,7 @@ done
 assert_invalid_option() {
   local label="$1" mode="$2" threshold="$3" status=0
   BLOCKING_THRESHOLD="$threshold" bash "$APPLY" "$WORK/findings1.json" "$WORK/empty.json" "$mode" > "$WORK/invalid.out" 2> "$WORK/invalid.err" || status=$?
-  if [ "$status" -eq 2 ]; then
+  if [[ "$status" -eq 2 ]]; then
     echo "PASS: $label rejected as invalid configuration"
     pass=$((pass + 1))
   else
@@ -361,7 +362,7 @@ elif ! bash -n "$MUTANT" 2>/dev/null; then
 else
   # Non-first member must now be MISSED.
   mutant_got=$(bash "$MUTANT" "$WORK/findings-mod2only.json" "$WORK/baseline-2mod.json" advisory \
-    | jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"')
+    | jq -r "$COUNTS_JQ")
   if [ "$mutant_got" = "0,1" ]; then
     echo "PASS: MUTANT (first element only) misses the non-first module — any() IS load-bearing"
     pass=$((pass + 1))
@@ -372,7 +373,7 @@ else
   # And the two-module case must regress to half-suppressed: exactly the
   # #966 symptom, reproduced on demand.
   mutant_both=$(bash "$MUTANT" "$WORK/findings-2mod.json" "$WORK/baseline-2mod.json" advisory \
-    | jq -r '"\(.findings_suppressed | length),\(.findings_kept | length)"')
+    | jq -r "$COUNTS_JQ")
   if [ "$mutant_both" = "1,1" ]; then
     echo "PASS: MUTANT reproduces the #966 symptom (half-suppressed, entry looks correct)"
     pass=$((pass + 1))
