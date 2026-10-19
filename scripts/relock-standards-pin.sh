@@ -130,7 +130,30 @@ awk -v k="    ${q}hyperpolymath/standards@$TARGET${q}:" '$0==k{s=1;next} s&&/^  
 git -C "$SROOT" show "${TARGET}:.github/workflows/actions.lock" > "$tmp/slock" 2>/dev/null || : > "$tmp/slock"
 while read -r u; do
   [ -n "$u" ] || continue
-  grep -qF "    '$u':" "$tmp/lock" && continue
+  existing=$(rec_body "$u" "$tmp/lock")
+  if [ -n "$existing" ]; then
+    pin=${u##*@}
+    if [[ "$pin" =~ ^[0-9a-f]{40}$ ]] && printf '%s\n' "$existing" | grep -qxF "        ref: '$pin'"; then
+      # A consumer can retain a poisoned copy after Standards repairs its own
+      # record. Refresh only ref:, and only with identical commit and IDs.
+      repaired=$(rec_body "$u" "$tmp/slock")
+      symbolic=$(printf '%s\n' "$repaired" | sed -n "s/^        ref: '\([^']*\)'$/\1/p")
+      [ -n "$symbolic" ] && [[ ! "$symbolic" =~ ^[0-9a-fA-F]{40}$ ]] \
+        || refuse "no symbolic repair for $u in target Standards lock"
+      local_identity=$(printf '%s\n' "$existing" | grep -E '^        (commit|owner_id|repo_id):')
+      source_identity=$(printf '%s\n' "$repaired" | grep -E '^        (commit|owner_id|repo_id):')
+      [ "$local_identity" = "$source_identity" ] && [ "$(printf '%s\n' "$source_identity" | wc -l)" -eq 3 ] \
+        || refuse "identity mismatch while repairing $u"
+      awk -v k="    '$u':" -v replacement="        ref: '$symbolic'" '
+        $0 == k { selected = 1; print; next }
+        /^    [^ ]/ { selected = 0 }
+        selected && /^        ref:/ { print replacement; next }
+        { print }
+      ' "$tmp/lock" > "$tmp/repaired.lock"
+      mv "$tmp/repaired.lock" "$tmp/lock"
+    fi
+    continue
+  fi
   r=$(rec_body "$u" "$tmp/slock")
   [ -n "$r" ] || refuse "no record for $u in this lock or in standards' own lock at ${TARGET:0:12}"
   printf '%s\n' "$r" >> "$tmp/lock"
