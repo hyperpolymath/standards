@@ -424,7 +424,7 @@ if [ ! -f "$SHIPPED" ]; then
   fail=$((fail + 1))
 else
   got=$(jq -r '[.[] | select(.type == "invalid_actions_lock")] | length' "$SHIPPED")
-  if [ "$got" = "0" ]; then
+  if [[ "$got" == "0" ]]; then
     echo "PASS: shipped ledger holds NO invalid_actions_lock ack"
     pass=$((pass + 1))
   else
