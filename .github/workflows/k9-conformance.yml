@@ -89,7 +89,6 @@ jobs:
       # gets validator, contract and renderer from the canon checkout at
       # job.workflow_sha.
       CANON: ${{ github.repository == 'hyperpolymath/standards' && '.' || '.k9-canon' }}
-      CANON_REF: ${{ github.repository == 'hyperpolymath/standards' && (github.event.pull_request.head.sha || github.sha) || job.workflow_sha }}
       NICKEL_VERSION: '1.18.0'
       NICKEL_SHA256: '9cba4dd65ae9915ec61f73033aafcff307a377665a83fd8f530df086763318cb'
       IJSON_JCS_REV: '0fdeea716fd558e9807362acf6f8202d56d8d88f'
@@ -109,6 +108,19 @@ jobs:
           persist-credentials: false
           sparse-checkout: "1-formats/k9\nscripts/k9-grid.sh\nscripts/lib/k9-grid.jq\n"
           sparse-checkout-cone-mode: false
+
+      - name: Record which standards commit supplies validator, contract and renderer
+        env:
+          # The job context is not available to job-level env, so the canon
+          # ref is recorded here. A caller gets this workflow's own commit.
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$GITHUB_REPOSITORY" = "hyperpolymath/standards" ]; then
+            echo "CANON_REF=$HEAD_SHA" >> "$GITHUB_ENV"
+          else
+            echo "CANON_REF=$WORKFLOW_SHA" >> "$GITHUB_ENV"
+          fi
 
       - name: Install Nickel (pinned, sha256-verified; one version estate-wide)
         run: |
