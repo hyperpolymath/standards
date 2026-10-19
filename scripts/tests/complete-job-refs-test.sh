@@ -114,6 +114,62 @@ else
   bad "the local-composite block differs between complete-job-refs, prune-stale and check-lock-sync"
 fi
 
+echo "=== owner/repo case: an existing entry covers a differently cased uses: ==="
+mkdir -p "$WORK/t5/.github/workflows"
+printf 'jobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: Swatinem/rust-cache@v2\n      - uses: o/r@V3\n' \
+  > "$WORK/t5/.github/workflows/c.yml"
+cat > "$WORK/t5/.github/workflows/actions.lock" <<EOF
+workflows:
+    '.github/workflows/c.yml':
+        - 'o/r@v3'
+        - 'swatinem/rust-cache@v2'
+dependencies:
+    'swatinem/rust-cache@v2':
+        ref: 'v2'
+EOF
+run t5 >/dev/null; st=$?
+L5="$WORK/t5/.github/workflows/actions.lock"
+[[ "$st" = 0 ]] && grep -qxF "        - 'swatinem/rust-cache@v2'" "$L5" && ! grep -qF "'Swatinem/rust-cache@v2'" "$L5" \
+  && ok "owner case differs only → existing entry kept, no second spelling" \
+  || bad "owner case differs only → existing entry kept, no second spelling (st=$st)"
+grep -qxF "        - 'o/r@V3'" "$L5" && grep -qxF "        - 'o/r@v3'" "$L5" \
+  && ok "ref case differs → both refs kept (refs are case-sensitive)" \
+  || bad "ref case differs → both refs kept (refs are case-sensitive)"
+
+echo "=== a lock that already holds both spellings keeps the one with a record ==="
+mkdir -p "$WORK/t6/.github/workflows"
+cp "$WORK/t5/.github/workflows/c.yml" "$WORK/t6/.github/workflows/c.yml"
+cat > "$WORK/t6/.github/workflows/actions.lock" <<EOF
+workflows:
+    '.github/workflows/c.yml':
+        - 'Swatinem/rust-cache@v2'
+        - 'o/r@v3'
+        - 'swatinem/rust-cache@v2'
+dependencies:
+    'swatinem/rust-cache@v2':
+        ref: 'v2'
+EOF
+run t6 >/dev/null; st=$?
+L6="$WORK/t6/.github/workflows/actions.lock"
+[[ "$st" = 0 ]] && grep -qxF "        - 'swatinem/rust-cache@v2'" "$L6" && ! grep -qF "'Swatinem/rust-cache@v2'" "$L6" \
+  && ok "both spellings present → the dependency-backed one survives" \
+  || bad "both spellings present → the dependency-backed one survives (st=$st)"
+
+echo "=== a tag containing @ keeps its case (split at the first @) ==="
+mkdir -p "$WORK/t7/.github/workflows"
+printf 'jobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: o/r@Release@2026\n' > "$WORK/t7/.github/workflows/c.yml"
+cat > "$WORK/t7/.github/workflows/actions.lock" <<EOF
+workflows:
+    '.github/workflows/c.yml':
+        - 'o/r@release@2026'
+dependencies:
+EOF
+run t7 >/dev/null; st=$?
+L7="$WORK/t7/.github/workflows/actions.lock"
+[[ "$st" = 0 ]] && grep -qxF "        - 'o/r@Release@2026'" "$L7" && grep -qxF "        - 'o/r@release@2026'" "$L7" \
+  && ok "o/r@Release@2026 and o/r@release@2026 are different refs → both kept" \
+  || bad "o/r@Release@2026 and o/r@release@2026 are different refs → both kept (st=$st)"
+
 echo "=== structural ==="
 mkrepo t3; printf 'dependencies:\n' > "$WORK/t3/.github/workflows/actions.lock"
 run t3 >/dev/null; st=$?
