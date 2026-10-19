@@ -89,6 +89,9 @@ out=$(cd "$WORK/r" && bash "$TARGET" 2>&1); st=$?
   && ok "a record's uses: list holds the merged ref once" || bad "a record's uses: list holds the merged ref once"
 [ "$(grep -c "^        commit: 'sha1-$A'" "$L")" = 1 ] \
   && ok "the merged record's body appears once" || bad "the merged record's body appears once"
+grep -qxF "        ref: 'v7'" "$L" && ! grep -qxF "        ref: '$A'" "$L" \
+  && ok "merged record keeps the symbolic tag ref ('v7'), not the self-SHA ref" \
+  || bad "merged record keeps the symbolic tag ref ('v7'), not the self-SHA ref"
 grep -qxF "    'actions/cache@$C':" "$L" && ! grep -qF "actions/cache@v4" "$L" \
   && ok "plain re-key (no SHA record yet) still happens" || bad "plain re-key (no SHA record yet) still happens"
 grep -qxF "    'o/tagged@v2':" "$L" && grep -qxF "        - 'o/tagged@v2'" "$L" \

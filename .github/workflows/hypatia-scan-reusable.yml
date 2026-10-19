@@ -21,6 +21,22 @@ on:
         type: string
         required: false
         default: 51ab6496bf47e30a0576d503df31fec30f3cfe56
+    secrets:
+      HYPATIA_SCAN_PAT:
+        description: >-
+          Fine-grained read-only PAT used to read Dependabot, code-scanning
+          and secret-scanning alerts; the scan falls back to the built-in
+          GITHUB_TOKEN when it is not supplied. Declared explicitly so
+          callers pass ONLY this secret instead of `secrets: inherit`,
+          which forwarded every caller secret (standards#1108 §6b).
+        required: false
+    outputs:
+      verdict:
+        description: >-
+          Overall state of the lane's verdict grid (docs/VERDICT-GRID-SPEC.adoc):
+          purple, red, orange, yellow, blue, green or grey. Callers that comment
+          on or gate from the grid read this and the verdict-grid artifact.
+        value: ${{ jobs.scan.outputs.verdict }}
 
 permissions:
   actions: read
@@ -35,12 +51,18 @@ jobs:
     # at 5, so a slow build or a hung scan records "not_run" or "error" instead
     # of timing out, and so failing, the whole job.
     timeout-minutes: 45
+    outputs:
+      verdict: ${{ steps.grid.outputs.state }}
     env:
       # panic-attack v2.5.5, built from source at this commit (cargo --rev
       # checks out exactly this object; --locked holds every dependency to the
       # Cargo.lock checksums). There is no release binary to pin instead.
       # The binary reports "2.1.0" for --version; that string is stale upstream.
       PANIC_ATTACK_SHA: 2dc1393c0ac982dbad98ba07f78a580d319456a5
+      # pons asinorum, built from source at this commit the same way. Its
+      # `scan --format json` envelope carries each finding's tier and
+      # evidence class, so a heuristic is never read as a proof.
+      PONS_SHA: 32e55677d8fd1f3010848dee22e822c2f385c2a0
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -363,6 +385,103 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # pons asinorum is ADVISORY on the same terms as panic-attack: a status
+      # envelope (ran | not_run | error) that is never a bare pass, built from
+      # source at PONS_SHA and cached by that commit.
+      - name: Restore pons build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pons
+          key: pons-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.PONS_SHA }}
+
+      - name: Install pons asinorum (pinned source build)
+        id: pons-install
+        run: |
+          set -euo pipefail
+          root="$HOME/.pons"
+          bin="$root/bin/pons"
+          reason=""
+          if [ -x "$bin" ] && grep -qF "#$PONS_SHA" "$root/.crates.toml" 2>/dev/null; then
+            echo "pons restored from cache at $PONS_SHA"
+          elif ! command -v cargo >/dev/null 2>&1; then
+            reason="cargo is not available on this runner"
+          elif ! timeout 600 cargo install --git https://github.com/hyperpolymath/pons-asinorum \
+              --rev "$PONS_SHA" --locked --force --root "$root" pons-cli; then
+            reason="source build at $PONS_SHA failed or exceeded 10 minutes"
+          elif [ ! -x "$bin" ]; then
+            reason="no binary after the source build at $PONS_SHA"
+          fi
+          if [ -n "$reason" ]; then
+            rm -rf "$root"
+            echo "::warning title=pons not installed::$reason"
+            echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          else
+            echo "bin=$bin" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run pons asinorum scan
+        id: pons
+        env:
+          PONS_BIN: ${{ steps.pons-install.outputs.bin }}
+          PONS_INSTALL_REASON: ${{ steps.pons-install.outputs.reason }}
+        run: |
+          set -euo pipefail
+          # pons-findings.json is the same status envelope as panic-attack's;
+          # `report` is pons's own JSON envelope when status is "ran".
+          out=pons-findings.json
+          marker() {
+            jq -n --arg status "$1" --arg reason "$2" --argjson exit_code "$3" \
+              --arg ref "$PONS_SHA" '{status: $status, tool: "pons-asinorum",
+                ref: $ref, reason: $reason, exit_code: $exit_code, counts: null,
+                report: null}' > "$out"
+          }
+          if [ -z "${PONS_BIN:-}" ] || [ ! -x "$PONS_BIN" ]; then
+            marker not_run "${PONS_INSTALL_REASON:-pons is not installed}" null
+          else
+            report=$(mktemp)
+            log=$(mktemp)
+            rc=0
+            timeout 300 "$PONS_BIN" scan --format json . > "$report" 2> "$log" || rc=$?
+            if [ "$rc" -eq 124 ]; then
+              marker error "pons scan did not finish within 5 minutes" "$rc"
+            elif [ "$rc" -ne 0 ]; then
+              marker error "pons scan exited $rc" "$rc"
+            elif ! jq -e -s 'length == 1 and (.[0] | type == "object" and
+                (.findings | type) == "array" and all(.findings[]; type == "object" and
+                  ((.severity | ascii_upcase) as $s | ["INFO", "WARN", "ERROR"] | index($s) != null)))' \
+                "$report" > /dev/null 2>&1; then
+              marker error "pons scan exited 0 without a valid report" 0
+            else
+              jq --arg ref "$PONS_SHA" '
+                [.findings[].severity | ascii_upcase] as $s
+                | {status: "ran", tool: "pons-asinorum", ref: $ref, reason: null, exit_code: 0,
+                   counts: {error: ($s | map(select(. == "ERROR")) | length),
+                            warn: ($s | map(select(. == "WARN")) | length),
+                            info: ($s | map(select(. == "INFO")) | length)},
+                   report: .}' "$report" > "$out"
+            fi
+            if [ "$(jq -r .status "$out")" = error ]; then
+              echo "::group::pons output"
+              cat "$log"
+              echo "::endgroup::"
+            fi
+          fi
+          status=$(jq -r .status "$out")
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" = ran ]; then
+            {
+              echo "## pons asinorum scan (advisory, does not gate)"
+              echo ""
+              echo "| Severity | Count |"
+              echo "|----------|-------|"
+              jq -r '"| ERROR | \(.counts.error) |", "| WARN | \(.counts.warn) |", "| INFO | \(.counts.info) |"' "$out"
+              echo ""
+              echo "Built from hyperpolymath/pons-asinorum@$PONS_SHA. Each finding carries its tier and evidence class; a heuristic is labelled as one."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning title=pons $status::$(jq -r .reason "$out"). pons-findings.json records status $status, which is not a pass."
+          fi
+
       - name: Check out standards for the SARIF baseline filter
         id: fetch_filter
         # ⚠ continue-on-error is on the CHECKOUT, never on the check. If the
@@ -439,6 +558,95 @@ jobs:
           path: |
             hypatia-findings.json
             panic-attack-findings.json
+            pons-findings.json
+          retention-days: 90
+
+      # ── VERDICT GRID (docs/VERDICT-GRID-SPEC.adoc) ──────────────────────
+      # One table for the lane: Hypatia, panic-attack, pons and every
+      # gitbot-fleet report-back under .gitbot-fleet/, graded by the worst
+      # finding present, with missing or unreadable evidence orange and
+      # explicit exclusions grey. It lands in the job summary, in the
+      # verdict-grid artifact (report.json, report.md, badge.json) and in the
+      # `verdict` output. The PR comment is the CALLER's job: this reusable
+      # declares only the permissions every existing caller already grants,
+      # and a called workflow may not ask for more than its caller.
+      - name: Check out the verdict grid renderer at this workflow's commit
+        if: ${{ always() }}
+        # continue-on-error on the CHECKOUT only: the render step below
+        # reports a missing renderer as orange, never as a pass.
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          # `job.workflow_sha`: the commit of THIS reusable file, i.e. what the
+          # caller pinned. See ci-pipeline.yml for why neither
+          # github.workflow_sha nor github.job_workflow_sha is that.
+          ref: ${{ job.workflow_sha }}
+          path: .standards-grid
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/verdict-grid.sh
+            scripts/lib/verdict-grid.jq
+          sparse-checkout-cone-mode: false
+
+      - name: Read the previous verdict grid
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        # Best effort: the token may lack pull-request read on the caller. A
+        # missing previous grid only means "no comparable baseline".
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            | jq -r '[.[][] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- verdict-grid:")))]
+                     | last | .body // ""' \
+            > "$RUNNER_TEMP/grid-previous.md" || : > "$RUNNER_TEMP/grid-previous.md"
+
+      - name: Render the verdict grid
+        id: grid
+        if: ${{ always() }}
+        env:
+          HYPATIA_REF: ${{ steps.hypatia-rev.outputs.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 'local' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -uo pipefail
+          renderer=.standards-grid/scripts/verdict-grid.sh
+          mkdir -p verdict-grid
+          if [ ! -f "$renderer" ]; then
+            # No renderer is missing evidence, rendered as such, never a pass.
+            jq -n '{schemaVersion: 1, label: "Hypatia grid", message: "indeterminate", color: "orange"}' > verdict-grid/badge.json
+            printf '%s\n%s\n' '<!-- verdict-grid:hypatia regenerated on every run -->' \
+              '🟠 indeterminate · the verdict grid renderer could not be checked out from hyperpolymath/standards; see the job log.' \
+              > verdict-grid/report.md
+            cat verdict-grid/report.md >> "$GITHUB_STEP_SUMMARY"
+            echo "state=orange" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          findings=hypatia-findings.json
+          [ -f hypatia-findings.relativized.json ] && findings=hypatia-findings.relativized.json
+          enrolment=""
+          [ -f .gitbot-fleet/enrolment.json ] && enrolment=.gitbot-fleet/enrolment.json
+          # The renderer appends the grid to the step summary and writes
+          # state= to GITHUB_OUTPUT itself; its exit code is 0 for any
+          # rendered verdict and 2 only for a usage error.
+          bash "$renderer" render --out verdict-grid \
+            --hypatia "$findings" --panic panic-attack-findings.json --pons pons-findings.json \
+            --report-backs .gitbot-fleet/report-backs --enrolment "$enrolment" \
+            --previous "$RUNNER_TEMP/grid-previous.md" \
+            --sha "$HEAD_SHA" --run "$GITHUB_RUN_ID" \
+            --url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --pr "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --hypatia-ref "$HYPATIA_REF" --panic-ref "$PANIC_ATTACK_SHA" --pons-ref "$PONS_SHA" > /dev/null
+
+      - name: Upload the verdict grid
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verdict-grid
+          path: verdict-grid
+          if-no-files-found: error
           retention-days: 90
 
       - name: Gate on baseline (blocking when a baseline is committed)
