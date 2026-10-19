@@ -161,6 +161,9 @@ check "a routed-only corpus is grey" grey "$(cat_state "$WORK/o9" corpus)"
 check "grey corpus with green checks is green overall" green "$(state "$WORK/o9")"
 render "$WORK/o9b" --results "$WORK/expected-none" --expected "$WORK/expected-none" "${good_evidence[@]}"
 check "an empty corpus is grey" grey "$(cat_state "$WORK/o9b" corpus)"
+render "$WORK/o9c" --results "$WORK/expected-none" --expected "$WORK/expected-none" "${good_evidence[@]}" --require-files
+check "an empty corpus under --require-files is red in the grid itself" red "$(state "$WORK/o9c")"
+check "and the badge says so" failing "$(jq -r .message "$WORK/o9c/badge.json")"
 
 # 10. Self-test and typecheck evidence.
 render "$WORK/o10" --results "$WORK/r-clean" --expected "$WORK/expected" --selftest "$bad_selftest" --selftest-code 1 --typecheck "$WORK/empty.log" --typecheck-code 0 --corpus-code 0
@@ -180,7 +183,7 @@ check "a self-test that did not run is orange" orange "$(state "$WORK/o10f")"
 # 11. Revision comparison: only under one profile, same PR, different commit.
 render "$WORK/o11a" --results "$WORK/r-fail" --expected "$WORK/expected" "${good_evidence[@]}" --sha 1111111111111111111111111111111111111111 --pr 7
 render "$WORK/o11b" --results "$WORK/r-clean" --expected "$WORK/expected" "${good_evidence[@]}" --sha 2222222222222222222222222222222222222222 --pr 7 --previous "$WORK/o11a/report.md"
-check "delta reports the fixed row" yes "$(grep -q 'K9 live corpus.*| ↑ improved (1 fewer failures)' "$WORK/o11b/report.md" && echo yes || echo no)"
+check "delta reports the fixed row" yes "$(grep -q 'K9 live corpus.*| ↑ improved (1 fewer blocking failures)' "$WORK/o11b/report.md" && echo yes || echo no)"
 render "$WORK/o11c" --results "$WORK/r-clean" --expected "$WORK/expected" "${good_evidence[@]}" --sha 1111111111111111111111111111111111111111 --pr 7 --previous "$WORK/o11a/report.md"
 check "same commit is not compared" yes "$(grep -q 'no comparable baseline' "$WORK/o11c/report.md" && echo yes || echo no)"
 render "$WORK/o11d" --results "$WORK/r-clean" --expected "$WORK/expected" "${good_evidence[@]}" --sha 2222222222222222222222222222222222222222 --pr 8 --previous "$WORK/o11a/report.md"
@@ -190,6 +193,13 @@ check "another profile is not compared" yes "$(grep -q 'no comparable baseline' 
 render "$WORK/o11f" --results "$WORK/r-warn" --expected "$WORK/expected" "${good_evidence[@]}" --sha 1111111111111111111111111111111111111111 --pr 7
 render "$WORK/o11g" --results "$WORK/r-clean" --expected "$WORK/expected" "${good_evidence[@]}" --sha 2222222222222222222222222222222222222222 --pr 7 --previous "$WORK/o11f/report.md"
 check "delta reports a cleared warning" yes "$(grep -q 'K9 live corpus.*| ↑ fewer warnings' "$WORK/o11g/report.md" && echo yes || echo no)"
+# A ledgered failure the PR starts touching goes from advisory to blocking with
+# the failed count unchanged: that is a regression, not "fewer advisories".
+render "$WORK/o11i" --results "$WORK/r-fail" --expected "$WORK/expected" --ledger "$WORK/ledger-b" "${good_evidence[@]}" --sha 1111111111111111111111111111111111111111 --pr 7
+render "$WORK/o11j" --results "$WORK/r-fail" --expected "$WORK/expected" --ledger "$WORK/ledger-b" --changed "$WORK/changed-b" "${good_evidence[@]}" --sha 2222222222222222222222222222222222222222 --pr 7 --previous "$WORK/o11i/report.md"
+check "advisory becoming blocking is a regression" yes "$(grep -q 'K9 live corpus.*| ↓ regressed (1 more blocking failures)' "$WORK/o11j/report.md" && echo yes || echo no)"
+render "$WORK/o11k" --results "$WORK/r-fail" --expected "$WORK/expected" --ledger "$WORK/ledger-b" "${good_evidence[@]}" --sha 3333333333333333333333333333333333333333 --pr 7 --previous "$WORK/o11j/report.md"
+check "blocking becoming advisory is an improvement" yes "$(grep -q 'K9 live corpus.*| ↑ improved (1 fewer blocking failures)' "$WORK/o11k/report.md" && echo yes || echo no)"
 printf '%s\n' a.k9.ncl b.k9.ncl c.k9.ncl > "$WORK/expected-abc"
 { rec a.k9.ncl pass '[]'; rec b.k9.ncl pass '[]'; rec c.k9.ncl pass '[]'; } > "$WORK/r-clean-abc"
 render "$WORK/o11h" --results "$WORK/r-clean-abc" --expected "$WORK/expected-abc" "${good_evidence[@]}" --sha 2222222222222222222222222222222222222222 --pr 7 --previous "$WORK/o11a/report.md"

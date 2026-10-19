@@ -8,12 +8,16 @@
 # 1-formats/k9/tools/conformance-report.mjs (the DEED–K9 lane that runs in
 # this repository), so the two K9 lanes grade one result the same way. Where
 # the two disagree on a rule they share, the .mjs is the reference rendering
-# and this file is a bug. Two rules are this lane's own, because its evidence
-# differs, and are marked "(this lane)" below: the corpus exit status here is
-# the raw validator's, not the ledger-aware hook's; and the caller's ledger is
-# compared with the PR base, so an entry added without a Ratchet-exception
-# buys no exemption. It is jq rather than JavaScript so the estate's
-# authored-JavaScript surface does not grow (docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc).
+# and this file is a bug, with one exception: `delta` here compares blocking
+# failures before advisory counts, so a ledgered failure that the PR starts
+# touching (yellow to red) reads as a regression; the .mjs ordering reads it
+# as "fewer advisories" and should adopt this. Two further rules are this
+# lane's own, because its evidence differs, and are marked "(this lane)"
+# below: the corpus exit status here is the raw validator's, not the
+# ledger-aware hook's; and the caller's ledger is compared with the PR base,
+# so an entry added without a Ratchet-exception buys no exemption. It is jq
+# rather than JavaScript so the estate's authored-JavaScript surface does not
+# grow (docs/NO-JAVASCRIPT-SOURCE-POLICY.adoc).
 #
 # Input (one object, assembled by scripts/k9-grid.sh):
 #   { identity:  {lane, sha, run, url, pr, repo, dirty, generated, canon_ref},
@@ -25,6 +29,7 @@
 #     ledger_growth: [ "path" ... ],      # ledger entries this PR adds with no Ratchet-exception
 #     changed:   [ "path" ... ],          # files this PR touches
 #     base_resolved: bool,                # false when the PR range could not be diffed
+#     require_files: bool,                # an empty corpus is a failure, not a scope exclusion
 #     selftest:  {code: int|null, output: "..."},
 #     typecheck: {code: int|null, output: "..."},
 #     corpus_code: int|null }             # the validator's own exit status
@@ -80,7 +85,7 @@ def typecheck_items(tc; contract):
 # at the PR base, or the PR declares the growth (this lane): an undeclared
 # addition is listed in `growth`, gets a failing row of its own, and the file
 # it names is graded as if it were not in the ledger.
-def corpus_items(results; expected; ledger; growth; changed):
+def corpus_items(results; expected; ledger; growth; changed; require_files):
   (ledger | map({key: ., value: true}) | from_entries) as $ledger
   | (growth | map({key: ., value: true}) | from_entries) as $growth
   | (changed | map({key: ., value: true}) | from_entries) as $changed
@@ -122,7 +127,10 @@ def corpus_items(results; expected; ledger; growth; changed):
     # to see it.
     + [ ledger[] | select(($expected[.] // false) | not) | item(.; "fail"; "Stale debt exemption: this path is not a tracked K9 file.") ]
     + [ growth[] | item("ledger + \(.)"; "fail"; "Added to the debt ledger in this PR with no Ratchet-exception naming the ledger; the entry exempts nothing.") ]
-    + (if (expected | length) == 0 then [item("live corpus"; "not_applicable"; "No tracked K9 contracts or routing files.")] else [] end);
+    + (if (expected | length) == 0 then
+         [ if require_files then item("live corpus"; "fail"; "require-files is set and the caller has no committed K9 file.")
+           else item("live corpus"; "not_applicable"; "No tracked K9 contracts or routing files.") end ]
+       else [] end);
 
 def titles: { typecheck: "K9 contract typecheck", selftest: "K9 validator self-test", corpus: "K9 live corpus (L0–L2)" };
 
@@ -131,7 +139,7 @@ def category(id; items): { id: id, title: titles[id], items: items, counts: (ite
 def build:
   . as $in
   | ("1-formats/k9/spec/contract/k9_contract.ncl") as $contract
-  | (corpus_items($in.results // []; $in.expected // []; $in.ledger // []; $in.ledger_growth // []; $in.changed // [])
+  | (corpus_items($in.results // []; $in.expected // []; $in.ledger // []; $in.ledger_growth // []; $in.changed // []; $in.require_files // false)
      + (if $in.base_resolved == false then [item("change scope"; "indeterminate"; "Cannot resolve the PR base/head range; debt exemptions cannot be determined.")] else [] end)) as $corpus0
   # The exit status is the raw validator's worst over the corpus, so a
   # ledgered (advisory) failure explains it as well as a blocking one does
@@ -159,6 +167,12 @@ def delta(prev; report):
     else (prev.categories | map(select(.id == $c.id)) | first) as $b
     | if $b == null or ($b.counts.indeterminate > 0) or ($c.counts.indeterminate > 0) then "— indeterminate"
       elif $b.counts.not_applicable != $c.counts.not_applicable then "— scope changed"
+      # Blocking failures first: a ledgered failure the PR now touches moves
+      # from advisory to blocking with the failed count unchanged.
+      elif ($b.counts.failed - $b.counts.advisory) != ($c.counts.failed - $c.counts.advisory) then
+        (($b.counts.failed - $b.counts.advisory) as $bb | ($c.counts.failed - $c.counts.advisory) as $cb
+         | if $cb < $bb then "↑ improved (\($bb - $cb) fewer blocking failures)"
+           else "↓ regressed (\($cb - $bb) more blocking failures)" end)
       elif $b.counts.failed != $c.counts.failed then
         (if $c.counts.failed < $b.counts.failed then "↑ improved (\($b.counts.failed - $c.counts.failed) fewer failures)"
          else "↓ regressed (\($c.counts.failed - $b.counts.failed) more failures)" end)

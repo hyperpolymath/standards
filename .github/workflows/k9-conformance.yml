@@ -42,6 +42,7 @@ name: k9-conformance
 #       with:
 #         require-files: true          # fail when the caller has no K9 file at all
 #         fail-on-indeterminate: true  # orange fails the job too (default: only red fails)
+#         grid-author: github-actions[bot]  # the account whose grid comment is the delta baseline
 
 on:
   push:
@@ -78,6 +79,11 @@ on:
         type: boolean
         required: false
         default: false
+      grid-author:
+        description: "The account that posts the grid comment in the caller; only its comment is read as the previous revision's baseline, so a contributor's comment cannot pose as one."
+        type: string
+        required: false
+        default: github-actions[bot]
     outputs:
       verdict:
         description: "Grid state: red, orange, yellow, green or grey."
@@ -202,8 +208,11 @@ jobs:
 
           # The PR's own changes are those since its merge base, not since the
           # base branch tip: a file the base branch changed after the PR
-          # branched is not this PR's edit.
-          if git fetch --quiet origin "$BASE_SHA" 2>/dev/null \
+          # branched is not this PR's edit. The full checkout already holds
+          # the base commit; the fetch is a fallback only, and runs without
+          # credentials (persist-credentials is off), so it serves public
+          # repositories.
+          if { git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --quiet origin "$BASE_SHA" 2>/dev/null; } \
              && merge_base=$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null) \
              && git diff --name-only "$merge_base" "$HEAD_SHA" > "$RUNNER_TEMP/changed" 2>/dev/null; then
             echo "$(wc -l < "$RUNNER_TEMP/changed") file(s) changed since the merge base $merge_base"
@@ -262,12 +271,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           COMMENTS_URL: ${{ github.event.pull_request.comments_url }}
           MARKER: '<!-- verdict-grid:k9 regenerated on every run -->'
+          GRID_AUTHOR: ${{ inputs.grid-author || 'github-actions[bot]' }}
         run: |
           set -euo pipefail
-          # Best effort: the caller posts the grid under this marker and
-          # regenerates it in place, so the last comment carrying it is the
-          # previous revision's grid and its baseline. Any failure here only
-          # costs the "since previous revision" column.
+          # Best effort: the caller's posting account writes the grid under
+          # this marker and regenerates it in place, so its last comment
+          # carrying the marker is the previous revision's grid and baseline.
+          # Only that account's comments count: anyone who can comment could
+          # otherwise plant a marker and a forged baseline. Any failure here
+          # only costs the "since previous revision" column.
           : > "$RUNNER_TEMP/previous.md"
           page=1
           while [ "$page" -le 10 ]; do
@@ -276,7 +288,8 @@ jobs:
               echo "::notice::could not read the pull request comments; the delta column reports no comparable baseline"
               break
             fi
-            jq -r --arg m "$MARKER" '[.[] | select((.body // "") | contains($m))] | last | .body // empty' \
+            jq -r --arg m "$MARKER" --arg a "$GRID_AUTHOR" \
+              '[.[] | select((.user.login // "") == $a and ((.body // "") | contains($m)))] | last | .body // empty' \
               "$RUNNER_TEMP/comments.json" > "$RUNNER_TEMP/previous-page.md"
             [ -s "$RUNNER_TEMP/previous-page.md" ] && mv "$RUNNER_TEMP/previous-page.md" "$RUNNER_TEMP/previous.md"
             [ "$(jq length "$RUNNER_TEMP/comments.json")" -eq 100 ] || break
@@ -303,13 +316,12 @@ jobs:
           [ -s "$RUNNER_TEMP/ledger-growth" ] && args+=(--ledger-growth "$RUNNER_TEMP/ledger-growth")
           [ -s "$RUNNER_TEMP/previous.md" ] && args+=(--previous "$RUNNER_TEMP/previous.md")
           [ -n "${BASE_UNRESOLVED:-}" ] && args+=("$BASE_UNRESOLVED")
+          # With require-files the empty corpus is a failing row in the grid
+          # itself, so report.md and badge.json carry the red the job reports.
+          [ "$REQUIRE_FILES" = "true" ] && args+=(--require-files)
           bash "$CANON/scripts/k9-grid.sh" render "${args[@]}"
           cp "$RUNNER_TEMP/selftest.log" "$RUNNER_TEMP/typecheck.log" "$RUNNER_TEMP/results.jsonl" "$RUNNER_TEMP/k9-grid/"
           [ -f "$RUNNER_TEMP/corpus.log" ] && cp "$RUNNER_TEMP/corpus.log" "$RUNNER_TEMP/k9-grid/"
-          if [ "$REQUIRE_FILES" = "true" ] && [ ! -s "$RUNNER_TEMP/expected" ]; then
-            echo "::error::require-files is set and no committed K9 file was found"
-            echo "state=red" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Archive the grid and its evidence
         if: ${{ always() && steps.grid.outcome != 'skipped' }}

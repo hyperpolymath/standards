@@ -16,6 +16,7 @@
 #                             naming the ledger, one per line: they exempt nothing
 #       --changed FILE        files the PR touches, one per line
 #       --base-unresolved     the PR base/head range could not be diffed
+#       --require-files       an empty corpus is a failing row, not a grey one
 #       --selftest LOG --selftest-code N     validator --self-test evidence
 #       --typecheck LOG --typecheck-code N   nickel typecheck of the contract
 #       --corpus-code N       the validator's exit status over the corpus
@@ -112,7 +113,7 @@ case "$cmd" in
   render)
     out="" results="" expected="" ledger="" growth="" changed="" prev="" lane="k9"
     selftest="" selftest_code="" typecheck="" typecheck_code="" corpus_code=""
-    base_resolved=true sha="" run="local" url="" pr="local" repo="" canon=""
+    base_resolved=true require_files=false sha="" run="local" url="" pr="local" repo="" canon=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --out) out="$2"; shift 2 ;;
@@ -122,6 +123,7 @@ case "$cmd" in
         --ledger-growth) growth="$2"; shift 2 ;;
         --changed) changed="$2"; shift 2 ;;
         --base-unresolved) base_resolved=false; shift ;;
+        --require-files) require_files=true; shift ;;
         --selftest) selftest="$2"; shift 2 ;;
         --selftest-code) selftest_code="$2"; shift 2 ;;
         --typecheck) typecheck="$2"; shift 2 ;;
@@ -164,12 +166,12 @@ case "$cmd" in
 
     jq -n --argjson results "$(results_json "$results")" --argjson expected "$(list_json "$expected")" \
       --argjson ledger "$(list_json "$ledger")" --argjson growth "$(list_json "$growth")" --argjson changed "$(list_json "$changed")" \
-      --argjson base_resolved "$base_resolved" --argjson selftest "$(evidence_json "$selftest" "$selftest_code")" \
+      --argjson base_resolved "$base_resolved" --argjson require_files "$require_files" --argjson selftest "$(evidence_json "$selftest" "$selftest_code")" \
       --argjson typecheck "$(evidence_json "$typecheck" "$typecheck_code")" --argjson corpus_code "$corpus_json" \
       --arg profile "$profile" --arg lane "$lane" --arg sha "$sha" --arg run "$run" --arg url "$url" \
       --arg pr "$pr" --arg repo "$repo" --argjson dirty "$dirty" --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       --arg canon "$canon" \
-      '{results: $results, expected: $expected, ledger: $ledger, ledger_growth: $growth, changed: $changed, base_resolved: $base_resolved,
+      '{results: $results, expected: $expected, ledger: $ledger, ledger_growth: $growth, changed: $changed, base_resolved: $base_resolved, require_files: $require_files,
         selftest: $selftest, typecheck: $typecheck, corpus_code: $corpus_code, profile: $profile,
         identity: {lane: $lane, sha: $sha, run: $run, url: $url, pr: $pr, repo: $repo, dirty: $dirty,
                    generated: $generated, canon_ref: $canon}}' \
