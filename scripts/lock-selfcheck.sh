@@ -31,6 +31,10 @@
 # Reads git objects ONLY (`git show`); never checks out, fetches, or writes.
 # Safe against a checkout shared with a live concurrent writer.
 #
+# The lock at each SHA must also be CLOSED: every ref under workflows: and in a
+# record's nested uses: has a top-level record (`close-lock.sh --check`,
+# standards#963). A dangling edge is a third POISON verdict.
+#
 # EXIT: 0 if every SHA examined self-validates; 1 if any does not; 2 on misuse.
 #
 # ⚠ SCOPE LIMIT, STATED SO IT IS NOT MISREAD: this proves a commit is
@@ -55,6 +59,7 @@ if ! git -C "$STANDARDS_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   exit 2
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TMP="${TMPDIR:-/tmp}/lock-selfcheck.$$"
 mkdir -p "$TMP"
 trap 'rm -rf "$TMP"' EXIT
@@ -224,6 +229,14 @@ for SHA in "$@"; do
   n_self_sha=$(sort -u "$TMP/self_sha_used" 2>/dev/null | wc -l)
   n_unkeyed=$(sort -u "$TMP/unkeyed_wf" 2>/dev/null | wc -l)
   n_unkeyed_wf=$(cut -f1 "$TMP/unkeyed_wf" 2>/dev/null | sort -u | wc -l)
+  # Closure (standards#963): close-lock.sh --check exits 1 and lists, two-space
+  # indented, every ref the lock names without a top-level record of its own.
+  n_dangling=0
+  if ! bash "$SCRIPT_DIR/close-lock.sh" --check "$TMP/lock" > "$TMP/closure" 2>&1; then
+    n_dangling=$(/usr/bin/grep -c '^  [^ ][^ ]*@[^ ]*$' "$TMP/closure" || true)
+    # A failure that names no ref still fails: an unread lock is not a closed one.
+    [[ "$n_dangling" -gt 0 ]] || n_dangling=1
+  fi
 
   echo "  workflows at this SHA: ${n_wfs}   lockfile keys: ${locked_wfs} workflow(s), ${locked_pairs} pair(s)"
   echo "  action refs used: ${n_actions}   reusable-workflow calls (not lock-keyed): ${n_reusable}"
@@ -237,8 +250,8 @@ for SHA in "$@"; do
     echo "  VERDICT: UNEXAMINED — yq could not parse $(sort -u "$TMP/unparsed" | wc -l) workflow(s); their refs were not checked:"
     sort -u "$TMP/unparsed" | sed 's/^/             /'
     overall_rc=1
-  elif [ "$n_missing" -eq 0 ] && [ "$n_self_sha" -eq 0 ]; then
-    echo "  VERDICT: SELF-CONSISTENT — every action ref used is keyed in this SHA's own lock."
+  elif [[ "$n_missing" -eq 0 && "$n_self_sha" -eq 0 && "$n_dangling" -eq 0 ]]; then
+    echo "  VERDICT: SELF-CONSISTENT — every action ref used is keyed in this SHA's own lock, and the lock is closed."
     echo "           (Reachability at the remote is NOT proven by this check.)"
   else
     if [ "$n_missing" -gt 0 ]; then
@@ -258,6 +271,12 @@ for SHA in "$@"; do
         echo "             ${wf}"
         echo "               self-SHA ref  ${key}"
       done
+    fi
+    if [[ "$n_dangling" -gt 0 ]]; then
+      echo "  VERDICT: POISON — ${n_dangling} dangling edge(s) in this SHA's own lock (standards#963)."
+      echo "           Hypatia fails closed on it (invalid_actions_lock), and close-lock.sh records"
+      echo "           GitHub refusing runs at startup for this shape (cicd-squabbler#101)."
+      sed 's/^/           /' "$TMP/closure"
     fi
     overall_rc=1
   fi

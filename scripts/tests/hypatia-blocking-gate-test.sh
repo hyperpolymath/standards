@@ -263,7 +263,7 @@ adapter_check 'CLI adapter crash fixture fails closed even if [] was written' cr
 
 # panic-attack controls. The step is advisory: it never fails the job, and it
 # never writes a bare `[]`. A skip or a failure must be an explicit status.
-export PANIC_ATTACK_SHA=2dc1393c0ac982dbad98ba07f78a580d319456a5
+export PANIC_ATTACK_SHA=b689a74d2762a1c19839ae3fbd59b7fe5ef920ea
 fail() { printf 'FAIL: %s\n' "$1"; cat result.log; exit 1; }
 
 cat > "$tmp/fake-panic-attack" <<'PA'
