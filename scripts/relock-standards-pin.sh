@@ -95,6 +95,22 @@ q="'"
 # succeeds; a file read error propagates awk's non-zero status.
 rec_body() { awk -v k="    ${q}$1${q}:" '$0==k{f=1;print;next} f&&/^    [^ ]/{exit} f' "$2"; }
 
+# GitHub's lockfile parser folds owner/repo case and keeps the ref as written:
+# 'Swatinem/rust-cache@X' and 'swatinem/rust-cache@X' are one key, and two
+# records for it with different metadata make the whole lock unparseable
+# ("duplicate action key ... after canonicalization"). Lookups and the closure
+# check compare keys that way.
+# fold — read owner/repo@ref lines; print each with owner/repo lower-cased.
+fold() { awk '{ i = index($0, "@"); if (i) print tolower(substr($0, 1, i - 1)) substr($0, i); else print }'; }
+# lock_key KEY FILE — print the dependency key in FILE naming the same pin as
+# KEY, in FILE's own spelling; nothing if FILE has none.
+lock_key() {
+  local want; want=$(printf '%s\n' "$1" | fold)
+  awk -v q="$q" -v w="$want" 'index($0, "    " q) == 1 && /@/ && /:$/ {
+      k = substr($0, 6, length($0) - 7); i = index(k, "@")
+      if (tolower(substr(k, 1, i - 1)) substr(k, i) == w) { print k; exit } }' "$2"
+}
+
 # Actions the called reusables use at TARGET, normalised to owner/repo@ref.
 : > "$tmp/uses"
 for p in $full; do
@@ -130,13 +146,16 @@ awk -v k="    ${q}hyperpolymath/standards@$TARGET${q}:" '$0==k{s=1;next} s&&/^  
 git -C "$SROOT" show "${TARGET}:.github/workflows/actions.lock" > "$tmp/slock" 2>/dev/null || : > "$tmp/slock"
 while read -r u; do
   [ -n "$u" ] || continue
-  existing=$(rec_body "$u" "$tmp/lock")
+  # The consumer's record may spell owner/repo differently; it is still this pin's.
+  key=$(lock_key "$u" "$tmp/lock")
+  existing=""; [ -z "$key" ] || existing=$(rec_body "$key" "$tmp/lock")
   if [[ -n "$existing" ]]; then
     pin=${u##*@}
     if [[ "$pin" =~ ^[0-9a-f]{40}$ ]] && printf '%s\n' "$existing" | grep -qxF "        ref: '$pin'"; then
       # A consumer can retain a poisoned copy after Standards repairs its own
       # record. Refresh only ref:, and only with identical commit and IDs.
-      repaired=$(rec_body "$u" "$tmp/slock")
+      skey=$(lock_key "$u" "$tmp/slock")
+      repaired=""; [ -z "$skey" ] || repaired=$(rec_body "$skey" "$tmp/slock")
       symbolic=$(printf '%s\n' "$repaired" | sed -n "s/^        ref: '\([^']*\)'$/\1/p")
       [[ -n "$symbolic" && ! "$symbolic" =~ ^[0-9a-fA-F]{40}$ ]] \
         || refuse "no symbolic repair for $u in target Standards lock"
@@ -145,7 +164,7 @@ while read -r u; do
       [[ "$local_identity" == "$source_identity" \
         && "$(printf '%s\n' "$source_identity" | wc -l)" -eq 3 ]] \
         || refuse "identity mismatch while repairing $u"
-      awk -v k="    '$u':" -v replacement="        ref: '$symbolic'" '
+      awk -v k="    '$key':" -v replacement="        ref: '$symbolic'" '
         $0 == k { selected = 1; print; next }
         /^    [^ ]/ { selected = 0 }
         selected && /^        ref:/ { print replacement; next }
@@ -155,7 +174,8 @@ while read -r u; do
     fi
     continue
   fi
-  r=$(rec_body "$u" "$tmp/slock")
+  skey=$(lock_key "$u" "$tmp/slock")
+  r=""; [ -z "$skey" ] || r=$(rec_body "$skey" "$tmp/slock")
   [ -n "$r" ] || refuse "no record for $u in this lock or in standards' own lock at ${TARGET:0:12}"
   printf '%s\n' "$r" >> "$tmp/lock"
 done < "$tmp/uses.s"
@@ -166,12 +186,13 @@ done < "$tmp/uses.s"
 deps_line() { grep -n '^dependencies:$' "$1" | cut -d: -f1; }
 while :; do
   n=$(deps_line "$tmp/lock")
-  grep -oE "^ {8,12}- '[^']+'" "$tmp/lock" | sed -E "s/^ +- '|'$//g" | LC_ALL=C sort -u > "$tmp/edges"
+  grep -oE "^ {8,12}- '[^']+'" "$tmp/lock" | sed -E "s/^ +- '|'$//g" | fold | LC_ALL=C sort -u > "$tmp/edges"
   pruned=0
   while read -r c; do
     [ -n "$c" ] || continue
-    grep -qxF "$c" "$tmp/edges" && continue
-    tail -n +"$((n+1))" "$tmp/lock" | grep -qxF "    '$c':" || continue
+    printf '%s\n' "$c" | fold | grep -qxFf - "$tmp/edges" && continue
+    tail -n +"$((n+1))" "$tmp/lock" > "$tmp/deps"
+    c=$(lock_key "$c" "$tmp/deps"); [ -n "$c" ] || continue
     rec_body "$c" "$tmp/lock" | grep -oE "^            - '[^']+'" | sed -E "s/^ +- '|'$//g" >> "$tmp/cand" || true
     awk -v k="    ${q}$c${q}:" '$0==k{s=1;next} s&&/^    [^ ]/{s=0} !s' "$tmp/lock" > "$tmp/l" && mv "$tmp/l" "$tmp/lock"
     pruned=1
@@ -188,8 +209,8 @@ tail -n +"$((n+1))" "$tmp/lock" \
 
 # Closure: every ref the lock names must have a record of its own.
 n=$(deps_line "$tmp/out")
-grep -oE "^ {8,12}- '[^']+'" "$tmp/out" | sed -E "s/^ +- '|'$//g" | LC_ALL=C sort -u > "$tmp/edges"
-tail -n +"$((n+1))" "$tmp/out" | grep -oE "^    '[^']+':" | sed -E "s/^    '|':$//g" | LC_ALL=C sort -u > "$tmp/recs"
+grep -oE "^ {8,12}- '[^']+'" "$tmp/out" | sed -E "s/^ +- '|'$//g" | fold | LC_ALL=C sort -u > "$tmp/edges"
+tail -n +"$((n+1))" "$tmp/out" | grep -oE "^    '[^']+':" | sed -E "s/^    '|':$//g" | fold | LC_ALL=C sort -u > "$tmp/recs"
 dangling=$(LC_ALL=C comm -23 "$tmp/edges" "$tmp/recs")
 [ -z "$dangling" ] || refuse "result would have dangling edges: ${dangling//$'\n'/ }"
 
