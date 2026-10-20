@@ -158,24 +158,7 @@ This is not a full census.
 
 == Local remediation
 
-=== W3: `unsafe-libyaml` unmaintained, via `serde_yaml`
-
-[cols="1,3"]
-|===
-|Advisory |RUSTSEC-2024-0449, informational (`unmaintained`). The upstream
-repository was archived on 2024-03-25.
-|Path in |`serde_yaml` 0.9 (itself deprecated) -> `unsafe-libyaml`, a c2rust
-translation of libyaml in unsafe Rust.
-|Status |Locally remediable; no upstream release is needed. `serde_yaml` will
-not be revived, so waiting does not clear this. Move to *Resolved* once the
-replacement is applied in every known affected repository.
-|Local fix |Replace `serde_yaml` with a YAML parser in safe Rust. The advisory
-suggests `serde-saphyr` for serde users, or `noyalib`. Use `noyalib` 0.0.53 or
-later, because earlier releases carry RUSTSEC-2026-0333, a denial-of-service
-vulnerability. Avoid `serde_yaml_ng`, which still depends on `unsafe-libyaml`.
-|Known affected |`hyperpolymath/panic-attack` declares `serde_yaml = "0.9"`
-directly. This is not a full census.
-|===
+No entries.
 
 == Resolved
 
@@ -206,4 +189,36 @@ first. The two commands above fix it only when the parent is `zbus_xml` or
 `wayland-scanner`. A direct
 dependency needs its requirement in `Cargo.toml` raised, and any other parent
 needs that parent upgraded.
+|===
+
+=== R2 (was W3): `unsafe-libyaml` unmaintained, via `serde_yaml` (resolved 2026-10-20)
+
+[cols="1,3"]
+|===
+|Advisory |RUSTSEC-2024-0449, informational (`unmaintained`). The upstream
+repository was archived on 2024-03-25.
+|Path in |`serde_yaml` 0.9 (itself deprecated) -> `unsafe-libyaml`, a c2rust
+translation of libyaml in unsafe Rust.
+|Fix |Replace `serde_yaml` with `serde-saphyr` 2.0, a serde YAML crate in safe
+Rust (`#![forbid(unsafe_code)]`). Avoid `serde_yaml_ng`, which still depends on
+`unsafe-libyaml`. `noyalib` is the other safe option, at 0.0.53 or later,
+because earlier releases carry RUSTSEC-2026-0333.
+|Minimum Rust version |`serde-saphyr` 1.2 and later declare Rust 1.89, and 1.1.0
+compiles only on 1.88 or later despite declaring none. `noyalib` releases after
+0.0.15 need 1.86 or later. The releases that still build on 1.85 are frozen and
+pre-1.0, and every `noyalib` release in that range predates the RUSTSEC-2026-0333
+fix. A repository on an older floor raises it rather than pinning one.
+|Resource limits |`serde-saphyr` parses within a resource budget. Its defaults
+(250k nodes, 1M events, 64 MiB of scalar text) suit hand-written configuration,
+but reject large machine-written documents. For those, scale the node, event and
+scalar-byte limits with the input length and leave the alias limits at their
+defaults.
+|Applied in |`hyperpolymath/panic-attack`, pull request 234 (MSRV raised from
+1.85.0 to 1.89).
+|Checked clear |`hyperpolymath/echidna`: no lockfile holds `unsafe-libyaml`.
+This is not a full census.
+|Estate follow-up |Any other Rust repository whose lockfile holds
+`unsafe-libyaml`. Run
+`cargo tree --target all --workspace --all-features -i unsafe-libyaml` to find
+the parent, then swap it as above.
 |===
