@@ -50,16 +50,50 @@
 # lock-selfcheck.sh and the pre-commit hook; its contract is the corpus in
 # scripts/tests/fixtures/actions-lock-closure/.
 #
+# MOVED TAGS. A leaf record for a SHA-pinned action takes as its `ref:` a tag
+# that points at that SHA now. A record whose `ref:` is the SHA itself is
+# rejected by runner verification (standards#1271), so none is written. An
+# action that moves its tags (dtolnay/rust-toolchain moves `v1`) leaves old pins
+# with no tag at all. MEASURED on hyperpolymath/standards run 39286638218
+# (2026-10-19 16:36 UTC): the runner said "Using locked action versions from the
+# workflow's lockfile", downloaded dtolnay/rust-toolchain@e2a55d2… from a record
+# with `ref: 'v1'`, and the step passed. By then `v1` was already 683b588
+# (Dependabot moved standards to it at 14:45 UTC, e926751). So a record whose
+# `ref:` names a tag that has since moved is accepted. When no current tag points
+# at the SHA, and only when the tag listing itself succeeded, one of these is
+# tried, in order:
+#   1. the record for the same key in the lock as it stood BEFORE
+#      `gh actions-lock` rewrote it (`--prior FILE`; regen-dependabot-locks.sh
+#      passes it), used only when its commit is that SHA and its owner and repo
+#      ids are the ones the API returns now;
+#   2. the `# <tag>` comment at a call site of that SHA, in this repository's
+#      workflows or in a called workflow read below.
+# The candidate's `ref:` is written only when it is a tag in that repository
+# NOW and its current commit descends from the SHA (compare status `ahead` or
+# `identical`). That holds when a tag moved forward past the pin. A branch name
+# (`# stable`), a deleted tag, a self-SHA ref and a commit the tag never reached
+# are refused, and the key SKIPs with exit 3 as before.
+#
 # GH_BIN overrides the `gh` binary (the test suite uses an offline stub).
 set -euo pipefail
-CHECK=0
-if [[ "${1:-}" == "--check" ]]; then CHECK=1; shift; fi
+CHECK=0; PRIOR=""
+while :; do
+  case "${1:-}" in
+    --check) CHECK=1; shift ;;
+    --prior) PRIOR="${2:?close-lock: --prior needs a FILE}"; shift 2 ;;
+    *) break ;;
+  esac
+done
 WF="${1:-.github/workflows}"
 if [[ "$CHECK" -eq 1 && -f "$WF" ]]; then L="$WF"; else L="$WF/actions.lock"; fi
 GH_BIN="${GH_BIN:-gh}"
 if [[ ! -f "$L" ]]; then
   echo "close-lock: no $L" >&2
   [[ "$CHECK" -eq 1 ]] && exit 2
+  exit 1
+fi
+if [[ -n "$PRIOR" && ! -f "$PRIOR" ]]; then
+  echo "close-lock: no prior lock $PRIOR" >&2
   exit 1
 fi
 SC="$(mktemp -d)"; trap 'rm -rf "$SC"' EXIT
@@ -97,6 +131,50 @@ reusable_calls() {
 keyfile() { printf '%s' "$1" | sha256sum | cut -c1-32; }
 # fold: lowercase the owner/repo part of each owner/repo@ref on stdin.
 fold() { awk '{ at = index($0, "@"); if (at) print tolower(substr($0, 1, at - 1)) substr($0, at); else print tolower($0) }'; }
+# uses_tags FILE: "key<TAB>tag" for each external SHA-pinned `uses:` in FILE that
+# carries a trailing `# <tag>` comment (the first word of the comment).
+uses_tags() {
+  { grep -E '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]' "$1" \
+    | sed -E 's/^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+//' | tr -d '"'"'"'' \
+    | awk -v t="$TAB" '{ if (!match($0, /[[:space:]]#/)) next
+        v = substr($0, 1, RSTART - 1); sub(/[[:space:]]+$/, "", v); sub(/,$/, "", v)
+        c = substr($0, RSTART + RLENGTH); sub(/^[[:space:]]+/, "", c); split(c, w, /[[:space:]]+/)
+        if (w[1] == "" || v ~ /^(\.\/|\$\/|docker:\/\/)/ || v ~ /[[:space:]]/) next
+        at = index(v, "@"); if (!at) next
+        r = substr(v, at + 1); if (length(r) != 40 || r !~ /^[0-9a-f]+$/) next
+        n = split(substr(v, 1, at - 1), a, "/"); if (n < 2 || a[1] == "" || a[2] == "") next
+        print a[1] "/" a[2] "@" r t w[1] }'; } || true
+}
+# prior_record KEY: "ref<TAB>commit<TAB>owner_id<TAB>repo_id" of KEY's record in
+# the --prior lock (owner/repo compared case-insensitively), or nothing.
+prior_record() {
+  [ -n "$PRIOR" ] || return 0
+  awk -v k="$(printf '%s\n' "$1" | fold)" -v t="$TAB" '
+    function fk(s,  at) { at = index(s, "@"); return tolower(substr(s, 1, at - 1)) substr(s, at) }
+    /^dependencies:[[:space:]]*$/ { d = 1; next }
+    d && /^[a-z_]+:/ { d = 0 }
+    !d { next }
+    /^    '\''[^'\'']+'\'':$/ { if (on) exit; s = $0; sub(/^    '\''/, "", s); sub(/'\'':$/, "", s); on = (fk(s) == k); next }
+    on && /^        ref: '\''[^'\'']+'\''$/ { r = $0; sub(/^        ref: '\''/, "", r); sub(/'\''$/, "", r) }
+    on && /^        commit: '\''[^'\'']+'\''$/ { c = $0; sub(/^        commit: '\''/, "", c); sub(/'\''$/, "", c) }
+    on && /^        owner_id: [0-9]+$/ { o = $2 }
+    on && /^        repo_id: [0-9]+$/ { p = $2 }
+    END { if (r != "") print r t c t o t p }' "$PRIOR"
+}
+# moved_tag OWNER NAME SHA TAG: succeed when TAG is a tag of OWNER/NAME now (not
+# a branch, not a SHA) and its current commit descends from SHA, i.e. the tag
+# moved forward past the pin. Otherwise print why on stdout and fail.
+moved_tag() {
+  local tsha st
+  if ! printf '%s' "$4" | grep -qxE '[A-Za-z0-9._+@/-]+' || printf '%s' "$4" | grep -qxE '[0-9a-f]{40}'; then
+    echo "not a symbolic tag name"; return 1
+  fi
+  tsha=$("$GH_BIN" api "repos/$1/$2/commits/tags/$4" --jq .sha 2>/dev/null) || tsha=""
+  if ! printf '%s' "$tsha" | grep -qxE '[0-9a-f]{40}'; then echo "no tag of that name"; return 1; fi
+  st=$("$GH_BIN" api "repos/$1/$2/compare/$3...$tsha" --jq .status 2>/dev/null) || st=""
+  case "$st" in ahead|identical) return 0 ;; esac
+  echo "tag is at ${tsha:0:12}, which does not descend from the pin (compare: ${st:-failed})"; return 1
+}
 
 if [[ "$CHECK" -eq 1 ]]; then
   keys | fold | LC_ALL=C sort -u > "$SC/have"
@@ -119,9 +197,10 @@ if [[ "$CHECK" -eq 1 ]]; then
 fi
 
 # ── reusable workflows: read each called file once, transitively ─────────────
-mkdir -p "$SC/u"; : > "$SC/read"; : > "$SC/bad"; : > "$SC/more"
+mkdir -p "$SC/u"; : > "$SC/read"; : > "$SC/bad"; : > "$SC/more"; : > "$SC/ctags"
 for f in "$WF"/*.yml "$WF"/*.yaml; do
   [ -e "$f" ] || continue
+  uses_tags "$f" >> "$SC/ctags"
   uses_values "$f" | reusable_calls
 done | LC_ALL=C sort -u > "$SC/calls"
 while :; do
@@ -135,6 +214,7 @@ while :; do
        && grep -qE '^[[:space:]]*\{?[[:space:]]*"?jobs"?[[:space:]]*:' "$SC/body"; then
       uses_values "$SC/body" | external_refs >> "$SC/u/$(keyfile "$k")"
       uses_values "$SC/body" | reusable_calls >> "$SC/more"
+      uses_tags "$SC/body" >> "$SC/ctags"
     else
       echo "  SKIP $k (cannot read $p at $ref)"; echo "$k" >> "$SC/bad"
     fi
@@ -219,13 +299,34 @@ for pass in 1 2 3 4 5 6; do
     if printf '%s' "$ref" | grep -qxE '[0-9a-f]{40}' && ! grep -qxF "$k$TAB" "$SC/owed"; then
       # Consume all pages before choosing a tag. An early pipeline exit can
       # SIGPIPE gh under pipefail and discard an otherwise valid result.
-      tag_ref=""
+      tag_ref=""; listed=0; why=""
       if "$GH_BIN" api "repos/$owner/$name/tags?per_page=100" --paginate \
           --jq '.[] | select(.commit.sha == "'"$sha"'") | .name' > "$SC/tags" 2>/dev/null; then
+        listed=1
         tag_ref=$(awk '/^[A-Za-z0-9._+@\/-]+$/ && !(length($0) == 40 && $0 ~ /^[0-9a-f]+$/) { if (!first) first = $0; if (!preferred && $0 ~ /^v?[0-9]+\.[0-9]+\.[0-9]+/) preferred = $0 } END { if (preferred) print preferred; else if (first) print first }' "$SC/tags")
       fi
+      # No current tag points at the SHA: try a moved tag (see MOVED TAGS).
+      if [ -z "$tag_ref" ] && [ "$listed" -eq 1 ]; then
+        IFS="$TAB" read -r p_ref p_commit p_owner p_repo <<<"$(prior_record "$k")" || true
+        if [ -n "${p_ref:-}" ]; then
+          if [ "$p_commit" != "sha1-$sha" ]; then why="$why; prior record: commit $p_commit"
+          elif [ "$p_owner $p_repo" != "$ids" ]; then why="$why; prior record: ids $p_owner $p_repo, API $ids"
+          elif r=$(moved_tag "$owner" "$name" "$sha" "$p_ref"); then tag_ref="$p_ref"; src="the prior lock record"
+          else why="$why; prior ref '$p_ref': $r"; fi
+        fi
+        if [ -z "$tag_ref" ]; then
+          while IFS= read -r c; do
+            [ -n "$c" ] || continue
+            if r=$(moved_tag "$owner" "$name" "$sha" "$c"); then tag_ref="$c"; src="a call-site comment"; break; fi
+            why="$why; call-site '# $c': $r"
+          done < <(awk -F'\t' -v k="$(printf '%s\n' "$k" | fold)" 'BEGIN { OFS = "\t" }
+                   { at = index($1, "@"); if (tolower(substr($1, 1, at - 1)) substr($1, at) == k) print ($2 ~ /^v?[0-9]+\.[0-9]+\.[0-9]+/ ? 0 : 1), $2 }' \
+                   "$SC/ctags" | LC_ALL=C sort -u | cut -f2)
+        fi
+        [ -n "$tag_ref" ] && echo "  ~ $k ref '$tag_ref' from $src: no current tag points at the pin; the tag moved forward from it"
+      fi
       if [ -z "$tag_ref" ]; then
-        echo "  SKIP $k (cannot resolve a symbolic tag for leaf SHA)"
+        echo "  SKIP $k (cannot resolve a symbolic tag for leaf SHA${why:+$why})"
         skipped=$((skipped + 1))
         continue
       fi

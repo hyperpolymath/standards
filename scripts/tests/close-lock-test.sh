@@ -26,7 +26,9 @@ bad() { echo "FAIL: $1"; fail=$((fail + 1)); }
 
 # Stub: repos/<o>/<n> → "7 9"; commits/v1 → $C; anything under o/missing → an
 # HTTP error body on stdout, exit 1; anything under o/garbled → a truncated body
-# on stdout, exit 0 (the {"messa shape AGENTS.md §5 records). A contents/ call
+# on stdout, exit 0 (the {"messa shape AGENTS.md §5 records). Moved tags: the
+# tag v1 of any o/ repo is at $C, $C descends from $A (compare `ahead`), $B is
+# on another line (`diverged`), and no other tag exists. A contents/ call
 # serves the file planted under $WORK/contents (its path with / ? = as _), or a
 # 404 body with exit 1 when none is planted.
 mkdir -p "$WORK/contents"
@@ -48,6 +50,10 @@ case "\$2" in
   repos/o/buildmeta/tags*) echo 'v1.2.3+build.4' ;;
   repos/o/releaseat/tags*) echo 'release@2026' ;;
   repos/o/leaf/tags*) printf 'v4\nv4.38.0\n' ;;
+  repos/o/*/commits/tags/v1) echo $C ;;
+  repos/o/*/commits/tags/*) echo '{"message":"No commit found"}'; exit 1 ;;
+  repos/o/*/compare/$A...$C) echo ahead ;;
+  repos/o/*/compare/*) echo diverged ;;
   repos/o/*/commits/v1) echo $C ;;
   repos/o/*/commits/*) echo '{"message":"No commit found"}'; exit 1 ;;
   repos/o/*) echo '7 9' ;;
@@ -255,6 +261,100 @@ d=$(mklock t14 "o/garbled@$A" </dev/null); mkwf t14 "o/garbled/.github/workflows
 out=$(run "$d"); st=$?
 [ "$st" = 3 ] && ! grep -qxF "    'o/garbled@$A':" "$d/actions.lock" \
   && ok "malformed called file (exit 0, no jobs:) → SKIP, exit 3" || bad "malformed called file → SKIP, exit 3 — st=$st $out"
+
+# runp <workflows dir> <prior lock>: run with --prior.
+runp() { (cd "$1/../.." && GH_BIN="$WORK/gh" bash "$TARGET" --prior "$2") 2>&1; }
+# mkprior <name>: a pre-regeneration lock whose dependencies: come from stdin.
+mkprior() { { echo 'dependencies:'; cat; } > "$WORK/$1.prior"; printf '%s' "$WORK/$1.prior"; }
+# refused <label> <dir> <out> <st>: exit 3, the dangling key got no record.
+refused() {
+  [ "$4" = 3 ] && grep -qF "SKIP o/" <<<"$3" && ! grep -qE "^    'o/(untagged|tagerror)@" "$2/actions.lock" \
+    && ok "$1" || bad "$1 — st=$4 $3"
+}
+# prior_rec <key> <ref> <commit-sha> <owner_id>: one prior record.
+prior_rec() { printf "    '%s':\n        ref: '%s'\n        commit: 'sha1-%s'\n        owner_id: %s\n        repo_id: 9\n" "$1" "$2" "$3" "$4"; }
+
+echo "=== moved tag: the pre-regeneration record supplies ref: ==="
+d=$(mklock mv1 "o/untagged@$A" </dev/null); p=$(prior_rec "o/untagged@$A" v1 "$A" 7 | mkprior mv1)
+out=$(runp "$d" "$p"); st=$?
+[ "$st" = 0 ] && [ "$(record "$d/actions.lock" "o/untagged@$A")" = "    'o/untagged@$A':
+        ref: 'v1'
+        commit: 'sha1-$A'
+        owner_id: 7
+        repo_id: 9" ] && grep -qF "~ o/untagged@$A ref 'v1' from the prior lock record" <<<"$out" \
+  && ok "prior record with a forward-moved tag → leaf record ref 'v1', reported" || bad "prior record → ref 'v1' — st=$st $out"
+d=$(mklock mv2 "o/untagged@$A" </dev/null); p=$(prior_rec "O/Untagged@$A" v1 "$A" 7 | mkprior mv2)
+out=$(runp "$d" "$p"); st=$?
+[ "$st" = 0 ] && record "$d/actions.lock" "o/untagged@$A" | grep -qxF "        ref: 'v1'" \
+  && ok "prior record key matches owner/repo case-insensitively" || bad "prior record case fold — st=$st $out"
+
+echo "=== moved tag: planted positives — a prior record that does not qualify writes nothing ==="
+d=$(mklock mvr1 "o/untagged@$A" </dev/null); p=$(prior_rec "o/untagged@$A" v1 "$B" 7 | mkprior mvr1)
+out=$(runp "$d" "$p"); st=$?; refused "prior record for another commit → refused" "$d" "$out" "$st"
+d=$(mklock mvr2 "o/untagged@$A" </dev/null); p=$(prior_rec "o/untagged@$A" v1 "$A" 8 | mkprior mvr2)
+out=$(runp "$d" "$p"); st=$?; refused "prior record whose owner_id differs from the API → refused" "$d" "$out" "$st"
+d=$(mklock mvr3 "o/untagged@$A" </dev/null); p=$(prior_rec "o/untagged@$A" "$A" "$A" 7 | mkprior mvr3)
+out=$(runp "$d" "$p"); st=$?; refused "prior self-SHA ref → refused (standards#1271)" "$d" "$out" "$st"
+grep -qF "prior ref '$A': not a symbolic tag name" <<<"$out" && ok "…refused by name, before any lookup" || bad "self-SHA prior reason — $out"
+d=$(mklock mvr4 "o/untagged@$A" </dev/null); p=$(prior_rec "o/untagged@$A" gone "$A" 7 | mkprior mvr4)
+out=$(runp "$d" "$p"); st=$?; refused "prior ref naming no current tag → refused" "$d" "$out" "$st"
+d=$(mklock mvr5 "o/untagged@$B" </dev/null); p=$(prior_rec "o/untagged@$B" v1 "$B" 7 | mkprior mvr5)
+out=$(runp "$d" "$p"); st=$?
+[ "$st" = 3 ] && grep -qF 'does not descend from the pin (compare: diverged)' <<<"$out" && ! grep -qF "    'o/untagged@$B':" "$d/actions.lock" \
+  && ok "prior tag whose commit does not descend from the pin → refused" || bad "diverged prior tag — st=$st $out"
+d=$(mklock mvr6 "o/tagerror@$A" </dev/null); p=$(prior_rec "o/tagerror@$A" v1 "$A" 7 | mkprior mvr6)
+cp "$d/actions.lock" "$WORK/mvr6.before"; out=$(runp "$d" "$p"); st=$?
+[ "$st" = 3 ] && cmp -s "$WORK/mvr6.before" "$d/actions.lock" \
+  && ok "failed tag listing → no fallback, exit 3, lock unchanged" || bad "failed tag listing must not fall back — st=$st $out"
+d=$(mklock mvr7 "o/untagged@$A" </dev/null)
+out=$(runp "$d" "$WORK/no-such.prior"); st=$?
+[ "$st" = 1 ] && ok "--prior naming a missing file → exit 1" || bad "--prior missing file — st=$st $out"
+
+echo "=== moved tag: a call-site '# <tag>' comment supplies ref: ==="
+plant o/r .github/workflows/cm.yml "$A" <<EOF
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: o/untagged@$A # v1
+EOF
+d=$(mklock mc1 "o/r@$A" </dev/null); mkwf mc1 "o/r/.github/workflows/cm.yml@$A"
+out=$(run "$d"); st=$?
+[ "$st" = 0 ] && record "$d/actions.lock" "o/r@$A" | grep -qxF "            - 'o/untagged@$A'" \
+  && record "$d/actions.lock" "o/untagged@$A" | grep -qxF "        ref: 'v1'" \
+  && grep -qF "~ o/untagged@$A ref 'v1' from a call-site comment" <<<"$out" \
+  && ok "comment in a called workflow → leaf record ref 'v1'" || bad "called-workflow comment — st=$st $out"
+d=$(mklock mc2 "o/untagged@$A" </dev/null)
+printf '{\n  jobs: {\n    a: {\n      steps: [\n        {\n          uses: "o/untagged@%s", # v1\n        },\n      ],\n    },\n  },\n}\n' "$A" > "$d/ci.yml"
+out=$(run "$d"); st=$?
+[ "$st" = 0 ] && record "$d/actions.lock" "o/untagged@$A" | grep -qxF "        ref: 'v1'" \
+  && ok "KYAML comment in this repository's workflow → leaf record ref 'v1'" || bad "local KYAML comment — st=$st $out"
+d=$(mklock mc3 "o/untagged@$A" </dev/null); p=$(prior_rec "o/untagged@$A" gone "$A" 7 | mkprior mc3)
+printf 'jobs:\n  a:\n    steps:\n      - uses: o/untagged@%s # v1\n' "$A" > "$d/ci.yml"
+out=$(runp "$d" "$p"); st=$?
+[ "$st" = 0 ] && record "$d/actions.lock" "o/untagged@$A" | grep -qxF "        ref: 'v1'" && grep -qF 'from a call-site comment' <<<"$out" \
+  && ok "a refused prior record falls through to the call-site comment" || bad "prior → comment fallthrough — st=$st $out"
+
+echo "=== moved tag: planted positives — a call-site comment that does not qualify writes nothing ==="
+d=$(mklock mcr1 "o/untagged@$A" </dev/null)
+printf 'jobs:\n  a:\n    steps:\n      - uses: o/untagged@%s # stable\n' "$A" > "$d/ci.yml"
+out=$(run "$d"); st=$?
+refused "comment naming a branch, not a tag (# stable) → refused" "$d" "$out" "$st"
+grep -qF "call-site '# stable': no tag of that name" <<<"$out" && ok "…and the refusal says why" || bad "refusal reason — $out"
+d=$(mklock mcr2 "o/untagged@$B" </dev/null)
+printf 'jobs:\n  a:\n    steps:\n      - uses: o/untagged@%s # v1\n' "$B" > "$d/ci.yml"
+out=$(run "$d"); st=$?
+[ "$st" = 3 ] && ! grep -qF "    'o/untagged@$B':" "$d/actions.lock" \
+  && ok "comment tag whose commit does not descend from the pin → refused" || bad "diverged comment tag — st=$st $out"
+d=$(mklock mcr3 "o/untagged@$A" </dev/null)
+printf 'jobs:\n  a:\n    steps:\n      - uses: o/untagged@%s # %s\n' "$A" "$A" > "$d/ci.yml"
+out=$(run "$d"); st=$?
+refused "comment naming the SHA itself → refused (standards#1271)" "$d" "$out" "$st"
+grep -qF "call-site '# $A': not a symbolic tag name" <<<"$out" && ok "…refused by name, before any lookup" || bad "self-SHA comment reason — $out"
+d=$(mklock mcr4 "o/untagged@$A" </dev/null)
+printf 'jobs:\n  a:\n    steps:\n      - uses: o/other@%s # v1\n' "$A" > "$d/ci.yml"
+out=$(run "$d"); st=$?
+refused "comment on another action's pin is not borrowed → refused" "$d" "$out" "$st"
 
 echo "=== structural ==="
 mkdir -p "$WORK/t7/.github/workflows"
