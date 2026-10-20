@@ -35,7 +35,8 @@ mkdir -p "$TOOLS"
 for s in relock-sha-keys complete-job-refs prune-stale; do
   printf '#!/usr/bin/env bash\nexit 0\n' > "$TOOLS/$s.sh"
 done
-printf '#!/usr/bin/env bash\nexit "${CLOSE_RC:-0}"\n' > "$TOOLS/close-lock.sh"
+# close-lock also keeps a copy of the --prior lock it was given, when asked.
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = --prior ] && [ -n "${PRIOR_COPY:-}" ]; then cp "$2" "$PRIOR_COPY"; fi\nexit "${CLOSE_RC:-0}"\n' > "$TOOLS/close-lock.sh"
 printf '#!/usr/bin/env bash\nexit "${VERIFY_RC:-0}"\n' > "$TOOLS/update-actions-lock.sh"
 printf '#!/usr/bin/env bash\nexit "${SYNC_RC:-0}"\n' > "$TOOLS/check-lock-sync.sh"
 
@@ -126,6 +127,14 @@ expect "a \$/ ref in the lock is refused" corrupt "$(TOOL_ACTION=dollar regen_lo
 
 d="$(fixture unres)"
 expect "an unresolvable edge (close-lock exit 3) is refused" unresolvable "$(TOOL_ACTION=bump CLOSE_RC=3 regen_lock "$d" 2>/dev/null)"
+
+# close-lock is handed the lock as it stood BEFORE gh actions-lock rewrote it,
+# so a leaf whose tag moved can keep its old ref: (close-lock.sh, MOVED TAGS).
+d="$(fixture prior)"; cp "$d/.github/workflows/actions.lock" "$WORK/prior.want"
+TOOL_ACTION=bump PRIOR_COPY="$WORK/prior.got" regen_lock "$d" >/dev/null 2>&1
+expect "close-lock gets --prior: the pre-regeneration lock, byte for byte" yes \
+  "$(cmp -s "$WORK/prior.want" "$WORK/prior.got" && ! cmp -s "$WORK/prior.got" "$d/.github/workflows/actions.lock" && echo yes || echo no)"
+expect "…and the snapshot is not left in the checkout" " M .github/workflows/actions.lock" "$(git -C "$d" status --porcelain --untracked-files=all)"
 
 d="$(fixture unver)"
 expect "a lock the gate's verifier rejects is refused" unverified "$(TOOL_ACTION=bump VERIFY_RC=1 regen_lock "$d" 2>/dev/null)"

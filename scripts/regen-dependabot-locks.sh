@@ -25,6 +25,9 @@
 #   gh actions-lock → relock-sha-keys → complete-job-refs → close-lock → prune-stale
 # then RESTORES every file except actions.lock, because `gh actions-lock`
 # rewrite mode de-pins inline SHAs and can invent `uses: $/...` local refs.
+# close-lock gets the lock as it stood before `gh actions-lock` (--prior). That
+# lets a leaf whose tag has since moved keep its old `ref:` (close-lock.sh,
+# MOVED TAGS).
 # The result is committed only when:
 #   * the ONLY changed path is .github/workflows/actions.lock,
 #   * the lock names no `$/` ref and close-lock resolved every edge, and
@@ -73,10 +76,14 @@ LOCK_PATH=.github/workflows/actions.lock
 # --verify-local, fails a lock that is missing their refs. Before that, they
 # were refused as `composite-unsupported`.
 regen_lock() {
-  local dir="$1" changed
+  local dir="$1" changed prior
+  prior="$(mktemp)"
   (
     cd "$dir" || exit 1
     [ -f "$LOCK_PATH" ] || { echo no-lock; exit 0; }
+    # Snapshot the lock before the tool rewrites it: close-lock may reuse a
+    # record from it for a leaf whose tag moved (close-lock.sh, MOVED TAGS).
+    cp "$LOCK_PATH" "$prior" || { echo tool-failed; exit 0; }
     # `gh actions-lock` exits non-zero whenever a workflow names a mutable
     # ref it will not auto-pin (e.g. hyperpolymath/cicd-suite/...@main, which
     # the template's dogfood-gate and main-estate-audit carry), even though it
@@ -95,7 +102,7 @@ regen_lock() {
     git clean -fdq
     bash "$REGEN_TOOLS/relock-sha-keys.sh" >&2 || { echo tool-failed; exit 0; }
     bash "$REGEN_TOOLS/complete-job-refs.sh" >&2 || { echo tool-failed; exit 0; }
-    GH_BIN="$GH_BIN" bash "$REGEN_TOOLS/close-lock.sh" >&2
+    GH_BIN="$GH_BIN" bash "$REGEN_TOOLS/close-lock.sh" --prior "$prior" >&2
     case $? in 0) ;; 3) echo unresolvable; exit 0 ;; *) echo tool-failed; exit 0 ;; esac
     bash "$REGEN_TOOLS/prune-stale.sh" >&2 || { echo tool-failed; exit 0; }
     if grep -Fq '$/' "$LOCK_PATH"; then echo corrupt; exit 0; fi
@@ -110,6 +117,7 @@ regen_lock() {
     if ! bash "$REGEN_TOOLS/check-lock-sync.sh" >&2; then echo unverified; exit 0; fi
     if [ -z "$changed" ]; then echo current; else echo changed; fi
   )
+  rm -f "$prior"
 }
 
 # Commit messages: a Dependabot/applier PR repair, and a default-branch repair.
