@@ -649,8 +649,9 @@ contractile clause. No instructions to agents.
 |six contractiles, `.machine_readable/contractiles/<verb>/<verb>.k9.ncl` +
 `<verb>.ncl`
 |The declaration is the `declaration` field of the K9 component; the runner is
-the paired `.ncl`. No A2ML and no per-verb manifest; whether the declaration
-also has a Verbfile of its own is Q13.
+the paired `.ncl`. Two files per verb and nothing else: no A2ML, no per-verb
+manifest, and no separate Verbfile. Q13 ruled that the Verbfile is the concept,
+and the `declaration` field is its content.
 |`k9-validate.sh` via `k9-conformance.yml`
 
 |How should an *agent* behave here?
@@ -818,7 +819,12 @@ ruling in <<decisions>> that the step implements; every one is ruled.
   negative controls: an unsigned and a tampered component are both refused, with
   `signature` named among the unmet preconditions. Until that verifier runs in
   CI, the probes stay refused and their clauses report a *blocking* unresolved
-  verdict; they never run on an unverified signature.
+  verdict; they never run on an unverified signature. The signature is one of
+  five preconditions, and #247 lands the executing component, so all five are
+  tested here, not in P2.1: for each of `signature`, `policy`, `sandbox`,
+  `dry_run` and `capability_grant`, one negative case withholds only that
+  evidence and is refused with that precondition named, and one positive case
+  supplies all five and is permitted.
 . *P0.2 A gate for renamed files, and its rollout.* A Hypatia rule that fails any
   `.deed` file that does not lint. A rule reaches a repository only when that
   repository's pins move. The Hypatia reusable builds the scanner from a fixed
@@ -833,9 +839,13 @@ ruling in <<decisions>> that the step implements; every one is ruled.
   path arms only when the caller has *both* `.hypatia-baseline.json` and its own
   `scripts/apply-baseline.sh` (`hypatia-scan-reusable.yml`, the "Gate on
   baseline" step); a baseline alone stays advisory. So each enrolled caller
-  carries the two together, the script copied from standards with the
-  propagation tooling, and the rule emits at `high` or above, the gate's
-  threshold. Its existing invalid deeds go in the baseline, and only new
+  carries the two together, and the rule emits at `high` or above, the gate's
+  threshold. `scripts/propagate-workflow-pins.sh` only rewrites reusable-workflow
+  SHAs; it copies neither file. So the rollout either extends that script, with
+  a test, to also deliver `apply-baseline.sh` and a generated
+  `.hypatia-baseline.json`, or adds a separate distribution step. A repinned
+  caller that lacks either file counts as a failed rollout, not as a state to
+  report. Its existing invalid deeds go in the baseline, and only new
   failures block, which keeps unrelated PRs mergeable until the wave converts
   the legacy set. The baseline is shrink-only by enforcement, not by intent:
   `apply-baseline.sh` compares findings with the ledger as it stands, so a PR
@@ -850,7 +860,8 @@ ruling in <<decisions>> that the step implements; every one is ruled.
   red on that file and lists the 133 baselined files as advisory; the 7 good deeds
   and standards' fixture tree stay silent. A second panoply PR that adds the bad
   deed *and* its baseline entry without a trailer is refused by the ratchet. A
-  caller missing `scripts/apply-baseline.sh` is reported by X1 as not armed.
+  rollout is complete only when X1 finds every enrolled caller armed: both files
+  present and the reusable pinned to the rule-bearing SHA.
 . *P0.3 Template text* *(Q12, Q13, Q14)*. Rewrite the template contractiles README to
   the ruled verb meanings and to the Verbfile form Q13 ruled. Add the
   `(contractiles …)` clause Q14 ruled, and derive `:contractiles_required` from
@@ -862,9 +873,11 @@ ruling in <<decisions>> that the step implements; every one is ruled.
   so it cannot see a missing verb. The check lists `(contractiles …)`,
   `:contractiles_required` and the six descriptile clauses with the template's
   own `scripts/deed-field.sh --list` (the reader exists in rsr-template-repo;
-  standards has no copy), and asserts all three name the same six verbs. It
-  ships with two failing fixtures: one missing a verb from the register, and one
-  missing a descriptile clause.
+  standards has no copy), and asserts all three name the same six verbs. Each
+  `(contractiles …)` entry must also name its K9 component and its runner, and
+  both paths must exist in the repository. It ships with four failing fixtures:
+  one missing a verb from the register, one missing a descriptile clause, one
+  entry with no runner, and one whose component path does not exist.
 . *P0.4 Front-door text in standards* *(Q15)*. The deed spec document says
   "DRAFT, not ratified. Nothing in this document is deployed", while its ABNF is
   normative (D308) and linted. Change the status only for the parsing surface,
@@ -877,13 +890,19 @@ ruling in <<decisions>> that the step implements; every one is ruled.
   A2ML the metadata format, and sends new projects to `A2ML-REPO-TEMPLATE.adoc`;
   the other bucket-A files of WO-7 carry the same pointers. Implement Q15 in
   `0-AI-MANIFEST.deed`: today it is a second `repo-deed` carrying `purpose`,
-  `routing`, `invariants`, `attestation` and `meta`. Move each of those
-  facts, field by field, into `standards_chora.deed` (or drop it where the
-  chora already holds it), leaving only pointers and the startup checklist.
+  `routing`, `invariants`, `attestation` and `meta`, and the top-level identity
+  fields `:canonical-name`, `:repo-uuid` and `:beholding-chora`. Move each of
+  those facts, field by field, into `standards_chora.deed` (or drop it where the
+  chora already holds it), leaving only `:schema-version`, the pointers and the
+  startup checklist. The linter does not require the identity fields on a
+  `repo-deed`, so they can go. If P1.5 finds the pointer-only manifest wants a
+  head of its own rather than a stripped `repo-deed`, that is a grammar change
+  made there.
   _Accept:_ the field-by-field table is in the PR description, every moved fact
   is found in the chora deed (read with the template's `deed-field.sh`), the
   manifest holds no clause other than `(front-doors …)` and
-  `(startup-checklist …)`, and the link-rot guard shows no new BROKEN line; a grep of every front-door file (`README.adoc`,
+  `(startup-checklist …)` and no top-level field other than `:schema-version`,
+  and the link-rot guard shows no new BROKEN line; a grep of every front-door file (`README.adoc`,
   `EXPLAINME.adoc`, `QUICKSTART-*.adoc`, `llm-warmup-*.adoc`, `AGENTS.adoc`,
   `0-AI-MANIFEST.deed`, `coordination.k9`) finds no text presenting A2ML as
   current, and none repeats the Deno ban that the 2026-10-14 ruling lifted
@@ -914,7 +933,13 @@ ruling in <<decisions>> that the step implements; every one is ruled.
   (accepted with a warning) and a two-segment value (refused). The coordination validator (P1.4) gets the same rule. K9 needs a change
   too: `k9-validate.sh` checks only the major and silently accepts a higher minor,
   so it gains the warning and a higher-minor fixture, and K9-S002 in
-  `K9-CONTRACT-SPEC.adoc` states the warning.
+  `K9-CONTRACT-SPEC.adoc` states the warning. The reader needs a minor to compare
+  against, and `k9_contract.ncl` exposes only `schema_major = "1"`; its
+  `contract_version` is the version of that file and must not stand in for it.
+  So the contract gains a full supported schema version (`schema_version =
+  "1.0.0"`, with `schema_major` derived from it), and `k9-validate.sh` reads that
+  value from the contract rather than hard-coding one. A self-test fails if the
+  two disagree.
 . *P1.4 Coordination validator.* Generate a recogniser from the v1.2 ABNF
   rather than hand-writing one, so the grammar stays the single source (see
   experiment X3), plus the three schema rules the ABNF cannot express. Run it on
@@ -965,7 +990,11 @@ ruling in <<decisions>> that the step implements; every one is ruled.
   unresolved verdict; none is left "deferred" (today 26 of 52 template clauses
   defer to a Hunt run that does not exist). Two fixtures prove it: a planted
   violation stops the run and names both settlements, and a clause with no
-  evidence stops it as unresolved.
+  evidence stops it as unresolved. `trust` is blocking too (<<target>>), so the
+  same two fixtures exist for a `trust` clause. The four other verbs get the
+  converse check: a violated `intend`, `adjust`, `dust` or `bust` clause is
+  reported at its own authority (reporting, advisory or alarm) and does not
+  stop the run.
 . *P2.2 Convert standards' own contractiles before removing anything.* Standards'
   six `<verb>.k9.ncl` files have no `declaration` field; each still points at its
   A2ML file. The required `k9-contractile.yml` gate runs `run-mustfile.sh` and
@@ -986,9 +1015,12 @@ ruling in <<decisions>> that the step implements; every one is ruled.
   _Accept:_ both consumers run green with their A2ML inputs absent:
   `debt-measure.yml` (through `run-debtfile.sh`) reads and writes the
   replacement ledger and no longer touches `Debtfile.a2ml`, and Hypatia's
-  RuleLoader loads the replacement rules, shown by a scan in which a known rule
-  fires. Deleting the A2ML in P3 waits on this proof, not on the records merely
-  existing.
+  RuleLoader loads the replacement rules. One firing rule is not proof of
+  coverage, so the check is one to one: an inventory maps each of the ten
+  `hypatia-rules/*.a2ml` rules to its replacement, and each replacement has a
+  fixture on which it fires. The replacement Debtfile ledger is compared entry
+  by entry with the source ledger, with no entry lost. Deleting the A2ML in P3
+  waits on this proof, not on the records merely existing.
 . *P2.5 kyX front end* for translating A2ML to deeds under the mapping specs
   (D313), with the mapping specs' acceptance greps as its tests. No hand
   conversion in bulk. There is no anchor mapping in `1-formats/deed/mappings/`
@@ -996,13 +1028,18 @@ ruling in <<decisions>> that the step implements; every one is ruled.
   `.machine_readable/anchors/ANCHOR.a2ml`, which carries an SSG configuration and
   a parent relationship. Write `anchor-to-repo-deed.adoc` first. _Accept:_ the
   anchor is translated with every field preserved or recorded as dropped by
-  that spec, before P3 removes the file.
+  that spec, before P3 removes the file. The same holds for the other live
+  A2ML in standards: `0-canon/rsr/rsr-criteria-v2.a2ml` (read through
+  `canon.lock`) and `CLAIMS.a2ml` (read by `dyadt-verify.yml`) have no mapping
+  either. Each gets a mapping spec and a consumer migration, and the
+  canon-lockstep and DYADT checks run green with the `.a2ml` absent before P3.
 
 === P3 — deploy (after P2.1, P2.2, P2.4 and P2.5)
 
 A repository's A2ML that still has a live consumer (the Debtfile, Hypatia's
-standards rules) stays until P2.4 has migrated that consumer; the wave's
-completion condition exempts it until then.
+standards rules, the RSR criteria, `CLAIMS.a2ml`, the anchor) stays until
+P2.4 or P2.5 has migrated that consumer; the wave's completion condition
+exempts it until then.
 
 . *Generator first.* Fix whatever mints repos (template, `repo-init`, any farm
   dispatch) before touching minted repos.
