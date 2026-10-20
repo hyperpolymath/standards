@@ -33,7 +33,9 @@ estate-wide claim, because *Known affected* is not a full census.
 . Look up every crate in the *Unblocking release* chain on crates.io and read
   the dependency requirements of each crate's newest release. For W1, check
   `atspi-common`, `atspi`, `accesskit_atspi_common`, `accesskit_unix`,
-  `accesskit_winit`, `egui-winit`, and `eframe`. Repeat the lookup below for
+  `accesskit_winit`, `egui-winit`, and `eframe`. Also check `zbus-lockstep`,
+  `zbus-lockstep-macros` and `zbus_xml`, which `atspi-common` pulls in and which
+  reach the retired crates on their own. Repeat the lookup below for
   each gate; consider the entry unblocked only when every gate's newest release
   accepts the fixed dependencies through the entire chain.
 +
@@ -67,10 +69,12 @@ for repo in */; do
     -exec grep -l "^name = \"$crate\"$" {} +
 done
 ----
-. Run every `cargo tree` check on this page with `--target all --workspace`.
-  By default `cargo tree` shows only the host platform and the current
-  workspace member, so a Linux-only dependency can look absent on another
-  host.
+. Run every `cargo tree` check on this page with
+  `--target all --workspace --all-features`. By default `cargo tree` shows only
+  the host platform, the current workspace member and default features. A
+  Linux-only dependency, or one behind an opt-in feature such as a `gui`
+  feature, can then look absent even though `cargo audit` finds it in
+  `Cargo.lock`.
 
 == Watching
 
@@ -98,7 +102,8 @@ Prefer waiting for the upstream release unless the advisory must clear sooner.
 |Blocked on, as of 2026-10-19 |`atspi-common` 0.14.0 and `atspi` 0.30.0 still
 require `zbus ^5.5`. `accesskit_unix` 0.24.0 requires `atspi ^0.29` and
 `zbus ^5.19`.
-|Unblocking release |An `atspi` / `atspi-common` release on `zbus ^6`, then
+|Unblocking release |An `atspi` / `atspi-common` release on `zbus ^6`, with its
+`zbus-lockstep` and `zbus_xml` dependencies also off the zbus 5 crates. Then
 `accesskit_atspi_common` and `accesskit_unix` following it, then an
 `accesskit_winit` and `egui-winit` / `eframe` release that takes those.
 |Action when cleared |Bump the crate each affected repository depends on
@@ -122,15 +127,22 @@ This is not a full census.
 `owned_ttf_parser` -> `ttf-parser`. This is the Wayland client-side window
 decoration path. It comes from `winit`'s `wayland-csd-adwaita` feature, which
 `eframe`'s default `winit/default` feature turns on.
-|Local workaround |Disable `eframe`'s default features and re-enable the ones
+|Local workaround a|Disable `eframe`'s default features and re-enable the ones
 the application needs (for example `wayland`, `x11`, `accesskit` and a renderer)
-without `winit/default`. Wayland windows then lose Adwaita client-side
-decorations on compositors that do not draw server-side decorations. This works
-only if no other dependency turns `winit/default` back on, since Cargo merges
-features across the dependency graph. Confirm that
-`cargo tree --target all --workspace -e features -i sctk-adwaita` finds no
-`sctk-adwaita` before relying
-on it.
+without `winit/default`. Then choose one of two options:
+
+* Drop the Adwaita decorations. Wayland windows lose client-side decorations
+on compositors that do not draw server-side ones.
+* Keep them by adding a direct `winit` dependency at the same version, with
+default features off and the `wayland-csd-adwaita-crossfont` feature on. That
+draws the decorations through FreeType and fontconfig, two C libraries, instead
+of `ab_glyph`.
+
+Either option holds only if nothing else turns `winit/default` or
+`wayland-csd-adwaita` back on, because Cargo merges features across the
+dependency graph. Confirm that
+`cargo tree --target all --workspace --all-features -i ttf-parser` finds no
+`ttf-parser` before relying on it.
 |Blocked on, as of 2026-10-19 |`ab_glyph` 0.2.32 requires
 `owned_ttf_parser ^0.25`, which requires `ttf-parser ^0.25.1`. The advisory
 names `skrifa` as the maintained alternative.
@@ -186,7 +198,8 @@ cargo update -p wayland-scanner
 |Applied in |`hyperpolymath/panic-attack`, pull requests 222 and 231.
 |Estate follow-up |Any other Rust repository whose lockfile still holds
 `quick-xml` below 0.41.0 (including 0.40) fails `cargo audit` for the same
-reason. Run `cargo tree --target all --workspace -i quick-xml@<version>`
+reason. Run
+`cargo tree --target all --workspace --all-features -i quick-xml@<version>`
 first. The two commands above fix it only when the parent is `zbus_xml` or
 `wayland-scanner`. A direct
 dependency needs its requirement in `Cargo.toml` raised, and any other parent
