@@ -28,11 +28,19 @@ git -C "$REPO" init -q -b main .
 git -C "$REPO" config user.email t@example.com
 git -C "$REPO" config user.name T
 git -C "$REPO" config commit.gpgsign false
+# A closed lock: the workflow ref has its own top-level record, as every lock
+# GitHub and Hypatia accept must (standards#963).
 cat > "$WF/actions.lock" <<EOF
 version: 'v0.0.2'
 workflows:
     '.github/workflows/ci.yml':
         - 'actions/checkout@$LOCKED'
+dependencies:
+    'actions/checkout@$LOCKED':
+        ref: 'v7.0.1'
+        commit: 'sha1-$LOCKED'
+        owner_id: 1
+        repo_id: 2
 EOF
 
 pass=0 fail=0
@@ -142,6 +150,22 @@ jobs:
 EOF
 )
 expect "symbolic tag ref in dependencies is SELF-CONSISTENT" "$sha" 0 "VERDICT: SELF-CONSISTENT"
+
+# The standards#963 shape: a record's nested uses: names a ref that has no
+# record of its own. Every workflow ref is keyed, so only closure catches it.
+cat >> "$WF/actions.lock" <<EOF
+        uses:
+            - 'actions/setup-python@v2'
+EOF
+sha=$(commit_ci <<EOF
+jobs:
+  a:
+    steps:
+      - uses: actions/checkout@$LOCKED # v7.0.1
+EOF
+)
+expect "a dangling nested edge is POISON (standards#963)" "$sha" 1 "dangling edge(s) in this SHA's own lock"
+expect "the dangling ref is named" "$sha" 1 "actions/setup-python@v2"
 
 echo
 echo "lock-selfcheck: $pass passed, $fail failed"

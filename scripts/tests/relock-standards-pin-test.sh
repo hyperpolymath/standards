@@ -160,7 +160,7 @@ echo "  PASS missing local identity refused without changing lock"
 # identity fields must reach the same explicit refusal, not exit on grep status.
 cp "$S/.github/workflows/actions.lock" "$T/source-lock-with-identity"
 sed -i "/commit: 'sha1-1111111111111111111111111111111111111111'/d; /owner_id: 10$/d; /repo_id: 11$/d" "$S/.github/workflows/actions.lock"
-git -C "$S" add .github/workflows/actions.lock
+git -C "$S" add .github/workflows/actions.lock .github/workflows/x-reusable.yml
 git -C "$S" commit -q -m missing-source-identity
 NEW_WITHOUT_ID=$(git -C "$S" rev-parse HEAD)
 NEW_SAVE=$NEW; NEW=$NEW_WITHOUT_ID
@@ -179,6 +179,27 @@ D=$(consumer idem); bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null
 cp "$D/actions.lock" "$T/once"; bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null
 cmp -s "$T/once" "$D/actions.lock" || fail "second run changed the lock"
 echo "  PASS idempotent"
+
+# A commented caller example pinned at another commit is not a pin.
+D=$(consumer commented-example)
+printf '# Caller example:\n#   uses: hyperpolymath/standards/.github/workflows/x-reusable.yml@%s\n' "$OLD" >> "$D/caller.yml"
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null 2>&1 || fail "a commented caller example at another commit refused the relock"
+grep -q "^    'hyperpolymath/standards@$NEW':\$" "$D/actions.lock" || fail "commented example: no record for the new pin"
+echo "  PASS a commented caller example at another commit is not counted as a pin"
+
+# A flow-style (KYAML) call is still a pin.
+D=$(consumer flow-style)
+printf 'on: push\njobs: { call: { uses: "hyperpolymath/standards/.github/workflows/x-reusable.yml@%s" } }\n' "$NEW" > "$D/caller.yml"
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null 2>&1 || fail "a flow-style call refused the relock"
+grep -q "^        - 'hyperpolymath/standards@$NEW'\$" "$D/actions.lock" || fail "flow-style: workflow entry not re-keyed"
+echo "  PASS a flow-style call is counted as a pin"
+
+# A quoted `uses` key is still a pin.
+D=$(consumer quoted-key)
+printf 'on: push\njobs:\n  call:\n    "uses": hyperpolymath/standards/.github/workflows/x-reusable.yml@%s\n' "$NEW" > "$D/caller.yml"
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null 2>&1 || fail "a quoted uses key refused the relock"
+grep -q "^        - 'hyperpolymath/standards@$NEW'\$" "$D/actions.lock" || fail "quoted key: workflow entry not re-keyed"
+echo "  PASS a quoted uses key is counted as a pin"
 
 # 3. Refusals leave the lock byte-identical.
 refuse_case() { # name mutate-command
@@ -269,5 +290,66 @@ Y
   fi
   echo "  PASS $length-hex pin prefixing the target: left as it is, full record from full pins only"
 done
+
+
+# 6. GitHub's lockfile parser folds owner/repo case: 'ACME/tool@<sha>' and
+# 'acme/tool@<sha>' are one key, and two records for it with different
+# metadata are a parse error ("duplicate action key ... after
+# canonicalization"), which fails every run. A record the consumer already
+# holds under another owner/repo spelling is the needed record: it is kept,
+# never copied a second time. Measured on hyperpolymath/januskey, whose
+# 'Swatinem/rust-cache@6323deb…' met standards' 'swatinem/rust-cache@6323deb…'.
+# case_variant DIR REF — give DIR's lock a 'ACME/Tool' spelling of the record
+# NEW's reusable needs, with ref: REF.
+case_variant() {
+  cat >> "$1/actions.lock" <<Y
+    'ACME/Tool@3333333333333333333333333333333333333333':
+        ref: '$2'
+        commit: 'sha1-3333333333333333333333333333333333333333'
+        owner_id: 30
+        repo_id: 31
+Y
+}
+# acme_keys LOCK — count the dependency keys naming acme/tool@333…, any case.
+acme_keys() { grep -ciE "^    'acme/tool@3333333333333333333333333333333333333333':\$" "$1" || true; }
+D=$(consumer case-kept); case_variant "$D" 'v3.0.1'
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null || fail "case variant: relock refused"
+L="$D/actions.lock"
+[ "$(acme_keys "$L")" = 1 ] || fail "case variant: the record is keyed $(acme_keys "$L") times (the parser rejects a duplicate)"
+grep -q "^    'ACME/Tool@3333333333333333333333333333333333333333':\$" "$L" || fail "case variant: the consumer's spelling was not kept"
+grep -q "ref: 'v3.0.1'" "$L" || fail "case variant: the consumer's symbolic ref was overwritten"
+echo "  PASS record held under another owner/repo case is kept, not duplicated"
+
+D=$(consumer case-self-sha); case_variant "$D" '3333333333333333333333333333333333333333'
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null || fail "case variant self-SHA: relock refused"
+L="$D/actions.lock"
+[ "$(acme_keys "$L")" = 1 ] || fail "case variant self-SHA: the record is keyed $(acme_keys "$L") times"
+grep -q "ref: '3333333333333333333333333333333333333333'" "$L" && fail "case variant self-SHA: the self-SHA ref survived"
+awk "/^    'ACME\\/Tool@3333333333333333333333333333333333333333':\$/{f=1;next} f&&/^    [^ ]/{exit} f" "$L" | grep -qx "        ref: 'v3'" \
+  || fail "case variant self-SHA: not repaired to standards' symbolic ref"
+echo "  PASS self-SHA record held under another owner/repo case is repaired in place"
+
+
+# The record the consumer lacks is copied from standards' own lock, which may
+# key it under another owner/repo spelling than the reusable's `uses:` edge.
+# That is still the record: copied, not refused as missing.
+cp "$S/.github/workflows/actions.lock" "$T/source-lock-before-case"
+git -C "$S" show "$NEW:.github/workflows/x-reusable.yml" > "$S/.github/workflows/x-reusable.yml"
+sed -i "s|^    'acme/tool@3333333333333333333333333333333333333333':\$|    'ACME/Tool@3333333333333333333333333333333333333333':|" "$S/.github/workflows/actions.lock"
+git -C "$S" add .github/workflows/actions.lock .github/workflows/x-reusable.yml
+git -C "$S" commit -q -m source-case-variant
+NEW_SAVE=$NEW; NEW=$(git -C "$S" rev-parse HEAD)
+D=$(consumer source-case)
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >"$T/source-case-log" 2>&1 || fail "source case variant: relock refused ($(cat "$T/source-case-log"))"
+L="$D/actions.lock"
+[ "$(acme_keys "$L")" = 1 ] || fail "source case variant: the record is keyed $(acme_keys "$L") times"
+grep -q "ref: 'v3'" "$L" || fail "source case variant: the copied record lost its ref"
+if command -v gawk >/dev/null 2>&1; then
+  sed -i '/unrelated\/orphan/,/repo_id: 41/d' "$L"
+  bash "$SYNC" "$D" >/dev/null 2>&1 || fail "source case variant: check-lock-sync.sh rejects the relocked lock"
+fi
+NEW=$NEW_SAVE
+cp "$T/source-lock-before-case" "$S/.github/workflows/actions.lock"
+echo "  PASS record standards' lock keys under another owner/repo case is copied, not refused"
 
 echo "PASS: relock-standards-pin.sh"

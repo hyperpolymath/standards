@@ -120,6 +120,22 @@ run_validator "Workflow permissions" "validate-permissions.sh" "staged"
 run_validator "CodeQL configuration" "validate-codeql.sh" "staged"
 run_validator "Bot directives" "validate-bot-directives.sh" "staged"
 
+# Lockfile closure (standards#963): every ref the staged actions.lock names
+# needs a top-level record of its own. Runs where the repository carries
+# scripts/close-lock.sh, like the canonical-names guard below.
+LOCK_REL=".github/workflows/actions.lock"
+if [[ -f "$REPO_ROOT/scripts/close-lock.sh" ]] \
+   && git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -qxF "$LOCK_REL"; then
+  echo -e "${BLUE}[pre-commit]${NC} Checking actions.lock closure..."
+  STAGED_LOCK="$(mktemp)"
+  if ! git show ":$LOCK_REL" > "$STAGED_LOCK" 2>/dev/null \
+     || ! bash "$REPO_ROOT/scripts/close-lock.sh" --check "$STAGED_LOCK"; then
+    echo -e "${RED}[pre-commit] staged actions.lock is not closed (see above)${NC}" >&2
+    ERRORS=$((ERRORS + 1))
+  fi
+  rm -f "$STAGED_LOCK"
+fi
+
 # Registry drift guard -- REMOVED 2026-09-15 (owner ruling R-H3).
 # It demanded that every commit stage .machine_readable/REGISTRY.a2ml, a generated
 # TOML-shaped artefact -- i.e. a specimen of the record dialect the owner ruled
