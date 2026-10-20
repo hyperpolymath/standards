@@ -70,15 +70,12 @@ PIN_RE='hyperpolymath/standards/\.github/workflows/[A-Za-z0-9._-]+\.ya?ml@[0-9a-
 shopt -s nullglob
 wfs=("$WF"/*.yml "$WF"/*.yaml)
 shopt -u nullglob
-# standards_pins FILE... — the standards reusable pins that a `uses:` key holds,
-# block or flow style (`build: { uses: "…@<sha>" }`). Full-line comments are
-# skipped: reusables carry commented caller examples (`#   uses: …@<old sha>`)
+# standards_pins FILE... — every standards reusable pin in the files, as the
+# scan always matched it (block, flow or quoted-key `uses`), except on full-line
+# comments: reusables carry commented caller examples (`#   uses: …@<old sha>`)
 # that no run resolves, and counting them refused every relock of standards'
 # own callers.
-standards_pins() {
-  grep -hvE '^[[:space:]]*#' "$@" 2>/dev/null \
-    | grep -oE "(^|[{,[:space:]])uses:[[:space:]]*['\"]?$PIN_RE" | grep -oE "$PIN_RE"
-}
+standards_pins() { grep -hvE '^[[:space:]]*#' "$@" 2>/dev/null | grep -oE "$PIN_RE"; }
 pins=$(standards_pins "${wfs[@]}" | sort -u || true)
 # A short pin (7+ hex) that prefixes TARGET names TARGET: the applier counts it
 # FRESH and leaves it as written, and the lock keys it by that short ref in a

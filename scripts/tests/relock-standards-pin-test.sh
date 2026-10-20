@@ -194,6 +194,13 @@ bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null 2>&1 || fail "a flow
 grep -q "^        - 'hyperpolymath/standards@$NEW'\$" "$D/actions.lock" || fail "flow-style: workflow entry not re-keyed"
 echo "  PASS a flow-style call is counted as a pin"
 
+# A quoted `uses` key is still a pin.
+D=$(consumer quoted-key)
+printf 'on: push\njobs:\n  call:\n    "uses": hyperpolymath/standards/.github/workflows/x-reusable.yml@%s\n' "$NEW" > "$D/caller.yml"
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null 2>&1 || fail "a quoted uses key refused the relock"
+grep -q "^        - 'hyperpolymath/standards@$NEW'\$" "$D/actions.lock" || fail "quoted key: workflow entry not re-keyed"
+echo "  PASS a quoted uses key is counted as a pin"
+
 # 3. Refusals leave the lock byte-identical.
 refuse_case() { # name mutate-command
   local d; d=$(consumer "$1"); eval "$2"; cp "$d/actions.lock" "$T/before"
