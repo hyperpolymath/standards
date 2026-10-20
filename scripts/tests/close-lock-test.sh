@@ -261,5 +261,29 @@ mkdir -p "$WORK/t7/.github/workflows"
 (cd "$WORK/t7" && GH_BIN="$WORK/gh" bash "$TARGET") >/dev/null 2>&1; st=$?
 [ "$st" = 1 ] && ok "no lockfile → exit 1" || bad "no lockfile → exit 1 (got $st)"
 
+echo "=== --check: the closure corpus (#963 criterion 5) ==="
+# expected.tsv is the contract Hypatia's ActionsLock.parse/1 also runs against
+# (hyperpolymath/hypatia vendors a byte-identical copy). Each row: the exit
+# code, and exactly the dangling refs the lock names, in the lock's spelling.
+CORPUS="$SCRIPT_DIR/fixtures/actions-lock-closure"
+printf '#!/usr/bin/env bash\necho "$*" >> "%s/gh-calls"; exit 1\n' "$WORK" > "$WORK/gh-trap"
+chmod +x "$WORK/gh-trap"; : > "$WORK/gh-calls"
+rows=0
+while IFS=$'\t' read -r file verdict dangling; do
+  case "$file" in ''|'#'*) continue ;; esac
+  rows=$((rows + 1))
+  lock="$CORPUS/$file"; before=$(sha256sum < "$lock")
+  out=$(GH_BIN="$WORK/gh-trap" bash "$TARGET" --check "$lock" 2>&1); st=$?
+  got=$(sed -n 's/^  \([^ ][^ ]*@[^ ]*\)$/\1/p' <<<"$out" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
+  want=$([ "$dangling" = "-" ] || printf '%s\n' $dangling | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
+  if [[ "$verdict" == "closed" ]]; then exp=0; else exp=1; fi
+  [[ "$st" == "$exp" && "$got" == "$want" && "$(sha256sum < "$lock")" == "$before" ]] \
+    && ok "$file: $verdict${want:+ ($want)}" || bad "$file: want exit $exp [$want], got exit $st [$got] — $out"
+done < "$CORPUS/expected.tsv"
+[[ "$rows" -ge 5 ]] && ok "corpus has $rows rows" || bad "corpus has only $rows rows"
+[[ ! -s "$WORK/gh-calls" ]] && ok "--check made no gh call" || bad "--check called gh: $(cat "$WORK/gh-calls")"
+GH_BIN="$WORK/gh-trap" bash "$TARGET" --check "$WORK/no-such.lock" >/dev/null 2>&1; st=$?
+[[ "$st" == 2 ]] && ok "--check with no lock → exit 2" || bad "--check with no lock → exit 2 (got $st)"
+
 echo "close-lock-test: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

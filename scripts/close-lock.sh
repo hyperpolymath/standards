@@ -41,12 +41,27 @@
 # `{"message"…` would be a present-but-unresolvable entry, which is fatal where
 # an absent one is merely dangling. A ref that cannot be resolved is SKIPPED,
 # reported, and makes the exit 3.
+# CHECK MODE: `close-lock.sh --check [DIR | LOCKFILE]` reports the dangling
+# edges the passes below would close, and does nothing else: no network, no
+# writes. Exit 0 when the lock is closed, 1 when any edge dangles, 2 when there
+# is no lock to read. Owner/repo compare case-insensitively, as GitHub's
+# lockfile parser canonicalises them (#1294, #1314); refs compare exactly.
+# Hypatia reports the same defect as invalid_actions_lock (#963). Run by
+# lock-selfcheck.sh and the pre-commit hook; its contract is the corpus in
+# scripts/tests/fixtures/actions-lock-closure/.
+#
 # GH_BIN overrides the `gh` binary (the test suite uses an offline stub).
 set -euo pipefail
+CHECK=0
+if [ "${1:-}" = "--check" ]; then CHECK=1; shift; fi
 WF="${1:-.github/workflows}"
-L="$WF/actions.lock"
+if [ "$CHECK" -eq 1 ] && [ -f "$WF" ]; then L="$WF"; else L="$WF/actions.lock"; fi
 GH_BIN="${GH_BIN:-gh}"
-[ -f "$L" ] || { echo "close-lock: no $L" >&2; exit 1; }
+if [ ! -f "$L" ]; then
+  echo "close-lock: no $L" >&2
+  [ "$CHECK" -eq 1 ] && exit 2
+  exit 1
+fi
 SC="$(mktemp -d)"; trap 'rm -rf "$SC"' EXIT
 TAB="$(printf '\t')"
 # keys: list the dependency record keys already present in the lock.
@@ -80,6 +95,28 @@ reusable_calls() {
 }
 # keyfile KEY: a file name for KEY's owed nested refs.
 keyfile() { printf '%s' "$1" | sha256sum | cut -c1-32; }
+# fold: lowercase the owner/repo part of each owner/repo@ref on stdin.
+fold() { awk '{ at = index($0, "@"); if (at) print tolower(substr($0, 1, at - 1)) substr($0, at); else print tolower($0) }'; }
+
+if [ "$CHECK" -eq 1 ]; then
+  keys | fold | LC_ALL=C sort -u > "$SC/have"
+  { nested; wfrefs; } | LC_ALL=C sort -u > "$SC/want"
+  : > "$SC/miss"
+  while IFS= read -r k; do
+    [ -n "$k" ] || continue
+    grep -qxF "$(printf '%s\n' "$k" | fold)" "$SC/have" || printf '%s\n' "$k" >> "$SC/miss"
+  done < "$SC/want"
+  n=$(wc -l < "$SC/miss")
+  if [ "$n" -eq 0 ]; then
+    echo "close-lock: closed (no dangling edges) in $L"
+    exit 0
+  fi
+  echo "close-lock: NOT closed: $n dangling edge(s) in $L"
+  sed 's/^/  /' "$SC/miss"
+  echo "  Each is named under workflows: or in a record's nested uses: and has no"
+  echo "  top-level record of its own. Repair: bash scripts/close-lock.sh (needs gh)."
+  exit 1
+fi
 
 # ── reusable workflows: read each called file once, transitively ─────────────
 mkdir -p "$SC/u"; : > "$SC/read"; : > "$SC/bad"; : > "$SC/more"
