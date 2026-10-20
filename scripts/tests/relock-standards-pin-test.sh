@@ -180,6 +180,13 @@ cp "$D/actions.lock" "$T/once"; bash "$RELOCK" --to "$NEW" --standards "$S" "$D"
 cmp -s "$T/once" "$D/actions.lock" || fail "second run changed the lock"
 echo "  PASS idempotent"
 
+# A commented caller example pinned at another commit is not a pin.
+D=$(consumer commented-example)
+printf '# Caller example:\n#   uses: hyperpolymath/standards/.github/workflows/x-reusable.yml@%s\n' "$OLD" >> "$D/caller.yml"
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >/dev/null 2>&1 || fail "a commented caller example at another commit refused the relock"
+grep -q "^    'hyperpolymath/standards@$NEW':\$" "$D/actions.lock" || fail "commented example: no record for the new pin"
+echo "  PASS a commented caller example at another commit is not counted as a pin"
+
 # 3. Refusals leave the lock byte-identical.
 refuse_case() { # name mutate-command
   local d; d=$(consumer "$1"); eval "$2"; cp "$d/actions.lock" "$T/before"
