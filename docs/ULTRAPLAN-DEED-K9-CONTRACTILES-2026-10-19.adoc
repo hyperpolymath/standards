@@ -709,7 +709,11 @@ reading is edited in P1.2.
   `must` is the contractile.
 * *Manifest* means `0-AI-MANIFEST.deed`. Per-directory ply manifests fold into
   the deed's `(ply …)` clause, as the template already did; per-verb manifests
-  are gone.
+  are gone. In standards, `0-AI-MANIFEST.deed` and `standards_chora.deed` are both
+  `repo-deed` documents carrying the same identity and overlapping routing and
+  policy, so they can drift. PROPOSED: the manifest becomes a pointer-only front
+  door (where to read first, and the startup checklist), and every fact lives in
+  the chora deed (Q15).
 * Every term above goes into `0-canon/CANONICAL-NAMES.adoc` as a homonym table,
   so the existing anti-normalisation directive covers it.
 
@@ -728,7 +732,8 @@ One rule for all three formats, generalised from the K9 contract:
 . A reader refuses another major and accepts any lower minor. It also accepts a
   *higher* minor of its own major with a warning that newer optional content was
   not validated, because a minor change only adds optional content. This
-  matches the K9 validator today, which accepts any triple with a matching major.
+  extends the K9 validator, which today accepts any triple with a matching major
+  silently; P1.3 adds the warning there.
 . Each format keeps a changelog in its spec, and a breaking change ships with a
   mapping spec and fixtures for the old major.
 . Today's deeds declare `"1.0.0"` against grammar v1.2.0; under this rule a v1.2
@@ -787,30 +792,36 @@ wait on <<decisions>>.
 
 === P0 — stop the bleeding (days)
 
-. *P0.1 Land the template fixes.* hyperpolymath/rsr-template-repo#247 and
-  hyperpolymath/rsr-template-repo#248 are open. #247 sets every contractile
-  record to `'Yard` with the paired runner executing the probes; see Q9 for why
-  that needs a second component. _Accept:_ both merged, the K9 grid green on the
-  template.
-. *P0.2 A gate for renamed files, deployed where it reaches.* A rule that fails
-  any `.deed` file that does not lint, shipped first as a Hypatia rule, because
-  repositories fetch the scanner from a ref that is advanced centrally. A step in
-  `governance-reusable` alone would not reach the estate: most callers pin that
-  workflow to a SHA, so it fires only after each caller repins. The repin of the
-  wave-1 repositories goes with it. The rule must also *block*: the Hypatia
-  reusable runs the scanner with `--exit-zero` and leaves findings advisory when
-  a caller has no baseline and `block-on-high` is off (its default). So P0.2 either
-  gives the rule a severity that blocks without a baseline, or sets
-  `block-on-high: true` in each enrolled caller. Blocking applies to *new* failures
-  only: a repository's existing invalid deeds go into its Hypatia baseline as a
-  shrink-only ledger, so unrelated PRs stay mergeable until the wave converts
-  them. Validator fixture trees and frozen archives are excluded from the rule,
-  because their negative controls are meant to fail (standards has 14 under
-  `1-formats/deed/tools/fixtures/invalid/`). _Accept:_ in a panoply PR that adds one
-  renamed `.deed`, the Hypatia check turns red on that file and lists the 133
-  baselined files as advisory; the 7 good deeds and standards' fixture tree stay
-  silent.
-. *P0.3 Template text* *(Q12, Q13)*. Rewrite the template contractiles README to
+. *P0.1 Land the template fixes, in the right order* *(Q9)*.
+  hyperpolymath/rsr-template-repo#247 and hyperpolymath/rsr-template-repo#248 are
+  open. #247 sets every contractile record to `'Yard` while the paired runner
+  executes the probes, which puts side effects outside the Hunt gate (Q9). #248
+  only changes which validator CI calls and can land on its own once retargeted.
+  #247 lands after Q9 is answered. If Q9 picks the split, #247 is revised first,
+  so the records are pure `'Yard` declarations and probe execution waits behind a
+  separate signed `'Hunt` component. _Accept:_ both merged, the K9 grid green on
+  the template, and no contractile record whose runner executes outside its
+  leash.
+. *P0.2 A gate for renamed files, and its rollout.* A Hypatia rule that fails any
+  `.deed` file that does not lint. A rule reaches a repository only when that
+  repository's pins move. The Hypatia reusable builds the scanner from a fixed
+  `hypatia-ref` default, and callers pin the reusable itself to a SHA, as they do
+  `governance-reusable`. So the rollout has three parts: advance the reusable's
+  `hypatia-ref` default to a Hypatia commit carrying the rule, then repin wave 1,
+  then repin every other enrolled caller with the existing pin-propagation
+  tooling (`scripts/propagate-workflow-pins.sh`). Until a caller is repinned, the
+  rule does not run there, and the census (X1) says which callers that is. The
+  rule must also *block*. The reusable runs the scanner with `--exit-zero` and
+  blocks only through a validated baseline or `block-on-high: true`. So each
+  enrolled caller carries a baseline: its existing invalid deeds go in as a
+  shrink-only ledger, and only new failures block, which keeps unrelated PRs
+  mergeable until the wave converts the legacy set. Validator fixture trees and
+  frozen archives are excluded from the rule, because their negative controls are
+  meant to fail (standards has 14 under `1-formats/deed/tools/fixtures/invalid/`).
+  _Accept:_ in a panoply PR that adds one renamed `.deed`, the Hypatia check turns
+  red on that file and lists the 133 baselined files as advisory; the 7 good deeds
+  and standards' fixture tree stay silent.
+. *P0.3 Template text* *(Q12, Q13, Q14)*. Rewrite the template contractiles README to
   the ruled verb meanings and to the Verbfile form Q13 chooses. Once the
   attestation form is ruled, add the `(contractiles …)` clause and make
   `:contractiles_required` list six verbs. _Accept:_ `deed_lint.js` OK, plus a
@@ -850,8 +861,10 @@ wait on <<decisions>>.
   `deed_lint.js` today checks only that `:schema-version` is a string (its tests
   accept `"1"`). It gains the three-segment form, the major and minor
   comparison, and fixtures for a wrong major (refused), a higher minor
-  (accepted with a warning) and a two-segment value (refused). The coordination validator (P1.4) gets the same rule. K9 already has it
-  (K9-S002).
+  (accepted with a warning) and a two-segment value (refused). The coordination validator (P1.4) gets the same rule. K9 needs a change
+  too: `k9-validate.sh` checks only the major and silently accepts a higher minor,
+  so it gains the warning and a higher-minor fixture, and K9-S002 in
+  `K9-CONTRACT-SPEC.adoc` states the warning.
 . *P1.4 Coordination validator.* Generate a recogniser from the v1.2 ABNF
   rather than hand-writing one, so the grammar stays the single source (see
   experiment X3), plus the three schema rules the ABNF cannot express. Run it on
@@ -925,7 +938,9 @@ completion condition exempts it until then.
 |X1
 |How many repos are panoply-class?
 |Clone every live estate repo shallowly; run `deed_lint.js` and
-`k9-validate.sh --layer L2` on every `.deed` and K9 file; tabulate per repo.
+`k9-validate.sh --layer L2 --strict` with the pinned Nickel 1.18.0 on every
+`.deed` and K9 file; tabulate per repo. `--strict` makes a skipped L2 check fail,
+so a missing toolchain is recorded as a non-pass, never as conformance.
 Validator fixture trees (`*/fixtures/`, `*/tools/fixtures/`) and frozen
 archives (`9-archive/`, `*-archive/`) are reported in their own columns, as
 this document's own measurement did, because their negative controls are
@@ -1022,6 +1037,14 @@ files keep their current role.
 content lives in the K9 component's `declaration` field (one file per verb, as
 the template does); a standalone `Mustfile.k9.ncl`-style component per verb;
 a new deed head for Verbfiles.
+|Q14 |What form does the deed's attestation of the contractiles take? |(E) a
+`(contractiles …)` clause naming each verb, its K9 component and its runner,
+with `:contractiles_required` derived from it; keep only `:contractiles_required`
+in `(policies …)` and widen it to six verbs; no attestation in the deed, with
+the K9 grid as the only record.
+|Q15 |What is `0-AI-MANIFEST.deed` for, beside the chora deed? |(E) a pointer-only
+front door with no facts of its own; merge it into the chora deed and keep the
+filename as an alias; keep both as they are.
 |===
 
 == Beyond this repository
