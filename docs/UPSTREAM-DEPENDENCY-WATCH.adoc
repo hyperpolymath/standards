@@ -1,0 +1,209 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Upstream dependency watch
+:toc:
+:toclevels: 2
+
+Estate-wide list of dependency advisories that no estate repository can clear
+on its own, because the fix has to be released upstream first. Each entry
+names the upstream releases that unblock it, so a re-check follows a known chain
+rather than a fresh investigation.
+
+== Scope and neighbours
+
+[cols="1,2"]
+|===
+|Lives here |An advisory whose fix is blocked on an upstream release, and that
+can affect more than one estate repository.
+|Not here |An advisory a repository can fix itself with a lockfile bump or a
+dependency swap. Fix it at its source in that repository. Entries below that
+turn out to be locally fixable move to *Local remediation*, then to *Resolved*
+once fixed.
+|Per-repo counts |This page holds the shared upstream trigger, not a per-repo
+count. Do not record these advisories in a new `Debtfile.a2ml` entry. The
+Debtfile format (`docs/DEBTFILE-SPEC.adoc`) is A2ML, which is retired, and no
+deed mapping for it exists yet.
+|What *Resolved* means |Clear in every repository checked so far. It is not an
+estate-wide claim, because *Known affected* is not a full census.
+|Standards' own advisories |`3-practice/SECURITY-ADVISORIES.adoc`.
+|===
+
+== How to re-check an entry
+
+. Look up every crate in the *Unblocking release* chain on crates.io and read
+  the dependency requirements of each crate's newest release. For W1, check
+  `atspi-common`, `atspi`, `accesskit_atspi_common`, `accesskit_unix`,
+  `accesskit_winit`, `egui-winit`, and `eframe`. Also check `zbus-lockstep`,
+  `zbus-lockstep-macros` and `zbus_xml`, which `atspi-common` pulls in and which
+  reach the retired crates on their own. Repeat the lookup below for
+  each gate; consider the entry unblocked only when every gate's newest release
+  accepts the fixed dependencies through the entire chain.
++
+[source,bash]
+----
+crate=atspi-common
+v=$(curl -sS -A "upstream-watch" "https://crates.io/api/v1/crates/$crate" | jq -r .crate.max_stable_version)
+curl -sS -A "upstream-watch" "https://crates.io/api/v1/crates/$crate/$v/dependencies" \
+  | jq -r '.dependencies[] | select(.kind != "dev") | "\(.crate_id) \(.req)"'
+----
+. Before assuming upstream is stuck, try the newest *semver-compatible*
+  release in the affected repository. The quick-xml entry under *Resolved* was
+  planned as a three-repository upstream fix, and turned out to need only
+  `cargo update -p zbus_xml --precise 5.2.1`.
++
+[source,bash]
+----
+cargo update -p <crate> --precise <newest-compatible>
+cargo audit
+----
+. Find which estate repositories carry a crate, from a directory of clones.
+  The search recurses, because some repositories keep their Rust workspaces
+  below the root. Each match prints the lockfile path, which starts with the
+  repository name.
++
+[source,bash]
+----
+crate=zvariant
+for repo in */; do
+  find "$repo" -name Cargo.lock -not -path '*/target/*' \
+    -exec grep -l "^name = \"$crate\"$" {} +
+done
+----
+. Run every `cargo tree` check on this page with
+  `--target all --workspace --all-features`. By default `cargo tree` shows only
+  the host platform, the current workspace member and default features. A
+  Linux-only dependency, or one behind an opt-in feature such as a `gui`
+  feature, can then look absent even though `cargo audit` finds it in
+  `Cargo.lock`.
+
+== Watching
+
+=== W1: zbus 5 sub-crates unmaintained
+
+[cols="1,3"]
+|===
+|Advisories |RUSTSEC-2026-0370 (`zvariant`), RUSTSEC-2026-0371 (`zbus_names`),
+RUSTSEC-2026-0372 (`zvariant_derive`). All informational (`unmaintained`),
+reported 2026-10-16. By default `cargo audit` warns but exits 0. It exits
+non-zero if an `audit.toml` denies `unmaintained` or `warnings`.
+|Cause |zbus 6 folded these crates into `zbus` itself. `zvariant` became the
+`wire` module, `zbus_names` became the `names` module, and `zbus` now provides
+the `zvariant_derive` macros. The 5.x crates get no further releases. Upstream
+notice:
+https://github.com/z-galaxy/zbus/issues/2043
+|Path in |`eframe` -> `egui-winit` -> `accesskit_winit` -> `accesskit_unix` ->
+`accesskit_atspi_common` / `atspi` -> `atspi-common` -> `zbus` 5. This is
+Linux screen-reader (AT-SPI) support. It is present only when the `accesskit`
+feature is on. That feature is in `eframe`'s default set, but opt-in for
+standalone `egui-winit`.
+|Local workaround |Turn off the `accesskit` feature on whichever crate the
+repository depends on directly: `eframe`, or `egui-winit` when it is used on
+its own. That drops the whole chain, at the cost of screen-reader support.
+Prefer waiting for the upstream release unless the advisory must clear sooner.
+|Blocked on, as of 2026-10-19 |`atspi-common` 0.14.0 and `atspi` 0.30.0 still
+require `zbus ^5.5`. `accesskit_unix` 0.24.0 requires `atspi ^0.29` and
+`zbus ^5.19`.
+|Unblocking release |An `atspi` / `atspi-common` release on `zbus ^6`, with its
+`zbus-lockstep` and `zbus_xml` dependencies also off the zbus 5 crates. Then
+`accesskit_atspi_common` and `accesskit_unix` following it, then an
+`accesskit_winit` and `egui-winit` / `eframe` release that takes those.
+|Action when cleared |Bump the crate each affected repository depends on
+directly, `eframe` or `egui-winit`. This is a manifest change and may carry
+egui API breaks, so build and test the GUI feature before merging.
+|Known affected |`hyperpolymath/panic-attack`. Only its opt-in `gui` feature
+compiles the chain into a binary. Its `cargo audit` still reports the
+advisories on every build, because the audit reads `Cargo.lock` and Cargo
+resolves the lockfile with every feature on. `hyperpolymath/echidna` is not
+affected.
+This is not a full census.
+|===
+
+=== W2: `ttf-parser` unmaintained
+
+[cols="1,3"]
+|===
+|Advisory |RUSTSEC-2026-0192, informational (`unmaintained`), reported
+2026-06-28. Upstream notice: https://github.com/harfbuzz/ttf-parser/issues/217
+|Path in |`eframe` -> `winit` -> `sctk-adwaita` -> `ab_glyph` ->
+`owned_ttf_parser` -> `ttf-parser`. This is the Wayland client-side window
+decoration path. It comes from `winit`'s `wayland-csd-adwaita` feature, which
+`eframe`'s default `winit/default` feature turns on.
+|Local workaround a|Disable `eframe`'s default features and re-enable the ones
+the application needs (for example `wayland`, `x11`, `accesskit` and a renderer)
+without `winit/default`. Then choose one of two options:
+
+* Drop the Adwaita decorations. Wayland windows lose client-side decorations
+on compositors that do not draw server-side ones.
+* Keep them by adding a direct `winit` dependency at the same version, with
+default features off and the `wayland-csd-adwaita-crossfont` feature on. That
+draws the decorations through FreeType and fontconfig, two C libraries, instead
+of `ab_glyph`.
+
+Either option holds only if nothing else turns `winit/default` or
+`wayland-csd-adwaita` back on, because Cargo merges features across the
+dependency graph. Confirm that
+`cargo tree --target all --workspace --all-features -i ttf-parser` finds no
+`ttf-parser` before relying on it.
+|Blocked on, as of 2026-10-19 |`ab_glyph` 0.2.32 requires
+`owned_ttf_parser ^0.25`, which requires `ttf-parser ^0.25.1`. The advisory
+names `skrifa` as the maintained alternative.
+|Unblocking release |`ab_glyph` / `owned_ttf_parser` moving to `skrifa`, or a
+`sctk-adwaita` release that drops `ab_glyph`, then a `winit` release taking it.
+|Action when cleared |`cargo update` in each affected repository, or an
+`eframe` bump if `winit` moves a minor version.
+|Known affected |`hyperpolymath/panic-attack`, through its opt-in `gui`
+feature. As with W1, its `cargo audit` reports the advisory on every build.
+This is not a full census.
+|===
+
+== Local remediation
+
+=== W3: `unsafe-libyaml` unmaintained, via `serde_yaml`
+
+[cols="1,3"]
+|===
+|Advisory |RUSTSEC-2024-0449, informational (`unmaintained`). The upstream
+repository was archived on 2024-03-25.
+|Path in |`serde_yaml` 0.9 (itself deprecated) -> `unsafe-libyaml`, a c2rust
+translation of libyaml in unsafe Rust.
+|Status |Locally remediable; no upstream release is needed. `serde_yaml` will
+not be revived, so waiting does not clear this. Move to *Resolved* once the
+replacement is applied in every known affected repository.
+|Local fix |Replace `serde_yaml` with a YAML parser in safe Rust. The advisory
+suggests `serde-saphyr` for serde users, or `noyalib`. Use `noyalib` 0.0.53 or
+later, because earlier releases carry RUSTSEC-2026-0333, a denial-of-service
+vulnerability. Avoid `serde_yaml_ng`, which still depends on `unsafe-libyaml`.
+|Known affected |`hyperpolymath/panic-attack` declares `serde_yaml = "0.9"`
+directly. This is not a full census.
+|===
+
+== Resolved
+
+=== R1: `quick-xml` 0.38 denial-of-service advisories (resolved 2026-10-19)
+
+[cols="1,3"]
+|===
+|Advisories |RUSTSEC-2026-0194 (quadratic attribute checking) and
+RUSTSEC-2026-0195 (unbounded namespace allocation), fixed in `quick-xml`
+0.41.0. These were vulnerabilities, so `cargo audit` failed.
+|Paths in |`zbus_xml` 5.1.0 (via the same AT-SPI chain as W1), and
+`wayland-scanner` before 0.31.11.
+|Fix a|Lockfile-only. `zbus_xml` 5.2.0 and later dropped `quick-xml` for
+`winnow`, and `zbus-lockstep` 0.5.2 accepts `zbus_xml ^5.0.2`.
+`wayland-scanner` 0.31.11 moved to `quick-xml` 0.41.
+
+[source,bash]
+----
+cargo update -p zbus_xml --precise 5.2.1
+cargo update -p wayland-scanner
+----
+|Applied in |`hyperpolymath/panic-attack`, pull requests 222 and 231.
+|Estate follow-up |Any other Rust repository whose lockfile still holds
+`quick-xml` below 0.41.0 (including 0.40) fails `cargo audit` for the same
+reason. Run
+`cargo tree --target all --workspace --all-features -i quick-xml@<version>`
+first. The two commands above fix it only when the parent is `zbus_xml` or
+`wayland-scanner`. A direct
+dependency needs its requirement in `Cargo.toml` raised, and any other parent
+needs that parent upgraded.
+|===
