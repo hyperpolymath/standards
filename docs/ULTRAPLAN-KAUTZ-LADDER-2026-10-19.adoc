@@ -2,12 +2,12 @@
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 = Ultraplan: climbing the Kautz ladder — from paid review bots to an estate-native neurosymbolic quality system
 Jonathan D.A. Jewell (hyperpolymath)
-v0.1.0, 2026-10-19
+v0.2.2, 2026-10-20
 :toc: left
 :toclevels: 3
 :sectnums:
 :icons: font
-:status: DRAFT — for owner review; nothing here is ruled
+:status: DRAFT v0.2.2 — E1 result recorded 2026-10-20, review gaps closed (Kin gate kept on Wave 1 executions, link probe SSRF-safe); the four decisions in <<decisions>> were ruled by the owner 2026-10-19; the waves below reflect them
 
 [.lead]
 This document does four things. It inventories what the commercial
@@ -92,7 +92,7 @@ executors as *type 4 data generators* for those proposers, and keep the
 falsifiable loop. Section <<ladder>> defines six estate rungs, K0–K6, each
 with a falsifier, so "what level are we at" stops being a matter of opinion.
 
-*What to do first (Wave 0 and Wave 1, roughly one quarter).* Make outcomes
+*What to do first (Wave 0 in weeks; Wave 1 across two quarters under the pons-native ruling).* Make outcomes
 true; deploy VeriSimDB with auth and persistence; mount Groove; fix the
 PatternQuery bug that makes ingested scans invisible; freeze PA identifiers;
 build the formulaic-check eater on top of pons and a SARIF adapter so that
@@ -226,20 +226,37 @@ estate languages
 
 |Container file correctness (`Containerfile`, Podman not Docker, Chainguard
 base, pinned digests, no `latest`, `USER` set, HEALTHCHECK present)
-|cicd-suite composite + hadolint; stapeln's `gap_analyzer.ex` for stack-level
-|hadolint, plus estate rules as Semgrep YAML or pons `.scm`
+|pons (Dockerfile grammar, ruled 2026-10-19); stapeln's `gap_analyzer.ex`
+for stack-level
+|pons `.scm` queries encoding the estate rules; hadolint only as an oracle
+in the falsifier corpus, never as the gate
 |hadolint is run by CodeRabbit only; the estate has no Containerfile gate
 
 |Guix manifest sanity (`guix.scm` parses, declares a licence, `(license #f)`
 absent, package names resolve; Nix absent)
-|governance reusable (extend `Guix packaging policy (Nix retired)`)
-|`guile -c` parse + a small Scheme walker
+|pons (Scheme grammar, ruled 2026-10-19) for the syntactic part: parse,
+licence field present and not `#f`, Nix absent; the governance reusable
+keeps only its existing Nix-absence probe
+|pons `.scm` queries over the parsed manifest; package-name resolution is
+a `guix build --dry-run` oracle step the rule shells out to, given the
+file (`-m guix.scm` for a manifest, `-f guix.scm` for a file that
+evaluates to a package; bare `guix build` names no packages), because a
+parse cannot know the catalogue (that step is `orange` where Guix is absent)
 |Hypatia DEBT-REGISTER L-3 found `(license #f)` by hand
 
 |Link rot in `.adoc`/`.md` (internal and external), anchors, placeholders
 |pons (deferred rules `document-reference-missing`,
 `document-anchor-missing`, `document-reference-placeholder`)
-|`lychee` for external; pons for internal with evidence class
+|pons for internal with evidence class; for external, the third oracle: an
+HTTP reachability probe pons runs itself (HEAD first, then GET whenever
+HEAD does not return 2xx/3xx, since servers reject HEAD with 403, 404,
+405 or 501 while serving GET; only a failed GET is a finding; cached;
+rate-limited), `orange` when the network is absent. The probe is not an
+SSRF primitive: `https` URLs only; every hop, redirects included, is
+resolved and refused when it lands on loopback, link-local (including
+cloud metadata addresses), RFC 1918 or ULA space; at most five redirects;
+a short timeout; the body is never read beyond a small cap. `lychee` only
+as a falsifier oracle in the corpus
 |`scripts/link-rot-guard.sh` exists only in standards and reports 443 on main
 
 |Template placeholders left behind (double-curly owner and repo tokens, "replace me" notes,
@@ -249,14 +266,26 @@ boilerplate GOVERNANCE text)
 |Hypatia HYP-DOG-001 detects; fix script exists; both idle under quarantine
 
 |Formatting (rustfmt, mix format, zig fmt, biome, kyaml-format)
-|cicd-suite `formatting-check` → SARIF
-|the formatters themselves (`--check`)
+|pons `formatting` rule invoking each formatter's non-mutating check mode
+and reporting the diff hunks as findings with evidence class (ruled
+2026-10-19); the existing cicd-suite `formatting-check` only gains SARIF
+output until then
+|the formatters themselves, each in its own check mode: `rustfmt --check`,
+`mix format --check-formatted`, `zig fmt --check`, `biome format` without
+`--write`, `kyaml-format.sh --check`; the rule carries this mapping, there
+is no universal flag. Where a check mode names files but prints no diff
+(`kyaml-format.sh --check`, `mix format --check-formatted`), the rule
+formats a temporary copy and diffs it against the tree to get the hunks;
+the working tree is never written
 |exists as pass/fail only
 
 |Commit-message and PR-title shape, linked issue, PR size, "not done" list
 present
-|a Danger-style estate rule set in cicd-suite, SARIF out
-|commitlint / gitlint; a 40-line jq
+|pons `commit-shape` and `pr-convention` rules over the commit message and
+PR body as text inputs (ruled 2026-10-19)
+|`tree-sitter-gitcommit` pinned for commit messages; PR body and title via
+the Markdown grammar (`tree-sitter-markdown`); conventional-commit shape
+as pons queries over those parses
 |CodeRabbit title/description checks (neural, noisy)
 
 |SPDX header presence (detect only; never edit)
@@ -279,10 +308,18 @@ oikosbot `infallible_gate_candidates`
 
 |Syntax and sequencing errors in config (YAML/KYAML, JSON canonical form,
 Nickel, deed, k9)
-|governance reusable (I-JSON/JCS probes exist), `deed_lint.js`,
-`k9-validate.sh`
-|yq, `ijson-jcs`
-|exists for JSON and deed; k9 coordination has no validator yet
+|Split (ruled 2026-10-19): the *canonical-form* probes (I-JSON/JCS, KYAML
+format) stay in the governance reusable, which already has them and is
+exact; the *shape* rules (required keys, enum values, sequencing of
+sections, cross-file agreement) are pons rules over the YAML and JSON
+grammars; `deed_lint.js` and `k9-validate.sh` keep deed and k9; Nickel
+keeps the existing `nickel` lane in `ci-pipeline.yml` (`nickel format
+--check` and typecheck), which gains SARIF output like the other retained
+checks
+|`ijson-jcs` and yq for canonical form (unchanged); pons `.scm` queries
+for shape
+|canonical form exists for JSON and deed; shape rules do not; k9
+coordination has no validator yet
 
 |Duplication, dead code, unused imports, complexity
 |pons T1 (`dead-store`, `read-before-init` exist for Python); clippy / credo
@@ -658,8 +695,13 @@ at K2 with extra steps, and should say so.)
 |===
 
 Honest position: the estate is at *K0 with holes* (SARIF not ingested, IDs
-unstable, fake gates present) and has *K1 unmeasured*. K2 is one quarter
-away once outcomes are true and VeriSimDB is reachable. K3 and K4 are
+unstable, fake gates present) and has *K1 unmeasured*. K2 needs three
+things: outcomes recorded as true (Wave 0), VeriSimDB reachable (Wave 0),
+and a stream of rescan-verified outcomes to train on, which under the
+interpreter-first ruling arrives only once the Wave 1 evaluator admits its
+first work orders; so K2 is two to three quarters away, not one. E1's
+replay of the historical log can give a provisional K2 reading earlier,
+but a reading from replayed history does not claim the rung. K3 and K4 are
 where the proof and type repositories pay off. K5 is research with a clear
 recipe. K6 is research without one; the plan reaches for it only after K4
 has produced data to learn a policy from.
@@ -681,9 +723,9 @@ numbering is dependency order, not calendar.
 . *VeriSimDB reachable.* Build the GHCR image with `FEATURES=persistent`;
   make `AuthState` configurable and default-on outside localhost; mount
   `groove_router()`; fix `PatternQuery`; implement or honestly remove
-  transactions (#30). Deploy one instance (owner decision: Fly.io as the
-  Intentfile says, or a stapeln bundle on owned hardware — see
-  <<decisions>>). _Experiment E2_: `mix hypatia.rsr_score` against the live
+  transactions (#30). Deploy one instance as a stapeln verified bundle
+  on owned hardware (ruled 2026-10-19, <<decisions>> item 3; the Fly.io
+  intent is superseded). _Experiment E2_: `mix hypatia.rsr_score` against the live
   store for 10 pilot repos; the ten `hypatia-rules` rules fire.
 . *Stable identifiers.* One PA table, generated from `src/types.rs`, consumed
   by `sarif.rs`, `aggregate/mod.rs`, Hypatia `pattern_registry.ex` and the
@@ -700,7 +742,7 @@ numbering is dependency order, not calendar.
   panic-attack their deeds (one each, D312) so the ladder has an address per
   repo to record its rung in. No A2ML is created or extended.
 
-=== Wave 1 — the formulaic eater (one quarter, overlapping Wave 0)
+=== Wave 1 — the formulaic eater (two quarters under the pons-native ruling, overlapping Wave 0)
 
 Goal: every row of the "checks to take back" table is an estate check with
 SARIF output and HYP-01 evidence, so the paid reviewers can be confined to
@@ -718,7 +760,14 @@ consistency-pair and container-file rules as tree-sitter queries, ship
 `pons catalogue` so docs stop drifting from code. One scanner, one evidence
 model, one SARIF shape.
 |Highest. Everything carries an evidence class and a falsifier corpus;
-nothing is a wrapper.
+nothing is a wrapper of another tool's *findings*. One stated exception:
+an exact question put to the world from inside a pons rule, a yes/no
+*oracle* (a formatter's non-mutating check mode, `guix build --dry-run`,
+an HTTP reachability probe for an external link), is not a wrapper, because pons
+owns the rule, its evidence class and its falsifier and the oracle
+answers only a question a parse cannot (what the formatter would emit;
+whether the catalogue has the name; whether the URL resolves); its
+absence, including an absent network, is `orange`, never a silent pass.
 |Medium. Grammar coverage is the long pole (Elixir, Zig, Julia, Idris2,
 AsciiDoc grammars to pin); months before parity with 59 linters.
 
@@ -746,35 +795,106 @@ with evidence classes; commodity checks are not reimplemented.
 never green), no vendor data path.
 |===
 
-Recommendation: *C*, departing from the elegant arm A for one reason: A
-alone leaves CodeRabbit in place for a further two quarters, and the credit
-leak is the problem being solved. C ships the symbolic floor in weeks and
-grows pons underneath it; every B row is a candidate to migrate to A once
-pons has the grammar.
+Recommendation was *C*, departing from the elegant arm A because A alone
+leaves CodeRabbit in place for a further two quarters. *Ruled 2026-10-19:
+A, pons-native.* The owner takes the elegant arm. Consequences, so the
+departure from the recommendation is visible rather than absorbed: the
+commodity rows (formatting, Containerfile syntax, KYAML/JSON shape,
+external link rot, commit and PR shape, duplication and complexity) become
+pons grammar and rule work rather than adapter work; secrets and SCA keep
+the estate homes the table already gives them (the secret-scanner
+reusable with gitleaks, and Hypatia `supply_chain` SC001–SC013 with
+cargo-deny and osv-scanner), so disabling the vendors' bundled linters
+leaves neither uncovered; so Wave 1 is a two-quarter build, not a one-quarter one; the
+paid reviewers stay restricted-and-measured (decision 2) only for as long
+as the monthly E4 run keeps finding genuinely useful neural comments from
+that reviewer, judged per reviewer and only on a conclusive month: a month
+in which a reviewer was invoked on fewer than 20 of the sampled PRs is
+inconclusive for that reviewer and extends its retention by one month
+rather than ending it; on a conclusive month the first run that finds
+none from CodeRabbit ends CodeRabbit, the first that finds none from Codex
+ends Codex, whatever the state of the pons build. Because Codex is
+invoked only by explicit `@codex review` under this plan, E4 must
+schedule those invocations deliberately (at least 20 per month, chosen
+across repos) or Codex can never reach a conclusive month. The cicd-suite SARIF normaliser is still built, but only so that
+existing composites and fleet report-backs reach the grid; it does not
+grow a linter bundle. Order of rules: consistency-pair and
+missing-doc-comment first (they close the two most frequent CodeRabbit
+comment classes on estate PRs), then the deferred document and template
+rules, then Containerfile and Guix as new grammars.
 
 Deliverables:
 
-* pons: `missing-doc-comment`, `consistency-pair`, `document-reference-*`,
+* pons, in the ruled order: `consistency-pair` and `missing-doc-comment`;
+  then `document-reference-*`, `document-anchor-missing`,
   `template-placeholder`, `readme-language-contradiction`,
-  `manifest-license-contradiction` (detect-only), `pons catalogue`; Elixir,
-  Zig, Julia grammars pinned; `--diff-base` scoping.
-* cicd-suite: `--format sarif` on every composite; the normaliser;
-  Containerfile, Guix, commit-shape, PR-convention checks.
+  `manifest-license-contradiction` (detect-only); then the commodity rows
+  as pons rules over new grammars: `formatting` (each formatter's own
+  non-mutating check mode per the table's mapping, hunks as findings), Containerfile (Podman, Chainguard base,
+  pinned digests, `USER`, HEALTHCHECK), Guix manifest sanity (syntactic in
+  pons, resolution via the Guix oracle step), KYAML/JSON shape, external
+  link rot, commit-message and PR-convention shape, duplication and
+  complexity; `pons catalogue`; grammars pinned: Elixir, Zig, Julia,
+  Idris2, AsciiDoc, Dockerfile, Scheme, YAML (`tree-sitter-yaml`, KYAML is
+  a subset), JSON (`tree-sitter-json`), git commit messages
+  (`tree-sitter-gitcommit`), Markdown (`tree-sitter-markdown`, for PR
+  titles and bodies) and shell (`tree-sitter-bash`, for the shell header
+  blocks `missing-doc-comment` checks); `--diff-base` scoping. The three oracle steps
+  (formatter check mode, `guix build --dry-run`, the HTTP reachability
+  probe for external links) are the exception option A records above. Secrets
+  and SCA are not pons rules: they stay with the secret-scanner reusable
+  and Hypatia `supply_chain` as the table says. Nor are dead code and
+  unused imports outside Python: they stay with each language's own
+  compiler diagnostics in the repo's CI (`cargo clippy -D warnings`,
+  `mix compile --warnings-as-errors`, `mix xref`), which are exact, are not
+  the vendors' bundled linters, and reach the grid through the cicd-suite
+  SARIF path below; pons adds duplication and complexity natively.
+* cicd-suite: `--format sarif` on every existing composite and the
+  normaliser `scripts/sarif-normalise.jq`, so what already runs reaches the
+  grid. The secret-scanner reusable gains SARIF output for its gating
+  gitleaks pass and its full-history pass, which today write findings to
+  the log only, so secrets stay on the grid once the vendors' linters are
+  off. No new checks are added to cicd-suite under this ruling; a row that
+  pons cannot yet parse stays uncovered and is reported as `orange` on the
+  grid, never approximated by a linter bundle.
 * standards: `hypatia-scan-reusable.yml` ingest; `.coderabbit.yaml` profile
-  that disables bundled linters and pre-merge docstring checks (`reviews.
-  tools.*.enabled: false`, `pre_merge_checks.docstrings.mode: off`) and
-  restricts review to source paths; `path_filters` excluding `.machine_
+  that disables bundled linters and pre-merge docstring checks: one
+  `reviews.tools.<tool>.enabled: false` line per bundled tool (the schema
+  has no wildcard; enumerate the 59 keys from
+  https://docs.coderabbit.ai/reference/configuration) and
+  `reviews.pre_merge_checks.docstrings.mode: off` (the fully qualified
+  path the estate file already uses with `warning`), and that restricts
+  review to source paths; `path_filters` excluding `.machine_
   readable/`, workflows and docs, where the estate's own checks are
-  stronger. The same for Codex via its repo settings.
-* gitbot-fleet: unquarantine a *named allowlist* of idempotent, rescan-
-  verified fix scripts (first ten: `fix-workflow-timeout-minutes`,
+  stronger. Codex has no path filter: it is scoped by its documented
+  mechanisms instead, a review-guidance section in the repo's `AGENTS.md`
+  saying what to review and what to leave to the estate checks, and the
+  trigger policy set to explicit `@codex review` only, not automatic
+  review on ready-for-review.
+* gitbot-fleet: *ruled 2026-10-19 — the policy interpreter comes first,
+  and it is therefore a Wave 1 deliverable, not a Wave 5 one.* Define the
+  k9 work-order contract (authority, files, steps, acceptance, escalation,
+  the shape the standards reorg already writes by hand) and build its
+  evaluator in gitbot-fleet (fleet ULTRAPLAN Wave 1, #264); Wave 5 then
+  moves the *emission* of work orders to the office, not their evaluation.
+  Nothing leaves exit 78 until the evaluator exists. The ten idempotent
+  scripts named in the recommended arm (`fix-workflow-timeout-minutes`,
   `fix-workflow-permissions`, `fix-unpinned-actions`,
   `fix-stale-template-placeholders`, `fix-tracked-package-lock`,
   `fix-gitattributes-eol`, `fix-dependabot-coverage`, `fix-http-to-https`,
-  `fix-tmp-paths`, `fix-shell-quoting`) behind the Kin gate, in `review`
-  tier (draft PRs) only, never `auto_execute`, with the licence refusal gate
-  untouched. Everything else stays at exit 78 until the policy interpreter
-  exists (fleet ULTRAPLAN Wave 1, #264).
+  `fix-tmp-paths`, `fix-shell-quoting`) become the *first work orders the
+  interpreter evaluates*, in `review` tier (draft PRs), rescan-verified,
+  licence refusal gate untouched, and every one still passes the Kin gate
+  between a successful evaluation and its execution: work order →
+  evaluator → Kin gate → `robot-repo-automaton` → rescan, the canonical
+  executor path below. The evaluator decides whether a work order is
+  admissible; Kin still decides whether this execution may run, and a
+  rescan after the fact cannot undo a mutation Kin would have refused. Consequence of the ruling: true outcome
+  data for Wave 2 arrives one to two quarters later than under the
+  allowlist arm, so E1 (replaying the historical log) is the only outcome
+  evidence Wave 2 can start from; Wave 2 therefore begins with E1 and the
+  ESN schema fix, and retraining waits for the Wave 1 interpreter and its
+  first rescan-verified outcomes.
 
 _Experiment E4 (the credit experiment)_: for the last 50 PRs in standards,
 gitbot-fleet and panic-attack, classify every CodeRabbit and Codex comment
@@ -823,7 +943,8 @@ load-bearing.
   and the grid's "since previous revision" column is a residue diff rather
   than a count diff.
 * *absolute-zero as the gate for "does nothing".* CNO/OND certificates for
-  the fix scripts in the allowlist: a fix script that is proven to change
+  the fix scripts the Wave 1 interpreter admits as its first work orders
+  (the ten named there): a fix script that is proven to change
   nothing outside its declared files is a candidate for `auto_execute`.
   This is the principled route out of quarantine.
 * *januskey for reversibility.* Every fleet mutation goes through
@@ -872,9 +993,10 @@ reversible, attested work orders. Concretely:
   attached by agent sessions; the office needs a plain name and a deed.
 * *Work orders as data.* The standards reorg already writes work orders
   (`docs/reorg/2026-10-14-tidy/WORK-ORDERS-2026-10-19.adoc`) with authority,
-  acceptance and escalation conditions. Make that shape a k9 contract the
-  office emits and the fleet consumes; the policy interpreter the fleet
-  quarantine demands (#264) is this contract's evaluator.
+  acceptance and escalation conditions. The k9 contract for that shape and
+  its evaluator are built in Wave 1 (the ruled prerequisite for any fleet
+  mutation); here the office becomes the emitter of those contracts and
+  the fleet stays their sole consumer.
 * *One executor.* Collapse `fleet-coordinator.sh`, `run-fleet.sh`,
   `dispatch-runner.sh` and the Rust CLI into one path: office work order →
   Kin gate → `robot-repo-automaton` (Rust) → rescan → outcome. Shell fix
@@ -970,7 +1092,8 @@ rescan the repo at the recorded commit; count confirmations.
 |Does the standards rule set fire against a live store?
 |Deploy `verisim-api` (persistent, auth on); ingest 10 pilot repos' scans;
 run the ten `hypatia-rules` rules.
-|Wave-0 deployment target; whether `hypatia-rules` needs re-targeting.
+|Whether the stapeln-bundle instance (ruled) is reachable from CI and
+whether `hypatia-rules` needs re-targeting.
 
 |E3
 |How many findings are invisible today?
@@ -1012,6 +1135,28 @@ findings per rule, false-positive rate on a 100-finding hand-labelled sample.
 |Which Wave-1 rules ship at `warn` vs `error`.
 |===
 
+=== Results so far
+
+*E1 (2026-10-20): none of the checkable "success" is true.*
+
+* *Replay set.* 214 rows could be replayed: every row for the two repos in reach, `standards` and `verisimdb`. All 214 are repo-level rows with no `file`.
+* *Result.* The fixer's own predicate was evaluated at `fixed_at`, at `fixed_at` + 7 days, and at HEAD:
+** 21 rows are refuted: the target was still present at the claim and a week later.
+** 109 are vacuous: there was nothing to fix.
+** 84 predate the repo's history.
+** That is *0 of 130* checkable rows confirmed.
+* *Shape of the log.* Across the whole log, 21,498 success rows collapse to 136 distinct keys.
+* *Root cause.* The writers record `success` when a fix script exits 0, and the scripts exit 0 after changing nothing. `recipe-remove-believe-me` only annotates.
+* *Decides.* No current neural weight trained on this label is salvageable, so all pools restart (as Wave 2 already assumed).
+* *Report and replay script:* `gitbot-fleet/docs/experiments/E1-fix-outcome-replay-2026-10-20.adoc` (gitbot-fleet#616).
+
+That PR also lands the gitbot-fleet half of Wave 0's *true outcomes*, still behind exit 78:
+* A predicate verdict per fix: `verified`, `no_op`, `incomplete`, `unverified` or `failed`.
+* A `--check` mode in the fixers.
+* `fleet-coordinator.sh` no longer writes `success` for unrun batches.
+
+Hypatia's own writer, which produced 98.7 % of the rows, is still open.
+
 == Beyond this repository
 
 Things this plan needs that are not in `hyperpolymath/standards`, for the
@@ -1019,8 +1164,8 @@ estate's tracking list:
 
 * *Vendor accounts:* restrict CodeRabbit to the neural slice (`.coderabbit.
   yaml` lives per repo, but the org-level "Organization UI" profile used on
-  standards#1295 overrides it — change it there); decide Codex's trigger
-  policy; SonarCloud and Semgrep Cloud projects exist per repo and are
+  standards#1295 overrides it — change it there); set Codex to the
+  explicit `@codex review` trigger Wave 1 chose; SonarCloud and Semgrep Cloud projects exist per repo and are
   mostly idle on estate languages.
 * *Secrets and tokens:* `PRIVATE_FARM_TOKEN`, `VERISIM_API_TOKEN`,
   `HYPATIA_ECHIDNABOT_URL`, `VERISIMDB_PAT` (used by
@@ -1040,22 +1185,29 @@ estate's tracking list:
 [[decisions]]
 == Decisions for the owner
 
-Put through the selector, not as prose; recorded here so the ledger has the
-arms.
+Put through the selector 2026-10-19 and ruled; recorded here so the ledger
+has the arms and the ruling. Two rulings take the elegant arm over the
+recommended one (1 and 4); the consequences are written into the waves
+above rather than absorbed.
 
 . *Wave-1 build shape.* A pons-native (elegant); B OSS-linter adapter
   (dependable); C hybrid (recommended, departs from A for speed of closing
-  the credit leak).
+  the credit leak). *Ruled: A.*
 . *Paid neural reviewers.* Keep CodeRabbit restricted to the neural slice
   and measure (recommended); cancel now and rely on Codex only; leave both
-  as they are until E4 reports.
+  as they are until E4 reports. *Ruled: restrict and measure.*
 . *VeriSimDB deployment target.* stapeln bundle on owned hardware
   (recommended: dogfoods the container stack, data stays home); Fly.io per
-  the Intentfile; stay on git flat files another quarter.
+  the Intentfile; stay on git flat files another quarter. *Ruled: stapeln
+  bundle on owned hardware.* The `persistent-server-fly` intent in
+  `verisimdb/.machine_readable/contractiles/intend/Intentfile.a2ml` is
+  superseded and should be retired there (owner edit; this document does
+  not touch another repo).
 . *Unquarantine policy.* Named allowlist of ten rescan-verified fix scripts
   in `review` tier behind Kin (recommended); build the full policy
   interpreter first and keep exit 78 until then; unquarantine nothing until
-  absolute-zero CNO certificates exist for a script.
+  absolute-zero CNO certificates exist for a script. *Ruled: policy
+  interpreter first.*
 
 [[appendix-tools]]
 == Appendix A — per-vendor feature inventory (S = symbolic, N = neural, H = hybrid)
