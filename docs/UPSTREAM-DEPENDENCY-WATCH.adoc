@@ -54,15 +54,23 @@ curl -sS -A "upstream-watch" "https://crates.io/api/v1/crates/$crate/$v/dependen
 cargo update -p <crate> --precise <newest-compatible>
 cargo audit
 ----
-. Find which estate repositories carry a crate, from a directory of clones:
+. Find which estate repositories carry a crate, from a directory of clones.
+  The search recurses, because some repositories keep their Rust workspaces
+  below the root. Each match prints the lockfile path, which starts with the
+  repository name.
 +
 [source,bash]
 ----
 crate=zvariant
-for lock in */Cargo.lock; do
-  grep -q "^name = \"$crate\"$" "$lock" && echo "${lock%/Cargo.lock}"
+for repo in */; do
+  find "$repo" -name Cargo.lock -not -path '*/target/*' \
+    -exec grep -l "^name = \"$crate\"$" {} +
 done
 ----
+. Run every `cargo tree` check on this page with `--target all --workspace`.
+  By default `cargo tree` shows only the host platform and the current
+  workspace member, so a Linux-only dependency can look absent on another
+  host.
 
 == Watching
 
@@ -83,18 +91,19 @@ https://github.com/z-galaxy/zbus/issues/2043
 Linux screen-reader (AT-SPI) support. It is present only when the `accesskit`
 feature is on. That feature is in `eframe`'s default set, but opt-in for
 standalone `egui-winit`.
-|Local workaround |Building `eframe` without its `accesskit` feature drops the
-whole chain, at the cost of screen-reader support. Prefer waiting for the
-upstream release unless the advisory must clear sooner.
+|Local workaround |Turn off the `accesskit` feature on whichever crate the
+repository depends on directly: `eframe`, or `egui-winit` when it is used on
+its own. That drops the whole chain, at the cost of screen-reader support.
+Prefer waiting for the upstream release unless the advisory must clear sooner.
 |Blocked on, as of 2026-10-19 |`atspi-common` 0.14.0 and `atspi` 0.30.0 still
 require `zbus ^5.5`. `accesskit_unix` 0.24.0 requires `atspi ^0.29` and
 `zbus ^5.19`.
 |Unblocking release |An `atspi` / `atspi-common` release on `zbus ^6`, then
 `accesskit_atspi_common` and `accesskit_unix` following it, then an
 `accesskit_winit` and `egui-winit` / `eframe` release that takes those.
-|Action when cleared |Bump `eframe` in each affected repository. This is a
-manifest change and may carry egui API breaks, so build and test the GUI
-feature before merging.
+|Action when cleared |Bump the crate each affected repository depends on
+directly, `eframe` or `egui-winit`. This is a manifest change and may carry
+egui API breaks, so build and test the GUI feature before merging.
 |Known affected |`hyperpolymath/panic-attack`. Only its opt-in `gui` feature
 compiles the chain into a binary. Its `cargo audit` still reports the
 advisories on every build, because the audit reads `Cargo.lock` and Cargo
@@ -119,7 +128,8 @@ without `winit/default`. Wayland windows then lose Adwaita client-side
 decorations on compositors that do not draw server-side decorations. This works
 only if no other dependency turns `winit/default` back on, since Cargo merges
 features across the dependency graph. Confirm that
-`cargo tree -e features -i sctk-adwaita` finds no `sctk-adwaita` before relying
+`cargo tree --target all --workspace -e features -i sctk-adwaita` finds no
+`sctk-adwaita` before relying
 on it.
 |Blocked on, as of 2026-10-19 |`ab_glyph` 0.2.32 requires
 `owned_ttf_parser ^0.25`, which requires `ttf-parser ^0.25.1`. The advisory
@@ -176,8 +186,9 @@ cargo update -p wayland-scanner
 |Applied in |`hyperpolymath/panic-attack`, pull requests 222 and 231.
 |Estate follow-up |Any other Rust repository whose lockfile still holds
 `quick-xml` below 0.41.0 (including 0.40) fails `cargo audit` for the same
-reason. Run `cargo tree -i quick-xml@<version>` first. The two commands above
-fix it only when the parent is `zbus_xml` or `wayland-scanner`. A direct
+reason. Run `cargo tree --target all --workspace -i quick-xml@<version>`
+first. The two commands above fix it only when the parent is `zbus_xml` or
+`wayland-scanner`. A direct
 dependency needs its requirement in `Cargo.toml` raised, and any other parent
 needs that parent upgraded.
 |===
