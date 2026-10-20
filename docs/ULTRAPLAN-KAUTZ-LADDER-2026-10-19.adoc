@@ -2,12 +2,12 @@
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 = Ultraplan: climbing the Kautz ladder — from paid review bots to an estate-native neurosymbolic quality system
 Jonathan D.A. Jewell (hyperpolymath)
-v0.2.1, 2026-10-20
+v0.2.2, 2026-10-20
 :toc: left
 :toclevels: 3
 :sectnums:
 :icons: font
-:status: DRAFT v0.2.1 — E1 result recorded 2026-10-20; the four decisions in <<decisions>> were ruled by the owner 2026-10-19; the waves below reflect them
+:status: DRAFT v0.2.2 — E1 result recorded 2026-10-20, review gaps closed (Kin gate kept on Wave 1 executions, link probe SSRF-safe); the four decisions in <<decisions>> were ruled by the owner 2026-10-19; the waves below reflect them
 
 [.lead]
 This document does four things. It inventories what the commercial
@@ -238,7 +238,9 @@ absent, package names resolve; Nix absent)
 licence field present and not `#f`, Nix absent; the governance reusable
 keeps only its existing Nix-absence probe
 |pons `.scm` queries over the parsed manifest; package-name resolution is
-a `guix build --dry-run` oracle step the rule shells out to, because a
+a `guix build --dry-run` oracle step the rule shells out to, given the
+file (`-m guix.scm` for a manifest, `-f guix.scm` for a file that
+evaluates to a package; bare `guix build` names no packages), because a
 parse cannot know the catalogue (that step is `orange` where Guix is absent)
 |Hypatia DEBT-REGISTER L-3 found `(license #f)` by hand
 
@@ -246,9 +248,15 @@ parse cannot know the catalogue (that step is `orange` where Guix is absent)
 |pons (deferred rules `document-reference-missing`,
 `document-anchor-missing`, `document-reference-placeholder`)
 |pons for internal with evidence class; for external, the third oracle: an
-HTTP reachability probe pons runs itself (HEAD, then GET on 405; cached;
-rate-limited), `orange` when the network is absent; `lychee` only as a
-falsifier oracle in the corpus
+HTTP reachability probe pons runs itself (HEAD first, then GET whenever
+HEAD does not return 2xx/3xx, since servers reject HEAD with 403, 404,
+405 or 501 while serving GET; only a failed GET is a finding; cached;
+rate-limited), `orange` when the network is absent. The probe is not an
+SSRF primitive: `https` URLs only; every hop, redirects included, is
+resolved and refused when it lands on loopback, link-local (including
+cloud metadata addresses), RFC 1918 or ULA space; at most five redirects;
+a short timeout; the body is never read beyond a small cap. `lychee` only
+as a falsifier oracle in the corpus
 |`scripts/link-rot-guard.sh` exists only in standards and reports 443 on main
 
 |Template placeholders left behind (double-curly owner and repo tokens, "replace me" notes,
@@ -265,7 +273,10 @@ output until then
 |the formatters themselves, each in its own check mode: `rustfmt --check`,
 `mix format --check-formatted`, `zig fmt --check`, `biome format` without
 `--write`, `kyaml-format.sh --check`; the rule carries this mapping, there
-is no universal flag
+is no universal flag. Where a check mode names files but prints no diff
+(`kyaml-format.sh --check`, `mix format --check-formatted`), the rule
+formats a temporary copy and diffs it against the tree to get the hunks;
+the working tree is never written
 |exists as pass/fail only
 
 |Commit-message and PR-title shape, linked issue, PR size, "not done" list
@@ -301,7 +312,10 @@ Nickel, deed, k9)
 format) stay in the governance reusable, which already has them and is
 exact; the *shape* rules (required keys, enum values, sequencing of
 sections, cross-file agreement) are pons rules over the YAML and JSON
-grammars; `deed_lint.js` and `k9-validate.sh` keep deed and k9
+grammars; `deed_lint.js` and `k9-validate.sh` keep deed and k9; Nickel
+keeps the existing `nickel` lane in `ci-pipeline.yml` (`nickel format
+--check` and typecheck), which gains SARIF output like the other retained
+checks
 |`ijson-jcs` and yq for canonical form (unchanged); pons `.scm` queries
 for shape
 |canonical form exists for JSON and deed; shape rules do not; k9
@@ -823,15 +837,24 @@ Deliverables:
   complexity; `pons catalogue`; grammars pinned: Elixir, Zig, Julia,
   Idris2, AsciiDoc, Dockerfile, Scheme, YAML (`tree-sitter-yaml`, KYAML is
   a subset), JSON (`tree-sitter-json`), git commit messages
-  (`tree-sitter-gitcommit`) and Markdown (`tree-sitter-markdown`, for PR
-  titles and bodies); `--diff-base` scoping. The three oracle steps
+  (`tree-sitter-gitcommit`), Markdown (`tree-sitter-markdown`, for PR
+  titles and bodies) and shell (`tree-sitter-bash`, for the shell header
+  blocks `missing-doc-comment` checks); `--diff-base` scoping. The three oracle steps
   (formatter check mode, `guix build --dry-run`, the HTTP reachability
   probe for external links) are the exception option A records above. Secrets
   and SCA are not pons rules: they stay with the secret-scanner reusable
-  and Hypatia `supply_chain` as the table says.
+  and Hypatia `supply_chain` as the table says. Nor are dead code and
+  unused imports outside Python: they stay with each language's own
+  compiler diagnostics in the repo's CI (`cargo clippy -D warnings`,
+  `mix compile --warnings-as-errors`, `mix xref`), which are exact, are not
+  the vendors' bundled linters, and reach the grid through the cicd-suite
+  SARIF path below; pons adds duplication and complexity natively.
 * cicd-suite: `--format sarif` on every existing composite and the
   normaliser `scripts/sarif-normalise.jq`, so what already runs reaches the
-  grid. No new checks are added to cicd-suite under this ruling; a row that
+  grid. The secret-scanner reusable gains SARIF output for its gating
+  gitleaks pass and its full-history pass, which today write findings to
+  the log only, so secrets stay on the grid once the vendors' linters are
+  off. No new checks are added to cicd-suite under this ruling; a row that
   pons cannot yet parse stays uncovered and is reported as `orange` on the
   grid, never approximated by a linter bundle.
 * standards: `hypatia-scan-reusable.yml` ingest; `.coderabbit.yaml` profile
@@ -861,7 +884,12 @@ Deliverables:
   `fix-gitattributes-eol`, `fix-dependabot-coverage`, `fix-http-to-https`,
   `fix-tmp-paths`, `fix-shell-quoting`) become the *first work orders the
   interpreter evaluates*, in `review` tier (draft PRs), rescan-verified,
-  licence refusal gate untouched. Consequence of the ruling: true outcome
+  licence refusal gate untouched, and every one still passes the Kin gate
+  between a successful evaluation and its execution: work order →
+  evaluator → Kin gate → `robot-repo-automaton` → rescan, the canonical
+  executor path below. The evaluator decides whether a work order is
+  admissible; Kin still decides whether this execution may run, and a
+  rescan after the fact cannot undo a mutation Kin would have refused. Consequence of the ruling: true outcome
   data for Wave 2 arrives one to two quarters later than under the
   allowlist arm, so E1 (replaying the historical log) is the only outcome
   evidence Wave 2 can start from; Wave 2 therefore begins with E1 and the
@@ -1136,8 +1164,8 @@ estate's tracking list:
 
 * *Vendor accounts:* restrict CodeRabbit to the neural slice (`.coderabbit.
   yaml` lives per repo, but the org-level "Organization UI" profile used on
-  standards#1295 overrides it — change it there); decide Codex's trigger
-  policy; SonarCloud and Semgrep Cloud projects exist per repo and are
+  standards#1295 overrides it — change it there); set Codex to the
+  explicit `@codex review` trigger Wave 1 chose; SonarCloud and Semgrep Cloud projects exist per repo and are
   mostly idle on estate languages.
 * *Secrets and tokens:* `PRIVATE_FARM_TOKEN`, `VERISIM_API_TOKEN`,
   `HYPATIA_ECHIDNABOT_URL`, `VERISIMDB_PAT` (used by
