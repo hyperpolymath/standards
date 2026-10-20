@@ -23,6 +23,8 @@ once fixed.
 count. Do not record these advisories in a new `Debtfile.a2ml` entry. The
 Debtfile format (`docs/DEBTFILE-SPEC.adoc`) is A2ML, which is retired, and no
 deed mapping for it exists yet.
+|What *Resolved* means |Clear in every repository checked so far. It is not an
+estate-wide claim, because *Known affected* is not a full census.
 |Standards' own advisories |`3-practice/SECURITY-ADVISORIES.adoc`.
 |===
 
@@ -91,8 +93,11 @@ require `zbus ^5.5`. `accesskit_unix` 0.24.0 requires `atspi ^0.29` and
 |Action when cleared |Bump `eframe` in each affected repository. This is a
 manifest change and may carry egui API breaks, so build and test the GUI
 feature before merging.
-|Known affected |`hyperpolymath/panic-attack`, opt-in `gui` feature only.
-Default builds are unaffected. `hyperpolymath/echidna` is not affected.
+|Known affected |`hyperpolymath/panic-attack`. Only its opt-in `gui` feature
+compiles the chain into a binary. Its `cargo audit` still reports the
+advisories on every build, because the audit reads `Cargo.lock` and Cargo
+resolves the lockfile with every feature on. `hyperpolymath/echidna` is not
+affected.
 This is not a full census.
 |===
 
@@ -109,7 +114,11 @@ decoration path. It comes from `winit`'s `wayland-csd-adwaita` feature, which
 |Local workaround |Disable `eframe`'s default features and re-enable the ones
 the application needs (for example `wayland`, `x11`, `accesskit` and a renderer)
 without `winit/default`. Wayland windows then lose Adwaita client-side
-decorations on compositors that do not draw server-side decorations.
+decorations on compositors that do not draw server-side decorations. This works
+only if no other dependency turns `winit/default` back on, since Cargo merges
+features across the dependency graph. Confirm that
+`cargo tree -e features -i sctk-adwaita` finds no `sctk-adwaita` before relying
+on it.
 |Blocked on, as of 2026-10-19 |`ab_glyph` 0.2.32 requires
 `owned_ttf_parser ^0.25`, which requires `ttf-parser ^0.25.1`. The advisory
 names `skrifa` as the maintained alternative.
@@ -117,7 +126,8 @@ names `skrifa` as the maintained alternative.
 `sctk-adwaita` release that drops `ab_glyph`, then a `winit` release taking it.
 |Action when cleared |`cargo update` in each affected repository, or an
 `eframe` bump if `winit` moves a minor version.
-|Known affected |`hyperpolymath/panic-attack`, opt-in `gui` feature only.
+|Known affected |`hyperpolymath/panic-attack`, through its opt-in `gui`
+feature. As with W1, its `cargo audit` reports the advisory on every build.
 This is not a full census.
 |===
 
@@ -133,7 +143,7 @@ repository was archived on 2024-03-25.
 translation of libyaml in unsafe Rust.
 |Status |Locally remediable; no upstream release is needed. `serde_yaml` will
 not be revived, so waiting does not clear this. Move to *Resolved* once the
-replacement is applied in the affected repository.
+replacement is applied in every known affected repository.
 |Local fix |Replace `serde_yaml` with a YAML parser in safe Rust. The advisory
 suggests `serde-saphyr` for serde users, or `noyalib`. Avoid `serde_yaml_ng`,
 which still depends on `unsafe-libyaml`.
@@ -164,5 +174,8 @@ cargo update -p wayland-scanner
 |Applied in |`hyperpolymath/panic-attack`, pull requests 222 and 231.
 |Estate follow-up |Any other Rust repository whose lockfile still holds
 `quick-xml` below 0.41.0 (including 0.40) fails `cargo audit` for the same
-reason and takes the same fix.
+reason. Run `cargo tree -i quick-xml@<version>` first. The two commands above
+fix it only when the parent is `zbus_xml` or `wayland-scanner`. A direct
+dependency needs its requirement in `Cargo.toml` raised, and any other parent
+needs that parent upgraded.
 |===
