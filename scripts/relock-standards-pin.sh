@@ -70,7 +70,16 @@ PIN_RE='hyperpolymath/standards/\.github/workflows/[A-Za-z0-9._-]+\.ya?ml@[0-9a-
 shopt -s nullglob
 wfs=("$WF"/*.yml "$WF"/*.yaml)
 shopt -u nullglob
-pins=$(grep -hoE "$PIN_RE" "${wfs[@]}" 2>/dev/null | sort -u || true)
+# standards_pins FILE... — the standards reusable pins that a `uses:` key holds,
+# block or flow style (`build: { uses: "…@<sha>" }`). Full-line comments are
+# skipped: reusables carry commented caller examples (`#   uses: …@<old sha>`)
+# that no run resolves, and counting them refused every relock of standards'
+# own callers.
+standards_pins() {
+  grep -hvE '^[[:space:]]*#' "$@" 2>/dev/null \
+    | grep -oE "(^|[{,[:space:]])uses:[[:space:]]*['\"]?$PIN_RE" | grep -oE "$PIN_RE"
+}
+pins=$(standards_pins "${wfs[@]}" | sort -u || true)
 # A short pin (7+ hex) that prefixes TARGET names TARGET: the applier counts it
 # FRESH and leaves it as written, and the lock keys it by that short ref in a
 # record of its own, which is left as it is. Only full pins feed TARGET's record.
@@ -218,7 +227,7 @@ dangling=$(LC_ALL=C comm -23 "$tmp/edges" "$tmp/recs")
 # The gates match an entry to a `uses:` by its ref as written, so an entry
 # re-keyed to TARGET for a workflow that pins a short ref is a desync they reject.
 for w in "${wfs[@]}"; do
-  want=$(grep -oE "$PIN_RE" "$w" | sed 's#^hyperpolymath/standards/.*@#hyperpolymath/standards@#' | LC_ALL=C sort -u || true)
+  want=$(standards_pins "$w" | sed 's#^hyperpolymath/standards/.*@#hyperpolymath/standards@#' | LC_ALL=C sort -u || true)
   have=$(awk -v k="    '.github/workflows/${w##*/}':" '$0==k{f=1;next} f&&!/^        - /{exit} f' "$tmp/out" \
     | grep -oE "'hyperpolymath/standards@[0-9a-fA-F]+'" | tr -d "'" | LC_ALL=C sort -u || true)
   [ "$want" = "$have" ] || refuse "${w##*/}: lock entries [${have//$'\n'/ }] would not match its pins [${want//$'\n'/ }]"
