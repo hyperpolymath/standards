@@ -235,7 +235,7 @@ for SHA in "$@"; do
   if ! bash "$SCRIPT_DIR/close-lock.sh" --check "$TMP/lock" > "$TMP/closure" 2>&1; then
     n_dangling=$(/usr/bin/grep -c '^  [^ ][^ ]*@[^ ]*$' "$TMP/closure" || true)
     # A failure that names no ref still fails: an unread lock is not a closed one.
-    [ "$n_dangling" -gt 0 ] || n_dangling=1
+    [[ "$n_dangling" -gt 0 ]] || n_dangling=1
   fi
 
   echo "  workflows at this SHA: ${n_wfs}   lockfile keys: ${locked_wfs} workflow(s), ${locked_pairs} pair(s)"
@@ -250,7 +250,7 @@ for SHA in "$@"; do
     echo "  VERDICT: UNEXAMINED — yq could not parse $(sort -u "$TMP/unparsed" | wc -l) workflow(s); their refs were not checked:"
     sort -u "$TMP/unparsed" | sed 's/^/             /'
     overall_rc=1
-  elif [ "$n_missing" -eq 0 ] && [ "$n_self_sha" -eq 0 ] && [ "$n_dangling" -eq 0 ]; then
+  elif [[ "$n_missing" -eq 0 && "$n_self_sha" -eq 0 && "$n_dangling" -eq 0 ]]; then
     echo "  VERDICT: SELF-CONSISTENT — every action ref used is keyed in this SHA's own lock, and the lock is closed."
     echo "           (Reachability at the remote is NOT proven by this check.)"
   else
@@ -272,7 +272,7 @@ for SHA in "$@"; do
         echo "               self-SHA ref  ${key}"
       done
     fi
-    if [ "$n_dangling" -gt 0 ]; then
+    if [[ "$n_dangling" -gt 0 ]]; then
       echo "  VERDICT: POISON — ${n_dangling} dangling edge(s) in this SHA's own lock (standards#963)."
       echo "           Hypatia fails closed on it (invalid_actions_lock), and close-lock.sh records"
       echo "           GitHub refusing runs at startup for this shape (cicd-squabbler#101)."

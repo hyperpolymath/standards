@@ -275,7 +275,7 @@ while IFS=$'\t' read -r file verdict dangling; do
   lock="$CORPUS/$file"; before=$(sha256sum < "$lock")
   out=$(GH_BIN="$WORK/gh-trap" bash "$TARGET" --check "$lock" 2>&1); st=$?
   got=$(sed -n 's/^  \([^ ][^ ]*@[^ ]*\)$/\1/p' <<<"$out" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
-  want=$([ "$dangling" = "-" ] || printf '%s\n' $dangling | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
+  want=$([[ "$dangling" == "-" ]] || printf '%s\n' $dangling | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')
   if [[ "$verdict" == "closed" ]]; then exp=0; else exp=1; fi
   [[ "$st" == "$exp" && "$got" == "$want" && "$(sha256sum < "$lock")" == "$before" ]] \
     && ok "$file: $verdict${want:+ ($want)}" || bad "$file: want exit $exp [$want], got exit $st [$got] — $out"
