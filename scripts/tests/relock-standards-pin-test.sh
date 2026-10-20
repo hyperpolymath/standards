@@ -160,7 +160,7 @@ echo "  PASS missing local identity refused without changing lock"
 # identity fields must reach the same explicit refusal, not exit on grep status.
 cp "$S/.github/workflows/actions.lock" "$T/source-lock-with-identity"
 sed -i "/commit: 'sha1-1111111111111111111111111111111111111111'/d; /owner_id: 10$/d; /repo_id: 11$/d" "$S/.github/workflows/actions.lock"
-git -C "$S" add .github/workflows/actions.lock
+git -C "$S" add .github/workflows/actions.lock .github/workflows/x-reusable.yml
 git -C "$S" commit -q -m missing-source-identity
 NEW_WITHOUT_ID=$(git -C "$S" rev-parse HEAD)
 NEW_SAVE=$NEW; NEW=$NEW_WITHOUT_ID
@@ -307,5 +307,28 @@ grep -q "ref: '3333333333333333333333333333333333333333'" "$L" && fail "case var
 awk "/^    'ACME\\/Tool@3333333333333333333333333333333333333333':\$/{f=1;next} f&&/^    [^ ]/{exit} f" "$L" | grep -qx "        ref: 'v3'" \
   || fail "case variant self-SHA: not repaired to standards' symbolic ref"
 echo "  PASS self-SHA record held under another owner/repo case is repaired in place"
+
+
+# The record the consumer lacks is copied from standards' own lock, which may
+# key it under another owner/repo spelling than the reusable's `uses:` edge.
+# That is still the record: copied, not refused as missing.
+cp "$S/.github/workflows/actions.lock" "$T/source-lock-before-case"
+git -C "$S" show "$NEW:.github/workflows/x-reusable.yml" > "$S/.github/workflows/x-reusable.yml"
+sed -i "s|^    'acme/tool@3333333333333333333333333333333333333333':\$|    'ACME/Tool@3333333333333333333333333333333333333333':|" "$S/.github/workflows/actions.lock"
+git -C "$S" add .github/workflows/actions.lock .github/workflows/x-reusable.yml
+git -C "$S" commit -q -m source-case-variant
+NEW_SAVE=$NEW; NEW=$(git -C "$S" rev-parse HEAD)
+D=$(consumer source-case)
+bash "$RELOCK" --to "$NEW" --standards "$S" "$D" >"$T/source-case-log" 2>&1 || fail "source case variant: relock refused ($(cat "$T/source-case-log"))"
+L="$D/actions.lock"
+[ "$(acme_keys "$L")" = 1 ] || fail "source case variant: the record is keyed $(acme_keys "$L") times"
+grep -q "ref: 'v3'" "$L" || fail "source case variant: the copied record lost its ref"
+if command -v gawk >/dev/null 2>&1; then
+  sed -i '/unrelated\/orphan/,/repo_id: 41/d' "$L"
+  bash "$SYNC" "$D" >/dev/null 2>&1 || fail "source case variant: check-lock-sync.sh rejects the relocked lock"
+fi
+NEW=$NEW_SAVE
+cp "$T/source-lock-before-case" "$S/.github/workflows/actions.lock"
+echo "  PASS record standards' lock keys under another owner/repo case is copied, not refused"
 
 echo "PASS: relock-standards-pin.sh"

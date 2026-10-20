@@ -174,7 +174,8 @@ while read -r u; do
     fi
     continue
   fi
-  r=$(rec_body "$u" "$tmp/slock")
+  skey=$(lock_key "$u" "$tmp/slock")
+  r=""; [ -z "$skey" ] || r=$(rec_body "$skey" "$tmp/slock")
   [ -n "$r" ] || refuse "no record for $u in this lock or in standards' own lock at ${TARGET:0:12}"
   printf '%s\n' "$r" >> "$tmp/lock"
 done < "$tmp/uses.s"
