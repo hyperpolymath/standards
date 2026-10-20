@@ -238,9 +238,11 @@ name, not the format.
 
 |Contractile CLI (`contractiles/cli`)
 |— |builds
-|Reads only `Mustfile.a2ml`, `Trustfile.a2ml`, `Intentfile.a2ml`, `Dustfile.a2ml`
-(and a `contractiles/lust/` path). In the template it finds nothing, because
-declarations now live in `<verb>.k9.ncl#declaration`.
+|Has subcommands for five verbs. `must`, `trust`, `intend` and `dust` read
+`Mustfile.a2ml`, `Trustfile.a2ml`, `Intentfile.a2ml` and `Dustfile.a2ml` (with a
+`contractiles/lust/` alias); `adjust` reads `ADJUST.contractile`, the
+descriptile, not the Adjustfile. There is no `bust` subcommand. In the template
+it finds nothing, because declarations now live in `<verb>.k9.ncl#declaration`.
 
 |Template coaptation drift gate
 |— |red
@@ -778,7 +780,11 @@ One rule for all three formats, generalised from the K9 contract:
   (P2.1).
 * Scope, assumptions and boundaries on the contractile clause schema, and the
   evidence-label rule (P2.3).
-* A `(contractiles …)` clause in the template deed listing all six verbs (P0.3).
+* A `(contractiles …)` clause in the template deed listing all six verbs, the
+  form Q14 ruled on 2026-10-20 (P0.3).
+* The six descriptile clauses (`(must …)`, `(trust …)`, …) in the template deed,
+  one per verb as Q12 ruled (P0.3).
+* An anchor mapping spec under `1-formats/deed/mappings/` (P2.5).
 * Non-A2ML forms for the Debtfile ledger and the Hypatia standards rules (P2.4).
 
 *Stays.*
@@ -805,7 +811,14 @@ wait on <<decisions>>.
   the records become pure `'Yard` declarations, and probe execution waits behind a
   separate signed `'Hunt` component. _Accept:_ both merged, the K9 grid green on
   the template, and no contractile record whose runner executes outside its
-  leash.
+  leash. A green grid is not enough for the Hunt component: `k9-validate.sh`
+  embeds no verifier and reports a signature as `'Present_Unverified`, which
+  never authorises `'Hunt` (`K9-CONTRACT-SPEC` §10.4). So the step also needs an
+  L3 verifier wired through `K9_SIG_VERIFIER` with a trusted-key policy, and two
+  negative controls: an unsigned and a tampered component are both refused, with
+  `signature` named among the unmet preconditions. Until that verifier runs in
+  CI, the probes stay refused and their clauses report a *blocking* unresolved
+  verdict; they never run on an unverified signature.
 . *P0.2 A gate for renamed files, and its rollout.* A Hypatia rule that fails any
   `.deed` file that does not lint. A rule reaches a repository only when that
   repository's pins move. The Hypatia reusable builds the scanner from a fixed
@@ -816,31 +829,61 @@ wait on <<decisions>>.
   tooling (`scripts/propagate-workflow-pins.sh`). Until a caller is repinned, the
   rule does not run there, and the census (X1) says which callers that is. The
   rule must also *block*. The reusable runs the scanner with `--exit-zero` and
-  blocks only through a validated baseline or `block-on-high: true`. So each
-  enrolled caller carries a baseline: its existing invalid deeds go in as a
-  shrink-only ledger, and only new failures block, which keeps unrelated PRs
-  mergeable until the wave converts the legacy set. Validator fixture trees and
+  blocks only through a validated baseline or `block-on-high: true`. The baseline
+  path arms only when the caller has *both* `.hypatia-baseline.json` and its own
+  `scripts/apply-baseline.sh` (`hypatia-scan-reusable.yml`, the "Gate on
+  baseline" step); a baseline alone stays advisory. So each enrolled caller
+  carries the two together, the script copied from standards with the
+  propagation tooling, and the rule emits at `high` or above, the gate's
+  threshold. Its existing invalid deeds go in the baseline, and only new
+  failures block, which keeps unrelated PRs mergeable until the wave converts
+  the legacy set. The baseline is shrink-only by enforcement, not by intent:
+  `apply-baseline.sh` compares findings with the ledger as it stands, so a PR
+  that adds a bad deed and its baseline entry together would pass it. The
+  existing exemption ratchet (`scripts/check-exemption-ratchet.sh`, the
+  governance "Exemption ratchet" job) refuses any growth of
+  `.hypatia-baseline.json` that lacks a `Ratchet-exception:` trailer naming the
+  ledger, and each enrolled caller must run it. Validator fixture trees and
   frozen archives are excluded from the rule, because their negative controls are
   meant to fail (standards has 14 under `1-formats/deed/tools/fixtures/invalid/`).
   _Accept:_ in a panoply PR that adds one renamed `.deed`, the Hypatia check turns
   red on that file and lists the 133 baselined files as advisory; the 7 good deeds
-  and standards' fixture tree stay silent.
+  and standards' fixture tree stay silent. A second panoply PR that adds the bad
+  deed *and* its baseline entry without a trailer is refused by the ratchet. A
+  caller missing `scripts/apply-baseline.sh` is reported by X1 as not armed.
 . *P0.3 Template text* *(Q12, Q13, Q14)*. Rewrite the template contractiles README to
-  the ruled verb meanings and to the Verbfile form Q13 chooses. Once the
-  attestation form is ruled, add the `(contractiles …)` clause and make
-  `:contractiles_required` list six verbs. _Accept:_ `deed_lint.js` OK, plus a
-  semantic check. The linter accepts any clause name, so it cannot see a missing
-  verb. The check lists `(contractiles …)` and `:contractiles_required` with
-  the template's own `scripts/deed-field.sh --list` (the reader exists in
-  rsr-template-repo; standards has no copy), asserts both name the same six verbs, and ships
-  with a failing fixture.
-. *P0.4 Front-door text in standards.* Mark the deed spec document's status to
-  match its grammar, fix the Chora spec's dead links, and rewrite
+  the ruled verb meanings and to the Verbfile form Q13 ruled. Add the
+  `(contractiles …)` clause Q14 ruled, and derive `:contractiles_required` from
+  it. Add the six descriptile clauses Q12 ruled (`(intend …)`, `(must …)`,
+  `(trust …)`, `(adjust …)`, `(dust …)`, `(bust …)`), so a repository minted from
+  the template gives the runner both parties from birth. (The template has no
+  all-caps `.contractile` file to migrate; standards' four move in P2.2.) _Accept:_
+  `deed_lint.js` OK, plus a semantic check. The linter accepts any clause name,
+  so it cannot see a missing verb. The check lists `(contractiles …)`,
+  `:contractiles_required` and the six descriptile clauses with the template's
+  own `scripts/deed-field.sh --list` (the reader exists in rsr-template-repo;
+  standards has no copy), and asserts all three name the same six verbs. It
+  ships with two failing fixtures: one missing a verb from the register, and one
+  missing a descriptile clause.
+. *P0.4 Front-door text in standards* *(Q15)*. The deed spec document says
+  "DRAFT, not ratified. Nothing in this document is deployed", while its ABNF is
+  normative (D308) and linted. Change the status only for the parsing surface,
+  the part the ABNF governs. The "Typechecking — PROPOSED" chapter and the
+  "Still open" rulings stay marked as proposals, or move to a companion
+  document, until a change procedure ratifies them; P1.3 and P1.5 revisit
+  them. Fix the Chora spec's dead links, and rewrite
   `coordination.k9`'s A2ML invariants and the Deno ban. Rewrite the agent front
   doors too: `EXPLAINME.adoc` still routes agents to `0-AI-MANIFEST.a2ml`, calls
   A2ML the metadata format, and sends new projects to `A2ML-REPO-TEMPLATE.adoc`;
-  the other bucket-A files of WO-7 carry the same pointers. _Accept:_ link-rot
-  guard shows no new BROKEN line; a grep of every front-door file (`README.adoc`,
+  the other bucket-A files of WO-7 carry the same pointers. Implement Q15 in
+  `0-AI-MANIFEST.deed`: today it is a second `repo-deed` carrying `purpose`,
+  `routing`, `invariants`, `attestation` and `meta`. Move each of those
+  facts, field by field, into `standards_chora.deed` (or drop it where the
+  chora already holds it), leaving only pointers and the startup checklist.
+  _Accept:_ the field-by-field table is in the PR description, every moved fact
+  is found in the chora deed (read with the template's `deed-field.sh`), the
+  manifest holds no clause other than `(front-doors …)` and
+  `(startup-checklist …)`, and the link-rot guard shows no new BROKEN line; a grep of every front-door file (`README.adoc`,
   `EXPLAINME.adoc`, `QUICKSTART-*.adoc`, `llm-warmup-*.adoc`, `AGENTS.adoc`,
   `0-AI-MANIFEST.deed`, `coordination.k9`) finds no text presenting A2ML as
   current, and none repeats the Deno ban that the 2026-10-14 ruling lifted
@@ -873,16 +916,32 @@ wait on <<decisions>>.
   rather than hand-writing one, so the grammar stays the single source (see
   experiment X3), plus the three schema rules the ABNF cannot express. Run it on
   every `coordination.k9` the estate has. _Accept:_ the two in standards pass;
-  contractiles' and panoply's fail on the magic line.
+  contractiles' and panoply's fail on the magic line. Those cases only prove the
+  magic line, so the validator also ships malformed-body fixtures that carry a
+  correct `K9!` line and fail later: a missing `schema_version`, a wrong
+  indentation level, a body production the ABNF does not admit, and one fixture
+  per schema rule the ABNF cannot express. Each must fail with its own rule
+  named.
 . *P1.5 The three grammars as one design* *(Q10)*. The owner names the deed and
   the two parts of K9 as the core of the overhaul. Write one short design note
   that states what each grammar is for (attestation, contract, coordination) and
   where they meet: `deed_ref`, the `(contractiles …)` attestation, and the
-  runner's inputs. Revise each ABNF against that note.
+  runner's inputs. Revise each ABNF against that note. Q10's new K9 envelope ABNF
+  (magic line, SPDX header, dialect line) goes under `1-formats/k9/spec/abnf/`,
+  and the step amends the "Why there is no `k9.abnf`" section of
+  `K9-CONTRACT-SPEC`. The grammar must become the validator's oracle, not a
+  second description beside it: `k9-validate.sh` checks the same envelope today
+  with its own shell predicates. Either generate the L0 recogniser from the ABNF,
+  as P1.4 does for coordination, or add conformance fixtures run both ways.
+  _Accept:_ every envelope fixture gets the same verdict from the ABNF
+  recogniser and from `k9-validate.sh` L0, and one fixture per production fails
+  both.
 . *P1.6 One format, one directory.* Move `2-protocols/chora/` into
-  `1-formats/deed/` (the chora is a deed form) and the contractile spec into
-  `1-formats/contractiles/` once that directory holds only the spec. Follows the
-  reorg plan's packet rules.
+  `1-formats/deed/` (the chora is a deed form). The contractile spec moves into
+  `1-formats/contractiles/` only if Q8 rules that the spec lives in standards;
+  if Q8 keeps spec and runner together in `hyperpolymath/contractiles`, the
+  spec moves there instead and standards keeps a pointer. *(Q8)* for that half.
+  Follows the reorg plan's packet rules.
 
 === P2 — design and develop (one quarter)
 
@@ -893,9 +952,13 @@ wait on <<decisions>>.
   the two ways to settle (amend the contractile, or fix the violation). The
   `contractile` CLI becomes its front end. It drops the `lust` path and reads
   A2ML only behind `--legacy` until P3 finishes. Probe execution runs as a
-  separate `'Hunt` component with the five preconditions (Q9). _Accept:_
-  `contractile must list` in the template prints the same clause ids as
-  `extract-clauses.sh`. Every `must` clause ends in a witness or a *blocking*
+  separate `'Hunt` component with the five preconditions (Q9). The CLI today has
+  no `bust` subcommand, and its `adjust` reads the descriptile, so the runner
+  gains `bust` and reads every verb from its K9 component. _Accept:_ for each of
+  the six verbs, `contractile <verb> list` in the template prints the same
+  clause ids as `extract-clauses.sh`, and a run grades that verb's clauses
+  against its descriptile clause. A fixture that removes one verb's component
+  fails discovery and names the verb, so a green runner cannot ignore an input. Every `must` clause ends in a witness or a *blocking*
   unresolved verdict; none is left "deferred" (today 26 of 52 template clauses
   defer to a Hunt run that does not exist). Two fixtures prove it: a planted
   violation stops the run and names both settlements, and a clause with no
@@ -905,17 +968,32 @@ wait on <<decisions>>.
   A2ML file. The required `k9-contractile.yml` gate runs `run-mustfile.sh` and
   discovers verbs through `INDEX.a2ml`. Fold each declaration into its K9 file,
   rewire that gate to the P2.1 runner, show it green, and only then delete the
-  A2ML files. _Accept:_ the K9-SVC contractile check green on the PR that deletes
-  them.
+  A2ML files. The four all-caps `.contractile` files in `.machine_readable/`
+  (ADJUST, INTENT, MUST, TRUST) migrate field by field into the matching
+  descriptile clauses of `standards_chora.deed` (Q12), and the deed gains the
+  `dust` and `bust` clauses that have no file today. _Accept:_ the K9-SVC
+  contractile check green on the PR that deletes them, and the runner grades all
+  six verbs against the deed with the `.contractile` files absent.
 . *P2.3 The envelope fields* *(Q6)*: scope, assumptions and boundaries, stored where
   Q6 rules (on the clause schema in `_base.ncl`, the recommended arm, or in a
   `(claims …)` deed clause), with the evidence-label rule and a pilot on
   Panoply, whose charter already demands it (<<copilot>>).
 . *P2.4 Replace the load-bearing A2ML*: Debtfile and Hypatia's standards rules as
   K9 components or praxis deeds, adopted in hypatia and standards together.
+  _Accept:_ both consumers run green with their A2ML inputs absent:
+  `debt-measure.yml` (through `run-debtfile.sh`) reads and writes the
+  replacement ledger and no longer touches `Debtfile.a2ml`, and Hypatia's
+  RuleLoader loads the replacement rules, shown by a scan in which a known rule
+  fires. Deleting the A2ML in P3 waits on this proof, not on the records merely
+  existing.
 . *P2.5 kyX front end* for translating A2ML to deeds under the mapping specs
   (D313), with the mapping specs' acceptance greps as its tests. No hand
-  conversion in bulk.
+  conversion in bulk. There is no anchor mapping in `1-formats/deed/mappings/`
+  today, so Q11's `(anchor …)` clause has no route for standards' live
+  `.machine_readable/anchors/ANCHOR.a2ml`, which carries an SSG configuration and
+  a parent relationship. Write `anchor-to-repo-deed.adoc` first. _Accept:_ the
+  anchor is translated with every field preserved or recorded as dropped by
+  that spec, before P3 removes the file.
 
 === P3 — deploy (after P2.1, P2.2, P2.4 and P2.5)
 
