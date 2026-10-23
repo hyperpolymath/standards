@@ -84,6 +84,42 @@ assert(r2_script.include?('/snapshots/${BUNDLE_TS}-${COMMIT_SHA}.bundle.age'),
        'mirror-r2-bundle must write an immutable timestamp+SHA snapshot bundle')
 assert(r2_script.include?('/latest.bundle.age'),
        'mirror-r2-bundle must update latest.bundle.age')
+Dir.mktmpdir('r2-snapshots-') do |tmp|
+  stubs = {
+    'date' => 'printf "%s\n" 20261023T120000Z',
+    'git' => 'if [ "$2" = create ]; then printf plaintext > "$3"; else test -s "$3"; fi',
+    'age' => 'printf ciphertext > "$4"',
+    'aws' => <<~'SH'
+      test ! -e "$RUNNER_TEMP/test-repo.bundle" || exit 1
+      test "$(cat "$3")" = ciphertext || exit 1
+      printf '%s\n' "$4" >> "$TEST_UPLOADS"
+    SH
+  }
+  stubs.each do |name, script|
+    path = File.join(tmp, name)
+    File.write(path, "#!/bin/sh\nset -eu\n#{script}\n")
+    File.chmod(0o755, path)
+  end
+  uploads = File.join(tmp, 'uploads')
+  sha = 'a' * 40
+  env = { 'PATH' => "#{tmp}:#{ENV.fetch('PATH')}", 'RUNNER_TEMP' => tmp,
+          'REPO_NAME' => 'test-repo', 'COMMIT_SHA' => sha, 'AGE_RECIPIENT' => 'test-recipient',
+          'R2_BUCKET' => 'test-bucket', 'MIRROR_ORG' => 'test-owner',
+          'R2_ENDPOINT' => 'https://test.r2.cloudflarestorage.com', 'TEST_UPLOADS' => uploads }
+  [[100, 1], [100, 2], [101, 1]].each do |run_id, attempt|
+    run!(env.merge('GITHUB_RUN_ID' => run_id.to_s, 'GITHUB_RUN_ATTEMPT' => attempt.to_s),
+         'bash', '-c', r2_script)
+    assert(!File.exist?(File.join(tmp, 'test-repo.bundle.age')), 'R2 upload left ciphertext behind')
+  end
+  keys = File.readlines(uploads, chomp: true)
+  snapshots = keys.each_slice(2).map(&:first)
+  assert(snapshots.uniq.length == 3, 'R2 snapshot uploads collide across runs or attempts')
+  assert(snapshots.first == "s3://test-bucket/test-owner/test-repo/snapshots/20261023T120000Z-100-1-#{sha}.bundle.age",
+         'R2 snapshot path or bundle filename format changed')
+  assert(keys.each_slice(2).all? { |_, latest| latest == 's3://test-bucket/test-owner/test-repo/latest.bundle.age' },
+         'R2 latest bundle path changed')
+end
+puts 'PASS: R2 snapshots differ across runs and attempts at the same timestamp and SHA; only ciphertext is uploaded'
 [
   ['https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com', 'estate-mirrors', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', true],
   ['https://0123456789abcdef0123456789abcdef.us.r2.cloudflarestorage.com', 'estate-mirrors', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', true],

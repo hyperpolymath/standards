@@ -59,15 +59,21 @@ ensure_open_pr() {
   fi
 }
 
-# check_probot_installed — Check whether Probot Settings (app_id 1561) is still installed.
-# Queries orgs/metadatastician/installations (supported by classic owner PATs with
-# admin:org); prints the matching installation count and returns 0.
-# If the query fails or returns empty output, DRY_RUN=1 prints 1 and returns 0
+# check_probot_installed — Check Probot Settings (app_id 1561) for one owner.
+# The personal account uses user/installations, filtered by account login;
+# the organisation uses orgs/{owner}/installations. Paginate both endpoints.
+# Prints the matching installation count and returns 0.
+# If the query fails or returns invalid output, DRY_RUN=1 prints 1 and returns 0
 # so callers treat the app as installed. In live mode, reports the query failure
 # on stderr and returns 1.
 check_probot_installed() {
-  local count=""
-  if count="$(gh api orgs/metadatastician/installations --jq '[.installations[]? | select(.app_id == 1561)] | length' 2>/dev/null)" && [ -n "$count" ]; then
+  local owner="$1" endpoint count=""
+  case "$owner" in
+    hyperpolymath) endpoint=user/installations ;;
+    metadatastician) endpoint=orgs/metadatastician/installations ;;
+    *) echo "ERROR: unsupported installation owner: $owner" >&2; return 1 ;;
+  esac
+  if count="$(gh api "$endpoint" --paginate --slurp --jq "[.[].installations[]? | select(.app_id == 1561 and .account.login == \"$owner\")] | length" 2>/dev/null)" && [[ "$count" =~ ^[0-9]+$ ]]; then
     printf '%s\n' "$count"
     return 0
   fi
@@ -75,7 +81,7 @@ check_probot_installed() {
     printf '1\n'
     return 0
   fi
-  echo "ERROR: unable to query orgs/metadatastician/installations (requires admin:org scope)" >&2
+  echo "ERROR: unable to query $endpoint for $owner (requires owner access)" >&2
   return 1
 }
 
@@ -86,6 +92,9 @@ A1_PENDING=0
 A5_PENDING=0
 A2_PENDING=0
 A3_PENDING=0
+# General registrations remain blocked (A6/D67); this script does not resolve
+# them. Clear this pending item only after their resolution is verified.
+A6_PENDING=1
 D332_PENDING=0
 
 # ---------------------------------------------------------------------------
@@ -526,18 +535,22 @@ D332_SETTINGS_REPOS=(
 )
 
 echo "  D332 .github/settings.yml targets: ${#D332_SETTINGS_REPOS[@]}"
-probot_installed="$(check_probot_installed)"
-if [ "$probot_installed" -gt 0 ]; then
-  echo "  NOTE: Probot Settings (app_id 1561, installation 145157322) is still installed ($probot_installed installation)."
-  echo "  Per D332 ('Uninstall the Probot Settings app, then delete .github/settings.yml across the estate'),"
-  echo "  uninstall https://github.com/settings/installations/145157322 first, then re-run this script."
-  D332_PENDING="${#D332_SETTINGS_REPOS[@]}"
-else
-  echo "  Probot Settings (app_id 1561) confirmed uninstalled — retiring .github/settings.yml across ${#D332_SETTINGS_REPOS[@]} repos..."
-  d332_branch="chore/d332-retire-settings-yml"
-  d332_title="chore(governance): delete .github/settings.yml after Probot Settings uninstall (D332, standards#1234)"
-  d332_body="Deletes \`.github/settings.yml\` now that the Probot Settings GitHub App (\`1561\`) is uninstalled; repository and organisation rulesets are the sole settings authority per owner ruling **D332** (\`hyperpolymath/standards#1234\`)."
+d332_branch="chore/d332-retire-settings-yml"
+d332_title="chore(governance): delete .github/settings.yml after Probot Settings uninstall (D332, standards#1234)"
+d332_body="Deletes \`.github/settings.yml\` now that the Probot Settings GitHub App (\`1561\`) is uninstalled; repository and organisation rulesets are the sole settings authority per owner ruling **D332** (\`hyperpolymath/standards#1234\`)."
+for owner in hyperpolymath metadatastician; do
+  probot_installed="$(check_probot_installed "$owner")"
+  if [ "$probot_installed" -gt 0 ]; then
+    echo "  $owner: Probot Settings (app_id 1561) is still installed or unverified; uninstall it before settings cleanup (D332)."
+  else
+    echo "  $owner: Probot Settings (app_id 1561) confirmed uninstalled — retiring .github/settings.yml..."
+  fi
   for r in "${D332_SETTINGS_REPOS[@]}"; do
+    [ "${r%%/*}" = "$owner" ] || continue
+    if [ "$probot_installed" -gt 0 ]; then
+      D332_PENDING=$((D332_PENDING + 1))
+      continue
+    fi
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "  [dry-run] D332 retire .github/settings.yml: $r"
       D332_PENDING=$((D332_PENDING + 1))
@@ -564,7 +577,7 @@ else
       )
     fi
   done
-fi
+done
 
 # ---------------------------------------------------------------------------
 # Section 6 — Gated close-out comments on #306 and #1234
@@ -588,22 +601,41 @@ close_if_open() {
   fi
 }
 
-TOTAL_PENDING=$((A1_PENDING + A5_PENDING + A2_PENDING + A3_PENDING + D332_PENDING))
-echo "  Pending convergence items: total=$TOTAL_PENDING (A1=$A1_PENDING, A5=$A5_PENDING, A2=$A2_PENDING, A3=$A3_PENDING, D332=$D332_PENDING)"
+# D329 requires deletion of the explore fork, not just its Pages workflow.
+# Only an explicit HTTP 404 counts as absence; query failures stay pending.
+if explore_response="$(gh api --include repos/hyperpolymath/explore 2>/dev/null)"; then
+  echo "  D329: hyperpolymath/explore still exists."
+  A3_PENDING=$((A3_PENDING + 1))
+elif printf '%s\n' "$explore_response" | grep -Eq '^HTTP/[0-9.]+ 404([[:space:]]|$)'; then
+  echo "  D329: hyperpolymath/explore is absent."
+else
+  echo "  D329: unable to verify deletion of hyperpolymath/explore."
+  A3_PENDING=$((A3_PENDING + 1))
+fi
+
+# D341 requires all three standards Pages workflows to be absent on the
+# default branch. A failed contents query stops closure under set -e.
+d341_pending="$(gh api "repos/$REPO/contents/.github/workflows" --jq '[.[] | select(.name == "casket-pages.yml" or .name == "pages-archive.yml" or .name == "pages.yml")] | length')"
+A3_PENDING=$((A3_PENDING + d341_pending))
+echo "  D341: $d341_pending standards Pages workflow(s) remain."
+
+TOTAL_PENDING=$((A1_PENDING + A5_PENDING + A2_PENDING + A3_PENDING + A6_PENDING + D332_PENDING))
+echo "  Pending convergence items: total=$TOTAL_PENDING (A1=$A1_PENDING, A5=$A5_PENDING, A2=$A2_PENDING, A3=$A3_PENDING, A6=$A6_PENDING, D332=$D332_PENDING)"
 
 if [ "$A3_PENDING" -eq 0 ]; then
   close_if_open 306 "Resolved under **D24** (**#1234 A3**). All 48 repositories in the #306 cohort have been classified in \`$REPORT_REL\` and converged:
 - **1 real interactive website (\`KEEP\` — Pages enabled & \`www/public/\` published):** \`metadatastician/knot-knot\` (\`www/public/knot-lab/index.html\`, 31,990-byte Three.js 3D knot laboratory).
 - **33 docs-only Pages workflows on Pages-disabled repos (\`DELETE\` workflow merged; docs go to BerryWiki per D295).**
 - **3 repositories carrying banned \`jekyll*.yml\` workflows (\`DELETE\` workflow / fork).**
-- **1 repository (\`hyperpolymath/standards\`)** tracked under D341.
+- **D329:** \`hyperpolymath/explore\` confirmed absent.
+- **D341:** All 3 Pages workflows (\`casket-pages.yml\`, \`pages-archive.yml\`, \`pages.yml\`) confirmed absent from \`hyperpolymath/standards\`.
 - **10 repositories** already retired in the 2026-05-30 sweep and \`jtv-lang#100\`."
 else
-  echo "  #306 kept open until all A3 workflow deletions and knot-knot Pages publication merge ($A3_PENDING pending)."
+  echo "  #306 kept open until all A3 workflow deletions, knot-knot Pages publication, D329, and D341 converge ($A3_PENDING pending)."
 fi
 
 if [ "$TOTAL_PENDING" -eq 0 ]; then
-  close_if_open 1234 "All items on **#1234** (**B / D304**, **B / D332**, and execution queue **A1–A7**) are verified converged and recorded in \`$REPORT_REL\` and \`scripts/triage-2026-10-23-issue-1234-apply.sh\`:
+  close_if_open 1234 "Execution results for **#1234** (**B / D304**, **B / D332**, and execution queue **A1–A7**) are recorded in \`$REPORT_REL\` and \`scripts/triage-2026-10-23-issue-1234-apply.sh\`. A6 General registrations remain blocked; the local check passed:
 - **B / D304:** Ruled in comment 2 (Cloudflare R2 + client-side \`age\` encryption); implemented in \`.github/workflows/mirror-reusable.yml\` (\`mirror-r2-bundle\`), wired in \`.github/workflows/mirror.yml\`, and documented in \`docs/MIRROR-HOST-VERIFICATION.adoc\`.
 - **B / D332:** Ruled in comment 2 (Probot Settings \`1561\` confirmed uninstalled and \`.github/settings.yml\` deleted across the 95 active repos).
 - **A1 (D16):** Full ruleset \`bypass_actors\` census complete (\`0\` in \`metadatastician\`, \`10\` in \`hyperpolymath\`: 4 active, 6 disabled) and converged in Section 1.
@@ -611,10 +643,10 @@ if [ "$TOTAL_PENDING" -eq 0 ]; then
 - **A3 (D24):** Full 48-repo Pages classification complete and converged (\`1\` KEEP real site \`metadatastician/knot-knot\`, \`33\` DELETE docs-only workflows, \`3\` banned \`jekyll*.yml\`, \`1\` \`standards\`, \`10\` already retired).
 - **A4 (D97):** Full 357-repo transfer-candidate cost census across 6 tiers + follow-up ruling row **D355** posted in \`$REPORT_REL\`.
 - **A5 (D298):** Precondition blast radius verified (\`0\` canon failures across 29 bypassed pushes; \`7\` secret-scanning failures on repos without secret scanning); \`?dry-run=true\` + live \`PUT\` reverting \`23868655\` and \`23868851\` to canon (\`deletion\` + \`non_fast_forward\`, \`bypass_actors: []\`) verified in Section 2.
-- **A6 (D67):** Local \`RegistryCI.jl\` \`AutoMerge\` check complete for all 9 Marid Tier-1 packages (\`16/16\` pass at tag \`fd139f763a306a7e2eca60d96ea1a1a9f77c1e71\`), with all 4 General registration blockers and verbatim guideline texts recorded in \`$REPORT_REL\`.
+- **A6 (D67) — pending:** Local \`RegistryCI.jl\` \`AutoMerge\` check passed for all 9 Marid Tier-1 packages (\`16/16\` at tag \`fd139f763a306a7e2eca60d96ea1a1a9f77c1e71\`); General registrations remain blocked, with all 4 blockers and verbatim guideline texts recorded in \`$REPORT_REL\`.
 - **A7 (D330):** Closed in comment 2 (no GitLab copy of \`canonical-ums\` exists)."
 else
-  echo "  #1234 kept open until all pending convergence items finish (total=$TOTAL_PENDING: A1=$A1_PENDING, A5=$A5_PENDING, A2=$A2_PENDING, A3=$A3_PENDING, D332=$D332_PENDING)."
+  echo "  #1234 kept open until all pending convergence items finish (total=$TOTAL_PENDING: A1=$A1_PENDING, A5=$A5_PENDING, A2=$A2_PENDING, A3=$A3_PENDING, A6=$A6_PENDING, D332=$D332_PENDING)."
 fi
 
 echo ""
