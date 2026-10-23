@@ -1,0 +1,1045 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Issue #1234 Close-Out Report — Rulings D304/D330/D332, Execution Queue A1–A7, and Decision Sheet D335–D355
+:toc: left
+:toclevels: 3
+:icons: font
+:sectnums:
+
+*Issue:* https://github.com/hyperpolymath/standards/issues/1234[`hyperpolymath/standards#1234`] ("Owner decision sheet — open rows (2) + execution queue (7); D1–D333 ruled in #787") +
+*Predecessor:* https://github.com/hyperpolymath/standards/issues/787[`hyperpolymath/standards#787`] +
+*Related tracker:* https://github.com/hyperpolymath/standards/issues/306[`hyperpolymath/standards#306`] (absorbed into A3 / D24) +
+*Date:* 2026-10-23 +
+*Execution script:* `scripts/triage-2026-10-23-issue-1234-apply.sh` (tested by `scripts/tests/triage-2026-10-23-issue-1234-apply-test.sh`)
+
+'''
+
+== Summary of #1234 Items and Completion Status
+
+[cols="1,2,2,4",options="header"]
+|===
+| Item | Ruling | Status | Deliverable / Verification
+
+| *B / D304*
+| Encrypted mirror bundles (`2026-10-14` comment 2)
+| *Ruled & Implemented in `standards`*
+| Ruled: *"Cloudflare R2 bucket with client-side age encryption."* Implemented as optional `mirror-r2-bundle` job in `.github/workflows/mirror-reusable.yml` (`vars.R2_BUNDLE_MIRROR_ENABLED == 'true'`), documented in `docs/MIRROR-HOST-VERIFICATION.adoc`, and verified by `scripts/tests/science-ci-security-test.rb`.
+
+| *B / D332*
+| `.github/settings.yml` vs `check-settings-drift.sh` (`2026-10-14` comment 2)
+| *Ruled & Scripted (`95` active repos)*
+| Ruled: *"Uninstall the Probot Settings app, then delete `.github/settings.yml` across the estate."* Full 95-repo census (64 `hyperpolymath`, 31 `metadatastician`) recorded below and automated in `scripts/triage-2026-10-23-issue-1234-apply.sh` (checks that app `1561` installation `145157322` is uninstalled before deleting `.github/settings.yml`).
+
+| *A1 (D16)*
+| Remove ruleset bypass for apps `1561`, `946600`, `85455`
+| *Census Complete (`10` rulesets in `hyperpolymath`, `0` in `metadatastician`) & Scripted*
+| Full census across all 357 `hyperpolymath` repos, 42 `metadatastician` repos, and 8 `metadatastician` org rulesets: `metadatastician` has **0** occurrences; `hyperpolymath` has **10** repo rulesets (4 active, 6 disabled). Live-read + `PUT` convergence automated in `scripts/triage-2026-10-23-issue-1234-apply.sh`.
+
+| *A2 (D14)*
+| ClusterFuzzLite `cflite_*` census & stub removal
+| *Census Complete (`24` repos: `10` KEEP, `14` DELETE) & Scripted*
+| Complete 24-repo inspection of `.clusterfuzzlite/`, `fuzz/`, and `fuzz/fuzz_targets/*.rs`: **10 KEEP** (real Rust/Zig fuzz targets; `echidna` keeps 3 real targets and drops stub `fuzz_input.rs`), **14 DELETE** (template stubs or missing `.clusterfuzzlite`/`fuzz` dirs). Automated with `scripts/prune-stale.sh` lockfile pruning in `scripts/triage-2026-10-23-issue-1234-apply.sh`.
+
+| *A3 (D24)*
+| Pages classification across the 48 `#306` repos
+| *Classification Complete (`48` repos: `1` KEEP real site, `33` DELETE docs-only on Pages-disabled, `3` banned `jekyll*.yml`, `1` `standards`, `10` already retired)*
+| Per-repo classification table below. **Real-site list for Jonathan to enable Pages:** `metadatastician/knot-knot` (`www/public/knot-lab/index.html`, 32 KB interactive Three.js 3D knot laboratory). Automated deletion of the 33 docs-only workflows + 2 active `jekyll*.yml` workflows in `scripts/triage-2026-10-23-issue-1234-apply.sh`.
+
+| *A4 (D97)*
+| Transfer candidates census with per-repo cost + ruling row
+| *Census Complete (`357` active `hyperpolymath` repos across 6 cost tiers) + Ruling Row `D355`*
+| Complete transfer cost table covering package-registry URLs (`julia-professional-registry`, `crates.io`, `hex.pm`, `npmjs.com`), archived/deleted status, and CI/CD reusable-workflow URL consumers, followed by ruling row `D355`.
+
+| *A5 (D298)*
+| Revert `metadatastician` `Branch-Floor` (`23868655`) & `Tag-Floor` (`23868851`) to canon
+| *Blast-Radius Verified + `?dry-run=true` & Apply Payloads Ready*
+| Precondition blast radius verified (`#787` comment `6021647985`: 29 bypassed pushes; 0 canon-rule failures; 7 secret-scanning failures on repos without secret scanning; 2 linear-history failures). Exact `PUT /orgs/metadatastician/rulesets/{23868655,23868851}?dry-run=true` and apply payloads scripted in `scripts/triage-2026-10-23-issue-1234-apply.sh`.
+
+| *A6 (D67)*
+| 9 Marid Tier-1 packages local `RegistryCI.jl` `AutoMerge` check & General blockers
+| *Local `AutoMerge` Check Complete (`16/16` pass at `v0.1.0` tag) + `4` Blockers Documented with Verbatim Guideline Text*
+| All 9 packages pass every programmatic `RegistryCI.jl` `AutoMerge` `NewPackage` check at tag commit `fd139f763a306a7e2eca60d96ea1a1a9f77c1e71` against `JuliaRegistries/General` (14,615 packages). Four blockers preventing immediate General registration merge are documented below with verbatim `RegistryCI.jl` guideline text and remediation.
+
+| *A7 (D330)*
+| `canonical-ums` GitLab divergence
+| *Closed (`2026-10-14` comment 2)*
+| Jonathan confirmed in `#1234` comment 2 (`IC_kwDOQozEHc8AAAABb41I1g`): *"Closed — no GitLab copy of `canonical-ums` exists."*
+|===
+
+'''
+
+== A1 (D16): Ruleset Bypass Census & Removal (`1561`, `946600`, `85455`)
+
+*Ruling D16 (`2026-10-03`):* Remove ruleset bypass for GitHub App `1561` (Probot Settings) and GitHub App `946600` (uninstalled integration; alongside `85455` Renovate per D15) wherever they still appear across every `hyperpolymath` repo ruleset and every `metadatastician` org/repo ruleset.
+
+=== Census Methodology & Totals (2026-10-23)
+
+* Enumerated all 357 `hyperpolymath` repositories (carrying 356 repository rulesets) and all 42 `metadatastician` repositories (carrying 6 repository rulesets + 8 organisation rulesets inherited across `metadatastician`).
+* Because GraphQL `rulesets.nodes.bypassActors` resolves uninstalled `Integration` actors as `actor: null`, every ruleset with any `Integration` or unresolved `bypassActors` entry was fetched individually via REST `GET /repos/{owner}/{repo}/rulesets/{ruleset_id}` to inspect raw `actor_id` and `actor_type`.
+* **`metadatastician` organisation rulesets (8 rulesets):** **0 occurrences** of `1561`, `946600`, or `85455`.
+** `18225024` (`EstateBranching`, active): `OrganizationAdmin (1)`, `RepositoryRole (5)`, `Integration (262318)`. (Note: `946600` was already removed from `18225024`.)
+** `18225677` (`EstateTagging`, active): `OrganizationAdmin (1)`, `RepositoryRole (5)`, `Integration (262318)`.
+** `23868655` (`Branch-Floor`, active): `bypass_actors: []`.
+** `23868851` (`Tag-Floor`, active): `bypass_actors: []`.
+** `23961775` (`Require-Signed-Commits`, active): `bypass_actors: []`.
+** `24256157` (`Require-Linear-History`, active): `bypass_actors: []`.
+** `24308338` (`Secret-Scan-Floor`, active): `bypass_actors: []`.
+** `24587777` (`Lock-Floor`, active): `bypass_actors: []`.
+* **`metadatastician` repository rulesets (6 rulesets across 42 repos):** **0 occurrences** of `1561`, `946600`, or `85455`.
+* **`hyperpolymath` repository rulesets (356 rulesets across 357 repos):** **10 rulesets across 10 repositories** carry `1561`, `946600`, and/or `85455` (**4 active**, **6 disabled**).
+
+=== `hyperpolymath` Rulesets Carrying `1561`, `946600`, or `85455`
+
+[cols="2,1,1,1,3,2",options="header"]
+|===
+| Repository | Ruleset ID | Name | Enforcement | Current `bypass_actors` (`actor_type:actor_id`) | Target Actors to Remove
+
+| `hyperpolymath/the-metadatastician`
+| `15402978`
+| `Base`
+| *active*
+| `RepositoryRole:5` (always), `Integration:1561` (always), `Integration:85455` (pull_request), `Integration:29110` (pull_request), `Integration:946600` (always)
+| `1561`, `85455`, `946600` (retain `RepositoryRole:5`, `Integration:29110`)
+
+| `hyperpolymath/deed-ecosystem`
+| `18110196`
+| `Immutable-Tags`
+| *active*
+| `RepositoryRole:5` (always), `Integration:1561` (always), `Integration:85455` (pull_request), `Integration:29110` (pull_request), `Integration:946600` (always)
+| `1561`, `85455`, `946600` (retain `RepositoryRole:5`, `Integration:29110`)
+
+| `hyperpolymath/network-outpost`
+| `18874804`
+| `Base`
+| *active*
+| `RepositoryRole:5` (always), `Integration:29110` (pull_request), `Integration:946600` (always)
+| `946600` (retain `RepositoryRole:5`, `Integration:29110`)
+
+| `hyperpolymath/jtv-halting-islands-ct`
+| `18875919`
+| `Base`
+| *active*
+| `RepositoryRole:5` (always), `Integration:29110` (pull_request), `Integration:946600` (always)
+| `946600` (retain `RepositoryRole:5`, `Integration:29110`)
+
+| `hyperpolymath/eclexia`
+| `14968573`
+| `Base`
+| disabled
+| `RepositoryRole:5`, `Integration:1561`, `Integration:85455`, `Integration:29110`, `Integration:946600`
+| `1561`, `85455`, `946600` (or delete disabled ruleset per D17)
+
+| `hyperpolymath/otpiser`
+| `14968592`
+| `Base`
+| disabled
+| `RepositoryRole:5`, `Integration:1561`, `Integration:85455`, `Integration:29110`, `Integration:946600`
+| `1561`, `85455`, `946600` (or delete disabled ruleset per D17)
+
+| `hyperpolymath/verisimiser`
+| `14968613`
+| `Base`
+| disabled
+| `RepositoryRole:5`, `Integration:1561`, `Integration:85455`, `Integration:29110`, `Integration:946600`
+| `1561`, `85455`, `946600` (or delete disabled ruleset per D17)
+
+| `hyperpolymath/typedqliser`
+| `14968721`
+| `Base`
+| disabled
+| `RepositoryRole:5`, `Integration:1561`, `Integration:85455`, `Integration:29110`, `Integration:946600`
+| `1561`, `85455`, `946600` (or delete disabled ruleset per D17)
+
+| `hyperpolymath/cafescripto`
+| `18110652`
+| `Base`
+| disabled
+| `RepositoryRole:5`, `Integration:85455`, `Integration:29110`, `Integration:946600`
+| `85455`, `946600` (or delete disabled ruleset per D17)
+
+| `hyperpolymath/lucidscript`
+| `18110675`
+| `Base`
+| disabled
+| `RepositoryRole:5`, `Integration:1561`, `Integration:85455`, `Integration:29110`, `Integration:946600`
+| `1561`, `85455`, `946600` (or delete disabled ruleset per D17)
+|===
+
+'''
+
+== A2 (D14): ClusterFuzzLite (`cflite_*`) Census & Verdicts
+
+*Ruling D14 (`2026-10-03`):* Keep ClusterFuzzLite (`cflite_*`) only on Rust/Zig repositories with real fuzz targets; delete where it runs template stubs or lacks `.clusterfuzzlite/` / `fuzz/`.
+
+=== Complete 24-Repository Census (2026-10-23)
+
+All 24 repositories carrying `.github/workflows/cflite_*.yml` or `.github/workflows/clusterfuzzlite.yml` across `hyperpolymath` and `metadatastician` were inspected at `HEAD:` for `.clusterfuzzlite/project.yaml`, `.clusterfuzzlite/Dockerfile`, `.clusterfuzzlite/build.sh`, and every file under `fuzz/fuzz_targets/`.
+
+[cols="2,1,2,3,1",options="header"]
+|===
+| Repository | Primary Language | Workflow File | Fuzz Target Evidence (`fuzz/fuzz_targets/` & `.clusterfuzzlite/`) | Verdict
+
+| `hyperpolymath/bunsenite`
+| Zig / Rust
+| `cflite_pr.yml`
+| 6 real `libfuzzer_sys::fuzz_target!` harnesses (`fuzz_lexer.rs`, `fuzz_parser.rs`, `fuzz_stream_loader.rs`, `fuzz_validator.rs`, `fuzz_value_types.rs`, `parser_fuzz.rs`) testing `bunsenite::*`.
+| *KEEP*
+
+| `hyperpolymath/dicti0nary-attack`
+| Rust
+| `cflite_pr.yml`
+| Real `fuzz/fuzz_targets/fuzz_main.rs` testing `dicti0nary_attack::crack_sha256` and `Dictionary::from_reader`.
+| *KEEP*
+
+| `hyperpolymath/echidna`
+| Rust
+| `cflite_pr.yml`
+| 3 real targets (`fuzz_aspect_tagging.rs`, `fuzz_concept_Arena.rs`, `fuzz_dispatch.rs`) + 1 leftover template stub (`fuzz_input.rs`: `let _ = std::str::from_utf8(data);`).
+| *KEEP* (delete stub `fuzz_input.rs` only)
+
+| `hyperpolymath/echidnabot`
+| Rust
+| `cflite_pr.yml`
+| 2 real targets (`fuzz_webhook_payload.rs`, `fuzz_verify_command.rs`) testing `echidnabot::webhook::*`.
+| *KEEP*
+
+| `hyperpolymath/eclexia`
+| Rust
+| `cflite_pr.yml`
+| 5 real targets (`fuzz_lexer.rs`, `fuzz_parser.rs`, `fuzz_typechecker.rs`, `fuzz_resource_checker.rs`, `fuzz_ dimensional.rs`) testing `eclexia_*` crates.
+| *KEEP*
+
+| `hyperpolymath/jtv-lang`
+| Rust
+| `cflite_pr.yml`
+| Real `fuzz/fuzz_targets/fuzz_main.rs` testing `viper_core::lexer::tokenize` and `viper_core::parser::parse`.
+| *KEEP*
+
+| `hyperpolymath/proven`
+| Idris 2 / Zig / Rust
+| `cflite_pr.yml`
+| Real `fuzz/fuzz_targets/fuzz_Target.rs` testing `proven` safe-math, bounded integers, UTF-8 validation, and hex decoding.
+| *KEEP*
+
+| `hyperpolymath/reposystem`
+| Rust
+| `cflite_pr.yml`
+| 3 real targets (`aspect_tag_deser.rs`, `forges_config_parse.rs`, `railway_graph_load.rs`) testing `reposystem::*`.
+| *KEEP*
+
+| `hyperpolymath/valence-shell`
+| Rust
+| `cflite_pr.yml`
+| Real `fuzz/fuzz_targets/fuzz_parser.rs` testing `valence_shell::parser::parse_command` and path traversal invariants.
+| *KEEP*
+
+| `hyperpolymath/verisimdb`
+| Rust
+| `cflite_pr.yml`
+| 4 real targets (`fuzz_drift_deserialize.rs`, `fuzz_hexad_validate.rs`, `fuzz_octad_create.rs`, `fuzz_vql_parser.rs`) testing `verisimdb_*` crates.
+| *KEEP*
+
+| `hyperpolymath/absolute-zero`
+| Julia
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`let _ = std::str::from_utf8(data);` with no crate under test).
+| *DELETE*
+
+| `hyperpolymath/betlang`
+| Rust
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`let _ = std::str::from_utf8(data);`, `let _ = data.iter().fold(0u8, \|acc, &b\| acc.wrapping_add(b));`).
+| *DELETE*
+
+| `hyperpolymath/conative-gating`
+| Ada / Rust
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`std::str::from_utf8` + `wrapping_add` placeholder).
+| *DELETE*
+
+| `hyperpolymath/conflow`
+| Rust / Cue
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`std::str::from_utf8` + `wrapping_add` placeholder).
+| *DELETE*
+
+| `hyperpolymath/docmatrix`
+| Rust
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`std::str::from_utf8` + `wrapping_add` placeholder).
+| *DELETE*
+
+| `hyperpolymath/formatrix-docs`
+| Rust
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`std::str::from_utf8` + `wrapping_add` placeholder).
+| *DELETE*
+
+| `hyperpolymath/heterogenous-mobile-computing`
+| Ada / Rust
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`std::str::from_utf8` + `wrapping_add` placeholder).
+| *DELETE*
+
+| `hyperpolymath/hypatia`
+| Elixir
+| `clusterfuzzlite.yml`
+| Neither `.clusterfuzzlite/` nor `fuzz/` exists in the repository; workflow fails on every trigger.
+| *DELETE*
+
+| `hyperpolymath/my-lang`
+| ReScript / Rust
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`std::str::from_utf8` + `wrapping_add` placeholder).
+| *DELETE*
+
+| `hyperpolymath/neurophone`
+| Ada / Rust
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`std::str::from_utf8` + `wrapping_add` placeholder).
+| *DELETE*
+
+| `hyperpolymath/rpa-elysium`
+| Rust
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`std::str::from_utf8` + `wrapping_add` placeholder).
+| *DELETE*
+
+| `hyperpolymath/ubicity`
+| Just / Shell
+| `cflite_pr.yml`
+| Neither `.clusterfuzzlite/` nor `fuzz/` exists in the repository.
+| *DELETE*
+
+| `hyperpolymath/wokelang`
+| Rust
+| `cflite_batch.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_main.rs` (`let _ = std::str::from_utf8(data);`).
+| *DELETE*
+
+| `hyperpolymath/zerostep`
+| Elixir / Ada
+| `cflite_pr.yml`
+| Template stub `fuzz/fuzz_targets/fuzz_input.rs` (`std::str::from_utf8` + `wrapping_add` placeholder).
+| *DELETE*
+|===
+
+'''
+
+== A3 (D24): GitHub Pages Classification Table Across the 48 `#306` Repositories
+
+*Ruling D24 (`2026-10-13`, closes `#306`):* Keep GitHub Pages only where a repository publishes a real website; delete docs-only Pages workflows (documentation goes to in-repo BerryWiki per D295); hand the real-site list to Jonathan to enable Pages in repository settings.
+
+=== Cohort Accounting (`48` Repositories in `#306`)
+
+* **34 repositories** currently have `has_pages == false` while carrying `.github/workflows/casket-pages.yml` (14) or `.github/workflows/pages.yml` (20) — causing `actions/configure-pages` (`Setup Pages`) to fail with HTTP 404 on every push:
+** **1 KEEP (real interactive web application — Jonathan to enable Pages):** `metadatastician/knot-knot` (`www/public/knot-lab/index.html`, 31,990-byte interactive Three.js 3D knot mechanics and quandle/skein/Conway web laboratory).
+** **33 DELETE (docs-only / README-stub workflows — docs go to BerryWiki per D295):** 30 in `hyperpolymath`, 3 in `metadatastician`.
+* **3 repositories** (`has_pages == true`) still carry banned `jekyll*.yml` workflows:
+** `hyperpolymath/candy-crash` (`.github/workflows/jekyll-gh-pages.yml` alongside `casket-pages.yml` — **DELETE `jekyll-gh-pages.yml`**).
+** `metadatastician/_pathroot` (`.github/workflows/jekyll-gh-pages.yml` and `.github/workflows/jekyll.yml` alongside `pages.yml` — **DELETE both `jekyll*.yml`**).
+** `hyperpolymath/explore` (`.github/workflows/jekyll_build.yml` — upstream fork of `github/explore`, slated for repository deletion per **D329**).
+* **1 repository** (`hyperpolymath/standards`, `has_pages == true`): carries 3 conflicting docs-only Pages workflows (`casket-pages.yml`, `pages-archive.yml`, `pages.yml`) tracked under P1.6 / P6.1 / **D341**.
+* **10 repositories** from the original `#306` 48-repo cohort already had their unused `jekyll-gh-pages.yml` retired (`dicti0nary-attack#29`, `grim-repo`, `ipv6-only`, `network-ambulance`, `nextgen-language-evangeliser`, `polysafe-gitfixer`, `project-wharf`, `vcs-ircd`, `verisimdb` on 2026-05-30; `jtv-lang#100` on 2026-09-18).
+
+=== Real-Site List for Jonathan to Enable GitHub Pages (1 Repository)
+
+[cols="2,2,4",options="header"]
+|===
+| Repository | Required Owner Action | Site Evidence
+
+| `metadatastician/knot-knot`
+| Enable GitHub Pages in *Settings -> Pages -> Build and deployment -> Source: GitHub Actions* (or `gh api -X POST repos/metadatastician/knot-knot/pages -f build_type=workflow`)
+| Contains `www/public/knot-lab/index.html` (31,990 bytes): a standalone interactive Three.js WebGL 3D knot mechanics (`sigma = F/A + E*d/(2R)`, capstan friction, fracture at UTS) and knot-theory (quandle, skein, Conway tangle) web laboratory.
+|===
+
+=== Complete 48-Repository Classification Table
+
+[cols="2,1,2,3,2",options="header"]
+|===
+| Repository | `has_pages` | Workflow File(s) | Site / Content Evidence | D24 Verdict
+
+| `metadatastician/knot-knot`
+| `false`
+| `pages.yml`
+| Real web app at `www/public/knot-lab/index.html` (31,990 B Three.js 3D knot laboratory).
+| *KEEP* (update `pages.yml` to publish `www/public/` + enable Pages)
+
+| `hyperpolymath/AcceleratorGate.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md` linking to README/docs.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/BowtieRisk.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`; Julia docs in `docs/make.jl`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/Causals.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`; Julia docs in `docs/make.jl`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/Cladistics.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/EpistemicTypes.jl`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/LowLevel.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/MacroPower.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/PolyglotFormalisms.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/Protoctist.jl`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/QuantumCircuit.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/ResidualEvidenceTypes.jl`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/SMTLib.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/ShellIntegration.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/SiliconCore.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/SoftwareSovereign.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/ViableSystems.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/ZeroProb.jl`
+| `false`
+| `casket-pages.yml`
+| No `site/` dir; generates 4-line stub `index.md`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/autoformal-fidelity`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/czech-file-knife`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/ensaid-spec`
+| `false`
+| `pages.yml`
+| `estate-ruby-exit.mjs` generated `site.json` listing `docs/*.adoc` only (`www/public` absent).
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/heron-polyfeed-reader`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/lol`
+| `false`
+| `pages.yml`
+| `estate-ruby-exit.mjs` generated `site.json` listing `docs/*.adoc` only (`www/` absent).
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/resource-algebra`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/sholes`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/unified-api-adapter`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/xmlpull-zig`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/zig-boringtls`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/zig-dnssec`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/zig-icu-collation`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/zig-unorm`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `metadatastician/ZeroInflatedCounts.jl`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `metadatastician/affinescript-libraries`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); no `www/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `metadatastician/odraz`
+| `false`
+| `pages.yml`
+| `rsr-template-repo` stub (`cat README.adoc > site/index.md`); boilerplate `www/public/`.
+| *DELETE workflow* (docs -> BerryWiki)
+
+| `hyperpolymath/candy-crash`
+| `true`
+| `jekyll-gh-pages.yml` (+ `casket-pages.yml`)
+| Banned Jekyll workflow duplicating `casket-pages.yml`.
+| *DELETE `jekyll-gh-pages.yml`*
+
+| `metadatastician/_pathroot`
+| `true`
+| `jekyll-gh-pages.yml`, `jekyll.yml` (+ `pages.yml`)
+| Two banned Jekyll workflows duplicating `pages.yml`.
+| *DELETE `jekyll-gh-pages.yml` & `jekyll.yml`*
+
+| `hyperpolymath/explore`
+| `true`
+| `jekyll_build.yml`
+| Upstream fork of `github/explore`.
+| *DELETE repo* (ruled under D329)
+
+| `hyperpolymath/standards`
+| `true`
+| `casket-pages.yml`, `pages-archive.yml`, `pages.yml`
+| Three Pages workflows sharing concurrency group `pages`; all build README stubs.
+| *DELETE all 3* (tracked under P1.6 / P6.1 / D341)
+
+| `hyperpolymath/dicti0nary-attack`
+| `false`
+| `jekyll-gh-pages.yml` (deleted `#29`)
+| Retired in 2026-05-30 `#306` sweep (`8d56ada7`).
+| *DONE* (`2026-05-30`)
+
+| `hyperpolymath/grim-repo`
+| `false`
+| `jekyll-gh-pages.yml` (deleted)
+| Retired in 2026-05-30 `#306` sweep (`94617b35`).
+| *DONE* (`2026-05-30`)
+
+| `hyperpolymath/ipv6-only`
+| `false`
+| `jekyll-gh-pages.yml` (deleted)
+| Retired in 2026-05-30 `#306` sweep (`ab77b4d0`).
+| *DONE* (`2026-05-30`)
+
+| `hyperpolymath/jtv-lang`
+| `true`
+| `jekyll-gh-pages.yml` (deleted `#100`)
+| Origin served by Cloudflare Worker (`jtv-lang.dev`); retired in `#100` (`2026-09-18`).
+| *DONE* (`2026-09-18`)
+
+| `hyperpolymath/network-ambulance`
+| `false`
+| `jekyll-gh-pages.yml` (deleted)
+| Retired in 2026-05-30 `#306` sweep (`ebe567db`).
+| *DONE* (`2026-05-30`)
+
+| `hyperpolymath/nextgen-language-evangeliser`
+| `false`
+| `jekyll-gh-pages.yml` (deleted)
+| Retired in 2026-05-30 `#306` sweep (`c1411d1a`).
+| *DONE* (`2026-05-30`)
+
+| `hyperpolymath/polysafe-gitfixer`
+| `false`
+| `jekyll-gh-pages.yml` (deleted)
+| Retired in 2026-05-30 `#306` sweep (`4a94ff05`).
+| *DONE* (`2026-05-30`)
+
+| `hyperpolymath/project-wharf`
+| `false`
+| `jekyll-gh-pages.yml` (deleted)
+| Retired in 2026-05-30 `#306` sweep (`807c29e0`).
+| *DONE* (`2026-05-30`)
+
+| `hyperpolymath/vcs-ircd`
+| `false`
+| `jekyll-gh-pages.yml` (deleted)
+| Retired in 2026-05-30 `#306` sweep (`34e49826`).
+| *DONE* (`2026-05-30`)
+
+| `hyperpolymath/verisimdb`
+| `false`
+| `jekyll-gh-pages.yml` (deleted)
+| Retired in 2026-05-30 `#306` sweep (`a2ff8fe9`).
+| *DONE* (`2026-05-30`)
+|===
+
+'''
+
+== A4 (D97): Transfer Candidates Census with Per-Repo Cost & Ruling Row
+
+*Ruling D97 (`2026-10-03`):* *"Transfer is a maybe. Find out what stays and what moves and what cost first."*
+
+=== Estate Population Baseline (Measured 2026-10-23)
+
+* **`metadatastician`:** 42 active repositories (0 archived, 0 forks).
+* **`catachresis-colloquium`:** 29 active repositories (D98 teaching/curriculum transfers already completed).
+* **`stuff-of-awe`:** 11 active repositories (D98 `awesome-*` transfers already completed).
+* **Previously archived/fork repos in `hyperpolymath` (`15` repos from the 2026-04-17 audit):** **Already deleted (`HTTP 404`)** (`awesome-Constraint-Programming`, `awesome-elixir`, `beagle-by-example`, `building-a-functional-web-app-with-gleam`, `conative-gating-device`, `fnm`, `git-Private-farm`, `gitlab-radix-backup`, `idris2-pack-db`, `innernet`, `my-music-scrobbler`, `proven-fsm`, `rhodium-minimal`, `winget-pkgs`, `wordpress-Hardened`).
+* **Private vaults/farm in `hyperpolymath` (`3` repos):** `hyperpolymath/dev-notes-vault`, `hyperpolymath/memory-vault`, `hyperpolymath/.git-private-farm` (stay in `hyperpolymath`; `dev-notes-vault` and `memory-vault` are governed by the D50 `Gcrypt-Vault-Guard` exclusion class).
+* **Active public `hyperpolymath` repositories (`357` repos):** **0 archived**, **3 forks** (`explore`, `cargo-zigbuild`, `MetaManifold-WebUI`).
+
+=== Per-Tier Transfer Cost Table Across the 357 Public `hyperpolymath` Repositories
+
+[cols="2,1,2,3,2",options="header"]
+|===
+| Tier / Cohort | Count | Repositories | Package-Registry & Estate URL Consumer Cost | Recommended Disposition
+
+| *Tier 0: GitHub Identity & Org-Profile Bound*
+| `3`
+| `hyperpolymath`, `hyperpolymath.github.io`, `.github`
+| *Hard platform block:* `hyperpolymath/hyperpolymath` is the personal profile README (`owner == repo`); `hyperpolymath/hyperpolymath.github.io` is the user GitHub Pages apex (`https://hyperpolymath.github.io`); `hyperpolymath/.github` collides with `metadatastician/.github` (`HTTP 422 name already exists`) and supplies user-account community health defaults.
+| *STAY in `hyperpolymath` permanently*
+
+| *Tier 1: Forks*
+| `3`
+| `explore` (ruled DELETE in D329), `cargo-zigbuild`, `MetaManifold-WebUI`
+| `explore` is already ruled for deletion under D329. `cargo-zigbuild` and `MetaManifold-WebUI` are upstream forks with no estate package-registry publications.
+| *DELETE `explore` (D329); keep or delete forks in `hyperpolymath`*
+
+| *Tier 2: Estate CI/CD, Governance & Tooling Spine (High Blast Radius)*
+| `12`
+| `standards`, `casket-ssg`, `ddraig-ssg`, `hypatia`, `ijson-jcs`, `panic-attack`, `panic-attack-action`, `pons-asinorum`, `cicd-suite`, `cicd-squabbler`, `actions-lock`, `rsr-template-repo`
+| *High CI/CD consumer cost:* `hyperpolymath/standards` is referenced by `uses: hyperpolymath/standards/.github/workflows/...` and `actions.lock` keys across ~340 repos (and GitHub Actions `actions-allowlist.json` / `lock-selfcheck.sh` match `hyperpolymath/standards`). `casket-ssg` is checked out by `repository: hyperpolymath/casket-ssg` in ~280 Pages workflows. `hypatia`, `ijson-jcs`, `panic-attack`, and `pons-asinorum` are cloned/installed by URL inside `governance-reusable.yml`, `hypatia-scan-reusable.yml`, and `k9-conformance.yml`. `cicd-suite` is called by `main-estate-audit.yml` across ~300 repos. `standards`, `palimpsest-license`, `bunsenite`, and `proven` also have `crates.io`/`npmjs.com` metadata references.
+| *STAY in `hyperpolymath`* (or move only last via a dedicated estate-wide lockfile + reusable-workflow rewrite campaign)
+
+| *Tier 3: Julia Registry & Registered Julia Packages*
+| `43`
+| `julia-professional-registry` (`1`) + `42` `*.jl` package repos (`29` registered in `julia-professional-registry`: `AcceleratorGate.jl`, `Axiology.jl`, `Axiom.jl`, `BowtieRisk.jl`, `Causals.jl`, `Cladistics.jl`, `Cliodynamics.jl`, `Cliometrics.jl`, `EchoTypes.jl`, `Exnovation.jl`, `FirmwareAudit.jl`, `HackenbushGames.jl`, `HardwareResilience.jl`, `InvestigativeJournalism.jl`, `JuliaKids.jl`, `JuliaPackageSpitter.jl`, `KnotTheory.jl`, `LowLevel.jl`, `MacroPower.jl`, `PRComms.jl`, `PolyglotFormalisms.jl`, `PostDisciplinary.jl`, `QuantumCircuit.jl`, `SMTLib.jl`, `ShellIntegration.jl`, `SiliconCore.jl`, `Skein.jl`, `SoftwareSovereign.jl`, `ViableSystems.jl`, `ZeroProb.jl`; plus `13` unregistered `*.jl` repos: `Apodeixis.jl`, `CompositionalCounts.jl`, `CompositionalDA.jl`, `ContrastFamilies.jl`, `CoprocessorRuntime.jl`, `EpistemicTypes.jl`, `ExactCounts.jl`, `ExactTests.jl`, `Hyperpolymath.jl`, `Protoctist.jl`, `ResidualEvidenceTypes.jl`, `TradeUnionism.jl`)
+| *Medium, bounded registry cost (0 General URLs, 30 `julia-professional-registry` `Package.toml` URLs):* None of these 42 packages is registered in `JuliaRegistries/General` (`0` hits in General `Registry.toml`). In `hyperpolymath/julia-professional-registry`, ADR-0003 (`docs/decisions/0003-package-repos-in-metadatastician.adoc`) already decided that Julia package repos move to `metadatastician`. Transferring the 42 `*.jl` repos requires **1 atomic PR** in `julia-professional-registry` updating `repo = "https://github.com/metadatastician/<Pkg>.jl.git"` across the 30 `Package.toml` files (including `ViperPkg` in `jtv-lang`). Keeping `julia-professional-registry` itself in `hyperpolymath` avoids breaking external `Pkg.Registry.add` URLs.
+| *TRANSFER the 42 `*.jl` package repos to `metadatastician` in one wave* + 1 atomic PR to `julia-professional-registry`; *KEEP `julia-professional-registry` in `hyperpolymath`*
+
+| *Tier 4: Multi-Ecosystem / Registry-Published Flagships (`crates.io` / `hex.pm` / `npmjs.com` / Submodule Hubs)*
+| `22`
+| `affinescript`, `ambientops`, `anamnesis`, `blocky-writer`, `boj-server`, `boj-server-mk2`, `bunsenite`, `chapeliser`, `deed-core`, `developer-ecosystem`, `echidna`, `excel-economic-numbers-tool`, `git-scripts`, `gitbot-fleet`, `iseriser`, `jtv-lang`, `k9-ecosystem`, `nextgen-databases`, `odds-and-sods-package-manager`, `palimpsest-license`, `patallm-gallery`, `proven`, `repo-guardian`, `rrecord-verity`, `volumod` (note: `standards` is in Tier 2; `22` distinct non-Tier-2 repos)
+| *Medium package-metadata cost:* `12` repos reference `crates.io/crates/*`, `7` reference `hex.pm/packages/*`, `8` reference `npmjs.com/package/*`, `affinescript` is referenced by `affinescript-verify.yml`, and `jtv-lang` hosts `ViperPkg` (`subdir = "viper-pkg"` in `julia-professional-registry`). GitHub maintains permanent HTTP/Git redirects on repo transfer so existing `cargo`/`hex`/`npm` installs continue working as long as the old `hyperpolymath/<repo>` name is never reused, and `Cargo.toml`/`mix.exs`/`package.json` `repository` URLs update on the next patch release.
+| *DEFER to Wave 2* (transfer per-flagship alongside next release bump, updating `Cargo.toml`/`mix.exs`/`package.json` and `affinescript-verify.yml`)
+
+| *Tier 5: Standalone Active Repositories (Zero External Registry URLs, Zero Estate CI Callers)*
+| `274`
+| All remaining 274 active public `hyperpolymath` repositories (0 archived, 0 forks, 0 `julia-professional-registry` entries, 0 `crates.io`/`hex.pm`/`npmjs.com` publications, 0 incoming `uses:` or `repository:` references from `standards` workflows)
+| *Low cost:* GitHub automatically redirects Git remotes and web URLs; org-level rulesets on `metadatastician` (`Branch-Floor`, `Tag-Floor`, `Require-Signed-Commits`, `Require-Linear-History`, `Secret-Scan-Floor`, `Lock-Floor`, `EstateBranching`, `EstateTagging`) immediately cover transferred repos without per-repo ruleset maintenance. Only per-repo cost is updating `README.adoc` / `CITATION.cff` / `.well-known` self-links via a post-transfer script (`docs/compliance/repo-transfer-to-enterprise-playbook.adoc`).
+| *READY TO TRANSFER in batched waves* (after A5 / D298 reverts `metadatastician` `Branch-Floor` and `Tag-Floor` to canon)
+|===
+
+=== Follow-Up Ruling Row for A4 (D97)
+
+[cols="1,2,4,2",options="header"]
+|===
+| ID | Area | Recommended Decision | Alternatives
+
+| *D355* (A4 / D97 follow-up)
+| Repository transfer wave plan (`hyperpolymath` -> `metadatastician`)
+| **(1) Keep Tier 0 (3 identity repos), Tier 1 (`cargo-zigbuild`, `MetaManifold-WebUI`; delete `explore` per D329), Tier 2 (12 CI/CD spine repos + `julia-professional-registry`), and the 3 private vaults/farm in `hyperpolymath`; (2) Transfer Tier 3 (42 `*.jl` package repos) to `metadatastician` with one atomic `Package.toml` URL PR in `julia-professional-registry` (per ADR-0003); (3) Transfer Tier 5 (274 zero-consumer active repos) in batches of 25 after D298 is applied; (4) Hold Tier 4 (22 registry-published flagships) for per-release transfer.**
+| Transfer Tier 3 (`42` `*.jl` repos) only for now / Transfer Tier 3 + Tier 4 + Tier 5 / Freeze all transfers
+|===
+
+'''
+
+== A5 (D298): Revert `metadatastician` `Branch-Floor` (`23868655`) and `Tag-Floor` (`23868851`) to Canon
+
+*Ruling D298 (`2026-10-06`):* *"Run the precondition (list every branch push since 2026-10-04 09:29Z and every tag push since 09:30Z that bypassed these rulesets) first; then revert both rulesets to canon (`deletion` + `non_fast_forward`, `bypass_actors: []`), with `required_linear_history` and `require_secret_scanning_alert_resolution` leaving in the same PUT."*
+
+=== 1. Precondition Blast-Radius Measurement (`#787` Comment `6021647985`, Verified 2026-10-23)
+
+Across all active `metadatastician` repositories since the ruleset edits on `2026-10-04T09:29:38Z` (`Branch-Floor` `23868655`) and `2026-10-04T09:30:35Z` (`Tag-Floor` `23868851`):
+
+* **Tag pushes since `2026-10-04T09:30:35Z`:** `9` tags pushed on `metadatastician/marid` (`MaridArango-v0.1.0` .. `MaridTransport-v0.1.0` at `fd139f763a306a7e2eca60d96ea1a1a9f77c1e71`), all fast-forward creations (`0` deletions, `0` non-fast-forwards).
+* **Default-branch pushes since `2026-10-04T09:29:38Z` (`29` pushes across 14 repos at the 2026-10-12 audit):**
+** **Failed canon rules (`deletion`, `non_fast_forward`):** **0 / 29**. Every push was a fast-forward update on `main`.
+** **Failed non-canon `require_secret_scanning_alert_resolution`:** **7 pushes** (on repositories where GitHub Secret Scanning is not enabled, e.g. `metadatastician/kcq`, `metadatastician/affinescript-libraries`, `metadatastician/FloatingPoint Arithmetic` — causing GitHub to reject normal PR merges unless bypassed).
+** **Failed non-canon `required_linear_history`:** **2 pushes** (merge commits on repos already covered by standalone `Require-Linear-History` `24256157` where applicable).
+* **Duplication with standalone org rulesets:** `metadatastician` already has standalone zero-bypass org rulesets `Require-Linear-History` (`24256157`), `Require-Signed-Commits` (`23961775`), `Secret-Scan-Floor` (`24308338`), and `Lock-Floor` (`24587777`). Keeping the extra rules inside `Branch-Floor` (`23868655`) and `Tag-Floor` (`23868851`) violates `config/rulesets/branch-floor.json` and `config/rulesets/tag-floor.json` and blocks pushes on repos without secret scanning.
+
+=== 2. Current Live State vs Canon State
+
+* **`Branch-Floor` (`23868655`):**
+** Live rules (`4`): `deletion`, `non_fast_forward`, `required_linear_history`, `require_secret_scanning_alert_resolution` (`bypass_actors: []`).
+** Canon (`config/rulesets/branch-floor.json`): `deletion`, `non_fast_forward` (`bypass_actors: []`).
+* **`Tag-Floor` (`23868851`):**
+** Live rules (`5`): `deletion`, `non_fast_forward`, `required_signatures`, `required_linear_history`, `required_status_checks` (`required_status_checks: []`, `bypass_actors: []`).
+** Canon (`config/rulesets/tag-floor.json`): `deletion`, `non_fast_forward` (`bypass_actors: []`).
+
+=== 3. Exact `?dry-run=true` PUT, Live PUT, and Verification Commands
+
+These commands are embedded in `scripts/triage-2026-10-23-issue-1234-apply.sh` (Section A5) and preserve the exact live `conditions` (`ref_name` + `repository_name`) as required by `config/rulesets/README.adoc`:
+
+[source,bash]
+----
+# 1. Dry-run PUT for Branch-Floor (23868655) — removes required_linear_history & require_secret_scanning_alert_resolution in one PUT
+gh api repos/metadatastician/metadatastician-governance/rulesets/23868655 \
+  | jq '{name, target, enforcement, bypass_actors: [], conditions, rules: [{type: "deletion"}, {type: "non_fast_forward"}]}' \
+  | gh api -X PUT "orgs/metadatastician/rulesets/23868655?dry-run=true" --input -
+
+# 2. Dry-run PUT for Tag-Floor (23868851) — removes required_signatures, required_linear_history & empty required_status_checks in one PUT
+gh api repos/metadatastician/metadatastician-governance/rulesets/23868851 \
+  | jq '{name, target, enforcement, bypass_actors: [], conditions, rules: [{type: "deletion"}, {type: "non_fast_forward"}]}' \
+  | gh api -X PUT "orgs/metadatastician/rulesets/23868851?dry-run=true" --input -
+
+# 3. Apply live PUTs (without ?dry-run=true) and verify GET shows only ["deletion", "non_fast_forward"] and bypass_actors == []
+----
+
+'''
+
+== A6 (D67 rev. 2026-10-13, amends D321): 9 Marid Tier-1 Packages Local `RegistryCI.jl` `AutoMerge` Check & General Blockers
+
+*Ruling D67 (rev. 2026-10-13, amends D321):* The 9 Marid Tier-1 packages (`MaridArango`, `MaridCodec`, `MaridControl`, `MaridCRDT`, `MaridIR`, `MaridLive`, `MaridRaft`, `MaridStorage`, `MaridTransport`) go to `JuliaRegistries/General` now while staying in `hyperpolymath/julia-professional-registry` with the same UUIDv8 profile-T UUIDs. Local `RegistryCI.jl` `AutoMerge` guideline check runs first; then 9 General registrations merged or each blocker posted with its guideline text.
+
+=== 1. Per-Package Identity & `RegistryCI.jl` `AutoMerge` Verification Against `JuliaRegistries/General`
+
+Verified against `JuliaRegistries/RegistryCI.jl` (`AutoMerge/src/guidelines.jl` + `AutoMerge/src/dependency_confusion.jl`) and `JuliaRegistries/General` (`Registry.toml`, 14,615 packages) on 2026-10-23:
+
+[cols="2,3,2,2,2",options="header"]
+|===
+| Package (`subdir`) | UUIDv8 Profile-T (`Project.toml` & `julia-professional-registry`) | `v0.1.0` Tag Commit (`fd139f76...`) `git-tree-sha1` | Nearest General Name (Damerau-Levenshtein) | `AutoMerge` at Tag `fd139f76` vs `HEAD` `7f9abca6`
+
+| `MaridArango` (`packages/MaridArango`)
+| `01a115ae-6523-8273-8497-753822252d6a`
+| `dc1e26f88ba8e74e47d3d4a5ab4543d52a8275ef`
+| `Maracas` (`d = 7`)
+| Tag: *PASS (16/16)* +
+HEAD: *PASS (unchanged)*
+
+| `MaridCodec` (`packages/MaridCodec`)
+| `01a115b0-6977-8194-b1bb-ba277a2ddf75`
+| `95c2d9ff70489e09e943a0407368001ec6d28fd0`
+| `GCode` (`d = 6`)
+| Tag: *PASS (16/16)* +
+HEAD: *PASS (unchanged)*
+
+| `MaridControl` (`packages/MaridControl`)
+| `01a115b1-6b89-8bc1-b693-306d1d0301d5`
+| `a6fd89bc3d0c9543ff8ffefed3fd82a3ab9129f6`
+| `GridapControl` (`d = 6`)
+| Tag: *PASS (16/16)* +
+HEAD: *DRIFT* (`src/MaridControl.jl` modified in `#85` without version bump)
+
+| `MaridCRDT` (`packages/MaridCRDT`)
+| `01a115af-6777-83e7-bbf4-4312fe84fb45`
+| `9fdcf0c5102dc16d3b14bd860f8f451bf43b706d`
+| `Mads` (`d = 6`)
+| Tag: *PASS (16/16)* +
+HEAD: *PASS (unchanged)*
+
+| `MaridIR` (`packages/MaridIR`)
+| `01a115b4-723a-8911-b469-7c18b764c41a`
+| `356603981566fc18162ebdf4bd7550a8b1a8a3ee`
+| `Mri` (`d = 4`)
+| Tag: *PASS (16/16)* +
+HEAD: *DRIFT* (`src/MaridIR.jl` modified in `#85` without version bump)
+
+| `MaridLive` (`packages/MaridLive`)
+| `01a115b5-7479-8d82-a0d2-d2a681675e27`
+| `228acdddb82df63fdab84499150b819cd6f9045a`
+| `MakieLive` (`d = 4`)
+| Tag: *PASS (16/16)* +
+HEAD: *FAIL* (`JSON3` added to `[deps]` in `#85` without `[compat]` entry)
+
+| `MaridRaft` (`packages/MaridRaft`)
+| `01a115b8-7a8a-8f24-baaa-cf06974b0145`
+| `230bb8cb530fc7384d3fc957aa87dd69fd9d3269`
+| `MariaDB` (`d = 5`)
+| Tag: *PASS (16/16)* +
+HEAD: *PASS (unchanged)*
+
+| `MaridStorage` (`packages/MaridStorage`)
+| `01a115b9-7cf4-8463-9dfb-224e0c6ab613`
+| `c2c34b4d24fc1a93a67bfed3df169312516e24bc`
+| `AzureStorage` (`d = 6`)
+| Tag: *PASS (16/16)* +
+HEAD: *DRIFT* (`src/MaridStorage.jl` modified in `#85` without version bump)
+
+| `MaridTransport` (`packages/MaridTransport`)
+| `01a115ba-7f33-8545-9989-732142b76ec2`
+| `bc704aa12be1bd888c4b4e3866c5ab0eb91746b4`
+| `RadiationTransport` (`d = 8`)
+| Tag: *PASS (16/16)* +
+HEAD: *PASS (unchanged)*
+|===
+
+=== 2. Programmatic `RegistryCI.jl` `AutoMerge` Checklist (All 16 Guidelines at Tag `fd139f763a306a7e2eca60d96ea1a1a9f77c1e71`)
+
+1. `guideline_name_is_julia_identifier` (`AutoMerge/src/guidelines.jl:721`): **PASS** (all 9 are valid Julia identifiers).
+2. `guideline_normal_capitalization` (`^[A-Z]\w*[a-z]\w*[0-9]?$`, `guidelines.jl:639`): **PASS** (`MaridCRDT` and `MaridIR` contain lowercase `arid` and end in uppercase acronym, matching `^[A-Z]\w*[a-z]\w*[0-9]?$`).
+3. `guideline_name_length` (`length(name) >= 5`, `guidelines.jl:660`): **PASS** (lengths 7 to 14: `MaridIR` = 7, `MaridTransport` = 14).
+4. `guideline_julia_name_check` (no `julia`, `Ju`, `jl` prefix/infix, `guidelines.jl:680`): **PASS**.
+5. `guideline_name_ascii` (`isascii(name)`, `guidelines.jl:707`): **PASS**.
+6. `guideline_repo_url_requirement` (`guidelines.jl:737`): **PASS** (`subdir = "packages/Marid..."` exempts `metadatastician/marid.git` from requiring `.jl` suffix on the monorepo URL).
+7. `guideline_version_number_no_prerelease` / `guideline_initial_version_number` (`0.1.0`, `guidelines.jl:254,300`): **PASS** (`version = "0.1.0"`).
+8. `guideline_compat_for_julia` (`[compat] julia = "1.10"`, `guidelines.jl:320`): **PASS** (`1.10` has lower bound `1.10.0` and upper bound `2.0.0`).
+9. `guideline_compat_has_upper_bound` (`guidelines.jl:339`): **PASS at tag `fd139f76`** (`0.1` -> `[0.1.0, 0.2.0)`, `1` -> `[1.0.0, 2.0.0)` for all non-stdlib deps `HTTP`, `JSON3`, `MsgPack`, `SQLite`, `DBInterface`, and sibling `Marid*` packages); **FAIL at `HEAD` `7f9abca6` for `MaridLive`** (see Blocker 1 below).
+10. `guideline_osi_license` (`guidelines.jl:945`): **PASS** (`packages/Marid*/LICENSE` is OSI-approved `MPL-2.0` detected by `LicenseCheck.find_license`).
+11. `guideline_src_files_ascii` (`guidelines.jl:1022`): **PASS** (all `packages/Marid*/src/*.jl` filenames are pure ASCII).
+12. `guideline_no_UUID_clash` (`guidelines.jl:1110`): **PASS** (all 9 UUIDs are valid RFC 9562 UUIDv8 profile-T with `version == 8` and `variant == 2`, satisfying `1 <= uuid_version(u) <= 8`, and have 0 collisions in General).
+13. `guideline_distant_name` (`guidelines.jl:789`): **PASS** (minimum Damerau-Levenshtein distance to any of the 14,615 General packages is `4` >= threshold `3`; lowercase distance >= `3`; visual distance > `2.5`).
+14. `guideline_dependency_confusion` (`dependency_confusion.jl`): **PASS** (`https://github.com/metadatastician/marid.git` resolves cleanly and matches `Package.toml` in `julia-professional-registry`).
+15. `guideline_code_can_be_downloaded` & `guideline_ can_load_package`: **PASS in topological tier order** (see Blocker 2 below regarding inter-package registration order).
+
+=== 3. The 4 Blockers Preventing Immediate General Merge (with Verbatim Guideline Text)
+
+==== Blocker 1 — `MaridLive` on `HEAD` (`7f9abca6`) Fails `guideline_compat_has_upper_bound` + Tree-Hash Split with `v0.1.0` Tags
+
+* **Cause:** PR `metadatastician/marid#85` (`7f9abca6`, merged 2026-10-21) modified `MaridControl`, `MaridIR`, `MaridStorage`, and `MaridLive` on `main` after `<Pkg>-v0.1.0` (`fd139f763a306a7e2eca60d96ea1a1a9f77c1e71`) was registered in `hyperpolymath/julia-professional-registry#109`, without bumping `version = "0.1.0"`. In `packages/MaridLive/Project.toml`, commit `7f9abca6` added `JSON3` to `[deps]` without adding `JSON3` to `[compat]`.
+* **Verbatim `RegistryCI.jl` Guideline Text (`AutoMerge/src/guidelines.jl:339-382`):**
++
+[quote, JuliaRegistries/RegistryCI.jl AutoMerge/src/guidelines.jl]
+____
+`("The following dependencies do not have a [compat] entry that has an upper-bound: JSON3. You may find CompatHelper (https://github.com/JuliaRegistries/CompatHelper.jl) helpful for keeping your compat entries up-to-date. Note: If your package works with the current version X.Y.Z of a dependency Foo, then a compat entry Foo = \"X.Y.Z\" implies an upper-bound of the next breaking release, which is sufficient to meet this guideline.")`
+____
+* **Remediation:** Register `v0.1.0` in General from tag commit `fd139f763a306a7e2eca60d96ea1a1a9f77c1e71` (so `git-tree-sha1` matches `julia-professional-registry#109` identically), and on `main` add `JSON3 = "1"` under `[compat]` in `packages/MaridLive/Project.toml` while bumping the 4 modified packages (`MaridControl`, `MaridIR`, `MaridStorage`, `MaridLive`) to `0.1.1` (automated in `scripts/triage-2026-10-23-issue-1234-apply.sh`).
+
+==== Blocker 2 — Inter-Package Dependency DAG Requires 3 Sequential Registration Waves in General (`guideline_package_can_be_loaded`)
+
+* **Cause:** Because `JuliaRegistries/General` requires every `[deps]` UUID in a registered package's `Project.toml` to already exist in `General` (`Registry.toml`) or Julia stdlib at the time `AutoMerge` runs `Pkg.add`, the 9 packages cannot be registered simultaneously in a single wave:
+** **Wave 1 (Leaf packages — stdlib + General deps only; can register immediately):**
+*** `MaridCodec` (deps: `Dates`, `JSON3`, `MsgPack`, `UUIDs`)
+*** `MaridCRDT` (deps: `Dates`, `SHA`, `UUIDs`)
+*** `MaridIR` (deps: `Dates`, `JSON3`, `SHA`, `UUIDs`)
+** **Wave 2 (Depends on `MaridCodec` — must wait for Wave 1 merge after 3-day NewPackage timer):**
+*** `MaridTransport` (deps: `MaridCodec`, `Dates`, `HTTP`, `JSON3`, `Sockets`, `UUIDs`)
+*** `MaridRaft` (deps: `MaridCodec`, `Dates`, `SHA`, `UUIDs`)
+*** `MaridStorage` (deps: `MaridCodec`, `DBInterface`, `Dates`, `JSON3`, `SHA`, `SQLite`, `UUIDs`)
+** **Wave 3 (Depends on Wave 1 + Wave 2 — must wait for Wave 2 merge):**
+*** `MaridArango` (deps: `MaridCodec`, `MaridIR`, `MaridTransport`, `Dates`, `HTTP`, `JSON3`, `SHA`, `UUIDs`)
+*** `MaridControl` (deps: `MaridCodec`, `MaridIR`, `MaridRaft`, `MaridStorage`, `MaridTransport`, `Dates`, `HTTP`, `JSON3`, `SHA`, `Sockets`, `UUIDs`)
+*** `MaridLive` (deps: `MaridCodec`, `MaridTransport`, `Dates`, `HTTP`, `JSON3`, `SHA`)
+* **Verbatim `RegistryCI.jl` Guideline Text (`AutoMerge/src/guidelines.jl:1049-1089`):**
++
+[quote, JuliaRegistries/RegistryCI.jl AutoMerge/src/guidelines.jl]
+____
+`("I was not able to install the package (i.e. Pkg.add(\"Marid...\") failed). See the CI logs for details.")` / `UnsatisfiableRequirements` when `[deps]` UUID is not yet present in `General/Registry.toml`.
+____
+
+==== Blocker 3 — Missing Per-Package `README.md` in `packages/Marid*/` & Missing `JuliaRegistrator` Installation on `metadatastician/marid`
+
+* **Cause:**
+1. None of the 9 `packages/Marid*/` subdirectories contains a `README.md` (only `LICENSE`, `Project.toml`, `src/`, `test/`). During the mandatory 3-day `NewPackage` waiting period on `JuliaRegistries/General`, human registry maintainers block any package lacking documentation and a basic usage example in its package root (`subdir`).
+2. `JuliaRegistrator` is not installed on `metadatastician/marid`.
+* **Verbatim `JuliaRegistries/General` Maintainer Guideline Text (posted on `JuliaRegistries/General#155654` by `@goerz`, 2026-05-17):**
++
+[quote, JuliaRegistries/General#155654]
+____
+"Could you add a little bit more documentation before registering? At the very least, in addition to the description of the package's purpose, that would be a small usage example in the README. An important part of packages in General is that any potential user can figure out what the package is about and how to get started with using it. That is really difficult when there is no documentation."
+____
+
+==== Blocker 4 — Prior `JuliaRegistries/General` Maintainer Hold on Batch Ecosystem Registrations (`General#155654`)
+
+* **Cause:** On `2026-05-17` (`JuliaRegistries/General#155654`, following `#150167`–`#150189`), `JuliaRegistries/General` maintainers (`@goerz`, `@DilumAluthge`) requested that multi-package ecosystems remain in their own `LocalRegistry` (`hyperpolymath/julia-professional-registry`) unless individual packages have standalone human-written documentation, prior-art comparison, and community demand.
+* **Verbatim `JuliaRegistries/General` Maintainer Hold (`JuliaRegistries/General#155654`, `@goerz`):**
++
+[quote, JuliaRegistries/General#155654]
+____
+"Such an ecosystem is probably best served by its own `LocalRegistry`. If specific packages grow into something for which there is organic demand in the community, such that registered packages would want to depend on them, that would be the point to reconsider that."
+____
+
+'''
+
+== B / D332: `.github/settings.yml` Estate Census (95 Active Repositories)
+
+*Ruling D332 (`2026-10-14` comment 2 on `#1234`):* *"Uninstall the Probot Settings app, then delete `.github/settings.yml` across the estate."*
+
+* **Owner Prerequisite:** Uninstall GitHub App `settings` (`app_id: 1561`, installation `145157322` at `https://github.com/settings/installations/145157322`).
+* **Estate Census (95 active repositories carrying `.github/settings.yml`):**
+** **`hyperpolymath` (64 repos):** `007`, `ambientops`, `apiserver`, `arthropodologist`, `asdf-overlay-manager`, `audit-my-cloud`, `awesome-lifecycle`, `betlang`, `bunsenite`, `bust`, `cable-audit`, `chapeliser`, `chrono-mcp`, `cicd-hyper-a`, `civic-connect`, `claude-config-vault`, `clippy-cornucopia`, `conative-gating`, `conflow`, `con-sensual`, `CryptographicAudit.jl`, `developer-ecosystem`, `dicti0nary-attack`, `docmatrix`, `echidnabot`, `ensaid-concatenator`, `ensaid- fleet`, `EntryPoint.jl`, `ephapax`, `error-catalog-mcp`, `exotic-programming-ideas`, `ExplicitlyTyped.jl`, `family-ops`, `feedback-o-tron`, `FireFlag.jl`, `flat-mate`, `formatrix-docs`, `git-private-farm-dashboard`, `git-reticulator`, `grim-repo`, `guix-overlay-pack`, `heterogenous-mobile-computing`, `hypatia`, `i-human`, `ipv6-only`, `iseriser`, `januskey`, `jtv-lang`, `julia-ecosystem`, `line-em-up`, `lithoglyph`, `local-coord-mcp`, `MarkovChains.jl`, `meta-repo-manager`, `minix-sdk`, `model-check-mcp`, `mustfile`, `my-lang`, `nesy-solver`, `network-ambulance`, `neurophone`, `nexia-list`, `nextgen-databases`, `nextgen-languages`.
+** **`metadatastician` (31 repos):** `_pathroot`, `affinescript-libraries`, `apate`, `arango-arango`, `burble`, `chora`, `data-prep`, `deliberation`, `design-practice`, `epistemic-logic`, `ergo`, `eval-harness`, `evidence-graph`, `floating-point-arithmetic`, `formal-methods`, `git-forensics`, `governance-audit`, `graph-analytics`, `information-retrieval`, `kcq`, `knot-knot`, `knowledge-representation`, `language-design`, `marid`, `meta-analysis`, `metadatastician-governance`, `methodology`, `model-checking`, `odraz`, `ontology-engineering`, `probabilistic-programming`.
+* Automated deletion (gated on verifying app `1561` is uninstalled) is in `scripts/triage-2026-10-23-issue-1234-apply.sh` (Section D332).
+
+'''
+
+== Consolidated Candidate Decision Sheet (`D335`–`D355`)
+
+Per `docs/reorg/2026-10-14-tidy/README.adoc` and `#1234` **A4 (D97)**, the consolidated decision rows `D335`–`D355` are recorded below for owner sign-off:
+
+[cols="1,2,4,2",options="header"]
+|===
+| ID | Area | Recommended Decision | Alternatives
+
+| *D335*
+| Authority hierarchy
+| Adopt the 6-class ladder (`0-canon/` > `1-formats/` > `2-architecture/` > `3-practice/` > `4-domains/` > `9-archive/`); `0-canon/CONSTITUTION.adoc` sits at the root of the ladder.
+| Keep flat `docs/` / 4-class ladder
+
+| *D336*
+| `0-canon/CANON-INDEX.adoc`
+| Make `0-canon/CANON-INDEX.adoc` the single normative document registry; `docs/STANDARDS-MAP.adoc` becomes a generated view.
+| Keep `docs/STANDARDS-MAP.adoc` hand-maintained
+
+| *D337*
+| Rulings ledger
+| Commit `0-canon/RULINGS-LEDGER.adoc` as the durable in-tree home of `D1`–`D355`; `#1234` and successor issues serve only as intake queues.
+| Keep rulings in GitHub issue comments only
+
+| *D338*
+| `0-AI-MANIFEST` filename
+| Standardise on `0-AI-MANIFEST.deed` in `standards` (`check-launcher-standard-currency.sh` accepts both `.deed` and `.a2ml` across consumer repos during the estate transition).
+| Revert `standards` to `0-AI-MANIFEST.a2ml`
+
+| *D339*
+| Duplicate `FUNDING.yml` / `funding.yml`
+| Delete lowercase `.github/funding.yml` (which names `metadatastician` and collides on case-insensitive filesystems); keep `.github/FUNDING.yml` (`hyperpolymath`).
+| Keep `.github/funding.yml`
+
+| *D340*
+| Lock gates in `standards`
+| Consolidate `actions-lock-gate.yml`, `lock-sync-gate.yml`, and `lock-selfcheck.yml` behind `actions-lock-gate.yml` (the required status context) + `governance.yml`.
+| Keep all four separate workflow files
+
+| *D341*
+| Pages for `standards` (D24)
+| Delete all three Pages workflows in `standards` (`casket-pages.yml`, `pages-archive.yml`, `pages.yml`) — `standards` is a specification repository whose docs go to BerryWiki (D295).
+| Keep one `pages.yml` using `pages-archive.yml`'s least-privilege body
+
+| *D342*
+| Mirror workflows in `standards`
+| Keep `mirror-reusable.yml` (+ `mirror.yml` calling `./.github/workflows/mirror-reusable.yml`, now including `mirror-r2-bundle` per D304); retire `github-backup-mirror-reusable.yml` (0 consumers) and `instant-sync.yml` (disabled).
+| Keep `github-backup-mirror-reusable.yml`
+
+| *D343*
+| `uuid-v7.yml` in `standards`
+| Retire `.github/workflows/uuid-v7.yml` (duplicates `governance-reusable.yml`'s UUIDv8 conformance check and is not a required status context).
+| Keep `uuid-v7.yml`
+
+| *D344*
+| `scorecard-enforcer.yml` in `standards`
+| Retire `.github/workflows/scorecard-enforcer.yml`; fold optional `min-score` check into `scorecard-reusable.yml`.
+| Keep both `scorecard.yml` and `scorecard-enforcer.yml`
+
+| *D345*
+| `allowlist-preflight-reusable.yml`
+| Retire standalone `.github/workflows/allowlist-preflight-reusable.yml` (0 external consumers; already inlined in `governance-reusable.yml`).
+| Have `governance-reusable.yml` call `allowlist-preflight-reusable.yml`
+
+| *D346*
+| `makefile-blocker.yml` in `standards`
+| Retire `.github/workflows/makefile-blocker.yml` (fails even on Makefile deletions; `governance-reusable.yml` language-policy already enforces the Makefile ban).
+| Fix `makefile-blocker.yml` path filter to ignore deletions
+
+| *D347*
+| `affirmation-check` composite action home
+| Keep `hyperpolymath/cicd-suite/actions/affirmation-check` as the single home (live consumer in `main-estate-audit.yml`); retire `.github/actions/affirmation-check` in `standards`.
+| Make `standards` the canonical home and update `main-estate-audit.yml`
+
+| *D348*
+| `propagate-hooks.yml` in `standards`
+| Retire `.github/workflows/propagate-hooks.yml` (hardcodes `ALL_REPOS=("hyperpolymath/standards")` and has failed 29 consecutive runs); move hook propagation to `gitbot-fleet`.
+| Fix `propagate-hooks.yml` in `standards`
+
+| *D349*
+| Retired workflows directory (`.github-retired/`)
+| Delete retired workflow files outright (Git history preserves them) rather than accumulating `.github-retired/` (amends D256 for `standards`).
+| Keep moving retired workflows to `.github-retired/`
+
+| *D350*
+| K9 security level names
+| Keep Kennel / Yard / Hunt (`1-formats/k9/`), matching `k9-conformance.yml` and estate `.k9.ncl` files.
+| Rename security levels
+
+| *D351*
+| Contractile verb set
+| Keep the 6-verb contractile set (`must`, `trust`, `lust`, `dust`, `bust`, `adjust`) with two-file transitional minimum until `.ncl` runners reach >50% estate coverage.
+| Shrink verb set to `must` + `trust` + `dust`
+
+| *D352*
+| Estate campaign tracking
+| Track estate-wide campaigns in `docs/campaigns/CAMPAIGN-LEDGER.adoc` + one GitHub Project board instead of open per-campaign tracking issues in `standards`.
+| Keep open `[campaign]` issues in `standards`
+
+| *D353*
+| Standing / recurring audit issues
+| Close standing `[standing]` / `[recurring]` issues in `standards` once their scheduled workflow (`lockfile-drift-detect.yml`, `settings-drift-detect.yml`, `main-estate-audit.yml`) is live.
+| Leave standing issues open indefinitely
+
+| *D354*
+| `1-formats/deed/tools/*.py` (D313 + #309)
+| Delete `1-formats/deed/tools/a2ml_to_deed.py` (per D313) and `1-formats/deed/tools/deed_lint.py` (superseded by `1-formats/deed/tools/deed_lint.js` on Bun).
+| Keep `deed_lint.py` as fallback
+
+| *D355*
+| Repository transfer wave plan (A4 / D97 follow-up)
+| **(1) Keep Tier 0 (3 identity repos), Tier 1 (forks; delete `explore` per D329), Tier 2 (12 CI/CD spine repos + `julia-professional-registry`), and 3 private vaults/farm in `hyperpolymath`; (2) Transfer Tier 3 (42 `*.jl` package repos) to `metadatastician` with 1 atomic `Package.toml` PR in `julia-professional-registry`; (3) Transfer Tier 5 (274 zero-consumer active repos) in batches of 25 after D298 is applied; (4) Hold Tier 4 (22 registry-published flagships) for per-release transfer.**
+| Transfer Tier 3 (`42` `*.jl` repos) only / Freeze all transfers
+|===

@@ -69,6 +69,12 @@ on:
         required: false
       RADICLE_KEY:
         required: false
+      R2_ACCESS_KEY_ID:
+        required: false
+      R2_SECRET_ACCESS_KEY:
+        required: false
+      R2_AGE_RECIPIENT:
+        required: false
 
 permissions:
   actions: read
@@ -443,3 +449,62 @@ jobs:
         if: ${{ env.RADICLE_KEY == '' }}
         run: |
           echo "::notice::RADICLE_MIRROR_ENABLED=true but secrets.RADICLE_KEY is empty. Skipping Radicle mirror. Configure the RADICLE_KEY org/repo secret to enable."
+
+  mirror-r2-bundle:
+    # D303/D304: Cloudflare R2 git-bundle backup with mandatory client-side
+    # age encryption before any bytes leave the runner.
+    timeout-minutes: 20
+    runs-on: ${{ inputs.runs-on }}
+    if: vars.R2_BUNDLE_MIRROR_ENABLED == 'true'
+    env:
+      R2_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_RECIPIENT: ${{ secrets.R2_AGE_RECIPIENT || vars.R2_AGE_RECIPIENT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify R2 endpoint and age recipient
+        if: ${{ env.R2_KEY_ID != '' && env.R2_SECRET_KEY != '' && env.R2_RECIPIENT != '' }}
+        env:
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT_URL }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          AGE_RECIPIENT: ${{ env.R2_RECIPIENT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$R2_ENDPOINT" =~ ^https://[a-zA-Z0-9-]+(\.eu|\.fedramp)?\.r2\.cloudflarestorage\.com$ ]] ||
+             [[ ! "$R2_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] ||
+             [[ ! "$AGE_RECIPIENT" =~ ^(age1[a-z0-9]{58}|ssh-ed25519[[:space:]]+AAAA[A-Za-z0-9+/=]+)$ ]]; then
+            echo "::error::Configure valid R2_ENDPOINT_URL (*.r2.cloudflarestorage.com), R2_BUCKET, and R2_AGE_RECIPIENT (age1... or ssh-ed25519)"
+            exit 1
+          fi
+      - name: Create, age-encrypt, and upload git bundle to Cloudflare R2
+        if: ${{ env.R2_KEY_ID != '' && env.R2_SECRET_KEY != '' && env.R2_RECIPIENT != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT_URL }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          AGE_RECIPIENT: ${{ env.R2_RECIPIENT }}
+          MIRROR_ORG: ${{ vars.R2_ORG || vars.MIRROR_ORG || github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          if ! command -v age >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq age
+          fi
+          RAW_BUNDLE="$RUNNER_TEMP/${REPO_NAME}.bundle"
+          ENC_BUNDLE="$RUNNER_TEMP/${REPO_NAME}.bundle.age"
+          trap 'rm -f "$RAW_BUNDLE" "$ENC_BUNDLE"' EXIT
+          git bundle create "$RAW_BUNDLE" --all
+          git bundle verify "$RAW_BUNDLE"
+          age -r "$AGE_RECIPIENT" -o "$ENC_BUNDLE" "$RAW_BUNDLE"
+          rm -f "$RAW_BUNDLE"
+          test -s "$ENC_BUNDLE"
+          aws s3 cp "$ENC_BUNDLE" "s3://${R2_BUCKET}/${MIRROR_ORG}/${REPO_NAME}/latest.bundle.age" --endpoint-url "$R2_ENDPOINT"
+      - name: Skipped (R2 credentials or age recipient not configured)
+        if: ${{ env.R2_KEY_ID == '' || env.R2_SECRET_KEY == '' || env.R2_RECIPIENT == '' }}
+        run: |
+          echo "::notice::R2_BUNDLE_MIRROR_ENABLED=true but R2 credentials or R2_AGE_RECIPIENT are empty. Skipping R2 bundle upload."
