@@ -73,9 +73,11 @@ assert(!r2_verify['continue-on-error'], 'mirror-r2-bundle verification failure i
 assert(r2_upload['run'].include?('age -r "$AGE_RECIPIENT" -o "$ENC_BUNDLE" "$RAW_BUNDLE"'), 'mirror-r2-bundle must encrypt with age before upload')
 assert(r2_upload['run'].include?('rm -f "$RAW_BUNDLE"'), 'mirror-r2-bundle must remove plaintext bundle before upload')
 r2_script = r2_upload['run']
-encrypt_at = r2_script.index('age -r "$AGE_RECIPIENT" -o "$ENC_BUNDLE" "$RAW_BUNDLE"')
-remove_at = r2_script.index('rm -f "$RAW_BUNDLE"')
-upload_at = r2_script.index('aws s3 cp "$ENC_BUNDLE"')
+# Match command lines so the earlier EXIT trap does not count as plaintext removal.
+r2_commands = r2_script.lines.map(&:strip)
+encrypt_at = r2_commands.index('age -r "$AGE_RECIPIENT" -o "$ENC_BUNDLE" "$RAW_BUNDLE"')
+remove_at = r2_commands.index('rm -f "$RAW_BUNDLE"')
+upload_at = r2_commands.index { |command| command.start_with?('aws s3 cp "$ENC_BUNDLE"') }
 assert(encrypt_at && remove_at && upload_at && encrypt_at < remove_at && remove_at < upload_at,
        'mirror-r2-bundle must encrypt and remove plaintext before uploading ciphertext')
 assert(r2_script.include?('/snapshots/${BUNDLE_TS}-${COMMIT_SHA}.bundle.age'),
