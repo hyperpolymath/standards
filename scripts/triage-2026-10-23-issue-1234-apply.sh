@@ -44,8 +44,10 @@ run_gh() {
 }
 
 # ensure_open_pr — Ensure an open pull request exists for a pushed branch on a repository.
-# Takes repo, branch, title, and body; creates the PR only when no open PR for
-# that head branch exists yet, making interrupted runs safely resumable.
+# Takes owner/repo, head branch, title, and body; creates the PR only when no
+# open PR for that head branch exists yet, making interrupted runs resumable.
+# Does not check DRY_RUN; callers must guard creation. Failures from `gh pr list`
+# or `gh pr create` stop the script under `set -e`.
 ensure_open_pr() {
   local repo="$1" branch="$2" title="$3" body="$4"
   local open_count
@@ -59,7 +61,10 @@ ensure_open_pr() {
 
 # check_probot_installed — Check whether Probot Settings (app_id 1561) is still installed.
 # Queries orgs/metadatastician/installations (supported by classic owner PATs with
-# admin:org); fails closed in live mode if the endpoint is inaccessible.
+# admin:org); prints the matching installation count and returns 0.
+# If the query fails or returns empty output, DRY_RUN=1 prints 1 and returns 0
+# so callers treat the app as installed. In live mode, reports the query failure
+# on stderr and returns 1.
 check_probot_installed() {
   local count=""
   if count="$(gh api orgs/metadatastician/installations --jq '[.installations[]? | select(.app_id == 1561)] | length' 2>/dev/null)" && [ -n "$count" ]; then
