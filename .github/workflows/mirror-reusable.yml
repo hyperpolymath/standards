@@ -14,13 +14,14 @@
 # `vars.<FORGE>_MIRROR_ENABLED == 'true'`, so forge selection is
 # configured per-repo via Actions vars — no per-call inputs required.
 #
-# Callers pass the per-forge SSH keys EXPLICITLY, by the names declared in
-# `workflow_call.secrets` below (GITLAB_SSH_KEY, BITBUCKET_SSH_KEY,
-# CODEBERG_SSH_KEY, SOURCEHUT_SSH_KEY, DISROOT_SSH_KEY, GITEA_SSH_KEY,
-# RADICLE_KEY). Do not use `secrets: inherit`: it forwards every repo/org
-# secret the caller can see, not just these seven (standards#1108 §6b).
-# Without a passed secret, `${{ secrets.X }}` inside the reusable
-# evaluates to empty and that forge's job no-ops.
+# Callers pass the per-forge SSH keys and optional R2 backup secrets
+# EXPLICITLY, by the names declared in `workflow_call.secrets` below
+# (GITLAB_SSH_KEY, BITBUCKET_SSH_KEY, CODEBERG_SSH_KEY, SOURCEHUT_SSH_KEY,
+# DISROOT_SSH_KEY, GITEA_SSH_KEY, RADICLE_KEY, R2_ACCESS_KEY_ID,
+# R2_SECRET_ACCESS_KEY, R2_AGE_RECIPIENT). Do not use `secrets: inherit`:
+# it forwards every repo/org secret the caller can see, not just these ten
+# (standards#1108 §6b). Without a passed secret, `${{ secrets.X }}` inside
+# the reusable evaluates to empty and that forge's job no-ops.
 #
 # Caller example (wrapper):
 #   # SPDX-License-Identifier: MPL-2.0
@@ -42,6 +43,9 @@
 #         DISROOT_SSH_KEY: ${{ secrets.DISROOT_SSH_KEY }}
 #         GITEA_SSH_KEY: ${{ secrets.GITEA_SSH_KEY }}
 #         RADICLE_KEY: ${{ secrets.RADICLE_KEY }}
+#         R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+#         R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+#         R2_AGE_RECIPIENT: ${{ secrets.R2_AGE_RECIPIENT }}
 
 name: Mirror to Git Forges (reusable)
 
@@ -453,6 +457,7 @@ jobs:
   mirror-r2-bundle:
     # D303/D304: Cloudflare R2 git-bundle backup with mandatory client-side
     # age encryption before any bytes leave the runner.
+    name: Mirror encrypted bundle to Cloudflare R2
     timeout-minutes: 20
     runs-on: ${{ inputs.runs-on }}
     if: vars.R2_BUNDLE_MIRROR_ENABLED == 'true'
@@ -474,9 +479,9 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ! "$R2_ENDPOINT" =~ ^https://[a-zA-Z0-9-]+(\.eu|\.fedramp|\.us)?\.r2\.cloudflarestorage\.com$ ]] ||
-             [[ ! "$R2_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] ||
+             [[ ! "$R2_BUCKET" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] ||
              [[ ! "$AGE_RECIPIENT" =~ ^(age1[a-z0-9]{58}|ssh-ed25519[[:space:]]+AAAA[A-Za-z0-9+/=]+)$ ]]; then
-            echo "::error::Configure valid R2_ENDPOINT_URL (*.r2.cloudflarestorage.com), R2_BUCKET, and R2_AGE_RECIPIENT (age1... or ssh-ed25519)"
+            echo "::error::Configure valid R2_ENDPOINT_URL (*.r2.cloudflarestorage.com), R2_BUCKET (lowercase alphanumeric and hyphens), and R2_AGE_RECIPIENT (age1... or ssh-ed25519)"
             exit 1
           fi
       - name: Create, age-encrypt, and upload git bundle to Cloudflare R2
@@ -490,8 +495,13 @@ jobs:
           AGE_RECIPIENT: ${{ env.R2_RECIPIENT }}
           MIRROR_ORG: ${{ vars.R2_ORG || vars.MIRROR_ORG || github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          if [[ ! "$COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid COMMIT_SHA"
+            exit 1
+          fi
           if ! command -v age >/dev/null 2>&1; then
             sudo apt-get update -qq && sudo apt-get install -y -qq age
           fi
@@ -503,7 +513,11 @@ jobs:
           age -r "$AGE_RECIPIENT" -o "$ENC_BUNDLE" "$RAW_BUNDLE"
           rm -f "$RAW_BUNDLE"
           test -s "$ENC_BUNDLE"
-          aws s3 cp "$ENC_BUNDLE" "s3://${R2_BUCKET}/${MIRROR_ORG}/${REPO_NAME}/latest.bundle.age" --endpoint-url "$R2_ENDPOINT"
+          BUNDLE_TS="$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SNAPSHOT_KEY="s3://${R2_BUCKET}/${MIRROR_ORG}/${REPO_NAME}/snapshots/${BUNDLE_TS}-${COMMIT_SHA}.bundle.age"
+          LATEST_KEY="s3://${R2_BUCKET}/${MIRROR_ORG}/${REPO_NAME}/latest.bundle.age"
+          aws s3 cp "$ENC_BUNDLE" "$SNAPSHOT_KEY" --endpoint-url "$R2_ENDPOINT"
+          aws s3 cp "$ENC_BUNDLE" "$LATEST_KEY" --endpoint-url "$R2_ENDPOINT"
       - name: Skipped (R2 credentials or age recipient not configured)
         if: ${{ env.R2_KEY_ID == '' || env.R2_SECRET_KEY == '' || env.R2_RECIPIENT == '' }}
         run: |
