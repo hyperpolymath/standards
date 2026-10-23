@@ -25,7 +25,7 @@ def workflow(name)
 end
 
 workflow('mirror-reusable.yml')['jobs'].each do |name, job|
-  next if name == 'mirror-radicle'
+  next if %w[mirror-radicle mirror-r2-bundle].include?(name)
 
   verify = job['steps'].find { |step| step.fetch('name', '').start_with?('Verify ') }
   push = job['steps'].find { |step| step.fetch('run', '').include?('git push') }
@@ -61,6 +61,31 @@ workflow('mirror-reusable.yml')['jobs'].each do |name, job|
   end
 end
 puts 'PASS: all six mirrors accept approved keys and reject tampered, empty, malformed, or unapproved keys'
+
+r2_job = workflow('mirror-reusable.yml')['jobs']['mirror-r2-bundle']
+assert(r2_job, 'mirror-r2-bundle job missing from mirror-reusable.yml')
+r2_verify = r2_job['steps'].find { |s| s.fetch('name', '') == 'Verify R2 endpoint and age recipient' }
+r2_upload = r2_job['steps'].find { |s| s.fetch('name', '').include?('age-encrypt') }
+assert(r2_verify && r2_upload, 'mirror-r2-bundle missing verify or upload step')
+assert(r2_job['steps'].index(r2_verify) < r2_job['steps'].index(r2_upload), 'mirror-r2-bundle verifies too late')
+assert(r2_verify['if'] == r2_upload['if'], 'mirror-r2-bundle verify/upload conditions differ')
+assert(!r2_verify['continue-on-error'], 'mirror-r2-bundle verification failure is ignored')
+assert(r2_upload['run'].include?('age -r "$AGE_RECIPIENT" -o "$ENC_BUNDLE" "$RAW_BUNDLE"'), 'mirror-r2-bundle must encrypt with age before upload')
+assert(r2_upload['run'].include?('rm -f "$RAW_BUNDLE"'), 'mirror-r2-bundle must remove plaintext bundle before upload')
+[
+  ['https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com', 'estate-mirrors', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', true],
+  ['http://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com', 'estate-mirrors', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', false],
+  ['https://evil.example.com', 'estate-mirrors', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', false],
+  ['https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com', 'INVALID_BUCKET', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', false],
+  ['https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com', 'estate-mirrors', '', false]
+].each do |endpoint, bucket, recipient, succeeds|
+  out, err, status = Open3.capture3(
+    { 'R2_ENDPOINT' => endpoint, 'R2_BUCKET' => bucket, 'AGE_RECIPIENT' => recipient },
+    'bash', '-c', r2_verify['run']
+  )
+  assert(status.success? == succeeds, "mirror-r2-bundle unexpected verify result for #{[endpoint, bucket, recipient].inspect}\n#{out}#{err}")
+end
+puts 'PASS: mirror-r2-bundle validates R2 endpoint, bucket, and age recipient and enforces client-side age encryption'
 
 step = workflow('hypatia-scan-reusable.yml')['jobs']['scan']['steps'].find do |candidate|
   candidate['name'] == 'Check out resolved Hypatia commit'
