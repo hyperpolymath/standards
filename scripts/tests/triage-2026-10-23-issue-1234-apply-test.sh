@@ -28,13 +28,21 @@ for id in 15402978 18110196 18874804 18875919 14968573 14968592 14968613 1496872
 done
 echo "PASS: all 10 A1 (D16) ruleset IDs are covered"
 
-# 3. Verify close-out report covers A1-A7, D304, D332, and D335-D355.
-for marker in "A1 (D16)" "A2 (D14)" "A3 (D24)" "A4 (D97)" "A5 (D298)" "A6 (D67" "A7 (D330)" "B / D304" "B / D332" "D355"; do
+# 3. Verify A2 covers echidna stub fuzz_input.rs, A3 updates knot-knot pages.yml, and D332 covers 95 repos.
+grep -q 'fuzz/fuzz_targets/fuzz_input.rs' "$SUT"
+grep -q 'www/public' "$SUT"
+grep -q 'ls-remote --exit-code --heads origin' "$SUT"
+grep -q 'orgs/metadatastician/installations' "$SUT"
+echo "PASS: A2 echidna stub, A3 knot-knot pages.yml, remote-branch resumability, and org installations check are present"
+
+# 4. Verify close-out report covers A1-A7, D304, D332, D335-D355, and reconciled Tier 4 (25) / Tier 5 (271) counts.
+for marker in "A1 (D16)" "A2 (D14)" "A3 (D24)" "A4 (D97)" "A5 (D298)" "A6 (D67" "A7 (D330)" "B / D304" "B / D332" "D355" "All remaining 271 active public"; do
   grep -q "$marker" "$REPORT" || { echo "FAIL: missing '$marker' in $REPORT" >&2; exit 1; }
 done
-echo "PASS: close-out report contains all #1234 sections and ruling row D355"
+echo "PASS: close-out report contains all #1234 sections, ruling row D355, and reconciled 357-repo tier counts"
 
-# 4. --dry-run must execute cleanly against a stub `gh` that refuses any write verb.
+# 5. --dry-run must execute cleanly against a stub `gh` that refuses any write verb,
+#    and must keep #306 and #1234 open while items are pending.
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 cat > "$WORK/gh" <<'SHIM'
@@ -56,8 +64,8 @@ case "${1:-}" in
       repos/metadatastician/knot-knot)
         printf 'false\n'
         ;;
-      user/installations)
-        printf '1\n'
+      orgs/metadatastician/installations|user/installations)
+        printf '0\n'
         ;;
       repos/hyperpolymath/standards/issues/*)
         printf 'open\n'
@@ -75,5 +83,8 @@ esac
 SHIM
 chmod +x "$WORK/gh"
 
-PATH="$WORK:$PATH" bash "$SUT" --dry-run >/dev/null
-echo "PASS: --dry-run performs zero gh write calls"
+dry_out="$(PATH="$WORK:$PATH" bash "$SUT" --dry-run)"
+printf '%s\n' "$dry_out" | grep -q 'D332 .github/settings.yml targets: 95'
+printf '%s\n' "$dry_out" | grep -q '#306 kept open'
+printf '%s\n' "$dry_out" | grep -q '#1234 kept open'
+echo "PASS: --dry-run performs zero gh write calls, enumerates 95 D332 repos, and gates issue closure on convergence"

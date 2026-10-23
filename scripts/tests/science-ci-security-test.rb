@@ -72,11 +72,23 @@ assert(r2_verify['if'] == r2_upload['if'], 'mirror-r2-bundle verify/upload condi
 assert(!r2_verify['continue-on-error'], 'mirror-r2-bundle verification failure is ignored')
 assert(r2_upload['run'].include?('age -r "$AGE_RECIPIENT" -o "$ENC_BUNDLE" "$RAW_BUNDLE"'), 'mirror-r2-bundle must encrypt with age before upload')
 assert(r2_upload['run'].include?('rm -f "$RAW_BUNDLE"'), 'mirror-r2-bundle must remove plaintext bundle before upload')
+r2_script = r2_upload['run']
+encrypt_at = r2_script.index('age -r "$AGE_RECIPIENT" -o "$ENC_BUNDLE" "$RAW_BUNDLE"')
+remove_at = r2_script.index('rm -f "$RAW_BUNDLE"')
+upload_at = r2_script.index('aws s3 cp "$ENC_BUNDLE"')
+assert(encrypt_at && remove_at && upload_at && encrypt_at < remove_at && remove_at < upload_at,
+       'mirror-r2-bundle must encrypt and remove plaintext before uploading ciphertext')
+assert(r2_script.include?('/snapshots/${BUNDLE_TS}-${COMMIT_SHA}.bundle.age'),
+       'mirror-r2-bundle must write an immutable timestamp+SHA snapshot bundle')
+assert(r2_script.include?('/latest.bundle.age'),
+       'mirror-r2-bundle must update latest.bundle.age')
 [
   ['https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com', 'estate-mirrors', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', true],
+  ['https://0123456789abcdef0123456789abcdef.us.r2.cloudflarestorage.com', 'estate-mirrors', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', true],
   ['http://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com', 'estate-mirrors', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', false],
   ['https://evil.example.com', 'estate-mirrors', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', false],
   ['https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com', 'INVALID_BUCKET', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', false],
+  ['https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com', 'estate.mirrors', 'age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p', false],
   ['https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com', 'estate-mirrors', '', false]
 ].each do |endpoint, bucket, recipient, succeeds|
   out, err, status = Open3.capture3(

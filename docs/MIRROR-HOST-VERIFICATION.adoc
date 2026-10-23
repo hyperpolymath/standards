@@ -40,11 +40,30 @@ Per owner rulings D303 and D304 (`standards#1234`), `mirror-reusable.yml` also
 provides an optional `mirror-r2-bundle` job gated on
 `vars.R2_BUNDLE_MIRROR_ENABLED == 'true'`. When enabled and provisioned with
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT_URL`
-(`https://<account>.r2.cloudflarestorage.com`), `R2_BUCKET`, and
-`R2_AGE_RECIPIENT` (`age1...` or `ssh-ed25519`), the runner creates a full
+(`https://<account>[.eu|.fedramp|.us].r2.cloudflarestorage.com`), `R2_BUCKET`,
+and `R2_AGE_RECIPIENT` (`age1...` or `ssh-ed25519`), the runner creates a full
 `git bundle`, verifies it, encrypts it client-side with `age -r`, removes the
 plaintext bundle, and uploads only the `.bundle.age` ciphertext to Cloudflare
-R2.
+R2 under both an immutable `snapshots/<timestamp>-<sha>.bundle.age` object key
+and `latest.bundle.age`.
+
+Callers must pass the R2 credentials explicitly in the `secrets:` block because
+GitHub Actions does not forward caller secrets to a reusable workflow
+automatically. Without these mappings, `mirror-r2-bundle` skips the upload and
+emits a notice. Map `R2_AGE_RECIPIENT` under `secrets:` when the recipient is
+stored as a secret; when stored as an Actions variable (`vars.R2_AGE_RECIPIENT`),
+the reusable workflow reads it directly from `vars` without a secret mapping:
+
+[source,yaml]
+----
+jobs:
+  mirror:
+    uses: hyperpolymath/standards/.github/workflows/mirror-reusable.yml@<sha>
+    secrets:
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_AGE_RECIPIENT: ${{ secrets.R2_AGE_RECIPIENT }}
+----
 
 `scripts/tests/science-ci-security-test.sh` launches the assertions in
 `scripts/tests/science-ci-security-test.rb`, which exercise every actual SSH
