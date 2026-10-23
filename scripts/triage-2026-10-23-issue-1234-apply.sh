@@ -33,6 +33,8 @@ if [ "${1:-}" = "--dry-run" ]; then
 fi
 
 # run_gh — Execute a `gh` CLI subcommand, or print it when DRY_RUN=1.
+# Pass arguments as for `gh`; live execution returns its exit status, including
+# failures. In dry-run mode, return the status of printing the command.
 run_gh() {
   if [ "$DRY_RUN" -eq 1 ]; then
     printf '[dry-run] gh %s\n' "$*"
@@ -287,6 +289,9 @@ echo ""
 echo "== Section 6: Closing #306 (absorbed into D24/A3) and #1234 =="
 
 # close_if_open — Close a GitHub issue on $REPO with an evidence comment if it is still open.
+# Takes an issue number and comment text. DRY_RUN=1 still fetches the issue state,
+# but only prints the close command. API and close-command failures stop the
+# script; an issue whose state is not "open" is skipped successfully.
 close_if_open() {
   local num="$1" comment="$2"
   local state
