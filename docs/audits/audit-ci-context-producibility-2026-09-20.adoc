@@ -535,3 +535,57 @@ does not do this: it derives contexts from checks that run and then has to pick
 a ruleset, and with six additive branch rulesets it cannot justify a choice, so
 it reports `AMBIGUOUS` and declines. A scripted single-field edit is the safe
 instrument; a general-purpose rewriter is not.
+
+=== Applied: the decision layer, verified
+
+The repair ran on 2026-10-24 and was verified by reading the ruleset back, not
+by trusting the script's success message.
+
+[cols="2,1,1",options="header"]
+|===
+| Field | Before | After
+
+| `required_status_checks` (Hypatia)
+| `scan / Hypatia Neurosymbolic Analysis`
+| `Hypatia verdict grid / Hypatia Neurosymbolic Analysis`
+
+| `bypass_actors`
+| `RepositoryRole:5`, `always`
+| none
+
+| `strict_required_status_checks_policy`
+| `false`
+| `true`
+
+| Required contexts
+| 20 (1 unproducible)
+| 21, all producible on a pull request
+|===
+
+`Repo self-tests` was added as the twenty-first. It is the check that caught both
+regressions in this audit — the `|| true` that swallowed the gate's exit, and
+inline Python that was banned repository-wide — and under the old ruleset it
+could not block either. A check that detects a defect and cannot stop it is a
+reporter, not a gate; it is now load-bearing.
+
+The gate re-run against the repaired ruleset reports `inspected: true`,
+`producible=23`, `app-owned=1`, and **zero findings**. `.machine_readable/
+required-contexts-allow.txt` is therefore header-only: the entry it carried is
+retired and recorded there, not silently deleted, because a declaration that
+disappears without a trace is indistinguishable from one that was never true.
+
+==== The timestamp that settles the argument
+
+#1337 carried the repair and merged at **21:38:20Z**. The ruleset was corrected
+at **22:57** — seventy-nine minutes later. The fix therefore provably did not
+enable its own merge, and that merge again went through the `always` bypass.
+
+That is the cleanest available proof of this document's thesis. The repository
+did not merge broken work because it lacked checks: it had twenty of them, and
+sixty-five green on the pull request in question. It merged broken work because
+every path to `main` ran through a bypass that discarded all twenty in one
+action, and the only reason the bypass was needed was a required context that
+nothing could produce. Both halves of that are now gone — the unproducible
+context by the ruleset edit, the bypass by deleting it — and the next pull
+request is the first in this repository's history that has no legal path to
+`main` which skips its own checks.
