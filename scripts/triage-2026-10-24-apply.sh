@@ -29,6 +29,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB="$SCRIPT_DIR/lib"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO="${REPO:-hyperpolymath/standards}"
 CSV="$ROOT/docs/triage/2026-10-24-issue-classification.csv"
@@ -46,26 +47,33 @@ esac
 [ -f "$CSV" ] || { printf 'missing classification CSV: %s\n' "$CSV" >&2; exit 2; }
 
 # rows_for TIER — print "number<TAB>note" for every row in a tier, in numeric order.
+#
+# Parsed by csv-to-tsv.awk, not by splitting on ",": the CSV has quoted fields
+# containing commas ("bug,security"), and -F, moves every later column one to
+# the left. Column order is the document's: 1 number, 3 tier, 12 note.
 rows_for() {
-  python3 - "$CSV" "$1" <<'PY'
-import csv, sys
-rows = [r for r in csv.DictReader(open(sys.argv[1])) if r["tier"] == sys.argv[2]]
-for r in sorted(rows, key=lambda r: int(r["number"])):
-    print(f'{r["number"]}\t{r["note"]}')
-PY
+  awk -f "$LIB/csv-to-tsv.awk" "$CSV" \
+    | awk -F'\t' -v tier="$1" 'NR > 1 && $3 == tier { print $1 "\t" $12 }' \
+    | sort -t"$(printf '\t')" -k1,1n
 }
 
 if [ "$MODE" = "report" ]; then
-  python3 - "$CSV" <<'PY'
-import csv, sys, collections
-tier_name = {"C":"close now","Q":"quick fix","S":"small task","E":"estate campaign",
-             "D":"decision","R":"research","U":"umbrella/parked"}
-c = collections.Counter(r["tier"] for r in csv.DictReader(open(sys.argv[1])))
-total = sum(c.values())
-for t in "CQSEDRU":
-    print(f"{t}  {tier_name[t]:<17} {c[t]:>3}  {100*c[t]/total:>4.0f}%")
-print(f"   {'total':<17} {total:>3}")
-PY
+  awk -f "$LIB/csv-to-tsv.awk" "$CSV" | awk -F'\t' '
+    NR == 1 { next }
+    { count[$3]++; total++ }
+    END {
+      split("C Q S E D R U", order, " ")
+      label["C"] = "close now";  label["Q"] = "quick fix"
+      label["S"] = "small task"; label["E"] = "estate campaign"
+      label["D"] = "decision";   label["R"] = "research"
+      label["U"] = "umbrella/parked"
+      for (i = 1; i <= 7; i++) {
+        t = order[i]
+        printf "%s  %-17s %3d  %4.0f%%\n", t, label[t], count[t] + 0,
+               100 * (count[t] + 0) / total
+      }
+      printf "   %-17s %3d\n", "total", total
+    }'
   exit 0
 fi
 
