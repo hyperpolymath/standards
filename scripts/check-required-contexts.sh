@@ -173,6 +173,11 @@ fetch_reusable() { # owner/repo/workflow@ref -> path on stdout, or empty
 # same findings twice). Every PR was therefore BLOCKED with every check green,
 # and the only way through was the ruleset's `always` admin bypass, which
 # discards the other nineteen required checks in the same action.
+#
+# Emit one event name per line from workflow file $1. Recognises scalar and
+# inline-list on: values, and block event keys indented by two spaces.
+# No recognised events produces no output; unreadable files return awk's error
+# status.
 events_of() {
   awk '
     /^"?on"?[[:space:]]*:[[:space:]]*\[/ {
@@ -198,7 +203,9 @@ events_of() {
   ' "$1"
 }
 
-runs_on_pr() { # workflow file -> 0 if it can publish a check run on a pull request
+# Accepts pull_request and pull_request_target; ignores branch/path filters
+# and job conditions. Returns 1 for no matching event or failed event extraction.
+runs_on_pr() { # workflow file -> 0 for a declared PR event
   # NOT `events_of "$1" | grep -q`: grep -q exits on the first match, awk takes
   # SIGPIPE, and `pipefail` turns a match into a non-zero pipeline. That reads
   # as "this workflow cannot run on a PR" for exactly the files where the
@@ -212,6 +219,10 @@ runs_on_pr() { # workflow file -> 0 if it can publish a check run on a pull requ
 # PR-UNPRODUCIBLE report can ask the same question about a specific file ("which
 # workflow publishes this name, and on what events?") without a second, subtly
 # different traversal of the YAML.
+# Local reusable paths are relative to ROOT. Remote reusables may be fetched
+# and cached unless OFFLINE=1; missing or unfetchable reusables emit caller / *
+# candidates. Matrix jobs also emit wildcard candidates. Returns 0 even when
+# no names are derived; derivation errors are not propagated.
 publishable_names_from() { # FILE -> one name per line
   local f="$1" id name uses mat stub iid iname local_path
   while IFS=$'\t' read -r id name uses mat; do
@@ -309,6 +320,12 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
 }
 
 # ------------------------------------------------------------------ audit -----
+# Print the required-context audit using workflows beneath ROOT; if JSON_OUT is
+# set, attempt to write its JSON summary. Returns 1 for UNSATISFIABLE or
+# PR-UNPRODUCIBLE findings when STRICT=1, otherwise 0.
+# Missing input files or jq failures while reading REQUIRED_CONTEXTS_JSON exit
+# the script with status 1; other rule-reading failures that return are ignored.
+# JSON write failures do not affect the return status.
 run_audit() {
   local pubb pubb_pr required ROWS unsatisfiable=0 line ctx app verdict
   pubb="$(mktemp)"; pubb_pr="$(mktemp)"; required="$(mktemp)"; ROWS="$(mktemp)"
