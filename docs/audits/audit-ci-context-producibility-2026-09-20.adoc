@@ -643,3 +643,53 @@ gate was fixed where the symptom was loudest, and three quieter rulesets were
 not examined. It is recorded rather than fixed here because it is a
 branch-protection write, and because a second unverified ruleset edit on the same
 day is how protection gets dropped by accident.
+
+==== The two data-dependent rules cannot be satisfied by writing code
+
+`code_coverage` and `code_quality` are the fourth and fifth instances of the
+same defect, and unlike the first three they cannot be repaired in this
+repository by any change to this repository's files.
+
+What they require, per GitHub's documentation: GitHub **Code Quality enabled**
+for the repository, and then either a Cobertura XML upload through
+`actions/upload-code-coverage@v1` (for coverage) or the `CodeQL - Code Quality`
+check running on pull requests (for quality). Neither prerequisite is a file in
+this tree. Code Quality is a repository setting, and the upload permission is
+`code-quality: write`, which no workflow here currently requests.
+
+Measured state of the tree those rules are judging:
+
+[cols="1,1",options="header"]
+|===
+| Fact | Value
+
+| AsciiDoc files | 756
+| Shell scripts | 245
+| Shell test scripts | 90
+| Rust files | 8, across five separate crates, none with a test file
+| Coverage instrumentation available in CI | none (no `kcov`, no `bashcov`)
+| `code_coverage` rule | `minimum_coverage: 80`
+|===
+
+An 80% line-coverage floor on a repository that is 90% prose and shell, with no
+coverage instrumentation for either, is not a threshold that a code change can
+reach. Standing up shell coverage is a project, not a tidy, and even then the
+number would describe the `scripts/` directory rather than the artifact this
+repository exists to produce.
+
+So the honest options are these two, and they are both settings:
+
+. **Remove the two rules** from `23787415`. The repository keeps 21 required
+  status contexts, all producible, and the other five rule types.
+. **Keep them, but make them true.** Enable Code Quality, add the Cobertura
+  upload with `code-quality: write`, and lower `minimum_coverage` to a figure
+  the tree actually meets — a floor nobody can reach is not a quality bar, it is
+  a permanent block. Note that the coverage rule evaluates only data already
+  uploaded and *does not wait* for uploads, so the job that uploads coverage
+  must itself be a required status context or the rule can pass on no data.
+
+What is not an option is leaving them as they are: `required_status_checks`
+fails every pull request that is otherwise perfect, and that is the precise
+failure this entire audit documents. The gate now reports them as
+`UNSATISFIED-RULE` so they cannot hide again, but a gate that reports the reason
+a pull request cannot merge is a diagnosis, not a remedy.
