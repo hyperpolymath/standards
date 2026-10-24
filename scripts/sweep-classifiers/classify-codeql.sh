@@ -16,9 +16,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_lib.sh
 . "$SCRIPT_DIR/_lib.sh"
 
-INPUT="${1:-/tmp/drift-survey/codeql-full.json}"
-BLOBS_DIR="${BLOBS_DIR:-/tmp/drift-survey/codeql-blobs}"
-mkdir -p "$BLOBS_DIR"
+SURVEY="$(survey_dir_init)"
+INPUT="${1:-$SURVEY/codeql-full.json}"
+BLOBS_DIR="${BLOBS_DIR:-$SURVEY/codeql-blobs}"
+(umask 077 && mkdir -p "$BLOBS_DIR")
 
 classify_blob() {
   local blob="$1" langs lines jobs
