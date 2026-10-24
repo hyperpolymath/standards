@@ -477,7 +477,6 @@ run_audit() {
     fi
     printf '%s\t%s\t%s\n' "$ctx" "$app" "$verdict" >>"$ROWS"
     case "$verdict" in
-      UNSATISFIED-RULE) unsatisfiable=$((unsatisfiable+1)) ;;
       UNSATISFIABLE)
         unsatisfiable=$((unsatisfiable+1))
         if [ "$STRICT" = 1 ]; then
@@ -542,6 +541,28 @@ EOS
                  | {context: .[0], app_id: (.[1]|tonumber), verdict: .[2]}))}' "$ROWS" >"$JSON_OUT" 2>/dev/null || true
     info "json report written to $JSON_OUT"
   fi
+  # Data-rule findings are appended to ROWS directly, so they never pass through
+  # the per-context case above. Without counting them here, a strict run whose
+  # ONLY finding was a data-dependent rule returned 0 — the gate would print the
+  # reason a pull request cannot merge and then declare success, which is the
+  # defect this script exists to catch, committed by the script itself.
+  local n_rule
+  n_rule="$(awk -F'\t' '$3=="UNSATISFIED-RULE"' "$ROWS" 2>/dev/null | wc -l | tr -d ' ')"
+  case "$n_rule" in ''|*[!0-9]*) n_rule=0 ;; esac
+  unsatisfiable=$((unsatisfiable + n_rule))
+  if [ "$n_rule" -gt 0 ]; then
+    while IFS= read -r r; do
+      [ -n "$r" ] || continue
+      if [ "$STRICT" = 1 ]; then
+        err "required $r needs data this repository never uploads — every pull request waits for a result that cannot exist; upload the data, or remove the rule"
+      else
+        warn "required $r needs data this repository never uploads — unsatisfiable as a merge rule"
+      fi
+    done <<EOF
+$(awk -F'\t' '$3=="UNSATISFIED-RULE" {print $1}' "$ROWS" 2>/dev/null)
+EOF
+  fi
+
   rm -f "$pubb" "$pubb_pr" "$required" "$ROWS"
   [ "$inspected" = 1 ] || return 1
   [ "$unsatisfiable" -gt 0 ] && [ "$STRICT" = 1 ] && return 1
