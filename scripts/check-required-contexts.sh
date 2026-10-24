@@ -377,6 +377,44 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
   return 0
 }
 
+# Rule types whose satisfaction depends on DATA being uploaded by something,
+# rather than on a workflow existing. GitHub evaluates these itself, so they
+# never appear as a status context and the producibility check above cannot see
+# them — which is exactly how they go unnoticed while blocking every pull
+# request. Measured 2026-10-24: `code_coverage` (minimum_coverage 80) and
+# `code_quality` (severity all) appeared on the main gate of a repository whose
+# only coverage job reports SKIPPED and which uploads no code-quality results.
+# Neither rule is in the repository's own config/rulesets/*.json; they arrived
+# through a UI edit.
+#
+# The repair differs per type and is not a rename: either upload the data, or
+# remove the rule. Keeping the rule and hoping is what makes every PR
+# undecidable, and an undecidable gate is a gate people bypass.
+DATA_RULES='code_coverage code_quality'
+data_rules_json() { # emit one finding per data-dependent rule on a branch ruleset
+  [ -f "${REQUIRED_CONTEXTS_JSON:-}" ] && return 0   # offline fixtures: none
+  command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 0
+  # Resolve the repo the same way required_json does. Returning early on an
+  # unset GITHUB_REPOSITORY made this check silently report nothing in exactly
+  # the local, hand-run case where someone is trying to find out why a green PR
+  # will not merge.
+  [ -n "${GITHUB_REPOSITORY:-}" ] || GITHUB_REPOSITORY="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
+  [ -n "${GITHUB_REPOSITORY:-}" ] || return 0
+  local repo="$GITHUB_REPOSITORY" id body
+  local list
+  list="$(gh api "repos/$repo/rulesets" 2>/dev/null || true)"
+  printf '%s' "$list" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  for id in $(printf '%s' "$list" | jq -r '.[]? | select(.target=="branch") | .id'); do
+    body="$(gh api "repos/$repo/rulesets/$id" 2>/dev/null || true)"
+    printf '%s' "$body" | jq -r --arg types "$DATA_RULES" --arg id "$id" '
+      if type == "object" and .enforcement != "disabled" then
+        .rules[]? | select(.type as $t | ($types | split(" ") | index($t)))
+        | "rule:\(.type) in ruleset \($id)\t0\tUNSATISFIED-RULE"
+      else empty end' 2>/dev/null
+  done
+  return 0
+}
+
 # ------------------------------------------------------------------ audit -----
 # Print the required-context audit using workflows beneath ROOT; if JSON_OUT is
 # set, attempt to write its JSON summary. Returns 1 for UNSATISFIABLE or
@@ -390,6 +428,12 @@ run_audit() {
   publishable_names pr | sort -u >"$pubb_pr"
   # Never let a failed inspection leave a stale or empty successful report.
   [ -z "$JSON_OUT" ] || rm -f "$JSON_OUT"
+  # Data-dependent rules are findings in their own right; they are appended to
+  # ROWS before the context loop so they appear in the same report, the same
+  # JSON and the same allow-list reconciliation. A context name that cannot be
+  # produced and a rule whose data is never uploaded fail the same way: every
+  # pull request becomes undecidable.
+  data_rules_json >>"$ROWS" 2>/dev/null || true
   if ! required_json >"$required"; then
     err "required contexts not inspected — could not read branch rules"
     inspected=0
@@ -433,6 +477,7 @@ run_audit() {
     fi
     printf '%s\t%s\t%s\n' "$ctx" "$app" "$verdict" >>"$ROWS"
     case "$verdict" in
+      UNSATISFIED-RULE) unsatisfiable=$((unsatisfiable+1)) ;;
       UNSATISFIABLE)
         unsatisfiable=$((unsatisfiable+1))
         if [ "$STRICT" = 1 ]; then
