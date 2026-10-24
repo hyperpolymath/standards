@@ -25,6 +25,9 @@ DOC="$ROOT/docs/triage/2026-10-24-issue-classification.adoc"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$*"; }
 
+WORK_CLASSIFICATION="$(mktemp -d)"
+trap 'rm -rf "$WORK_CLASSIFICATION"' EXIT
+
 # 1. The subject exists and parses.
 [ -f "$SUT" ] || fail "$SUT does not exist"
 bash -n "$SUT" || fail "$SUT does not parse"
@@ -34,24 +37,33 @@ pass "script exists and parses"
 [ -f "$CSV" ] || fail "$CSV does not exist"
 [ -f "$DOC" ] || fail "$DOC does not exist"
 
-python3 - "$CSV" "$DOC" <<'PY' || exit 1
-import csv, sys, collections
-rows = list(csv.DictReader(open(sys.argv[1])))
-assert rows, "CSV has no rows"
-nums = [r["number"] for r in rows]
-assert len(nums) == len(set(nums)), "duplicate issue numbers in CSV"
-tiers = collections.Counter(r["tier"] for r in rows)
-assert set(tiers) <= set("CQSEDRU"), f"unknown tier codes: {set(tiers) - set('CQSEDRU')}"
-notes = [r for r in rows if not r["note"].strip()]
-assert not notes, f"{len(notes)} rows carry no note"
-doc = open(sys.argv[2]).read()
-for t in "CQSEDRU":
-    assert f"== Tier {t} " in doc, f"document has no Tier {t} section"
-total = len(rows)
-assert f"{total}" in doc, "document does not state the total"
-print(f"PASS: {total} classified issues ({', '.join(f'{t}={tiers[t]}' for t in 'CQSEDRU')}), "
-      "unique numbers, every row annotated, every tier has a section")
-PY
+# Parsed with the same converter the SUT uses: a raw `grep ,` or `-F,` would
+# be wrong on the rows whose quoted fields contain commas, and a validation
+# that mis-parses its input certifies the wrong document.
+TSV="$WORK_CLASSIFICATION/classification.tsv"
+awk -f "$ROOT/scripts/lib/csv-to-tsv.awk" "$CSV" > "$TSV" \
+  || fail "CSV does not parse with csv-to-tsv.awk"
+
+rows="$(awk 'END { print NR - 1 }' "$TSV")"
+[ "$rows" -gt 0 ] || fail "CSV has no rows"
+
+problems="$(awk -F'\t' '
+  NR == 1 { next }
+  NF != 12            { print "row " NR ": " NF " fields, expected 12" }
+  seen[$1]++          { print "row " NR ": duplicate issue number " $1 }
+  $3 !~ /^[CQSEDRU]$/ { print "row " NR ": unknown tier code " $3 }
+  $12 ~ /^[ \t]*$/    { print "row " NR ": no note" }
+' "$TSV")"
+[ -z "$problems" ] || fail "$problems"
+
+for t in C Q S E D R U; do
+  grep -q "== Tier $t " "$DOC" || fail "document has no Tier $t section"
+done
+grep -q "$rows" "$DOC" || fail "document does not state the total ($rows)"
+
+tier_counts="$(awk -F'\t' 'NR > 1 { c[$3]++ } END {
+  for (t in c) printf "%s=%d ", t, c[t] }' "$TSV" | sed 's/ *$//')"
+pass "$rows classified issues ($tier_counts), unique numbers, every row annotated, every tier has a section"
 
 # 3. --report must not need the network at all: run it with an empty PATH for gh.
 REPORT_OUT="$(PATH="/usr/bin:/bin" bash "$SUT" --report)" || fail "--report failed without gh on PATH"
@@ -61,7 +73,9 @@ pass "--report works with no gh on PATH"
 
 # 4. Everything below uses a shim gh.
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# Both directories: an EXIT trap replaces the previous one, so the shim's
+# cleanup must also remove the classification workspace created above.
+trap 'rm -rf "$WORK" "$WORK_CLASSIFICATION"' EXIT
 CALLS="$WORK/calls.log"
 : > "$CALLS"
 
@@ -80,9 +94,7 @@ chmod +x "$WORK/gh"
 
 run_sut() { SHIM_CALLS="$CALLS" PATH="$WORK:$PATH" bash "$SUT" "$@"; }
 
-C_TIER="$(python3 -c "
-import csv,sys
-print(len([r for r in csv.DictReader(open('$CSV')) if r['tier']=='C']))")"
+C_TIER="$(awk -F'\t' 'NR > 1 && $3 == "C"' "$TSV" | wc -l | tr -d ' ')"
 [ "$C_TIER" -gt 0 ] || fail "tier C is empty, nothing to apply"
 
 # 4a. Dry-run: reads state, writes nothing.
@@ -102,23 +114,18 @@ comments="$(grep -cE '^issue comment ' "$CALLS" || true)"
 [ "$comments" = "$C_TIER" ] || fail "--apply commented $comments times, expected $C_TIER"
 
 # Every close names an issue number; every one of them is a tier-C number.
-python3 - "$CSV" "$CALLS" <<'PY' || exit 1
-import csv, sys, re
-tier_c = {r["number"]: r["note"] for r in csv.DictReader(open(sys.argv[1])) if r["tier"] == "C"}
-closed = []
-commented = []
-for line in open(sys.argv[2]):
-    parts = line.split()
-    if parts[:2] == ["issue", "close"]:
-        closed.append(parts[2])
-    elif parts[:2] == ["issue", "comment"]:
-        commented.append(parts[2])
-bad = [n for n in closed if n not in tier_c]
-assert not bad, f"--apply closed non-tier-C issues: {bad}"
-assert sorted(closed) == sorted(commented), "a close was not preceded by a comment"
-assert len(closed) == len(set(closed)), "an issue was closed twice"
-print(f"PASS: --apply commented and closed exactly the {len(closed)} tier-C issues, nothing else")
-PY
+tier_c="$(awk -F'\t' 'NR > 1 && $3 == "C" { print $1 }' "$TSV" | sort -n)"
+closed="$(awk '$1 == "issue" && $2 == "close"   { print $3 }' "$CALLS" | sort -n)"
+commented="$(awk '$1 == "issue" && $2 == "comment" { print $3 }' "$CALLS" | sort -n)"
+
+[ -n "$tier_c" ] || fail "tier C is empty in the CSV"
+[ "$closed" = "$tier_c" ] \
+  || fail "--apply closed a set that is not tier C"$'\n'"  tier C: $(printf '%s' "$tier_c" | tr '\n' ' ')"$'\n'"  closed: $(printf '%s' "$closed" | tr '\n' ' ')"
+[ "$commented" = "$closed" ] || fail "a close was not preceded by a comment"
+[ "$closed" = "$(printf '%s\n' "$closed" | sort -un)" ] \
+  || fail "an issue was closed twice"
+
+pass "--apply commented and closed exactly the $(printf '%s\n' "$closed" | wc -l | tr -d ' ') tier-C issues, nothing else"
 
 # 4c. Idempotence: an already-closed issue is skipped, never re-commented.
 : > "$CALLS"

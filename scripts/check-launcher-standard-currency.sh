@@ -69,6 +69,12 @@ SELF_TEST_TMP=""
 # path. Each entry is justified; do not add one without a reason.
 ALLOWLIST=(
   'docs/audits/*'                    # dated audit records (AC1's exemption)
+  'docs/triage/*'                    # dated backlog classifications. Same class as docs/audits/:
+                                     # a record whose SUBJECT is a rename must be able to name the
+                                     # renamed file, or the record disagrees with the issue it
+                                     # indexes. This exempts the record, not new guidance: a live
+                                     # document instructing anyone to use the retired name is still
+                                     # a defect, and the check still reports it everywhere else.
   '1-formats/deed/mappings/*'        # the .a2ml -> .deed conversion record; naming both is its job
   'dev-notes/*'                      # working notes, not compliance claims
   '*HANDOVER*'                       # handover documents record prior state
