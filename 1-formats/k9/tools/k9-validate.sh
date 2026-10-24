@@ -59,7 +59,7 @@ SPEC_DIR="$(cd -- "$SCRIPT_DIR/../spec" && pwd)"
 # everything. --self-test uses this to do exactly that. No CI lane sets it: if
 # it were set in production the gate would validate against whatever it was
 # pointed at, so the self-test also asserts the default is the canonical path.
-CONTRACT="${K9_CONTRACT:-$SPEC_DIR/contract/k9_contract.ncl}"
+CONTRACT="$SPEC_DIR/contract/k9_contract.ncl"
 
 CONTRACT_VERSION="1.0.0"
 SCHEMA_MAJOR="1"
