@@ -26,31 +26,29 @@ base() {
     [$ctxs[] | {context: ., integration_id: 15368}] as $list' 2>/dev/null
 }
 
-mk_ruleset() { # $1=old context present? $2=new context present?
-  python3 - "$1" "$2" <<'PY'
-import json,sys
-old_new, new_new = sys.argv[1]=="1", sys.argv[2]=="1"
-ctx = ["CodeQL", "SPARK Theatre Gate"]
-for i in range(17):
-    ctx.append(f"governance / filler {i}")
-if old_new: ctx.append("scan / Hypatia Neurosymbolic Analysis")
-if new_new: ctx.append("Hypatia verdict grid / Hypatia Neurosymbolic Analysis")
-print(json.dumps({
-  "name": "main gate: append-only + required checks + signatures + scanning",
-  "target": "branch", "enforcement": "active",
-  "bypass_actors": [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
-  "conditions": {"ref_name": {"exclude": [], "include": ["~DEFAULT_BRANCH"]}},
-  "rules": [
-    {"type": "deletion"},
-    {"type": "non_fast_forward"},
-    {"type": "required_status_checks", "parameters": {
-      "strict_required_status_checks_policy": False,
-      "do_not_enforce_on_create": False,
-      "required_status_checks": [{"context": c, "integration_id": 15368} for c in ctx]}},
-    {"type": "pull_request", "parameters": {"required_approving_review_count": 0}},
-    {"type": "required_signatures"},
-  ]}))
-PY
+mk_ruleset() { # $1=old context present (1/0)  $2=new context present (1/0)
+  # Pure jq: inline Python is banned in this repository
+  # (scripts/tests/check-inline-python-test.sh), and a fixture generator is not
+  # a good enough reason to open the door.
+  jq -n --argjson o "$1" --argjson n "$2" '
+    (["CodeQL", "SPARK Theatre Gate"]
+     + [range(0;17) | "governance / filler \(.)"]
+     + (if $o == 1 then ["scan / Hypatia Neurosymbolic Analysis"] else [] end)
+     + (if $n == 1 then ["Hypatia verdict grid / Hypatia Neurosymbolic Analysis"] else [] end)) as $ctx
+    | {name: "main gate: append-only + required checks + signatures + scanning",
+       target: "branch", enforcement: "active",
+       bypass_actors: [{actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always"}],
+       conditions: {ref_name: {exclude: [], include: ["~DEFAULT_BRANCH"]}},
+       rules: [
+         {type: "deletion"},
+         {type: "non_fast_forward"},
+         {type: "required_status_checks", parameters: {
+           strict_required_status_checks_policy: false,
+           do_not_enforce_on_create: false,
+           required_status_checks: [$ctx[] | {context: ., integration_id: 15368}]}},
+         {type: "pull_request", parameters: {required_approving_review_count: 0}},
+         {type: "required_signatures"}
+       ]}'
 }
 
 # Fake `gh`: `api repos/R/rulesets/N` serves $FIXTURE, unless a write has
