@@ -83,11 +83,23 @@ render "$WORK/o7" --hypatia "$hyp_clean" --panic "$pan_clean" --pons "$pons_clea
 check "fleet error severity is high" red "$(row "$WORK/o7" rhodibot)"
 check "enrolled member without a report-back is orange" orange "$(row "$WORK/o7" panicbot)"
 check "member not enrolled is grey" grey "$(row "$WORK/o7" glambot)"
-check "grey rows do not hide a red one" red "$(state "$WORK/o7")"
+# ⚠ CONTRACT CHANGE (scope + gate separation, 2026-10-24). The lane state used
+# to be the worst row of ANY kind, so an advisory fleet report-back could turn
+# the lane red while every gating check was green. It is now the worst GATING
+# row; the advisory worst is surfaced on the next line and must name the red.
+check "an advisory red does not set the gating state" green "$(state "$WORK/o7")"
+check "the advisory red is still reported and named" yes \
+  "$(grep -q 'Advisory: .*worst .*' "$WORK/o7/report.md" && grep -q '🔴' "$WORK/o7/report.md" && echo yes)"
+check "the row itself is still red, and marked advisory" yes \
+  "$(grep -q '| rhodibot (RSR) | advisory | 🔴' "$WORK/o7/report.md" && echo yes)"
 check "the grey reason is shown" yes "$(grep -q 'no served HTML' "$WORK/o7/report.md" && echo yes)"
 echo 'nonsense' > "$WORK/enrol-bad.json"
 render "$WORK/o8" --hypatia "$hyp_clean" --panic "$pan_clean" --pons "$pons_clean" --enrolment "$WORK/enrol-bad.json" 2>/dev/null
-check "an unreadable enrolment manifest is missing evidence" orange "$(state "$WORK/o8")"
+# The enrolment manifest governs which ADVISORY fleet members should report.
+# Breaking it no longer reddens the lane -- the gating row is independent -- but
+# it must remain visible as missing advisory evidence, never as clean.
+check "an unreadable enrolment manifest still surfaces as missing evidence" yes \
+  "$(grep -q 'Advisory: .*🟠 indeterminate' "$WORK/o8/report.md" && echo yes)"
 
 # 6. Escaping: untrusted text cannot break the table or inject markup.
 echo '[{"severity":"high","rule_module":"r","type":"t</details><script>x</script>","file":"a|b","reason":"line one\nline two"}]' > "$WORK/hyp-esc.json"
@@ -107,6 +119,66 @@ render "$WORK/d5" --hypatia "$hyp_clean" --panic "$pan_not" --pons "$pons_clean"
 check "a changed evidence status is not an improvement" 1 "$(grep -c '— evidence changed' "$WORK/d5/report.md")"
 check "baseline round-trips" aaaa "$(bash "$GRID" baseline "$WORK/d1/report.md" | jq -r .sha)"
 check "a garbled baseline reads as null" null "$(printf '<!-- verdict-grid-baseline:xxxx -->' > "$WORK/garbled.md"; bash "$GRID" baseline "$WORK/garbled.md")"
+
+# 8. Scope: what the grid is allowed to GRADE.
+#    The failures that matter here are the quiet ones -- a delta grid that
+#    silently grades everything (a verdict that never moves) and an exclusion
+#    that swallows a finding it should not have matched.
+printf 'scripts/touched.sh\n' > "$WORK/changed.txt"
+cat > "$WORK/hyp-mixed.json" <<'JSON'
+[
+ {"severity":"medium","rule_module":"cp","type":"t","file":"scripts/touched.sh","reason":"in scope"},
+ {"severity":"critical","rule_module":"cp","type":"t","file":"scripts/untouched.sh","reason":"standing"},
+ {"severity":"high","rule_module":"cp","type":"t","file":"9-archive/old.adoc","reason":"frozen"}
+]
+JSON
+render "$WORK/s1" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --pons "$WORK/pons_clean" \
+  --changed "$WORK/changed.txt" --exclude-prefix 9-archive/
+check "delta scope grades only the touched file" yellow "$(row "$WORK/s1" hypatia)"
+check "the standing critical does not grade" 0 "$(jq -r '.reporters[] | select(.id=="hypatia") | .counts.critical' "$WORK/s1/report.json")"
+check "the standing critical IS counted" 1 "$(jq -r '.reporters[] | select(.id=="hypatia") | .counts_standing.critical' "$WORK/s1/report.json")"
+check "the excluded finding is neither graded nor standing" 1 "$(jq -r '.reporters[] | select(.id=="hypatia") | .counts_excluded.high' "$WORK/s1/report.json")"
+check "the identity line states the scope" yes \
+  "$(grep -q 'scope: this change (1 file' "$WORK/s1/report.md" && echo yes)"
+check "the identity line names the exclusion" yes \
+  "$(grep -q 'excludes .*9-archive/' "$WORK/s1/report.md" && echo yes)"
+check "the standing finding is named in the accordion" yes \
+  "$(grep -q 'further finding(s) in files this change does not touch' "$WORK/s1/report.md" && echo yes)"
+
+render "$WORK/s2" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --pons "$WORK/pons_clean"
+check "without --changed the whole repository is graded" purple "$(row "$WORK/s2" hypatia)"
+check "whole-repo mode says so" yes "$(grep -q 'scope: whole repository' "$WORK/s2/report.md" && echo yes)"
+
+# A finding with no path cannot be shown to be outside the change: it grades.
+printf '[{"severity":"high","rule_module":"cp","type":"t","file":"","reason":"no path"}]' > "$WORK/hyp-nopath.json"
+render "$WORK/s3" --hypatia "$WORK/hyp-nopath.json" --panic "$WORK/pan_clean" --pons "$WORK/pons_clean" \
+  --changed "$WORK/changed.txt"
+check "a location-less finding is graded, not silently standing" red "$(row "$WORK/s3" hypatia)"
+
+# Exclusion applies in whole-repo mode too: frozen history is out of scope
+# whether or not the change touched it.
+render "$WORK/s4" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --pons "$WORK/pons_clean" \
+  --exclude-prefix 9-archive/
+check "exclusion applies without delta scoping" purple "$(row "$WORK/s4" hypatia)"
+check "...and the excluded row is not counted as graded" 0 \
+  "$(jq -r '.reporters[] | select(.id=="hypatia") | .counts.high' "$WORK/s4/report.json")"
+
+# An unreadable changed-file list is a usage error, never a silent whole-repo
+# run: grading the repository when the caller asked for a delta would colour the
+# PR for debt it did not introduce, with nothing to say which question was asked.
+# (Under `set -e` the failing call is read with `||`, never bare.)
+rc=0
+bash "$GRID" render --out "$WORK/s5" --hypatia "$WORK/hyp-mixed.json" \
+  --changed "$WORK/does-not-exist.txt" >/dev/null 2>&1 || rc=$?
+check "a missing changed-file list exits 2..." 2 "$rc"
+check "...and writes no report to be misread" no \
+  "$(if [ -f "$WORK/s5/report.json" ]; then echo yes; else echo no; fi)"
+
+# A scope change invalidates the comparison rather than faking one.
+render "$WORK/s6" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --pons "$WORK/pons_clean" --pr 9 --sha s1
+render "$WORK/s7" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --pons "$WORK/pons_clean" --pr 9 --sha s2 \
+  --changed "$WORK/changed.txt" --previous "$WORK/s6/report.md"
+check "a change of scope is not a comparable baseline" 3 "$(grep -c 'no comparable baseline' "$WORK/s7/report.md")"
 
 echo
 echo "verdict-grid-test: $pass passed, $fail failed"

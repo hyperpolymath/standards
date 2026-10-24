@@ -42,14 +42,14 @@ echo "== order: summary, then k9-deed, then hypatia =="
 d="$TMP/a"; render "$d" --deed-result success --k9-result success --k9-verdict green \
   --k9-report "$grid_k9" --hypatia-result success --hypatia-verdict purple --hypatia-report "$grid_hyp"
 sum_at=$(grep -n '^| Lane | Status | Run |$' "$d/body.md" | cut -d: -f1)
-k9_at=$(grep -n '^## k9-deed conformance$' "$d/body.md" | cut -d: -f1)
+k9_at=$(grep -n '^## K9-DEED conformance$' "$d/body.md" | cut -d: -f1)
 hyp_at=$(grep -n '^## Hypatia verdict grid$' "$d/body.md" | cut -d: -f1)
 check "summary precedes k9-deed section" "[ -n '$sum_at' ] && [ -n '$k9_at' ] && [ '$sum_at' -lt '$k9_at' ]" "sum=$sum_at k9=$k9_at"
 check "k9-deed precedes hypatia" "[ '$k9_at' -lt '$hyp_at' ]" "k9=$k9_at hyp=$hyp_at"
 
-echo "== the lane is named k9-deed conformance, not K9 =="
-check "summary row says k9-deed conformance" \
-  "grep -q '| k9-deed conformance (L0–L2; L3 not verified) |' '$d/body.md'"
+echo "== the lane is named K9-DEED conformance, not K9 =="
+check "summary row says K9-DEED conformance" \
+  "grep -q '| K9-DEED conformance (L0–L2; L3 not verified) |' '$d/body.md'"
 check "no bare '| K9 conformance' row survives" \
   "! grep -q '| K9 conformance' '$d/body.md'"
 
@@ -76,13 +76,13 @@ check "overall badge is orange when any lane is indeterminate" \
 echo "== a failed job outranks its own stale green grid =="
 d="$TMP/c"; render "$d" --deed-result success --k9-result failure --k9-verdict green \
   --k9-report "$grid_k9" --hypatia-result success --hypatia-verdict green --hypatia-report "$grid_hyp"
-check "k9 row is failing, not green" "grep -q '| k9-deed conformance .* | 🔴 failing' '$d/body.md'"
+check "k9 row is failing, not green" "grep -q '| K9-DEED conformance .* | 🔴 failing' '$d/body.md'"
 check "overall badge is red" "grep -q '\"message\": \"failing\"' '$d/badge.json'"
 
 echo "== an unknown state word is indeterminate, never green =="
 d="$TMP/d"; render "$d" --deed-result success --k9-result success --k9-verdict 'looks-fine' \
   --k9-report "$grid_k9" --hypatia-result success --hypatia-verdict green --hypatia-report "$grid_hyp"
-check "unrecognised verdict renders orange" "grep -q '| k9-deed conformance .* | 🟠 indeterminate' '$d/body.md'"
+check "unrecognised verdict renders orange" "grep -q '| K9-DEED conformance .* | 🟠 indeterminate' '$d/body.md'"
 
 echo "== DEED lane =="
 d="$TMP/e"; render "$d" --deed-result success --k9-result success --k9-verdict green \
@@ -109,6 +109,24 @@ render "$d1" --deed-result success --k9-result success --k9-verdict yellow \
 render "$d2" --deed-result success --k9-result success --k9-verdict yellow \
   --k9-report "$grid_k9" --hypatia-result success --hypatia-verdict orange --hypatia-report "$grid_hyp"
 check "same inputs produce a byte-identical body" "cmp -s '$d1/body.md' '$d2/body.md'"
+
+echo "== advisory is shown beside the verdict, never inside it =="
+d="$TMP/k"
+render "$d" --deed-result success --k9-result success --k9-verdict green --k9-report "$grid_k9" \
+  --hypatia-result success --hypatia-verdict green --hypatia-report "$grid_hyp" \
+  --hypatia-advisory "purple:4:1"
+check "a green verdict stays green with 4 advisory criticals" \
+  "grep -q '| Hypatia verdict grid | 🟢 conformant .* · advisory: 🟣 purple (4 critical, 1 high, not grading) |' '$d/body.md'"
+check "the overall badge is green, not purple" "grep -q '\"message\": \"conformant\"' '$d/badge.json'"
+check "the advisory counts are not folded into the row state" \
+  "! grep -q '| Hypatia verdict grid | 🟣' '$d/body.md'"
+
+check "advisory=none adds nothing" \
+  "bash '$RENDER' --out '$TMP/l' --deed-result success --k9-result success --k9-verdict green --hypatia-result success --hypatia-verdict green --hypatia-advisory none >/dev/null 2>&1; ! grep -q 'advisory:' '$TMP/l/body.md'"
+check "an empty advisory adds nothing" \
+  "bash '$RENDER' --out '$TMP/m' --deed-result success --k9-result success --k9-verdict green --hypatia-result success --hypatia-verdict green >/dev/null 2>&1; ! grep -q 'advisory:' '$TMP/m/body.md'"
+check "an unparseable advisory is shown, not dropped" \
+  "bash '$RENDER' --out '$TMP/n' --deed-result success --k9-result success --k9-verdict green --hypatia-result success --hypatia-verdict green --hypatia-advisory 'wat' >/dev/null 2>&1; grep -q 'advisory: wat (unparsed)' '$TMP/n/body.md'"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

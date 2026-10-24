@@ -13,8 +13,8 @@
 # lanes' already-rendered reports as inputs and emits a single body, in a fixed
 # order:
 #
-#   1. the summary table   (DEED syntax, k9-deed conformance, Hypatia)
-#   2. the k9-deed conformance grid
+#   1. the summary table   (DEED syntax, K9-DEED conformance, Hypatia)
+#   2. the K9-DEED conformance grid
 #   3. the Hypatia verdict grid
 #
 # The lane reports are NOT re-rendered here. `k9-grid.sh` and
@@ -58,6 +58,7 @@ K9_REPORT=""
 HYPATIA_RESULT=""
 HYPATIA_VERDICT=""
 HYPATIA_REPORT=""
+HYPATIA_ADVISORY=""
 SHA=""
 RUN_ID=""
 RUN_URL=""
@@ -76,6 +77,7 @@ while [ $# -gt 0 ]; do
     --hypatia-result) shift; HYPATIA_RESULT="${1:-}" ;;
     --hypatia-verdict) shift; HYPATIA_VERDICT="${1:-}" ;;
     --hypatia-report) shift; HYPATIA_REPORT="${1:-}" ;;
+    --hypatia-advisory) shift; HYPATIA_ADVISORY="${1:-}" ;;
     --sha)            shift; SHA="${1:-}" ;;
     --run)            shift; RUN_ID="${1:-}" ;;
     --url)            shift; RUN_URL="${1:-}" ;;
@@ -153,6 +155,28 @@ label_of() {
   esac
 }
 
+# The advisory figure sits BESIDE the verdict, never inside it. The lane's
+# verdict is computed over gating rows only; a reader who saw "green" and
+# nothing else would not know that four advisory criticals are listed directly
+# beneath it. An unparseable value is shown as-is: dropping it would be the
+# exact silence this line exists to prevent.
+adv_suffix=""
+case "$HYPATIA_ADVISORY" in
+  ""|none) : ;;
+  *)
+    a_state="${HYPATIA_ADVISORY%%:*}"
+    a_rest="${HYPATIA_ADVISORY#*:}"
+    a_crit="${a_rest%%:*}"
+    a_high="${a_rest#*:}"
+    if word_ok "$a_state" && [ -n "$a_crit" ] && [ -n "$a_high" ] \
+       && [ "$a_crit" -eq "$a_crit" ] 2>/dev/null && [ "$a_high" -eq "$a_high" ] 2>/dev/null; then
+      adv_suffix=" · advisory: $(glyph_for "$a_state") ${a_state} (${a_crit} critical, ${a_high} high, not grading)"
+    else
+      adv_suffix=" · advisory: ${HYPATIA_ADVISORY} (unparsed)"
+    fi
+    ;;
+esac
+
 deed_cell="$(glyph_for "$DEED_STATE") $(label_of "$DEED_STATE")"
 k9_cell="$(glyph_for "$K9_STATE") $(label_of "$K9_STATE")"
 hyp_cell="$(glyph_for "$HYP_STATE") $(label_of "$HYP_STATE")"
@@ -169,20 +193,22 @@ BODY="$OUT/body.md"
   echo '| Lane | Status | Run |'
   echo '|---|---|---|'
   printf '| DEED syntax (repo deed) | %s | [run %s](%s) |\n' "$deed_cell" "$RUN_ID" "$RUN_URL"
-  printf '| k9-deed conformance (L0–L2; L3 not verified) | %s (job: %s) | same run |\n' \
+  printf '| K9-DEED conformance (L0–L2; L3 not verified) | %s (job: %s) | same run |\n' \
     "$k9_cell" "${K9_RESULT:-not run}"
-  printf '| Hypatia verdict grid | %s (job: %s) | same run |\n' \
-    "$hyp_cell" "${HYPATIA_RESULT:-not run}"
+  printf '| Hypatia verdict grid | %s (job: %s)%s | same run |\n' \
+    "$hyp_cell" "${HYPATIA_RESULT:-not run}" "$adv_suffix"
   echo
   echo 'Scope: the three lanes below are static checks at the named commit. A'
   echo 'green row means every applicable check in its declared scope passed;'
-  echo 'orange means evidence is missing, not that nothing was found. No row is'
-  echo 'a security certification.'
+  echo 'orange means evidence is missing, not that nothing was found. The'
+  echo 'Hypatia verdict covers GATING rows only; advisory reporters are listed'
+  echo 'in its grid and named beside the verdict, and cannot colour it. No row'
+  echo 'is a security certification.'
   echo
 
-  # ── Lane 2: k9-deed conformance ──
+  # ── Lane 2: K9-DEED conformance ──
   echo '<!-- fork-governance:lane k9-deed -->'
-  echo '## k9-deed conformance'
+  echo '## K9-DEED conformance'
   echo
   if [ -n "$K9_REPORT" ] && [ -s "$K9_REPORT" ]; then
     cat "$K9_REPORT"
