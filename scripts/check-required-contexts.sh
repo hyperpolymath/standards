@@ -185,12 +185,11 @@ events_of() {
       n=split(v,a,","); for(i=1;i<=n;i++){gsub(/[[:space:]"\047]/,"",a[i]); if(a[i]!="") print a[i]}
       inon=0; next
     }
-    /^"?on"?[[:space:]]*:[[:space:]]*[^[:space:]]/ {
-      v=$0; sub(/^[^:]*:[[:space:]]*/,"",v); sub(/[[:space:]]*#.*$/,"",v)
-      gsub(/[[:space:]"\047]/,"",v); if(v!="") print v
-      inon=0; next
+    /^"?on"?[[:space:]]*:/ {
+      v=$0; sub(/^[^:]*:/,"",v); sub(/#.*$/,"",v); gsub(/[[:space:]]/,"",v)
+      if (v == "") { inon=1 } else { print v; inon=0 }
+      next
     }
-    /^"?on"?[[:space:]]*:[[:space:]]*$/ { inon=1; next }
     /^[^[:space:]#]/ { inon=0 }
     # Event keys sit at exactly two spaces. Anything deeper (branches:, cron:,
     # inputs:, description:) is configuration FOR that event, and emitting it
@@ -203,16 +202,66 @@ events_of() {
   ' "$1"
 }
 
-# Accepts pull_request and pull_request_target; ignores branch/path filters
-# and job conditions. Returns 1 for no matching event or failed event extraction.
-runs_on_pr() { # workflow file -> 0 for a declared PR event
+# Narrowing checks. Each answers "could this workflow publish a check run on an
+# OPEN pull request?" — the event alone does not: `types: [closed]` fires after
+# the merge, and an unrestricted `push` publishes check runs on a same-repo
+# branch, which DO satisfy required checks on that PR's head commit.
+#
+# Not modelled: `paths:`/`paths-ignore:` filters, and job-level `if:`
+# conditions. A path-filtered workflow can leave a required check pending on a
+# PR that does not touch those paths — the same defect one level down. It is
+# reported rather than judged, because most correctly-configured repositories
+# filter their expensive workflows and failing them all would be a gate nobody
+# keeps.
+block_field() { # FILE EVENT FIELD -> the value of FIELD inside EVENT's block
+  awk -v ev="$2" -v field="$3" '
+    /^  [A-Za-z_][A-Za-z0-9_-]*:/ {
+      k=$0; sub(/^  /,"",k); sub(/:.*$/,"",k)
+      inev = (k == ev); next
+    }
+    inev && /^[^[:space:]#]/ { inev=0 }
+    inev && $0 ~ ("^    " field ":") {
+      v=$0; sub(/^[^:]*:/,"",v); sub(/#.*$/,"",v); gsub(/^[[:space:]]+|[[:space:]]+$/,"",v)
+      print v
+    }
+  ' "$1"
+}
+
+pull_request_fires_while_open() { # FILE
+  local types
+  types="$(block_field "$1" pull_request types)"
+  [ -z "$types" ] && return 0      # the default set fires on open/synchronise
+  # A `types:` list that cannot fire while the PR is open does not gate a merge.
+  printf '%s' "$types" | grep -qE 'opened|synchronize|reopened|ready_for_review'
+}
+
+push_reaches_a_pr_head() { # FILE
+  # Unrestricted `on: push` publishes check runs on the feature branch, and a
+  # check run on the head commit satisfies a required check. A push restricted
+  # to the default branch does not — which is why hypatia-scan.yml's
+  # `push: branches: [main, master, develop]` is not a PR publisher.
+  local branches
+  branches="$(block_field "$1" push branches; block_field "$1" push branches-ignore)"
+  [ -z "$branches" ]
+}
+
+runs_on_pr() { # workflow file -> 0 if it can publish a check run on a pull request
   # NOT `events_of "$1" | grep -q`: grep -q exits on the first match, awk takes
   # SIGPIPE, and `pipefail` turns a match into a non-zero pipeline. That reads
   # as "this workflow cannot run on a PR" for exactly the files where the
   # event is listed early — a false negative in the gate, not in the workflows.
   local ev
-  ev="$(events_of "$1")" || return 1
-  grep -qxE 'pull_request|pull_request_target' <<<"$ev"
+  ev="$(events_of "$1")" || return 1   # unreadable file: not a publisher
+  if grep -qx 'pull_request' <<<"$ev" && pull_request_fires_while_open "$1"; then
+    return 0
+  fi
+  if grep -qx 'pull_request_target' <<<"$ev" && pull_request_fires_while_open "$1"; then
+    return 0
+  fi
+  if grep -qx 'push' <<<"$ev" && push_reaches_a_pr_head "$1"; then
+    return 0
+  fi
+  return 1
 }
 
 # Names ONE workflow file can publish. Split out of publishable_names so the
@@ -230,8 +279,12 @@ publishable_names_from() { # FILE -> one name per line
     [ "$name" = "-" ] && name=""
     [ "$uses" = "-" ] && uses=""
     case "$uses" in
-      ./.github/workflows/*|.github/workflows/*)
-        local_path="$ROOT/${uses#./}"
+      # `$/` is the same-repository prefix introduced alongside `./`; both mean
+      # "this checkout", so they resolve identically. Missing it made the caller
+      # publish its own name instead of `caller / inner job`, and a required
+      # inner context then read as UNSATISFIABLE.
+      $/.github/workflows/*|./.github/workflows/*|.github/workflows/*)
+        local_path="$ROOT/${uses#./}"; local_path="${local_path#\$}"
         if [ -f "$local_path" ]; then
           while IFS=$'\t' read -r iid iname _u _m; do
             [ -n "$iid" ] || continue
@@ -327,11 +380,11 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
 # the script with status 1; other rule-reading failures that return are ignored.
 # JSON write failures do not affect the return status.
 run_audit() {
-  local pubb pubb_pr required ROWS unsatisfiable=0 line ctx app verdict
+  local pubb pubb_pr required ROWS unsatisfiable=0 line ctx app verdict inspected=1
   pubb="$(mktemp)"; pubb_pr="$(mktemp)"; required="$(mktemp)"; ROWS="$(mktemp)"
   publishable_names | sort -u >"$pubb"
   publishable_names pr | sort -u >"$pubb_pr"
-  required_json >"$required" || true
+  if ! required_json >"$required"; then inspected=0; fi
 
   say ""
   say "== publishable context names ($(wc -l <"$pubb" | tr -d ' '); $(wc -l <"$pubb_pr" | tr -d ' ') on pull_request)"
@@ -427,8 +480,9 @@ EOS
   done <"$required"
 
   if [ -n "$JSON_OUT" ]; then
-    jq -Rs --arg repo "${GITHUB_REPOSITORY:-$ROOT}" --argjson n "$unsatisfiable" --rawfile _ /dev/null '
-      {repository: $repo, unsatisfiable: $n,
+    jq -Rs --arg repo "${GITHUB_REPOSITORY:-$ROOT}" --argjson n "$unsatisfiable" \
+       --argjson inspected "$inspected" --rawfile _ /dev/null '
+      {repository: $repo, inspected: ($inspected == 1), unsatisfiable: $n,
        results: (split("\n") | map(select(length > 0) | split("\t")
                  | {context: .[0], app_id: (.[1]|tonumber), verdict: .[2]}))}' "$ROWS" >"$JSON_OUT" 2>/dev/null || true
     info "json report written to $JSON_OUT"
@@ -472,6 +526,18 @@ jobs:
     name: Hypatia Neurosymbolic Analysis
     runs-on: ubuntu-latest
 YML
+  check_says() { # label contexts-json expected-text — exit code alone cannot
+                 # tell PR-UNPRODUCIBLE from UNSATISFIABLE: both exit 0 advisory
+                 # and both exit 1 strict, so a classification regression would
+                 # pass every other case in this file.
+    local label="$1" file="$2" want="$3" out
+    out="$(REUSABLE_CACHE_DIR="$work/cache" REQUIRED_CONTEXTS_JSON="$file" \
+             REQUIRED_CONTEXTS_STRICT=0 GITHUB_REPOSITORY=example/repo \
+             bash "$0" "$work/repo" --no-network 2>&1)"
+    if printf '%s' "$out" | grep -qF "$want"; then pass=$((pass+1)); say "PASS $label"
+    else fail=$((fail+1)); say "FAIL $label — output does not mention: $want"; say "$out" | tail -4; fi
+  }
+
   check() { # label expected-exit contexts-json strict
     local label="$1" want="$2" file="$3" strict="${4:-0}" out status
     out="$(REUSABLE_CACHE_DIR="$work/cache" REQUIRED_CONTEXTS_JSON="$file" \
@@ -513,6 +579,8 @@ YML
   printf '[{"context":"Nightly Audit","app_id":15368,"source":"ruleset"}]' >"$work/nightly.json"
   check "publishable-only-off-pull_request-advisory" 0 "$work/nightly.json" 0
   check "publishable-only-off-pull_request-strict" 1 "$work/nightly.json" 1
+  check_says "classified PR-UNPRODUCIBLE, not UNSATISFIABLE" "$work/nightly.json" \
+    "published only by workflows that never run on pull_request"
 
   # The same name, once something publishes it on pull_request — including the
   # inline `on: [...]` spelling and pull_request_target, so a parser that only
@@ -527,6 +595,22 @@ jobs:
     steps: [{run: "true"}]
 YML
   check "same-name-on-a-pr-workflow-is-producible" 0 "$work/nightly.json" 1
+
+  # `types: [closed]` fires AFTER the merge, so it cannot gate one — the event
+  # alone is not enough, which is easy to regress.
+  cat >"$work/repo/.github/workflows/after-merge.yml" <<'YML'
+name: After merge
+on:
+  pull_request:
+    types: [closed]
+jobs:
+  audit:
+    name: Post Merge Audit
+    runs-on: ubuntu-latest
+    steps: [{run: "true"}]
+YML
+  printf '[{"context":"Post Merge Audit","app_id":15368,"source":"ruleset"}]' >"$work/postmerge.json"
+  check "pull_request types:[closed] does not gate a merge" 1 "$work/postmerge.json" 1
   rm -rf "$work"
   say ""
   say "self-test: $pass passed, $fail failed"
