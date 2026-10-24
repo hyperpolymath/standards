@@ -49,6 +49,21 @@ jobs:
         id: measure
         run: |
           set -uo pipefail
+
+          # Record WHAT we measured against. This workflow measures on Monday
+          # and a human merges whenever they get to it; between those two
+          # moments `main` can move, and the recorded numbers then describe a
+          # tree that is not the tree they land in. That is exactly what
+          # happened with #1302: it measured 83 against e16a231 on 2026-10-19,
+          # `docs/reorg/2026-10-14-tidy/WORK-ORDERS-2026-10-19.adoc` landed
+          # later that day (#1298) taking the tree to 84, and the merged file
+          # said 83 — so `todo-fixme-markers` breached every Monday for five
+          # weeks. Nothing in the pipeline can close that window while the
+          # merge is a human act, so the numbers carry their own provenance
+          # and the PR says out loud how to check them.
+          echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "base_when=$(git log -1 --format=%cd --date=short HEAD)" >> "$GITHUB_OUTPUT"
+
           if [ ! -f .machine_readable/Debtfile.a2ml ]; then
             echo "No Debtfile — nothing to measure."
             echo "changed=no" >> "$GITHUB_OUTPUT"
@@ -89,10 +104,11 @@ jobs:
           # leaves the workflow unparseable — the estate already has a large
           # population of workflows broken exactly this way.
           git commit -m "chore(debt): re-measure Debtfile probes" \
-                     -m "Machine-written by .github/workflows/debt-measure.yml. Counts follow the probes; ceilings only ever fall. A ceiling that needs to RISE is not done here — raise it in a human PR with a Debt-exception: trailer."
+                     -m "Machine-written by .github/workflows/debt-measure.yml. Counts follow the probes; ceilings only ever fall. A ceiling that needs to RISE is not done here — raise it in a human PR with a Debt-exception: trailer." \
+                     -m "Measured against ${{ steps.measure.outputs.base_sha }} (${{ steps.measure.outputs.base_when }}). If main has moved since, these numbers are stale; re-run this workflow before merging."
           git push -f origin "$BRANCH"
 
-          BODY="$(printf 'Automated re-measurement of `.machine_readable/Debtfile.a2ml`.\n\n```\n%s\n```\n\nCeilings only fall here. If an entry breached its ceiling this PR is red on\npurpose — pay the debt down, or raise the ceiling in a human commit carrying\na `Debt-exception:` trailer naming the entry.\n\nSee `docs/DEBTFILE-SPEC.adoc`.\n' "$(cat "$RUNNER_TEMP/report.txt")")"
+          BODY="$(printf 'Automated re-measurement of `.machine_readable/Debtfile.a2ml`.\n\n```\n%s\n```\n\n**Measured against `%s` (%s).** These numbers describe that tree, not\nnecessarily the tree this PR will land in. If `main` has moved since, re-run\nthe workflow before merging — merging a stale measurement is what left\n`todo-fixme-markers` breached for five weeks after #1302.\n\nCeilings only fall here. If an entry breached its ceiling this PR is red on\npurpose — pay the debt down, or raise the ceiling in a human commit carrying\na `Debt-exception:` trailer naming the entry.\n\nSee `docs/DEBTFILE-SPEC.adoc`.\n' "$(cat "$RUNNER_TEMP/report.txt")" "${{ steps.measure.outputs.base_sha }}" "${{ steps.measure.outputs.base_when }}")"
 
           if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
             gh pr edit "$BRANCH" --body "$BODY"
