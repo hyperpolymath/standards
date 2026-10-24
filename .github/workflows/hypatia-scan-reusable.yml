@@ -12,6 +12,16 @@ on:
         type: boolean
         required: false
         default: false
+      scope-excludes:
+        description: >-
+          Comma-separated path prefixes that are reported but NEVER graded, and
+          whose SARIF is not uploaded: frozen history that cannot be edited
+          without falsifying the record. Default 9-archive/ -- matching the
+          CodeQL config, which already ignores the same tree. Set to an empty
+          string to grade everything.
+        type: string
+        required: false
+        default: "9-archive/"
       hypatia-ref:
         description: >-
           Hypatia commit to build the scanner from. Defaults to a vetted SHA so a
@@ -33,10 +43,18 @@ on:
     outputs:
       verdict:
         description: >-
-          Overall state of the lane's verdict grid (docs/VERDICT-GRID-SPEC.adoc):
-          purple, red, orange, yellow, blue, green or grey. Callers that comment
-          on or gate from the grid read this and the verdict-grid artifact.
+          Overall state of the lane's verdict grid, computed over GATING rows
+          only (docs/VERDICT-GRID-SPEC.adoc): purple, red, orange, yellow,
+          blue, green or grey. Advisory rows are reported in the grid and in
+          `advisory`, and never set this.
         value: ${{ jobs.scan.outputs.verdict }}
+      advisory:
+        description: >-
+          Advisory rows in the report, as `<state>:<critical>:<high>`, or
+          `none` when the lane has no advisory reporter. Empty when the grid
+          did not render. Callers show this beside the verdict so that an
+          advisory critical is visible WITHOUT being able to grade the change.
+        value: ${{ jobs.scan.outputs.advisory }}
 
 permissions:
   actions: read
@@ -53,6 +71,7 @@ jobs:
     timeout-minutes: 45
     outputs:
       verdict: ${{ steps.grid.outputs.state }}
+      advisory: ${{ steps.grid.outputs.advisory }}
     env:
       # panic-attack v2.5.5, built from source at this commit (cargo --rev
       # checks out exactly this object; --locked holds every dependency to the
@@ -538,6 +557,30 @@ jobs:
           APPLY_BASELINE=scripts/apply-baseline.sh \
             bash "$FILTER" hypatia.sarif hypatia-findings.relativized.json .hypatia-baseline.json
 
+      # ── Scope: keep frozen history out of code scanning ───────────────────
+      # Runs AFTER the baseline filter, so the two cannot disagree about which
+      # results survive: the baseline removes acknowledged results, this removes
+      # a declared out-of-scope prefix. A finding that is both is removed once
+      # and by the second pass, which is idempotent.
+      #
+      # Fails OPEN: an unfiltered upload shows more alerts, never fewer.
+      - name: Filter SARIF by declared scope
+        id: filter_scope
+        run: |
+          set -uo pipefail
+          SCOPE_EXCLUDES="${{ inputs.scope-excludes }}"
+          [ -z "$SCOPE_EXCLUDES" ] && { echo "  no scope exclusions declared"; exit 0; }
+          if [ -f .standards-checkout/scripts/filter-sarif-by-scope.sh ]; then
+            FILTER=.standards-checkout/scripts/filter-sarif-by-scope.sh
+          elif [ -f scripts/filter-sarif-by-scope.sh ]; then
+            FILTER=scripts/filter-sarif-by-scope.sh
+          else
+            echo "  ::warning::scope filter unavailable — SARIF uploaded unfiltered"
+            exit 0
+          fi
+          IFS=',' read -r -a _prefixes <<< "$SCOPE_EXCLUDES"
+          bash "$FILTER" hypatia.sarif hypatia.sarif "${_prefixes[@]}"
+
       - name: Upload SARIF to code scanning
         # NOTE: this does NOT make under-permissioned callers "skip gracefully".
         # This workflow declares `security-events: write` at the top, so a
@@ -590,6 +633,42 @@ jobs:
             scripts/lib/verdict-grid.jq
           sparse-checkout-cone-mode: false
 
+      # ── Scope: what the grid is allowed to GRADE ──────────────────────────
+      # Without this the grid grades the whole repository, so its verdict is a
+      # property of the REPOSITORY and not of the pull request: every revision
+      # scores the same, and a comment that never changes is not read. Delta
+      # mode grades only findings in files the change touches; everything else
+      # is still counted and named in the comment, never hidden.
+      #
+      # Falls back to whole-repository scope when the base commit cannot be
+      # resolved (a push, a force-push, a shallow clone). A fallback that
+      # silently NARROWED the scope would be the dangerous direction; this one
+      # only ever widens it.
+      - name: Compute the change scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SCOPE_EXCLUDES: ${{ inputs.scope-excludes }}
+        run: |
+          set -uo pipefail
+          : > "$RUNNER_TEMP/changed.txt"
+          mode=whole-repo
+          case "$BASE_SHA" in
+          '') : ;;
+          *)
+            if git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || git fetch --quiet origin "$BASE_SHA" 2>/dev/null; then
+              base=$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null) || base="$BASE_SHA"
+              if git diff --name-only "$base" "$HEAD_SHA" > "$RUNNER_TEMP/changed.txt" 2>/dev/null; then
+                mode=delta
+              fi
+            fi
+            ;;
+          esac
+          n=$(grep -c . "$RUNNER_TEMP/changed.txt" 2>/dev/null || true)
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "scope: $mode (${n:-0} changed file(s), excluded: ${SCOPE_EXCLUDES:-none})"
+
       - name: Read the previous verdict grid
         if: ${{ always() && github.event_name == 'pull_request' }}
         # Best effort: the token may lack pull-request read on the caller. A
@@ -611,6 +690,8 @@ jobs:
           HYPATIA_REF: ${{ steps.hypatia-rev.outputs.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number || 'local' }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SCOPE_MODE: ${{ steps.scope.outputs.mode }}
+          SCOPE_EXCLUDES: ${{ inputs.scope-excludes }}
         run: |
           set -uo pipefail
           renderer=.standards-grid/scripts/verdict-grid.sh
@@ -632,6 +713,16 @@ jobs:
           # The renderer appends the grid to the step summary and writes
           # state= to GITHUB_OUTPUT itself; its exit code is 0 for any
           # rendered verdict and 2 only for a usage error.
+          # Scope: delta when the change scope step resolved a base commit,
+          # whole-repository otherwise. A missing changed.txt with mode=delta
+          # is a usage error inside the renderer, not a silent fallback.
+          scope_args=()
+          [ "${SCOPE_MODE:-}" = "delta" ] && scope_args+=(--changed "$RUNNER_TEMP/changed.txt")
+          # Prefixes from the caller; empty means grade everything.
+          IFS=',' read -r -a _ex <<< "${SCOPE_EXCLUDES:-}"
+          for _p in "${_ex[@]}"; do
+            [ -n "$_p" ] && scope_args+=(--exclude-prefix "$_p")
+          done
           bash "$renderer" render --out verdict-grid \
             --hypatia "$findings" --panic panic-attack-findings.json --pons pons-findings.json \
             --report-backs .gitbot-fleet/report-backs --enrolment "$enrolment" \
@@ -639,7 +730,17 @@ jobs:
             --sha "$HEAD_SHA" --run "$GITHUB_RUN_ID" \
             --url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --pr "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --hypatia-ref "$HYPATIA_REF" --panic-ref "$PANIC_ATTACK_SHA" --pons-ref "$PONS_SHA" > /dev/null
+            --hypatia-ref "$HYPATIA_REF" --panic-ref "$PANIC_ATTACK_SHA" --pons-ref "$PONS_SHA" \
+            "${scope_args[@]}" > /dev/null
+          # Advisory summary, for callers that show it beside the verdict. The
+          # verdict output is written by the renderer and covers GATING rows
+          # only; without this a caller would state "green" and omit the four
+          # advisory criticals sitting directly beneath it.
+          if [ -s verdict-grid/report.json ]; then
+            adv=$(jq -r 'if (.advisory.rows // 0) == 0 then "none"
+                         else "\(.advisory.state):\(.advisory.critical):\(.advisory.high)" end' verdict-grid/report.json)
+            echo "advisory=$adv" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload the verdict grid
         if: ${{ always() }}

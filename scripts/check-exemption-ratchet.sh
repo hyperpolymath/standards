@@ -57,6 +57,9 @@
 set -euo pipefail
 
 BASE_REF="${1:-}"
+# How far out an acknowledgement may be dated. Long enough for a real migration
+# window, short enough that every ack is re-read at least annually.
+HORIZON_DAYS="${RATCHET_HORIZON_DAYS:-366}"
 if [ -z "$BASE_REF" ]; then
   echo "usage: check-exemption-ratchet.sh <base-ref>" >&2
   exit 2
@@ -234,6 +237,85 @@ if [ -f .hypatia-baseline.json ]; then
     note "               Every exemption touched now must say what it is. Add \`note\` explaining"
     note "               what the finding actually is, or \`tracking_issue\` naming the"
     note "               work that discharges it."
+    fail=1
+  fi
+fi
+
+# 2b. NO NEW UNDATED DEBT.
+# An acknowledgement with no `expires_at` is a decision nobody will revisit:
+# apply-baseline.sh can only tighten a gate on a date, so an undated entry
+# suppresses its finding for as long as the file exists. Measured 2026-10-24
+# in this repository: 63 entries, 23 undated, 7 of them literally "Baseline
+# permanently".
+#
+# The rule applies to NEW OR CHANGED entries only, using the same multiset-of-
+# complete-values comparison as 2 above. Requiring a date from every entry
+# would fail every other repository in the estate on its next pull request —
+# a gate that cannot be satisfied gets deleted, and this one costs one date.
+# Existing undated entries are grandfathered while byte-identical; touching one
+# (including to re-ack it) means dating it.
+#
+# A date is not a formality here. It is checked for shape, for being in the
+# future, and for being inside the horizon: an ack dated 2199 delegates the
+# decision to nobody in particular, which is the undated case wearing a date.
+if [ -f .hypatia-baseline.json ]; then
+  ratchet_base="$(mktemp)"
+  trap 'rm -f "$ratchet_base"' EXIT
+  if git cat-file -e "${BASE_REF}:.hypatia-baseline.json" 2>/dev/null; then
+    git show "${BASE_REF}:.hypatia-baseline.json" > "$ratchet_base"
+  else
+    printf '[]\n' > "$ratchet_base"
+  fi
+
+  undated_delta="$(jq -n \
+    --slurpfile before "$ratchet_base" \
+    --slurpfile after .hypatia-baseline.json \
+    --arg today "$(date -u +%Y-%m-%d)" \
+    --argjson horizon "$HORIZON_DAYS" '
+      ($today | strptime("%Y-%m-%d") | mktime) as $now
+      | def day_diff: ((. | strptime("%Y-%m-%d") | mktime) - $now) / 86400 | floor;
+      def verify:
+        if (has("expires_at") | not) then "no expires_at"
+        elif ((.expires_at | type) != "string") then "expires_at is not a string"
+        elif (.expires_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") | not)
+          then "expires_at is not YYYY-MM-DD"
+        else
+          (.expires_at | day_diff) as $d
+          | if $d < 0 then "expired on \(.expires_at) — re-acking means a new date, not the old one"
+            elif $d > $horizon then "expires_at \(.expires_at) is \($d) days out (horizon: \($horizon)) — that defers the decision rather than dating it"
+            else null end
+        end;
+
+      ($before[0]) as $base
+      | ($after[0]) as $head
+      | if (($base | type) != "array" or ($head | type) != "array") then
+          error(".hypatia-baseline.json must contain a JSON array at base and HEAD")
+        else
+          ([ $base[] ] | group_by(.) | map({entry: .[0], count: length})) as $bg
+          | ([ $head[] ] | group_by(.) | map({entry: .[0], count: length})) as $hg
+          | [ $hg[] as $new
+              | (($bg | map(select(.entry == $new.entry) | .count) | first) // 0) as $old
+              | select($new.count > $old)
+              | { entry: $new.entry, added: ($new.count - $old) }
+              | . + { problem: (.entry | verify) }
+              | select(.problem != null) ]
+        end
+    ')" || {
+      note "UNREADABLE     .hypatia-baseline.json could not be compared with $BASE_REF"
+      fail=1
+      undated_delta="[]"
+    }
+  rm -f "$ratchet_base"
+  trap - EXIT
+
+  bad="$(printf '%s\n' "$undated_delta" | jq 'length' 2>/dev/null || echo 0)"
+  if [ "${bad:-0}" -gt 0 ]; then
+    note "EXPIRY         .hypatia-baseline.json: ${bad} new or changed entr(y|ies) have no usable expires_at"
+    printf '%s\n' "$undated_delta" | jq -r \
+      '.[] | "                 \(.problem)\n                   \(.entry.rule_module)/\(.entry.type) @ \(.entry.file // .entry.file_pattern // "?")"'
+    note "               Every acknowledgement now must date itself. Pick a date you"
+    note "               expect to be able to defend the finding until — the horizon is"
+    note "               ${HORIZON_DAYS} days — and put what you checked in \`note\`."
     fail=1
   fi
 fi

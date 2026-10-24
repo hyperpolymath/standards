@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: CC-BY-SA-4.0
 // SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
-= Fork governance — specification v1.0
+= Fork governance — specification v1.1
 :toc: left
 :toclevels: 4
 :revdate: 2026-10-24
-:revnumber: 1.0
+:revnumber: 1.1
 :status: normative
 
 This document is normative for the *comment*: its markers, its order, its
@@ -15,7 +15,7 @@ themselves, link:../../docs/VERDICT-GRID-SPEC.adoc[VERDICT-GRID-SPEC].
 == 1. Terms
 
 *Lane*:: One conformance question with one verdict. This system has exactly
-three: DEED syntax, k9-deed conformance, Hypatia verdict grid.
+three: DEED syntax, K9-DEED conformance, Hypatia verdict grid.
 
 *Grid*:: The per-row report a lane renders into `report.md`
 (VERDICT-GRID-SPEC §Anatomy). Two of the three lanes have one; DEED does not.
@@ -50,7 +50,7 @@ The body MUST contain, in this order:
 . the summary table;
 . the scope note;
 . the lane marker `<!-- fork-governance:lane k9-deed -->` and the heading
-  `## k9-deed conformance`, then the k9-deed grid or its orange placeholder;
+  `## K9-DEED conformance`, then the k9-deed grid or its orange placeholder;
 . the lane marker `<!-- fork-governance:lane hypatia -->` and the heading
   `## Hypatia verdict grid`, then the Hypatia grid or its orange placeholder.
 
@@ -59,7 +59,7 @@ humans and by scrapers, and because an order that varies between runs makes
 two verdicts on the same PR look like two different verdicts.
 `scripts/tests/fork-governance-render-test.sh` asserts it.
 
-The lane *name* is `k9-deed conformance` in the summary row and in the section
+The lane *name* is `K9-DEED conformance` in the summary row and in the section
 heading. It is not `K9 conformance`; the rename is normative.
 
 === 2.3 Summary table
@@ -69,6 +69,7 @@ heading. It is not `K9 conformance`; the rename is normative.
 | Header | Values | Rule
 | `Lane` | fixed strings | As listed in §2.2.
 | `Status` | `<glyph> <word>` | Derived from the lane's verdict and job result (§3). Never typed by hand.
+| `Status` (suffix) | `· advisory: <glyph> <word> (<n> critical, <n> high, not grading)` | Optional, on the Hypatia row only. Present iff the lane reported an advisory finding (§3.2). Absent — not `none` — when there is nothing to show.
 | `Run` | `[run N](url)` or `same run` | The first row carries the link; the rest say `same run` because they share one run.
 |===
 
@@ -114,7 +115,61 @@ Rules, in order:
 DEED has no grid of its own: its job result is the whole of its verdict
 (`success` → green, `failure` → red, anything else → orange).
 
-=== 3.1 The overall badge
+=== 3.0 What the verdict is a verdict ABOUT
+
+A lane's state grades *the change*, not the repository. The summary answers
+"may this pull request merge", and a finding that predates the pull request is
+not evidence about the pull request.
+
+Each row therefore carries three disjoint counts, and only the first grades:
+
+[cols="1,2,3",options="header"]
+|===
+| Count | Meaning | Grades?
+
+| `counts`
+| findings inside the declared scope — the changed files, or the whole tree
+  when no scope is declared
+| yes
+
+| `counts_standing`
+| findings in files this change did not touch
+| no — reported, so the number cannot be mistaken for zero
+
+| `counts_excluded`
+| findings under a declared exclusion prefix (`9-archive/` by default)
+| no — reported, so exclusion is visible rather than silent
+|===
+
+A finding with no path is graded: absence of a location is not evidence of
+absence of a defect, and the alternative lets a reporter escape the gate by
+omitting a field.
+
+The scope is part of the report and of the embedded baseline blob. A delta is
+comparable only when the previous revision was produced under the same scope —
+a change from whole-repository to diff-scoped reporting makes every row look
+improved, which is a measurement artefact, not a fix.
+
+The identity line states it, so the reader never has to infer it:
+`scope: this change (N file(s)) · excludes \`9-archive/\``, else
+`scope: whole repository`.
+
+=== 3.1 Gating and advisory rows
+
+A reporter is *gating* or *advisory*. The lane state is the worst **gating**
+row; an advisory row cannot set it, regardless of severity.
+
+Hypatia is gating. Every other reporter is advisory unless
+`.gitbot-fleet/enrolment.json` sets `reporters.<id>.gating` to a boolean. A
+grid with no gating row at all falls back to grading every row — never green by
+absence of evidence.
+
+The advisory figure beside the verdict (§2.3) exists because the alternative —
+omitting advisory findings from the summary — makes a purple critical invisible
+on the one line everyone reads. Shown and not grading is a different claim from
+not shown, and only the first one is honest.
+
+=== 3.2 The overall badge
 
 `badge.json` carries the *worst* lane, with precedence
 `red = purple > orange = blue > yellow > green` and `grey` only when every lane
@@ -179,7 +234,41 @@ commenting job that can rewrite it.
 | A lane could not run | orange row, orange summary | as the lane reports
 | Artifact missing but job green | orange row | green
 | Comment could not be posted | none | red — a governance run that cannot report is a failure
+| An acknowledgement has passed its `expires_at` | unchanged | as the finding now grades — the entry stops suppressing before the date is noticed
 |===
+
+=== 7.1 Acknowledgements are dated, and the date has consequences
+
+An entry in `.hypatia-baseline.json` MUST carry `expires_at`. The gate already
+honours the field — a past-dated entry is dropped before matching, so the
+finding grades again — which means the date is not paperwork: it is the
+mechanism by which a suppressed finding returns.
+
+Three rules follow, and they are enforced in different places on purpose:
+
+[cols="1,2,3",options="header"]
+|===
+| Rule | Enforced by | Failure mode if it were not
+
+| New or changed entries must be dated, in the future, and within the horizon
+| `check-exemption-ratchet.sh` §2b, per pull request
+| The escape hatch becomes a way to add permanent debt with a sentence of prose
+
+| Every entry must be dated
+| `check-baseline-expiry.sh`, per repository (`baseline-strict`)
+| Undated entries accumulate: measured 2026-10-24 at 23 of 63 in this
+  repository, seven of them literally "Baseline permanently"
+
+| Soon-expiring entries must be surfaced before they lapse
+| `check-baseline-expiry.sh --warn-days`, advisory
+| A cliff where many entries lapse at once turns every PR red and the ledger is
+  bulk-renewed unread — the ratchet clicked back one notch without a decision
+|===
+
+The horizon is 366 days. A date beyond it defers the decision rather than
+dating it; a date in the past is a re-acknowledgement of nothing. Both are
+refused, because a field that accepts any value records only that someone typed
+something.
 
 A missing comment is never acceptable, and never silent: the posting job fails
 loudly rather than exiting 0 with nothing to show.
@@ -192,3 +281,9 @@ loudly rather than exiting 0 with nothing to show.
   order. Removing or renaming a lane is MAJOR and requires a migration that
   edits or deletes existing comments.
 * Consumers must tolerate additional sections after the two documented ones.
+* Scope and gating (§3.0, §3.1) are a MINOR change to the grid schema, and the
+  renderer declares it (`schema: 2`). A consumer that reads `state` cannot
+  tell why it changed — diff-scoping and advisory-splitting both only ever make
+  a row quieter — so the report carries `scope` and a per-row `gating` flag for
+  exactly that reason. Do not remove them as redundant; they are the audit
+  trail for every state that got better without a fix.

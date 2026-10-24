@@ -14,6 +14,16 @@
 #       --report-backs DIR    gitbot-fleet report-back envelopes, one *.json per member
 #       --enrolment FILE      gitbot-fleet enrolment manifest for this repository
 #       --previous FILE       body of the previous grid comment (delta column)
+#     scope (what the grid GRADES; every finding is still reported and counted)
+#       --changed FILE        newline-separated paths this change touches, as
+#                             from `git diff --name-only base...head`. Switches
+#                             the grid to delta mode: only findings in these
+#                             files can move a row's colour. Without it the grid
+#                             grades the whole repository, which means the
+#                             verdict cannot change on an ordinary pull request.
+#       --exclude-prefix P    repeatable. Findings whose path starts with P are
+#                             reported but never graded, in either mode. For
+#                             frozen history (9-archive/) that cannot be edited.
 #     identity
 #       --lane NAME           grid lane (default: hypatia)
 #       --sha SHA --run ID --url URL --pr N --repo OWNER/NAME
@@ -69,6 +79,7 @@ case "$cmd" in
   render)
     out="" hyp="" pan="" pon="" backs="" enrol="" prev="" lane="hypatia"
     sha="" run="local" url="" pr="local" repo="" href="" pref="" qref=""
+    changed="" excludes=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --out) out="$2"; shift 2 ;;
@@ -87,6 +98,8 @@ case "$cmd" in
         --hypatia-ref) href="$2"; shift 2 ;;
         --panic-ref) pref="$2"; shift 2 ;;
         --pons-ref) qref="$2"; shift 2 ;;
+        --changed) changed="$2"; shift 2 ;;
+        --exclude-prefix) excludes="${excludes}${2}"$'\n'; shift 2 ;;
         *) echo "unknown option: $1" >&2; usage ;;
       esac
     done
@@ -121,6 +134,22 @@ case "$cmd" in
     previous=null
     [ -n "$prev" ] && previous=$(baseline_of "$prev")
 
+    # ── scope ────────────────────────────────────────────────────────────────
+    # A scope that cannot be read is a usage error, never a silent whole-repo
+    # run: grading the repository when the caller asked for a delta would show
+    # a red or purple verdict on a change that introduced nothing, and the
+    # reader would have no way to tell which question was answered.
+    scope_mode="whole-repo"
+    if [ -n "$changed" ]; then
+      [ -f "$changed" ] || { echo "changed-file list not found: $changed" >&2; exit 2; }
+      scope_mode="delta"
+    fi
+    changed_json='[]'
+    [ "$scope_mode" = "delta" ] && changed_json=$(jq -R -s 'split("\n") | map(select(length > 0))' "$changed")
+    excludes_json=$(printf '%s' "$excludes" | jq -R -s 'split("\n") | map(select(length > 0))')
+    scope=$(jq -n --arg mode "$scope_mode" --argjson changed "$changed_json" --argjson ex "$excludes_json" \
+      '{mode: $mode, changed: $changed, excluded_prefixes: $ex}')
+
     # The profile names what produced the grid: renderer, enrolment and tool
     # commits. Two revisions compare only under the same profile.
     profile=$( { cat "$0" "$JQ_LIB"; [ -n "$enrol" ] && [ -f "$enrol" ] && cat "$enrol"; printf '%s\n' "$href" "$pref" "$qref" "$lane"; } | sha256sum | cut -d' ' -f1)
@@ -135,7 +164,8 @@ case "$cmd" in
       --arg profile "$profile" --arg lane "$lane" --arg sha "$sha" --arg run "$run" --arg url "$url" \
       --arg pr "$pr" --arg repo "$repo" --argjson dirty "$dirty" --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       --arg href "$href" --arg pref "$pref" --arg qref "$qref" \
-      '{sources: $sources[0], enrolment: $enrolment, profile: $profile,
+      --argjson scope "$scope" \
+      '{sources: $sources[0], enrolment: $enrolment, profile: $profile, scope: $scope,
         identity: {lane: $lane, sha: $sha, run: $run, url: $url, pr: $pr, repo: $repo, dirty: $dirty,
                    generated: $generated, refs: {hypatia: $href, panic: $pref, pons: $qref}}}' \
       | jq --arg mode build --argjson previous null -f "$JQ_LIB" > "$out/report.json"

@@ -19,9 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_lib.sh
 . "$SCRIPT_DIR/_lib.sh"
 
-INPUT="${1:-/tmp/drift-survey/secret-scanner-full.json}"
-BLOBS_DIR="${BLOBS_DIR:-/tmp/drift-survey/secret-blobs}"
-mkdir -p "$BLOBS_DIR"
+SURVEY="$(survey_dir_init)"
+INPUT="${1:-$SURVEY/secret-scanner-full.json}"
+BLOBS_DIR="${BLOBS_DIR:-$SURVEY/secret-blobs}"
+(umask 077 && mkdir -p "$BLOBS_DIR")
 
 CORE_JOBS="trufflehog,gitleaks"
 ALL_CANONICAL="gitleaks,rust-secrets,shell-secrets,trufflehog"

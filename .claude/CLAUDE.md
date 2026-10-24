@@ -4,7 +4,7 @@
 
 Every pull request in this repository gets one generated comment, marked
 `<!-- fork-governance-verdict: regenerated on every run -->`. It reports three
-lanes in a fixed order: summary, **k9-deed conformance**, **Hypatia verdict
+lanes in a fixed order: summary, **K9-DEED conformance**, **Hypatia verdict
 grid**. The comment is produced by `.github/workflows/fork-governance.yml`
 (lanes) and `.github/workflows/fork-governance-reusable.yml` (posting).
 
