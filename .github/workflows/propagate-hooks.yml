@@ -294,21 +294,41 @@ jobs:
           
           chmod +x "$DEST"
 
+      # Fork governance visibility (3-practice/fork-governance/DISCOVERY.adoc).
+      # Every estate repository gets a root-level pointer to the standard, in
+      # the same commit as its hooks. The text is copied verbatim from
+      # .github/fork-governance-pointer.adoc -- not templated, not generated
+      # per-repo -- so there is exactly one version of what it says.
+      #
+      # This is the only reason the hook propagation job touches a file outside
+      # .githooks/, and it is deliberate: a standard that a repository has to
+      # know exists before it can read is not propagated at all.
+      - name: Write the fork governance pointer
+        if: needs.identify-repos.outputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          cp .github/fork-governance-pointer.adoc target-repo/FORK-GOVERNANCE.adoc
+          echo "::notice::wrote FORK-GOVERNANCE.adoc into $TARGET_REPO"
+
       - name: Commit and push hook updates
         if: needs.identify-repos.outputs.dry_run != 'true'
         run: |
           cd target-repo
           
-          # Check if there are changes
-          if git status --porcelain | grep -q '.githooks'; then
-            echo "📝 Changes detected in .githooks - committing..."
+          # Check if there are changes. The pointer is part of the same
+          # commit: a repository that gets new hooks but an old pointer would
+          # be pointing at documentation that no longer matches its hooks.
+          if git status --porcelain | grep -qE '(\.githooks|FORK-GOVERNANCE\.adoc)'; then
+            echo "📝 Changes detected (.githooks and/or FORK-GOVERNANCE.adoc) - committing..."
             
             # Configure git
             git config user.name "hyperpolymath-hooks-bot"
             git config user.email "hooks-bot@hyperpolymath.dev"
             
-            # Add all changes
+            # Add both artefacts explicitly. `git add -A` would also sweep in
+            # whatever the checked-out target repository happened to contain.
             git add .githooks/
+            [ -f FORK-GOVERNANCE.adoc ] && git add FORK-GOVERNANCE.adoc
             
             # Commit
             COMMIT_MSG="chore(.githooks): update hooks from standards (${{ github.sha }})"

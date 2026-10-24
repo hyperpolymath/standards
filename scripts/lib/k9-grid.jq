@@ -223,7 +223,7 @@ def esc: tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;") |
          | gsub("`"; "&#96;") | gsub("\\\\"; "&#92;") | gsub("\\["; "&#91;") | gsub("\\]"; "&#93;")
          | gsub("\\("; "&#40;") | gsub("\\)"; "&#41;") | gsub("\\*"; "&#42;") | gsub("_"; "&#95;")
          | gsub("!"; "&#33;") | gsub("~"; "&#126;") | gsub("@"; "&#64;") | gsub("\r?\n"; " ");
-def grid_label: "K9 L0–L2";
+def grid_label: "k9-deed L0–L2";
 def badge_url(st): "https://img.shields.io/badge/\(grid_label | @uri)-\(st | word | @uri)-\(st | colour)";
 
 # Render the input report as Markdown, comparing categories with prev or null.

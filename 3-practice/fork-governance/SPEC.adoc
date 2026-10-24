@@ -1,0 +1,194 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Fork governance — specification v1.0
+:toc: left
+:toclevels: 4
+:revdate: 2026-10-24
+:revnumber: 1.0
+:status: normative
+
+This document is normative for the *comment*: its markers, its order, its
+states, and the rules the posting job obeys. It does not restate how a lane
+computes its verdict; that is link:LANES.adoc[LANES] and, for the grids
+themselves, link:../../docs/VERDICT-GRID-SPEC.adoc[VERDICT-GRID-SPEC].
+
+== 1. Terms
+
+*Lane*:: One conformance question with one verdict. This system has exactly
+three: DEED syntax, k9-deed conformance, Hypatia verdict grid.
+
+*Grid*:: The per-row report a lane renders into `report.md`
+(VERDICT-GRID-SPEC §Anatomy). Two of the three lanes have one; DEED does not.
+
+*Summary*:: The three-row table at the top of the comment. It is a projection
+of the lane verdicts, never an independent judgement.
+
+*Posting engine*:: `fork-governance-reusable.yml`. The only component that
+writes to a pull request.
+
+== 2. The comment contract
+
+=== 2.1 Marker
+
+[source]
+----
+<!-- fork-governance-verdict: regenerated on every run -->
+----
+
+The marker MUST be the first line of the comment body. The posting engine finds
+its previous comment by marker *and author*; a comment carrying the marker but
+written by any other account MUST be ignored. Without the author check, anyone
+who can comment could plant a marker and a forged baseline, and the delta
+column of every later revision would be measured against it.
+
+=== 2.2 Order
+
+The body MUST contain, in this order:
+
+. the marker;
+. the heading `# Fork governance`;
+. the summary table;
+. the scope note;
+. the lane marker `<!-- fork-governance:lane k9-deed -->` and the heading
+  `## k9-deed conformance`, then the k9-deed grid or its orange placeholder;
+. the lane marker `<!-- fork-governance:lane hypatia -->` and the heading
+  `## Hypatia verdict grid`, then the Hypatia grid or its orange placeholder.
+
+Order is part of the contract because the sections are read positionally by
+humans and by scrapers, and because an order that varies between runs makes
+two verdicts on the same PR look like two different verdicts.
+`scripts/tests/fork-governance-render-test.sh` asserts it.
+
+The lane *name* is `k9-deed conformance` in the summary row and in the section
+heading. It is not `K9 conformance`; the rename is normative.
+
+=== 2.3 Summary table
+
+[cols="1,1,4",options="header"]
+|===
+| Header | Values | Rule
+| `Lane` | fixed strings | As listed in §2.2.
+| `Status` | `<glyph> <word>` | Derived from the lane's verdict and job result (§3). Never typed by hand.
+| `Run` | `[run N](url)` or `same run` | The first row carries the link; the rest say `same run` because they share one run.
+|===
+
+=== 2.4 Embedded grids
+
+The lane reports MUST be embedded verbatim, including each lane's own marker
+(`<!-- verdict-grid:k9 … -->`, `<!-- verdict-grid:hypatia … -->`) and its
+baseline comment. Two consequences, both intended:
+
+* each lane remains independently machine-readable *inside* the combined
+  comment, so the lane's own baseline parser keeps working across revisions;
+* a reader who only knows about one lane can still find it.
+
+=== 2.5 A missing lane is a row, not an omission
+
+If a lane produced no artifact, the section MUST contain an orange
+`**indeterminate**` line naming the job result, and the summary row MUST be
+orange. A lane MUST NOT be dropped from the body or the table.
+
+A summary that silently loses a row reads as "nothing wrong there". That is
+the failure mode this system exists to prevent, so it is also the one it must
+never itself exhibit.
+
+== 3. State derivation
+
+The posting engine receives two different facts per lane and MUST NOT confuse
+them:
+
+* `*-result` — the *job result* (`success`, `failure`, `cancelled`, `skipped`).
+  It says whether the lane completed.
+* `*-verdict` — the *grid state* (`green`, `yellow`, `orange`, `red`, `grey`,
+  and for findings lanes `purple` or `blue`). It says what the lane found.
+
+Rules, in order:
+
+. If the job result is not `success`, the lane state is `red` for `failure` and
+  `orange` for anything else — *regardless of the verdict*. A failed job whose
+  artifact still says green is red, because the failure is the newer fact.
+. Else, if the verdict is a recognised state word, the lane state is that word.
+. Else the lane state is `orange`. An unrecognised or missing verdict is never
+  green.
+
+DEED has no grid of its own: its job result is the whole of its verdict
+(`success` → green, `failure` → red, anything else → orange).
+
+=== 3.1 The overall badge
+
+`badge.json` carries the *worst* lane, with precedence
+`red = purple > orange = blue > yellow > green` and `grey` only when every lane
+is grey. Red outranks orange deliberately: missing evidence must not be able to
+hide a known failure (VERDICT-GRID-SPEC §Conformance family).
+
+== 4. Posting
+
+. One comment per pull request. The engine lists the PR's comments, selects
+   those whose author equals `grid-author` *and* whose body contains the
+   marker, takes the last, and PATCHes it. Otherwise it POSTs.
+. The marker is read *before* the new body is written, so a rerun cannot create
+   a second comment.
+. `concurrency.cancel-in-progress` is set on the run: a superseded run that
+   finished later would otherwise overwrite a newer verdict with a stale one.
+4. The engine runs with `always()`. A lane that failed is exactly when the
+   summary matters most, and a summary that does not appear when something
+   broke reads as a pass.
+
+== 5. Single poster
+
+A repository MUST have exactly one poster for these lanes. Where a lane's
+reusable also posts (some forks call a local copy that does), the repository
+MUST disable one of the two. Two comments carrying the same lane but different
+runs is two verdicts, and a reader has no way to know which is current.
+
+The estate's lane workflows follow the split in link:LANES.adoc[LANES]: lanes
+render and publish artifacts, the posting engine writes. `k9-conformance.yml`
+and `hypatia-scan-reusable.yml` therefore request no write permission.
+
+== 6. Permissions
+
+[cols="1,2,3",options="header"]
+|===
+| Job | Permissions | Why
+| `deed` (called reusable)
+| `contents: read`
+| Lints the caller's tree.
+| `k9` (called reusable)
+| `contents: read`, `pull-requests: read`
+| Reads the previous grid comment for the delta column; writes nothing.
+| `hypatia` (called reusable)
+| `actions: read`, `contents: read`, `security-events: write`
+| Uploads SARIF. A caller may not grant less than the callee declares — the
+run then dies at startup with zero jobs.
+| `verdict` (posting engine)
+| `contents: read`, `actions: read`, `pull-requests: write`
+| Downloads two artifacts, writes one comment.
+|===
+
+The posting engine MUST NOT be given `contents: write`. It has no reason to
+touch the tree, and a commenting job with write access to the repository is a
+commenting job that can rewrite it.
+
+== 7. Failure semantics
+
+[cols="1,1,3",options="header"]
+|===
+| Condition | Comment | Run
+| All three lanes green | green summary | green
+| A lane red | red summary; red row | red (the lane job fails)
+| A lane could not run | orange row, orange summary | as the lane reports
+| Artifact missing but job green | orange row | green
+| Comment could not be posted | none | red — a governance run that cannot report is a failure
+|===
+
+A missing comment is never acceptable, and never silent: the posting job fails
+loudly rather than exiting 0 with nothing to show.
+
+== 8. Compatibility
+
+* The marker strings are a public interface. Changing one orphans every
+  existing comment, which then stands as a stale verdict forever.
+* Adding a lane is a MINOR change: a new row, a new section, in the documented
+  order. Removing or renaming a lane is MAJOR and requires a migration that
+  edits or deletes existing comments.
+* Consumers must tolerate additional sections after the two documented ones.

@@ -70,7 +70,7 @@ good_evidence=(--selftest "$ok_selftest" --selftest-code 0 --typecheck "$WORK/em
 render "$WORK/o1" --results "$WORK/r-clean" --expected "$WORK/expected" "${good_evidence[@]}" --sha 1111111111111111111111111111111111111111 --pr 7 --run 1
 check "clean corpus is green" green "$(state "$WORK/o1")"
 check "report.json is JCS (sorted, compact, one LF)" yes "$( [ "$(jq -S -c . "$WORK/o1/report.json"; echo)" = "$(cat "$WORK/o1/report.json")" ] && [ "$(tail -c1 "$WORK/o1/report.json" | od -An -c | tr -d ' ')" = '\n' ] && echo yes || echo no)"
-check "badge.json uses the shields schema" "K9 L0–L2/conformant/brightgreen" "$(jq -r '"\(.label)/\(.message)/\(.color)"' "$WORK/o1/badge.json")"
+check "badge.json uses the shields schema" "k9-deed L0–L2/conformant/brightgreen" "$(jq -r '"\(.label)/\(.message)/\(.color)"' "$WORK/o1/badge.json")"
 check "report.md carries the lane marker" yes "$(grep -q '^<!-- verdict-grid:k9 regenerated on every run -->' "$WORK/o1/report.md" && echo yes || echo no)"
 check "report.md carries a baseline" yes "$(grep -q '<!-- k9-baseline:' "$WORK/o1/report.md" && echo yes || echo no)"
 
