@@ -74,6 +74,17 @@ LEASH_LEVELS="'Kennel 'Yard 'Hunt"
 CORE_CAPABILITIES="fs.read fs.write net.fetch process.spawn container.run secret.read deploy.apply rollback.apply"
 EXTENSION_PREFIX="x-"
 
+# The same two closed lists are also written down in the host-side files
+# leash.ncl and capabilities.ncl, which this validator never loads — they carry
+# `detect_level`, `check_level` and the handshake records a contract file has no
+# business holding. MIGRATION-1058 M6 states that "--self-test asserts the
+# mirrors agree, so it cannot drift silently". That was true of the bash
+# constants above and false of these two files: nothing read them. --self-test
+# now does.
+K9_DIR="$(cd -- "$SPEC_DIR/.." && pwd)"
+LEASH_NCL="$K9_DIR/leash.ncl"
+CAPABILITIES_NCL="$K9_DIR/capabilities.ncl"
+
 LAYER="all"
 STRICT=0
 JSON=0
@@ -744,6 +755,27 @@ self_test() {
     "$(grep -oE 'contract_version = "[^"]+"' "$CONTRACT" | sed 's/.*"\(.*\)"/\1/')"
   t "schema_major mirrors k9_contract.ncl" "$SCHEMA_MAJOR" \
     "$(grep -oE 'schema_major = "[^"]+"' "$CONTRACT" | sed 's/.*"\(.*\)"/\1/')"
+
+  echo "== the host-side .ncl mirrors cannot drift either (M6) =="
+  # Every value below is extracted as DATA — the enum literal and the array
+  # literal — and never from a comment, so rewriting the prose that documents
+  # a list cannot satisfy the assertion that checks it.
+  local cn hp
+  t "leash.ncl SecurityLevel mirrors k9_contract.ncl" \
+    "$(grep -oE "leash_levels = \[[^]]*\]" "$CONTRACT" | grep -oE "'[A-Za-z]+" | tr '\n' ' ' | sed 's/ $//')" \
+    "$(grep -oE "let SecurityLevel = \[\|[^]]*\|\]" "$LEASH_NCL" | grep -oE "'[A-Za-z]+" | tr '\n' ' ' | sed 's/ $//')"
+  cn="$(awk '/core_capabilities = \[/,/^  \]/' "$CONTRACT" | grep -oE '"[a-z]+\.[a-z]+"' | tr -d '"' | tr '\n' ' ' | sed 's/ $//')"
+  t "capabilities.ncl core mirrors k9_contract.ncl" "$cn" \
+    "$(awk '/^  core = \[/,/^  \]/' "$CAPABILITIES_NCL" | grep -oE '"[a-z]+\.[a-z]+"' | tr -d '"' | tr '\n' ' ' | sed 's/ $//')"
+  # §9.2 — Hunt needs all five, always. This is a closed set: a precondition
+  # removed from the contract must fail here rather than quietly weaken Hunt.
+  hp="$(awk '/hunt_preconditions = \[/,/^  \]/' "$CONTRACT" | grep -oE '"[a-z_]+"' | tr -d '"' | tr '\n' ' ' | sed 's/ $//')"
+  t "hunt_preconditions is exactly the five, closed (§9.2)" \
+    "signature policy sandbox dry_run capability_grant" "$hp"
+  # §7 — the leash taxonomy is likewise closed, in both directions.
+  t "the leash taxonomy is exactly three, closed (§7)" \
+    "'Kennel 'Yard 'Hunt" \
+    "$(grep -oE "leash_levels = \[[^]]*\]" "$CONTRACT" | grep -oE "'[A-Za-z]+" | tr '\n' ' ' | sed 's/ $//')"
 
   echo "== capability arithmetic (§8) =="
   expect_ok  capability_ok "fs.read"
