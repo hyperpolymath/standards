@@ -433,6 +433,48 @@ Still open in M6: deriving the lists from one source rather than asserting two
 copies agree, and making the §16.2 relationship between the component pedigree
 and the repository pedigree explicit in `SPEC.adoc`.
 
+==== M6 — closed (2026-10-24)
+
+Both halves, one by doing and one by finding it already done.
+
+*The §16.2 half was already written.* §16.2 of the spec, "`pedigree.ncl` — a
+different contract", already names the two pedigrees, tables them by subject
+and normative source, and states that a reader MUST NOT apply one to the other.
+The claim that this was outstanding was wrong, and checking it exposed a second
+error: the cross-reference checker used while writing it did not model
+AsciiDoc's `:sectnums!:` / `:sectnums:` toggle at lines 16 and 68 of
+`K9-CONTRACT-SPEC.adoc`, so it numbered the unnumbered _Abstract_ and _Status_
+sections and reported every reference in the document as two sections out.
+§16.2 looked like it pointed at "The negative controls are the point". With the
+toggle modelled, all *117* `§`-references across the K9 documents resolve, and
+§16.2 is the pedigree section. Five references were nearly "corrected" into
+being wrong.
+
+*The derivation half is a decision, not a deferral.* Measured, not assumed:
+
+* Nothing in this repository imports `leash.ncl` or `capabilities.ncl`. The
+  only `import` of any of the three host-side files is two illustrative
+  snippets in `GUIDE.adoc`, and they import `pedigree.ncl`.
+* `hyperpolymath/k9-ecosystem`, which the archived k9-svc scorecard names as
+  where the implementation went, keeps its *own* copies — its `Containerfile`
+  COPYs `pedigree.ncl register.ncl leash.ncl` into the image and its `Justfile`
+  typechecks them. Cloned at `20f6be5`, it references no file under
+  `standards/1-formats/k9/` and does not mention `capabilities.ncl` at all.
+* The leash taxonomy *cannot* be single-sourced in Nickel. `SecurityLevel` is a
+  type — `[| 'Kennel, 'Yard, 'Hunt |]` — and a type cannot be derived from the
+  array `leash_levels`. The capability list could be imported, but that removes
+  one of three copies while the enum copy has to stay regardless.
+
+So the closed set will always exist in at least two forms, and the assertion is
+the correct permanent control rather than a stopgap on the way to a merge that
+the language does not allow. Deriving the capability array alone would trade a
+mutation-tested cross-check for a tautology and an import dependency, for one
+list, in files nothing consumes. Not done, on purpose.
+
+What is real and was missing: nothing outside this repository reads these two
+files, so their only guard is the one in `--self-test`. That is now four
+assertions, each mutation-tested.
+
 Deriving them from one source is the right end state. Do it *after* M1–M5, so
 that the change can be verified against a corpus that already conforms rather
 than against one that does not.
@@ -502,6 +544,53 @@ Still never run anywhere: `nickel format --check` on a `.k9.ncl` body.
 without the binary — so any M1–M6 change that adds a body will be the first
 thing to discover what `nickel fmt` thinks of these files.
 
+==== M7 — closed (2026-10-24), with one sentence left standing
+
+L2 over the corpus is live and strict. `.github/workflows/k9-conformance.yml`
+line 272 runs every committed K9 file through
+
+----
+k9-validate.sh --strict --layer L2 --json --quiet -- "$f"
+----
+
+with Nickel installed and pinned, and line 204 scopes the corpus to tracked
+`*.k9` and `*.k9.ncl` outside `.k9-canon/`, `9-archive/` and
+`1-formats/k9/tools/fixtures/`. So the corpus is no longer L1-only and the
+ledger no longer has anything in it to work down: it is empty, M3 fixed the
+four `svc/k9` files, and M5's `rsr-compliance-checklist.k9.ncl` sits under
+`9-archive/`, which that pathspec excludes. M5's prediction — that its
+top-level binding sequence is a Nickel parse error — is therefore *not*
+tested and never will be by this gate. It is a frozen archived file; the
+prediction is recorded here as unverified rather than quietly dropped.
+
+Measured on the tree at `2825f7c`: 15 tracked K9 files outside the fixtures,
+12 conforming at L1, 2 routed to the coordination grammar, 1 the archived file
+above.
+
+That the lane is green is *not* on its own evidence that L2 ran. A file with any
+`skipped` finding is graded `indeterminate` by `corpus_items`
+(`scripts/lib/k9-grid.jq:132`), `indeterminate` makes the state `orange`, and
+the Gate only fails `orange` when `fail-on-indeterminate` is set — which it is
+not by default. So a run with no Nickel binary would grade every file
+indeterminate and still pass. What settles it is the step list of run
+`40052958049` on `main`, read from the jobs API rather than from logs:
+
+----
+ 5  success  Install Nickel (pinned, sha256-verified; one version estate-wide)
+10  success  Contract typecheck
+12  success  Validate every committed K9 file (L0–L2, strict)
+16  success  Gate
+----
+
+Nickel was present, so L2 was not skipped, so the 12 files passed Nickel
+semantics and not merely the lexical screen. A file that fails L2 is graded
+`fail` by `corpus_items`, which makes the state `red`, which exits 1 — that is
+the path that would have fired.
+
+The one sentence that still stands is the last: `nickel format --check` has
+never been run on a `.k9.ncl` body, anywhere. That is proposal P5, not M7, and
+it is the only item in this plan left undone.
+
 == Suggested issue breakdown
 
 [cols="1,3,1,2",options="header"]
@@ -522,6 +611,18 @@ component |— |M3 · K9-S003 ×3, K9-S005 ×3, K9-S007 ×2, K9-S009 ×2, K9-S01
 #A, #B, #C, #D and #E are independent and can run in parallel. #F should not
 start before them, because triaging a first L2 run is much easier against a
 corpus whose lexical defects are already gone. #G is last for the same reason.
+
+*Status 2026-10-24.* None of #A–#G was filed as an issue; the work was done
+directly. #A, #C and #D are done (M1, M3, M4). #B is moot — its twelve
+`PROTOCOL.k9` files were never tracked, so there was no collision in the tree
+to settle. #E is moot — the file is under `9-archive/` and out of gate scope,
+with M5's parse-error prediction recorded as unverified rather than tested. #F
+is done: the corpus step runs `--strict --layer L2` and the ledger is empty. #G
+is closed as a decision, not a change — see M6; the leash taxonomy cannot be
+single-sourced in Nickel because `SecurityLevel` is a type, and the
+mutation-tested assertions are the correct permanent control. The only item
+from this plan left undone is `nickel format --check` on a `.k9.ncl` body,
+which is proposal P5.
 
 Every one of them ends with the same acceptance test:
 
