@@ -269,3 +269,131 @@ route the credentialed work through a reusable, where the caller passes
   `scripts/tests/check-required-contexts-test.sh`.
 * Tooling used for the census: GitHub REST API (`/rulesets`, branch protection),
   raw workflow and reusable sources at their pinned refs.
+
+== Addendum — 2026-10-24: the gate was never wired, and the class recurred here
+
+This addendum does not change the audit above. It records what happened when the
+threshold the audit defined was crossed again, in the canon itself.
+
+=== The gate ran nowhere
+
+`scripts/check-required-contexts.sh` shipped on 2026-09-20 with a fixture suite
+and a section headed *"Recommended wiring (not done here, deliberately)"*. It
+was never wired. The only reference to it in either repository was a comment in
+`governance-reusable.yml`:
+
+[quote]
+____
+delete this job once scripts/check-required-contexts.sh shows no consumer still
+requires it, and drop it from the frozen list.
+____
+
+That sentence assumes a run that never happened. A gate that is not scheduled is
+not advisory — it is absent, and its absence is indistinguishable from a clean
+report. This is the same shape the audit documents one level up: a rule that
+nothing enforces looks exactly like a rule that is satisfied.
+
+It is wired now, in this repository only, as `.github/workflows/required-contexts.yml`
+(advisory on pull requests, `strict: true` by manual dispatch).
+
+=== The defect that was live
+
+`hyperpolymath/standards`' main-gate ruleset required twenty contexts. Nineteen
+were publishable on `pull_request`. The twentieth was not:
+
+|===
+| Required context | Publisher | Triggers
+
+| `scan / Hypatia Neurosymbolic Analysis`
+| `hypatia-scan.yml`, job `scan`
+| `push`, `schedule`, `workflow_dispatch` — **no `pull_request`**
+|===
+
+The omission is deliberate and documented in that workflow's header: the
+PR-time scan runs inside `fork-governance.yml` through the same reusable, and
+running both would upload identical findings to code scanning twice per pull
+request. So the requirement and the trigger were each defensible, and together
+they made every pull request unsatisfiable.
+
+Measured consequence, 2026-10-24:
+
+* every PR showed all checks green and `mergeStateStatus: BLOCKED`;
+* the only exit was the ruleset's bypass — `RepositoryRole:5`, `bypass_mode:
+  always`;
+* a bypass applies to the **whole ruleset**, so each merge that used it also
+  discarded the other nineteen required checks;
+* two PRs merged red that day (#1333, #1334) and `main` was red for ~3h20m.
+
+The last bullet is the part worth keeping: the bypass is what turned an
+unsatisfiable requirement into an unguarded branch. The requirement blocks
+everyone; the workaround unblocks everyone for everything.
+
+=== What the gate now says
+
+The audit's verdicts were one-dimensional — a name was *producible* or not. The
+new class is `PR-UNPRODUCIBLE`: publishable, but only by workflows that never
+run on `pull_request`. It is a different verdict from `UNSATISFIABLE` because
+its repair is different: the name is right, the trigger is missing, and renaming
+a job fixes nothing.
+
+Three accuracy defects were fixed alongside it, each of which had been masking
+real verdicts:
+
+. *Local reusables were not resolved.* `uses: ./.github/workflows/x.yml` has no
+   `@ref`, so it fell through to the plain-job branch and published only the
+   caller's name. Every context published by this repository's own reusables —
+   which is most of the twenty — was invisible.
+. *A bare `*` matched every required context.* A job whose display name is
+   `${{ matrix.runtime }}` degrades to `*` after templating, and one such job
+   made the whole required set look satisfiable.
+. *`events_of … | grep -q` misclassified PR workflows under `pipefail`.* When
+   `grep -q` exits on the first match the writer takes `SIGPIPE`, the pipeline
+   returns 141, and the workflow reads as "cannot run on a PR". The gate reported
+   false positives for exactly the files it was built to trust.
+
+=== Remediation — settings changes, not code
+
+These are recorded as commands rather than applied: branch rules are not in git,
+and the estate's guardrail is that settings changes are a human decision.
+Replace the required context with the one the PR-time scan actually publishes:
+
+[source,sh]
+----
+# 1. What does the PR-time scan actually publish? (fork-governance.yml -> reusable)
+gh pr checks <any open PR> | grep -i hypatia
+
+# 2. Re-derive the required set from what the default branch really emitted.
+#    Without --apply this only reports; it refuses to write a context that
+#    nothing has emitted (a PHANTOM), which is this audit in code.
+bash scripts/apply-branch-gates.sh --repo hyperpolymath/standards
+bash scripts/apply-branch-gates.sh --repo hyperpolymath/standards --apply
+----
+
+Three further findings from the same inspection, none of which the audit above
+could see with a read-only credential:
+
+[cols="2,3",options="header"]
+|===
+| Finding | Why it matters
+
+| `bypass_mode: always` for `RepositoryRole:5` on four rulesets
+| Any admin merge silently discards **every** required check in that ruleset.
+  Narrowing the bypass to a specific app, or removing it, is the change that
+  makes the other nineteen checks mean anything.
+
+| `strict_required_status_checks_policy: false`
+| A branch need not be up to date before merging, so a PR can merge with checks
+  run against a base that no longer exists.
+
+| `Repo self-tests` is not a required context
+| The job that detected both 2026-10-24 regressions is advisory. `main` went red
+  twice in one day through a gate that would have caught it.
+|===
+
+=== Method note
+
+Everything above was measured through the REST API on 2026-10-24: `/rulesets`
+(seven active), `/rulesets/{id}` for rules, parameters and bypass actors,
+`/commits/main/check-runs`, and the check rollup of the pull requests named.
+`/branches/main/protection` returned `403` for the credential used, which the
+gate reports as *not inspected* rather than as nothing required.

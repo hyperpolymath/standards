@@ -1,0 +1,107 @@
+# This workflow is managed by gh actions-lock.
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# required-contexts.yml — run the required-context gate on this repository.
+#
+# WHY THIS WORKFLOW EXISTS
+# ------------------------
+# scripts/check-required-contexts.sh has existed since 2026-09-20, is tested,
+# and was referenced by exactly one line — a comment inside
+# governance-reusable.yml saying a job could be deleted "once
+# scripts/check-required-contexts.sh shows no consumer still requires it". That
+# sentence assumed a run that never happened. The gate was never wired to
+# anything, so it never ran, so it never reported.
+#
+# Measured the day this workflow was added (2026-10-24): the main-gate ruleset
+# requires `scan / Hypatia Neurosymbolic Analysis`, and the only workflow that
+# publishes it — hypatia-scan.yml — deliberately has no `pull_request` trigger
+# (its header explains that the PR-time scan runs inside fork-governance.yml, so
+# running both would upload the same findings twice). Every pull request
+# therefore waited for a check run that could not happen: all its checks green,
+# the PR permanently BLOCKED. The only way through was the ruleset's admin
+# bypass, which is `always` — and a bypass applies to the entire ruleset, so
+# merging discarded the other nineteen required checks as well.
+#
+# That is why this repository went red twice on 2026-10-24 (#1333, #1334) and
+# why nothing stopped it. The proximate fix is a settings change (documented in
+# docs/audits/audit-ci-context-producibility-2026-09-20.adoc §Addendum); this
+# workflow is what makes the next such requirement visible on the PR that
+# introduces it rather than a quarter later.
+#
+# ADVISORY BY DEFAULT, AND NOT DECORATION
+# ---------------------------------------
+# `continue-on-error` is true: this repository currently HAS the defect, so
+# gating on it would red every PR until the ruleset is re-derived, and a gate
+# that blocks all work gets bypassed — which is the failure mode being fixed.
+# The job still fails under `workflow_dispatch` with `strict: true`, and the
+# summary is always written, so the finding is visible on every run instead of
+# only to whoever asks.
+
+name: Required contexts
+
+on:
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Mondays 06:52 UTC — off the hour, after the settings sweep at :40, so a
+    # weekend ruleset edit is reported before the working week rather than
+    # discovered by a blocked PR.
+    - cron: '52 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      strict:
+        description: >-
+          Fail the job when a required context cannot be published on a pull
+          request. Expected to be RED until the ruleset is re-derived.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: required-contexts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  producible:
+    name: Required contexts are producible
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Rulesets are readable with the job token; the classic branch-protection
+      # endpoint needs Administration: read and is reported as "not inspected"
+      # rather than as a pass, which is the behaviour that matters here.
+      - name: Check required contexts
+        id: check
+        continue-on-error: ${{ ! inputs.strict }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          REQUIRED_CONTEXTS_STRICT: ${{ inputs.strict && '1' || '0' }}
+        run: |
+          set -uo pipefail
+          out="$(mktemp)"
+          # No `set -e` around this call: the exit code is advisory-mode
+          # information, and the report must be written either way.
+          bash scripts/check-required-contexts.sh . --print-commands 2>&1 | tee "$out"
+          rc=${PIPESTATUS[0]}
+          {
+            echo "### Required contexts"
+            echo
+            if [ "$rc" = 0 ]; then
+              echo "Every required context is publishable on \`pull_request\`."
+            else
+              echo "**At least one required context is not publishable on a pull request.**"
+              echo
+              echo '```'
+              grep -E 'UNPRODUCIBLE|UNSATISFIABLE|unsatisfiable|only by workflows' "$out" || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
