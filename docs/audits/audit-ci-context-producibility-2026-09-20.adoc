@@ -539,8 +539,12 @@ instrument; a general-purpose rewriter is not.
 === Applied: the decision layer, verified
 
 The repair ran on 2026-10-24 and was verified by reading the ruleset back, not
-by trusting the script's success message. The table covers only the repaired
-Hypatia ruleset (23787415).
+by trusting the script's success message.
+
+*Scope of this table, stated because the numbers differ elsewhere:* it covers
+**one** ruleset, `23787415` (*main gate*), which is the one that carried both
+the unproducible context and the bypass that made the red merges possible. The
+repository has six active branch rulesets. See the caveat after the table.
 
 [cols="2,1,1",options="header"]
 |===
@@ -569,13 +573,17 @@ inline Python that was banned repository-wide — and under the old ruleset it
 could not block either. A check that detects a defect and cannot stop it is a
 reporter, not a gate; it is now load-bearing.
 
-The gate re-run across the full inspected ruleset set reports `inspected: true`,
-`producible=23`, `app-owned=1`, and **zero findings**. These counts cover the
-inspected ruleset set, while the table's 21 contexts belong to the single
-repaired Hypatia ruleset. `.machine_readable/
-required-contexts-allow.txt` is therefore header-only: the entry it carried is
-retired and recorded there, not silently deleted, because a declaration that
-disappears without a trace is indistinguishable from one that was never true.
+The gate re-run reports `inspected: true`, `producible=23`, `app-owned=1`, and
+**zero findings**. Those counts cover the *whole inspected ruleset set*, not the
+21 contexts of the one ruleset above: 23 contexts are producible and 1 is owned
+by a GitHub App, across all six active rulesets, and 21 + 3 = 24 required
+context entries include duplicates across rulesets. The two totals are different
+views and neither is wrong.
+
+`.machine_readable/required-contexts-allow.txt` is therefore header-only: the
+entry it carried is retired and recorded there, not silently deleted, because a
+declaration that disappears without a trace is indistinguishable from one that
+was never true.
 
 ==== The timestamp that settles the argument
 
@@ -583,13 +591,55 @@ disappears without a trace is indistinguishable from one that was never true.
 at **22:57** — seventy-nine minutes later. The fix therefore provably did not
 enable its own merge, and that merge again went through the `always` bypass.
 
-That is the cleanest available proof of this document's thesis. The repository
-did not merge broken work because it lacked checks: it had twenty of them, and
-sixty-five green on the pull request in question. It merged broken work because
-every path to `main` ran through a bypass that discarded all twenty in one
-action, and the only reason the bypass was needed was a required context that
-nothing could produce. Both halves of that are now gone from the repaired
-Hypatia ruleset — the unproducible context by the ruleset edit, the bypass by
-deleting it. Bypass removal from other active rulesets and legacy branch
-protection remains unverified, so this does not establish that every path to
-`main` enforces all checks.
+The unproducible context and bypass are now gone from the repaired Hypatia
+ruleset. Legacy branch protection remains unverified; the other active
+rulesets' remaining bypass actors are recorded below. This does not establish
+that every path to `main` enforces all checks.
+
+==== The bypass removal was not complete, and the residue is recorded here
+
+Removing `bypass_actors` from `23787415` did not remove bypass from the
+repository. Three of the six active branch rulesets still carry
+`RepositoryRole:5` with `bypass_mode: always`, measured 2026-10-24 after the
+repair. What each one actually protects, and whether the bypass matters:
+
+[cols="1,2,2",options="header"]
+|===
+| Ruleset | Its only rule | Is that rule enforced anywhere else?
+
+| `24255701` Require-Linear-History
+| `required_linear_history`
+| **No.** This is the one real gap. `23787415` has `non_fast_forward`, which
+  stops history being *rewritten*, but not `required_linear_history`, which
+  stops merge commits being *created*. Linear history is therefore bypassable
+  by any admin today.
+
+| `24587723` Lock-Floor
+| 2 status checks
+| Yes — both are also required by `23787415`, which has no bypass.
+
+| `24309995` Secret-Scan-Floor
+| `scan / gitleaks`
+| Yes — also required by `23787415`, which has no bypass.
+|===
+
+So the accurate statement is narrower than "the bypass is gone" and different
+from "three gates are open":
+
+* All **21 distinct required contexts** are unbypassable, because `23787415`
+  enforces them all and carries no bypass actor. Lock-Floor and Secret-Scan-Floor
+  duplicate two and one of them respectively, so their bypasses discard nothing
+  that is not still required next door.
+* **`required_linear_history` is genuinely bypassable.** It is the only rule in
+  the repository that appears in exactly one ruleset, and that ruleset still
+  grants `RepositoryRole:5` bypass mode `always`. Append-only merging is
+  therefore still advice for an admin.
+* Those two duplicate rulesets should still be cleaned up, not because they
+  currently weaken anything but because a redundant bypass is a bypass waiting
+  to become load-bearing the day someone removes the check from the main gate.
+
+This is the same failure mode the audit describes, one layer down: the headline
+gate was fixed where the symptom was loudest, and three quieter rulesets were
+not examined. It is recorded rather than fixed here because it is a
+branch-protection write, and because a second unverified ruleset edit on the same
+day is how protection gets dropped by accident.
