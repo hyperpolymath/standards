@@ -68,9 +68,15 @@ jobs:
 
       - name: Configure
         id: config
+        env:
+          # workflow_dispatch inputs are user-supplied strings, not shell
+          # syntax. Inlining `${{ github.event.inputs.* }}` executes whatever a
+          # dispatcher types (actions/command-injection).
+          DRY_RUN_DASH: ${{ github.event.inputs.dry-run }}
+          DRY_RUN_UNDERSCORE: ${{ github.event.inputs.dry_run }}
         run: |
           # Check if this is a dry run
-          if [ "${{ github.event.inputs.dry-run }}" = "true" ] || [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          if [ "$DRY_RUN_DASH" = "true" ] || [ "$DRY_RUN_UNDERSCORE" = "true" ]; then
             echo "dry_run=true" >> $GITHUB_OUTPUT
             echo "::notice::Running in DRY RUN mode - no changes will be made"
           else
@@ -87,6 +93,10 @@ jobs:
           # for live repo reads. Without a token every probe fails silently
           # and every repo is misclassified as hookless.
           GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
+          # Dispatch input as data (actions/command-injection). A repo name is
+          # also untrusted enough to want quoting-by-construction: it reaches
+          # `jq --arg` below and must never be re-parsed by the shell.
+          TARGET_INPUT: ${{ github.event.inputs.target-repo }}
         run: |
           echo "🔍 Identifying repositories that need hook updates..."
           
@@ -94,8 +104,8 @@ jobs:
           TRIGGER_SHA="${{ github.sha }}"
           
           # Check if specific repo was requested
-          if [ -n "${{ github.event.inputs.target-repo }}" ]; then
-            TARGET="${{ github.event.inputs.target-repo }}"
+          if [ -n "$TARGET_INPUT" ]; then
+            TARGET="$TARGET_INPUT"
             # -c: compact, single-line JSON — a multiline value breaks
             # $GITHUB_OUTPUT below (same defect class as root cause 2, #807).
             REPOS_JSON=$(jq -cn --arg repo "$TARGET" '[$repo]')

@@ -46,6 +46,14 @@ function parseK9Kennel(text) {
   return parseYamlLikeBlock(contentLines, 0).value;
 }
 
+// Keys come straight out of the document being parsed, so they must never be
+// assigned blindly: `result["__proto__"] = value` rewrites the object's
+// prototype, and `constructor`/`prototype` are the same defect one level up
+// (CWE-915, CodeQL js/prototype-polluting-assignment). A K9 document has no
+// legitimate use for any of the three, so reject rather than silently skip —
+// a file that tried to smuggle one in should fail loudly.
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function parseYamlLikeBlock(lines, baseIndent) {
   const result = {};
   let i = 0;
@@ -66,6 +74,9 @@ function parseYamlLikeBlock(lines, baseIndent) {
     if (colonIdx === -1) { i++; continue; }
 
     const key = trimmed.substring(0, colonIdx).trim();
+    if (FORBIDDEN_KEYS.has(key)) {
+      throw new Error(`forbidden key "${key}" in K9 document (prototype pollution)`);
+    }
     const afterColon = trimmed.substring(colonIdx + 1).trim();
 
     if (afterColon === "|") {
@@ -293,6 +304,30 @@ project:
 `);
   assertEquals(data.project.name, "with-comments");
   assertEquals(data.project.license, "PMPL-1.0-or-later");
+});
+
+Deno.test("Parser: rejects prototype-polluting keys", () => {
+  // CWE-915: a key read out of the document must never be assigned blindly.
+  // `result["__proto__"] = {...}` replaces the prototype of the parsed map, so
+  // a document could make `data.admin` resolve through Object.prototype (and,
+  // one level up, pollute it). All three magic keys are refused.
+  for (const key of ["__proto__", "constructor", "prototype"]) {
+    assertThrows(
+      () => parseK9Kennel(`K9!\n---\n${key}:\n  polluted: true\n`),
+      Error,
+      "prototype pollution",
+    );
+  }
+  // A nested occurrence is refused too, not only a top-level one.
+  assertThrows(
+    () => parseK9Kennel(`K9!\n---\nproject:\n  __proto__:\n    polluted: true\n`),
+    Error,
+    "prototype pollution",
+  );
+  // And the guard leaves ordinary keys alone.
+  const ok = parseK9Kennel(`K9!\n---\nproject:\n  name: "constructor-safe"\n`);
+  assertEquals(ok.project.name, "constructor-safe");
+  assertEquals(Object.prototype.polluted, undefined);
 });
 
 Deno.test("Parser: handles K9 without --- separator", () => {

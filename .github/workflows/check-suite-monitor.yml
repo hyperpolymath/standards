@@ -33,35 +33,47 @@ jobs:
 
       - name: Get Check Suite Details
         id: check-suite
+        env:
+          # Event payload through `env:`, never inlined into the shell body
+          # (CodeQL actions/command-injection). `check_suite` fires for every
+          # check suite in the repository, including suites belonging to
+          # fork pull requests, so its fields are attacker-adjacent data and
+          # must never be re-parsed as shell syntax. They also cross into
+          # $GITHUB_OUTPUT, where one embedded newline would forge a second
+          # output line.
+          CHECK_SUITE_ID: ${{ github.event.check_suite.id }}
+          EVENT_ACTION: ${{ github.event.action }}
+          PR_ID: ${{ github.event.check_suite.pull_requests[0].id }}
+          PR_NUMBER: ${{ github.event.check_suite.pull_requests[0].number }}
+          HEAD_SHA: ${{ github.event.check_suite.head_sha }}
+          CONCLUSION: ${{ github.event.check_suite.conclusion }}
+          REPO: ${{ github.repository }}
         run: |
           echo "🔍 Retrieving check suite information..."
           
           # Get the check suite that triggered this workflow
-          CHECK_SUITE_ID="${{ github.event.check_suite.id }}"
-          REPO="${{ github.repository }}"
-          
           if [ -n "$CHECK_SUITE_ID" ]; then
-            echo "check_suite_id=$CHECK_SUITE_ID" >> $GITHUB_OUTPUT
+            echo "check_suite_id=$CHECK_SUITE_ID" >> "$GITHUB_OUTPUT"
             
             # Get check suite details via GitHub API
             # Note: This would require a token with appropriate permissions
             # For now, we'll use the context information
             
-            echo "repository=$REPO" >> $GITHUB_OUTPUT
-            echo "event_type=${{ github.event.action }}" >> $GITHUB_OUTPUT
+            echo "repository=$REPO" >> "$GITHUB_OUTPUT"
+            echo "event_type=$EVENT_ACTION" >> "$GITHUB_OUTPUT"
             
             # Extract branch information
-            if [ "${{ github.event.check_suite.pull_requests[0].id }}" != "" ]; then
-              echo "is_pr=true" >> $GITHUB_OUTPUT
-              echo "pr_number=${{ github.event.check_suite.pull_requests[0].number }}" >> $GITHUB_OUTPUT
+            if [ "$PR_ID" != "" ]; then
+              echo "is_pr=true" >> "$GITHUB_OUTPUT"
+              echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
             else
-              echo "is_pr=false" >> $GITHUB_OUTPUT
+              echo "is_pr=false" >> "$GITHUB_OUTPUT"
             fi
             
-            echo "head_sha=${{ github.event.check_suite.head_sha }}" >> $GITHUB_OUTPUT
-            echo "conclusion=${{ github.event.check_suite.conclusion }}" >> $GITHUB_OUTPUT
+            echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+            echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
           else
-            echo "check_suite_id=unknown" >> $GITHUB_OUTPUT
+            echo "check_suite_id=unknown" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Analyze Check Suite Results
@@ -171,15 +183,30 @@ jobs:
 
       - name: Get Workflow Run Information
         id: workflow-info
+        env:
+          # `workflow_run` is triggered by *other* workflows, including ones a
+          # fork pull request started. Everything here is data (env), never
+          # template text spliced into the shell body — same reason as the
+          # check-suite job above (CodeQL actions/command-injection).
+          #
+          # `github.event.workflow` is the workflow OBJECT, not its name; the
+          # old spelling stringified to "[object Object]" and, worse, made the
+          # `contains()` guard on the next step permanently false, so the GATE
+          # analysis after it never ran. The name lives at `.name`.
+          WORKFLOW_NAME: ${{ github.event.workflow.name }}
+          WORKFLOW_ID: ${{ github.event.workflow_run.id }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          echo "workflow_name=${{ github.event.workflow }}" >> $GITHUB_OUTPUT
-          echo "workflow_id=${{ github.event.workflow_run.id }}" >> $GITHUB_OUTPUT
-          echo "conclusion=${{ github.event.workflow_run.conclusion }}" >> $GITHUB_OUTPUT
-          echo "run_number=${{ github.event.workflow_run.run_number }}" >> $GITHUB_OUTPUT
-          echo "head_sha=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+          echo "workflow_name=$WORKFLOW_NAME" >> "$GITHUB_OUTPUT"
+          echo "workflow_id=$WORKFLOW_ID" >> "$GITHUB_OUTPUT"
+          echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
+          echo "run_number=$RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Analyze GATE Workflow Results
-        if: contains(github.event.workflow, '🔴 GATE:')
+        if: contains(github.event.workflow.name, '🔴 GATE:')
         run: |
           CONCLUSION="${{ steps.workflow-info.outputs.conclusion }}"
           WORKFLOW="${{ steps.workflow-info.outputs.workflow_name }}"

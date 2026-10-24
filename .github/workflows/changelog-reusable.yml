@@ -184,6 +184,12 @@ jobs:
       - name: Mode = commit-back — commit regenerated CHANGELOG.md
         if: ${{ inputs.mode == 'commit-back' && github.event_name == 'push' }}
         working-directory: caller
+        env:
+          # Never interpolate `${{ github.ref_name }}` into the shell body
+          # (CodeQL actions/command-injection): a git ref may legally contain
+          # `$`, `(`, `)`, `;`, `|` and `&`, so a branch named `$(cmd)` is
+          # executed by the runner. Passing it through `env:` makes it data.
+          BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if [ -f CHANGELOG.md ] && diff -q CHANGELOG.md CHANGELOG.md.new >/dev/null; then
@@ -206,13 +212,16 @@ jobs:
           See standards/templates/cliff.toml for the canonical config.
 
           Closes part of the 2026-05-26 CHANGELOG gap (standards#197 audit)."
-          git push origin HEAD:${{ github.ref_name }}
+          git push origin "HEAD:$BRANCH"
 
       - name: Mode = pr-back — open PR with regenerated CHANGELOG.md
         if: ${{ inputs.mode == 'pr-back' && github.event_name == 'push' }}
         working-directory: caller
         env:
           GH_TOKEN: ${{ github.token }}
+          # Same reason as the commit-back step: ref names reach the shell as
+          # data, never as template expansion (actions/command-injection).
+          BASE_BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if [ -f CHANGELOG.md ] && diff -q CHANGELOG.md CHANGELOG.md.new >/dev/null; then
@@ -233,7 +242,7 @@ jobs:
           # against the same base so we don't accumulate duplicate PRs if a
           # maintainer hasn't merged the previous one before another push lands.
           for pr in $(gh pr list --repo "${{ github.repository }}" \
-                                 --base "${{ github.ref_name }}" \
+                                 --base "$BASE_BRANCH" \
                                  --head 'bot/changelog-' \
                                  --state open \
                                  --json number,headRefName \
@@ -255,16 +264,20 @@ jobs:
             Please do not remove that marker when editing the description.
 
             Closes part of the 2026-05-26 CHANGELOG gap (standards#197 audit)." \
-            --base "${{ github.ref_name }}" \
+            --base "$BASE_BRANCH" \
             --head "$branch"
 
       - name: Mode = release-only — attach to release
         if: ${{ inputs.mode == 'release-only' && github.event_name == 'release' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          # Release tag names are event data and may contain shell
+          # metacharacters; pass through env, never inline
+          # (actions/command-injection).
+          TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          tag="${{ github.event.release.tag_name }}"
+          tag="$TAG"
           gh release upload "$tag" caller/CHANGELOG.md.new \
             --clobber \
             --repo "${{ github.repository }}"
