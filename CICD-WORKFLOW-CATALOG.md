@@ -43,6 +43,8 @@ These workflows **block** merges if they fail. They enforce critical estate-wide
 | `governance-reusable.yml` | Reusable governance | standards | Yes |
 | `hypatia-scan.yml` | Security scanning with Hypatia | rsr-template-repo | Yes |
 | `hypatia-scan-reusable.yml` | Reusable Hypatia scan | standards | Yes |
+| `fork-governance.yml` | The one PR comment (DEED · K9-DEED conformance · Hypatia verdict grid) plus the PR-time scanner. This is the lane that publishes `Hypatia verdict grid / Hypatia Neurosymbolic Analysis`, so a ruleset requiring that context depends on this workflow running on every PR | standards | `fork-governance-reusable.yml` |
+| `required-contexts.yml` | Asserts every context the branch ruleset requires is actually publishable on a pull request. A required check nothing can publish makes every PR undecidable; this gate catches that before the ruleset has to be bypassed | standards | No |
 | `main-estate-audit.yml` | Estate audit checks | rsr-template-repo | Yes |
 | `scorecard.yml` | OSSF Scorecard | rsr-template-repo | Yes |
 | `scorecard-reusable.yml` | Reusable Scorecard | standards | Yes |
@@ -51,7 +53,7 @@ These workflows **block** merges if they fail. They enforce critical estate-wide
 | `guix-policy.yml` | Guix/Nix package policy | knot-rider (canonical) | No |
 | `secret-scanner.yml` | Secrets detection | rsr-template-repo | Yes |
 | `secret-scanner-reusable.yml` | Reusable secrets scanner | standards | Yes |
-| `runtime-policy.yml` | Runtime security policies | rsr-template-repo | No |
+| ~~`runtime-policy.yml`~~ | **RETIRED:** removed from `rsr-template-repo`; `tests/workflows/governance_policy_test.sh` asserts the file and its lock record must not exist. Listed here only so the retirement is discoverable rather than looking like an omission | — | No |
 | `static-analysis-gate.yml` | Static analysis gate | rsr-template-repo | No |
 | `wellknown-enforcement.yml` | .well-known file enforcement | rsr-template-repo | No |
 
