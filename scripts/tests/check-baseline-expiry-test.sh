@@ -80,7 +80,7 @@ check "inside 45d: passes" "$([ "$RC" = 0 ] && echo 1)"
 
 run "[$(entry a.sh 2026-11-15)]" --warn-days 10
 check "outside a narrowed window: not reported" \
-  "$(printf '%s' "$OUT" | grep -qv 'EXPIRING' && echo 1)"
+  "$(! printf '%s' "$OUT" | grep -q 'EXPIRING' && echo 1)"
 check "outside a narrowed window: still passes" "$([ "$RC" = 0 ] && echo 1)"
 
 run "[$(entry a.sh 2026-12-22)]" --warn-days 59
