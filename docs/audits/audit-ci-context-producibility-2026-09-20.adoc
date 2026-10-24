@@ -455,3 +455,64 @@ code, and advisory mode exits zero for `UNSATISFIABLE` and `PR-UNPRODUCIBLE`
 alike. A regression that collapsed one verdict into the other would have passed
 every case in the file. They now assert the verdict text, and a tenth case covers
 `types: [closed]`.
+
+=== Correction: the finding is real, and the first explanation of it was not
+
+The gate reported `scan / Hypatia Neurosymbolic Analysis` as `PR-UNPRODUCIBLE`.
+An earlier version of this addendum then argued the finding was *already
+repaired*, on the grounds that `fork-governance.yml` publishes that name on
+`pull_request`. That was wrong, and the error is worth recording because it is
+the failure this document exists to catch: a plausible explanation accepted
+without reading back the name the run actually reports.
+
+The fork-governance lane publishes
+`Hypatia verdict grid / Hypatia Neurosymbolic Analysis`. The required context
+names `scan / Hypatia Neurosymbolic Analysis`. Both call the same reusable
+workflow and run the same scanner; they differ in the caller's job `name`, which
+is the first half of the context string. `hypatia-scan.yml`'s `scan` job is
+push/schedule-only on purpose — its own comment says that adding
+`pull_request` would upload the same findings to code scanning twice per pull
+request — so the name the ruleset requires is published only after merge.
+
+Measured on pull request #1336 at `1e338b0`, which is the cleanest possible
+specimen:
+
+[cols="1,3",options="header"]
+|===
+| Signal | Value
+
+| Checks | 65 pass, 0 fail, 12 skipping
+| `reviewDecision` | clear (stale bot review dismissed, every thread answered)
+| `mergeable` | `MERGEABLE`
+| `mergeStateStatus` | `BLOCKED`
+| Required contexts | 20
+| Required but absent from the head commit | exactly one — `scan / Hypatia Neurosymbolic Analysis`
+|===
+
+That is the whole thesis of this audit in one pull request. Sixty-five green
+checks and a clean review still cannot merge, and the reason is not a failing
+check but an *absent* one, which no amount of re-running, rebasing, or fixing
+code can ever produce. There is nothing left to fix at the PR level. The only
+route to `main` is the `always` bypass on ruleset 23787415 — which, in the same
+action, discards the nineteen required checks that would have bitten.
+
+Consequence for the eighteen other repositories: this is not a `standards`
+peculiarity caused by the fork-governance lane. It is what happens whenever a
+required context names a *call site* rather than a *check*. The context string
+is `<caller job name> / <callee job name>`, so two workflows that run the same
+reusable produce two different contexts, and only one of them is required. The
+gate now reports this class as `PR-UNPRODUCIBLE`, and `check-required-contexts.sh
+--print-commands` names the workflow and its event list so the repair is a
+lookup rather than an investigation.
+
+Repair, decision layer, one field:
+
+[source,bash]
+----
+# ruleset 23787415, the single required_status_checks rule; 20 contexts, change one
+scan / Hypatia Neurosymbolic Analysis        # post-merge call site, unreachable on a PR
+Hypatia verdict grid / Hypatia Neurosymbolic Analysis   # published on every pull_request
+----
+
+The deep scan keeps running weekly on `main`; it simply stops being *required*,
+which it was never able to be.
