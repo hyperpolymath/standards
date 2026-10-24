@@ -128,6 +128,76 @@ detect_platform() {
     esac
 }
 
+# ── Verified just installer ──
+#
+# Replaces two `curl https://just.systems/install.sh | bash` calls. Piping a
+# remote script into a shell executes whatever the server returns, with no
+# opportunity to check it; `set -eu` does not help, because a truncated or
+# substituted body still reaches the shell intact. It is also the shape
+# OpenSSF Scorecard's Pinned-Dependencies check reports (download-then-run with
+# no pinned artefact) — the two findings this template used to carry.
+#
+# A pinned RELEASE BINARY rather than a pinned installer script: the installer
+# is a moving target, so pinning its checksum would break the moment upstream
+# edited it, and the usual response to that breakage is to delete the check.
+#
+# ⚠ PLATFORM RESOLVED, NOT ASSUMED — this script supports macOS and Windows
+# package managers too, so a hardcoded x86-64 Linux target would download the
+# wrong binary on Apple Silicon and every ARM machine. An unrecognised platform
+# returns failure and the caller falls back to the package manager; a
+# plausible-looking artefact for the wrong target fails later and further away.
+#
+# Keep JUST_VERSION and the digests in step with the same helper in the
+# standards repository's own setup.sh — one estate, one set of pins.
+JUST_VERSION="1.58.0"
+
+just_target() {
+    case "$(uname -s 2>/dev/null):$(uname -m 2>/dev/null)" in
+        Linux:x86_64|Linux:amd64)    echo "x86_64-unknown-linux-musl" ;;
+        Linux:aarch64|Linux:arm64)   echo "aarch64-unknown-linux-musl" ;;
+        Darwin:x86_64)               echo "x86_64-apple-darwin" ;;
+        Darwin:arm64|Darwin:aarch64) echo "aarch64-apple-darwin" ;;
+        *)                           echo "" ;;
+    esac
+}
+
+just_sha256() {
+    case "$1" in
+        x86_64-unknown-linux-musl)  echo "4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d" ;;
+        aarch64-unknown-linux-musl) echo "748237128c4c40cbdabc65e841d05ceba13cc23a91eaba395495894c1d9764df" ;;
+        x86_64-apple-darwin)        echo "9a09cfef66aaa79da58203970103a0684307716caaabd3e9844cacc4dc0f4023" ;;
+        aarch64-apple-darwin)       echo "50ae3e996c974a0bf32ea7d10f495070df33f1b43e0616b2769e3d4821ed8f48" ;;
+        *)                          echo "" ;;
+    esac
+}
+
+install_just_verified() {
+    jv_target="$(just_target)"
+    [ -z "$jv_target" ] && {
+        warn "just: no verified build for $(uname -s)/$(uname -m); use your package manager"
+        return 1
+    }
+    jv_want="$(just_sha256 "$jv_target")"
+    [ -z "$jv_want" ] && { warn "just: no pinned digest for $jv_target"; return 1; }
+    jv_tmp="$(mktemp -d)"
+    jv_url="https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${jv_target}.tar.gz"
+    if ! curl -fsSL --proto '=https' --tlsv1.2 -o "$jv_tmp/just.tar.gz" "$jv_url"; then
+        warn "just: download failed: $jv_url"
+        rm -rf "$jv_tmp"
+        return 1
+    fi
+    if ! printf '%s  %s\n' "$jv_want" "$jv_tmp/just.tar.gz" | sha256sum -c - >/dev/null 2>&1; then
+        warn "just: CHECKSUM MISMATCH for $jv_url"
+        warn "  expected $jv_want"
+        warn "  actual   $(sha256sum "$jv_tmp/just.tar.gz" | cut -d' ' -f1)"
+        rm -rf "$jv_tmp"
+        return 1
+    fi
+    tar -xzf "$jv_tmp/just.tar.gz" -C "$jv_tmp" just
+    sudo install -m 0755 "$jv_tmp/just" /usr/local/bin/just
+    rm -rf "$jv_tmp"
+}
+
 # ── Install just ──
 install_just() {
     if command -v just >/dev/null 2>&1; then
@@ -140,8 +210,8 @@ install_just() {
     case "$PKG_MGR" in
         dnf)        sudo dnf install -y just ;;
         apt)        sudo apt-get install -y just 2>/dev/null || {
-                        # just not in older apt repos — use installer
-                        curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+                        # just not in older apt repos — fetch the pinned release
+                        install_just_verified || warn "install just manually: https://github.com/casey/just"
                     } ;;
         pacman)     sudo pacman -S --noconfirm just ;;
         apk)        sudo apk add just ;;
@@ -152,8 +222,8 @@ install_just() {
         guix)       guix install just ;;
         nix)        nix-env -iA nixpkgs.just ;;
         *)
-            info "Using just installer script..."
-            curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+            info "Fetching the pinned just release..."
+            install_just_verified || warn "install just manually: https://github.com/casey/just"
             ;;
     esac
 

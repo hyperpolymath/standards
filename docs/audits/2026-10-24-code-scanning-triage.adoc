@@ -1,0 +1,216 @@
+= Code-scanning triage, 2026-10-24
+:description: Per-alert disposition for every open alert on the repository's code-scanning page.
+:status: accepted
+:revdate: 2026-10-24
+:revnumber: 1.0
+
+== Why this document exists
+
+A code-scanning alert can be closed in four ways: fix the code, dismiss it,
+delete the uploader, or leave it open forever. Three of those leave no trace in
+the repository, and the fourth is indistinguishable from neglect. This
+document is the trace. Every open alert at the time of writing appears below
+with the reason it is in the state it is in, and every dismissal is mirrored in
+`.github/code-scanning-dismissals.json` — the machine-readable list that
+`scripts/dismiss-code-scanning-alerts.sh` will not depart from.
+
+The alerts split into two populations by *producer*, which matters because the
+fixes have nothing in common:
+
+[cols="1,1,3"]
+|===
+|Producer |Rule ids |What it is
+
+|OSSF Scorecard
+|`TokenPermissionsID`, `PinnedDependenciesID`, `BinaryArtifactsID`, `SASTID`
+|Scorecard runs as a workflow and uploads SARIF. It reports *posture*, not
+code defects: a write permission that exists, an executable that is committed,
+a dependency fetched without a digest.
+
+|Hypatia
+|`hypatia/*`
+|This estate's own scanner, uploading SARIF from `hypatia-scan.yml`.
+|===
+
+Because `9-archive/**` is excluded from the CodeQL configuration, and Scorecard
+does not read that configuration, the Scorecard findings inside `9-archive/`
+are *not* silenced by it. That is why the two `PinnedDependenciesID` alerts were
+fixed in the file rather than excluded by path.
+
+== Fixed in code
+
+=== `PinnedDependenciesID` ×2 — `9-archive/rhodium-standard-repositories/templates/setup.sh.template`
+
+Both alerts pointed at the same shape, at lines 144 and 156:
+
+[source,sh]
+----
+curl -fsSL https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+----
+
+A remote script piped straight into a shell, twice: once as the `apt` fallback
+(when the distribution's repository is too old to carry `just`) and once as
+the catch-all for an unrecognised package manager. The body is whatever the
+server returns at that moment, so `set -e` protects against nothing.
+
+Replaced with `install_just_verified`, which downloads a **pinned release
+binary** (`JUST_VERSION`), checks it against a per-platform SHA-256, and only
+then installs it. The platform is resolved from `uname`, not assumed: a
+hardcoded `x86_64-linux` artefact would be the wrong binary on Apple Silicon
+and every ARM host, and would fail later and further from the cause. An
+unrecognised platform fails closed and tells the user to use the package
+manager.
+
+The same helper, with the same version and digests, is in the repository's own
+`setup.sh`; the template now says so, because two copies of a pin that drift
+apart are worse than one copy. The installer script was deliberately *not*
+pinned by checksum instead: it is a moving target upstream, and a digest over a
+moving target produces a red build whose usual repair is to delete the check.
+
+This is an archived template, so the fix also protects the repositories that
+were generated from it — they carry the same two lines today.
+
+=== `BinaryArtifactsID` ×2 — `2-protocols/axel/casket-ssg`, `2-protocols/axel/casket-simple`
+
+Two ELF x86-64 executables tracked in git: 1 285 360 and 1 678 656 bytes. They
+were the site generator for the Axel subtree, invoked as
+`./casket-simple build content _site`.
+
+They were removed, and the workflow that used them now builds the generator
+from source:
+
+* `2-protocols/axel/.github/workflows/deploy-casket.yml` checks out
+  `hyperpolymath/casket-ssg` at a pinned commit, builds it with the same GHC
+  and Cabal versions the root `casket-pages.yml` uses, and runs it from Cabal.
+  No step consumes a committed binary.
+* `2-protocols/axel/.gitignore` now ignores `/casket-simple` and `/casket-ssg`
+  at the repository root, root-anchored so a source checkout into
+  `./casket-ssg/` is not accidentally swallowed.
+
+A committed binary cannot be reviewed, cannot be patched by a dependency
+scanner, and silently pins the build to whatever machine produced it. The
+absence of provenance is the finding, not the file size.
+
+== Dismissed with a written argument
+
+Each of these is recorded in `.github/code-scanning-dismissals.json` with its
+path, line, reason and comment. The script refuses to dismiss an alert that
+does not match an entry by rule id *and* path *and* line, and an entry with no
+path matches only an alert with no path — so a new finding in a neighbouring
+file cannot be absorbed by these rationales.
+
+=== `TokenPermissionsID` ×6
+
+Scorecard reports every write permission a workflow declares. It does not
+evaluate whether the job performs the operation that requires it, and it cannot
+know that GitHub rejects a run at *startup* when a caller grants less than the
+callee declares. It is worth being precise about which of the six is which,
+because two of them are the same defect seen from both ends:
+
+[cols="2,1,3"]
+|===
+|Location |Scope |Why it cannot be removed
+
+|`hypatia-scan.yml:25`
+|workflow
+|`security-events: write` — the only permission that can upload SARIF. There is
+no read-only spelling of an upload.
+
+|`hypatia-scan-reusable.yml:44`
+|workflow
+|Same, from the callee's side. Required, not chosen: a caller must grant at
+least what the callee declares or the run fails at startup with zero jobs.
+
+|`codeql.yml:40`
+|workflow
+|Same again, for the CodeQL upload that branch protection's code-scanning rule
+depends on.
+
+|`propagate-hooks.yml:193`
+|job
+|`contents: write` to push hook updates into target repositories. Workflow level
+is `contents: read`.
+
+|`debt-measure.yml:43`
+|job
+|`contents: write` + `pull-requests: write` to push the measurement branch and
+maintain its single recording PR. Workflow level is `contents: read`.
+
+|`changelog-reusable.yml:111`
+|job
+|`contents: write` + `pull-requests: write` for the commit-back and pr-back
+modes. Callers that only ever pass `mode: check-only` can drop it on their side.
+|===
+
+In every case the workflow *already* declares least privilege: `read-all` (or
+an explicit read set) at workflow level, and the single write narrowed to the
+job that performs the operation. The remaining finding is the irreducible
+minimum, so the choice is a documented dismissal or an alert that stays open
+until the workflow is deleted.
+
+=== `SASTID` — aggregate, no file
+
+Scorecard's SAST probe asks whether a static-analysis check run exists on the
+commits it samples. It samples *merged* commits. This repository runs CodeQL on
+every push and pull request, and the `CodeQL` check run from
+`github-advanced-security` reports success on current pull-request heads, but
+commits merged before code scanning was enabled cannot retroactively acquire a
+check run. The finding therefore cannot be closed by any change to the
+repository, only by the passage of commits.
+
+Dismissed as a false positive *as stated*, not as "we do not run SAST": the
+control is in place and running.
+
+== The Hypatia aggregate
+
+`hypatia/green_web/non_green_hosting` (`{null}` severity, path
+`.github/workflows/:1`) is a rule defect rather than a finding. The rule
+lower-cases every workflow's text, substring-matches it against a list of
+non-green providers, and reports the pseudo-path `.github/workflows/` with no
+line — so the alert names neither the file nor the token that matched, and
+there is nothing in it to fix.
+
+The only match in this tree is the R2 backup job in `mirror-reusable.yml`,
+which runs the preinstalled AWS CLI against a Cloudflare R2 endpoint:
+`aws s3 cp … --endpoint-url https://<account>.r2.cloudflarestorage.com`. The
+provider is Cloudflare; `aws` is the name of the client. Nothing this
+repository publishes is hosted on a provider in the rule's list.
+
+Because the finding cannot be repaired in source, the disposition is a
+baseline entry in `.hypatia-baseline.json` (rule `green_web`, type
+`non_green_hosting`, file `.github/workflows/`), which is the estate's
+supported mechanism for "acknowledged, and here is the argument". The entry
+travels with the repository, is reviewed like any other change, and disappears
+if the rule is ever fixed upstream and stops emitting. The proper repair —
+word-boundary matching plus a real file and line — belongs in Hypatia and is
+not attempted here.
+
+== Verification
+
+[source,sh]
+----
+bash scripts/tests/dismiss-code-scanning-alerts-test.sh   # 16 passed, 0 failed
+bash scripts/apply-baseline.sh <findings> .hypatia-baseline.json advisory
+bash scripts/check-workflow-duplicate-keys.sh             # clean
+bash -n 9-archive/rhodium-standard-repositories/templates/setup.sh.template
+sh -n   9-archive/rhodium-standard-repositories/templates/setup.sh.template
+----
+
+The dismissal test is written around the *negative* direction: same rule id in
+a different file, same file at a new line, an aggregate rule reported against a
+real path, an unlisted rule id, and a new `BinaryArtifactsID` alert must all
+match nothing. A matcher that dismisses too little is visible; one that
+dismisses too much hides a real finding behind a neighbour's rationale and
+nothing would ever say so.
+
+== What is not done here
+
+* The dismissals are *planned* but not applied. `gh api` on
+  `repos/:owner/:repo/code-scanning/alerts` returns HTTP 403 with the token
+  available in this session (no `security-events` scope), so
+  `scripts/dismiss-code-scanning-alerts.sh --apply` must be run by a token that
+  has it. The plan is reproducible:
+  `scripts/dismiss-code-scanning-alerts.sh` prints exactly which alerts would be
+  dismissed and exits without writing.
+* `hypatia/green_web/non_green_hosting` will disappear from the code-scanning
+  page only after a scan that applies the new baseline entry.
