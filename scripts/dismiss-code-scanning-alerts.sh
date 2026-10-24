@@ -94,13 +94,19 @@ if [ -n "${ALERTS_JSON:-}" ]; then
   FEED="$(cat "$ALERTS_JSON")"
 else
   command -v gh >/dev/null 2>&1 || die "gh is required (or set ALERTS_JSON)"
-  if ! FEED="$(gh api --paginate "repos/$REPO/code-scanning/alerts?state=open&per_page=100" 2>/tmp/.dcsa-err.$$)"; then
+  # mktemp, not a predictable /tmp name: a fixed path in a shared directory is
+  # a symlink target an attacker can pre-create, and it is what Hypatia's
+  # content_patterns/hardcoded_tmp rule reports. The file is created before the
+  # command runs and removed on every exit path.
+  ERR_FILE="$(mktemp)"
+  # shellcheck disable=SC2064  # expand now: $ERR_FILE is reassigned nowhere,
+  # but the trap must not depend on a variable that a later edit could unset.
+  trap "rm -f '$ERR_FILE'" EXIT
+  if ! FEED="$(gh api --paginate "repos/$REPO/code-scanning/alerts?state=open&per_page=100" 2>"$ERR_FILE")"; then
     printf 'dismiss-code-scanning-alerts: could not read alerts for %s\n' "$REPO" >&2
-    sed 's/^/  /' /tmp/.dcsa-err.$$ >&2
-    rm -f /tmp/.dcsa-err.$$
+    sed 's/^/  /' "$ERR_FILE" >&2
     exit 3
   fi
-  rm -f /tmp/.dcsa-err.$$
 fi
 printf '%s' "$FEED" | jq -e 'type == "array"' >/dev/null 2>&1 || die "alert feed is not a JSON array"
 
