@@ -52,7 +52,14 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SPEC_DIR="$(cd -- "$SCRIPT_DIR/../spec" && pwd)"
-CONTRACT="$SPEC_DIR/contract/k9_contract.ncl"
+# K9_CONTRACT is a TEST SEAM and nothing else. K9-N002 says "the normative
+# contract itself does not typecheck", and the only way to prove that check can
+# still fire is to point the validator at a contract that is broken — which
+# cannot be a committed file, because a broken committed contract breaks
+# everything. --self-test uses this to do exactly that. No CI lane sets it: if
+# it were set in production the gate would validate against whatever it was
+# pointed at, so the self-test also asserts the default is the canonical path.
+CONTRACT="${K9_CONTRACT:-$SPEC_DIR/contract/k9_contract.ncl}"
 
 CONTRACT_VERSION="1.0.0"
 SCHEMA_MAJOR="1"
@@ -828,6 +835,23 @@ EOF
     unset K9_SIG_VERIFIER
     t "verifier refuses -> K9-C001 error, verdict 'Rejected" 1 \
       "$(printf '%s' "$out" | grep -c "K9-C001.*'Rejected")"
+
+    # The three verdicts above are the *finding*. What they do not assert is
+    # the CONSEQUENCE, and the consequence is the whole rule: §9.4 makes
+    # `signature` a Hunt precondition, so a verifier that refuses must leave
+    # the component non-conforming. An error finding that still exited 0 would
+    # let a host treat the verdict as advisory — the same shape as a Hunt gate
+    # satisfied by the mere presence of a signature field (§10.4).
+    K9_SIG_VERIFIER="$stub_bad"
+    local rej_json rej_rc
+    QUIET=1; JSON=1
+    rej_json="$(validate_one "$hunt" 2>/dev/null)"; rej_rc=$?
+    JSON=0; QUIET=0
+    unset K9_SIG_VERIFIER
+    t "a refused signature exits non-zero" 1 \
+      "$([ "$rej_rc" -ne 0 ] && echo 1 || echo 0)"
+    t "and the file's verdict is fail, not pass" "fail" \
+      "$(printf '%s' "$rej_json" | grep -oE '"verdict":"[a-z]+"' | head -1 | sed 's/.*:"//; s/"//')"
     QUIET=0
   else
     echo -e "${YEL}SKIP${NC} L3 assertions: $hunt not present"
@@ -925,6 +949,69 @@ EOF
     done
   done
   t "the contract and all 27 fixtures avoid Nickel's reserved words" 0 "$kw_hits"
+
+  echo "== K9-N002: a contract that does not typecheck judges nothing =="
+  # N002 fired four times during #1058 — `Record`, then `Any`, then twice more
+  # — and had no control proving it could still fire. Without one, a validator
+  # that quietly stopped checking the contract would keep reporting files as
+  # merely non-conforming instead of reporting ITSELF broken, which is the
+  # more dangerous of the two failures.
+  #
+  # The broken contract cannot be a committed file, so it is generated here and
+  # reached through the K9_CONTRACT seam. With no nickel binary the honest
+  # assertion is the other half: N002 must be SKIPPED, never passed.
+  local good_contract="$CONTRACT" broken n002_json n002_rc
+  broken="$(mktemp --suffix=.ncl)"
+  printf '# deliberately broken: `Record` is not a Nickel type\n{ x | Record }\n' > "$broken"
+  local subject="$SCRIPT_DIR/fixtures/valid/kennel-data.k9.ncl"
+  if [ -f "$subject" ]; then
+    CONTRACT="$broken"
+    QUIET=1; JSON=1
+    n002_json="$(validate_one "$subject" 2>/dev/null)"; n002_rc=$?
+    JSON=0; QUIET=0
+    CONTRACT="$good_contract"
+    if nickel_bin >/dev/null; then
+      t "a broken contract raises K9-N002" 1 \
+        "$(printf '%s' "$n002_json" | grep -cE '"severity":"error","rule":"K9-N002"')"
+      # The point of the rule: when the contract is broken, L2 must make NO
+      # claim about the file. Emitting K9-N001 here would be the contract's
+      # failure being reported as the component's.
+      t "and makes no K9-N001 claim about the component" 0 \
+        "$(printf '%s' "$n002_json" | grep -cE '"rule":"K9-N001"')"
+      t "and still fails the file rather than passing it" 1 \
+        "$([ "$n002_rc" -ne 0 ] && echo 1 || echo 0)"
+    else
+      t "with no nickel, a broken contract is SKIPPED not passed" 1 \
+        "$(printf '%s' "$n002_json" | grep -cE '"severity":"skipped","rule":"K9-N002"')"
+      t "and is not reported as an error it could not establish" 0 \
+        "$(printf '%s' "$n002_json" | grep -cE '"severity":"error","rule":"K9-N002"')"
+    fi
+  else
+    echo -e "${YEL}SKIP${NC} K9-N002 assertions: $subject not present"
+  fi
+  rm -f "$broken"
+  t "the contract path defaults to the canonical one (seam not left open)" \
+    "$SPEC_DIR/contract/k9_contract.ncl" "$CONTRACT"
+
+  echo "== K9-E000: an absent path is a usage error, never a pass =="
+  # E000 cannot have a committed fixture — the file would have to not exist —
+  # so the control lives here. It matters because "file not found" is the one
+  # finding a gate can produce while checking nothing at all, and a runner that
+  # mistook it for a pass would report an empty corpus as conforming.
+  local absent absent_json absent_rc
+  absent="$SCRIPT_DIR/fixtures/invalid/this-file-does-not-exist.k9.ncl"
+  QUIET=1; JSON=1
+  absent_json="$(validate_one "$absent" 2>/dev/null)"; absent_rc=$?
+  JSON=0; QUIET=0
+  t "a missing file raises K9-E000" 1 \
+    "$(printf '%s' "$absent_json" | grep -cE '"severity":"error","rule":"K9-E000"')"
+  t "and exits non-zero" 1 "$([ "$absent_rc" -ne 0 ] && echo 1 || echo 0)"
+
+  # A name beginning `-` is handed to cmp, head, sed, grep and dirname, every
+  # one of which would read it as an option; validate_one prefixes `./` for
+  # exactly that reason. That prefix is already asserted above ("dash-leading
+  # name: no L0 failure" / "verdict pass at L1"), and it is applied once before
+  # any layer runs, so re-asserting it at full depth would prove nothing new.
 
   echo
   if [ $SELFTEST_FAILS -eq 0 ]; then

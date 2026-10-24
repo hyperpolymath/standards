@@ -100,15 +100,29 @@ runner that only checked rejection would report that as a pass while the rule
 under test does nothing.
 
 Coverage, measured: *20 of the 23* rules in the contract have a negative
-control that names them. Of the three that do not:
+control in `fixtures/invalid/` that names them. All 23 are exercised — the
+other three cannot have a fixture, and each is instead asserted in
+`--self-test` *to fire*, not merely described:
 
 [horizontal]
-`K9-C001` |Asserted in `--self-test` with a stub verifier rather than by a
-fixture, because no fixture can make a verifier appear. All three verdicts a
-host can reach are exercised there.
-`K9-N002` |A self-check on the contract file itself, run before the contract is
-used to judge anything.
-`K9-E000` |A usage error (the file does not exist), not a conformance rule.
+`K9-C001` |No fixture can make a verifier appear, so `--self-test` drives it
+with a stub. All three verdicts a host can reach are exercised ('Not_Run →
+`'Present_Unverified`, accepted → `'Verified`, refused → `'Rejected`), **and so
+is the consequence**: a refused signature must exit non-zero with verdict
+`fail`. An error finding that left the exit status at 0 would let a host read
+§9.4's Hunt precondition as advisory.
+`K9-N002` |A self-check on the contract file itself, run before the contract
+judges anything. `--self-test` points the validator at a deliberately broken
+contract through the `K9_CONTRACT` seam and asserts the rule fires, that L2
+then makes *no* `K9-N001` claim about the component (the contract's failure
+must not be reported as the component's), and that the file still fails. With
+no `nickel` binary it asserts the other half: skipped, never passed. This rule
+fired four times during #1058 and had no control proving it still could.
+`K9-E000` |A usage error, not a conformance rule, and it cannot have a fixture
+— the file would have to not exist. `--self-test` asserts a missing path raises
+it and exits non-zero. It matters because "file not found" is the one finding a
+gate can emit while checking nothing at all: a runner that mistook it for a
+pass would report an empty corpus as conforming.
 
 === The two L2 controls
 
