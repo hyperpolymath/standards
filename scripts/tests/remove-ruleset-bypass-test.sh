@@ -66,6 +66,12 @@ case "$path" in
   */rulesets) cat "$SERVE_DIR/list.json" ;;
   */rulesets/*)
     id="${path##*/}"
+    if [ "${VERIFY_FAIL:-0}" = 1 ] && [ -f "$PUT_DIR/$id.json" ]; then
+      echo "curl: (52) Empty reply from server" >&2; exit 1     # GET after PUT
+    fi
+    if [ "${CORRUPT:-0}" = 1 ] && [ -f "$PUT_DIR/$id.json" ]; then
+      echo '{"message":"Not Found"}'; exit 0                   # parses, wrong shape
+    fi
     if [ -f "$SERVE_DIR/$id.json" ]; then cat "$SERVE_DIR/$id.json"; else cat "$SRC_DIR/rs$id.json"; fi ;;
   *) echo "unexpected: $path" >&2; exit 1 ;;
 esac
@@ -84,7 +90,8 @@ setup() {
 out=""; rc=0
 run() {
   SRC_DIR="$work/src" SERVE_DIR="$work/serve" PUT_DIR="$work/put" \
-    REFUSE="${REFUSE:-0}" GH="$work/gh" REPO="example/repo" ONLY="${ONLY:-}" \
+    REFUSE="${REFUSE:-0}" VERIFY_FAIL="${VERIFY_FAIL:-0}" CORRUPT="${CORRUPT:-0}" \
+    GH="$work/gh" REPO="example/repo" ONLY="${ONLY:-}" \
     bash "$script" "$@" >"$work/out" 2>&1
   rc=$?; out="$(cat "$work/out")"
 }
@@ -135,7 +142,25 @@ check "403 exits 1" 1 "$rc"
 check_says "403 explains the installation-token trap" "installation"
 REFUSE=0
 
-# 7. unknown argument is not silently ignored
+# 7. the read-back GET fails after a successful PUT. Reported by Codex on #1338
+#    and a genuine bug in the first version: an empty verify.json made
+#    `[ "" -ne 0 ]` a syntax error, which evaluated false, skipped the mismatch
+#    branch, and printed "verified" after verifying nothing.
+setup; VERIFY_FAIL=1; run --apply
+check "read-back failure exits 1" 1 "$rc"
+check_says "read-back failure says UNVERIFIED" "UNVERIFIED"
+if printf '%s' "$out" | grep -q "verified: 0 bypass"; then
+  fail=$((fail+1)); echo "FAIL read-back failure still claimed verification"
+else pass=$((pass+1)); echo "PASS read-back failure did not claim verification"; fi
+VERIFY_FAIL=0
+
+# 8. the read-back returns valid JSON but not a ruleset (no bypass_actors array)
+setup; CORRUPT=1; run --apply
+check "corrupt read-back exits 1" 1 "$rc"
+check_says "corrupt read-back says UNVERIFIED" "UNVERIFIED"
+CORRUPT=0
+
+# 9. unknown argument is not silently ignored
 run --force
 check "unknown arg exits 2" 2 "$rc"
 

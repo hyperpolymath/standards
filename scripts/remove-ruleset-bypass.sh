@@ -144,10 +144,31 @@ for id in $ids; do
     exit 1
   fi
 
-  "$GH" api "repos/$REPO/rulesets/$id" >"$tmp/verify.json"
-  v_bypass="$(jq -r '.bypass_actors|length' "$tmp/verify.json")"
-  v_rules="$(jq -r '.rules|length' "$tmp/verify.json")"
-  o_rules="$(jq -r '.rules|length' "$tmp/rs.json")"
+  # Verify against the server, and treat an unverifiable result as a failure.
+  # A GET that fails leaves an empty file; jq then yields empty strings, and
+  # `[ "" -ne 0 ]` is a *syntax* error that evaluates false — so the mismatch
+  # branch is skipped and the script would print "verified" after performing no
+  # verification at all. That is the same defect this whole exercise is about
+  # (a gate reporting a check it never ran), so it is checked explicitly:
+  # the request must succeed, the response must parse, and the fields must be
+  # present and numeric before any comparison happens.
+  if ! "$GH" api "repos/$REPO/rulesets/$id" >"$tmp/verify.json" 2>"$tmp/err"; then
+    echo "FATAL: could not read back $id after writing it — protection is UNVERIFIED" >&2
+    sed 's/^/       /' "$tmp/err" >&2
+    exit 1
+  fi
+  if ! jq -e '.bypass_actors | type == "array"' "$tmp/verify.json" >/dev/null 2>&1; then
+    echo "FATAL: read-back for $id is not a ruleset payload — protection is UNVERIFIED" >&2
+    exit 1
+  fi
+  v_bypass="$(jq -r '.bypass_actors|length' "$tmp/verify.json" 2>/dev/null)"
+  v_rules="$(jq -r '.rules|length' "$tmp/verify.json" 2>/dev/null)"
+  o_rules="$(jq -r '.rules|length' "$tmp/rs.json" 2>/dev/null)"
+  case "$v_bypass$v_rules$o_rules" in
+    *[!0-9]*|"")
+      echo "FATAL: read-back for $id gave non-numeric counts — protection is UNVERIFIED" >&2
+      exit 1 ;;
+  esac
   if [ "$v_bypass" -ne 0 ] || [ "$v_rules" -ne "$o_rules" ]; then
     echo "FATAL: read-back mismatch for $id (bypass=$v_bypass, rules $o_rules→$v_rules)" >&2
     exit 1

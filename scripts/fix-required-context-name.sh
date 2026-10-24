@@ -159,10 +159,27 @@ if ! "$GH" api -X PUT "repos/$REPO/rulesets/$RULESET" --input "$tmp/after.json" 
 fi
 
 # Verify against the server, not against the payload we sent.
-"$GH" api "repos/$REPO/rulesets/$RULESET" >"$tmp/verify.json"
+# Verify against the server, and treat an unverifiable result as a failure: a
+# failed GET leaves an empty file, jq yields empty strings, and `[ "" -ne 1 ]`
+# is a syntax error that evaluates false — which would skip the mismatch branch
+# and print success after verifying nothing.
+if ! "$GH" api "repos/$REPO/rulesets/$RULESET" >"$tmp/verify.json" 2>"$tmp/err"; then
+  echo "FATAL: could not read back the ruleset after writing it — UNVERIFIED" >&2
+  sed 's/^/       /' "$tmp/err" >&2
+  exit 1
+fi
+if ! jq -e '.rules | type == "array"' "$tmp/verify.json" >/dev/null 2>&1; then
+  echo "FATAL: read-back is not a ruleset payload — UNVERIFIED" >&2
+  exit 1
+fi
 v_new="$(jq -r --arg c "$NEW_CONTEXT" '[.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[]? | select(.context==$c)] | length' "$tmp/verify.json")"
 v_old="$(jq -r --arg c "$OLD_CONTEXT" '[.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[]? | select(.context==$c)] | length' "$tmp/verify.json")"
 v_cnt="$(jq -r '[.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[]?] | length' "$tmp/verify.json")"
+case "$v_new$v_old$v_cnt$n_ctx" in
+  *[!0-9]*|"")
+    echo "FATAL: read-back gave non-numeric counts — UNVERIFIED" >&2
+    exit 1 ;;
+esac
 
 if [ "$v_new" -ne 1 ] || [ "$v_old" -ne 0 ] || [ "$v_cnt" -ne "$n_ctx" ]; then
   echo "FATAL: read-back does not match what was intended." >&2
