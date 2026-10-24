@@ -1,0 +1,77 @@
+{
+  "_comment": [
+    "Accepted-risk record for GitHub code-scanning alerts that CANNOT be fixed in",
+    "this repository's source. Consumed by scripts/dismiss-code-scanning-alerts.sh,",
+    "which refuses to dismiss anything not listed here. Keep every entry specific:",
+    "an entry with no path or line matches every alert with that rule id.",
+    "",
+    "Two classes live here, both documented in",
+    "docs/audits/2026-10-24-code-scanning-triage.adoc:",
+    "  1. TokenPermissionsID — a true finding about a write permission that is",
+    "     structurally required (SARIF upload / same-repo push + PR). There is no",
+    "     code shape that avoids it, so the choice is dismiss-with-reason or leave",
+    "     the alert open forever. The workflows already declare least privilege:",
+    "     read at workflow level, the one write at job level.",
+    "  2. SASTID — scorecard's SAST probe samples merged commits; commits that",
+    "     predate code scanning keep it open even though CodeQL now reports a",
+    "     successful github-advanced-security check run on every pull request."
+  ],
+  "dismissals": [
+    {
+      "alert_number": null,
+      "comment": "security-events: write is the ONLY permission that can upload SARIF to code scanning; it cannot be expressed as read. The reusable this job calls declares the same permission, and GitHub rejects a run at startup when the caller grants less than the callee requests (startup_failure, zero jobs) - so downgrading this to read does not reduce privilege, it silently disables code scanning. See standards#451 and the in-file comment.",
+      "line": 25,
+      "path": ".github/workflows/hypatia-scan.yml",
+      "reason": "won't fix",
+      "rule_id": "TokenPermissionsID"
+    },
+    {
+      "alert_number": null,
+      "comment": "Same structural requirement as the caller above: the scan job uploads its own SARIF, so security-events: write is the minimum this reusable can declare. Workflow-level actions/contents stay read.",
+      "line": 44,
+      "path": ".github/workflows/hypatia-scan-reusable.yml",
+      "reason": "won't fix",
+      "rule_id": "TokenPermissionsID"
+    },
+    {
+      "alert_number": null,
+      "comment": "security-events: write is required for the CodeQL SARIF upload that branch protection's code-scanning rule depends on. A caller of a reusable workflow must grant at least what the callee declares (startup_failure otherwise), so there is no lower-privilege spelling of this workflow. actions/contents remain read.",
+      "line": 40,
+      "path": ".github/workflows/codeql.yml",
+      "reason": "won't fix",
+      "rule_id": "TokenPermissionsID"
+    },
+    {
+      "alert_number": null,
+      "comment": "Job-scoped contents: write, needed to push propagated git hooks into target repositories; the workflow level is contents: read. pull-requests and actions were removed as dead grants. Scorecard reports every write permission without evaluating whether the job performs the matching operation.",
+      "line": 193,
+      "path": ".github/workflows/propagate-hooks.yml",
+      "reason": "won't fix",
+      "rule_id": "TokenPermissionsID"
+    },
+    {
+      "alert_number": null,
+      "comment": "Job-scoped contents: write + pull-requests: write, needed to push the machine-written measurement branch and open/update its single recording PR. The workflow level is contents: read. Nothing else in the repository writes with this job's token.",
+      "line": 43,
+      "path": ".github/workflows/debt-measure.yml",
+      "reason": "won't fix",
+      "rule_id": "TokenPermissionsID"
+    },
+    {
+      "alert_number": null,
+      "comment": "Job-scoped contents: write + pull-requests: write, needed by the commit-back and pr-back modes that push a regenerated CHANGELOG.md and open its PR. The reusable never grants this at workflow level, and check-only mode writes nothing. Callers that only ever pass mode=check-only can drop it on their side.",
+      "line": 111,
+      "path": ".github/workflows/changelog-reusable.yml",
+      "reason": "won't fix",
+      "rule_id": "TokenPermissionsID"
+    },
+    {
+      "alert_number": null,
+      "comment": "False positive as stated: this repository runs CodeQL on every push and pull request and the github-advanced-security 'CodeQL' check run reports success on current pull-request heads. Scorecard's SAST probe scores its sample of merged commits, so commits merged before code scanning was enabled keep the aggregate finding open; no commit can be retroactively given a check run. Dismissing this does not disable the SAST check - it is a threshold finding, not a control.",
+      "line": null,
+      "path": null,
+      "reason": "false positive",
+      "rule_id": "SASTID"
+    }
+  ]
+}

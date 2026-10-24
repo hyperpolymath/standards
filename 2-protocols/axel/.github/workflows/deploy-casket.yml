@@ -16,16 +16,54 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     permissions:
-      contents: write
+      contents: read
       pages: write
       id-token: write
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
 
+      # Casket is BUILT, not committed. This workflow used to run a checked-in
+      # `./casket-simple` ELF binary; that is why the repository carried two
+      # prebuilt executables under 2-protocols/axel/ (1.3 MB + 1.7 MB, amd64
+      # only, no provenance, no way to review what was in them). OpenSSF
+      # Scorecard's Binary-Artifacts check reports every committed executable,
+      # and it is right to: a binary in git cannot be audited, cannot be
+      # patched, and silently pins the site build to whatever machine produced
+      # it.
+      #
+      # The build below mirrors .github/workflows/casket-pages.yml at the
+      # repository root: same pinned compiler toolchain, same source-built
+      # generator. Pinning casket-ssg by commit (rather than following its
+      # default branch) means a change upstream reaches this site only through
+      # a reviewed commit here.
+      - name: Checkout casket-ssg (pinned)
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+        with:
+          repository: hyperpolymath/casket-ssg
+          ref: 3dcade85400cef62949a6a0ab6900f5e7f065e56
+          path: .casket-ssg
+
+      - name: Setup Haskell
+        uses: haskell-actions/setup@0f8e8c99d88aeb3fbfd523f1ef2c6f762d10d64d # v2.12.1
+        with:
+          ghc-version: '9.8.2'
+          cabal-version: '3.10'
+
+      - name: Cache Cabal
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cabal/packages
+            ~/.cabal/store
+            .casket-ssg/dist-newstyle
+          key: ${{ runner.os }}-casket-${{ hashFiles('.casket-ssg/casket-ssg.cabal') }}
+
+      - name: Build casket-ssg
+        working-directory: .casket-ssg
+        run: cabal build
+
       - name: Build site with Casket-SSG
-        run: |
-          chmod +x casket-simple
-          ./casket-simple build content _site
+        run: cd .casket-ssg && cabal run casket-ssg -- build ../content ../_site
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
