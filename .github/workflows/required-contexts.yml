@@ -80,22 +80,28 @@ jobs:
           set -uo pipefail
           json="$RUNNER_TEMP/required-contexts.json"
           # Strict findings and inspection failures can both exit non-zero.
-          # Reconcile JSON verdicts below; a missing report is not inspected.
+          # Reconcile JSON verdicts below; inspected:false or a missing report
+          # means the rules were not inspected.
           if ! bash scripts/check-required-contexts.sh . --json "$json" --print-commands; then
             echo "::notice::audit exited non-zero; checking its report below"
           fi
           echo "json=$json" >> "$GITHUB_OUTPUT"
-          if [ -s "$json" ]; then echo "have_json=1" >> "$GITHUB_OUTPUT"; else echo "have_json=0" >> "$GITHUB_OUTPUT"; fi
+          # A JSON file proves the script ran, not that it could read the rules.
+          # An API failure writes a report with zero results, and "zero findings"
+          # would then read as "everything is fine" — the one conclusion this job
+          # must never reach by accident. `inspected` is set by the script itself.
+          inspected="$(jq -r '.inspected // false' "$json" 2>/dev/null || echo false)"
+          echo "inspected=$inspected" >> "$GITHUB_OUTPUT"
 
       - name: Compare findings against the declared exemptions
         id: reconcile
         env:
           JSON: ${{ steps.audit.outputs.json }}
-          HAVE: ${{ steps.audit.outputs.have_json }}
+          INSPECTED: ${{ steps.audit.outputs.inspected }}
           ALLOW: .machine_readable/required-contexts-allow.txt
         run: |
           set -uo pipefail
-          if [ "$HAVE" != 1 ]; then
+          if [ "$INSPECTED" != true ]; then
             echo "### Required contexts: not inspected" >> "$GITHUB_STEP_SUMMARY"
             echo "::error::could not inspect the branch rules at all — this is not a pass"
             exit 1

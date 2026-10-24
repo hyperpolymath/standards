@@ -404,3 +404,55 @@ Everything above was measured through the REST API on 2026-10-24: `/rulesets`
 `/commits/main/check-runs`, and the check rollup of the pull requests named.
 `/branches/main/protection` returned `403` for the credential used, which the
 gate reports as *not inspected* rather than as nothing required.
+
+=== Review pass: what the advisory gate still got wrong
+
+The first version of the gate was structurally right and wrong in four details.
+Each made the gate answer a slightly different question from the one the merge
+decision asks. All four are fixed in `scripts/check-required-contexts.sh` and
+pinned by a fixture, because every one of them failed *silently and in the
+permissive direction*.
+
+[cols="1,2,2",options="header"]
+|===
+| Question asked | Wrong answer | Now
+
+| Did the audit actually read the rules?
+| The job tested whether the JSON file existed. An API failure still writes a
+  file, so "zero findings" was reachable by accident — the one conclusion this
+  job must never reach that way.
+| The script emits `inspected`; the job fails on anything but `true`. A report
+  that could not be produced is not a pass.
+
+| Does `on:` with a trailing comment declare events?
+| `on:  # comment` was parsed as a scalar, the comment stripped to empty, block
+  mode exited, and every event in the file ignored.
+| A header line is a header line whether or not it carries a comment.
+
+| Can `pull_request` fire while the PR is open?
+| Any `pull_request` event counted, including `types: [closed]` — which fires
+  after the merge it is supposed to gate.
+| Activity types are inspected; a trigger that only fires on close is not a
+  publisher.
+
+| Can a `push` publish a check on the PR head?
+| Only `pull_request` counted. An unrestricted `on: push` publishes check runs
+  on a same-repository feature branch, and those satisfy required checks on that
+  PR's head commit — a false *negative* that would fail correct repositories.
+| Unrestricted `push` counts as PR-capable; a push pinned to the default branch
+  does not (which is why `hypatia-scan.yml` is still the one finding).
+|===
+
+The merged review fixes also account for `paths:` and `paths-ignore:` filters.
+Without a PR diff, a filtered `pull_request` publisher is conservatively treated
+as unavailable: an excluded PR can otherwise wait indefinitely for its required
+check. Unrestricted `push` remains a publisher on a same-repository PR head;
+branch or path filters make that fallback unavailable. Job conditions and PR
+branch filters are not evaluated, and `pull_request_target` retains its prior
+handling.
+
+The fixtures were also upgraded: the two existing cases asserted only the exit
+code, and advisory mode exits zero for `UNSATISFIABLE` and `PR-UNPRODUCIBLE`
+alike. A regression that collapsed one verdict into the other would have passed
+every case in the file. They now assert the verdict text, and a tenth case covers
+`types: [closed]`.
