@@ -1,0 +1,424 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= The canon–spine seam — proposal
+:toc: left
+:toclevels: 3
+:revdate: 2026-10-24
+:revnumber: 0.1
+:status: proposal
+:doctype: proposal
+
+*Status*: proposal, not policy. Nothing here is binding until it is ratified and
+the checks it describes exist. Where it disagrees with a shipped check, the
+check is the current truth and this document is the argument for changing it.
+
+*Scope*: the seam between `hyperpolymath/standards` (the canon) and
+`hyperpolymath/rsr-template-repo` (the spine). Not the internal structure of
+either repository, except where that structure is the seam's fault.
+
+*Supersedes*: the ad-hoc sequencing in `canon.lock`'s header and in the
+`GATE A` comment at the top of `canon-spine-lockstep.yml`. Both describe the
+right binding and stop before the mechanism.
+
+== 1. The claim
+
+These are two halves of one system. Both halves are wired to the other, and
+neither wire is anchored.
+
+The canon is checked against the spine — the canon may not tighten a criterion
+the reference implementation fails, and Gate A enforces that. The spine is also
+checked against the canon — job 6 of `dogfood-gate.yml` compares the criteria
+hash in the spine's deed against the one published in `canon.lock`. Both halves
+exist and neither names a release: Gate A compares the canon with whatever the
+spine is today, and job 6 compares the spine with whatever the canon is today.
+
+So the binding exists and cannot be *satisfied*, only *survived*. Adoption of
+the canon by the spine decays under repeated bot edits, because a bot optimising
+one repository has no way to know it is editing half of a pair, and because the
+signal it would need — "which canon do I implement" — has no answer that a check
+can compare.
+
+The consequence is measurable, and it is not a tidiness problem:
+
+[cols="3,1,4",options="header"]
+|===
+| Measure (2026-10-24) | Value | Consequence
+
+| Reusable workflows the canon offers
+| 22
+| Each one is a rule with an implementation attached.
+
+| Reusable workflows the spine calls
+| 8
+| 36%. Every reusable added since the eight has an adoption count of zero,
+  because adopting one means hand-editing a SHA in the spine and again in every
+  child already minted.
+
+| Spine workflow files
+| 32
+| —
+
+| Spine workflows that call no canon reusable
+| 23
+| Each is either a local implementation of a canon concern or a genuine local
+  concern. *Nothing in either repository distinguishes the two*, so neither a
+  reviewer nor a bot can tell a deliberate duplicate from an accidental fork.
+|===
+
+A canon nobody adopts is documentation. A spine that reimplements the canon is
+a second, unreviewed canon. Both statements are true of the same estate today,
+and neither is anyone's fault in particular — which is why the fix has to be
+structural rather than another campaign.
+
+[[_diagnosis]]
+== 2. Diagnosis
+
+Six mechanisms. Each is a normal, locally-reasonable behaviour that becomes
+drift in aggregate; naming the mechanism is what makes it preventable.
+
+=== 2.1 A fork is cheaper than an adoption
+
+Adding `.github/workflows/x.yml` to the spine is one file, reviewable in
+isolation, and works immediately. Calling `standards/.github/workflows/x.yml@SHA`
+requires knowing the reusable exists, choosing a SHA, and taking a dependency on
+another repository's schedule. Under that cost difference, a bot asked to "add a
+codeql workflow" writes one. It has no reason to look for `codeql-reusable.yml`.
+
+Evidence: 23 of 32 spine workflows call nothing; 14 of the 22 canon reusables
+have never been called by the spine at all.
+
+=== 2.2 The pin is a hand edit, so it only moves when someone remembers
+
+All eight canon workflow calls in the spine sit at one literal SHA, `b3ce78e1…`
+(2026-10-19). Nothing in either repository fails when a reusable changes in a
+way the spine should adopt, and nothing fails when a reusable changes in a way
+the spine *must* adapt to — the spine finds out when its CI breaks, which is the
+only notification the estate has.
+
+It is not even one pin. The same repository fetches `kyaml-format.sh` from the
+canon at `75bd5999…`, a different commit from the same day. So "which canon does
+the spine run?" has two answers inside one `git ls-files`, and neither is
+recorded anywhere a reviewer reads.
+
+This is not staleness. Both pins are days old and correct. The defect is that
+*correctness is maintained by hand in a place no check reads*, so the next five
+days are unconstrained.
+
+=== 2.3 The seam is checked against a moving target
+
+This mechanism is the one that has already been fixed once, and the fix is what
+makes the remaining defect visible.
+
+The binding used to be two free-text strings in a retired profile
+(`spec = "rsr-criteria-v2"`, `declares-against = "2.0.0-draft"`) and nothing
+failed when the canon changed. It is now a comparison: the spine declares the
+canon's artefact hashes in the `(canon …)` clause of its repo deed, and job 6 of
+`dogfood-gate.yml` fetches `canon.lock` and compares.
+
+Except it fetches it from
+`raw.githubusercontent.com/hyperpolymath/standards/**main**/canon.lock`.
+
+So the check reads the canon at `main` while the workflows run the canon at
+`b3ce78e1`. A canon release turns the spine red without a single commit in the
+spine — and the repair is a *spine* commit changing a hash it did not choose,
+which is the "recurring standardisation-PR campaign" the spine's own
+`check-template-conformance.sh` header complains about in another context:
+
+[quote]
+____
+Copier/Cruft solved it with an answer-file + update + check; this estate
+hand-simulated it as recurring standardisation-PR campaigns.
+____
+
+A check that fires on someone else's commit is not lockstep. Lockstep is two
+parties moving together on purpose, which requires a version both can name.
+
+`canon.lock` exists, is published, and is read — this is not the "nobody reads
+the record" failure. It is the subtler one: the record is read at a ref nobody
+chose.
+
+=== 2.4 Checks are narrower than the rules they implement
+
+The canon's duplicate-document check looks for `ARCHITECTURE|ROADMAP|PHILOSOPHY|INSTALL`
+at the root and for `CONTRIBUTING.md` specifically beside
+`3-practice/CONTRIBUTING.adoc`. It does not recognise the spine's layout, so it
+sees nothing when the spine carries both:
+
+[source]
+----
+CONTRIBUTING.adoc                139 lines
+.github/CONTRIBUTING.md          120 lines    # different content, same subject
+----
+
+Both are maintained. Neither is derived from the other. The rule ("one canonical
+document per class") is right; the check implements one layout out of three, so
+any repository carrying the pair in another layout — the spine first among them
+— reports green. The template is the worst place for that to be true, because
+its output is every child's input.
+
+This is the estate's most expensive recurring bug shape and it has a name here:
+a check that cannot fail on the instance in front of it.
+
+=== 2.5 The menu grows faster than adoption, and nobody notices
+
+A new reusable is a visible, praiseworthy artefact: a PR with a workflow, a
+test, a doc. An adoption is invisible: a SHA changes in a file nobody diffs. So
+the reward gradient points at building, and the estate has 22 reusables and 8
+adoptions.
+
+Nothing measures adoption, so this is not a decision anyone made. It is what
+happens when only one direction has a check.
+
+=== 2.6 Every bot is a local optimiser
+
+Both repositories have been edited by many agents. Each edit was locally sound.
+The class of damage is specific and worth stating in the form the fix takes:
+
+* a bot asked to fix a workflow fixes the workflow in front of it, not the
+  reusable it duplicates;
+* a bot asked to add a doc writes the format it saw in that repository;
+* a bot asked to make a check pass narrows the check, because the check's
+  failure is the local signal and the rule is not;
+* a bot given a generated file edits the generated file, because the source is
+  not in the prompt.
+
+None of these are errors of reasoning. They are errors of *position*: the bot
+sees one repository, and the seam lives between two. The only durable fix is to
+put the knowledge the bot lacks into the tree, where the bot reads it —
+registries, generated-file banners, and checks narrow enough to fail.
+
+== 3. The design
+
+Four moves. They are ordered by dependency, not by importance, and none of them
+requires merging the repositories or moving a subsystem.
+
+=== Move 1 — One seam file, one ref, generated in one direction
+
+`canon.lock` becomes the seam contract rather than the canon's self-description:
+
+[source,toml]
+----
+[seam]
+profile          = "rsr-criteria-v2"       # what a profile may declare
+breaking         = "2.0.0"                 # last breaking change
+
+[[seam.reusable]]
+name    = "hypatia-scan-reusable"
+path    = ".github/workflows/hypatia-scan-reusable.yml"
+pin     = "b3ce78e1…"                      # the SHA the spine should use
+status  = "adopted"                        # adopted | offered | experimental
+----
+
+Two changes use it, and the second is the one that matters.
+
+*One ref.* The spine declares `implements = "<sha of canon.lock>"` in its deed,
+and job 6 fetches the lock *at that sha*, not at `main`. A canon release then
+changes nothing in the spine until the spine says so; adopting it is a commit
+that moves one pin and regenerates the rest.
+
+*Generated pins.* The spine's eight workflow pins and the script fetch are
+generated from the lock by a script in the spine, and a check fails when a hand
+edit disagrees with the generator's output. A bump becomes one command and one
+diff, and the diff is reviewable because it is a single file rather than nine
+literals across nine workflows.
+
+The asymmetry survives: the spine names a release and adopts it deliberately;
+the canon still may not tighten past its reference implementation. What changes
+is that "behind" becomes a fact with a commit attached, instead of an inference
+from a CI failure at an unpredictable time.
+
+=== Move 2 — A workflow registry: adoption becomes a property
+
+New file in the spine, `.machine_readable/workflow-registry.toml`, with one
+record per file in `.github/workflows/`:
+
+[source,toml]
+----
+[[workflow]]
+file   = "hypatia-scan.yml"
+canon  = "hypatia-scan-reusable"
+
+[[workflow]]
+file   = "static-analysis-gate.yml"
+local  = "deliberate-duplicate"
+reason = "Runs Hypatia inside the gate and deposits findings for fleet
+          learning; see .github/workflows/README.adoc §Hypatia runs in two
+          places."
+----
+
+`local` takes a value from a closed set: `no-canon-equivalent`,
+`deliberate-duplicate`, `estate-specific`, `retired`. `unclassified` is not a
+value — it is the absence of a decision, and it fails.
+
+The check is bidirectional, in the pattern the spine's own `root-allow.txt`
+documents:
+
+* every workflow file has a record, and every record has a file;
+* a record with `canon` must actually call that reusable at the pin in
+  `canon.lock`;
+* the count of `local` records may not increase without a
+  `Registry-exception: <file> — <why>` line in the commit message.
+
+That last clause is the exemption ratchet's escape hatch, applied to structure
+rather than debt, and for the same reason: a gate nobody can satisfy gets
+deleted, a gate that costs one honest sentence gets obeyed.
+
+*What this buys*: the 23 undecided workflows become 23 decisions. Nobody has to
+be right on the first pass — a `local/no-canon-equivalent` line is a legitimate
+answer today. What stops being possible is the current state, where a duplicate
+is invisible because it was never classified.
+
+=== Move 3 — Every file is generated, checked, or hand-written. Never two.
+
+The spine already knows this pattern: `root-allow.txt` describes `CLAUDE.md` as
+"generated arrival pack; … do not hand-edit; edit the repo deed". Generalise it:
+
+* a generated file carries `GENERATED from <source> — do not edit` in its first
+  lines, in whatever comment syntax the format allows;
+* a check fails when a commit changes a generated file without changing its
+  declared source in the same commit;
+* the pin block is generated (Move 1); the registry header is generated from the
+  workflow directory listing (Move 2); the arrival pack already is.
+
+This is the single most direct answer to §2.6. A bot that edits a generated file
+is not being careless — it was given the file and not the source. A banner plus
+a failing check turns that into a review comment instead of silent drift.
+
+=== Move 4 — One vocabulary per document class, owned by the canon
+
+The canon states, once, a table of document classes and where each lives
+(`CONTRIBUTING`, `SECURITY`, `CODE_OF_CONDUCT`, `GOVERNANCE`, `SUPPORT`, arrival
+packs). The spine mints exactly that set, in that format, with one copy each.
+
+Two immediate consequences, both visible in `git ls-files` today:
+
+. the spine's `CONTRIBUTING.adoc` and `.github/CONTRIBUTING.md` collapse to one;
+. the canon's duplicate-format check is widened from "the `3-practice/` layout"
+   to "one canonical document per class, in any layout", which is what the rule
+   always said.
+
+The direction matters: the canon decides the vocabulary, because the canon is
+what a child is checked against. A spine that chooses a different format mints
+children that fail the canon by construction, and every one of those failures
+looks like the child's fault.
+
+== 4. Rules for bots
+
+This section exists because §2.6 is the root cause, and "be more careful" is not
+a mechanism. These are the rules a reviewing agent should apply, and the checks
+above exist to make them default rather than remembered.
+
+. *Do not edit a generated file.* Edit its source. If there is no source, that
+  is the defect — write one.
+. *Do not add a workflow without a registry record.* If a canon reusable does
+  the job, adopt it; if not, classify the local one and say why.
+. *Do not narrow a check to make it pass.* A change to a gate is its own PR,
+  naming the gate and showing the before/after counts. Widening scope is a
+  decision; narrowing a check is indistinguishable from deleting it.
+. *Never add a one-directional allowlist.* The "must exist" half ships in the
+  same commit or the allowlist is decoration.
+. *Never add an exemption without a date and a disposition.* (Already enforced
+  for the Hypatia baseline as of 2026-10-24.)
+. *Do not create a 23rd reusable until the first 22 have an adoption answer.*
+  The registry makes this checkable: `offered` is a status, not an achievement.
+
+== 5. Order of work
+
+Each step is independently mergeable and independently useful. The order is a
+dependency chain, not a priority list.
+
+[cols="1,3,3",options="header"]
+|===
+| # | Step | Why here
+
+| 1
+| Extend `canon.lock` with `[seam]`; add the generator + check in the spine;
+  point job 6 at `implements` instead of `main`
+| Everything downstream reads the pin, and today the pin moves under the spine
+  without a commit. This is the only step that removes an existing failure
+  mode rather than preventing a future one.
+
+| 2
+| `workflow-registry.toml` + bidirectional check, no behaviour change
+| Converts the 23 unknowns into 23 stated decisions. Deliberately does not
+  require adopting anything — the first pass only demands that someone look.
+
+| 3
+| Widen the duplicate-format check to document classes
+| Catches the existing `CONTRIBUTING` pair on the day it lands, and catches the
+  next one in the PR that creates it.
+
+| 4
+| Retire duplicates named in the registry, in tranches of one concern each
+| Only now is there a list, and only now is "delete this workflow" a reviewable
+  claim rather than a guess about coverage.
+
+| 5
+| Roll `implements` out to minted children, and to the eight chained pins
+| Last, because it is the step that will fail loudly for every child repository
+  that has drifted, and the registry is what tells the difference between drift
+  and a deliberate local choice.
+|===
+
+== 6. Acceptance tests
+
+A proposal without a failing test is a preference. These are the tests, in the
+order they should be written.
+
+[cols="2,3",options="header"]
+|===
+| Test | Passes when
+
+| Pin is generated
+| Hand-editing a pin in any spine workflow fails the check; regenerating
+  produces a clean tree.
+
+| Registry is complete
+| A workflow file with no record fails; a record with no file fails; a
+  `local` without a class from the closed set fails.
+
+| `local` does not grow quietly
+| Adding a `local` workflow without `Registry-exception:` fails.
+
+| Generated files are not hand-edited
+| A commit touching a `GENERATED` file without its source fails.
+
+| One document per class
+| The spine carries exactly one `CONTRIBUTING`, one `SECURITY`, one
+  `CODE_OF_CONDUCT`, in the canon's format, and the check finds the old pair
+  before the fix and nothing after.
+|===
+
+Two slower measures, because a seam can be perfectly compliant and still dead:
+
+* *Adoption*: `canon` records as a share of all records, measured monthly.
+  8 of 22 today. The target is not 100% — the closed set of `local` classes
+  exists precisely because some duplication is correct — but a number that does
+  not move for two quarters means the reusables are decoration.
+* *The twenty-PR rule*: if every workflow in the spine has the same registry
+  status on twenty consecutive PRs, the registry is decoration too. Instrument
+  status changes per quarter, not status.
+
+== 7. What this does not propose
+
+Recorded because each of these is the obvious next step and each is wrong:
+
+* *Merging the repositories.* The asymmetry is the design: a canon that can be
+  edited to match its implementation is not a canon. The seam needs a contract,
+  not a merge.
+* *Deleting the deliberate duplicates.* The spine's own
+  `.github/workflows/README.adoc` documents two that must stay: Hypatia runs
+  twice because it has two consumers (security scan and fleet learning), and
+  secret scanning is deliberately two-tier (gitleaks in CI, TruffleHog
+  pre-push). The registry's `deliberate-duplicate` class exists to keep these
+  visible, not to queue them for removal.
+* *Making Gate A symmetric.* Gate A's asymmetry is correct and its comment says
+  why: the canon may not tighten criteria the reference implementation fails.
+  The declaration on the other side already exists — job 6 — so this is not a
+  missing half. The defect is that it is evaluated against `main`, and the fix
+  is a ref, not a new check.
+* *A submodule, or vendoring the canon into the spine.* Both replace a manual
+  pin with a heavier manual pin. The problem is that the pin is not generated
+  and not checked, not that it is a pin.
+* *Adding reusables for the 14 uncalled ones' sake.* Adoption is the goal; a new
+  reusable before the registry exists is more menu and no meal.
