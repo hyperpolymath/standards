@@ -203,16 +203,47 @@ events_of() {
   ' "$1"
 }
 
-# Accepts pull_request and pull_request_target; ignores branch/path filters
-# and job conditions. Returns 1 for no matching event or failed event extraction.
-runs_on_pr() { # workflow file -> 0 for a declared PR event
+# Accepts pull_request_target as before. For pull_request, a closed-only
+# trigger cannot gate a merge, and path filters can leave a required check
+# pending on excluded PRs. Without a PR diff, treat filtered publishers as
+# unavailable. Branch filters and job conditions are not evaluated here.
+runs_on_pr() { # workflow file -> 0 for an available PR event
   # NOT `events_of "$1" | grep -q`: grep -q exits on the first match, awk takes
   # SIGPIPE, and `pipefail` turns a match into a non-zero pipeline. That reads
   # as "this workflow cannot run on a PR" for exactly the files where the
   # event is listed early — a false negative in the gate, not in the workflows.
   local ev
   ev="$(events_of "$1")" || return 1
-  grep -qxE 'pull_request|pull_request_target' <<<"$ev"
+  grep -qx 'pull_request_target' <<<"$ev" && return 0
+  grep -qx 'pull_request' <<<"$ev" || return 1
+  awk '
+    function activities(v, n,a,i) {
+      gsub(/[\[\]{},"\047]/," ",v)
+      n=split(v,a,/[[:space:]]+/)
+      for(i=1;i<=n;i++) if(a[i]!="" && a[i]!="closed") before_merge=1
+    }
+    {
+      sub(/[[:space:]]*#.*$/,"")
+      if ($0 ~ /^"?on"?[[:space:]]*:[[:space:]]*$/) { inon=1; next }
+      if ($0 ~ /^[^[:space:]#]/) inon=0
+      if (!inon) next
+      if ($0 ~ /^  pull_request[[:space:]]*:/) {
+        inpr=1; v=$0; sub(/^[^:]*:[[:space:]]*/,"",v)
+      } else if (inpr && $0 ~ /^[[:space:]]*$/) next
+      else if (inpr && $0 ~ /^    /) v=$0
+      else { inpr=0; next }
+
+      if (v ~ /(^|[,{[:space:]])paths(-ignore)?[[:space:]]*:/) filtered=1
+      if (v ~ /(^|[,{[:space:]])types[[:space:]]*:/) {
+        has_types=1; intypes=1
+        sub(/^.*types[[:space:]]*:[[:space:]]*/,"",v)
+        sub(/\].*$/,"]",v); activities(v)
+      } else if (intypes && v ~ /^[[:space:]]*-/) {
+        sub(/^[[:space:]]*-[[:space:]]*/,"",v); activities(v)
+      } else intypes=0
+    }
+    END { exit(filtered || (has_types && !before_merge) ? 1 : 0) }
+  ' "$1"
 }
 
 # Names ONE workflow file can publish. Split out of publishable_names so the
@@ -230,8 +261,9 @@ publishable_names_from() { # FILE -> one name per line
     [ "$name" = "-" ] && name=""
     [ "$uses" = "-" ] && uses=""
     case "$uses" in
-      ./.github/workflows/*|.github/workflows/*)
-        local_path="$ROOT/${uses#./}"
+      ./.github/workflows/*|.github/workflows/*|'$/'*)
+        local_path="${uses#\$/}"
+        local_path="$ROOT/${local_path#./}"
         if [ -f "$local_path" ]; then
           while IFS=$'\t' read -r iid iname _u _m; do
             [ -n "$iid" ] || continue
@@ -279,9 +311,9 @@ publishable_names() { # [pr] -> one name per line; `pr` restricts to PR-capable 
 # ------------------------------------------------------------ required set ----
 required_json() { # emit {"context":..,"app_id":..,"source":..} objects
   if [ -n "${REQUIRED_CONTEXTS_JSON:-}" ]; then
-    [ -f "$REQUIRED_CONTEXTS_JSON" ] || { err "REQUIRED_CONTEXTS_JSON not found: $REQUIRED_CONTEXTS_JSON"; exit 1; }
+    [ -f "$REQUIRED_CONTEXTS_JSON" ] || { err "REQUIRED_CONTEXTS_JSON not found: $REQUIRED_CONTEXTS_JSON"; return 1; }
     jq -c '.[] | {context: .context, app_id: (.app_id // 0), source: (.source // "file")}' "$REQUIRED_CONTEXTS_JSON" \
-      || { err "REQUIRED_CONTEXTS_JSON is not a JSON array of {\"context\": ...} objects"; exit 1; }
+      || { err "REQUIRED_CONTEXTS_JSON is not a JSON array of {\"context\": ...} objects"; return 1; }
     return 0
   fi
   command -v gh >/dev/null 2>&1 || { note "gh not installed — cannot read branch rules"; return 1; }
@@ -323,15 +355,20 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
 # Print the required-context audit using workflows beneath ROOT; if JSON_OUT is
 # set, attempt to write its JSON summary. Returns 1 for UNSATISFIABLE or
 # PR-UNPRODUCIBLE findings when STRICT=1, otherwise 0.
-# Missing input files or jq failures while reading REQUIRED_CONTEXTS_JSON exit
-# the script with status 1; other rule-reading failures that return are ignored.
+# Rule-reading failures return 1 without an audit report: nothing was inspected.
 # JSON write failures do not affect the return status.
 run_audit() {
   local pubb pubb_pr required ROWS unsatisfiable=0 line ctx app verdict
   pubb="$(mktemp)"; pubb_pr="$(mktemp)"; required="$(mktemp)"; ROWS="$(mktemp)"
   publishable_names | sort -u >"$pubb"
   publishable_names pr | sort -u >"$pubb_pr"
-  required_json >"$required" || true
+  # Never let a failed inspection leave a stale or empty successful report.
+  [ -z "$JSON_OUT" ] || rm -f "$JSON_OUT"
+  if ! required_json >"$required"; then
+    err "required contexts not inspected — could not read branch rules"
+    rm -f "$pubb" "$pubb_pr" "$required" "$ROWS"
+    return 1
+  fi
 
   say ""
   say "== publishable context names ($(wc -l <"$pubb" | tr -d ' '); $(wc -l <"$pubb_pr" | tr -d ' ') on pull_request)"
@@ -360,7 +397,7 @@ run_audit() {
              n=$0; gsub(/\*/,".*",n)
              if (n ~ /\*/ && n != ".*" && c ~ ("^" n "$")) ok=1 }
            END { exit(ok?0:1) }' "$pubb"; then
-      # The name exists, but nothing that carries it runs on pull_request.
+      # The name exists, but no publisher is reliably available before merge.
       # This is a distinct verdict and a distinct repair: the name is not wrong,
       # the TRIGGER is. Rolling it in with UNSATISFIABLE sends someone to rename
       # a job that was never the problem.
@@ -405,14 +442,14 @@ EOS
         done
         owners="${owners% }"   # the loop separates with a trailing space
         if [ "$STRICT" = 1 ]; then
-          err "required context '$ctx' ($src) is published only by workflows that never run on pull_request (${owners:-see the publishable list}) — every pull request waits for a check run that cannot happen, and the only exit is a ruleset bypass that discards every other required check too"
+          err "required context '$ctx' ($src) has no publisher reliably available before merge (${owners:-see the publishable list}) — a pull request can wait indefinitely, and a ruleset bypass discards every other required check too"
         else
-          warn "required context '$ctx' ($src) is published only by workflows that never run on pull_request (${owners:-see the publishable list}) — unsatisfiable for a merge rule; every PR waits forever"
+          warn "required context '$ctx' ($src) has no publisher reliably available before merge (${owners:-see the publishable list}) — unsatisfiable for a merge rule; pull requests can wait indefinitely"
         fi
         if [ "$PRINT_COMMANDS" = 1 ]; then
           cat <<EOS
     # Remediation — pick ONE:
-    #   a) give the publishing workflow a pull_request trigger, if running it on
+    #   a) give the publisher an unfiltered pre-merge pull_request trigger, if running it on
     #      PRs is wanted (check first that it does not duplicate an existing
     #      PR-time run: on 2026-10-24 hypatia-scan.yml omits pull_request
     #      precisely because fork-governance.yml already scans on PRs), or
@@ -472,13 +509,17 @@ jobs:
     name: Hypatia Neurosymbolic Analysis
     runs-on: ubuntu-latest
 YML
-  check() { # label expected-exit contexts-json strict
-    local label="$1" want="$2" file="$3" strict="${4:-0}" out status
+  check() { # label expected-exit contexts-json strict [expected-verdict]
+    local label="$1" want="$2" file="$3" strict="${4:-0}" verdict="${5:-}" out status
     out="$(REUSABLE_CACHE_DIR="$work/cache" REQUIRED_CONTEXTS_JSON="$file" \
              REQUIRED_CONTEXTS_STRICT="$strict" GITHUB_REPOSITORY=example/repo \
-             bash "$0" "$work/repo" --no-network 2>&1)"; status=$?
-    if [ "$status" = "$want" ]; then pass=$((pass+1)); say "PASS $label"
-    else fail=$((fail+1)); say "FAIL $label — expected exit $want, got $status"; say "$out" | head -6; fi
+             bash "$0" "$work/repo" --no-network --json "$work/report.json" 2>&1)"; status=$?
+    if [ "$status" != "$want" ]; then
+      fail=$((fail+1)); say "FAIL $label — expected exit $want, got $status"; say "$out" | head -6
+    elif [ -n "$verdict" ] && ! jq -e --arg verdict "$verdict" \
+      '(.results | length) > 0 and all(.results[]; .verdict == $verdict)' "$work/report.json" >/dev/null 2>&1; then
+      fail=$((fail+1)); say "FAIL $label — expected verdict $verdict"; cat "$work/report.json"
+    else pass=$((pass+1)); say "PASS $label"; fi
   }
   printf '[{"context":"hypatia / Hypatia Neurosymbolic Analysis","app_id":15368,"source":"ruleset"},{"context":"lake-build","app_id":15368,"source":"ruleset"},{"context":"analyze (actions, python)","app_id":15368,"source":"ruleset"},{"context":"CodeRabbit","app_id":9999,"source":"ruleset"}]' >"$work/ok.json"
   printf '[{"context":"Hypatia Neurosymbolic Analysis","app_id":15368,"source":"ruleset"}]' >"$work/bare.json"
@@ -511,8 +552,56 @@ jobs:
     steps: [{run: "true"}]
 YML
   printf '[{"context":"Nightly Audit","app_id":15368,"source":"ruleset"}]' >"$work/nightly.json"
-  check "publishable-only-off-pull_request-advisory" 0 "$work/nightly.json" 0
-  check "publishable-only-off-pull_request-strict" 1 "$work/nightly.json" 1
+  check "publishable-only-off-pull_request-advisory" 0 "$work/nightly.json" 0 PR-UNPRODUCIBLE
+  check "publishable-only-off-pull_request-strict" 1 "$work/nightly.json" 1 PR-UNPRODUCIBLE
+
+  pr_trigger_check() { # label expected-verdict trigger-yaml
+    local want=0
+    [ "$2" = producible ] || want=1
+    printf '%s\n' "$3" >"$work/repo/.github/workflows/pr-audit.yml"
+    cat >>"$work/repo/.github/workflows/pr-audit.yml" <<'YML'
+jobs:
+  audit:
+    name: Nightly Audit
+    runs-on: ubuntu-latest
+YML
+    check "$1" "$want" "$work/nightly.json" 1 "$2"
+  }
+  pr_trigger_check closed-only-inline PR-UNPRODUCIBLE 'on:
+  pull_request:
+    types: [closed]'
+  pr_trigger_check closed-only-block PR-UNPRODUCIBLE 'on:
+  pull_request:
+    types:
+      - closed'
+  pr_trigger_check closed-only-flow-config PR-UNPRODUCIBLE 'on:
+  pull_request: {types: [closed]}'
+  pr_trigger_check pre-merge-inline producible 'on:
+  pull_request:
+    types: [opened, synchronize, closed]'
+  pr_trigger_check pre-merge-block producible 'on:
+  pull_request:
+    types:
+      - closed
+      - opened'
+  pr_trigger_check paths-filtered PR-UNPRODUCIBLE 'on:
+  pull_request:
+    paths: ["src/**"]'
+  pr_trigger_check paths-ignore-filtered PR-UNPRODUCIBLE 'on:
+  pull_request:
+    paths-ignore:
+      - "docs/**"'
+  pr_trigger_check paths-flow-config PR-UNPRODUCIBLE 'on:
+  pull_request: {paths: ["src/**"], types: [opened]}'
+  pr_trigger_check push-filter-does-not-restrict-pr producible 'on:
+  push:
+    paths: ["src/**"]
+  pull_request:'
+  pr_trigger_check pr-filter-does-not-restrict-target producible 'on:
+  pull_request:
+    types: [closed]
+    paths: ["src/**"]
+  pull_request_target:'
 
   # The same name, once something publishes it on pull_request — including the
   # inline `on: [...]` spelling and pull_request_target, so a parser that only
@@ -526,7 +615,51 @@ jobs:
     runs-on: ubuntu-latest
     steps: [{run: "true"}]
 YML
-  check "same-name-on-a-pr-workflow-is-producible" 0 "$work/nightly.json" 1
+  check "same-name-on-a-pr-workflow-is-producible" 0 "$work/nightly.json" 1 producible
+
+  # Resolve all supported local forms and preserve both caller names. The
+  # missing inner name must remain unsatisfiable, rather than caller / *.
+  cat >"$work/repo/.github/workflows/local-reusable.yml" <<'YML'
+on: workflow_call
+jobs:
+  inner:
+    name: Local Inner
+    runs-on: ubuntu-latest
+YML
+  printf '[{"context":"local / Local Inner"},{"context":"Local Caller / Local Inner"}]' >"$work/local.json"
+  printf '[{"context":"local / Missing Inner"}]' >"$work/missing-inner.json"
+  local ref
+  for ref in './.github/workflows/local-reusable.yml' '.github/workflows/local-reusable.yml' '$/.github/workflows/local-reusable.yml'; do
+    cat >"$work/repo/.github/workflows/local-caller.yml" <<YML
+on: pull_request
+jobs:
+  local:
+    name: Local Caller
+    uses: $ref
+YML
+    check "local-reference-$ref" 0 "$work/local.json" 1 producible
+    check "local-reference-no-wildcard-$ref" 1 "$work/missing-inner.json" 1 UNSATISFIABLE
+  done
+
+  # An unavailable rules API must not turn into an empty successful report,
+  # even when a report from an earlier run exists at the requested path.
+  mkdir -p "$work/bin"
+  cat >"$work/bin/gh" <<'SH'
+#!/usr/bin/env bash
+printf '{"message":"fixture inspection failure"}\n'
+exit 1
+SH
+  chmod +x "$work/bin/gh"
+  local inspection_status inspection_out
+  inspection_out="$(unset REQUIRED_CONTEXTS_JSON
+    PATH="$work/bin:$PATH" GITHUB_REPOSITORY=example/repo \
+      bash "$0" "$work/repo" --no-network --json "$work/report.json" 2>&1)"; inspection_status=$?
+  if [ "$inspection_status" = 1 ] && [ ! -e "$work/report.json" ] && \
+    grep -q 'not inspected' <<<"$inspection_out"; then
+    pass=$((pass+1)); say "PASS inspection-failure-is-not-a-clean-report"
+  else
+    fail=$((fail+1)); say "FAIL inspection-failure-is-not-a-clean-report"
+  fi
   rm -rf "$work"
   say ""
   say "self-test: $pass passed, $fail failed"

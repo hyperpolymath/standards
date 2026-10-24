@@ -79,10 +79,11 @@ jobs:
         run: |
           set -uo pipefail
           json="$RUNNER_TEMP/required-contexts.json"
-          # The script exits non-zero for "cannot inspect"; the verdicts are in
-          # the JSON either way, and the accounting happens in the next step so
-          # that nothing here has to swallow an exit code.
-          bash scripts/check-required-contexts.sh . --json "$json" --print-commands
+          # Strict findings and inspection failures can both exit non-zero.
+          # Reconcile JSON verdicts below; a missing report is not inspected.
+          if ! bash scripts/check-required-contexts.sh . --json "$json" --print-commands; then
+            echo "::notice::audit exited non-zero; checking its report below"
+          fi
           echo "json=$json" >> "$GITHUB_OUTPUT"
           if [ -s "$json" ]; then echo "have_json=1" >> "$GITHUB_OUTPUT"; else echo "have_json=0" >> "$GITHUB_OUTPUT"; fi
 
@@ -95,6 +96,7 @@ jobs:
         run: |
           set -uo pipefail
           if [ "$HAVE" != 1 ]; then
+            echo "### Required contexts: not inspected" >> "$GITHUB_STEP_SUMMARY"
             echo "::error::could not inspect the branch rules at all — this is not a pass"
             exit 1
           fi
