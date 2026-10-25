@@ -699,3 +699,76 @@ itself blocks every pull request: as noted above, it can pass when no coverage
 data has been uploaded. Choose either settings repair above based on the data
 and enforcement the repository intends to require; a context-name repair does
 not address these rule findings.
+
+==== Correction, 2026-10-25 — the coverage half *is* repairable in this repository
+
+The subsection above is wrong on its central claim, and the error is the kind
+this audit exists to catch, so it is recorded rather than quietly edited.
+
+It said `code_coverage` "cannot be repaired in this repository by any change to
+this repository's files". That is true of `code_quality`, which needs a
+repository setting. It is not true of `code_coverage`. The table it printed was
+also wrong on the size and testability of the Rust surface:
+
+[cols="2,1,2",options="header"]
+|===
+| Claim in the table | Measured | How
+
+| Rust files: 8, across five separate crates
+| 45 files; 14 `Cargo.toml`. Outside `9-archive/`: 8 files in 6 crates
+| `git ls-files '*.rs'`, `git ls-files '*Cargo.toml'`
+
+| none with a test file
+| all six non-archive crates contain tests
+| `#[test]` / `#[cfg(test)]` / assertion macros per crate
+|===
+
+The count of 8 was right for the non-archive tree and was then stated as the
+whole tree; "five crates" and "no test files" were wrong in both cardinality and
+fact. The conclusion drawn from them — that no code change could produce
+coverage data — followed from the error, not from the tree.
+
+What the tree can actually be measured for, measured rather than estimated
+(`.github/workflows/code-coverage.yml`, run
+https://github.com/hyperpolymath/standards/actions/runs/40146453852[40146453852]):
+
+[cols="2,1,1,1",options="header"]
+|===
+| Crate | Covered | Instrumented | Line coverage
+
+| `js-runtimes`                      | 282 | 601 | 46.92%
+| `k9-init`                          | 222 | 326 | 68.10%
+| `ecosystem-ingest`                 | 340 | 501 | 67.86%
+| `inline-annotations-extractor`     | 211 | 291 | 72.51%
+| `playbook-to-recipe`               | 179 | 266 | 67.29%
+| `uuid-v8`                          | 102 | 126 | 80.95%
+| *Aggregate*                        | *1336* | *2111* | *63.29%*
+|===
+
+So the 80% floor is **16.71 points** above what the tree currently meets. It is
+not a quality bar; no pull request could hold it, and it would block
+`23787415`'s twenty-one satisfiable contexts from ever being discharged. The
+correct floor is a number at or below the aggregate the tree actually produces,
+after which `max_drop: 5` becomes the real mechanism: a ratchet against
+regression rather than an aspiration nobody reaches.
+
+Three limits on that number, stated because a coverage figure that hides its
+scope reads as a guarantee it cannot keep:
+
+. It describes these six crates and nothing else. The 245 shell scripts and 756
+  AsciiDoc files, which are the bulk of this repository, are not instrumented
+  and contribute nothing to the aggregate. The floor must not be read as a
+  statement about them.
+. Eight further `Cargo.toml` manifests sit under `9-archive/`. They are excluded
+  deliberately: a coverage floor over retained historical code would demand work
+  on files nobody is meant to change again.
+. The aggregate is only defined once a baseline exists. Code Quality compares a
+  pull request against the default branch, so `main` must upload at least once
+  (the workflow's `push` trigger) before the rule has anything to compare.
+   Until then the rule's behaviour on an absent baseline is GitHub's to decide,
+   not this repository's.
+
+What remains true from the subsection above: **`code_quality` still cannot be
+satisfied by a file**. It requires Code Quality to be enabled for the
+repository, which is a settings change, and the `CodeQL - Code Quality` check
+then appears on its own.
