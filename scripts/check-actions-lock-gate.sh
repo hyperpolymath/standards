@@ -100,7 +100,7 @@ uses_refs() {
 # already SHA-pinned, so removing it costs nothing and closes the hole.
 exempt_ref() {
   case "$1" in
-    ./* | docker://* | hyperpolymath/standards/*) return 0 ;;
+    ./* | docker://*) return 0 ;;
     *) return 1 ;;
   esac
 }
