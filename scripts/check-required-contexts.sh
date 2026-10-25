@@ -545,8 +545,12 @@ data_rule_evidence() {
         length == 1 and (.[0] | type == "object" and
           (.workflow_runs | type == "array"))
       ' >/dev/null 2>&1 || return 1
-      printf '%s' "$body" | jq -r --arg repo "$repo" '
-        [.workflow_runs[] | select((.head_repository.full_name // "") == $repo)][0] // empty
+      local since
+      since="$(printf '%s' "$catalogue" | jq -r '
+        [.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql") | .created_at // empty][0] // ""')"
+      printf '%s' "$body" | jq -r --arg repo "$repo" --arg since "$since" '
+        [.workflow_runs[] | select((.head_repository.full_name // "") == $repo
+            and ($since == "" or (.created_at // "") >= $since))][0] // empty
         | "a successful \(.path // "coverage") run on \(.head_branch // "?") (\((.head_sha // "")[0:12]))"' \
         2>/dev/null
       ;;
