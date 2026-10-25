@@ -177,7 +177,7 @@ v_old="$(jq -r --arg c "$OLD_CONTEXT" '[.rules[] | select(.type=="required_statu
 v_cnt="$(jq -r '[.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[]?] | length' "$tmp/verify.json")"
 for count in "$v_new" "$v_old" "$v_cnt" "$n_ctx"; do
   case "$count" in
-    *[!0-9]*|"")
+    ''|*[!0-9]*)
       echo "FATAL: read-back gave non-numeric counts — UNVERIFIED" >&2
       exit 1 ;;
   esac
