@@ -12,12 +12,14 @@
 #   * chains exit 4 (cycle / dead upstream) must fail the job — demoting it
 #     to a warning would make the gate advisory in exactly the case it
 #     exists for;
-#   * tool failures (exit 2) must fail too, or a broken advisor reads as an
-#     all-clear;
+#   * generic tool failures (exit 2) must fail too, or a broken advisor
+#     reads as an all-clear; the sole downgrade is the pinned upstream's
+#     exact hidden-classic-protection wording, which is NOT EVALUATED;
 #   * no job may hold a write grant, no secrets may be inherited, and the
 #     only declared secret is the optional Administration-read credential
-#     that fight needs to see classic branch protection — absent it, the
-#     advisory must say NOT RUN rather than fail (or pass) blind;
+#     that fight needs to see classic branch protection — absent it the
+#     advisory says NOT RUN, and with insufficient visibility it says
+#     NOT EVALUATED, rather than failing or passing blind;
 #   * the caller must carry no paths: filter (a filtered gate never
 #     reports on PRs that miss the filter);
 #   * both workflows must be present in actions.lock, or GitHub refuses
@@ -81,7 +83,14 @@ t "reusable never summons boj experts" noflag "$reusable" '--summon'
 # 4 blocking chain finding) is honoured, not flattened.
 t "chains exit 4 fails the job" has "$reusable" 'if [ "$rc" -eq 4 ]'
 t "chains other non-zero fails the job" has "$reusable" 'squabble chains failed to run'
-t "fight exit 2 fails the job" has "$reusable" 'if [ "$rc" -eq 2 ]'
+t "generic fight exit 2 still fails the job" has "$reusable" \
+  'squabble fight failed to run'
+t "only exact pinned hidden-gate wording is downgraded" has "$reusable" \
+  'classic branch protection on this branch is not visible to this token'
+t "hidden gate is an explicit NOT EVALUATED" has "$reusable" \
+  'Squabble fight report — NOT EVALUATED'
+t "hidden gate does not redden the advisory" has "$reusable" \
+  'title=Squabble fight not evaluated'
 t "fight exit 3 is a warning, not a failure" has "$reusable" 'if [ "$rc" -eq 3 ]'
 t "fight refuses a non-numeric PR number" has "$reusable" '*[!0-9]*'
 
