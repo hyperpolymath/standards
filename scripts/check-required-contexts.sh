@@ -546,8 +546,15 @@ data_rule_evidence() {
       # cannot prove an upload. Older catalogues without a registration time
       # retain the previous repository-run selection.
       printf '%s' "$body" | jq -r --arg repo "$repo" --arg registered_at "$registered_at" '
+        def instant:
+          capture("^(?<time>[0-9-]+T[0-9:]+)(?<fraction>\\.[0-9]+)?(?<zone>Z|[+-][0-9]{2}:[0-9]{2})$")
+          | ((.time + "Z" | fromdateiso8601) + ((.fraction // "0") | tonumber))
+            - (if .zone == "Z" then 0 else
+                (((.zone[1:3] | tonumber) * 60 + (.zone[4:6] | tonumber)) * 60)
+                * (if .zone[0:1] == "+" then 1 else -1 end)
+              end);
         [.workflow_runs[] | select((.head_repository.full_name // "") == $repo)
-          | select($registered_at == "" or (.created_at // "") >= $registered_at)][0] // empty
+          | select($registered_at == "" or ((.created_at // "" | instant) >= ($registered_at | instant)))][0] // empty
         | "a successful \(.path // "coverage") run on \(.head_branch // "?") (\((.head_sha // "")[0:12]))"' \
         2>/dev/null
       ;;

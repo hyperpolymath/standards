@@ -83,10 +83,11 @@ case "$path" in
   */actions/workflows/*/runs\?status=success\&per_page=30)
     case "${RUNS_MODE:-none}" in
       ok|foreign|fork-first|missing-head|before-enablement|at-enablement|after-enablement|missing-time)
-        jq -n --arg mode "$RUNS_MODE" '
+        jq -n --arg mode "$RUNS_MODE" --arg run_at "${RUN_CREATED_AT:-}" '
           {id:9, path:".github/workflows/coverage.yml", head_sha:"abcdef1234567890",
            head_branch:"main", conclusion:"success",
-           created_at:(if $mode == "at-enablement" then "2026-10-25T12:00:00Z"
+           created_at:(if $run_at != "" then $run_at
+             elif $mode == "at-enablement" then "2026-10-25T12:00:00Z"
              elif $mode == "after-enablement" then "2026-10-25T13:00:00Z"
              else "2026-10-25T11:00:00Z" end),
            head_repository:{full_name:"example/repo"}} as $run
@@ -117,7 +118,8 @@ case "$path" in
     [[ " $* " == *" --paginate "* && " $* " == *" --slurp "* ]] || exit 1
     case "${WF_MODE:-none}" in
       quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}]' ;;
-      quality-timed) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql","created_at":"2026-10-25T12:00:00Z"}]}]' ;;
+      quality-timed) jq -n --arg at "${REGISTERED_AT:-2026-10-25T12:00:00Z}" \
+        '[{total_count:1,workflows:[{name:"Code Quality",path:"dynamic/github-code-quality/codeql",created_at:$at}]}]' ;;
       local-quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":".github/workflows/code-quality.yml"}]}]' ;;
       quality-later)
         jq -n '[range(100) | {name:"CI", path:".github/workflows/ci-\(.).yml"}] as $first
@@ -245,6 +247,22 @@ for mode in at-enablement after-enablement; do
     '.inspected == true and .unsatisfiable == 0 and
      ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 6'
 done
+# Opposing wall-clock order, equivalent instants and fractions exercise both
+# timestamps. Empty registration times are covered by the untimed cases above.
+while read -r run_at registered_at expected; do
+  RUN_CREATED_AT="$run_at" REGISTERED_AT="$registered_at" RUNS_MODE=ok WF_MODE=quality-timed run ok 1
+  check "coverage at $run_at against enablement at $registered_at" "$expected" \
+    ".inspected == true and .unsatisfiable == $((expected * 6)) and
+     ([.results[] | select(.verdict == \"VERIFIED-RULE\" and (.context | startswith(\"rule:code_coverage\")))] | length) == $(((1 - expected) * 6))"
+done <<'TIMESTAMPS'
+2026-10-25T13:00:00+02:00 2026-10-25T12:00:00Z 1
+2026-10-25T11:00:00-02:00 2026-10-25T12:00:00Z 0
+2026-10-25T12:00:00Z 2026-10-25T13:00:00+02:00 0
+2026-10-25T12:00:00Z 2026-10-25T11:00:00-02:00 1
+2026-10-25T17:30:00+05:30 2026-10-25T12:00:00Z 0
+2026-10-25T12:00:00Z 2026-10-25T12:00:00.001+00:00 1
+2026-10-25T12:00:00.001-00:00 2026-10-25T12:00:00Z 0
+TIMESTAMPS
 for mode in foreign missing-head; do
   # Feature ON (quality verifies, 6) so the runs are actually consulted;
   # foreign or head-less runs must still leave coverage unverified.
