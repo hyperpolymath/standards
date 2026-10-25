@@ -391,7 +391,13 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
 # remove the rule. Keeping the rule and hoping is what makes every PR
 # undecidable, and an undecidable gate is a gate people bypass.
 DATA_RULES='code_coverage code_quality'
-data_rules_json() { # emit one finding per data-dependent rule on a branch ruleset
+# Emit tab-separated finding name, app id 0 and UNSATISFIED-RULE for each
+# DATA_RULES match in a branch ruleset whose enforcement is not disabled.
+# Presence alone is flagged; uploaded coverage or quality data is not checked.
+# Uses GITHUB_REPOSITORY, resolving and setting it with gh when unset.
+# Returns 0 with no findings for file fixtures or unavailable inspection;
+# individual ruleset read/parse failures are ignored, so output may be partial.
+data_rules_json() {
   [ -f "${REQUIRED_CONTEXTS_JSON:-}" ] && return 0   # offline fixtures: none
   command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 0
   # Resolve the repo the same way required_json does. Returning early on an
@@ -417,10 +423,12 @@ data_rules_json() { # emit one finding per data-dependent rule on a branch rules
 
 # ------------------------------------------------------------------ audit -----
 # Print the required-context audit using workflows beneath ROOT; if JSON_OUT is
-# set, attempt to write its JSON summary. Returns 1 for UNSATISFIABLE or
-# PR-UNPRODUCIBLE findings when STRICT=1, otherwise 0.
-# Rule-reading failures return 1 and emit inspected:false in the JSON report.
-# JSON write failures do not affect the return status.
+# set, replace any existing report and attempt to write its JSON summary.
+# Returns 1 for UNSATISFIABLE, PR-UNPRODUCIBLE or UNSATISFIED-RULE findings
+# when STRICT=1, otherwise 0. A required_json failure returns 1 regardless of
+# STRICT and marks the JSON report inspected:false; data-rule inspection
+# failures are ignored. JSON write failures do not affect the return status.
+# Data-rule findings appear in results but not in the JSON unsatisfiable count.
 run_audit() {
   local pubb pubb_pr required ROWS unsatisfiable=0 line ctx app verdict inspected=1
   pubb="$(mktemp)"; pubb_pr="$(mktemp)"; required="$(mktemp)"; ROWS="$(mktemp)"
