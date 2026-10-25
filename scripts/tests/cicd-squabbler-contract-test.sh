@@ -121,6 +121,8 @@ t "fight credential is not required" bash -c \
   'grep -A3 "ADMINISTRATION_READ_TOKEN:" "$1" | grep -q "required: false"' _ "$reusable"
 t "caller maps only the estate Administration-read PAT" has "$caller" \
   'ADMINISTRATION_READ_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}'
+t "caller declares no secret beyond the Administration-read PAT" bash -c \
+  'test "$(sed -n "/^    secrets:/,/^    [A-Za-z_]/p" "$1" | grep -cE "^      [A-Za-z_][A-Za-z0-9_]*:")" -eq 1' _ "$caller"
 t "absent fight credential is an explicit NOT RUN" has "$reusable" \
   'Squabble fight report — NOT RUN'
 t "credentialed fight steps are visibility-gated" has "$reusable" \
