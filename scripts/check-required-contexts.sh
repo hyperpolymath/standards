@@ -499,7 +499,7 @@ code_quality_enabled_in() {
 }
 
 data_rule_evidence() {
-  local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body errf catalogue
+  local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body errf catalogue registered_at
   [ -n "$repo" ] || return 1
   errf="$(mktemp)"
   case "$type" in
@@ -518,6 +518,9 @@ data_rule_evidence() {
       # stands); catalogue unreadable => inspection failure.
       catalogue="$(workflows_catalogue "$repo")" || { rm -f "$errf"; return 1; }
       code_quality_enabled_in "$catalogue" || { rm -f "$errf"; return 0; }
+      registered_at="$(printf '%s' "$catalogue" | jq -r '
+        [.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")]
+        | .[0].created_at // ""')" || { rm -f "$errf"; return 1; }
       # Address the workflow by file name; inspect several successful runs so a
       # recent fork run cannot hide an earlier run from this repository.
       #
@@ -545,8 +548,12 @@ data_rule_evidence() {
         length == 1 and (.[0] | type == "object" and
           (.workflow_runs | type == "array"))
       ' >/dev/null 2>&1 || return 1
-      printf '%s' "$body" | jq -r --arg repo "$repo" '
-        [.workflow_runs[] | select((.head_repository.full_name // "") == $repo)][0] // empty
+      # Runs before enablement may only have measured and annotated; they
+      # cannot prove an upload. Older catalogues without a registration time
+      # retain the previous repository-run selection.
+      printf '%s' "$body" | jq -r --arg repo "$repo" --arg registered_at "$registered_at" '
+        [.workflow_runs[] | select((.head_repository.full_name // "") == $repo)
+          | select($registered_at == "" or (.created_at // "") >= $registered_at)][0] // empty
         | "a successful \(.path // "coverage") run on \(.head_branch // "?") (\((.head_sha // "")[0:12]))"' \
         2>/dev/null
       ;;

@@ -186,7 +186,7 @@ squabble-chains:
 
 # cicd-squabbler: classify a stuck PR's reds (propose-only; never --apply here)
 squabble-fight pr:
-    @command -v squabble >/dev/null 2>&1 && squabble fight metadatastician/standards {{pr}} --repo-root . || echo "squabble not found — install from https://github.com/hyperpolymath/cicd-squabbler"
+    @if command -v squabble >/dev/null 2>&1; then squabble fight metadatastician/standards {{pr}} --repo-root .; else echo "squabble not found — install from https://github.com/hyperpolymath/cicd-squabbler"; fi
 
 # Contract test for the squabbler wiring (pin, exit codes, propose-only, lock)
 squabble-test:

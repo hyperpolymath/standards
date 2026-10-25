@@ -33,6 +33,20 @@ t() { local label="$1"; shift
 has()   { grep -qF -e "$2" "$1"; }
 hasre() { grep -qE -e "$2" "$1"; }
 lacks() { ! grep -qF -e "$2" "$1"; }
+# Ignore comments and join shell continuations; global flags may precede
+# the subcommand, so checking only `panic-attack attack` can pass blind.
+has_subcommand() {
+  sed '/^[[:space:]]*#/d; :join; /\\$/ { N; s/\\\n[[:space:]]*/ /; b join; }' "$1" \
+    | grep -qE -e "panic-attack[[:space:]]+(--[^[:space:]]+[[:space:]]+)*$2([[:space:]]|$)"
+}
+no_subcommand() { ! has_subcommand "$@"; }
+planted="$(mktemp)"; trap 'rm -f "$planted"' EXIT
+for subcommand in attack assault; do
+  for options in '' '--headless '; do
+    printf '      - run: panic-attack %s%s scripts\n' "$options" "$subcommand" > "$planted"
+    t "matcher detects ${options}${subcommand}" has_subcommand "$planted" "$subcommand"
+  done
+done
 
 for f in "$reusable" "$caller" "$root/pons.toml" "$root/.ponsignore"; do
   t "exists: ${f#$root/}" test -f "$f"
@@ -51,8 +65,8 @@ t "pons SARIF category is stable" has "$reusable" 'category: pons-asinorum'
 t "assail runs headless (CI-safe)" has "$reusable" '--headless'
 t "assail report must parse as JSON" has "$reusable" 'not parseable JSON'
 t "assail tool failure fails the job" has "$reusable" 'assail failed to run on'
-t "assail never runs dynamic attacks in CI" lacks "$reusable" 'panic-attack attack'
-t "assail never assaults in CI" lacks "$reusable" 'panic-attack assault'
+t "assail never runs dynamic attacks in CI" no_subcommand "$reusable" attack
+t "assail never assaults in CI" no_subcommand "$reusable" assault
 
 # Pins and privilege.
 t "pons rev default is 40-hex" hasre "$reusable" 'default: "[0-9a-f]{40}"'

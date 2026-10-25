@@ -26,7 +26,8 @@
 #   cycle: its 49-language surface has never been baselined against this
 #   tree, and gating on an unmeasured corpus would either red everything
 #   or teach the estate to ignore it. What IS hard: the tool must run,
-#   and its JSON report must parse and carry a findings array — a
+#   and its JSON report must carry a weak_points array and a positive
+#   statistics.total_lines count — a
 #   crashed or empty scanner fails the job rather than summarising
 #   itself green. Promotion to a finding-level gate happens by editing
 #   the threshold step with a measured baseline in hand, in its own PR.
@@ -172,8 +173,9 @@ jobs:
             # The tool ran; now prove it actually examined something. An
             # unparseable or shape-less report is a tool failure, not a
             # clean bill.
-            if ! jq -e 'type == "object"' "$report" >/dev/null 2>&1; then
-              echo "::error::panic-attack report for $target is not parseable JSON — treating as tool failure"
+            if ! jq -e '(.weak_points | type == "array") and
+                        (.statistics.total_lines | type == "number" and . > 0)' "$report" >/dev/null 2>&1; then
+              echo "::error::panic-attack report for $target is not parseable JSON with a weak_points array and positive statistics.total_lines — treating as tool failure"
               overall=1
               continue
             fi
@@ -194,5 +196,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: panic-attack-assail
-          path: ${{ runner.temp }}/assail-*.json
+          path: |
+            ${{ runner.temp }}/assail-*.json
+            ${{ runner.temp }}/assail-*.log
           if-no-files-found: warn

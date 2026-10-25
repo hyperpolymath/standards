@@ -82,15 +82,19 @@ case "$path" in
   # resting state, or every test would pass by accident.
   */actions/workflows/*/runs\?status=success\&per_page=30)
     case "${RUNS_MODE:-none}" in
-      ok|foreign|fork-first|missing-head)
+      ok|foreign|fork-first|missing-head|before-enablement|at-enablement|after-enablement|missing-time)
         jq -n --arg mode "$RUNS_MODE" '
           {id:9, path:".github/workflows/coverage.yml", head_sha:"abcdef1234567890",
            head_branch:"main", conclusion:"success",
+           created_at:(if $mode == "at-enablement" then "2026-10-25T12:00:00Z"
+             elif $mode == "after-enablement" then "2026-10-25T13:00:00Z"
+             else "2026-10-25T11:00:00Z" end),
            head_repository:{full_name:"example/repo"}} as $run
           | ($run | .id = 10 | .head_repository.full_name = "example/fork") as $fork
           | {workflow_runs: (if $mode == "foreign" then [$fork]
               elif $mode == "fork-first" then [$fork, $run]
               elif $mode == "missing-head" then [$run | del(.head_repository)]
+              elif $mode == "missing-time" then [$run | del(.created_at)]
               else [$run] end)}' ;;
       invalid) echo '{"workflow_runs":{}}'; exit 0 ;;
       not-found) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;
@@ -113,6 +117,7 @@ case "$path" in
     [[ " $* " == *" --paginate "* && " $* " == *" --slurp "* ]] || exit 1
     case "${WF_MODE:-none}" in
       quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}]' ;;
+      quality-timed) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql","created_at":"2026-10-25T12:00:00Z"}]}]' ;;
       local-quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":".github/workflows/code-quality.yml"}]}]' ;;
       quality-later)
         jq -n '[range(100) | {name:"CI", path:".github/workflows/ci-\(.).yml"}] as $first
@@ -228,6 +233,18 @@ RUNS_MODE=fork-first WF_MODE=quality run ok 1
 check 'coverage evidence selects a repository run after a newer fork run' 0 \
   '.inspected == true and .unsatisfiable == 0 and
    ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 6'
+for mode in before-enablement missing-time; do
+  RUNS_MODE="$mode" WF_MODE=quality-timed run ok 1
+  check "$mode coverage run cannot verify a rule after enablement" 1 \
+    '.inspected == true and .unsatisfiable == 6 and
+     ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 0'
+done
+for mode in at-enablement after-enablement; do
+  RUNS_MODE="$mode" WF_MODE=quality-timed run ok 1
+  check "$mode coverage run verifies a rule" 0 \
+    '.inspected == true and .unsatisfiable == 0 and
+     ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 6'
+done
 for mode in foreign missing-head; do
   # Feature ON (quality verifies, 6) so the runs are actually consulted;
   # foreign or head-less runs must still leave coverage unverified.
