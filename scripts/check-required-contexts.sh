@@ -819,7 +819,7 @@ EOF
       if [ "$rtype" = code_quality ]; then
         msg="required $r needs Code Quality enabled for this repository — a repository setting, and no file in the tree can supply it; every pull request waits for a result that cannot exist"
       elif [ -n "$producer" ]; then
-        msg="required $r has an uploader in the tree ($producer), but that upload cannot succeed until Code Quality is enabled for this repository; every pull request waits for data that is uploaded and rejected"
+        msg="required $r has an uploader in the tree ($producer), but no successful upload run by this repository was found — Code Quality may be disabled, the workflow may not yet be registered on the default branch, or no run has succeeded recently; every pull request waits for data that has not arrived"
       else
         msg="required $r needs data this repository never uploads — every pull request waits for a result that cannot exist; upload the data, or remove the rule"
       fi
