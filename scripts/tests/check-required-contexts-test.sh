@@ -93,14 +93,14 @@ case "$path" in
     # Model gh's --slurp output and require pagination, not just a larger page.
     [[ " $* " == *" --paginate "* && " $* " == *" --slurp "* ]] || exit 1
     case "${WF_MODE:-none}" in
-      quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/code-quality"}]}]' ;;
+      quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}]' ;;
       local-quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":".github/workflows/code-quality.yml"}]}]' ;;
       quality-later)
         jq -n '[range(100) | {name:"CI", path:".github/workflows/ci-\(.).yml"}] as $first
           | [{total_count:101, workflows:$first},
-             {total_count:101, workflows:[{name:"Renamed analysis", path:"dynamic/code-quality"}]}]' ;;
-      incomplete) echo '[{"total_count":2,"workflows":[{"name":"Code Quality","path":"dynamic/code-quality"}]}]' ;;
-      inconsistent-total) echo '[{"total_count":1,"workflows":[]},{"total_count":2,"workflows":[{"path":"dynamic/code-quality"}]}]' ;;
+             {total_count:101, workflows:[{name:"Renamed analysis", path:"dynamic/github-code-quality/codeql"}]}]' ;;
+      incomplete) echo '[{"total_count":2,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}]' ;;
+      inconsistent-total) echo '[{"total_count":1,"workflows":[]},{"total_count":2,"workflows":[{"path":"dynamic/github-code-quality/codeql"}]}]' ;;
       page-fail) echo '[{"total_count":0,"workflows":[]}]'; exit 1 ;;
       empty-pages) echo '[]' ;;
       invalid) echo '[{"total_count":0,"workflows":{}}]' ;;
