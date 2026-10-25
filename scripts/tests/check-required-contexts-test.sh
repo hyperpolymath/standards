@@ -74,17 +74,37 @@ case "$path" in
     cat "$FIXTURES/$id.json" ;;
   # Evidence lookups. Defaults are deliberately empty: "no evidence" must be the
   # resting state, or every test would pass by accident.
-  */actions/workflows/*/runs*)
+  */actions/workflows/*/runs\?status=success\&per_page=30)
     case "${RUNS_MODE:-none}" in
-      ok) echo '{"workflow_runs":[{"id":9,"path":".github/workflows/coverage.yml","head_sha":"abcdef1234567890","head_branch":"main","conclusion":"success"}]}' ;;
+      ok|foreign|fork-first|missing-head)
+        jq -n --arg mode "$RUNS_MODE" '
+          {id:9, path:".github/workflows/coverage.yml", head_sha:"abcdef1234567890",
+           head_branch:"main", conclusion:"success",
+           head_repository:{full_name:"example/repo"}} as $run
+          | ($run | .id = 10 | .head_repository.full_name = "example/fork") as $fork
+          | {workflow_runs: (if $mode == "foreign" then [$fork]
+              elif $mode == "fork-first" then [$fork, $run]
+              elif $mode == "missing-head" then [$run | del(.head_repository)]
+              else [$run] end)}' ;;
       invalid) echo '{"workflow_runs":{}}'; exit 0 ;;
       *) echo '{"workflow_runs":[]}' ;;
     esac ;;
-  */actions/workflows)
+  */actions/workflows\?per_page=100)
+    # Model gh's --slurp output and require pagination, not just a larger page.
+    [[ " $* " == *" --paginate "* && " $* " == *" --slurp "* ]] || exit 1
     case "${WF_MODE:-none}" in
-      quality) echo '{"workflows":[{"name":"Code Quality","path":"dynamic/code-quality"}]}' ;;
-      invalid) echo '{"workflows":{}}'; exit 0 ;;
-      *) echo '{"workflows":[]}' ;;
+      quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/code-quality"}]}]' ;;
+      local-quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":".github/workflows/code-quality.yml"}]}]' ;;
+      quality-later)
+        jq -n '[range(100) | {name:"CI", path:".github/workflows/ci-\(.).yml"}] as $first
+          | [{total_count:101, workflows:$first},
+             {total_count:101, workflows:[{name:"Renamed analysis", path:"dynamic/code-quality"}]}]' ;;
+      incomplete) echo '[{"total_count":2,"workflows":[{"name":"Code Quality","path":"dynamic/code-quality"}]}]' ;;
+      inconsistent-total) echo '[{"total_count":1,"workflows":[]},{"total_count":2,"workflows":[{"path":"dynamic/code-quality"}]}]' ;;
+      page-fail) echo '[{"total_count":0,"workflows":[]}]'; exit 1 ;;
+      empty-pages) echo '[]' ;;
+      invalid) echo '[{"total_count":0,"workflows":{}}]' ;;
+      *) echo '[{"total_count":0,"workflows":[]}]' ;;
     esac ;;
   */protection/required_status_checks) echo '{"message":"not found"}'; exit 1 ;;
   *) exit 1 ;;
@@ -184,6 +204,16 @@ if [ "$rc" = 1 ] && jq -e '.inspected == true and .unsatisfiable == 6' "$work/re
 else
   fail=$((fail+1)); echo "FAIL a successful coverage run satisfies only the coverage rule (exit $rc)"; cat "$work/out"
 fi
+RUNS_MODE=fork-first run ok 1
+check 'coverage evidence selects a repository run after a newer fork run' 1 \
+  '.inspected == true and .unsatisfiable == 6 and
+   ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 6'
+for mode in foreign missing-head; do
+  RUNS_MODE="$mode" run ok 1
+  check "$mode coverage runs cannot verify a rule" 1 \
+    '.inspected == true and .unsatisfiable == 12 and
+     ([.results[] | select(.verdict == "VERIFIED-RULE")] | length) == 0'
+done
 # Same tree, no successful run: the uploader exists and proves nothing. This is
 # the branch's first six runs, which all failed 404 while the feature was off.
 run ok 1
@@ -199,7 +229,15 @@ if [ "$rc" = 1 ] && jq -e '.inspected == true and .unsatisfiable == 6' "$work/re
 else
   fail=$((fail+1)); echo "FAIL a Code Quality workflow satisfies the quality rule independently (exit $rc)"; cat "$work/out"
 fi
-RUNS_MODE=ok WF_MODE=quality run ok 0
+WF_MODE=local-quality run ok 1
+check 'a repository workflow named Code Quality cannot verify the quality rule' 1 \
+  '.inspected == true and .unsatisfiable == 12 and
+   ([.results[] | select(.verdict == "VERIFIED-RULE")] | length) == 0'
+WF_MODE=quality-later run ok 1
+check 'a generated quality workflow beyond 100 entries is found by path despite its renamed display name' 1 \
+  '.inspected == true and .unsatisfiable == 6 and
+   ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_quality")))] | length) == 6'
+RUNS_MODE=ok WF_MODE=quality run ok 1
 if [ "$rc" = 0 ] && jq -e '.inspected == true and .unsatisfiable == 0' "$work/report.json" >/dev/null; then
   pass=$((pass+1)); echo "PASS strict mode passes when both data rules are demonstrably fed"
 else
@@ -219,6 +257,10 @@ if [ "$rc" = 1 ] && jq -e '.inspected == false and .results == []' "$work/report
 else
   fail=$((fail+1)); echo "FAIL a malformed workflows response is an inspection failure, not a verdict (exit $rc)"; cat "$work/out"
 fi
+for mode in incomplete inconsistent-total page-fail empty-pages; do
+  WF_MODE="$mode" run ok 1
+  check "$mode workflow catalogue is an inspection failure" 1 '.inspected == false and .results == []'
+done
 rm -f "$work/repo/.github/workflows/coverage.yml"
 for mode in list-fail list-invalid list-empty detail-fail detail-invalid detail-empty detail-malformed detail-shape; do
   run "$mode" 0

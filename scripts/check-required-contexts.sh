@@ -439,7 +439,8 @@ data_rule_evidence() {
     code_coverage)
       producer="$(data_rule_producer code_coverage)"
       [ -n "$producer" ] || return 0
-      # Address the workflow by file name; GitHub accepts it in place of the id.
+      # Address the workflow by file name; inspect several successful runs so a
+      # recent fork run cannot hide an earlier run from this repository.
       body="$(gh api "repos/$repo/actions/workflows/${producer##*/}/runs?status=success&per_page=30" 2>/dev/null)" || return 1
       [ -n "$body" ] || return 1
       printf '%s' "$body" | jq -es '
@@ -455,15 +456,22 @@ data_rule_evidence() {
       # GitHub runs this analysis itself once the feature is enabled, so there is
       # no uploader in the tree to inspect; the workflow it registers is the
       # signal that the feature exists for this repository.
-      body="$(gh api "repos/$repo/actions/workflows" 2>/dev/null)" || return 1
+      body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate --slurp 2>/dev/null)" || return 1
       [ -n "$body" ] || return 1
+      # --slurp groups all pages. Reject malformed or incomplete catalogues,
+      # including a successful response whose pagination stopped too early.
       printf '%s' "$body" | jq -es '
-        length == 1 and (.[0] | type == "object" and (.workflows | type == "array"))
+        length == 1 and (.[0] | type == "array" and length > 0 and
+          all(.[]; type == "object" and (.total_count | type == "number") and
+            (.workflows | type == "array")) and
+          (.[0].total_count as $total |
+            all(.[]; .total_count == $total) and
+            ([.[].workflows[]] | length == $total)))
       ' >/dev/null 2>&1 || return 1
       printf '%s' "$body" | jq -r '
-        [.workflows[]? | select((.name // "") | test("code[ -]?quality"; "i"))]
+        [.[].workflows[]? | select(.path == "dynamic/code-quality")]
         | .[0] // empty
-        | "the repository workflow \(.path) (\(.name))"' 2>/dev/null
+        | "the GitHub-generated workflow \(.path) (\(.name))"' 2>/dev/null
       ;;
     *) return 0 ;;
   esac
