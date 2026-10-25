@@ -69,7 +69,7 @@ if [ -f "$WF_DIR/actions.lock" ]; then
   bash "$VERIFIER" --verify-local
   rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "::error::actions-lock gate: lockfile verification FAILED (exit $rc). Regenerate with scripts/update-actions-lock.sh in the same PR as the uses: change."
+    echo "::error::actions-lock gate: lockfile verification FAILED (exit $rc). Regenerate the lockfile in the same PR as the uses: change: run \`gh actions-lock\` (or the standards checkout's scripts/update-actions-lock.sh, which wraps it) from YOUR repository root — the path in this message is inside the standards repo that runs this gate, not a file your repository has (#930)."
     echo "Note: Per estate canon rule 10, actions MUST be SHA-pinned. A bare SHA must be accompanied by a version comment (e.g., '# v2.0.0') for traceability."
     exit "$rc"
   fi
@@ -89,11 +89,18 @@ uses_refs() {
 }
 
 # Succeeds when $1 needs no inline SHA: a local action, a container image, or
-# one of the two exemptions the grep this replaced carried
-# (actions/github-script, and standards' own reusables).
+# this repository's own reusables (pinned by `ref:` in actions.lock, not by an
+# inline SHA this gate could place).
+#
+# actions/github-script was exempt here UNCONDITIONALLY until #907: the gate
+# carried that exemption forward from the grep it replaced, so `@main` passed
+# a gate whose whole purpose is to refuse exactly that. A third-party action is
+# not this repository's own, and a tag is not a SHA, so the exemption is gone.
+# The estate's one call site (.github/workflows/check-suite-monitor.yml) is
+# already SHA-pinned, so removing it costs nothing and closes the hole.
 exempt_ref() {
   case "$1" in
-    ./* | docker://* | actions/github-script* | hyperpolymath/standards/*) return 0 ;;
+    ./* | docker://* | hyperpolymath/standards/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -156,10 +163,10 @@ if [ -n "$unexamined" ] || [ -n "$unpinned" ]; then
 fi
 
 if [[ "$TODAY" < "$ENFORCE_FROM" ]]; then
-  echo "::warning::actions-lock gate: no $WF_DIR/actions.lock. All refs are SHA-pinned, but the lockfile becomes REQUIRED on $ENFORCE_FROM (today is $TODAY). Run scripts/update-actions-lock.sh."
+  echo "::warning::actions-lock gate: no $WF_DIR/actions.lock. All refs are SHA-pinned, but the lockfile becomes REQUIRED on $ENFORCE_FROM (today is $TODAY). Run \`gh actions-lock\` in your repository root to create it (#930: the standards-side script this used to name does not exist in a consumer checkout)."
   echo "NOT YET ENFORCED: lockfile missing but inside the grace window."
   exit 0
 fi
 
-echo "::error::actions-lock gate: no $WF_DIR/actions.lock and the grace window closed on $ENFORCE_FROM (today is $TODAY). MISSING-LOCK DEBT (exit 3): run scripts/update-actions-lock.sh and commit the lockfile."
+echo "::error::actions-lock gate: no $WF_DIR/actions.lock and the grace window closed on $ENFORCE_FROM (today is $TODAY). MISSING-LOCK DEBT (exit 3): run \`gh actions-lock\` in your repository root and commit the lockfile."
 exit 3

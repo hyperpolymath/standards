@@ -169,8 +169,13 @@ while IFS= read -r line; do
       continue ;;
   esac
 
+  # A here-string, deliberately, NOT `printf ... | grep -q`. Under `set -o
+  # pipefail` a matching `grep -q` exits first, closes the pipe and SIGPIPEs the
+  # printf, so the pipeline reports failure for a file that WAS touched — the
+  # change then passes as grandfathered advisory instead of blocking (#1219,
+  # measured on roughly 12-14% of large change lists). No pipe, no SIGPIPE.
   touched=0
-  if [ -n "$CHANGED" ] && printf '%s\n' "$CHANGED" | grep -qxF "$file"; then
+  if [ -n "$CHANGED" ] && grep -qxF -- "$file" <<< "$CHANGED"; then
     touched=1
   fi
 
