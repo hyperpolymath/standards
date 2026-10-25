@@ -418,6 +418,57 @@ data_rule_producer() {
   esac
 }
 
+# Print evidence that a data-dependent rule is demonstrably fed, or nothing when
+# there is none. Empty output means the finding stands.
+#
+# This is the difference between *unverified* and *unsatisfiable*, and it is the
+# whole point of the check. A rule whose data pipeline has actually run is not a
+# rule that blocks every pull request, and reporting it as one is its own defect:
+# a permanent alarm is how people learn to ignore the alarm.
+#
+# The evidence is deliberately an OUTCOME, never an intention. For coverage that
+# means a completed run that SUCCEEDED. A workflow merely existing proves
+# nothing — every run on this branch failed with HTTP 404 while Code Quality was
+# off, and a check that accepted file presence would have called that satisfied
+# and let the block through. Returns 1 when a lookup fails, so an API problem
+# becomes an inspection failure instead of a silent pass.
+data_rule_evidence() {
+  local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body
+  [ -n "$repo" ] || return 1
+  case "$type" in
+    code_coverage)
+      producer="$(data_rule_producer code_coverage)"
+      [ -n "$producer" ] || return 0
+      # Address the workflow by file name; GitHub accepts it in place of the id.
+      body="$(gh api "repos/$repo/actions/workflows/${producer##*/}/runs?status=success&per_page=1" 2>/dev/null)" || return 1
+      [ -n "$body" ] || return 1
+      printf '%s' "$body" | jq -es '
+        length == 1 and (.[0] | type == "object" and
+          (.workflow_runs | type == "array"))
+      ' >/dev/null 2>&1 || return 1
+      printf '%s' "$body" | jq -r '
+        .workflow_runs[0] // empty
+        | "a successful \(.path // "coverage") run on \(.head_branch // "?") (\((.head_sha // "")[0:12]))"' \
+        2>/dev/null
+      ;;
+    code_quality)
+      # GitHub runs this analysis itself once the feature is enabled, so there is
+      # no uploader in the tree to inspect; the workflow it registers is the
+      # signal that the feature exists for this repository.
+      body="$(gh api "repos/$repo/actions/workflows" 2>/dev/null)" || return 1
+      [ -n "$body" ] || return 1
+      printf '%s' "$body" | jq -es '
+        length == 1 and (.[0] | type == "object" and (.workflows | type == "array"))
+      ' >/dev/null 2>&1 || return 1
+      printf '%s' "$body" | jq -r '
+        [.workflows[]? | select((.name // "") | test("code[ -]?quality"; "i"))]
+        | .[0] // empty
+        | "the repository workflow \(.path) (\(.name))"' 2>/dev/null
+      ;;
+    *) return 0 ;;
+  esac
+}
+
 # Emit tab-separated finding name, app id 0 and UNSATISFIED-RULE for each
 # DATA_RULES match in an active branch ruleset whose ref filters match MERGE_BRANCH.
 # Presence alone is flagged; uploaded coverage or quality data is not checked.
@@ -435,8 +486,12 @@ data_rules_json() {
   [ -n "${GITHUB_REPOSITORY:-}" ] || GITHUB_REPOSITORY="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
   [ -n "${GITHUB_REPOSITORY:-}" ] || return 1
   local repo="$GITHUB_REPOSITORY" id body
-  local list
+  local list ev_cov ev_qual
   [ -n "$MERGE_BRANCH" ] || return 1
+  # Resolve the evidence once per rule type, not once per ruleset: the answer
+  # cannot differ between rulesets, and these are API calls.
+  ev_cov="$(data_rule_evidence code_coverage)" || return 1
+  ev_qual="$(data_rule_evidence code_quality)" || return 1
   list="$(gh api "repos/$repo/rulesets" 2>/dev/null)" || return 1
   printf '%s' "$list" | jq -es '
     length == 1 and (.[0] | type == "array" and all(.[]; type == "object" and
@@ -452,7 +507,8 @@ data_rules_json() {
         (.include | type == "array" and all(.[]; type == "string")) and
         (.exclude | type == "array" and all(.[]; type == "string"))))
     ' >/dev/null 2>&1 || return 1
-    printf '%s' "$body" | jq -r --arg types "$DATA_RULES" --arg id "$id" --arg branch "$MERGE_BRANCH" '
+    printf '%s' "$body" | jq -r --arg types "$DATA_RULES" --arg id "$id" --arg branch "$MERGE_BRANCH" \
+      --arg ev_cov "$ev_cov" --arg ev_qual "$ev_qual" '
       # GitHub ref filters use pathname globs: * and ? do not cross /.
       def matches_ref:
         if . == "~ALL" or . == "~DEFAULT_BRANCH" then true
@@ -470,7 +526,15 @@ data_rules_json() {
         select(any(.conditions.ref_name.include[]; matches_ref))
         | select(all(.conditions.ref_name.exclude[]; matches_ref | not))
         | .rules[]? | select(.type as $t | ($types | split(" ") | index($t)))
-        | "rule:\(.type) in ruleset \($id)\t0\tUNSATISFIED-RULE"
+        # A rule with evidence of real data keeps its row, because a reader of
+        # the report deserves to see what the audit found and accepted. It is
+        # just no longer a finding: the verdict carries the claim, not the
+        # absence of a row.
+        | (if .type == "code_coverage" then $ev_cov
+           elif .type == "code_quality" then $ev_qual
+           else "" end) as $ev
+        | "rule:\(.type) in ruleset \($id)\t0\t" +
+          (if $ev != "" then "VERIFIED-RULE\t\($ev)" else "UNSATISFIED-RULE" end)
       else empty end' 2>/dev/null || return 1
   done
   return 0
@@ -600,9 +664,14 @@ EOS
   done <"$required"
 
   # Count rule findings before serializing the total into the JSON report.
-  local n_rule
+  local n_rule n_verified
   n_rule="$(awk -F'\t' '$3=="UNSATISFIED-RULE"' "$ROWS" 2>/dev/null | wc -l | tr -d ' ')"
   case "$n_rule" in ''|*[!0-9]*) n_rule=0 ;; esac
+  # A rule that is demonstrably fed is reported, not hidden. Silence would make
+  # the audit unable to answer "was this rule considered at all?" — the same
+  # question that goes unanswered when a check quietly never runs.
+  n_verified="$(awk -F'\t' '$3=="VERIFIED-RULE"' "$ROWS" 2>/dev/null | wc -l | tr -d ' ')"
+  case "$n_verified" in ''|*[!0-9]*) n_verified=0 ;; esac
   unsatisfiable=$((unsatisfiable + n_rule))
   if [ -n "$JSON_OUT" ]; then
     jq -Rs --arg repo "${GITHUB_REPOSITORY:-$ROOT}" --argjson n "$unsatisfiable" \
@@ -617,6 +686,14 @@ EOS
   # ONLY finding was a data-dependent rule returned 0 — the gate would print the
   # reason a pull request cannot merge and then declare success, which is the
   # defect this script exists to catch, committed by the script itself.
+  if [ "$n_verified" -gt 0 ]; then
+    while IFS=$'\t' read -r r _ _ ev; do
+      [ -n "$r" ] || continue
+      info "satisfied $r — $ev"
+    done <<EOF
+$(awk -F'\t' '$3=="VERIFIED-RULE"' "$ROWS" 2>/dev/null)
+EOF
+  fi
   if [ "$n_rule" -gt 0 ]; then
     while IFS= read -r r; do
       [ -n "$r" ] || continue

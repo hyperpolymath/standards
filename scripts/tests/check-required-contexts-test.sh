@@ -72,6 +72,20 @@ case "$path" in
       esac
     fi
     cat "$FIXTURES/$id.json" ;;
+  # Evidence lookups. Defaults are deliberately empty: "no evidence" must be the
+  # resting state, or every test would pass by accident.
+  */actions/workflows/*/runs*)
+    case "${RUNS_MODE:-none}" in
+      ok) echo '{"workflow_runs":[{"id":9,"path":".github/workflows/coverage.yml","head_sha":"abcdef1234567890","head_branch":"main","conclusion":"success"}]}' ;;
+      invalid) echo '{"workflow_runs":{}}'; exit 0 ;;
+      *) echo '{"workflow_runs":[]}' ;;
+    esac ;;
+  */actions/workflows)
+    case "${WF_MODE:-none}" in
+      quality) echo '{"workflows":[{"name":"Code Quality","path":"dynamic/code-quality"}]}' ;;
+      invalid) echo '{"workflows":{}}'; exit 0 ;;
+      *) echo '{"workflows":[]}' ;;
+    esac ;;
   */protection/required_status_checks) echo '{"message":"not found"}'; exit 1 ;;
   *) exit 1 ;;
 esac
@@ -104,6 +118,7 @@ run() {
   rm -f "$work"/*-count
   (unset REQUIRED_CONTEXTS_JSON
     PATH="$work/bin:$PATH" FIXTURES="$work" MODE="$1" GITHUB_REPOSITORY=example/repo \
+      RUNS_MODE="${RUNS_MODE:-none}" WF_MODE="${WF_MODE:-none}" \
       REQUIRED_CONTEXTS_STRICT="$2" bash "$GATE" "$work/repo" --no-network --json "$work/report.json"
   ) >"$work/out" 2>&1
   rc=$?
@@ -150,6 +165,61 @@ if [ "$rc" = 1 ] && grep -q 'never uploads' "$work/out"; then
 else
   fail=$((fail+1)); echo "FAIL with no uploader the finding still says nothing uploads (exit $rc)"; cat "$work/out"
 fi
+
+# Evidence: a successful run is what makes a data rule satisfied, and file
+# presence alone must never be enough. Each fixture below holds one variable.
+cat >"$work/repo/.github/workflows/coverage.yml" <<'YML'
+name: Coverage
+on: [pull_request]
+jobs:
+  c:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-code-coverage@0000000000000000000000000000000000000000
+YML
+RUNS_MODE=ok run ok 1
+if [ "$rc" = 1 ] && jq -e '.inspected == true and .unsatisfiable == 6' "$work/report.json" >/dev/null &&
+   grep -q 'satisfied rule:code_coverage' "$work/out"; then
+  pass=$((pass+1)); echo "PASS a successful coverage run satisfies only the coverage rule"
+else
+  fail=$((fail+1)); echo "FAIL a successful coverage run satisfies only the coverage rule (exit $rc)"; cat "$work/out"
+fi
+# Same tree, no successful run: the uploader exists and proves nothing. This is
+# the branch's first six runs, which all failed 404 while the feature was off.
+run ok 1
+if [ "$rc" = 1 ] && jq -e '.inspected == true and .unsatisfiable == 12' "$work/report.json" >/dev/null; then
+  pass=$((pass+1)); echo "PASS an uploader with no successful run is not evidence"
+else
+  fail=$((fail+1)); echo "FAIL an uploader with no successful run is not evidence (exit $rc)"; cat "$work/out"
+fi
+WF_MODE=quality run ok 1
+if [ "$rc" = 1 ] && jq -e '.inspected == true and .unsatisfiable == 6' "$work/report.json" >/dev/null &&
+   grep -q 'satisfied rule:code_quality' "$work/out"; then
+  pass=$((pass+1)); echo "PASS a Code Quality workflow satisfies the quality rule independently"
+else
+  fail=$((fail+1)); echo "FAIL a Code Quality workflow satisfies the quality rule independently (exit $rc)"; cat "$work/out"
+fi
+RUNS_MODE=ok WF_MODE=quality run ok 0
+if [ "$rc" = 0 ] && jq -e '.inspected == true and .unsatisfiable == 0' "$work/report.json" >/dev/null; then
+  pass=$((pass+1)); echo "PASS strict mode passes when both data rules are demonstrably fed"
+else
+  fail=$((fail+1)); echo "FAIL strict mode passes when both data rules are demonstrably fed (exit $rc)"; cat "$work/out"
+fi
+# A lookup that fails must not be read as "no data" (a silent finding) nor as
+# "data present" (a silent pass). It is an inspection failure.
+RUNS_MODE=invalid run ok 1
+if [ "$rc" = 1 ] && jq -e '.inspected == false and .results == []' "$work/report.json" >/dev/null; then
+  pass=$((pass+1)); echo "PASS a malformed runs response is an inspection failure, not a verdict"
+else
+  fail=$((fail+1)); echo "FAIL a malformed runs response is an inspection failure, not a verdict (exit $rc)"; cat "$work/out"
+fi
+WF_MODE=invalid run ok 1
+if [ "$rc" = 1 ] && jq -e '.inspected == false and .results == []' "$work/report.json" >/dev/null; then
+  pass=$((pass+1)); echo "PASS a malformed workflows response is an inspection failure, not a verdict"
+else
+  fail=$((fail+1)); echo "FAIL a malformed workflows response is an inspection failure, not a verdict (exit $rc)"; cat "$work/out"
+fi
+rm -f "$work/repo/.github/workflows/coverage.yml"
 for mode in list-fail list-invalid list-empty detail-fail detail-invalid detail-empty detail-malformed detail-shape; do
   run "$mode" 0
   check "$mode does not become an empty success or retain partial findings" 1 '.inspected == false and .results == []'
