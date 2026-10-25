@@ -21,18 +21,29 @@
 #
 # * `fight-report` is a REPORT, deliberately. It classifies the calling
 #   pull request's reds (self-win | escalate | assign-owner) into the step
-#   summary. It fails only when the tool itself fails (exit 2): "the
-#   planner proposed a move" is information for a human, not a verdict on
-#   the PR, and gating on it would fail every PR that is legitimately red
-#   for unrelated reasons — twice. It NEVER passes `--apply` and never
-#   writes to the repository; enacting a move is a follow-up commit a
-#   human (or a later, separately-reviewed automation) makes.
+#   summary. When it runs, it fails only when the tool itself fails
+#   (exit 2): "the planner proposed a move" is information for a human,
+#   not a verdict on the PR, and gating on it would fail every PR that is
+#   legitimately red for unrelated reasons — twice. It NEVER passes
+#   `--apply` and never writes to the repository; enacting a move is a
+#   follow-up commit a human (or a later, separately-reviewed
+#   automation) makes.
+#
+#   Measured on this repository: `fight` reads the gate as rulesets ∪
+#   classic branch protection, and refuses to reason about a gate it can
+#   only partially see. The classic-protection endpoint is 403 to the
+#   built-in Actions token even though all 24 ruleset contexts are
+#   visible, so squabble correctly exits 2. Fight therefore runs only
+#   when the caller supplies the optional Administration-read credential
+#   declared below. Absent credential = the summary says NOT RUN, in
+#   those words; present-but-unreadable credential = the job still fails,
+#   because then the tool really could not inspect what it was asked to.
 #
 # The squabble binary is installed by the upstream composite action pinned
 # to a commit; the action itself refuses any binary whose sha256 and build
 # attestation do not match its pinned release. `verify-satisfied` is NOT
-# run here: it needs Administration:read, which `github.token` cannot
-# hold — that leg belongs to an App-token caller, tracked upstream.
+# run here even when the credential is supplied: promoting that stronger
+# verdict is a separate, separately-reviewed decision.
 #
 # Consumers pin this reusable by commit SHA like every other estate
 # reusable. Keep caller grants at or above the job-level grants below, or
@@ -53,6 +64,10 @@ on:
         required: false
         type: string
         default: "ubuntu-latest"
+    secrets:
+      ADMINISTRATION_READ_TOKEN:
+        description: "Optional fine-grained/App token with Administration:read plus pull-request, check and status read for squabble fight; absent means the advisory fight report is explicitly not run."
+        required: false
 
 permissions:
   contents: read
@@ -117,12 +132,42 @@ jobs:
       pull-requests: read
       attestations: read
     steps:
+      # Record credential presence without printing the credential. The
+      # built-in token cannot read classic branch protection, and squabble
+      # rightly exits 2 rather than reasoning about a partially visible
+      # gate; without the optional credential there is therefore nothing
+      # honest for this advisory leg to do beyond saying so.
+      - name: Record whether fight can inspect the full gate
+        id: fight-credential
+        env:
+          SQUABBLE_TOKEN: ${{ secrets.ADMINISTRATION_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SQUABBLE_TOKEN" ]; then
+            echo "supplied=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "supplied=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Squabble fight not run::No Administration-read credential was supplied, so the advisory fight report did not inspect this pull request. The hard chains gate still ran."
+            {
+              echo "### Squabble fight report — NOT RUN"
+              echo
+              echo "No \`ADMINISTRATION_READ_TOKEN\` was supplied by the caller."
+              echo "squabble fight reads rulesets and classic branch protection as"
+              echo "one gate, and the built-in Actions token cannot read the"
+              echo "classic-protection endpoint. This advisory job therefore makes"
+              echo "no claim about this pull request's reds. The separate hard"
+              echo "\`squabble chains\` gate remains enforced."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.fight-credential.outputs.supplied == 'true'
         with:
           persist-credentials: false
 
       - name: Install the pinned, attested squabble
         id: squabble
+        if: steps.fight-credential.outputs.supplied == 'true'
         uses: hyperpolymath/cicd-squabbler/.github/actions/squabble@14f853fde902ab2d7631070d87a9dc9122e01013
         with:
           args: ""
@@ -131,13 +176,15 @@ jobs:
       # base branch") is a reportable finding printed below, not a tool
       # failure; exit 2 is a tool failure and fails the job, because a
       # silently broken advisor would be indistinguishable from "nothing
-      # to fight".
+      # to fight". A supplied credential that still cannot read the full
+      # gate lands in exit 2 and stays red.
       - name: Classify this pull request's reds
+        if: steps.fight-credential.outputs.supplied == 'true'
         env:
           SQUABBLE_BIN: ${{ steps.squabble.outputs.path }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr-number }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.ADMINISTRATION_READ_TOKEN }}
         run: |
           set -uo pipefail
           test -x "$SQUABBLE_BIN" || { echo "::error::squabble did not install"; exit 1; }

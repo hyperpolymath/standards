@@ -14,7 +14,10 @@
 #     exists for;
 #   * tool failures (exit 2) must fail too, or a broken advisor reads as an
 #     all-clear;
-#   * no job may hold a write grant, and no secrets may be inherited;
+#   * no job may hold a write grant, no secrets may be inherited, and the
+#     only declared secret is the optional Administration-read credential
+#     that fight needs to see classic branch protection — absent it, the
+#     advisory must say NOT RUN rather than fail (or pass) blind;
 #   * the caller must carry no paths: filter (a filtered gate never
 #     reports on PRs that miss the filter);
 #   * both workflows must be present in actions.lock, or GitHub refuses
@@ -82,11 +85,30 @@ t "fight exit 2 fails the job" has "$reusable" 'if [ "$rc" -eq 2 ]'
 t "fight exit 3 is a warning, not a failure" has "$reusable" 'if [ "$rc" -eq 3 ]'
 t "fight refuses a non-numeric PR number" has "$reusable" '*[!0-9]*'
 
-# Least privilege: no write scope anywhere, no secret inheritance.
+# Least privilege: no write scope anywhere, no secret inheritance, and at
+# most one declared secret — fight's optional Administration-read
+# credential. "No secrets at all" was the rule until fight was measured
+# to need classic-branch-protection visibility that the built-in token
+# cannot have; the narrow, declared exception is the contract now.
 t "reusable holds no write grant" lacks "$reusable" ': write'
 t "caller holds no write grant" lacks "$caller" ': write'
-t "caller does not inherit secrets" lacks "$caller" 'secrets: inherit'
-t "reusable references no secrets" lacks "$reusable" 'secrets.'
+# Comment-aware (noflag): the workflows explain the inherit ban in prose
+# using the very string they forbid, exactly like --apply above.
+t "caller does not inherit secrets" noflag "$caller" 'secrets: inherit'
+t "reusable does not inherit secrets" noflag "$reusable" 'secrets: inherit'
+t "reusable references no GITHUB_TOKEN secret" lacks "$reusable" 'secrets.GITHUB_TOKEN'
+t "reusable declares the optional Administration-read secret" has "$reusable" \
+  'ADMINISTRATION_READ_TOKEN:'
+t "fight credential is not required" bash -c \
+  'grep -A3 "ADMINISTRATION_READ_TOKEN:" "$1" | grep -q "required: false"' _ "$reusable"
+t "caller maps only the estate Administration-read PAT" has "$caller" \
+  'ADMINISTRATION_READ_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}'
+t "absent fight credential is an explicit NOT RUN" has "$reusable" \
+  'Squabble fight report — NOT RUN'
+t "credentialed fight steps are presence-gated" has "$reusable" \
+  "steps.fight-credential.outputs.supplied == 'true'"
+t "fight talks to the API with the declared credential" has "$reusable" \
+  'GH_TOKEN: ${{ secrets.ADMINISTRATION_READ_TOKEN }}'
 t "checkouts do not persist credentials" has "$reusable" 'persist-credentials: false'
 
 # Gate shape: unfiltered, cancellable, time-boxed.
