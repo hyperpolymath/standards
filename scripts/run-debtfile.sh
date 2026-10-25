@@ -34,7 +34,8 @@
 # Usage: run-debtfile.sh [--write] [path/to/Debtfile.a2ml]
 #   --write   update `count` in place, and lower `ceiling` to match when debt
 #             has been paid down (the auto-ratchet). Never raises a ceiling.
-#   Default path: .machine_readable/Debtfile.a2ml
+#   Default path: .machine_readable/debt_praxis.deed
+#   A path ending in .a2ml is still accepted, for a caller that has not converted.
 #
 # Exit: 0 all entries at or under ceiling · 1 a ceiling was breached, a probe
 #       failed, or an acceptance expired · 2 file missing / bad invocation
@@ -50,7 +51,7 @@ for arg in "$@"; do
     *) if [ -n "$DEBT" ]; then echo "error: more than one Debtfile given" >&2; exit 2; fi; DEBT="$arg" ;;
   esac
 done
-DEBT="${DEBT:-.machine_readable/Debtfile.a2ml}"
+DEBT="${DEBT:-.machine_readable/debt_praxis.deed}"
 
 if [ ! -f "$DEBT" ]; then
   echo "error: Debtfile not found: $DEBT" >&2
@@ -114,6 +115,74 @@ measure() {
 }
 
 reset_block() { name="$1"; probe=""; count=""; ceiling=""; severity=""; policy=""; accepted=""; }
+
+deed_unquote() {
+  local s="$1"
+  local i=1 c out="" esc=0 len
+  len=${#s}
+  while [ "$i" -lt "$len" ]; do
+    c="${s:$i:1}"
+    if [ "$esc" -eq 1 ]; then
+      case "$c" in n) out+=$'\n' ;; t) out+=$'\t' ;; *) out+="$c" ;; esac
+      esc=0
+    elif [ "$c" = "\\" ]; then esc=1
+    elif [ "$c" = '"' ]; then printf '%s' "$out"; return 0
+    else out+="$c"; fi
+    i=$((i + 1))
+  done
+  return 1
+}
+deed_sym() { local rest="${1#*$2 }"; printf '%s' "${rest%% *}" | tr -d ')'; }
+
+if [ "${DEBT##*.}" = "deed" ]; then
+  echo "Debtfile: $DEBT"
+  echo
+  while IFS= read -r raw || [ -n "$raw" ]; do
+    case "$raw" in *'(entry '*) ;; *) continue ;; esac
+    reset_block "$(deed_sym "$raw" :id)"
+    probe="$(deed_unquote "${raw#*:probe }")"
+    count="$(deed_sym "$raw" :count)"
+    ceiling="$(deed_sym "$raw" :ceiling)"
+    severity="$(deed_sym "$raw" :severity)"
+    policy="$(deed_sym "$raw" :policy)"
+    accepted="$(deed_unquote "${raw#*:accepted-until }")"
+    measure
+  done < "$DEBT"
+  if [ "$WRITE" -eq 1 ] && { [ "${#NEW_COUNT_IDS[@]}" -gt 0 ] || [ "${#NEW_CEIL_IDS[@]}" -gt 0 ]; }; then
+    tmp="$(mktemp)"
+    while IFS= read -r raw || [ -n "$raw" ]; do
+      case "$raw" in
+        *'(entry '*)
+          cur="$(deed_sym "$raw" :id)"
+          for i in "${!NEW_COUNT_IDS[@]}"; do
+            if [ "${NEW_COUNT_IDS[$i]}" = "$cur" ]; then
+              raw="$(printf '%s' "$raw" | sed -E "s/:count [0-9]+/:count ${NEW_COUNT_VALS[$i]}/")"
+              break
+            fi
+          done
+          for i in "${!NEW_CEIL_IDS[@]}"; do
+            if [ "${NEW_CEIL_IDS[$i]}" = "$cur" ]; then
+              raw="$(printf '%s' "$raw" | sed -E "s/:ceiling [0-9]+/:ceiling ${NEW_CEIL_VALS[$i]}/")"
+              break
+            fi
+          done
+          ;;
+      esac
+      printf '%s\n' "$raw"
+    done < "$DEBT" > "$tmp"
+    mv "$tmp" "$DEBT"
+    echo
+    echo "  ✍  wrote ${#NEW_COUNT_IDS[@]} count update(s), ${#NEW_CEIL_IDS[@]} ceiling reduction(s)"
+  fi
+  echo
+  echo "Debtfile: $ok holding · $paid paid-down · $resolved resolved · $breached breached · $expired expired · $broke broken-probe"
+  if [ "$fail" -ne 0 ]; then
+    echo "❌ Debtfile run FAILED" >&2
+    exit 1
+  fi
+  echo "✅ Debtfile run passed (no ceiling breached, no probe broken, no acceptance expired)"
+  exit 0
+fi
 
 echo "Debtfile: $DEBT"
 echo

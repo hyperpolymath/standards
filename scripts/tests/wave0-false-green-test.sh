@@ -33,7 +33,7 @@ expect() { if [ "$2" -eq "$1" ]; then ok "$3 (exit $2)"; else bad "$3 (wanted $1
 echo "== check-mustfile-structure.sh =="
 MS="$ROOT/scripts/check-mustfile-structure.sh"
 # valid: the repo's real Mustfile -> exit 0
-bash "$MS" "$ROOT/.machine_readable/contractiles/must/Mustfile.a2ml" >/dev/null 2>&1
+bash "$MS" "$ROOT/9-archive/a2ml/.machine_readable/contractiles/must/Mustfile.a2ml" >/dev/null 2>&1
 expect 0 $? "real Mustfile is structurally valid"
 # hollow: a check with neither run nor verification -> exit 1
 hf="$TMP/hollow.a2ml"; printf '### hollow\n- description: nothing runnable\n- severity: high\n' > "$hf"

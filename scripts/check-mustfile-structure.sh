@@ -15,17 +15,36 @@
 # of Mustfile checking; scripts/run-mustfile.sh (Wave 1) executes the `- run:`
 # commands.
 #
-# Usage: check-mustfile-structure.sh [path/to/Mustfile.a2ml]
-#   Default path: .machine_readable/contractiles/must/Mustfile.a2ml
+# Usage: check-mustfile-structure.sh [path/to/must_praxis.deed]
+#   Default path: .machine_readable/contractiles/must/must_praxis.deed
+#   A path ending in .a2ml is still accepted, for a caller that has not converted.
 # Exit: 0 valid · 1 malformed/hollow · 2 file not found
 
 set -euo pipefail
 
-MUST="${1:-.machine_readable/contractiles/must/Mustfile.a2ml}"
+MUST="${1:-.machine_readable/contractiles/must/must_praxis.deed}"
 
 if [ ! -f "$MUST" ]; then
   echo "error: Mustfile not found: $MUST" >&2
   exit 2
+fi
+
+if [ "${MUST##*.}" = "deed" ]; then
+  awk '
+    /\(check / {
+      checks++
+      if ($0 !~ /:severity /) { printf "  ❌ check missing :severity\n"; fails++ }
+      if ($0 !~ /:discharge (run|verification) /) { printf "  ❌ check missing :discharge\n"; fails++ }
+      if ($0 !~ /:body "/) { printf "  ❌ check missing :body\n"; fails++ }
+      next
+    }
+    END {
+      if (checks < 1) { print "❌ Mustfile deed declares no (check ...) clauses"; exit 1 }
+      if (fails > 0) { printf "❌ Malformed Mustfile deed: %d structural problem(s) across %d checks\n", fails, checks; exit 1 }
+      printf "✅ Mustfile structurally valid (%d checks, each with severity + discharge)\n", checks
+    }
+  ' "$MUST"
+  exit 0
 fi
 
 awk '

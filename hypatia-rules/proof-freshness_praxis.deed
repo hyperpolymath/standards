@@ -1,0 +1,14 @@
+;; SPDX-License-Identifier: MPL-2.0
+;; SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+;; Hypatia rule proof-freshness. The .a2ml body is archived; this deed is the live file.
+(praxis-deed
+  :schema-version "1.0.0"
+  :canonical-name "proof-freshness"
+  :beholding-chora #u5"estate/chora"
+  ;; Translated from archived hypatia-rules/proof-freshness.a2ml. Not an A2ML rule.
+  (rule :version "1.0" :body "id: HYP-S003\nname: \"Proof freshness\"\ndescription: \"Detect stale proofs (not re-verified in > stale_after_days)\"\nseverity: medium\ncategory: FormalVerification\nauto_fixable: true\nsource: standards/hypatia-rules")
+  (parameters :body "stale_after_days: 30\ncritical_after_days: 90")
+  (query :engine vcl :body "octads(entity=\"proof-status\")\n  |> where(\"temporal.proof_age_days > ${stale_after_days}\")\n  |> order_by(\"proof_age_days desc\")\n  |> project(\"file_path, prover, theorem_name, verified_at, proof_age_days\")")
+  (action :body "emit_signal: proof.stale\nmessage_template: \"Proof stale: {file_path} last verified {verified_at} ({proof_age_days}d ago)\"\nrecipe: echidna-reverify\nseverity_escalates_at: 90   # above critical_after_days → severity becomes high")
+  (recipe :id echidna-reverify :body "description: \"Trigger ECHIDNA re-verification for a stale proof\"\ncommand: \"gh workflow run echidna-verify.yml --field target={file_path}\"\nauto_applicable: true")
+)

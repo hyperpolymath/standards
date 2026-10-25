@@ -40,6 +40,51 @@ if [ ! -f "$DEBT" ]; then
   exit 2
 fi
 
+# Deed form used by this repository. Caller repositories still pass .a2ml.
+if [ "${DEBT##*.}" = "deed" ]; then
+  awk '
+    /\(entry / {
+      entries++
+      if ($0 !~ /:probe "/) { printf "  ❌ entry missing :probe\n"; fail=1 }
+      if ($0 !~ /:ceiling [0-9]+/) { printf "  ❌ entry missing :ceiling\n"; fail=1 }
+      if ($0 !~ /:count [0-9]+/) { printf "  ❌ entry missing :count\n"; fail=1 }
+      if ($0 !~ /:accepted-until [0-9]{4}-[0-9]{2}-[0-9]{2}([[:space:]]|\))/) { printf "  ❌ entry missing or invalid :accepted-until (expected YYYY-MM-DD)\n"; fail=1 }
+      if ($0 !~ /:severity (critical|high|medium|low)([[:space:]]|\))/) { printf "  ❌ entry severity missing or illegal\n"; fail=1 }
+      if ($0 !~ /:policy (remediable|flag-only)([[:space:]]|\))/) { printf "  ❌ entry policy missing or illegal\n"; fail=1 }
+
+      count = ""
+      ceiling = ""
+      accepted = ""
+
+      if (match($0, /:count [0-9]+/)) {
+        count = substr($0, RSTART + 7, RLENGTH - 7) + 0
+      }
+      if (match($0, /:ceiling [0-9]+/)) {
+        ceiling = substr($0, RSTART + 9, RLENGTH - 9) + 0
+      }
+      if (match($0, /:accepted-until [0-9]{4}-[0-9]{2}-[0-9]{2}/)) {
+        accepted = substr($0, RSTART + 16, RLENGTH - 16)
+        split(accepted, d, "-")
+        if (d[2] < 1 || d[2] > 12 || d[3] < 1 || d[3] > 31) {
+          printf "  ❌ entry has invalid :accepted-until date components (%s)\n", accepted
+          fail=1
+        }
+      }
+
+      if (count != "" && ceiling != "" && count > ceiling) {
+        printf "  ❌ entry has :count (%d) above :ceiling (%d)\n", count, ceiling
+        fail=1
+      }
+    }
+    END {
+      if (entries < 1) { print "❌ Debtfile deed declares no entries"; exit 1 }
+      if (fail) { printf "❌ Malformed Debtfile deed (%d entries)\n", entries; exit 1 }
+      printf "✅ Debtfile structurally valid (%d entries)\n", entries
+    }
+  ' "$DEBT"
+  exit $?
+fi
+
 fail=0
 entries=0
 seen_ids=" "

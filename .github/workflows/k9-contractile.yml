@@ -58,7 +58,7 @@ jobs:
           # must carry a severity and a means of discharge (run or verification).
           # A hollow check fails loudly. See scripts/check-mustfile-structure.sh
           # (unit-tested by scripts/tests/wave0-false-green-test.sh).
-          bash scripts/check-mustfile-structure.sh
+          bash scripts/check-mustfile-structure.sh .machine_readable/contractiles/must/must_praxis.deed
 
       - name: Mustfile Enforcement (execute the checks)
         run: |
@@ -67,28 +67,27 @@ jobs:
           # that were previously declared but never run by any CI job. A failing
           # critical/high check fails the build (fail loudly); warning-severity
           # failures are reported but non-blocking. See scripts/run-mustfile.sh.
-          bash scripts/run-mustfile.sh
+          bash scripts/run-mustfile.sh .machine_readable/contractiles/must/must_praxis.deed
 
       - name: Contractile Check
         run: |
           set -euo pipefail
           echo "Checking contractile completeness..."
-          index=".machine_readable/contractiles/INDEX.a2ml"
+          index=".machine_readable/contractiles/contractiles_praxis.deed"
           if [ ! -f "$index" ]; then
             echo "❌ Contractile registry not found: $index"
             exit 1
           fi
-          # Read the canonical verb set from the registry rather than hard-coding
-          # it (INDEX.a2ml §Registry: consumers SHOULD discover verbs from here).
-          # Each verb's trident lists "<verb>/<Verb>file.a2ml" as its first entry.
-          mapfile -t files < <(grep -oE '"[a-z]+/[A-Z][a-z]+file\.a2ml"' "$index" | tr -d '"' | sort -u)
+          # Discover the live K9 contracts from the deed registry. The A2ML
+          # index is archived and is not a live standard.
+          mapfile -t files < <(grep -oE ':contract "[^"]+"' "$index" | sed 's/:contract "//;s/"$//' | sort -u)
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "❌ No contractile files discovered in $index"
+            echo "❌ No contractile contracts discovered in $index"
             exit 1
           fi
           missing=0
           for rel in "${files[@]}"; do
-            if [ -f ".machine_readable/contractiles/$rel" ]; then
+            if [ -f "$rel" ]; then
               echo "✅ $rel"
             else
               echo "❌ Missing: $rel"

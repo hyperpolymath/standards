@@ -22,7 +22,7 @@ echo "== run-mustfile.sh =="
 RM="$ROOT/scripts/run-mustfile.sh"
 # The repo's real Mustfile must pass (all critical/high green) — this is the
 # ground truth that lets the CI job block honestly.
-bash "$RM" "$ROOT/.machine_readable/contractiles/must/Mustfile.a2ml" >/dev/null 2>&1
+bash "$RM" "$ROOT/9-archive/a2ml/.machine_readable/contractiles/must/Mustfile.a2ml" >/dev/null 2>&1
 expect 0 $? "real Mustfile passes enforcement"
 # A failing critical check blocks.
 cf="$TMP/crit.a2ml"; printf '### x\n- run: test -f /nonexistent-xyzzy\n- severity: critical\n' > "$cf"

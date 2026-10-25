@@ -1,0 +1,14 @@
+;; SPDX-License-Identifier: MPL-2.0
+;; SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+;; Hypatia rule workflow-allowlist-gap. The .a2ml body is archived; this deed is the live file.
+(praxis-deed
+  :schema-version "1.0.0"
+  :canonical-name "workflow-allowlist-gap"
+  :beholding-chora #u5"estate/chora"
+  ;; Translated from archived hypatia-rules/workflow-allowlist-gap.a2ml. Not an A2ML rule.
+  (rule :version "1.0" :body "id: HYP-S008\nname: \"Workflow allowlist gap\"\ndescription: \"Detect .github/workflows `uses:` refs not covered by the canonical Actions allowlist (would startup_failure under allowed_actions=selected)\"\nseverity: high\ncategory: CiResilience\nauto_fixable: false          # setting the allowlist needs an admin token, not the workflow GITHUB_TOKEN\nsource: standards/hypatia-rules")
+  (parameters :body "allowlist: rhodium-standard-repositories/actions-allowlist/allowed-actions.json")
+  (query :engine vcl :body "workflow_uses(scan=\"repo-tree\", dir=\".github/workflows\")\n  |> where(\"not covered_by_allowlist(ref, ${allowlist})\")\n  |> project(\"file, ref\")")
+  (action :body "emit_signal: compliance.finding.new\nmessage_template: \"Actions allowlist gap: {file} uses {ref} — not permitted by the repo allowlist; the run will startup_failure. Add the pattern to the allowlist, or run scripts/set-allowed-actions.sh.\"\nrecipe: check-allowlist")
+  (recipe :id check-allowlist :body "description: \"List the uncovered `uses:` refs — legible + satisfiable, no admin needed. The paired set-allowed-actions.sh (admin PAT) applies the fix.\"\ncommand: \"bash scripts/check-allowed-actions.sh\"\nauto_applicable: false")
+)
