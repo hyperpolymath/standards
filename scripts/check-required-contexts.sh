@@ -455,7 +455,7 @@ data_rule_evidence() {
       # GitHub runs this analysis itself once the feature is enabled, so there is
       # no uploader in the tree to inspect; the workflow it registers is the
       # signal that the feature exists for this repository.
-      body="$(gh api "repos/$repo/actions/workflows" 2>/dev/null)" || return 1
+      body="$(gh api "repos/$repo/actions/workflows?per_page=100" 2>/dev/null)" || return 1
       [ -n "$body" ] || return 1
       printf '%s' "$body" | jq -es '
         length == 1 and (.[0] | type == "object" and (.workflows | type == "array"))
