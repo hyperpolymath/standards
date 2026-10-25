@@ -59,13 +59,20 @@ if [ "$method" = PUT ]; then
     exit 1
   fi
   # Serve the written payload back on subsequent reads.
-  jq '. + {id: 1, _links: {}}' "$PUT_DIR/$id.json" >"$SERVE_DIR/$id.json"
+  jq "${MUTATION:-.}" "$PUT_DIR/$id.json" | jq '. + {id: 1, _links: {}}' >"$SERVE_DIR/$id.json"
   exit 0
 fi
 case "$path" in
   */rulesets) cat "$SERVE_DIR/list.json" ;;
   */rulesets/*)
     id="${path##*/}"
+    echo "$id" >>"$SERVE_DIR/reads"
+    if [ "${READ_FAIL:-}" = "$id" ]; then
+      echo "fixture read failure" >&2; exit 1
+    fi
+    if [ -n "${BYPASS_SHAPE:-}" ] && [ ! -f "$PUT_DIR/$id.json" ]; then
+      jq "$BYPASS_SHAPE" "$SRC_DIR/rs$id.json"; exit 0
+    fi
     if [ "${VERIFY_FAIL:-0}" = 1 ] && [ -f "$PUT_DIR/$id.json" ]; then
       echo "curl: (52) Empty reply from server" >&2; exit 1     # GET after PUT
     fi
@@ -83,7 +90,7 @@ setup() {
   mkdir -p "$work/src" "$work/serve" "$work/put"
   cp "$work"/rs*.json "$work/src/"
   cp "$work"/rs*.json "$work/serve/"
-  jq -n '[{id:1,target:"branch"},{id:2,target:"branch"},{id:3,target:"branch"},{id:4,target:"branch"}]' \
+  jq -n '([range(1;5) | {id:.,target:"branch",source_type:"Repository"}] + [{id:5,target:"branch",source_type:"Organization"},{id:6,target:"tag",source_type:"Repository"}])' \
     >"$work/serve/list.json"
 }
 
@@ -91,6 +98,7 @@ out=""; rc=0
 run() {
   SRC_DIR="$work/src" SERVE_DIR="$work/serve" PUT_DIR="$work/put" \
     REFUSE="${REFUSE:-0}" VERIFY_FAIL="${VERIFY_FAIL:-0}" CORRUPT="${CORRUPT:-0}" \
+    READ_FAIL="${READ_FAIL:-}" BYPASS_SHAPE="${BYPASS_SHAPE:-}" MUTATION="${MUTATION:-.}" \
     GH="$work/gh" REPO="example/repo" ONLY="${ONLY:-}" \
     bash "$script" "$@" >"$work/out" 2>&1
   rc=$?; out="$(cat "$work/out")"
@@ -159,6 +167,41 @@ setup; CORRUPT=1; run --apply
 check "corrupt read-back exits 1" 1 "$rc"
 check_says "corrupt read-back says UNVERIFIED" "UNVERIFIED"
 CORRUPT=0
+
+# Inherited and non-branch rulesets must never reach the repository endpoint.
+setup; run --apply
+check "inherited and tag rulesets not read" 0 "$(grep -Ec '^(5|6)$' "$work/serve/reads")"
+setup; ONLY=5 run --apply
+check "explicit inherited target refused" 1 "$rc"
+check "explicit inherited target not written" 0 "$(ls "$work/put" | wc -l | tr -d ' ')"
+
+# A failed explicit target is a failure; broad scans retain their skip policy.
+setup; ONLY='1 2' READ_FAIL=2 run --apply
+check "unreadable explicit target fails" 1 "$rc"
+check_says "unreadable explicit target named" "cannot read targeted ruleset 2"
+setup; READ_FAIL=2 run --apply
+check "unreadable non-targeted ruleset skipped" 0 "$rc"
+check_says "unreadable non-targeted ruleset named" "SKIP 2"
+
+for shape in 'del(.bypass_actors)' '.bypass_actors=null' '.bypass_actors={}' '.bypass_actors=""'; do
+  setup; ONLY=1 BYPASS_SHAPE="$shape" run --apply
+  check "unknown bypass shape $shape fails" 1 "$rc"
+  check_says "unknown bypass shape $shape reported" "expected an array"
+  check "unknown bypass shape $shape not written" 0 "$(ls "$work/put" | wc -l | tr -d ' ')"
+done
+
+# Equal rule counts cannot hide changed rules or other writable fields.
+for mutation in \
+  '.rules[0].parameters.required_status_checks[0].context="different check"' \
+  '.conditions.ref_name.include=["~ALL"]' \
+  '.enforcement="disabled"' \
+  '.name="different name"' \
+  '.target="tag"' \
+  '.bypass_actors=[{actor_type:"RepositoryRole",actor_id:5,bypass_mode:"always"}]'; do
+  setup; ONLY=1 MUTATION="$mutation" run --apply
+  check "read-back mutation $mutation fails" 1 "$rc"
+  check_says "read-back mutation $mutation diagnosed" "read-back mismatch"
+done
 
 # 9. unknown argument is not silently ignored
 run --force

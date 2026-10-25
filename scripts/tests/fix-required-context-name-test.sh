@@ -87,7 +87,8 @@ out=""; rc=0
 run() { # fixture-file [arg]
   : >"$work/written"
   FIXTURE="$1" WRITTEN="$work/written" PUT_CAPTURE="$work/payload.json" \
-    REFUSE="${REFUSE:-0}" GH="$work/gh" \
+    REFUSE="${REFUSE:-0}" GH="$work/gh" PATH="$work/bin:$PATH" \
+    COUNT_TARGET="${COUNT_TARGET:-}" COUNT_VALUE="${COUNT_VALUE:-}" \
     bash "$script" "${2:-}" >"$work/out" 2>&1
   rc=$?
   out="$(cat "$work/out")"
@@ -149,6 +150,43 @@ check_says "inactive is refused" "not 'active'" "$out"
 REFUSE=1; run "$work/old-only.json" --apply; check "403 exits 1" 1 "$rc"
 REFUSE=0
 check_says "403 explains the installation-token trap" "installation token" "$out"
+
+# Each query result must be validated independently. Simulate a jq query that
+# produces no count or a non-numeric count while the other queries still work.
+mkdir -p "$work/bin"
+real_jq="$(command -v jq)"
+cat >"$work/bin/jq" <<'SH'
+#!/usr/bin/env bash
+query="$*"
+field=""
+case "$query" in
+  *verify.json*)
+    case "$query" in
+      *'Hypatia verdict grid / Hypatia Neurosymbolic Analysis'*) field=v_new ;;
+      *'scan / Hypatia Neurosymbolic Analysis'*) field=v_old ;;
+      *'required_status_checks[]?] | length'*) field=v_cnt ;;
+    esac ;;
+  *before.json*)
+    case "$query" in *'required_status_checks[]?] | length'*) field=n_ctx ;; esac ;;
+esac
+if [ -n "$field" ] && [ "$field" = "$COUNT_TARGET" ]; then
+  printf '%s' "$COUNT_VALUE"; exit 1
+fi
+exec "$REAL_JQ" "$@"
+SH
+chmod +x "$work/bin/jq"
+export REAL_JQ="$real_jq"
+for field in v_new v_old v_cnt n_ctx; do
+  for value in '' invalid; do
+    COUNT_TARGET="$field" COUNT_VALUE="$value" run "$work/old-only.json" --apply
+    check "$field value '$value' exits 1" 1 "$rc"
+    if [ "$field" = n_ctx ]; then
+      check_says "invalid original count refused before write" "Refusing to send" "$out"
+    else
+      check_says "$field value '$value' is unverified" "UNVERIFIED" "$out"
+    fi
+  done
+done
 
 # 8. unknown argument is not silently ignored
 run "$work/old-only.json" --force; check "unknown arg exits 2" 2 "$rc"

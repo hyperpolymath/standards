@@ -77,8 +77,16 @@ fi
 # Filter the list locally rather than with `gh --jq`: the fetch above already
 # returned it, and a local jq keeps this working against any gh version and any
 # wrapper that does not pass --jq through.
-ids="$(jq -r '.[] | select(.target=="branch") | .id' "$tmp/list.json")"
-[ -n "$ONLY" ] && ids="$ONLY"
+ids="$(jq -r '.[] | select(.target=="branch" and .source_type=="Repository") | .id' "$tmp/list.json")"
+if [ -n "$ONLY" ]; then
+  for id in $ONLY; do
+    if ! grep -qxF "$id" <<<"$ids"; then
+      echo "FATAL: targeted ruleset $id is not a repository-owned branch ruleset" >&2
+      exit 1
+    fi
+  done
+  ids="$ONLY"
+fi
 [ -z "$ids" ] && { echo "no branch rulesets to inspect"; exit 0; }
 
 # Never rewrite a bypass away by accident on a ruleset that is currently doing
@@ -87,12 +95,20 @@ changed=0; skipped=0; target=0
 
 for id in $ids; do
   if ! "$GH" api "repos/$REPO/rulesets/$id" >"$tmp/rs.json" 2>"$tmp/err"; then
+    if [ -n "$ONLY" ]; then
+      echo "FATAL: cannot read targeted ruleset $id: $(head -1 "$tmp/err")" >&2
+      exit 1
+    fi
     echo "SKIP $id — cannot read it: $(head -1 "$tmp/err")" >&2
     skipped=$((skipped+1)); continue
   fi
 
   name="$(jq -r '.name' "$tmp/rs.json")"
   enforcement="$(jq -r '.enforcement' "$tmp/rs.json")"
+  if ! jq -e '.bypass_actors | type == "array"' "$tmp/rs.json" >/dev/null 2>&1; then
+    echo "FATAL: bypass actors for $id are unknown — expected an array" >&2
+    exit 1
+  fi
   n_bypass="$(jq -r '.bypass_actors | length' "$tmp/rs.json")"
 
   if [ "$n_bypass" -eq 0 ]; then
@@ -148,10 +164,8 @@ for id in $ids; do
   # A GET that fails leaves an empty file; jq then yields empty strings, and
   # `[ "" -ne 0 ]` is a *syntax* error that evaluates false — so the mismatch
   # branch is skipped and the script would print "verified" after performing no
-  # verification at all. That is the same defect this whole exercise is about
-  # (a gate reporting a check it never ran), so it is checked explicitly:
-  # the request must succeed, the response must parse, and the fields must be
-  # present and numeric before any comparison happens.
+  # verification at all. The request must succeed, the response must parse,
+  # and the complete writable ruleset must match the intended payload.
   if ! "$GH" api "repos/$REPO/rulesets/$id" >"$tmp/verify.json" 2>"$tmp/err"; then
     echo "FATAL: could not read back $id after writing it — protection is UNVERIFIED" >&2
     sed 's/^/       /' "$tmp/err" >&2
@@ -161,16 +175,11 @@ for id in $ids; do
     echo "FATAL: read-back for $id is not a ruleset payload — protection is UNVERIFIED" >&2
     exit 1
   fi
-  v_bypass="$(jq -r '.bypass_actors|length' "$tmp/verify.json" 2>/dev/null)"
   v_rules="$(jq -r '.rules|length' "$tmp/verify.json" 2>/dev/null)"
-  o_rules="$(jq -r '.rules|length' "$tmp/rs.json" 2>/dev/null)"
-  case "$v_bypass$v_rules$o_rules" in
-    *[!0-9]*|"")
-      echo "FATAL: read-back for $id gave non-numeric counts — protection is UNVERIFIED" >&2
-      exit 1 ;;
-  esac
-  if [ "$v_bypass" -ne 0 ] || [ "$v_rules" -ne "$o_rules" ]; then
-    echo "FATAL: read-back mismatch for $id (bypass=$v_bypass, rules $o_rules→$v_rules)" >&2
+  if ! jq -e --slurpfile intended "$tmp/payload.json" '
+    {name, target, enforcement, conditions, rules, bypass_actors} == $intended[0]
+  ' "$tmp/verify.json" >/dev/null 2>&1; then
+    echo "FATAL: read-back mismatch for $id — writable ruleset differs from intended payload" >&2
     exit 1
   fi
   echo "        verified: 0 bypass actors, $v_rules rules unchanged"

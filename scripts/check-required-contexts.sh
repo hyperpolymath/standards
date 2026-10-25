@@ -108,6 +108,7 @@ APP_NAMED_DEFAULT="github-advanced-security Dependabot Dependabot Updates Code s
 APP_NAMED="${APP_NAMED_CONTEXTS:-$APP_NAMED_DEFAULT}"
 GH_ACTIONS_APP=15368
 RAW="https://raw.githubusercontent.com"
+MERGE_BRANCH=""
 
 say()  { printf '%s\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
@@ -358,6 +359,7 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
     return 1
   fi
   br="$(gh api "repos/$repo" 2>/dev/null | jq -r 'if type=="object" then (.default_branch // "main") else "main" end' 2>/dev/null || echo main)"
+  MERGE_BRANCH="$br"
   for id in $(printf '%s' "$list" | jq -r '.[]? | select(.target=="branch") | .id'); do
     body="$(gh api "repos/$repo/rulesets/$id" 2>/dev/null || true)"
     printf '%s' "$body" | jq -c '
@@ -393,24 +395,51 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
 DATA_RULES='code_coverage code_quality'
 data_rules_json() { # emit one finding per data-dependent rule on a branch ruleset
   [ -f "${REQUIRED_CONTEXTS_JSON:-}" ] && return 0   # offline fixtures: none
-  command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 0
+  command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
   # Resolve the repo the same way required_json does. Returning early on an
   # unset GITHUB_REPOSITORY made this check silently report nothing in exactly
   # the local, hand-run case where someone is trying to find out why a green PR
   # will not merge.
   [ -n "${GITHUB_REPOSITORY:-}" ] || GITHUB_REPOSITORY="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
-  [ -n "${GITHUB_REPOSITORY:-}" ] || return 0
+  [ -n "${GITHUB_REPOSITORY:-}" ] || return 1
   local repo="$GITHUB_REPOSITORY" id body
   local list
-  list="$(gh api "repos/$repo/rulesets" 2>/dev/null || true)"
-  printf '%s' "$list" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  [ -n "$MERGE_BRANCH" ] || return 1
+  list="$(gh api "repos/$repo/rulesets" 2>/dev/null)" || return 1
+  printf '%s' "$list" | jq -es '
+    length == 1 and (.[0] | type == "array" and all(.[]; type == "object" and
+      (.target | type == "string") and (.id | type == "number")))
+  ' >/dev/null 2>&1 || return 1
   for id in $(printf '%s' "$list" | jq -r '.[]? | select(.target=="branch") | .id'); do
-    body="$(gh api "repos/$repo/rulesets/$id" 2>/dev/null || true)"
-    printf '%s' "$body" | jq -r --arg types "$DATA_RULES" --arg id "$id" '
-      if type == "object" and .enforcement != "disabled" then
-        .rules[]? | select(.type as $t | ($types | split(" ") | index($t)))
+    body="$(gh api "repos/$repo/rulesets/$id" 2>/dev/null)" || return 1
+    printf '%s' "$body" | jq -es '
+      length == 1 and (.[0] | type == "object" and
+      (.enforcement | IN("active", "evaluate", "disabled")) and
+      (.rules | type == "array" and all(.[]; type == "object" and (.type | type == "string"))) and
+      (.conditions.ref_name | type == "object" and
+        (.include | type == "array" and all(.[]; type == "string")) and
+        (.exclude | type == "array" and all(.[]; type == "string"))))
+    ' >/dev/null 2>&1 || return 1
+    printf '%s' "$body" | jq -r --arg types "$DATA_RULES" --arg id "$id" --arg branch "$MERGE_BRANCH" '
+      # GitHub ref filters use pathname globs: * and ? do not cross /.
+      def matches_ref:
+        if . == "~ALL" or . == "~DEFAULT_BRANCH" then true
+        else
+          ([scan("\\*\\*/|\\*\\*|\\*|\\?|\\[[^]]+\\]|.") |
+            if . == "**/" then "(.*/)?"
+            elif . == "**" then ".*"
+            elif . == "*" then "[^/]*"
+            elif . == "?" then "[^/]"
+            elif startswith("[") then sub("^\\[!"; "[^")
+            else gsub("(?<c>[.()+^$|{}\\\\])"; "\\\(.c)") end] | join("")) as $pattern
+          | ("refs/heads/" + $branch) | test("^" + $pattern + "$")
+        end;
+      if .enforcement == "active" then
+        select(any(.conditions.ref_name.include[]; matches_ref))
+        | select(all(.conditions.ref_name.exclude[]; matches_ref | not))
+        | .rules[]? | select(.type as $t | ($types | split(" ") | index($t)))
         | "rule:\(.type) in ruleset \($id)\t0\tUNSATISFIED-RULE"
-      else empty end' 2>/dev/null
+      else empty end' 2>/dev/null || return 1
   done
   return 0
 }
@@ -433,11 +462,14 @@ run_audit() {
   # JSON and the same allow-list reconciliation. A context name that cannot be
   # produced and a rule whose data is never uploaded fail the same way: every
   # pull request becomes undecidable.
-  data_rules_json >>"$ROWS" 2>/dev/null || true
   if ! required_json >"$required"; then
     err "required contexts not inspected — could not read branch rules"
     inspected=0
     : >"$required"  # discard any partial results from the failed inspection
+  elif ! data_rules_json >>"$ROWS"; then
+    err "data-dependent rules not inspected — could not read branch rules"
+    inspected=0
+    : >"$ROWS"  # discard any partial findings from the failed inspection
   fi
 
   say ""
@@ -533,6 +565,11 @@ EOS
     esac
   done <"$required"
 
+  # Count rule findings before serializing the total into the JSON report.
+  local n_rule
+  n_rule="$(awk -F'\t' '$3=="UNSATISFIED-RULE"' "$ROWS" 2>/dev/null | wc -l | tr -d ' ')"
+  case "$n_rule" in ''|*[!0-9]*) n_rule=0 ;; esac
+  unsatisfiable=$((unsatisfiable + n_rule))
   if [ -n "$JSON_OUT" ]; then
     jq -Rs --arg repo "${GITHUB_REPOSITORY:-$ROOT}" --argjson n "$unsatisfiable" \
        --argjson inspected "$inspected" --rawfile _ /dev/null '
@@ -546,10 +583,6 @@ EOS
   # ONLY finding was a data-dependent rule returned 0 — the gate would print the
   # reason a pull request cannot merge and then declare success, which is the
   # defect this script exists to catch, committed by the script itself.
-  local n_rule
-  n_rule="$(awk -F'\t' '$3=="UNSATISFIED-RULE"' "$ROWS" 2>/dev/null | wc -l | tr -d ' ')"
-  case "$n_rule" in ''|*[!0-9]*) n_rule=0 ;; esac
-  unsatisfiable=$((unsatisfiable + n_rule))
   if [ "$n_rule" -gt 0 ]; then
     while IFS= read -r r; do
       [ -n "$r" ] || continue

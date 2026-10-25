@@ -175,11 +175,13 @@ fi
 v_new="$(jq -r --arg c "$NEW_CONTEXT" '[.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[]? | select(.context==$c)] | length' "$tmp/verify.json")"
 v_old="$(jq -r --arg c "$OLD_CONTEXT" '[.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[]? | select(.context==$c)] | length' "$tmp/verify.json")"
 v_cnt="$(jq -r '[.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[]?] | length' "$tmp/verify.json")"
-case "$v_new$v_old$v_cnt$n_ctx" in
-  *[!0-9]*|"")
-    echo "FATAL: read-back gave non-numeric counts — UNVERIFIED" >&2
-    exit 1 ;;
-esac
+for count in "$v_new" "$v_old" "$v_cnt" "$n_ctx"; do
+  case "$count" in
+    *[!0-9]*|"")
+      echo "FATAL: read-back gave non-numeric counts — UNVERIFIED" >&2
+      exit 1 ;;
+  esac
+done
 
 if [ "$v_new" -ne 1 ] || [ "$v_old" -ne 0 ] || [ "$v_cnt" -ne "$n_ctx" ]; then
   echo "FATAL: read-back does not match what was intended." >&2
