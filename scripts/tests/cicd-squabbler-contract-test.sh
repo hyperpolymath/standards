@@ -110,5 +110,14 @@ wf_pin="$(grep -oE 'squabble@[0-9a-f]{40}' "$reusable" | head -1 | cut -d@ -f2)"
 lock_pin="$(grep -oE "cicd-squabbler@[0-9a-f]{40}" "$lock" | head -1 | cut -d@ -f2)"
 t "workflow pin equals lock pin" test "$wf_pin" = "$lock_pin"
 
+# A full-SHA lock key must record a containing branch/tag in `ref:`; when
+# `ref:` repeats the SHA, GitHub rejects the action at job setup as an
+# "invalid lockfile pin" (standards#1271, measured on this workflow).
+lock_ref="$(grep -A1 -F "'hyperpolymath/cicd-squabbler@$wf_pin':" "$lock" \
+  | sed -n "s/.*ref: '\([^']*\)'.*/\1/p" | head -1)"
+t "lock recorded ref is not the pin SHA" \
+  bash -c '[ -n "$1" ] && [ "$1" != "$2" ] && ! printf "%s" "$1" | grep -qE "^[0-9a-f]{40}$"' \
+  _ "$lock_ref" "$wf_pin"
+
 printf '\ncicd-squabbler contract tests: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
