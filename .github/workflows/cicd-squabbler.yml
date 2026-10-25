@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# cicd-squabbler.yml — dogfood caller for cicd-squabbler-reusable.yml.
+#
+# This repository is the canon other estate repos pin reusables from, which
+# makes its own chain map the estate's highest fan-in node: a cycle or a
+# dead upstream here is inherited by every consumer. So `chains` runs on
+# every pull request (no `paths:` filter — a filtered workflow never
+# reports on PRs that miss the filter, which deadlocks any ruleset that
+# ever requires it), and the fight report classifies each PR's reds into
+# the step summary, propose-only.
+
+name: CICD Squabbler
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Mondays 07:17 UTC — after the required-contexts sweep at 06:52, so a
+    # weekend upstream deletion is reported by both instruments before the
+    # working week, each naming the half it can see.
+    - cron: '17 7 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  squabble:
+    # The reusable's jobs need exactly these grants; a job-level block
+    # replaces (never merges with) the workflow-level one for the call.
+    permissions:
+      contents: read
+      pull-requests: read
+      attestations: read
+    uses: ./.github/workflows/cicd-squabbler-reusable.yml
+    with:
+      pr-number: ${{ github.event.pull_request.number && format('{0}', github.event.pull_request.number) || '' }}

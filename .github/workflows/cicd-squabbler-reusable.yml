@@ -1,0 +1,170 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# cicd-squabbler-reusable.yml — run the estate's CI/CD fighter as a gate.
+#
+# The squabbler's one invariant is machine-checked (SPARK, in its repo):
+# green ⇔ a required check actually ran and passed. It never offers a
+# bypass, an admin override, or a dropped required context as a move. That
+# is exactly the failure this repository paid for on 2026-10-24 (a required
+# context nothing could produce, merged around with an `always` bypass), so
+# the tool belongs INSIDE the gate set, not beside it.
+#
+# Two jobs, two different contracts:
+#
+# * `chains` is a HARD gate. `squabble chains` maps reusable-workflow and
+#   action dependencies between repositories. Exit 4 means a dependency
+#   cycle or a dead upstream — either makes some required check
+#   unproducible while the board reads green, so the job fails. Exit 2 is a
+#   tool failure and also fails: a gate that cannot look must not pass.
+#   Warnings (pin skew, diamonds) are printed and do not fail.
+#
+# * `fight-report` is a REPORT, deliberately. It classifies the calling
+#   pull request's reds (self-win | escalate | assign-owner) into the step
+#   summary. It fails only when the tool itself fails (exit 2): "the
+#   planner proposed a move" is information for a human, not a verdict on
+#   the PR, and gating on it would fail every PR that is legitimately red
+#   for unrelated reasons — twice. It NEVER passes `--apply` and never
+#   writes to the repository; enacting a move is a follow-up commit a
+#   human (or a later, separately-reviewed automation) makes.
+#
+# The squabble binary is installed by the upstream composite action pinned
+# to a commit; the action itself refuses any binary whose sha256 and build
+# attestation do not match its pinned release. `verify-satisfied` is NOT
+# run here: it needs Administration:read, which `github.token` cannot
+# hold — that leg belongs to an App-token caller, tracked upstream.
+#
+# Consumers pin this reusable by commit SHA like every other estate
+# reusable. Keep caller grants at or above the job-level grants below, or
+# GitHub rejects the run at startup with no check run at all.
+
+name: CICD Squabbler (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        description: "Pull request number for the fight report; empty skips it (push/schedule runs)."
+        required: false
+        type: string
+        default: ""
+      runs-on:
+        description: "Runner label; the pinned squabble release is x86_64 Linux only."
+        required: false
+        type: string
+        default: "ubuntu-latest"
+
+permissions:
+  contents: read
+
+jobs:
+  chains:
+    name: Squabble chains (cycles and dead upstreams block)
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned, attested squabble
+        id: squabble
+        uses: hyperpolymath/cicd-squabbler/.github/actions/squabble@14f853fde902ab2d7631070d87a9dc9122e01013
+        with:
+          args: ""
+
+      # Argument form is <path>=<owner/repo>: the checkout is this repo, so
+      # its own outbound reusable/action edges are attributed to its slug.
+      # No `gh:` sources and no --follow here: following into other repos
+      # needs their read access from this token and belongs to the weekly
+      # estate sweep, not a per-PR gate.
+      - name: Map this repository's CI dependency chains
+        env:
+          SQUABBLE_BIN: ${{ steps.squabble.outputs.path }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          test -x "$SQUABBLE_BIN" || { echo "::error::squabble did not install"; exit 1; }
+          rc=0
+          "$SQUABBLE_BIN" chains ".=$REPO" | tee "$RUNNER_TEMP/chains.txt" || rc=$?
+          {
+            echo "### Squabble chains"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/chains.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -eq 4 ]; then
+            echo "::error::blocking chain finding (dependency cycle or dead upstream) — see the summary"
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::squabble chains failed to run (exit $rc) — a gate that cannot look does not pass"
+            exit 1
+          fi
+
+  fight-report:
+    name: Squabble fight report (advisory)
+    if: inputs.pr-number != ''
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned, attested squabble
+        id: squabble
+        uses: hyperpolymath/cicd-squabbler/.github/actions/squabble@14f853fde902ab2d7631070d87a9dc9122e01013
+        with:
+          args: ""
+
+      # Propose-only: no --apply, ever, from CI. Exit 3 ("no gate on the
+      # base branch") is a reportable finding printed below, not a tool
+      # failure; exit 2 is a tool failure and fails the job, because a
+      # silently broken advisor would be indistinguishable from "nothing
+      # to fight".
+      - name: Classify this pull request's reds
+        env:
+          SQUABBLE_BIN: ${{ steps.squabble.outputs.path }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          test -x "$SQUABBLE_BIN" || { echo "::error::squabble did not install"; exit 1; }
+          case "$PR_NUMBER" in
+            ''|*[!0-9]*) echo "::error::pr-number must be a number, got '$PR_NUMBER'"; exit 1 ;;
+          esac
+          rc=0
+          "$SQUABBLE_BIN" fight "$REPO" "$PR_NUMBER" --repo-root . > "$RUNNER_TEMP/fight.txt" 2>&1 || rc=$?
+          {
+            echo "### Squabble fight report (propose-only)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/fight.txt"
+            echo '```'
+            echo
+            echo "Exit $rc. No move was applied; squabble in CI proposes, humans enact."
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/fight.txt"
+          if [ "$rc" -eq 2 ]; then
+            echo "::error::squabble fight failed to run — the report above is a failure, not an all-clear"
+            exit 1
+          fi
+          if [ "$rc" -eq 3 ]; then
+            echo "::warning::squabble found no required_status_checks gate on the base branch — nothing to triage"
+            exit 0
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::squabble fight exited $rc (unclassified) — treated as a tool failure"
+            exit 1
+          fi
