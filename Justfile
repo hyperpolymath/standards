@@ -72,32 +72,32 @@ governance-gates-test:
     @bash scripts/tests/governance-gates-505-test.sh
 
 # Structural validation of the Mustfile contract (severity + run/verification per check)
-mustfile-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
+mustfile-check path=".machine_readable/contractiles/must/must_praxis.deed":
     @bash scripts/check-mustfile-structure.sh "{{path}}"
 
 # Execute the Mustfile's `- run:` checks (critical/high failures block)
-must-check path=".machine_readable/contractiles/must/Mustfile.a2ml":
+must-check path=".machine_readable/contractiles/must/must_praxis.deed":
     @bash scripts/run-mustfile.sh "{{path}}"
 
 # Structural validation of the Debtfile (probe + ceiling + policy + expiry per entry)
-debtfile-check path=".machine_readable/Debtfile.a2ml":
+debtfile-check path=".machine_readable/debt_praxis.deed":
     @bash scripts/check-debtfile-structure.sh "{{path}}"
 
 # Re-measure every Debtfile probe and compare against its ceiling (read-only)
-debt-measure path=".machine_readable/Debtfile.a2ml":
+debt-measure path=".machine_readable/debt_praxis.deed":
     @bash scripts/run-debtfile.sh "{{path}}"
 
 # Re-measure and WRITE BACK: updates count, lowers ceilings that were paid down.
 # Never raises a ceiling — that needs a Debt-exception in the commit message.
-debt-ratchet-down path=".machine_readable/Debtfile.a2ml":
+debt-ratchet-down path=".machine_readable/debt_praxis.deed":
     @bash scripts/run-debtfile.sh --write "{{path}}"
 
 # Install this repo's git hooks into .git/hooks/ (pre-commit guards)
 hooks-install:
     @bash hooks/install.sh
 
-# DYADT: verify a CLAIMS.a2ml against primary evidence (default: root CLAIMS.a2ml)
-verify-claims path="CLAIMS.a2ml":
+# DYADT: verify archived claims against primary evidence (A2ML is retired)
+verify-claims path=".machine_readable/claims_praxis.deed":
     @bash scripts/verify-claims.sh "{{path}}"
 
 # DYADT: run the conformance vector suite
@@ -125,7 +125,13 @@ canonical-names-check base="origin/main":
 # is not expected to score Gold — but a *broken* audit (exit 4 / unexpected)
 # must fail loudly rather than pass silently under a blanket `|| true`
 # (Wave-0 false-green fix).
+# A2ML is retired. Fail if a tracked .a2ml sits outside 9-archive/.
+a2ml-archived-check:
+    @bash scripts/check-a2ml-archived.sh
+
 validate:
+    @echo "=== validate: A2ML stays in 9-archive/ (HARD GATE) ==="
+    @bash scripts/check-a2ml-archived.sh
     @echo "=== validate: per-language testing guides (structural, HARD GATE) ==="
     @bash scripts/check-language-guide.sh
     @echo "=== validate: canonical-names reintroduction guard (vs origin/main) ==="
@@ -136,8 +142,8 @@ validate:
 
 # Print role-appropriate LLM warm-up context (machine front door)
 llm-context role="dev":
-    @echo "# Front door: 0-AI-MANIFEST.a2ml (machine) + README.adoc (human)"
-    @cat "llm-warmup-{{role}}.adoc" 2>/dev/null || cat 0-AI-MANIFEST.a2ml
+    @echo "# Front door: .machine_readable/descriptiles/0-AI-MANIFEST.deed (machine routing) + README.adoc (human)"
+    @cat "docs/onboarding/llm-warmup-{{role}}.adoc" 2>/dev/null || cat .machine_readable/descriptiles/0-AI-MANIFEST.deed
 
 # Build all sub-project artefacts. The canon ships specs, not products: the k9
 # Rust binding moved to hyperpolymath/k9-ecosystem (#491) and the groove ipv6t
@@ -192,7 +198,7 @@ doctor:
     @echo "Checking for hardcoded paths..."
     @grep -rn '$HOME\|$ECLIPSE_DIR' --include='*.rs' --include='*.ex' --include='*.res' --include='*.gleam' --include='*.sh' . 2>/dev/null | head -5 || echo "  [OK] No hardcoded paths"
     @echo "Checking canonical contractiles source..."
-    @test -f .machine_readable/contractiles/dust/Dustfile.a2ml && echo "  [OK] canonical Dustfile present" || echo "  [FAIL] canonical Dustfile missing"
+    @test -f .machine_readable/contractiles/dust/dust.k9.ncl && echo "  [OK] canonical dust contract present" || echo "  [FAIL] canonical dust contract missing"
     @echo "Checking git hooks are installed..."
     @test -f "$(git rev-parse --git-dir)/hooks/pre-commit" && echo "  [OK] pre-commit hook installed" || echo "  [INFO] pre-commit hook not installed — run 'just hooks-install'"
     @echo "Diagnostics complete."
@@ -248,4 +254,4 @@ crg-badge:
       A) color="brightgreen" ;; B) color="green" ;; C) color="yellow" ;; \
       D) color="orange" ;; E) color="red" ;; F) color="critical" ;; \
       *) color="lightgrey" ;; esac; \
-    echo "[![CRG $grade](https://img.shields.io/badge/CRG-$grade-$color?style=flat-square)](https://github.com/hyperpolymath/standards/tree/main/component-readiness-grades)"
+    echo "[![CRG $grade](https://img.shields.io/badge/CRG-$grade-$color?style=flat-square)](https://github.com/hyperpolymath/standards/tree/main/4-readiness/component-readiness-grades)"

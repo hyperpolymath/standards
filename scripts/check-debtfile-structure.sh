@@ -40,6 +40,26 @@ if [ ! -f "$DEBT" ]; then
   exit 2
 fi
 
+# Deed form used by this repository. Caller repositories still pass .a2ml.
+if [ "${DEBT##*.}" = "deed" ]; then
+  awk '
+    /\(entry / {
+      entries++
+      if ($0 !~ /:probe "/) { printf "  ❌ entry missing :probe\n"; fail=1 }
+      if ($0 !~ /:ceiling [0-9]+/) { printf "  ❌ entry missing :ceiling\n"; fail=1 }
+      if ($0 !~ /:count [0-9]+/) { printf "  ❌ entry missing :count\n"; fail=1 }
+      if ($0 !~ /:severity (critical|high|medium|low) /) { printf "  ❌ entry severity missing or illegal\n"; fail=1 }
+      if ($0 !~ /:policy (remediable|flag-only) /) { printf "  ❌ entry policy missing or illegal\n"; fail=1 }
+    }
+    END {
+      if (entries < 1) { print "❌ Debtfile deed declares no entries"; exit 1 }
+      if (fail) { printf "❌ Malformed Debtfile deed (%d entries)\n", entries; exit 1 }
+      printf "✅ Debtfile structurally valid (%d entries)\n", entries
+    }
+  ' "$DEBT"
+  exit $?
+fi
+
 fail=0
 entries=0
 seen_ids=" "

@@ -34,7 +34,9 @@ is_excluded() {
   case "$1" in
     0-canon/CANONICAL-NAMES.adoc|scripts/check-canonical-names.sh|scripts/tests/*|\
     *MIGRATION*|*migration*|*CHANGELOG*|\
-    .machine_readable/archive/scorecards-v1/*.scorecard.a2ml|\
+    9-archive/*|\
+    9-archive/a2ml/.machine_readable/archive/scorecards-v1/*.scorecard.a2ml|\
+    9-archive/standards-update/.machine_readable/6scm-archive/.machine_readable/6a2/*|\
     standards-update/.machine_readable/6scm-archive/.machine_readable/6a2/*) return 0 ;;
   esac
   return 1

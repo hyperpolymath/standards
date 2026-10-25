@@ -12,8 +12,8 @@ ROOT="$(git -C "$HERE" rev-parse --show-toplevel)"
 VERIFIER="${DYADT_VERIFIER:-$ROOT/scripts/verify-claims.sh}"
 
 pass=0 fail=0
-for vec in "$HERE"/*.a2ml; do
-  name="$(basename "$vec" .a2ml)"
+for vec in "$HERE"/*_praxis.deed; do
+  name="$(basename "$vec" _praxis.deed)"
   exp="$HERE/$name.expected"
   [ -f "$exp" ] || { echo "  ❌ $name: no .expected file"; fail=$((fail+1)); continue; }
   # Run with unverifiable allowed so the verifier reports every verdict without

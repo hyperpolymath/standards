@@ -223,24 +223,59 @@ emit() {
   esac
 }
 
-while IFS= read -r raw; do
-  line="${raw#"${raw%%[![:space:]]*}"}"
-  case "$line" in
-    '[[claim]]'*) emit; in_claim=1; id=""; class=""; target=""; expect=""; verifier=""; statement=""; not_before=""; continue ;;
-  esac
-  [ "$in_claim" = 1 ] || continue
-  kv "$line" || continue
-  case "$KV_KEY" in
-    id)          id="$KV_VAL" ;;
-    claim_class) class="$KV_VAL" ;;
-    target)      target="$KV_VAL" ;;
-    expect)      expect="$KV_VAL" ;;
-    verifier)    verifier="$KV_VAL" ;;
-    statement)   statement="$KV_VAL" ;;
-    not_before)  not_before="$KV_VAL" ;;
-  esac
-done < "$CLAIMS"
-emit
+deed_unquote() {
+  local s="$1"
+  local i=1 c out="" esc=0 len
+  len=${#s}
+  while [ "$i" -lt "$len" ]; do
+    c="${s:$i:1}"
+    if [ "$esc" -eq 1 ]; then
+      case "$c" in n) out+=$'\n' ;; t) out+=$'\t' ;; *) out+="$c" ;; esac
+      esc=0
+    elif [ "$c" = "\\" ]; then esc=1
+    elif [ "$c" = '"' ]; then printf '%s' "$out"; return 0
+    else out+="$c"; fi
+    i=$((i + 1))
+  done
+  return 1
+}
+deed_sym() { local rest="${1#*$2 }"; printf '%s' "${rest%% *}" | tr -d ')'; }
+
+if [ "${CLAIMS##*.}" = "deed" ]; then
+  while IFS= read -r raw; do
+    case "$raw" in *'(claim '*) ;; *) continue ;; esac
+    in_claim=1
+    id="$(deed_sym "$raw" :id)"
+    class="$(deed_sym "$raw" :claim-class)"
+    verifier="$(deed_sym "$raw" :verifier)"
+    expect=""; target=""; statement=""
+    case "$raw" in *':expect "'*) expect="$(deed_unquote "${raw#*:expect }")" ;; esac
+    case "$raw" in *':target "'*) target="$(deed_unquote "${raw#*:target }")" ;; esac
+    case "$raw" in *':statement "'*) statement="$(deed_unquote "${raw#*:statement }")" ;; esac
+    not_before=""
+    emit
+    in_claim=0
+  done < "$CLAIMS"
+else
+  while IFS= read -r raw; do
+    line="${raw#"${raw%%[![:space:]]*}"}"
+    case "$line" in
+      '[[claim]]'*) emit; in_claim=1; id=""; class=""; target=""; expect=""; verifier=""; statement=""; not_before=""; continue ;;
+    esac
+    [ "$in_claim" = 1 ] || continue
+    kv "$line" || continue
+    case "$KV_KEY" in
+      id)          id="$KV_VAL" ;;
+      claim_class) class="$KV_VAL" ;;
+      target)      target="$KV_VAL" ;;
+      expect)      expect="$KV_VAL" ;;
+      verifier)    verifier="$KV_VAL" ;;
+      statement)   statement="$KV_VAL" ;;
+      not_before)  not_before="$KV_VAL" ;;
+    esac
+  done < "$CLAIMS"
+  emit
+fi
 
 echo "DYADT verify: $CLAIMS (base: ${BASE:-<none>})"
 printf '%s\n' "${rows[@]}"

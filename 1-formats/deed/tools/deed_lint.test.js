@@ -172,7 +172,7 @@ function cli(...args) {
 
 describe("CLI", () => {
   test("canonical machine manifest passes with its real filename", () => {
-    const manifest = join(HERE, "../../../0-AI-MANIFEST.deed");
+    const manifest = join(HERE, "../../../.machine_readable/descriptiles/0-AI-MANIFEST.deed");
     const r = cli(manifest);
     expect(r.code).toBe(0);
     expect(r.out).toContain(`OK   ${manifest}`);

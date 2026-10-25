@@ -64,7 +64,7 @@ jobs:
           echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "base_when=$(git log -1 --format=%cd --date=short HEAD)" >> "$GITHUB_OUTPUT"
 
-          if [ ! -f .machine_readable/Debtfile.a2ml ]; then
+          if [ ! -f .machine_readable/debt_praxis.deed ]; then
             echo "No Debtfile — nothing to measure."
             echo "changed=no" >> "$GITHUB_OUTPUT"
             exit 0
@@ -77,10 +77,10 @@ jobs:
           # growth is a human decision (pay it down, or raise the ceiling with a
           # `Debt-exception:` trailer), never something a cron decides.
           rc=0
-          bash scripts/run-debtfile.sh --write | tee "$RUNNER_TEMP/report.txt" || rc=$?
+          bash scripts/run-debtfile.sh --write .machine_readable/debt_praxis.deed | tee "$RUNNER_TEMP/report.txt" || rc=$?
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
 
-          if git diff --quiet -- .machine_readable/Debtfile.a2ml; then
+          if git diff --quiet -- .machine_readable/debt_praxis.deed; then
             echo "No change in measured debt."
             echo "changed=no" >> "$GITHUB_OUTPUT"
           else
@@ -98,7 +98,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git checkout -B "$BRANCH"
-          git add .machine_readable/Debtfile.a2ml
+          git add .machine_readable/debt_praxis.deed
           # One -m per paragraph. A multi-line quoted string here would put its
           # continuation lines at column 1, which ends the YAML block scalar and
           # leaves the workflow unparseable — the estate already has a large
@@ -108,7 +108,7 @@ jobs:
                      -m "Measured against ${{ steps.measure.outputs.base_sha }} (${{ steps.measure.outputs.base_when }}). If main has moved since, these numbers are stale; re-run this workflow before merging."
           git push -f origin "$BRANCH"
 
-          BODY="$(printf 'Automated re-measurement of `.machine_readable/Debtfile.a2ml`.\n\n```\n%s\n```\n\n**Measured against `%s` (%s).** These numbers describe that tree, not\nnecessarily the tree this PR will land in. If `main` has moved since, re-run\nthe workflow before merging — merging a stale measurement is what left\n`todo-fixme-markers` breached for five weeks after #1302.\n\nCeilings only fall here. If an entry breached its ceiling this PR is red on\npurpose — pay the debt down, or raise the ceiling in a human commit carrying\na `Debt-exception:` trailer naming the entry.\n\nSee `docs/DEBTFILE-SPEC.adoc`.\n' "$(cat "$RUNNER_TEMP/report.txt")" "${{ steps.measure.outputs.base_sha }}" "${{ steps.measure.outputs.base_when }}")"
+          BODY="$(printf 'Automated re-measurement of `.machine_readable/debt_praxis.deed`.\n\n```\n%s\n```\n\n**Measured against `%s` (%s).** These numbers describe that tree, not\nnecessarily the tree this PR will land in. If `main` has moved since, re-run\nthe workflow before merging — merging a stale measurement is what left\n`todo-fixme-markers` breached for five weeks after #1302.\n\nCeilings only fall here. If an entry breached its ceiling this PR is red on\npurpose — pay the debt down, or raise the ceiling in a human commit carrying\na `Debt-exception:` trailer naming the entry.\n\nSee `docs/DEBTFILE-SPEC.adoc`.\n' "$(cat "$RUNNER_TEMP/report.txt")" "${{ steps.measure.outputs.base_sha }}" "${{ steps.measure.outputs.base_when }}")"
 
           if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
             gh pr edit "$BRANCH" --body "$BODY"

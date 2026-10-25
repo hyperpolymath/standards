@@ -1,0 +1,13 @@
+;; SPDX-License-Identifier: MPL-2.0
+;; SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+;; Hypatia rule profile-drift-detector. The .a2ml body is archived; this deed is the live file.
+(praxis-deed
+  :schema-version "1.0.0"
+  :canonical-name "profile-drift-detector"
+  :beholding-chora #u5"estate/chora"
+  ;; Translated from archived hypatia-rules/profile-drift-detector.a2ml. Not an A2ML rule.
+  (rule :version "1.0" :body "id: HYP-S007\nname: \"A2ML profile drift detector\"\ndescription: \"Flag a descriptiles file whose content drifts from its declared @profile\"\nseverity: medium\ncategory: Dogfooding\nstrategy: review\nauto_fixable: false\nsource: standards/hypatia-rules")
+  (scanner :type file-tree :body "find:\n  - glob: \"**/.machine_readable/descriptiles/*.a2ml\"\n  - glob: \"**/.machine_readable/anchors/ANCHOR.a2ml\"\n  - glob: \"a2ml/profiles/*/PROFILE.a2ml\"\n  - glob: \"a2ml/profiles/REGISTRY.a2ml\"")
+  (logic :engine built-in :body "# 1. For each descriptiles file, read the @profile(id=ns/name) declaration in its\n#    preamble. A descriptiles file with no @profile declaration is itself a finding\n#    (undeclared: cannot be validated through the mechanism).\n# 2. Resolve ns/name against a2ml/profiles/REGISTRY.a2ml; confirm the\n#    definition's sha256 equals the registry-pinned hash. A hash mismatch is a\n#    finding (registry desync).\n# 3. Load the profile definition (the five axes) and extract the file's facts:\n#    section titles (TOML [sections] or, for the key-based anchor dialect,\n#    top-level keys), directive occurrences, and @ref classes.\n# 4. Compute conformance exactly as src/A2ML/Profiles.idr conformsB:\n#      - every required_section present,\n#      - every occurring directive permitted by allowed_directives,\n#      - required_directives cardinality satisfied,\n#      - required reference_classes present,\n#      - mode >= min_attestation.\n# 5. Emit one finding per violation (mirrors Profiles.idr ProfileViolation).\nsteps:\n  - read_profile_decl: \"@profile(id=*)\"\n  - resolve_against_registry: \"a2ml/profiles/REGISTRY.a2ml\"\n  - verify_definition_hash: \"sha256\"\n  - extract_doc_facts: { sections: true, directives: true, ref_classes: true }\n  - check_conformance: \"conformsB\"\n  - emit_violations")
+  (action :body "emit_signal: compliance.finding.new\nmessage_template: \"Profile drift: {file} declares @profile({profile_id}) but {violation} (see a2ml/profiles/{profile_dir})\"\nrecipe: none")
+)

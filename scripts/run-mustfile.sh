@@ -14,16 +14,78 @@
 # (reported, non-blocking). This is the executable half of Mustfile checking;
 # scripts/check-mustfile-structure.sh is the structural half.
 #
-# Usage: run-mustfile.sh [path/to/Mustfile.a2ml]
-#   Default: .machine_readable/contractiles/must/Mustfile.a2ml
+# Usage: run-mustfile.sh [path/to/must_praxis.deed]
+#   Default: .machine_readable/contractiles/must/must_praxis.deed
+#   A path ending in .a2ml is still accepted, for a caller that has not converted.
 # Exit: 0 all blocking checks pass · 1 a blocking check failed · 2 file missing
 
 set -uo pipefail
 
-MUST="${1:-.machine_readable/contractiles/must/Mustfile.a2ml}"
+MUST="${1:-.machine_readable/contractiles/must/must_praxis.deed}"
 if [ ! -f "$MUST" ]; then
   echo "error: Mustfile not found: $MUST" >&2
   exit 2
+fi
+
+# Deed form: one (check ...) clause per line. :body is a deed string.
+if [ "${MUST##*.}" = "deed" ]; then
+  deed_unquote() {
+    local s="$1"
+    local i=1 c out="" esc=0 len
+    len=${#s}
+    while [ "$i" -lt "$len" ]; do
+      c="${s:$i:1}"
+      if [ "$esc" -eq 1 ]; then
+        case "$c" in n) out+=$'\n' ;; t) out+=$'\t' ;; *) out+="$c" ;; esac
+        esc=0
+      elif [ "$c" = "\\" ]; then esc=1
+      elif [ "$c" = '"' ]; then printf '%s' "$out"; return 0
+      else out+="$c"; fi
+      i=$((i + 1))
+    done
+    return 1
+  }
+  deed_sym() { local rest="${1#*$2 }"; printf '%s' "${rest%% *}" | tr -d ')'; }
+  pass=0 warn=0 manual=0 blocking_fail=0
+  while IFS= read -r raw; do
+    case "$raw" in
+      *'(check '*) ;;
+      *) continue ;;
+    esac
+    name="$(deed_sym "$raw" :id)"
+    sev="$(deed_sym "$raw" :severity)"
+    kind="$(deed_sym "$raw" :discharge)"
+    body=""
+    case "$raw" in
+      *':body "'*) body="$(deed_unquote "${raw#*:body }")" ;;
+    esac
+    if [ "$kind" = "run" ]; then
+      if [ -z "$body" ]; then
+        printf '  ❌ FAIL   [%-8s] %s\n' "$sev" "$name"; blocking_fail=$((blocking_fail + 1))
+        continue
+      fi
+      if bash -c "$body" >/dev/null 2>&1; then
+        printf '  ✅ PASS   [%-8s] %s\n' "$sev" "$name"; pass=$((pass + 1))
+      else
+        case "$sev" in
+          critical|high)
+            printf '  ❌ FAIL   [%-8s] %s\n' "$sev" "$name"; blocking_fail=$((blocking_fail + 1)) ;;
+          *)
+            printf '  ⚠️  WARN   [%-8s] %s\n' "$sev" "$name"; warn=$((warn + 1)) ;;
+        esac
+      fi
+    else
+      printf '  🔎 MANUAL [%-8s] %s\n' "$sev" "$name"; manual=$((manual + 1))
+    fi
+  done < "$MUST"
+  echo
+  echo "Mustfile: $pass passed · $warn warning · $manual manual · $blocking_fail blocking-fail"
+  if [ "$blocking_fail" -gt 0 ]; then
+    echo "❌ Mustfile check FAILED ($blocking_fail blocking failure(s))" >&2
+    exit 1
+  fi
+  echo "✅ Mustfile check passed (all critical/high checks green)"
+  exit 0
 fi
 
 name="" sev="" cmd="" kind=""
