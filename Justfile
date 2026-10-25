@@ -182,7 +182,7 @@ assail:
 # cicd-squabbler: map this repo's CI dependency chains (exit 4 = cycle or
 # dead upstream; the same gate .github/workflows/cicd-squabbler.yml runs)
 squabble-chains:
-    @command -v squabble >/dev/null 2>&1 && squabble chains . || echo "squabble not found — install from https://github.com/hyperpolymath/cicd-squabbler"
+    @if command -v squabble >/dev/null 2>&1; then squabble chains .; else echo "squabble not found — install from https://github.com/hyperpolymath/cicd-squabbler"; fi
 
 # cicd-squabbler: classify a stuck PR's reds (propose-only; never --apply here)
 squabble-fight pr:
