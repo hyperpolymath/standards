@@ -454,6 +454,16 @@ data_rule_evidence() {
     code_coverage)
       producer="$(data_rule_producer code_coverage)"
       [ -n "$producer" ] || return 0
+      # A successful run is not yet evidence: the upload action SKIPS rather
+      # than fails when it cannot attribute the report (fork pull requests, and
+      # after this repository was renamed, every PR whose event payload still
+      # carries the old head-repo name). Such a run concludes green having
+      # uploaded nothing. The ingestion endpoint belongs to Code Quality, so no
+      # upload can be accepted before that product exists — which makes its
+      # presence the precondition for any coverage run to have meant anything.
+      local q
+      q="$(data_rule_evidence code_quality)" || return 1
+      [ -n "$q" ] || return 0
       # Address the workflow by file name; inspect several successful runs so a
       # recent fork run cannot hide an earlier run from this repository.
       body="$(gh api "repos/$repo/actions/workflows/${producer##*/}/runs?status=success&per_page=30" 2>/dev/null)" || return 1
@@ -471,19 +481,25 @@ data_rule_evidence() {
       # GitHub runs this analysis itself once the feature is enabled, so there is
       # no uploader in the tree to inspect; the workflow it registers is the
       # signal that the feature exists for this repository.
-      body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate --slurp 2>/dev/null)" || return 1
+      # `--slurp` is not available in every gh release (2.23.0, shipped by
+      # Debian, rejects it outright), and depending on it made this check fail
+      # closed everywhere that version is installed. `--paginate` alone emits
+      # one JSON document per page, which jq's own slurp mode folds into the
+      # array of pages.
+      body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate 2>/dev/null)" || return 1
       [ -n "$body" ] || return 1
-      # --slurp groups all pages. Reject malformed or incomplete catalogues,
-      # including a successful response whose pagination stopped too early.
+      # Reject malformed or incomplete catalogues, including a successful
+      # response whose pagination stopped too early: every page must agree on
+      # total_count, and the pages must actually contain that many workflows.
       printf '%s' "$body" | jq -es '
-        length == 1 and (.[0] | type == "array" and length > 0 and
-          all(.[]; type == "object" and (.total_count | type == "number") and
-            (.workflows | type == "array")) and
-          (.[0].total_count as $total |
-            all(.[]; .total_count == $total) and
-            ([.[].workflows[]] | length == $total)))
+        length > 0 and
+        all(.[]; type == "object" and (.total_count | type == "number") and
+          (.workflows | type == "array")) and
+        (.[0].total_count as $total |
+          all(.[]; .total_count == $total) and
+          ([.[].workflows[]] | length) == $total)
       ' >/dev/null 2>&1 || return 1
-      printf '%s' "$body" | jq -r '
+      printf '%s' "$body" | jq -sr '
         [.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")]
         | .[0] // empty
         | "the GitHub-generated workflow \(.path) (\(.name))"' 2>/dev/null

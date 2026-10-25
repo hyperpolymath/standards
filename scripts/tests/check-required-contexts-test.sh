@@ -97,21 +97,24 @@ case "$path" in
       *) echo '{"workflow_runs":[]}' ;;
     esac ;;
   */actions/workflows\?per_page=100)
-    # Model gh's --slurp output and require pagination, not just a larger page.
-    [[ " $* " == *" --paginate "* && " $* " == *" --slurp "* ]] || exit 1
+    # gh --paginate emits one JSON document per page; jq folds them, so the stub
+    # must too. --slurp is deliberately NOT required here: it does not exist in
+    # every gh release, and the script must not depend on it.
+    [[ " $* " == *" --paginate "* ]] || exit 1
+    [[ " $* " != *" --slurp "* ]] || exit 1
     case "${WF_MODE:-none}" in
-      quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}]' ;;
-      local-quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":".github/workflows/code-quality.yml"}]}]' ;;
+      quality) echo '{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}' ;;
+      local-quality) echo '{"total_count":1,"workflows":[{"name":"Code Quality","path":".github/workflows/code-quality.yml"}]}' ;;
       quality-later)
         jq -n '[range(100) | {name:"CI", path:".github/workflows/ci-\(.).yml"}] as $first
-          | [{total_count:101, workflows:$first},
-             {total_count:101, workflows:[{name:"Renamed analysis", path:"dynamic/github-code-quality/codeql"}]}]' ;;
-      incomplete) echo '[{"total_count":2,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}]' ;;
-      inconsistent-total) echo '[{"total_count":1,"workflows":[]},{"total_count":2,"workflows":[{"path":"dynamic/github-code-quality/codeql"}]}]' ;;
-      page-fail) echo '[{"total_count":0,"workflows":[]}]'; exit 1 ;;
-      empty-pages) echo '[]' ;;
-      invalid) echo '[{"total_count":0,"workflows":{}}]' ;;
-      *) echo '[{"total_count":0,"workflows":[]}]' ;;
+          | {total_count:101, workflows:$first},
+            {total_count:101, workflows:[{name:"Renamed analysis", path:"dynamic/github-code-quality/codeql"}]}' ;;
+      incomplete) echo '{"total_count":2,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}' ;;
+      inconsistent-total) printf '%s\n' '{"total_count":1,"workflows":[]}' '{"total_count":2,"workflows":[{"path":"dynamic/github-code-quality/codeql"}]}' ;;
+      page-fail) echo '{"total_count":0,"workflows":[]}'; exit 1 ;;
+      empty-pages) : ;;
+      invalid) echo '{"total_count":0,"workflows":{}}' ;;
+      *) echo '{"total_count":0,"workflows":[]}' ;;
     esac ;;
   */protection/required_status_checks) echo '{"message":"not found"}'; exit 1 ;;
   *) exit 1 ;;
@@ -204,16 +207,23 @@ jobs:
     steps:
       - uses: actions/upload-code-coverage@0000000000000000000000000000000000000000
 YML
+# A green coverage run is not evidence on its own. The upload action skips
+# rather than fails when it cannot attribute the report — fork PRs, and every PR
+# whose head-repo name went stale when this repository was renamed. Those runs
+# conclude success having uploaded nothing, so while Code Quality is off (and the
+# ingestion endpoint therefore absent) a green run must verify nothing.
 RUNS_MODE=ok run ok 1
-if [ "$rc" = 1 ] && jq -e '.inspected == true and .unsatisfiable == 6' "$work/report.json" >/dev/null &&
-   grep -q 'satisfied rule:code_coverage' "$work/out"; then
-  pass=$((pass+1)); echo "PASS a successful coverage run satisfies only the coverage rule"
+if [ "$rc" = 1 ] && jq -e '.inspected == true and .unsatisfiable == 12' "$work/report.json" >/dev/null &&
+   ! grep -q 'satisfied rule:code_coverage' "$work/out"; then
+  pass=$((pass+1)); echo "PASS a green coverage run cannot verify the rule while Code Quality is off"
 else
   fail=$((fail+1)); echo "FAIL a successful coverage run satisfies only the coverage rule (exit $rc)"; cat "$work/out"
 fi
-RUNS_MODE=fork-first run ok 1
-check 'coverage evidence selects a repository run after a newer fork run' 1 \
-  '.inspected == true and .unsatisfiable == 6 and
+# Code Quality must be present for a coverage upload to have any chance of being
+# accepted, so these evidence tests enable it and then vary only the run data.
+RUNS_MODE=fork-first WF_MODE=quality run ok 0
+check 'coverage evidence selects a repository run after a newer fork run' 0 \
+  '.inspected == true and .unsatisfiable == 0 and
    ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 6'
 for mode in foreign missing-head; do
   RUNS_MODE="$mode" run ok 1
@@ -252,7 +262,7 @@ else
 fi
 # A lookup that fails must not be read as "no data" (a silent finding) nor as
 # "data present" (a silent pass). It is an inspection failure.
-RUNS_MODE=invalid run ok 1
+RUNS_MODE=invalid WF_MODE=quality run ok 1
 if [ "$rc" = 1 ] && jq -e '.inspected == false and .results == []' "$work/report.json" >/dev/null; then
   pass=$((pass+1)); echo "PASS a malformed runs response is an inspection failure, not a verdict"
 else
