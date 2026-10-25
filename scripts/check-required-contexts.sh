@@ -519,8 +519,8 @@ data_rule_evidence() {
       catalogue="$(workflows_catalogue "$repo")" || { rm -f "$errf"; return 1; }
       code_quality_enabled_in "$catalogue" || { rm -f "$errf"; return 0; }
       registered_at="$(printf '%s' "$catalogue" | jq -r '
-        [.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")]
-        | .[0].created_at // ""')" || { rm -f "$errf"; return 1; }
+        [.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")
+          | .created_at // empty][0] // ""')" || { rm -f "$errf"; return 1; }
       # Address the workflow by file name; inspect several successful runs so a
       # recent fork run cannot hide an earlier run from this repository.
       #
