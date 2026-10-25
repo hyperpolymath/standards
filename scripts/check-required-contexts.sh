@@ -447,14 +447,77 @@ data_rule_producer() {
 # off, and a check that accepted file presence would have called that satisfied
 # and let the block through. Returns 1 when a lookup fails, so an API problem
 # becomes an inspection failure instead of a silent pass.
+# Print the repository's full workflow catalogue as one JSON array of pages
+# (the --slurp shape), validated complete; return 1 when it cannot be read
+# or does not validate. `--slurp` needs gh >= 2.32; older gh exits before
+# any request is made, which callers would otherwise report as "could not
+# inspect" on a machine whose only defect is its gh version (measured
+# 2026-10-25: gh 2.23 turned a fully readable repository into
+# inspected:false). The fallback reproduces --slurp exactly — the same
+# pages, jq -s grouped — and the validation is identical either way, so a
+# truncated fallback is rejected just like a truncated --slurp.
+workflows_catalogue() {
+  local repo="${1:-}" body errf
+  [ -n "$repo" ] || return 1
+  errf="$(mktemp)"
+  if ! body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate --slurp 2>"$errf")"; then
+    if grep -qi 'unknown flag.*slurp' "$errf"; then
+      body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate 2>"$errf" | jq -s '.')" || { rm -f "$errf"; return 1; }
+    else
+      rm -f "$errf"
+      return 1
+    fi
+  fi
+  rm -f "$errf"
+  [ -n "$body" ] || return 1
+  printf '%s' "$body" | jq -es '
+    length == 1 and (.[0] | type == "array" and length > 0 and
+      all(.[]; type == "object" and (.total_count | type == "number") and
+        (.workflows | type == "array")) and
+      (.[0].total_count as $total |
+        all(.[]; .total_count == $total) and
+        ([.[].workflows[]] | length == $total)))
+  ' >/dev/null 2>&1 || return 1
+  printf '%s\n' "$body"
+}
+
+# Succeed when GitHub Code Quality is enabled for the repository, judged by
+# the one signal that cannot be forged from the tree: the generated
+# workflow GitHub registers when the feature is turned on. Return 1 when
+# the feature is off; return 2 when the catalogue cannot be read (unknown
+# is not off — callers turn 2 into an inspection failure). $1 is a
+# catalogue previously printed by workflows_catalogue.
+code_quality_enabled_in() {
+  local catalogue="${1:-}"
+  [ -n "$catalogue" ] || return 2
+  if printf '%s' "$catalogue" | jq -e \
+      '[.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")] | length > 0' \
+      >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
 data_rule_evidence() {
-  local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body errf
+  local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body errf catalogue
   [ -n "$repo" ] || return 1
   errf="$(mktemp)"
   case "$type" in
     code_coverage)
       producer="$(data_rule_producer code_coverage)"
       [ -n "$producer" ] || { rm -f "$errf"; return 0; }
+      # Uploads land in the same Code Quality feature, and its ingestion
+      # endpoint rejects them while the feature is off (measured: HTTP
+      # 404, then 403 "Code quality is not enabled"). A successful producer
+      # run is therefore upload evidence ONLY when the feature is on: with
+      # it off, the run may have measured and annotated beautifully while
+      # uploading nothing — code-coverage.yml now does exactly that behind
+      # a probe, and counting those runs would resurrect, one level up,
+      # the "green run = uploaded data" conflation this function exists to
+      # prevent. Feature off => evidence definitively absent (finding
+      # stands); catalogue unreadable => inspection failure.
+      catalogue="$(workflows_catalogue "$repo")" || { rm -f "$errf"; return 1; }
+      code_quality_enabled_in "$catalogue" || { rm -f "$errf"; return 0; }
       # Address the workflow by file name; inspect several successful runs so a
       # recent fork run cannot hide an earlier run from this repository.
       #
@@ -491,35 +554,9 @@ data_rule_evidence() {
       # GitHub runs this analysis itself once the feature is enabled, so there is
       # no uploader in the tree to inspect; the workflow it registers is the
       # signal that the feature exists for this repository.
-      #
-      # `--slurp` needs gh >= 2.32; older gh exits before any request is made,
-      # which this function would otherwise report as "could not inspect" on a
-      # machine whose only defect is its gh version (measured 2026-10-25:
-      # gh 2.23 turned a fully readable repository into inspected:false). The
-      # fallback reproduces --slurp exactly — the same pages, jq -s grouped —
-      # and the catalogue validation below is unchanged, so a truncated
-      # fallback is rejected just like a truncated --slurp.
-      if ! body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate --slurp 2>"$errf")"; then
-        if grep -qi 'unknown flag.*slurp' "$errf"; then
-          body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate 2>"$errf" | jq -s '.')" || { rm -f "$errf"; return 1; }
-        else
-          rm -f "$errf"
-          return 1
-        fi
-      fi
       rm -f "$errf"
-      [ -n "$body" ] || return 1
-      # --slurp groups all pages. Reject malformed or incomplete catalogues,
-      # including a successful response whose pagination stopped too early.
-      printf '%s' "$body" | jq -es '
-        length == 1 and (.[0] | type == "array" and length > 0 and
-          all(.[]; type == "object" and (.total_count | type == "number") and
-            (.workflows | type == "array")) and
-          (.[0].total_count as $total |
-            all(.[]; .total_count == $total) and
-            ([.[].workflows[]] | length == $total)))
-      ' >/dev/null 2>&1 || return 1
-      printf '%s' "$body" | jq -r '
+      catalogue="$(workflows_catalogue "$repo")" || return 1
+      printf '%s' "$catalogue" | jq -r '
         [.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")]
         | .[0] // empty
         | "the GitHub-generated workflow \(.path) (\(.name))"' 2>/dev/null

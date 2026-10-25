@@ -216,22 +216,25 @@ jobs:
     steps:
       - uses: actions/upload-code-coverage@0000000000000000000000000000000000000000
 YML
+# A successful run with the feature OFF verifies nothing: uploads are
+# rejected while Code Quality is disabled, so such a run measured and
+# annotated without uploading. Counting it would be "green run = uploaded
+# data" one level up (code-coverage.yml's probe does exactly this now).
 RUNS_MODE=ok run ok 1
-if [ "$rc" = 1 ] && jq -e '.inspected == true and .unsatisfiable == 6' "$work/report.json" >/dev/null &&
-   grep -q 'satisfied rule:code_coverage' "$work/out"; then
-  pass=$((pass+1)); echo "PASS a successful coverage run satisfies only the coverage rule"
-else
-  fail=$((fail+1)); echo "FAIL a successful coverage run satisfies only the coverage rule (exit $rc)"; cat "$work/out"
-fi
-RUNS_MODE=fork-first run ok 1
-check 'coverage evidence selects a repository run after a newer fork run' 1 \
-  '.inspected == true and .unsatisfiable == 6 and
+check 'a successful run with Code Quality off is not upload evidence' 1 \
+  '.inspected == true and .unsatisfiable == 12 and
+   ([.results[] | select(.verdict == "VERIFIED-RULE")] | length) == 0'
+RUNS_MODE=fork-first WF_MODE=quality run ok 1
+check 'coverage evidence selects a repository run after a newer fork run' 0 \
+  '.inspected == true and .unsatisfiable == 0 and
    ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 6'
 for mode in foreign missing-head; do
-  RUNS_MODE="$mode" run ok 1
+  # Feature ON (quality verifies, 6) so the runs are actually consulted;
+  # foreign or head-less runs must still leave coverage unverified.
+  RUNS_MODE="$mode" WF_MODE=quality run ok 1
   check "$mode coverage runs cannot verify a rule" 1 \
-    '.inspected == true and .unsatisfiable == 12 and
-     ([.results[] | select(.verdict == "VERIFIED-RULE")] | length) == 0'
+    '.inspected == true and .unsatisfiable == 6 and
+     ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 0'
 done
 # Same tree, no successful run: the uploader exists and proves nothing. This is
 # the branch's first six runs, which all failed 404 while the feature was off.
@@ -266,13 +269,15 @@ fi
 # inspection failure: it proves GitHub has no such workflow registered, which
 # is the normal state of the PR introducing the producer (measured on #1338).
 # The verdict must be "inspected, rule unsatisfied" — the finding stands.
-RUNS_MODE=not-found run ok 1
+# (WF_MODE=quality in these: with the feature off the runs endpoint is
+# never consulted, so the 404/500 distinction would go unexercised.)
+RUNS_MODE=not-found WF_MODE=quality run ok 1
 check 'a 404 producer is evidence of absence, not an inspection failure' 1 \
-  '.inspected == true and .unsatisfiable == 12 and
-   ([.results[] | select(.verdict == "VERIFIED-RULE")] | length) == 0'
+  '.inspected == true and .unsatisfiable == 6 and
+   ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 0'
 # Its negative control: any OTHER runs-endpoint failure is still an inspection
 # failure, or the 404 carve-out could pass by swallowing every error.
-RUNS_MODE=server-fail run ok 1
+RUNS_MODE=server-fail WF_MODE=quality run ok 1
 check 'a 500 from the runs endpoint is still an inspection failure' 1 \
   '.inspected == false and .results == []'
 # An old gh without --slurp must not turn a readable repository into
@@ -284,7 +289,7 @@ check 'a gh without --slurp falls back to paginated jq -s grouping' 1 \
    ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_quality")))] | length) == 6'
 # A lookup that fails must not be read as "no data" (a silent finding) nor as
 # "data present" (a silent pass). It is an inspection failure.
-RUNS_MODE=invalid run ok 1
+RUNS_MODE=invalid WF_MODE=quality run ok 1
 if [ "$rc" = 1 ] && jq -e '.inspected == false and .results == []' "$work/report.json" >/dev/null; then
   pass=$((pass+1)); echo "PASS a malformed runs response is an inspection failure, not a verdict"
 else

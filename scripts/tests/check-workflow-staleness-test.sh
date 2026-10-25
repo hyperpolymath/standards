@@ -201,6 +201,25 @@ run_case "consumer direct Scorecard SARIF upload fails" 1 "$R"
 run_case "canonical standards Scorecard SARIF uploader passes" 0 "$R" \
   GITHUB_REPOSITORY=hyperpolymath/standards
 
+# The repository was transferred to metadatastician/standards; self-recognition
+# tied to the old slug made the canon fail its own consumer rules (2026-10-25).
+run_case "transferred slug metadatastician/standards is still the canon" 0 "$R" \
+  GITHUB_REPOSITORY=metadatastician/standards
+
+# And with no slug signal at all, the structural signature (its own deed under
+# its canonical name, next to the canonical reusable and this checker) must
+# still recognise it — a future rename cannot reopen the hole.
+touch "$R/standards_chora.deed"
+mkdir -p "$R/scripts"
+touch "$R/scripts/check-workflow-staleness.sh" "$R/.github/workflows/scorecard-reusable.yml"
+run_case "structural signature recognises the canon with no slug signal" 0 "$R" \
+  GITHUB_REPOSITORY=example/renamed-again
+rm -f "$R/standards_chora.deed" "$R/scripts/check-workflow-staleness.sh" \
+      "$R/.github/workflows/scorecard-reusable.yml"
+# Negative control for the signature: the same tree without it is a consumer.
+run_case "same tree minus the signature is a consumer again" 1 "$R" \
+  GITHUB_REPOSITORY=example/renamed-again
+
 # ── 10. No workflows dir -> pass ────────────────────────────────────────────
 R="$TEST_DIR/empty"; mkdir -p "$R"
 run_case "no .github/workflows passes" 0 "$R"

@@ -130,18 +130,29 @@ STANDARDS_REUSABLES=(
   "scorecard-reusable.yml"
 )
 
-# Determine if we are in standards repo
+# Determine if we are in standards repo. The repository was transferred
+# hyperpolymath -> metadatastician (measured 2026-10-25: with only the old
+# slug recognised, the canon failed its own consumer rules — its canonical
+# scorecard-reusable.yml read as a "consumer-owned direct SARIF publisher"
+# and its template scorecard-enforcer.yml as a retired consumer file).
+# Identity therefore accepts either slug, or — slug-independently — the
+# structural signature of the canon itself: it carries its own repo deed
+# under its canonical name. A rename must never again be able to make the
+# standards repo fail the rules it publishes for everyone else.
 IS_STANDARDS=false
-if [ "$GITHUB_REPOSITORY" = "hyperpolymath/standards" ]; then
-  IS_STANDARDS=true
-else
-  # Fallback: check Git remote origin URL
-  if [ -d "$REPO_ROOT/.git" ]; then
-    REMOTE_URL=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
-    if [[ "$REMOTE_URL" =~ "hyperpolymath/standards" ]]; then
-      IS_STANDARDS=true
-    fi
+case "${GITHUB_REPOSITORY:-}" in
+  hyperpolymath/standards|metadatastician/standards) IS_STANDARDS=true ;;
+esac
+if [ "$IS_STANDARDS" = "false" ] && [ -d "$REPO_ROOT/.git" ]; then
+  REMOTE_URL=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
+  if [[ "$REMOTE_URL" =~ (hyperpolymath|metadatastician)/standards(\.git)?$ ]]; then
+    IS_STANDARDS=true
   fi
+fi
+if [ "$IS_STANDARDS" = "false" ] && [ -f "$REPO_ROOT/standards_chora.deed" ] \
+   && [ -f "$REPO_ROOT/.github/workflows/scorecard-reusable.yml" ] \
+   && [ -f "$REPO_ROOT/scripts/check-workflow-staleness.sh" ]; then
+  IS_STANDARDS=true
 fi
 
 # ── Locate a git checkout that carries standards history ────────────────────
