@@ -20,7 +20,7 @@ metadata:
   schema: k9-coordination
   schema_version: 1.2.0
   generated_by: manual
-  last_updated: 2026-10-14
+  last_updated: 2026-10-24
 
 project:
   name: "standards"
@@ -88,6 +88,14 @@ invariants:
     rule: "All GitHub Actions must be SHA-pinned, not version-tagged"
     reason: "Version tags are mutable. SHA pins are immutable. This is a security invariant."
     severity: high
+  - id: required-checks-are-producible
+    rule: "Every context required by a branch ruleset MUST be publishable on a pull request. A context only a post-merge run produces is a defect, never a stricter gate."
+    reason: "A required check nothing can publish makes every pull request undecidable, and the only way through is a bypass that discards every other required check at once. Measured 2026-10-24: #1336 had 65 passing checks, a cleared review and mergeable=MERGEABLE while BLOCKED. Every required context must be checked; scripts/check-required-contexts.sh checks contexts within its scope on every pull request and weekly, excluding app-owned contexts from findings."
+    severity: critical
+  - id: no-standing-bypass
+    rule: "No ruleset guarding the default branch may carry an `always` bypass actor. The emergency path is disabling the ruleset deliberately, which is auditable."
+    reason: "Bypass is all-or-nothing: one use discards every required check in the ruleset. A standing bypass therefore makes the whole decision layer advisory, and leaves no trace at merge time."
+    severity: critical
 
 protected:
   - path: component-readiness-grades/
@@ -182,6 +190,12 @@ innervation:
     - trigger: "file-create"
       guard: "No banned language files (*.ts, *.res, *.py, *.go, *.java, *.kt)"
       action: "Reject with language policy link"
+    - trigger: "pull_request"
+      guard: "Every required status context is publishable on a pull request"
+      action: "Fail with the workflow and event list that could not publish it; never silence with continue-on-error"
+    - trigger: "ruleset-edit"
+      guard: "No `always` bypass actor on a ruleset guarding the default branch"
+      action: "Refuse the edit; the emergency path is disabling the ruleset deliberately"
 
 do_not_create:
   - pattern: **/*.ts

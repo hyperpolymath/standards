@@ -108,6 +108,7 @@ APP_NAMED_DEFAULT="github-advanced-security Dependabot Dependabot Updates Code s
 APP_NAMED="${APP_NAMED_CONTEXTS:-$APP_NAMED_DEFAULT}"
 GH_ACTIONS_APP=15368
 RAW="https://raw.githubusercontent.com"
+MERGE_BRANCH=""
 
 say()  { printf '%s\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
@@ -357,7 +358,23 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
     note "could not read branch rulesets for $repo (API error, rate limit, or missing permission) — nothing inspected" >&2
     return 1
   fi
-  br="$(gh api "repos/$repo" 2>/dev/null | jq -r 'if type=="object" then (.default_branch // "main") else "main" end' 2>/dev/null || echo main)"
+  # MERGE_BRANCH decides which rulesets are considered to apply, so it must be
+  # the real default branch or the audit must stop. Defaulting to "main" when
+  # the lookup fails is not a harmless fallback: on a repository whose default
+  # branch is `master`, `main` matches no ref filter, every rule is filtered
+  # out, and the audit reports a clean gate that was never examined. That is the
+  # same false-clean this check exists to catch, so an unreadable or malformed
+  # repository response is an inspection failure instead.
+  local details
+  details="$(gh api "repos/$repo" 2>/dev/null || true)"
+  br="$(printf '%s' "$details" | jq -r '
+    if type == "object" and (.default_branch | type) == "string" and (.default_branch | length) > 0
+    then .default_branch else empty end' 2>/dev/null)"
+  if [ -z "$br" ]; then
+    note "could not resolve the default branch of $repo — cannot tell which rules apply, nothing inspected" >&2
+    return 1
+  fi
+  MERGE_BRANCH="$br"
   for id in $(printf '%s' "$list" | jq -r '.[]? | select(.target=="branch") | .id'); do
     body="$(gh api "repos/$repo/rulesets/$id" 2>/dev/null || true)"
     printf '%s' "$body" | jq -c '
@@ -377,12 +394,217 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
   return 0
 }
 
+# Rule types whose satisfaction depends on DATA being uploaded by something,
+# rather than on a workflow existing. GitHub evaluates these itself, so they
+# never appear as a status context and the producibility check above cannot see
+# them — which is exactly how they go unnoticed while blocking every pull
+# request. Measured 2026-10-24: `code_coverage` (minimum_coverage 80) and
+# `code_quality` (severity all) appeared on the main gate of a repository whose
+# only coverage job reports SKIPPED and which uploads no code-quality results.
+# Neither rule is in the repository's own config/rulesets/*.json; they arrived
+# through a UI edit.
+#
+# The repair differs per type and is not a rename: either upload the data, or
+# remove the rule. Keeping the rule and hoping is what makes every PR
+# undecidable, and an undecidable gate is a gate people bypass.
+DATA_RULES='code_coverage code_quality'
+# Locate a workflow in the tree that uploads data for a data-dependent rule, and
+# echo its path; echo nothing when there is none. This changes the WORDING of the
+# finding only, never whether it is a finding: a rule with an uploader in the
+# tree is still unsatisfiable until the repository setting it needs is on, so it
+# must keep failing rather than becoming a warning. What it stops is the audit
+# asserting that a repository "never uploads" while a workflow in that repository
+# does the uploading — an error message that is confidently wrong sends the
+# reader looking for data that is already being produced.
+# `code_quality` deliberately has no producer here: GitHub runs that analysis
+# itself once the feature is enabled, so no file can supply it.
+data_rule_producer() {
+  local match
+  case "${1:-}" in
+    code_coverage)
+      match="$(grep -rl --include='*.yml' --include='*.yaml' \
+        'actions/upload-code-coverage' "$ROOT/.github/workflows" 2>/dev/null | head -1)"
+      [ -n "$match" ] || return 0
+      # Strip the scan root by expansion, not by regex: ROOT is usually a temp
+      # path, and its dots and slashes would be live regex metacharacters.
+      printf '%s\n' "${match#"$ROOT"/}"
+      ;;
+    *) return 0 ;;
+  esac
+}
+
+# Print evidence that a data-dependent rule is demonstrably fed, or nothing when
+# there is none. Empty output means the finding stands.
+#
+# This is the difference between *unverified* and *unsatisfiable*, and it is the
+# whole point of the check. A rule whose data pipeline has actually run is not a
+# rule that blocks every pull request, and reporting it as one is its own defect:
+# a permanent alarm is how people learn to ignore the alarm.
+#
+# The evidence is deliberately an OUTCOME, never an intention. For coverage that
+# means a completed run that SUCCEEDED. A workflow merely existing proves
+# nothing — every run on this branch failed with HTTP 404 while Code Quality was
+# off, and a check that accepted file presence would have called that satisfied
+# and let the block through. Returns 1 when a lookup fails, so an API problem
+# becomes an inspection failure instead of a silent pass.
+data_rule_evidence() {
+  local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body
+  [ -n "$repo" ] || return 1
+  case "$type" in
+    code_coverage)
+      producer="$(data_rule_producer code_coverage)"
+      [ -n "$producer" ] || return 0
+      # A successful run is not yet evidence: the upload action SKIPS rather
+      # than fails when it cannot attribute the report (fork pull requests, and
+      # after this repository was renamed, every PR whose event payload still
+      # carries the old head-repo name). Such a run concludes green having
+      # uploaded nothing. The ingestion endpoint belongs to Code Quality, so no
+      # upload can be accepted before that product exists — which makes its
+      # presence the precondition for any coverage run to have meant anything.
+      local q
+      q="$(data_rule_evidence code_quality)" || return 1
+      [ -n "$q" ] || return 0
+      # Address the workflow by file name; inspect several successful runs so a
+      # recent fork run cannot hide an earlier run from this repository.
+      body="$(gh api "repos/$repo/actions/workflows/${producer##*/}/runs?status=success&per_page=30" 2>/dev/null)" || return 1
+      [ -n "$body" ] || return 1
+      printf '%s' "$body" | jq -es '
+        length == 1 and (.[0] | type == "object" and
+          (.workflow_runs | type == "array"))
+      ' >/dev/null 2>&1 || return 1
+      printf '%s' "$body" | jq -r --arg repo "$repo" '
+        [.workflow_runs[] | select((.head_repository.full_name // "") == $repo)][0] // empty
+        | "a successful \(.path // "coverage") run on \(.head_branch // "?") (\((.head_sha // "")[0:12]))"' \
+        2>/dev/null
+      ;;
+    code_quality)
+      # GitHub runs this analysis itself once the feature is enabled, so there is
+      # no uploader in the tree to inspect; the workflow it registers is the
+      # signal that the feature exists for this repository.
+      # `--slurp` is not available in every gh release (2.23.0, shipped by
+      # Debian, rejects it outright), and depending on it made this check fail
+      # closed everywhere that version is installed. `--paginate` alone emits
+      # one JSON document per page, which jq's own slurp mode folds into the
+      # array of pages.
+      body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate 2>/dev/null)" || return 1
+      [ -n "$body" ] || return 1
+      # Reject malformed or incomplete catalogues, including a successful
+      # response whose pagination stopped too early: every page must agree on
+      # total_count, and the pages must actually contain that many workflows.
+      printf '%s' "$body" | jq -es '
+        length > 0 and
+        all(.[]; type == "object" and (.total_count | type == "number") and
+          (.workflows | type == "array")) and
+        (.[0].total_count as $total |
+          all(.[]; .total_count == $total) and
+          ([.[].workflows[]] | length) == $total)
+      ' >/dev/null 2>&1 || return 1
+      printf '%s' "$body" | jq -sr '
+        [.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")]
+        | .[0] // empty
+        | "the GitHub-generated workflow \(.path) (\(.name))"' 2>/dev/null
+      ;;
+    *) return 0 ;;
+  esac
+}
+
+# Emit tab-separated finding name, app id 0 and UNSATISFIED-RULE for each
+# DATA_RULES match in an active branch ruleset whose ref filters match MERGE_BRANCH.
+# Presence alone is flagged; uploaded coverage or quality data is not checked.
+# Uses GITHUB_REPOSITORY, resolving and setting it with gh when unset.
+# Reuses MERGE_BRANCH resolved by required_json. Returns 0 with no findings for
+# file fixtures; unavailable inspection or a ruleset read/parse failure returns 1.
+# Output may be partial on failure; run_audit discards those partial findings.
+data_rules_json() {
+  [ -f "${REQUIRED_CONTEXTS_JSON:-}" ] && return 0   # offline fixtures: none
+  command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 || return 1
+  # Resolve the repo the same way required_json does. Returning early on an
+  # unset GITHUB_REPOSITORY made this check silently report nothing in exactly
+  # the local, hand-run case where someone is trying to find out why a green PR
+  # will not merge.
+  [ -n "${GITHUB_REPOSITORY:-}" ] || GITHUB_REPOSITORY="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
+  [ -n "${GITHUB_REPOSITORY:-}" ] || return 1
+  local repo="$GITHUB_REPOSITORY" id body
+  local list
+  [ -n "$MERGE_BRANCH" ] || return 1
+  # Evidence is fetched lazily, per rule type, the first time an applicable rule
+  # of that type is seen — never up front. Fetching it unconditionally made an
+  # unrelated Actions API failure abort the whole audit on repositories with no
+  # data-dependent rules at all: protection could be read perfectly well, but
+  # the run reported `inspected: false` because of an endpoint it did not need.
+  local ev_cov="" ev_qual="" got_cov=0 got_qual=0 applicable
+  # Defined once, used twice: the applicability probe and the emission below must
+  # never disagree about which rulesets apply to the merge branch.
+  local ref_match_jq='      # GitHub ref filters use pathname globs: * and ? do not cross /.
+      def matches_ref:
+        if . == "~ALL" or . == "~DEFAULT_BRANCH" then true
+        else
+          ([scan("\\*\\*/|\\*\\*|\\*|\\?|\\[[^]]+\\]|.") |
+            if . == "**/" then "(.*/)?"
+            elif . == "**" then ".*"
+            elif . == "*" then "[^/]*"
+            elif . == "?" then "[^/]"
+            elif startswith("[") then sub("^\\[!"; "[^")
+            else gsub("(?<c>[.()+^$|{}\\\\])"; "\\\(.c)") end] | join("")) as $pattern
+          | ("refs/heads/" + $branch) | test("^" + $pattern + "$")
+        end;
+'
+  list="$(gh api "repos/$repo/rulesets" 2>/dev/null)" || return 1
+  printf '%s' "$list" | jq -es '
+    length == 1 and (.[0] | type == "array" and all(.[]; type == "object" and
+      (.target | type == "string") and (.id | type == "number")))
+  ' >/dev/null 2>&1 || return 1
+  for id in $(printf '%s' "$list" | jq -r '.[]? | select(.target=="branch") | .id'); do
+    body="$(gh api "repos/$repo/rulesets/$id" 2>/dev/null)" || return 1
+    printf '%s' "$body" | jq -es '
+      length == 1 and (.[0] | type == "object" and
+      (.enforcement | IN("active", "evaluate", "disabled")) and
+      (.rules | type == "array" and all(.[]; type == "object" and (.type | type == "string"))) and
+      (.conditions.ref_name | type == "object" and
+        (.include | type == "array" and all(.[]; type == "string")) and
+        (.exclude | type == "array" and all(.[]; type == "string"))))
+    ' >/dev/null 2>&1 || return 1
+    applicable="$(printf '%s' "$body" | jq -r --arg types "$DATA_RULES" --arg branch "$MERGE_BRANCH" \
+      "$ref_match_jq"'
+      if .enforcement == "active" then
+        select(any(.conditions.ref_name.include[]; matches_ref))
+        | select(all(.conditions.ref_name.exclude[]; matches_ref | not))
+        | .rules[]? | select(.type as $t | ($types | split(" ") | index($t))) | .type
+      else empty end')" || return 1
+    case "$applicable" in
+      *code_coverage*) [ "$got_cov" = 1 ] || { ev_cov="$(data_rule_evidence code_coverage)" || return 1; got_cov=1; } ;;
+    esac
+    case "$applicable" in
+      *code_quality*) [ "$got_qual" = 1 ] || { ev_qual="$(data_rule_evidence code_quality)" || return 1; got_qual=1; } ;;
+    esac
+    printf '%s' "$body" | jq -r --arg types "$DATA_RULES" --arg id "$id" --arg branch "$MERGE_BRANCH" \
+      --arg ev_cov "$ev_cov" --arg ev_qual "$ev_qual" "$ref_match_jq"'
+      if .enforcement == "active" then
+        select(any(.conditions.ref_name.include[]; matches_ref))
+        | select(all(.conditions.ref_name.exclude[]; matches_ref | not))
+        | .rules[]? | select(.type as $t | ($types | split(" ") | index($t)))
+        # A rule with evidence of real data keeps its row, because a reader of
+        # the report deserves to see what the audit found and accepted. It is
+        # just no longer a finding: the verdict carries the claim, not the
+        # absence of a row.
+        | (if .type == "code_coverage" then $ev_cov
+           elif .type == "code_quality" then $ev_qual
+           else "" end) as $ev
+        | "rule:\(.type) in ruleset \($id)\t0\t" +
+          (if $ev != "" then "VERIFIED-RULE\t\($ev)" else "UNSATISFIED-RULE" end)
+      else empty end' 2>/dev/null || return 1
+  done
+  return 0
+}
+
 # ------------------------------------------------------------------ audit -----
 # Print the required-context audit using workflows beneath ROOT; if JSON_OUT is
-# set, attempt to write its JSON summary. Returns 1 for UNSATISFIABLE or
-# PR-UNPRODUCIBLE findings when STRICT=1, otherwise 0.
-# Rule-reading failures return 1 and emit inspected:false in the JSON report.
-# JSON write failures do not affect the return status.
+# set, replace any existing report and attempt to write its JSON summary.
+# Returns 1 for UNSATISFIABLE, PR-UNPRODUCIBLE or UNSATISFIED-RULE findings
+# when STRICT=1, otherwise 0. A required_json or data_rules_json failure returns
+# 1 regardless of STRICT and marks the JSON report inspected:false.
+# JSON write failures do not affect the return status. Data-rule findings appear
+# in both results and the JSON unsatisfiable count.
 run_audit() {
   local pubb pubb_pr required ROWS unsatisfiable=0 line ctx app verdict inspected=1
   pubb="$(mktemp)"; pubb_pr="$(mktemp)"; required="$(mktemp)"; ROWS="$(mktemp)"
@@ -390,10 +612,19 @@ run_audit() {
   publishable_names pr | sort -u >"$pubb_pr"
   # Never let a failed inspection leave a stale or empty successful report.
   [ -z "$JSON_OUT" ] || rm -f "$JSON_OUT"
+  # Data-dependent rules are findings in their own right; they are appended to
+  # ROWS before the context loop so they appear in the same report, the same
+  # JSON and the same allow-list reconciliation. A context name that cannot be
+  # produced and a rule whose data is never uploaded fail the same way: every
+  # pull request becomes undecidable.
   if ! required_json >"$required"; then
     err "required contexts not inspected — could not read branch rules"
     inspected=0
     : >"$required"  # discard any partial results from the failed inspection
+  elif ! data_rules_json >>"$ROWS"; then
+    err "data-dependent rules not inspected — could not read branch rules"
+    inspected=0
+    : >"$ROWS"  # discard any partial findings from the failed inspection
   fi
 
   say ""
@@ -489,6 +720,16 @@ EOS
     esac
   done <"$required"
 
+  # Count rule findings before serializing the total into the JSON report.
+  local n_rule n_verified
+  n_rule="$(awk -F'\t' '$3=="UNSATISFIED-RULE"' "$ROWS" 2>/dev/null | wc -l | tr -d ' ')"
+  case "$n_rule" in ''|*[!0-9]*) n_rule=0 ;; esac
+  # A rule that is demonstrably fed is reported, not hidden. Silence would make
+  # the audit unable to answer "was this rule considered at all?" — the same
+  # question that goes unanswered when a check quietly never runs.
+  n_verified="$(awk -F'\t' '$3=="VERIFIED-RULE"' "$ROWS" 2>/dev/null | wc -l | tr -d ' ')"
+  case "$n_verified" in ''|*[!0-9]*) n_verified=0 ;; esac
+  unsatisfiable=$((unsatisfiable + n_rule))
   if [ -n "$JSON_OUT" ]; then
     jq -Rs --arg repo "${GITHUB_REPOSITORY:-$ROOT}" --argjson n "$unsatisfiable" \
        --argjson inspected "$inspected" --rawfile _ /dev/null '
@@ -497,6 +738,44 @@ EOS
                  | {context: .[0], app_id: (.[1]|tonumber), verdict: .[2]}))}' "$ROWS" >"$JSON_OUT" 2>/dev/null || true
     info "json report written to $JSON_OUT"
   fi
+  # Data-rule findings are appended to ROWS directly, so they never pass through
+  # the per-context case above. Without counting them here, a strict run whose
+  # ONLY finding was a data-dependent rule returned 0 — the gate would print the
+  # reason a pull request cannot merge and then declare success, which is the
+  # defect this script exists to catch, committed by the script itself.
+  if [ "$n_verified" -gt 0 ]; then
+    while IFS=$'\t' read -r r _ _ ev; do
+      [ -n "$r" ] || continue
+      info "satisfied $r — $ev"
+    done <<EOF
+$(awk -F'\t' '$3=="VERIFIED-RULE"' "$ROWS" 2>/dev/null)
+EOF
+  fi
+  if [ "$n_rule" -gt 0 ]; then
+    while IFS= read -r r; do
+      [ -n "$r" ] || continue
+      # `$r` is "rule:<type> in ruleset <id>"; the repair depends on the type,
+      # and so does the sentence. All three branches are findings.
+      local rtype producer msg
+      rtype="$(printf '%s' "$r" | sed 's/^rule:\([^ ]*\) .*/\1/')"
+      producer="$(data_rule_producer "$rtype")"
+      if [ "$rtype" = code_quality ]; then
+        msg="required $r needs Code Quality enabled for this repository — a repository setting, and no file in the tree can supply it; every pull request waits for a result that cannot exist"
+      elif [ -n "$producer" ]; then
+        msg="required $r has an uploader in the tree ($producer), but that upload cannot succeed until Code Quality is enabled for this repository; every pull request waits for data that is uploaded and rejected"
+      else
+        msg="required $r needs data this repository never uploads — every pull request waits for a result that cannot exist; upload the data, or remove the rule"
+      fi
+      if [ "$STRICT" = 1 ]; then
+        err "$msg"
+      else
+        warn "$msg"
+      fi
+    done <<EOF
+$(awk -F'\t' '$3=="UNSATISFIED-RULE" {print $1}' "$ROWS" 2>/dev/null)
+EOF
+  fi
+
   rm -f "$pubb" "$pubb_pr" "$required" "$ROWS"
   [ "$inspected" = 1 ] || return 1
   [ "$unsatisfiable" -gt 0 ] && [ "$STRICT" = 1 ] && return 1

@@ -130,19 +130,30 @@ STANDARDS_REUSABLES=(
   "scorecard-reusable.yml"
 )
 
-# Determine if we are in standards repo
+# Determine if we are in the canonical standards repo. The owner changed from
+# hyperpolymath to metadatastician; both slugs resolve to GitHub repo 1116521501.
+# These are exact identities, not an exemption for arbitrary standards forks.
 IS_STANDARDS=false
-if [ "$GITHUB_REPOSITORY" = "hyperpolymath/standards" ]; then
-  IS_STANDARDS=true
-else
-  # Fallback: check Git remote origin URL
-  if [ -d "$REPO_ROOT/.git" ]; then
-    REMOTE_URL=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
-    if [[ "$REMOTE_URL" =~ "hyperpolymath/standards" ]]; then
-      IS_STANDARDS=true
-    fi
-  fi
+REMOTE_URL=""
+if [ -d "$REPO_ROOT/.git" ]; then
+  REMOTE_URL=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
 fi
+for standards_repo in hyperpolymath/standards metadatastician/standards; do
+  if [ "${GITHUB_REPOSITORY:-}" = "$standards_repo" ]; then
+    IS_STANDARDS=true
+    break
+  fi
+  # Local runs have no Actions context. Match complete HTTPS/SSH origins so a
+  # consumer named standards-something cannot inherit the canonical exemption.
+  case "$REMOTE_URL" in
+    "https://github.com/$standards_repo" | "https://github.com/$standards_repo.git" | \
+    "git@github.com:$standards_repo" | "git@github.com:$standards_repo.git" | \
+    "ssh://git@github.com/$standards_repo" | "ssh://git@github.com/$standards_repo.git")
+      IS_STANDARDS=true
+      break
+      ;;
+  esac
+done
 
 # ── Locate a git checkout that carries standards history ────────────────────
 # We need the commit graph (not just HEAD) to answer "is this pin an ancestor
