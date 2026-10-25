@@ -37,9 +37,11 @@ t() { # label condition...
   if "$@" >/dev/null 2>&1; then pass=$((pass+1)); echo "PASS $label"
   else fail=$((fail+1)); echo "FAIL $label"; fi
 }
-has()   { grep -qF "$2" "$1"; }
-hasre() { grep -qE "$2" "$1"; }
-lacks() { ! grep -qF "$2" "$1"; }
+# -e is load-bearing: patterns like `--apply` would otherwise be parsed as
+# grep flags, making the `lacks` assertions pass without checking anything.
+has()   { grep -qF -e "$2" "$1"; }
+hasre() { grep -qE -e "$2" "$1"; }
+lacks() { ! grep -qF -e "$2" "$1"; }
 
 for f in "$reusable" "$caller" "$lock"; do
   t "exists: ${f##*/}" test -f "$f"
@@ -52,10 +54,25 @@ t "no tag/branch squabble ref" lacks "$reusable" 'squabble@main'
 t "no tag-pinned squabble ref" lacks "$reusable" 'squabble@v'
 t "no ad-hoc binary download" lacks "$reusable" 'releases/download'
 
-# Propose-only, forever, from CI.
-t "reusable never passes --apply" lacks "$reusable" '--apply'
-t "caller never passes --apply" lacks "$caller" '--apply'
-t "reusable never summons boj experts" lacks "$reusable" '--summon'
+# Propose-only, forever, from CI. Comment lines are stripped first: the
+# workflows explain the rule using the very flag they forbid, and the
+# explanation must not read as the offence.
+noflag() { ! grep -v '^[[:space:]]*#' "$1" | grep -qF -e "$2"; }
+# Firing fixture first: the matcher must SEE a planted --apply, or the
+# assertions below could pass blind (they once did — grep parsed the
+# pattern as a flag). Silence fixture: a comment mentioning it is fine.
+planted="$(mktemp)"; trap 'rm -f "$planted"' EXIT
+printf '      - run: squabble fight o/r 1 --apply\n' > "$planted"
+if noflag "$planted" '--apply'; then
+  fail=$((fail+1)); echo "FAIL matcher is blind to a planted --apply"
+else
+  pass=$((pass+1)); echo "PASS matcher sees a planted --apply"
+fi
+printf '      # never passes --apply from CI\n' > "$planted"
+t "matcher ignores --apply in comments" noflag "$planted" '--apply'
+t "reusable never passes --apply" noflag "$reusable" '--apply'
+t "caller never passes --apply" noflag "$caller" '--apply'
+t "reusable never summons boj experts" noflag "$reusable" '--summon'
 
 # The exit-code contract (squabble-cli: 2 tool failure, 3 no gate,
 # 4 blocking chain finding) is honoured, not flattened.
