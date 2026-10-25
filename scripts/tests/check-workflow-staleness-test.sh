@@ -201,6 +201,45 @@ run_case "consumer direct Scorecard SARIF upload fails" 1 "$R"
 run_case "canonical standards Scorecard SARIF uploader passes" 0 "$R" \
   GITHUB_REPOSITORY=hyperpolymath/standards
 
+# The canonical repository moved owners; both names resolve to GitHub repo
+# 1116521501. Its own workflows must not be classified as consumer copies.
+R="$TEST_DIR/standards-self"; mk_repo "$R"
+cp "$TEST_DIR/sarif/.github/workflows/scorecard.yml" "$R/.github/workflows/scorecard-reusable.yml"
+touch "$R/.github/workflows/scorecard-enforcer.yml"
+run_case "canonical standards retains both structural exemptions" 0 "$R" \
+  GITHUB_REPOSITORY=hyperpolymath/standards
+run_case "renamed standards retains both structural exemptions" 0 "$R" \
+  GITHUB_REPOSITORY=metadatastician/standards
+
+# Local runs have no Actions context; identify the exact GitHub origin, never
+# a consumer whose name merely contains the standards slug.
+git -C "$R" init -q
+git -C "$R" remote add origin https://github.com/metadatastician/standards.git
+for origin in \
+  https://github.com/hyperpolymath/standards.git \
+  https://github.com/metadatastician/standards \
+  https://github.com/metadatastician/standards.git \
+  git@github.com:metadatastician/standards.git \
+  ssh://git@github.com/metadatastician/standards.git; do
+  git -C "$R" remote set-url origin "$origin"
+  run_case "canonical origin $origin is recognised without Actions context" 0 "$R" \
+    GITHUB_REPOSITORY=
+done
+for origin in \
+  https://github.com/hyperpolymath/standards-consumer.git \
+  https://github.com/metadatastician/standards-consumer.git \
+  https://example.com/metadatastician/standards.git; do
+  git -C "$R" remote set-url origin "$origin"
+  run_case "consumer origin $origin still fails structural checks" 1 "$R" \
+    GITHUB_REPOSITORY=
+done
+git -C "$R" remote remove origin
+run_case "a consumer named standards does not gain exemptions" 1 "$R" \
+  GITHUB_REPOSITORY=example/standards
+write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$FORGED"
+run_case "renamed standards still rejects forged reusable pins" 1 "$R" \
+  GITHUB_REPOSITORY=metadatastician/standards
+
 # ── 10. No workflows dir -> pass ────────────────────────────────────────────
 R="$TEST_DIR/empty"; mkdir -p "$R"
 run_case "no .github/workflows passes" 0 "$R"
