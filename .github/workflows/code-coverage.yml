@@ -152,28 +152,33 @@ jobs:
           # Deliberately not `--locked`: four of these six crates do not commit a
           # Cargo.lock, so `--locked` fails there rather than measuring them.
           cargo llvm-cov --cobertura --output-path cobertura.xml
-          # Report the aggregate so the number is visible in the log and in the
-          # step summary. The floor in the ruleset has to come from a real
-          # measurement, not from a round number someone liked.
-          PCT="$(awk -F'"' '/<coverage / {
+          # Read the totals Cobertura puts on the root element. The rule compares
+          # a weighted aggregate across every uploaded report, so the raw counts
+          # matter as much as the ratio: a floor can only be chosen from data
+          # that shows how much of the aggregate each crate actually carries.
+          read -r PCT COVERED VALID <<< "$(awk -F'"' '/<coverage / {
             for (i = 1; i < NF; i++) {
               if ($i ~ /lines-valid=$/)   valid = $(i + 1)
               if ($i ~ /lines-covered=$/) covered = $(i + 1)
             }
           } END {
-            if (valid + 0 == 0) { print "0.00"; exit }
-            printf "%.2f", (covered + 0) * 100 / (valid + 0)
+            if (valid + 0 == 0) { print "0.00 0 0"; exit }
+            printf "%.2f %d %d", (covered + 0) * 100 / (valid + 0), covered + 0, valid + 0
           }' cobertura.xml)"
-          echo "### ${{ matrix.name }}: ${PCT}% line coverage" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### ${{ matrix.name }}: ${PCT}%"
+            echo ""
+            echo "\`${COVERED}\` of \`${VALID}\` instrumented lines covered."
+          } >> "$GITHUB_STEP_SUMMARY"
           # Also emit the number as an annotation. The step summary is only in the
           # run's own page; an annotation shows up on the pull request and is
           # readable through the API, which is what makes the figure auditable
           # after the fact rather than "trust the green tick".
-          echo "::notice title=Line coverage: ${{ matrix.name }}::${PCT}% of instrumented lines are covered by tests."
+          echo "::notice title=Line coverage: ${{ matrix.name }}::${PCT}% of instrumented lines are covered by tests (${COVERED}/${VALID})."
           # A crate that instruments nothing would otherwise report a cheerful
           # 0.00% or, worse, divide by zero. Both mean "this measured nothing",
           # which is a different statement from "this is untested".
-          if [ "$PCT" = "0.00" ]; then
+          if [ "$VALID" -eq 0 ]; then
             echo "::warning title=No instrumented lines: ${{ matrix.name }}::cargo llvm-cov reported no instrumented lines; this crate contributes nothing to the aggregate."
           fi
 
