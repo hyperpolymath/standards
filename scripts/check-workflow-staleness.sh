@@ -156,7 +156,7 @@ case "${GITHUB_REPOSITORY:-}" in
 esac
 if [ "$IS_STANDARDS" = "false" ]; then
   REMOTE_URL=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
-  if [[ "$REMOTE_URL" =~ (^|[:/])(hyperpolymath|metadatastician)/standards(\.git)?$ ]]; then
+  if [[ "$REMOTE_URL" =~ ^((git@github\.com:)|(ssh://git@github\.com/)|(https?://github\.com/))(hyperpolymath|metadatastician)/standards(\.git)?$ ]]; then
     IS_STANDARDS=true
   fi
 fi
