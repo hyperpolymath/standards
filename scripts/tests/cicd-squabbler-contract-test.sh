@@ -13,8 +13,9 @@
 #     to a warning would make the gate advisory in exactly the case it
 #     exists for;
 #   * generic tool failures (exit 2) must fail too, or a broken advisor
-#     reads as an all-clear; the sole downgrade is the pinned upstream's
-#     exact hidden-classic-protection wording, which is NOT EVALUATED;
+#     reads as an all-clear; downgrade to NOT EVALUATED only when the
+#     credential preflight cannot see the whole gate, or the pinned
+#     upstream emits its exact hidden-classic-protection wording;
 #   * no job may hold a write grant, no secrets may be inherited, and the
 #     only declared secret is the optional Administration-read credential
 #     that fight needs to see classic branch protection — absent it the
@@ -85,7 +86,15 @@ t "chains exit 4 fails the job" has "$reusable" 'if [ "$rc" -eq 4 ]'
 t "chains other non-zero fails the job" has "$reusable" 'squabble chains failed to run'
 t "generic fight exit 2 still fails the job" has "$reusable" \
   'squabble fight failed to run'
-t "only exact pinned hidden-gate wording is downgraded" has "$reusable" \
+t "preflight reads the pull request base" has "$reusable" \
+  'gh pr view "$PR_NUMBER" --repo "$REPO" --json baseRefName'
+t "preflight reads the branch rules endpoint" has "$reusable" \
+  'repos/$REPO/rules/branches/$encoded_base_ref'
+t "preflight reads classic branch protection" has "$reusable" \
+  'repos/$REPO/branches/$encoded_base_ref/protection'
+t "classic 404 is visible evidence of no classic gate" has "$reusable" \
+  'HTTP 404|Branch not protected'
+t "pinned hidden-gate wording remains a fallback downgrade" has "$reusable" \
   'classic branch protection on this branch is not visible to this token'
 t "hidden gate is an explicit NOT EVALUATED" has "$reusable" \
   'Squabble fight report — NOT EVALUATED'
@@ -114,10 +123,15 @@ t "caller maps only the estate Administration-read PAT" has "$caller" \
   'ADMINISTRATION_READ_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}'
 t "absent fight credential is an explicit NOT RUN" has "$reusable" \
   'Squabble fight report — NOT RUN'
-t "credentialed fight steps are presence-gated" has "$reusable" \
-  "steps.fight-credential.outputs.supplied == 'true'"
+t "credentialed fight steps are visibility-gated" has "$reusable" \
+  "steps.fight-credential.outputs.available == 'true'"
+t "fight no longer uses a presence-only credential output" lacks "$reusable" \
+  'outputs.supplied'
 t "fight talks to the API with the declared credential" has "$reusable" \
   'GH_TOKEN: ${{ secrets.ADMINISTRATION_READ_TOKEN }}'
+t "secret-touching fight job installs pinned harden-runner" hasre "$reusable" \
+  'uses: step-security/harden-runner@[0-9a-f]{40}'
+t "harden-runner audits egress" has "$reusable" 'egress-policy: audit'
 t "checkouts do not persist credentials" has "$reusable" 'persist-credentials: false'
 
 # Gate shape: unfiltered, cancellable, time-boxed.
@@ -134,6 +148,8 @@ t "lock lists the reusable" has "$lock" "'.github/workflows/cicd-squabbler-reusa
 t "lock lists the caller as pin-free" has "$lock" "'.github/workflows/cicd-squabbler.yml': []"
 t "lock records the squabbler pin" hasre "$lock" \
   "'hyperpolymath/cicd-squabbler@[0-9a-f]{40}'"
+t "lock lists harden-runner for the squabbler reusable" bash -c \
+  'grep -A4 "cicd-squabbler-reusable.yml" "$1" | grep -q "step-security/harden-runner@"' _ "$lock"
 
 # The pin in the workflow and the pin in the lock are the same commit, or
 # one of them is stale and the run dies at startup.

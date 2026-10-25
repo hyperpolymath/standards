@@ -35,12 +35,15 @@
 #   built-in Actions token even though all 24 ruleset contexts are
 #   visible, so squabble correctly exits 2. Fight therefore runs only
 #   when the caller supplies the optional Administration-read credential
-#   declared below. Absent credential = the summary says NOT RUN, in
-#   those words. A supplied credential that still cannot see classic
-#   branch protection = NOT EVALUATED: the pinned upstream's exact
-#   hidden-gate wording is recognised, the summary makes no claim about
-#   the PR, and this advisory does not redden every PR for an owner-side
-#   credential that needs broadening. Every other exit 2 still fails.
+#   declared below AND a preflight proves that credential can read the
+#   pull request, the branch-rules endpoint and classic protection (or a
+#   genuine 404 for the latter). Absent credential = the summary says
+#   NOT RUN, in those words. A supplied credential that cannot see the
+#   whole gate = NOT EVALUATED: the summary makes no claim about the PR,
+#   and this advisory does not redden every PR for an owner-side
+#   credential that needs broadening or reissuing. The pinned upstream's
+#   exact hidden-gate wording remains a second guard if visibility
+#   changes between probe and classification. Every other exit 2 fails.
 #
 # The squabble binary is installed by the upstream composite action pinned
 # to a commit; the action itself refuses any binary whose sha256 and build
@@ -135,42 +138,79 @@ jobs:
       pull-requests: read
       attestations: read
     steps:
-      # Record credential presence without printing the credential. The
-      # built-in token cannot read classic branch protection, and squabble
-      # rightly exits 2 rather than reasoning about a partially visible
-      # gate; without the optional credential there is therefore nothing
-      # honest for this advisory leg to do beyond saying so.
-      - name: Record whether fight can inspect the full gate
+      # This is the only job in the reusable that touches a caller secret.
+      # Harden it first (Hypatia RE001 / ruling D131) so outbound egress is
+      # audited from the first credential-bearing request onward.
+      - name: Harden runner (egress audit)
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: audit
+
+      # Do not equate "a secret string exists" with "fight can inspect":
+      # the estate PAT measured on this PR is present but cannot read the
+      # Administration endpoint. Probe exactly the read surfaces squabble
+      # needs for its gate (PR/base, branch rules, classic protection). A
+      # classic-protection 404 is visible evidence of no classic gate; any
+      # other classic failure means the gate is only partially visible.
+      - name: Probe whether fight can inspect the full gate
         id: fight-credential
         env:
-          SQUABBLE_TOKEN: ${{ secrets.ADMINISTRATION_READ_TOKEN }}
+          GH_TOKEN: ${{ secrets.ADMINISTRATION_READ_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
         run: |
-          set -euo pipefail
-          if [ -n "$SQUABBLE_TOKEN" ]; then
-            echo "supplied=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "supplied=false" >> "$GITHUB_OUTPUT"
+          set -uo pipefail
+          not_evaluated() {
+            reason="$1"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Squabble fight not evaluated::${reason}. This advisory makes no claim about this pull request's reds. The hard chains gate still ran."
+            {
+              echo "### Squabble fight report — NOT EVALUATED"
+              echo
+              echo "${reason}."
+              echo "squabble fight reads rulesets and classic branch protection as one gate and refuses to reason about a partially visible gate. This advisory therefore makes no claim about this pull request's reds. Broaden or reissue the Administration-read credential to enable classification. The separate hard \`squabble chains\` gate remains enforced."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+          case "$PR_NUMBER" in
+            ''|*[!0-9]*) echo "::error::pr-number must be a number, got '$PR_NUMBER'"; exit 1 ;;
+          esac
+          if [ -z "$GH_TOKEN" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
             echo "::notice title=Squabble fight not run::No Administration-read credential was supplied, so the advisory fight report did not inspect this pull request. The hard chains gate still ran."
             {
               echo "### Squabble fight report — NOT RUN"
               echo
               echo "No \`ADMINISTRATION_READ_TOKEN\` was supplied by the caller."
-              echo "squabble fight reads rulesets and classic branch protection as"
-              echo "one gate, and the built-in Actions token cannot read the"
-              echo "classic-protection endpoint. This advisory job therefore makes"
-              echo "no claim about this pull request's reds. The separate hard"
-              echo "\`squabble chains\` gate remains enforced."
+              echo "squabble fight reads rulesets and classic branch protection as one gate, and the built-in Actions token cannot read the classic-protection endpoint. This advisory job therefore makes no claim about this pull request's reds. The separate hard \`squabble chains\` gate remains enforced."
             } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
+          probe_err="$RUNNER_TEMP/fight-probe.err"
+          pr_json="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json baseRefName 2>"$probe_err")" \
+            || not_evaluated "The supplied credential could not read this pull request"
+          base_ref="$(printf '%s' "$pr_json" | jq -er '.baseRefName | select(type == "string" and length > 0)')" \
+            || { echo "::error::gh pr view returned no usable base branch for the fight preflight"; exit 1; }
+          encoded_base_ref="$(printf '%s' "$base_ref" | jq -Rr '@uri')"
+          gh api "repos/$REPO/rules/branches/$encoded_base_ref" >/dev/null 2>"$probe_err" \
+            || not_evaluated "The supplied credential could not read this pull request's branch rules"
+          if gh api "repos/$REPO/branches/$encoded_base_ref/protection" >/dev/null 2>"$probe_err"; then
+            :
+          elif grep -Eq 'HTTP 404|Branch not protected' "$probe_err"; then
+            :
+          else
+            not_evaluated "The supplied credential could not read classic branch protection"
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.fight-credential.outputs.supplied == 'true'
+        if: steps.fight-credential.outputs.available == 'true'
         with:
           persist-credentials: false
 
       - name: Install the pinned, attested squabble
         id: squabble
-        if: steps.fight-credential.outputs.supplied == 'true'
+        if: steps.fight-credential.outputs.available == 'true'
         uses: hyperpolymath/cicd-squabbler/.github/actions/squabble@14f853fde902ab2d7631070d87a9dc9122e01013
         with:
           args: ""
@@ -187,7 +227,7 @@ jobs:
       # generic exit-2 branch below turns red until this contract is
       # updated — failing closed, not silently downgrading real breakage.
       - name: Classify this pull request's reds
-        if: steps.fight-credential.outputs.supplied == 'true'
+        if: steps.fight-credential.outputs.available == 'true'
         env:
           SQUABBLE_BIN: ${{ steps.squabble.outputs.path }}
           REPO: ${{ github.repository }}
