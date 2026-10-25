@@ -149,11 +149,8 @@ case "${GITHUB_REPOSITORY:-}" in
   hyperpolymath/standards|metadatastician/standards) IS_STANDARDS=true ;;
 esac
 if [ "$IS_STANDARDS" = "false" ] && [ -d "$REPO_ROOT/.git" ]; then
-  # Fallback: check Git remote origin URL (either owner spelling).
+  # Fallback: capture Git remote origin URL for exact canonical matching below.
   REMOTE_URL=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
-  if [[ "$REMOTE_URL" =~ (hyperpolymath|metadatastician)/standards ]]; then
-    IS_STANDARDS=true
-  fi
 fi
 for standards_repo in hyperpolymath/standards metadatastician/standards; do
   if [ "${GITHUB_REPOSITORY:-}" = "$standards_repo" ]; then
