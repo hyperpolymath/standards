@@ -336,6 +336,12 @@ publishable_names() { # [pr] -> one name per line; `pr` restricts to PR-capable 
 }
 
 # ------------------------------------------------------------ required set ----
+# Emit required checks from non-disabled branch rulesets and default-branch
+# legacy protection, or from REQUIRED_CONTEXTS_JSON when set.
+# Live inspection resolves GITHUB_REPOSITORY when unset and sets MERGE_BRANCH.
+# Returns 1 for an unusable fixture, missing tools/repository, an unreadable
+# ruleset list or an unresolved default branch. Individual ruleset read/parse
+# failures and unavailable legacy protection do not fail the call.
 required_json() { # emit {"context":..,"app_id":..,"source":..} objects
   if [ -n "${REQUIRED_CONTEXTS_JSON:-}" ]; then
     [ -f "$REQUIRED_CONTEXTS_JSON" ] || { err "REQUIRED_CONTEXTS_JSON not found: $REQUIRED_CONTEXTS_JSON"; return 1; }
@@ -408,14 +414,10 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
 # remove the rule. Keeping the rule and hoping is what makes every PR
 # undecidable, and an undecidable gate is a gate people bypass.
 DATA_RULES='code_coverage code_quality'
-# Locate a workflow in the tree that uploads data for a data-dependent rule, and
-# echo its path; echo nothing when there is none. This changes the WORDING of the
-# finding only, never whether it is a finding: a rule with an uploader in the
-# tree is still unsatisfiable until the repository setting it needs is on, so it
-# must keep failing rather than becoming a warning. What it stops is the audit
-# asserting that a repository "never uploads" while a workflow in that repository
-# does the uploading — an error message that is confidently wrong sends the
-# reader looking for data that is already being produced.
+# For rule type $1 = code_coverage, print the first .yml/.yaml workflow beneath
+# ROOT/.github/workflows mentioning actions/upload-code-coverage, relative to
+# ROOT. File presence alone does not prove an upload. No match (including an
+# unreadable workflow directory) or an unsupported type returns 0 without output.
 # `code_quality` deliberately has no producer here: GitHub runs that analysis
 # itself once the feature is enabled, so no file can supply it.
 data_rule_producer() {
@@ -433,20 +435,6 @@ data_rule_producer() {
   esac
 }
 
-# Print evidence that a data-dependent rule is demonstrably fed, or nothing when
-# there is none. Empty output means the finding stands.
-#
-# This is the difference between *unverified* and *unsatisfiable*, and it is the
-# whole point of the check. A rule whose data pipeline has actually run is not a
-# rule that blocks every pull request, and reporting it as one is its own defect:
-# a permanent alarm is how people learn to ignore the alarm.
-#
-# The evidence is deliberately an OUTCOME, never an intention. For coverage that
-# means a completed run that SUCCEEDED. A workflow merely existing proves
-# nothing — every run on this branch failed with HTTP 404 while Code Quality was
-# off, and a check that accepted file presence would have called that satisfied
-# and let the block through. Returns 1 when a lookup fails, so an API problem
-# becomes an inspection failure instead of a silent pass.
 # Print the repository's full workflow catalogue as one JSON array of pages
 # (the --slurp shape), validated complete; return 1 when it cannot be read
 # or does not validate. `--slurp` needs gh >= 2.32; older gh exits before
@@ -481,12 +469,9 @@ workflows_catalogue() {
   printf '%s\n' "$body"
 }
 
-# Succeed when GitHub Code Quality is enabled for the repository, judged by
-# the one signal that cannot be forged from the tree: the generated
-# workflow GitHub registers when the feature is turned on. Return 1 when
-# the feature is off; return 2 when the catalogue cannot be read (unknown
-# is not off — callers turn 2 into an inspection failure). $1 is a
-# catalogue previously printed by workflows_catalogue.
+# Check $1, a catalogue from workflows_catalogue, for the GitHub-generated
+# Code Quality workflow path. Return 0 when present, 2 for a missing/empty
+# catalogue, or 1 when absent or jq cannot inspect the supplied catalogue.
 code_quality_enabled_in() {
   local catalogue="${1:-}"
   [ -n "$catalogue" ] || return 2
@@ -498,6 +483,15 @@ code_quality_enabled_in() {
   return 1
 }
 
+# Print audit evidence for rule type $1 in GITHUB_REPOSITORY. Coverage requires
+# a local uploader, registered Code Quality workflow and a matching repository
+# run among the producer's 30 most recent successful runs. When the generated
+# workflow has a registration time, the run must be at or after it. Quality
+# evidence is the registered GitHub-generated workflow itself.
+# Return 0 without output for unsupported types or absent evidence, including
+# a producer-runs HTTP 404. Missing GITHUB_REPOSITORY, catalogue lookup/validation
+# failures and other runs-request failures return 1. Invalid runs responses or
+# errors extracting evidence return nonzero.
 data_rule_evidence() {
   local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body errf catalogue registered_at
   [ -n "$repo" ] || return 1
@@ -572,12 +566,14 @@ data_rule_evidence() {
   esac
 }
 
-# Emit tab-separated finding name, app id 0 and UNSATISFIED-RULE for each
+# Emit tab-separated rule name, app id 0 and verdict for each
 # DATA_RULES match in an active branch ruleset whose ref filters match MERGE_BRANCH.
-# Presence alone is flagged; uploaded coverage or quality data is not checked.
+# Evidence from data_rule_evidence yields VERIFIED-RULE plus an evidence field;
+# otherwise the verdict is UNSATISFIED-RULE. Evidence is fetched once per type.
 # Uses GITHUB_REPOSITORY, resolving and setting it with gh when unset.
 # Reuses MERGE_BRANCH resolved by required_json. Returns 0 with no findings for
-# file fixtures; unavailable inspection or a ruleset read/parse failure returns 1.
+# file fixtures; missing prerequisites/branch, ruleset read/parse failures or
+# failed evidence inspection return 1.
 # Output may be partial on failure; run_audit discards those partial findings.
 data_rules_json() {
   [ -f "${REQUIRED_CONTEXTS_JSON:-}" ] && return 0   # offline fixtures: none
