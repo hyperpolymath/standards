@@ -290,6 +290,47 @@ The link:.github/workflows/k9-contractile.yml[DEED–K9 workflow] publishes one
 compact PR report, with expandable findings and links to dated evidence.
 See link:1-formats/k9/tools/CONFORMANCE-REPORTING.adoc[its scope, colours and reproduction guide].
 
+=== What actually blocks a merge
+
+`main` is gated by the ruleset *main gate: append-only + required checks +
+signatures + scanning*: 21 required status checks, branches required to be up to
+date, and **no bypass actors**. Nothing merges without producing all 21.
+
+That last clause is the one that is easy to lose, so it is worth stating what a
+gate is *not*. A required check that no pull request can publish does not make
+the gate stricter — it makes every pull request undecidable. On 2026-10-24 this
+repository merged red repeatedly for exactly that reason, and not because a check
+failed: pull request #1336 stood at 65 passing checks, a cleared review and
+`mergeable=MERGEABLE` while `mergeStateStatus` stayed `BLOCKED`, because the
+required context named the post-merge call site of a scan that runs pre-merge
+under a different name. The only way through was the ruleset bypass, which
+discards all 21 required checks in the same action.
+
+Three things now keep that from recurring:
+
+* *Producibility is a gate.*
+  link:.github/workflows/required-contexts.yml[`required-contexts.yml`] runs
+  link:scripts/check-required-contexts.sh[`scripts/check-required-contexts.sh`]
+  on every pull request and weekly. It rejects undeclared findings:
+  `PR-UNPRODUCIBLE`, `UNSATISFIABLE`, and `UNSATISFIED-RULE` for data-dependent
+  rules such as `code_coverage` and `code_quality`. App-owned contexts are
+  excluded from findings, and declared findings are permitted.
+* *Exemptions are declared, dated and shrink-only.*
+  link:.machine_readable/required-contexts-allow.txt[`required-contexts-allow.txt`]
+  lists known-unsatisfiable contexts with a reason. It is currently **empty**,
+  which is its intended resting state; the gate warns when a listed entry stops
+  appearing as a finding, so it cannot rot into a museum of stale exemptions.
+  Silence is never achieved with `continue-on-error` or `|| true` — both were tried here and
+  both produced an always-green job that reported a gate it never ran.
+* *The repair is scripted.*
+  link:scripts/fix-required-context-name.sh[`scripts/fix-required-context-name.sh`]
+  repoints a single named context at a single named ruleset, refuses every state
+  it cannot justify, and verifies the read-back. Branch protection is edited by
+  a narrow instrument or not at all.
+
+The full measurement, including the 3h20m of red `main` that motivated it, is in
+link:docs/audits/audit-ci-context-producibility-2026-09-20.adoc[the context-producibility audit].
+
 === CI/CD Workflows
 
 Copy these workflows to `.github/workflows/` in your repository:

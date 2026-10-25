@@ -1,0 +1,210 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# code-coverage.yml — publish real line-coverage data to GitHub Code Quality.
+#
+# WHY THIS EXISTS
+# ---------------
+# The main-gate ruleset carries a `code_coverage` rule (minimum line coverage).
+# GitHub evaluates that rule against **uploaded** Cobertura reports; it runs
+# nothing itself and it does not wait for an upload to arrive. A coverage rule
+# with no uploader therefore blocks every pull request forever while looking,
+# in the check list, like a rule rather than a fault. That is the same defect as
+# a required status context no pull request can publish; see
+# docs/audits/audit-ci-context-producibility-2026-09-20.adoc, which records five
+# instances of it in a single day.
+#
+# The alternative — delete the rule — was offered and declined. So the number
+# has to be real: this workflow measures what is measurable here and uploads it.
+#
+# WHAT IS MEASURED, AND WHAT IS NOT
+# ---------------------------------
+# Measured: line coverage of the six independent Rust crates in this tree
+# (`cargo llvm-cov`, Cobertura output).
+#
+# NOT measured: the 245 shell scripts under scripts/ and the 756 AsciiDoc files
+# that are the bulk of this repository. Shell coverage needs kcov, is materially
+# more fragile, and belongs in its own change with its own review. Until that
+# lands, the floor set in the ruleset describes the Rust crates only. Saying so
+# is the point: a coverage number that quietly excludes most of the tree is
+# worse than no number, because it reads as a guarantee.
+#
+# WHY push AND pull_request
+# -------------------------
+# Code Quality compares pull-request coverage against the **default branch**
+# baseline. Without a `push` trigger on main there is no baseline, and the rule
+# has nothing to compare against. Both triggers are load-bearing.
+#
+# WHY NO `paths:` FILTER
+# ----------------------
+# A path-filtered workflow never reports on pull requests that miss the filter.
+# This job must be a required status check (see below), so a filter would leave
+# those pull requests waiting for a check that never starts. That is deadlock,
+# not optimisation — the same reasoning as lock-sync-gate.yml.
+#
+# WHY THE CHECK MUST BE REQUIRED
+# ------------------------------
+# The coverage rule evaluates "data that has already been uploaded". Merge
+# before this job finishes and the rule can evaluate an empty set and pass.
+# Requiring the job is what makes the rule mean anything, and it is also what
+# makes a fork pull request — whose upload the action deliberately skips — wait
+# for the same check as everything else instead of slipping through.
+#
+# ONE JOB PER CRATE, ONE LABEL PER UPLOAD
+# ---------------------------------------
+# GitHub aggregates the uploaded reports for a branch, so six labels are six
+# contributions to one number rather than six competing numbers. A matrix keeps
+# each crate's build isolated: these are independent crates with no workspace
+# root, and one broken build must not mask another crate's coverage.
+#
+# SCOPE OF THE MATRIX
+# -------------------
+# Six crates live outside `9-archive/`. Eight more Cargo manifests live *inside*
+# it. Archive contents are excluded on purpose: measuring code that is retained
+# for the historical record puts a coverage floor on work nobody is meant to
+# change. The exclusion is stated rather than silent, because the aggregate
+# describes these six crates and nothing else.
+#
+# FIRST RUN, RECORDED (2026-10-25)
+# --------------------------------
+# All six legs measured successfully. All six uploads then failed with
+# `Coverage upload failed (HTTP 404): Not Found` — the Code Quality ingestion
+# endpoint does not exist until Code Quality is enabled for the repository, and
+# that is a settings change, not a file. The job stayed red rather than
+# reporting a passing upload that never happened, which is the behaviour this
+# file intends. `fail-on-error` must therefore stay at its default until the
+# setting is on; turning it off here would only hide the 404.
+#
+# The measured per-crate figures are recorded in
+# docs/audits/audit-ci-context-producibility-2026-09-20.adoc under "Correction,
+# 2026-10-25", including the aggregate the ruleset's floor has to sit at or
+# below. They are kept there rather than duplicated here so the two cannot drift
+# apart — this file states the mechanism, that document states the numbers.
+
+name: Code coverage
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  # Deliberately no workflow_dispatch: the upload action needs a pull request
+  # number for any non-default branch and skips uploads it cannot attribute, so
+  # a manual run would appear to work and publish nothing.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    # The matrix suffix is generated by GitHub from the raw `include` values, so
+    # without this the required check would be named
+    # `Rust coverage (<crate path>, <slug>)` — the path baked into a context name
+    # that must stay stable for as long as the ruleset requires it. Naming the
+    # slug explicitly keeps the published context readable and short.
+    name: Rust coverage (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Required to upload coverage data. Granted at job scope rather than
+      # workflow scope; nothing else here needs it.
+      code-quality: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # `name` is a stable slug used in the upload label. Deriving the label
+        # from `strategy.job-index` would renumber every report whenever an
+        # entry is inserted, which silently invalidates history comparisons.
+        include:
+          - crate: .verisimdb/ecosystem-ingest
+            name: ecosystem-ingest
+          - crate: 1-formats/sub-specs/inline-annotations/extractor
+            name: inline-annotations-extractor
+          - crate: 2-protocols/k9-coordination/tools/k9-init
+            name: k9-init
+          - crate: hooks/playbook-to-recipe
+            name: playbook-to-recipe
+          - crate: tools/js-runtimes
+            name: js-runtimes
+          - crate: tools/uuid-v8
+            name: uuid-v8
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Measure the tree the upload is attributed to. On a `pull_request`
+          # event the default checkout is GitHub's synthetic merge commit, but
+          # the upload action attributes the report to
+          # `github.event.pull_request.head.sha`. When the head is behind the
+          # base, the two trees differ and base-branch changes land in coverage
+          # totals recorded against a commit that does not contain them. On
+          # `push` there is no pull request object, so this falls back to
+          # `github.sha` — the commit being pushed.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install Rust toolchain
+        # `toolchain:` is mandatory under a SHA pin.
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        # Version-pinned: `cargo install` without a version silently picks up
+        # whatever crates.io serves that day, and a coverage tool that changes
+        # under you changes the number the ruleset is measuring.
+        run: cargo install cargo-llvm-cov --version 0.9.1 --locked
+
+      - name: Measure line coverage
+        working-directory: ${{ matrix.crate }}
+        run: |
+          set -euo pipefail
+          # Deliberately not `--locked`: four of these six crates do not commit a
+          # Cargo.lock, so `--locked` fails there rather than measuring them.
+          cargo llvm-cov --cobertura --output-path cobertura.xml
+          # Read the totals Cobertura puts on the root element. The rule compares
+          # a weighted aggregate across every uploaded report, so the raw counts
+          # matter as much as the ratio: a floor can only be chosen from data
+          # that shows how much of the aggregate each crate actually carries.
+          read -r PCT COVERED VALID <<< "$(awk -F'"' '/<coverage / {
+            for (i = 1; i < NF; i++) {
+              if ($i ~ /lines-valid=$/)   valid = $(i + 1)
+              if ($i ~ /lines-covered=$/) covered = $(i + 1)
+            }
+          } END {
+            if (valid + 0 == 0) { print "0.00 0 0"; exit }
+            printf "%.2f %d %d", (covered + 0) * 100 / (valid + 0), covered + 0, valid + 0
+          }' cobertura.xml)"
+          {
+            echo "### ${{ matrix.name }}: ${PCT}%"
+            echo ""
+            echo "\`${COVERED}\` of \`${VALID}\` instrumented lines covered."
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Also emit the number as an annotation. The step summary is only in the
+          # run's own page; an annotation shows up on the pull request and is
+          # readable through the API, which is what makes the figure auditable
+          # after the fact rather than "trust the green tick".
+          echo "::notice title=Line coverage: ${{ matrix.name }}::${PCT}% of instrumented lines are covered by tests (${COVERED}/${VALID})."
+          # A crate that instruments nothing would otherwise report a cheerful
+          # 0.00% or, worse, divide by zero. Both mean "this measured nothing",
+          # which is a different statement from "this is untested".
+          if [ "$VALID" -eq 0 ]; then
+            echo "::warning title=No instrumented lines: ${{ matrix.name }}::cargo llvm-cov reported no instrumented lines; this crate contributes nothing to the aggregate."
+          fi
+
+      - name: Upload coverage report
+        # Fork pull requests cannot receive the write permission this needs; the
+        # action detects that and skips rather than failing. `fail-on-error`
+        # stays at its default (true), so a genuine upload failure fails the
+        # job. A coverage job that goes green without uploading is the exact
+        # defect this file exists to prevent.
+        uses: actions/upload-code-coverage@2b21a77928be8d5168c2b9581a67f2adbebacc52 # v1.4.4
+        with:
+          file: ${{ matrix.crate }}/cobertura.xml
+          language: Rust
+          label: code-coverage/rust-${{ matrix.name }}

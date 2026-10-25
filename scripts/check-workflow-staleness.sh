@@ -155,6 +155,22 @@ if [ "$IS_STANDARDS" = "false" ] && [ -d "$REPO_ROOT/.git" ]; then
     IS_STANDARDS=true
   fi
 fi
+for standards_repo in hyperpolymath/standards metadatastician/standards; do
+  if [ "${GITHUB_REPOSITORY:-}" = "$standards_repo" ]; then
+    IS_STANDARDS=true
+    break
+  fi
+  # Local runs have no Actions context. Match complete HTTPS/SSH origins so a
+  # consumer named standards-something cannot inherit the canonical exemption.
+  case "$REMOTE_URL" in
+    "https://github.com/$standards_repo" | "https://github.com/$standards_repo.git" | \
+    "git@github.com:$standards_repo" | "git@github.com:$standards_repo.git" | \
+    "ssh://git@github.com/$standards_repo" | "ssh://git@github.com/$standards_repo.git")
+      IS_STANDARDS=true
+      break
+      ;;
+  esac
+done
 
 # ── Locate a git checkout that carries standards history ────────────────────
 # We need the commit graph (not just HEAD) to answer "is this pin an ancestor

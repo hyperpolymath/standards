@@ -108,7 +108,11 @@ jobs:
           fi
           # Findings = every required context that cannot be satisfied on a pull
           # request. `app-owned` and `producible` are not findings.
-          jq -r '[.results[] | select(.verdict == "PR-UNPRODUCIBLE" or .verdict == "UNSATISFIABLE") | .context] | .[]' \
+          # Three verdicts are findings, and the third is easy to forget: a
+          # data-dependent RULE (`code_coverage`, `code_quality`) never appears
+          # as a status context, so it cannot be caught by looking at contexts,
+          # yet it blocks every pull request exactly like an unproducible one.
+          jq -r '[.results[] | select(.verdict == "PR-UNPRODUCIBLE" or .verdict == "UNSATISFIABLE" or .verdict == "UNSATISFIED-RULE") | .context] | .[]' \
             "$JSON" > "$RUNNER_TEMP/findings.txt"
           awk '{ sub(/#.*/, ""); gsub(/^[ \t]+|[ \t]+$/, ""); if ($0 != "") print }' \
             "$ALLOW" > "$RUNNER_TEMP/allow.txt"
@@ -146,9 +150,9 @@ jobs:
             echo "::warning::$n_stale declared exemption(s) no longer match anything — remove them from $ALLOW"
           fi
           if [ "$n_new" -gt 0 ]; then
-            echo "::error::$n_new required context(s) cannot be published on a pull request and are not declared in $ALLOW"
+            echo "::error::$n_new requirement(s) cannot be satisfied on a pull request and are not declared in $ALLOW — see the findings above; a \`rule:\` entry is a rule whose data nothing uploads, a bare name is a status context nothing publishes"
             sed 's/^/  /' "$RUNNER_TEMP/undeclared.txt"
-            echo "Every pull request waits for a check run that cannot happen. Either publish it on pull_request, require the name the PR-time workflow actually emits, or declare it in $ALLOW with a reason."
+            echo "For a status context: publish it on pull_request, or require the name the PR-time workflow actually emits. For a rule: upload the data it needs, or remove the rule — a coverage threshold on a repository that publishes no coverage blocks every pull request forever, and an undecidable gate is one people bypass. Declaring it in $ALLOW is the last resort, not the repair."
             exit 1
           fi
-          echo "All unsatisfiable required contexts are declared in $ALLOW ($n_find declared)."
+          echo "All unsatisfiable requirements are declared in $ALLOW ($n_find declared)."
