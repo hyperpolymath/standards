@@ -448,15 +448,35 @@ data_rule_producer() {
 # and let the block through. Returns 1 when a lookup fails, so an API problem
 # becomes an inspection failure instead of a silent pass.
 data_rule_evidence() {
-  local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body
+  local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body errf
   [ -n "$repo" ] || return 1
+  errf="$(mktemp)"
   case "$type" in
     code_coverage)
       producer="$(data_rule_producer code_coverage)"
-      [ -n "$producer" ] || return 0
+      [ -n "$producer" ] || { rm -f "$errf"; return 0; }
       # Address the workflow by file name; inspect several successful runs so a
       # recent fork run cannot hide an earlier run from this repository.
-      body="$(gh api "repos/$repo/actions/workflows/${producer##*/}/runs?status=success&per_page=30" 2>/dev/null)" || return 1
+      #
+      # A 404 from this endpoint has one specific meaning — GitHub has no
+      # workflow registered under that file name — and it is the NORMAL state
+      # of the pull request that introduces the producer: a workflow is not
+      # registered until it reaches the default branch, yet the audit runs on
+      # the very PR carrying it. Evidence is then definitively absent, which
+      # is a finding (the rule stands unsatisfied), not an inability to
+      # inspect. Mapping it to "not inspected" failed #1338's gate on a
+      # workflow that could not possibly have run yet, and said so nowhere.
+      # Every other failure (403, 5xx, network) still returns 1 below: the
+      # audit could not look, so it must not reach a verdict either way.
+      if ! body="$(gh api "repos/$repo/actions/workflows/${producer##*/}/runs?status=success&per_page=30" 2>"$errf")"; then
+        if grep -q 'HTTP 404' "$errf"; then
+          rm -f "$errf"
+          return 0
+        fi
+        rm -f "$errf"
+        return 1
+      fi
+      rm -f "$errf"
       [ -n "$body" ] || return 1
       printf '%s' "$body" | jq -es '
         length == 1 and (.[0] | type == "object" and
@@ -471,7 +491,23 @@ data_rule_evidence() {
       # GitHub runs this analysis itself once the feature is enabled, so there is
       # no uploader in the tree to inspect; the workflow it registers is the
       # signal that the feature exists for this repository.
-      body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate --slurp 2>/dev/null)" || return 1
+      #
+      # `--slurp` needs gh >= 2.32; older gh exits before any request is made,
+      # which this function would otherwise report as "could not inspect" on a
+      # machine whose only defect is its gh version (measured 2026-10-25:
+      # gh 2.23 turned a fully readable repository into inspected:false). The
+      # fallback reproduces --slurp exactly — the same pages, jq -s grouped —
+      # and the catalogue validation below is unchanged, so a truncated
+      # fallback is rejected just like a truncated --slurp.
+      if ! body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate --slurp 2>"$errf")"; then
+        if grep -qi 'unknown flag.*slurp' "$errf"; then
+          body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate 2>"$errf" | jq -s '.')" || { rm -f "$errf"; return 1; }
+        else
+          rm -f "$errf"
+          return 1
+        fi
+      fi
+      rm -f "$errf"
       [ -n "$body" ] || return 1
       # --slurp groups all pages. Reject malformed or incomplete catalogues,
       # including a successful response whose pagination stopped too early.
@@ -488,7 +524,7 @@ data_rule_evidence() {
         | .[0] // empty
         | "the GitHub-generated workflow \(.path) (\(.name))"' 2>/dev/null
       ;;
-    *) return 0 ;;
+    *) rm -f "$errf"; return 0 ;;
   esac
 }
 

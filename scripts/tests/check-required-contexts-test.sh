@@ -93,10 +93,22 @@ case "$path" in
               elif $mode == "missing-head" then [$run | del(.head_repository)]
               else [$run] end)}' ;;
       invalid) echo '{"workflow_runs":{}}'; exit 0 ;;
+      not-found) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;
+      server-fail) echo 'gh: Server Error (HTTP 500)' >&2; exit 1 ;;
       fail) echo '{"message":"Not Found"}'; exit 1 ;;
       *) echo '{"workflow_runs":[]}' ;;
     esac ;;
   */actions/workflows\?per_page=100)
+    # Model an old gh (no --slurp): it rejects the flag before any request,
+    # then serves --paginate as concatenated page objects for jq -s to group.
+    if [ "${WF_MODE:-none}" = "old-gh-quality" ]; then
+      if [[ " $* " == *" --slurp "* ]]; then echo 'unknown flag: --slurp' >&2; exit 1; fi
+      [[ " $* " == *" --paginate "* ]] || exit 1
+      printf '%s\n%s\n' \
+        '{"total_count":2,"workflows":[{"name":"CI","path":".github/workflows/ci.yml"}]}' \
+        '{"total_count":2,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}'
+      exit 0
+    fi
     # Model gh's --slurp output and require pagination, not just a larger page.
     [[ " $* " == *" --paginate "* && " $* " == *" --slurp "* ]] || exit 1
     case "${WF_MODE:-none}" in
@@ -250,6 +262,26 @@ if [ "$rc" = 0 ] && jq -e '.inspected == true and .unsatisfiable == 0' "$work/re
 else
   fail=$((fail+1)); echo "FAIL strict mode passes when both data rules are demonstrably fed (exit $rc)"; cat "$work/out"
 fi
+# A 404 from the producer-runs endpoint is the one failure that is NOT an
+# inspection failure: it proves GitHub has no such workflow registered, which
+# is the normal state of the PR introducing the producer (measured on #1338).
+# The verdict must be "inspected, rule unsatisfied" — the finding stands.
+RUNS_MODE=not-found run ok 1
+check 'a 404 producer is evidence of absence, not an inspection failure' 1 \
+  '.inspected == true and .unsatisfiable == 12 and
+   ([.results[] | select(.verdict == "VERIFIED-RULE")] | length) == 0'
+# Its negative control: any OTHER runs-endpoint failure is still an inspection
+# failure, or the 404 carve-out could pass by swallowing every error.
+RUNS_MODE=server-fail run ok 1
+check 'a 500 from the runs endpoint is still an inspection failure' 1 \
+  '.inspected == false and .results == []'
+# An old gh without --slurp must not turn a readable repository into
+# inspected:false: the fallback groups the same pages with jq -s and the
+# catalogue validation still applies to what it grouped.
+WF_MODE=old-gh-quality run ok 1
+check 'a gh without --slurp falls back to paginated jq -s grouping' 1 \
+  '.inspected == true and .unsatisfiable == 6 and
+   ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_quality")))] | length) == 6'
 # A lookup that fails must not be read as "no data" (a silent finding) nor as
 # "data present" (a silent pass). It is an inspection failure.
 RUNS_MODE=invalid run ok 1
