@@ -393,6 +393,31 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
 # remove the rule. Keeping the rule and hoping is what makes every PR
 # undecidable, and an undecidable gate is a gate people bypass.
 DATA_RULES='code_coverage code_quality'
+# Locate a workflow in the tree that uploads data for a data-dependent rule, and
+# echo its path; echo nothing when there is none. This changes the WORDING of the
+# finding only, never whether it is a finding: a rule with an uploader in the
+# tree is still unsatisfiable until the repository setting it needs is on, so it
+# must keep failing rather than becoming a warning. What it stops is the audit
+# asserting that a repository "never uploads" while a workflow in that repository
+# does the uploading — an error message that is confidently wrong sends the
+# reader looking for data that is already being produced.
+# `code_quality` deliberately has no producer here: GitHub runs that analysis
+# itself once the feature is enabled, so no file can supply it.
+data_rule_producer() {
+  local match
+  case "${1:-}" in
+    code_coverage)
+      match="$(grep -rl --include='*.yml' --include='*.yaml' \
+        'actions/upload-code-coverage' "$ROOT/.github/workflows" 2>/dev/null | head -1)"
+      [ -n "$match" ] || return 0
+      # Strip the scan root by expansion, not by regex: ROOT is usually a temp
+      # path, and its dots and slashes would be live regex metacharacters.
+      printf '%s\n' "${match#"$ROOT"/}"
+      ;;
+    *) return 0 ;;
+  esac
+}
+
 # Emit tab-separated finding name, app id 0 and UNSATISFIED-RULE for each
 # DATA_RULES match in an active branch ruleset whose ref filters match MERGE_BRANCH.
 # Presence alone is flagged; uploaded coverage or quality data is not checked.
@@ -595,10 +620,22 @@ EOS
   if [ "$n_rule" -gt 0 ]; then
     while IFS= read -r r; do
       [ -n "$r" ] || continue
-      if [ "$STRICT" = 1 ]; then
-        err "required $r needs data this repository never uploads — every pull request waits for a result that cannot exist; upload the data, or remove the rule"
+      # `$r` is "rule:<type> in ruleset <id>"; the repair depends on the type,
+      # and so does the sentence. All three branches are findings.
+      local rtype producer msg
+      rtype="$(printf '%s' "$r" | sed 's/^rule:\([^ ]*\) .*/\1/')"
+      producer="$(data_rule_producer "$rtype")"
+      if [ "$rtype" = code_quality ]; then
+        msg="required $r needs Code Quality enabled for this repository — a repository setting, and no file in the tree can supply it; every pull request waits for a result that cannot exist"
+      elif [ -n "$producer" ]; then
+        msg="required $r has an uploader in the tree ($producer), but that upload cannot succeed until Code Quality is enabled for this repository; every pull request waits for data that is uploaded and rejected"
       else
-        warn "required $r needs data this repository never uploads — unsatisfiable as a merge rule"
+        msg="required $r needs data this repository never uploads — every pull request waits for a result that cannot exist; upload the data, or remove the rule"
+      fi
+      if [ "$STRICT" = 1 ]; then
+        err "$msg"
+      else
+        warn "$msg"
       fi
     done <<EOF
 $(awk -F'\t' '$3=="UNSATISFIED-RULE" {print $1}' "$ROWS" 2>/dev/null)

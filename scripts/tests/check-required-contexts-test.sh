@@ -121,6 +121,35 @@ check 'only active rules matching the merge branch are counted in JSON' 0 \
    ([.results[].context | capture("ruleset (?<id>[0-9]+)").id] | unique) == ["1","12","13","2","8","9"]'
 run ok 1
 check 'strict mode fails when findings consist only of data rules' 1 '.inspected == true and .unsatisfiable == 12'
+# An uploader in the tree must change the EXPLANATION and not the verdict. The
+# rule stays unsatisfiable until Code Quality is enabled for the repository, so a
+# producer must never turn the finding into a pass; what it must do is stop the
+# audit claiming the repository "never uploads" while a workflow does.
+cat >"$work/repo/.github/workflows/coverage.yml" <<'YML'
+name: Coverage
+on: [pull_request]
+jobs:
+  c:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-code-coverage@0000000000000000000000000000000000000000
+YML
+run ok 1
+if [ "$rc" = 1 ] && grep -q 'has an uploader in the tree (.github/workflows/coverage.yml)' "$work/out" && \
+   ! grep -q 'never uploads' "$work/out"; then
+  pass=$((pass+1)); echo "PASS an uploader in the tree changes the wording and not the verdict"
+else
+  fail=$((fail+1)); echo "FAIL an uploader in the tree changes the wording and not the verdict (exit $rc)"; cat "$work/out"
+fi
+# Negative control: with no uploader the old sentence must come back, or the test
+# above would pass for a script that never looked at the tree at all.
+rm -f "$work/repo/.github/workflows/coverage.yml"
+run ok 1
+if [ "$rc" = 1 ] && grep -q 'never uploads' "$work/out"; then
+  pass=$((pass+1)); echo "PASS with no uploader the finding still says nothing uploads"
+else
+  fail=$((fail+1)); echo "FAIL with no uploader the finding still says nothing uploads (exit $rc)"; cat "$work/out"
+fi
 for mode in list-fail list-invalid list-empty detail-fail detail-invalid detail-empty detail-malformed detail-shape; do
   run "$mode" 0
   check "$mode does not become an empty success or retain partial findings" 1 '.inspected == false and .results == []'
