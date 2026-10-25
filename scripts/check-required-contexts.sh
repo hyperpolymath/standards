@@ -469,7 +469,7 @@ data_rule_evidence() {
             ([.[].workflows[]] | length == $total)))
       ' >/dev/null 2>&1 || return 1
       printf '%s' "$body" | jq -r '
-        [.[].workflows[]? | select(.path == "dynamic/code-quality")]
+        [.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")]
         | .[0] // empty
         | "the GitHub-generated workflow \(.path) (\(.name))"' 2>/dev/null
       ;;
