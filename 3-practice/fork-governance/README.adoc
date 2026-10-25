@@ -1,0 +1,152 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Fork governance
+:toc: left
+:toclevels: 3
+:revdate: 2026-10-24
+:revnumber: 1.0
+
+Fork governance is the one comment every pull request in a Hyperpolymath
+repository carries: a summary of the three conformance lanes, followed by the
+two grids those lanes produce, in a fixed order.
+
+It exists because a pull request is the only place where a human, a bot and an
+agent are all guaranteed to look at the same thing at the same moment. A
+dashboard is not visited; a comment on the diff is. Everything this estate
+believes about a change — that its deeds parse, that its K9 contracts hold,
+that the scanners found nothing it cannot defend — is therefore posted there,
+in one place, once per revision.
+
+== The comment
+
+[source,markdown]
+----
+<!-- fork-governance-verdict: regenerated on every run -->
+# Fork governance
+
+| Lane | Status | Run |
+|---|---|---|
+| DEED syntax (repo deed) | 🟢 conformant | [run 4242](…) |
+| K9-DEED conformance (L0–L2; L3 not verified) | 🟢 conformant (job: success) | same run |
+| Hypatia verdict grid | 🟣 critical (job: success) | same run |
+
+<!-- fork-governance:lane k9-deed -->
+## K9-DEED conformance
+…the k9-deed verdict grid…
+
+<!-- fork-governance:lane hypatia -->
+## Hypatia verdict grid
+…the Hypatia verdict grid…
+----
+
+The order is normative and enforced by a test, not by convention: summary,
+then *K9-DEED conformance*, then *Hypatia*. A reader who has seen one comment
+has seen them all, and a tool that scrapes the third section can find it
+without parsing the first.
+
+=== Reading a row
+
+[cols="1,4",options="header"]
+|===
+| Column | Meaning
+
+| Lane
+| Which conformance question was asked.
+
+| Status
+| The lane's own state word, with its glyph. A glyph is never decoration: it
+is derived from the lane's verdict, and a state word this system does not
+recognise renders as orange, never as green.
+
+| Run
+| Where the evidence is. The first row links the run; the others say `same run`
+because all three lanes run in one workflow run, so the link would be the same
+three times.
+|===
+
+=== Reading a status
+
+Two grading families, from link:../../docs/VERDICT-GRID-SPEC.adoc[VERDICT-GRID-SPEC]:
+
+.Conformance (DEED, k9-deed)
+[cols="1,1,3",options="header"]
+|===
+| Glyph | Word | Meaning
+| 🟢 | conformant | every applicable check in the declared scope passed
+| 🟡 | conformant (advisory debt) | passed, with ledgered debt or warnings
+| 🟠 | indeterminate | evidence is missing, unavailable or malformed — *not* clean
+| 🔴 | failing | a blocking failure is known
+| ⚪ | not applicable | explicitly out of scope, with a reason
+|===
+
+.Findings (Hypatia)
+[cols="1,1,3",options="header"]
+|===
+| Glyph | Word | Meaning
+| 🟣 | critical | the reporter ran and its worst finding is critical
+| 🔵 | high findings | the reporter ran and its worst finding is high
+| 🟠 | indeterminate | a reporter did not run, or its report was malformed
+| 🟢 | clean | the reporter ran and found nothing in scope
+|===
+
+Orange is the load-bearing state. It means *this row certifies nothing*, and
+it is deliberately louder than green: a system that renders "no evidence" as
+"no problem" teaches its readers to stop looking.
+
+== The three lanes
+
+[cols="1,1,3",options="header"]
+|===
+| Lane | Implementation | What it proves
+| DEED syntax
+| `.github/workflows/deed-conformance.yml`
+| Every committed `.deed` file parses against the grammar in
+`1-formats/deed/spec/abnf/deed.abnf`, and the fixture corpus still passes.
+| K9-DEED conformance
+| `.github/workflows/k9-conformance.yml`
+| Every committed K9 contract passes layers L0–L2 of
+`1-formats/k9/tools/k9-validate.sh --strict`. L3 (signature verification) is
+*not* covered and the grid says so.
+| Hypatia verdict grid
+| `.github/workflows/hypatia-scan-reusable.yml`
+| The repository's scanners ran, and here is what they reported, one row per
+reporter, with the fleet's report-backs folded in.
+|===
+
+The lane named *K9-DEED conformance* is the K9 lane and the DEED lane read as
+one question: a K9 contract and the deed that claims it are the same promise
+written twice, and a repository can be green in one and red in the other. The
+summary keeps DEED as its own row because it fails for entirely different
+reasons (grammar, fixtures) and a reader needs to know which one broke.
+
+== Where everything lives
+
+[cols="2,3",options="header"]
+|===
+| Path | What it is
+| `3-practice/fork-governance/SPEC.adoc` | The normative contract: markers, order, states, posting rules, idempotency.
+| `3-practice/fork-governance/LANES.adoc` | Each lane's inputs, outputs, permissions and artifacts.
+| `3-practice/fork-governance/ADOPTION.adoc` | How another repository turns this on, step by step.
+| `3-practice/fork-governance/DISCOVERY.adoc` | How a reader in *any* repository finds this, and why that is enforced rather than hoped for.
+| `scripts/fork-governance-render.sh` | The renderer. Pure function of its inputs; no network, no clock.
+| `scripts/tests/fork-governance-render-test.sh` | 22 cases, weighted to the failures that look like passes.
+| `.github/workflows/fork-governance.yml` | This repository's own run: the three lanes, then the post.
+| `.github/workflows/fork-governance-reusable.yml` | The posting engine, callable from any repository.
+| `.github/workflows/k9-conformance.yml` | Lane 2. Renders the grid, publishes the artifact, does not post.
+| `.github/workflows/hypatia-scan-reusable.yml` | Lane 3. Same division of labour.
+|===
+
+== What this is not
+
+* Not a security certification. A green row means the declared checks ran and
+passed. It says nothing about a vulnerability nobody wrote a rule for.
+* Not a merge gate by itself. The lanes gate their own jobs; the summary
+reports. A repository that wants the summary to block a merge makes the lane
+checks required, not the comment.
+* Not a replacement for the individual lane comments where a repository still
+wants them — but a repository that keeps both gets two verdicts that can
+disagree, which is worse than one. See link:SPEC.adoc[SPEC] §Single poster.
+
+== Adopting it
+
+Four steps, one file, no secrets of its own. See link:ADOPTION.adoc[ADOPTION].

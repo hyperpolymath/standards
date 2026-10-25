@@ -345,6 +345,21 @@ fi
 
 if (( MAX_KEPT_RANK >= THRESHOLD_RANK )); then
   echo "::error::Gate failed: $BLOCKING_COUNT unfiltered finding(s) at or above '$BLOCKING_THRESHOLD' ($KEPT_COUNT kept in total)." >&2
+  # ⚠ NAME THE FINDINGS. The summary line above says how many; it does not say
+  # which, and the job log is not always readable (progress-log retention, a
+  # fork PR, an API that returns EOF). The annotation API is, and it is the only
+  # channel that survives into the pull request's Files-changed view — so every
+  # finding that caused the failure is emitted as its own annotation. Without
+  # this, diagnosing a red baseline gate means reproducing the scanner locally,
+  # which is exactly the work the gate exists to avoid.
+  printf '%s' "$ANNOTATED" | jq -r --arg th "$BLOCKING_THRESHOLD" '
+    def rank: {critical: 5, high: 4, medium: 3, warn: 3, low: 2, info: 1, informational: 1}[.] // 0;
+    ($th | rank) as $min
+    | .[]
+    | select((.baseline_status // "new") == "new")
+    | select((.severity | rank) >= $min)
+    | "::error file=\(.file // "hypatia"),line=\(.line // 1),title=\(.rule_module)/\(.type)::unfiltered \(.severity) finding \(.rule_module)/\(.type) in \(.file // "(no file)") -- add it to .hypatia-baseline.json with a note, or fix it"
+  ' >&2 || true
   exit 1
 fi
 

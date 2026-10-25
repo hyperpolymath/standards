@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
 #
-# k9-grid.sh — render the compact verdict grid for the K9 conformance lane.
+# k9-grid.sh — render the compact verdict grid for the K9-DEED conformance lane.
 # Policy and anatomy: docs/VERDICT-GRID-SPEC.adoc. Logic: scripts/lib/k9-grid.jq.
 # The lane that calls it: .github/workflows/k9-conformance.yml.
 #

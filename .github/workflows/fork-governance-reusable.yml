@@ -1,0 +1,201 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# fork-governance-reusable.yml — post the Fork governance summary on a pull
+# request, with the lanes in a fixed order:
+#
+#   1. summary        DEED syntax · K9-DEED conformance · Hypatia verdict grid
+#   2. K9-DEED conformance grid
+#   3. Hypatia verdict grid
+#
+# This workflow POSTS; it does not run the lanes. A reusable cannot read the
+# caller's `needs` graph, so the caller passes its lane results and verdicts in
+# as inputs. That is deliberate: the posting step must not be able to invent a
+# lane outcome, and a lane that never ran has no result to pass — it renders
+# orange, which is the truth.
+#
+# WHY THE LANES DO NOT POST THEMSELVES. `k9-conformance.yml` and
+# `hypatia-scan-reusable.yml` render grids and publish artifacts. They ask for
+# no write permission, because a reusable may not request more than its caller
+# grants and most callers grant only reads. This workflow is the single place
+# that is allowed to write to a pull request, so there is exactly one comment,
+# one marker, and one update loop per repository.
+#
+# Documented in 3-practice/fork-governance/ (SPEC.adoc, LANES.adoc,
+# ADOPTION.adoc). Read those before changing the comment shape: the markers are
+# a contract with every downstream reader.
+
+name: Fork governance (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        description: "Pull request number to comment on. Pass github.event.pull_request.number."
+        type: string
+        required: true
+      deed-result:
+        description: "needs.<deed job>.result"
+        type: string
+        required: false
+        default: ""
+      k9-result:
+        description: "needs.<k9 job>.result"
+        type: string
+        required: false
+        default: ""
+      k9-verdict:
+        description: "needs.<k9 job>.outputs.verdict — green, yellow, orange, red or grey."
+        type: string
+        required: false
+        default: ""
+      k9-artifact:
+        description: "Artifact name carrying k9-grid/report.md. Empty to skip the download."
+        type: string
+        required: false
+        default: "k9-grid"
+      hypatia-result:
+        description: "needs.<hypatia job>.result"
+        type: string
+        required: false
+        default: ""
+      hypatia-verdict:
+        description: "needs.<hypatia job>.outputs.verdict — green, yellow, orange, red, purple or grey."
+        type: string
+        required: false
+        default: ""
+      hypatia-artifact:
+        description: "Artifact name carrying verdict-grid/report.md. Empty to skip the download."
+        type: string
+        required: false
+        default: "verdict-grid"
+      hypatia-advisory:
+        description: >-
+          needs.<hypatia job>.outputs.advisory — `<state>:<critical>:<high>`
+          or `none`. Shown beside the verdict so an advisory critical is
+          visible without being able to grade the change. Empty is fine.
+        type: string
+        required: false
+        default: ""
+      grid-author:
+        description: "The account whose previous comment is read as the baseline. Only this account's comment is trusted."
+        type: string
+        required: false
+        default: "github-actions[bot]"
+      canon-ref:
+        description: "Ref of hyperpolymath/standards holding the renderer. Pin it in production."
+        type: string
+        required: false
+        default: "main"
+
+permissions: {}
+
+jobs:
+  post:
+    name: Post the fork governance summary
+    # Always: a lane that failed is exactly when the summary matters most.
+    if: ${{ always() && inputs.pr-number != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      # In this repository the renderer is already checked out below the
+      # workspace; anywhere else it comes from the canon at a pinned ref.
+      - name: Checkout the caller
+        if: ${{ github.repository == 'hyperpolymath/standards' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/fork-governance-render.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout the canon
+        if: ${{ github.repository != 'hyperpolymath/standards' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/standards
+          ref: ${{ inputs.canon-ref }}
+          path: .fork-governance-canon
+          persist-credentials: false
+          sparse-checkout: scripts/fork-governance-render.sh
+          sparse-checkout-cone-mode: false
+
+      # `continue-on-error` on both downloads, and never a condition on the
+      # posting step: an artifact that did not upload is a fact to report
+      # (orange row), not a reason to post nothing. A summary that fails to
+      # appear when things went wrong is worse than no summary at all.
+      - name: Download the k9-deed grid
+        if: ${{ inputs.k9-artifact != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.k9-artifact }}
+          path: k9-grid
+
+      - name: Download the Hypatia verdict grid
+        if: ${{ inputs.hypatia-artifact != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.hypatia-artifact }}
+          path: verdict-grid
+
+      - name: Render the combined verdict
+        id: render
+        env:
+          DEED_RESULT: ${{ inputs.deed-result }}
+          K9_RESULT: ${{ inputs.k9-result }}
+          K9_VERDICT: ${{ inputs.k9-verdict }}
+          HYPATIA_RESULT: ${{ inputs.hypatia-result }}
+          HYPATIA_VERDICT: ${{ inputs.hypatia-verdict }}
+          HYPATIA_ADVISORY: ${{ inputs.hypatia-advisory }}
+        run: |
+          set -euo pipefail
+          case "${{ github.repository }}" in
+            hyperpolymath/standards) RENDERER=scripts/fork-governance-render.sh ;;
+            *)                       RENDERER=.fork-governance-canon/scripts/fork-governance-render.sh ;;
+          esac
+          [ -f "$RENDERER" ] || { echo "::error::renderer not found at $RENDERER"; exit 1; }
+          args=(--out "$RUNNER_TEMP/fork-governance"
+                --deed-result "$DEED_RESULT"
+                --k9-result "$K9_RESULT" --k9-verdict "$K9_VERDICT"
+                --hypatia-result "$HYPATIA_RESULT" --hypatia-verdict "$HYPATIA_VERDICT"
+                --hypatia-advisory "${HYPATIA_ADVISORY:-}"
+                --sha "$GITHUB_SHA" --run "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY")
+          [ -s k9-grid/report.md ] && args+=(--k9-report k9-grid/report.md)
+          [ -s verdict-grid/report.md ] && args+=(--hypatia-report verdict-grid/report.md)
+          bash "$RENDERER" "${args[@]}" >/dev/null
+          {
+            echo "## Fork governance"
+            echo
+            cat "$RUNNER_TEMP/fork-governance/body.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          GRID_AUTHOR: ${{ inputs.grid-author }}
+        run: |
+          set -euo pipefail
+          # One comment per pull request, updated in place. The marker is read
+          # before the body is written, so a rerun of the same commit cannot
+          # produce two comments and a reader cannot see two verdicts at once.
+          comment_id=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            | jq -r --arg a "$GRID_AUTHOR" \
+                '[.[][] | select((.user.login // "") == $a and ((.body // "") | contains("<!-- fork-governance-verdict:")))]
+                 | last | .id // ""')
+          jq -n --rawfile body "$RUNNER_TEMP/fork-governance/body.md" '{body: $body}' \
+            > "$RUNNER_TEMP/fork-governance/comment.json"
+          if [ -n "$comment_id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" \
+              --input "$RUNNER_TEMP/fork-governance/comment.json" >/dev/null
+            echo "updated the fork governance comment on #$PR_NUMBER ($comment_id)"
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+              --input "$RUNNER_TEMP/fork-governance/comment.json" >/dev/null
+            echo "posted the fork governance comment on #$PR_NUMBER"
+          fi

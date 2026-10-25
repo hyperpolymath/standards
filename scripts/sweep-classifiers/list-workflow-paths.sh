@@ -39,7 +39,7 @@
 #
 # Example:
 #   ./list-workflow-paths.sh codeql.yml \
-#     > /tmp/drift-survey/codeql-all-tuples.tsv
+#     > "${DRIFT_SURVEY_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/drift-survey}/codeql-all-tuples.tsv"
 #
 # Notes:
 #   - Requires `gh` CLI + jq.

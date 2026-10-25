@@ -1,5 +1,19 @@
 # CLAUDE.md - AI Assistant Instructions
 
+## Fork governance (read before changing a workflow)
+
+Every pull request in this repository gets one generated comment, marked
+`<!-- fork-governance-verdict: regenerated on every run -->`. It reports three
+lanes in a fixed order: summary, **K9-DEED conformance**, **Hypatia verdict
+grid**. The comment is produced by `.github/workflows/fork-governance.yml`
+(lanes) and `.github/workflows/fork-governance-reusable.yml` (posting).
+
+Documentation, in AsciiDoc, lives in `3-practice/fork-governance/` — `SPEC.adoc`
+is normative for the comment's markers and order. Machine-readable route:
+`:governance` in the `routing` clause of `standards_chora.deed`.
+
+Never hand-edit the comment, and never reorder the sections.
+
 ## License Policy — Manual Only (highest-priority guardrail)
 
 **Owner directive 2026-06-02 (verbatim):**

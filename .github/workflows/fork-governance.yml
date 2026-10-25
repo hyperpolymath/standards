@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# fork-governance.yml — the repository's own fork governance run.
+#
+# Every pull request gets one comment, regenerated in place, carrying:
+#
+#   1. the summary        DEED syntax · K9-DEED conformance · Hypatia verdict
+#   2. K9-DEED conformance grid
+#   3. Hypatia verdict grid
+#
+# THIS WORKFLOW IS THE SINGLE PR-TIME ENTRY POINT for the three lanes. The lane
+# workflows keep their own `push` and `workflow_dispatch` triggers, and they
+# declare `workflow_call` here. Their `pull_request` triggers were removed on
+# purpose: a path-filtered lane run and a governance run of the same lane are
+# two scans of the same commit producing two artifacts and, in the case of
+# Hypatia, two SARIF uploads for one set of findings. One PR, one scan.
+#
+# A PR therefore gets a governance verdict even when it touches none of the
+# lanes' paths — which is the point. A path-filtered governance check is a
+# check that does not report on most pull requests, and a required check that
+# does not report blocks the merge.
+#
+# The `verdict` job is `always()`: a lane that failed is exactly when the
+# summary matters most, and a missing summary reads as "nothing to see".
+#
+# Documented in 3-practice/fork-governance/. Adopting this in another
+# repository: 3-practice/fork-governance/ADOPTION.adoc.
+
+name: Fork governance
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# A new push supersedes the previous run for the same PR. The comment is
+# updated in place, so a superseded run that finished later would otherwise
+# overwrite the newer verdict with a stale one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deed:
+    name: DEED syntax
+    uses: ./.github/workflows/deed-conformance.yml
+    permissions:
+      contents: read
+    with:
+      # This repository always has at least one .deed file (0-AI-MANIFEST.deed,
+      # standards_chora.deed). A zero-file run is grey, and grey must never
+      # stand in for "someone deleted the corpus".
+      require-files: true
+
+  k9:
+    name: K9-DEED conformance
+    uses: ./.github/workflows/k9-conformance.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      require-files: true
+      # ⚠ RATCHET, not a preference. Flip to `true` once this repository's grid
+      # is green on a full run; from then on orange fails the lane instead of
+      # warning. It is left `false` here because no full run had been observed
+      # at the time the lane was introduced, and a gate nobody has seen pass is
+      # a gate that will be disabled by the first person it blocks.
+      fail-on-indeterminate: false
+
+  hypatia:
+    name: Hypatia verdict grid
+    uses: ./.github/workflows/hypatia-scan-reusable.yml
+    permissions:
+      actions: read
+      contents: read
+      # MUST be write: the reusable uploads SARIF. A caller may not grant less
+      # than the callee declares — the run dies at startup with zero jobs.
+      security-events: write
+    secrets:
+      HYPATIA_SCAN_PAT: ${{ secrets.HYPATIA_SCAN_PAT }}
+
+  verdict:
+    name: Post the fork governance summary
+    needs: [deed, k9, hypatia]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/fork-governance-reusable.yml
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    with:
+      pr-number: ${{ github.event.pull_request.number }}
+      deed-result: ${{ needs.deed.result }}
+      k9-result: ${{ needs.k9.result }}
+      k9-verdict: ${{ needs.k9.outputs.verdict }}
+      hypatia-result: ${{ needs.hypatia.result }}
+      hypatia-verdict: ${{ needs.hypatia.outputs.verdict }}
+      hypatia-advisory: ${{ needs.hypatia.outputs.advisory }}

@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Fork governance — the three lanes
+:toc: left
+:toclevels: 3
+:revdate: 2026-10-24
+
+Each lane answers one question, produces one grid (except DEED), and publishes
+one artifact. None of them posts. The posting engine described in
+link:SPEC.adoc[SPEC] is the only writer.
+
+== Lane 1 — DEED syntax
+
+[cols="1,4"]
+|===
+| Workflow | `.github/workflows/deed-conformance.yml` (`workflow_call`)
+| Question | Does every committed `.deed` file parse against the grammar, and does the fixture corpus still behave?
+| Passes on | grammar violations, unparsable fixtures, a repository with no `.deed` file at all when `require-files` is set
+| Output | job result only — this lane renders no grid
+| Permissions | `contents: read`
+| Artifact | none
+|===
+
+DEED is the repository's self-description: what it is, what it claims, what it
+will not do. It is small, it is hand-written, and it is the cheapest thing in
+the estate to get wrong — a single missing clause makes the document a
+plausible-looking text file that no parser will accept.
+
+`require-files: true` is set by fork governance in repositories that must have
+at least one deed. Without it, a repository that deleted its deed would show a
+green row for having nothing to check.
+
+== Lane 2 — K9-DEED conformance
+
+[cols="1,4"]
+|===
+| Workflow | `.github/workflows/k9-conformance.yml` (`workflow_call`)
+| Question | Do the committed K9 contracts satisfy layers L0–L2 of the K9 contract, with the validator's own self-test and typecheck behind them?
+| Passes on | a validator self-test failure, a typecheck failure, any contract failing L0–L2, a zero-file corpus when `require-files` is set
+| Output | `verdict` (grid state), artifact `k9-grid`
+| Permissions | `contents: read`, `pull-requests: read`
+| Artifact | `k9-grid/report.md`, `report.json`, `badge.json`, `results.jsonl`, `selftest.log`, `typecheck.log`
+|===
+
+The lane runs three things, in order, because the later two are meaningless
+without the first:
+
+. the validator's **self-test** — if the validator is broken, "no findings" is
+  a statement about the validator;
+. the **typecheck** of the validator against its own contract;
+. every committed K9 file at **L0–L2**, `--strict`.
+
+L3 (signature verification) is not verified anywhere in the estate yet. The
+summary row says so, in the row, rather than in a footnote — a scope claim a
+reader has to go looking for is a scope claim that will be misread as broader
+than it is.
+
+`--layer L2` is the ceiling: the loop passes every tracked `.k9` and `.k9.ncl`
+file. A file whose name starts with `-` is passed after `--`, because a tracked
+path is a path and not a flag.
+
+=== The debt ledger
+
+`.machine_readable/k9-contract-debt.txt` records contracts that predate the
+current rules. The ledger is **shrink-only**: entries present at HEAD and absent
+at the merge base are growth, and growth fails the run unless the PR body or a
+commit message declares
+
+[source]
+----
+Ratchet-exception: .machine_readable/k9-contract-debt.txt — <why>
+----
+
+A debt ledger without a ratchet is a permanent exemption list, and the first
+person to add an entry never removes one.
+
+=== Why "k9-deed"
+
+The lane is named for both formats on purpose. A deed states what a repository
+claims; a K9 contract states what it will hold. In this estate they are the
+same promise in two notations, and a repository can be green in one and red in
+the other. Reading them as one row is the point; reading them as one *check*
+would hide which one broke, so DEED keeps its own summary row above.
+
+== Lane 3 — Hypatia verdict grid
+
+[cols="1,4"]
+|===
+| Workflow | `.github/workflows/hypatia-scan-reusable.yml` (`workflow_call`)
+| Question | Did the scanners run, and what did each of them report?
+| Passes on | nothing by default — this is a *findings* lane, not a conformance lane. Callers may set `block-on-high` to refuse current high or critical findings after baseline filtering.
+| Output | `verdict` (grid state), artifact `verdict-grid`
+| Permissions | `actions: read`, `contents: read`, `security-events: write`
+| Artifact | `verdict-grid/report.md`, `report.json`, `badge.json`
+|===
+
+The lane folds in several reporters. `Hypatia scan` is the estate's own
+scanner; `panic-attack assail`, `pons asinorum` and the gitbot-fleet members
+(`rhodibot`, `panicbot`, `echidnabot`, `seambot`, `finishingbot`,
+`accessibilitybot`, `glambot`, `cipherbot`, `sustainabot`) report back where
+they are enrolled. A reporter that is enrolled but silent is **orange**, not
+green: an absence of evidence is reported as an absence of evidence.
+
+Findings are filtered through `.hypatia-baseline.json` before the grid is
+rendered, so a known-and-argued finding does not reappear every revision, and
+the grid shows what is *new or unargued*.
+
+=== A finding lane is not a pass/fail lane
+
+Conformance asks "did it pass?". Findings ask "what is there?". A findings
+lane that reported zero findings and a findings lane that never ran both have
+zero rows — which is why the state word, not the count, is authoritative, and
+why `indeterminate` exists as a first-class state.
+
+== Lane → summary mapping
+
+[cols="1,1,2",options="header"]
+|===
+| Lane | Summary row | Notes
+| DEED syntax | `DEED syntax (repo deed)` | result → state, no grid
+| K9-DEED conformance | `K9-DEED conformance (L0–L2; L3 not verified)` | verdict → state, result can override
+| Hypatia verdict grid | `Hypatia verdict grid` | verdict → state, result can override
+|===
+
+== Artifacts and retention
+
+Both grids are uploaded per run with `retention-days: 90`. The comment links
+the run, not the artifact: an artifact URL requires authentication, expires,
+and cannot be read from a notification. The grid *is* the durable record; the
+artifact is the evidence behind it.

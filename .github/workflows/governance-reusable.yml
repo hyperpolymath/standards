@@ -20,6 +20,16 @@ on:
         type: string
         required: false
         default: ubuntu-latest
+      baseline-strict:
+        description: >-
+          Fail when an acknowledgement in .hypatia-baseline.json carries no
+          `expires_at`. Default false: an undated entry is REPORTED but does
+          not fail, so this is adoptable by repositories mid-migration. A
+          repository that has dated all of its entries should turn it on —
+          otherwise the undated ones it already fixed can silently come back.
+        type: boolean
+        required: false
+        default: false
     secrets:
       HYPATIA_SCAN_PAT:
         description: Fine-grained token with repository Administration read access
@@ -1679,10 +1689,37 @@ jobs:
           # Both files: the ratchet calls count-ledger-entries.sh as a sibling,
           # and it has no fallback if the counter is missing — deliberately.
           cp .standards-checkout/scripts/check-exemption-ratchet.sh \
-             .standards-checkout/scripts/count-ledger-entries.sh "$RUNNER_TEMP/"
+             .standards-checkout/scripts/count-ledger-entries.sh \
+             .standards-checkout/scripts/check-baseline-expiry.sh "$RUNNER_TEMP/"
           rm -rf .standards-checkout
           bash "$RUNNER_TEMP/check-exemption-ratchet.sh" \
             "${{ github.event.pull_request.base.sha }}"
+
+      # The ratchet stops NEW undated debt; this reports the debt already
+      # there. They are different jobs on purpose: the ratchet is a gate and
+      # must fail, this is a forecast and must not — a repository with 200
+      # undated legacy entries cannot be asked to fix them in the PR that
+      # happens to notice. `baseline-strict` is the switch a migrated
+      # repository flips once, and this repository has flipped it.
+      - name: Forecast baseline expiry
+        if: ${{ always() }}
+        continue-on-error: ${{ ! inputs.baseline-strict }}
+        env:
+          STRICT: ${{ inputs.baseline-strict }}
+        run: |
+          set -uo pipefail
+          if [ ! -f .hypatia-baseline.json ]; then
+            echo "No .hypatia-baseline.json — nothing is acknowledged, nothing expires."
+            exit 0
+          fi
+          args=(--quiet --warn-days 60)
+          if [ "$STRICT" != "true" ]; then
+            args+=(--allow-undated)
+          fi
+          # Intentionally NOT `set -e`: an expired or undated entry must not
+          # hide the forecast for the rest, so the script runs once and its
+          # exit code is the step's.
+          bash "$RUNNER_TEMP/check-baseline-expiry.sh" "${args[@]}"
 
   debt-ratchet:
     name: Debt ratchet

@@ -46,7 +46,7 @@ expect 0 "44 unchanged anonymous legacy entries pass"
 
 # jq, not an interpreter: estate policy bans Python, and the JS runtime has
 # already moved once. jq is what the rest of the estate's CI already uses.
-jq '. + [{"severity":"low","rule_module":"m","type":"t2","file":"b.rs","note":"ok"}]' \
+jq '. + [{"severity":"low","rule_module":"m","type":"t2","file":"b.rs","note":"ok","expires_at":"2027-06-30"}]' \
    .hypatia-baseline.json > .baseline.tmp && mv .baseline.tmp .hypatia-baseline.json
 git commit -aqm "grow"
 expect 1 "silent growth fails"
@@ -55,6 +55,44 @@ git commit -q --amend -m "grow
 
 Ratchet-exception: .hypatia-baseline.json — vendored upstream corpus"
 expect 0 "declared growth passes"
+
+# A declared exception licenses the GROWTH, not an undated acknowledgement.
+# Without this the escape hatch would be a way to add permanent debt with a
+# sentence of prose, which is the state the expiry rule exists to end.
+git checkout -q "$BASE" -- .hypatia-baseline.json
+jq '. + [{"severity":"low","rule_module":"m","type":"t4","file":"d.rs","note":"undated"}]' \
+   .hypatia-baseline.json > .baseline.tmp && mv .baseline.tmp .hypatia-baseline.json
+git commit -aqm "grow undated
+
+Ratchet-exception: .hypatia-baseline.json — declared"
+expect 1 "declared growth of an UNDATED entry still fails"
+
+# ...and the date must be a date you could defend: in the past is a re-ack of
+# nothing, and beyond the horizon defers the decision instead of dating it.
+git checkout -q "$BASE" -- .hypatia-baseline.json
+jq '. + [{"severity":"low","rule_module":"m","type":"t5","file":"e.rs","note":"stale","expires_at":"2020-01-01"}]' \
+   .hypatia-baseline.json > .baseline.tmp && mv .baseline.tmp .hypatia-baseline.json
+git commit -aqm "grow stale
+
+Ratchet-exception: .hypatia-baseline.json — declared"
+expect 1 "an entry dated in the PAST fails"
+
+git checkout -q "$BASE" -- .hypatia-baseline.json
+jq '. + [{"severity":"low","rule_module":"m","type":"t6","file":"f.rs","note":"forever","expires_at":"2199-01-01"}]' \
+   .hypatia-baseline.json > .baseline.tmp && mv .baseline.tmp .hypatia-baseline.json
+git commit -aqm "grow forever
+
+Ratchet-exception: .hypatia-baseline.json — declared"
+expect 1 "an entry dated beyond the horizon fails"
+
+# Re-acking means a NEW date: pushing an existing entry's date further out is
+# indistinguishable from keeping it forever unless the entry is re-verified,
+# so a past date on an existing entry must not be grandfathered either.
+git checkout -q "$BASE" -- .hypatia-baseline.json
+jq '.[-1].expires_at = "2020-01-01"' .hypatia-baseline.json > .baseline.tmp \
+  && mv .baseline.tmp .hypatia-baseline.json
+git commit -aqm "expire a dated entry retroactively"
+expect 1 "setting an existing entry's date into the past fails"
 
 jq '. + [{"severity":"low","rule_module":"m","type":"t3","file":"c.rs"}]' \
    .hypatia-baseline.json > .baseline.tmp && mv .baseline.tmp .hypatia-baseline.json
@@ -82,12 +120,21 @@ git commit -aqm "modify anonymous legacy entry"
 expect 1 "modified anonymous entry fails without ledger growth"
 
 # Documentation is debt reduction. Although the JSON value changed, its new
-# form is no longer anonymous and therefore must pass.
+# form is no longer anonymous and therefore must pass -- but the same edit is
+# now also the moment the entry gets a date. Requiring the date HERE is the
+# whole adoption strategy: 23 undated entries in this repository became 0 not
+# by a migration campaign but by making the next hand that touched one date it.
 git checkout -q "$BASE" -- .hypatia-baseline.json .hypatia-ignore
 jq '.[0].note = "legacy finding documented when touched"' \
   .hypatia-baseline.json > .baseline.tmp && mv .baseline.tmp .hypatia-baseline.json
 git commit -aqm "document legacy entry"
-expect 0 "adding documentation to a legacy anonymous entry passes"
+expect 1 "documenting a legacy entry without dating it now fails"
+
+git checkout -q "$BASE" -- .hypatia-baseline.json .hypatia-ignore
+jq '.[0].note = "legacy finding documented when touched" | .[0].expires_at = "2027-06-30"' \
+  .hypatia-baseline.json > .baseline.tmp && mv .baseline.tmp .hypatia-baseline.json
+git commit -aqm "document and date legacy entry"
+expect 0 "documenting a legacy anonymous entry AND dating it passes"
 
 # Removing grandfathered debt is always allowed.
 git checkout -q "$BASE" -- .hypatia-baseline.json .hypatia-ignore

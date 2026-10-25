@@ -68,9 +68,15 @@ jobs:
 
       - name: Configure
         id: config
+        env:
+          # workflow_dispatch inputs are user-supplied strings, not shell
+          # syntax. Inlining `${{ github.event.inputs.* }}` executes whatever a
+          # dispatcher types (actions/command-injection).
+          DRY_RUN_DASH: ${{ github.event.inputs.dry-run }}
+          DRY_RUN_UNDERSCORE: ${{ github.event.inputs.dry_run }}
         run: |
           # Check if this is a dry run
-          if [ "${{ github.event.inputs.dry-run }}" = "true" ] || [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          if [ "$DRY_RUN_DASH" = "true" ] || [ "$DRY_RUN_UNDERSCORE" = "true" ]; then
             echo "dry_run=true" >> $GITHUB_OUTPUT
             echo "::notice::Running in DRY RUN mode - no changes will be made"
           else
@@ -87,6 +93,10 @@ jobs:
           # for live repo reads. Without a token every probe fails silently
           # and every repo is misclassified as hookless.
           GH_TOKEN: ${{ secrets.HYPATIA_SCAN_PAT }}
+          # Dispatch input as data (actions/command-injection). A repo name is
+          # also untrusted enough to want quoting-by-construction: it reaches
+          # `jq --arg` below and must never be re-parsed by the shell.
+          TARGET_INPUT: ${{ github.event.inputs.target-repo }}
         run: |
           echo "🔍 Identifying repositories that need hook updates..."
           
@@ -94,8 +104,8 @@ jobs:
           TRIGGER_SHA="${{ github.sha }}"
           
           # Check if specific repo was requested
-          if [ -n "${{ github.event.inputs.target-repo }}" ]; then
-            TARGET="${{ github.event.inputs.target-repo }}"
+          if [ -n "$TARGET_INPUT" ]; then
+            TARGET="$TARGET_INPUT"
             # -c: compact, single-line JSON — a multiline value breaks
             # $GITHUB_OUTPUT below (same defect class as root cause 2, #807).
             REPOS_JSON=$(jq -cn --arg repo "$TARGET" '[$repo]')
@@ -284,21 +294,41 @@ jobs:
           
           chmod +x "$DEST"
 
+      # Fork governance visibility (3-practice/fork-governance/DISCOVERY.adoc).
+      # Every estate repository gets a root-level pointer to the standard, in
+      # the same commit as its hooks. The text is copied verbatim from
+      # .github/fork-governance-pointer.adoc -- not templated, not generated
+      # per-repo -- so there is exactly one version of what it says.
+      #
+      # This is the only reason the hook propagation job touches a file outside
+      # .githooks/, and it is deliberate: a standard that a repository has to
+      # know exists before it can read is not propagated at all.
+      - name: Write the fork governance pointer
+        if: needs.identify-repos.outputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          cp .github/fork-governance-pointer.adoc target-repo/FORK-GOVERNANCE.adoc
+          echo "::notice::wrote FORK-GOVERNANCE.adoc into $TARGET_REPO"
+
       - name: Commit and push hook updates
         if: needs.identify-repos.outputs.dry_run != 'true'
         run: |
           cd target-repo
           
-          # Check if there are changes
-          if git status --porcelain | grep -q '.githooks'; then
-            echo "📝 Changes detected in .githooks - committing..."
+          # Check if there are changes. The pointer is part of the same
+          # commit: a repository that gets new hooks but an old pointer would
+          # be pointing at documentation that no longer matches its hooks.
+          if git status --porcelain | grep -qE '(\.githooks|FORK-GOVERNANCE\.adoc)'; then
+            echo "📝 Changes detected (.githooks and/or FORK-GOVERNANCE.adoc) - committing..."
             
             # Configure git
             git config user.name "hyperpolymath-hooks-bot"
             git config user.email "hooks-bot@hyperpolymath.dev"
             
-            # Add all changes
+            # Add both artefacts explicitly. `git add -A` would also sweep in
+            # whatever the checked-out target repository happened to contain.
             git add .githooks/
+            [ -f FORK-GOVERNANCE.adoc ] && git add FORK-GOVERNANCE.adoc
             
             # Commit
             COMMIT_MSG="chore(.githooks): update hooks from standards (${{ github.sha }})"

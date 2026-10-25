@@ -1,0 +1,154 @@
+# This workflow is managed by gh actions-lock.
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# required-contexts.yml — run the required-context gate on this repository.
+#
+# WHY THIS WORKFLOW EXISTS
+# ------------------------
+# scripts/check-required-contexts.sh has existed since 2026-09-20, is tested,
+# and was referenced by exactly one line — a comment inside
+# governance-reusable.yml saying a job could be deleted "once
+# scripts/check-required-contexts.sh shows no consumer still requires it". That
+# sentence assumed a run that never happened. The gate was never wired to
+# anything, so it never ran, so it never reported.
+#
+# Measured the day this workflow was added (2026-10-24): the main-gate ruleset
+# requires `scan / Hypatia Neurosymbolic Analysis`, and the only workflow that
+# publishes it — hypatia-scan.yml — deliberately has no `pull_request` trigger
+# (its header explains that the PR-time scan runs inside fork-governance.yml, so
+# running both would upload the same findings twice). Every pull request
+# therefore waited for a check run that could not happen: all its checks green,
+# the PR permanently BLOCKED. The only way through was the ruleset's admin
+# bypass, which is `always` — and a bypass applies to the entire ruleset, so
+# merging discarded the other nineteen required checks as well.
+#
+# That is why this repository went red twice on 2026-10-24 (#1333, #1334) and
+# why nothing stopped it.
+#
+# WHY THIS IS NOT `continue-on-error: true`
+# -----------------------------------------
+# An advisory job that is always green is the failure this estate keeps paying
+# for: it cannot disagree with anyone, so its green carries no information.
+# Instead, known-unsatisfiable contexts are DECLARED, one line each, in
+# .machine_readable/required-contexts-allow.txt. The job passes only while the
+# live findings are a subset of that declaration, and fails on anything new —
+# so the declaration is a review surface and a to-do list, not a silencer.
+#
+# The step ids and names are chosen so that the failure is named where it
+# happens, in plain words, on the run that introduces it.
+
+name: Required contexts
+
+on:
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Mondays 06:52 UTC — off the hour, after the settings sweep at :40, so a
+    # weekend ruleset edit is reported before the working week rather than
+    # discovered by a blocked pull request.
+    - cron: '52 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: required-contexts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  producible:
+    name: Required contexts are producible
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Rulesets are readable with the job token; the classic branch-protection
+      # endpoint needs Administration: read and is reported by the script as
+      # "not inspected" rather than as a pass, which is the behaviour that
+      # matters here.
+      - name: Run the required-contexts audit
+        id: audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          json="$RUNNER_TEMP/required-contexts.json"
+          # Strict findings and inspection failures can both exit non-zero.
+          # Reconcile JSON verdicts below; inspected:false or a missing report
+          # means the rules were not inspected.
+          if ! bash scripts/check-required-contexts.sh . --json "$json" --print-commands; then
+            echo "::notice::audit exited non-zero; checking its report below"
+          fi
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+          # A JSON file proves the script ran, not that it could read the rules.
+          # An API failure writes a report with zero results, and "zero findings"
+          # would then read as "everything is fine" — the one conclusion this job
+          # must never reach by accident. `inspected` is set by the script itself.
+          inspected="$(jq -r '.inspected // false' "$json" 2>/dev/null || echo false)"
+          echo "inspected=$inspected" >> "$GITHUB_OUTPUT"
+
+      - name: Compare findings against the declared exemptions
+        id: reconcile
+        env:
+          JSON: ${{ steps.audit.outputs.json }}
+          INSPECTED: ${{ steps.audit.outputs.inspected }}
+          ALLOW: .machine_readable/required-contexts-allow.txt
+        run: |
+          set -uo pipefail
+          if [ "$INSPECTED" != true ]; then
+            echo "### Required contexts: not inspected" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::could not inspect the branch rules at all — this is not a pass"
+            exit 1
+          fi
+          # Findings = every required context that cannot be satisfied on a pull
+          # request. `app-owned` and `producible` are not findings.
+          jq -r '[.results[] | select(.verdict == "PR-UNPRODUCIBLE" or .verdict == "UNSATISFIABLE") | .context] | .[]' \
+            "$JSON" > "$RUNNER_TEMP/findings.txt"
+          awk '{ sub(/#.*/, ""); gsub(/^[ \t]+|[ \t]+$/, ""); if ($0 != "") print }' \
+            "$ALLOW" > "$RUNNER_TEMP/allow.txt"
+
+          sort -u "$RUNNER_TEMP/findings.txt" -o "$RUNNER_TEMP/findings.txt"
+          sort -u "$RUNNER_TEMP/allow.txt" -o "$RUNNER_TEMP/allow.txt"
+          comm -23 "$RUNNER_TEMP/findings.txt" "$RUNNER_TEMP/allow.txt" > "$RUNNER_TEMP/undeclared.txt"
+          comm -13 "$RUNNER_TEMP/findings.txt" "$RUNNER_TEMP/allow.txt" > "$RUNNER_TEMP/stale.txt"
+
+          n_find="$(wc -l < "$RUNNER_TEMP/findings.txt" | tr -d ' ')"
+          n_new="$(wc -l < "$RUNNER_TEMP/undeclared.txt" | tr -d ' ')"
+          n_stale="$(wc -l < "$RUNNER_TEMP/stale.txt" | tr -d ' ')"
+
+          {
+            echo "### Required contexts"
+            echo
+            echo "${n_find} unsatisfiable required context(s); ${n_new} undeclared, ${n_stale} declared-but-no-longer-present."
+            echo
+            if [ "$n_find" -gt 0 ]; then
+              echo '```'
+              cat "$RUNNER_TEMP/findings.txt"
+              echo '```'
+            fi
+            if [ "$n_stale" -gt 0 ]; then
+              echo
+              echo "These are declared in \`$ALLOW\` but are no longer findings — delete the line (the file is shrink-only):"
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/stale.txt"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$n_stale" -gt 0 ]; then
+            echo "::warning::$n_stale declared exemption(s) no longer match anything — remove them from $ALLOW"
+          fi
+          if [ "$n_new" -gt 0 ]; then
+            echo "::error::$n_new required context(s) cannot be published on a pull request and are not declared in $ALLOW"
+            sed 's/^/  /' "$RUNNER_TEMP/undeclared.txt"
+            echo "Every pull request waits for a check run that cannot happen. Either publish it on pull_request, require the name the PR-time workflow actually emits, or declare it in $ALLOW with a reason."
+            exit 1
+          fi
+          echo "All unsatisfiable required contexts are declared in $ALLOW ($n_find declared)."

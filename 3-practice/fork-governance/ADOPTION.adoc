@@ -1,0 +1,166 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+= Fork governance — adopting it in a repository
+:toc: left
+:toclevels: 3
+:revdate: 2026-10-24
+
+This is the operator's guide. It assumes you want the same comment, in the same
+order, on every pull request in a repository, and that the repository already
+lives in the estate (it has `.machine_readable/`, it may have `.deed` and
+`.k9.ncl` files, and the fleet may be enrolled against it).
+
+== 1. What you are turning on
+
+One workflow, four jobs, one comment:
+
+[source,yaml]
+----
+jobs:
+  deed:    uses: hyperpolymath/standards/.github/workflows/deed-conformance.yml@<SHA>
+  k9:      uses: hyperpolymath/standards/.github/workflows/k9-conformance.yml@<SHA>
+  hypatia: uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@<SHA>
+  verdict: uses: hyperpolymath/standards/.github/workflows/fork-governance-reusable.yml@<SHA>
+----
+
+The first three produce verdicts and artifacts. The fourth reads them from the
+caller's `needs` graph — a reusable cannot see your jobs, so you pass the
+results in — and writes the comment.
+
+== 2. The file
+
+Copy this into `.github/workflows/fork-governance.yml` and replace `<SHA>` with
+a standards commit. Do not use `@main`:
+
+[source,yaml]
+----
+# SPDX-License-Identifier: MPL-2.0
+name: Fork governance
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deed:
+    name: DEED syntax
+    uses: hyperpolymath/standards/.github/workflows/deed-conformance.yml@<SHA>
+    permissions:
+      contents: read
+    with:
+      require-files: true
+
+  k9:
+    name: K9-DEED conformance
+    uses: hyperpolymath/standards/.github/workflows/k9-conformance.yml@<SHA>
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      require-files: true
+      fail-on-indeterminate: false
+
+  hypatia:
+    name: Hypatia verdict grid
+    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@<SHA>
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    secrets:
+      HYPATIA_SCAN_PAT: ${{ secrets.HYPATIA_SCAN_PAT }}
+
+  verdict:
+    name: Post the fork governance summary
+    needs: [deed, k9, hypatia]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    uses: hyperpolymath/standards/.github/workflows/fork-governance-reusable.yml@<SHA>
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    with:
+      pr-number: ${{ github.event.pull_request.number }}
+      deed-result: ${{ needs.deed.result }}
+      k9-result: ${{ needs.k9.result }}
+      k9-verdict: ${{ needs.k9.outputs.verdict }}
+      hypatia-result: ${{ needs.hypatia.result }}
+      hypatia-verdict: ${{ needs.hypatia.outputs.verdict }}
+      canon-ref: <SHA>
+----
+
+`canon-ref` tells the posting engine which standards commit to take the
+renderer from. Pass the same `<SHA>` as the `uses:` pins: two refs that can
+drift are two renderers that can disagree.
+
+== 3. Remove the duplicate triggers
+
+If the repository already calls a lane on `pull_request`, remove that trigger
+from the lane's own workflow. Keep its `push` and `workflow_dispatch`
+triggers. Otherwise every PR runs the same lane twice and, for Hypatia,
+uploads the same findings to code scanning twice — which produces duplicate
+alerts and two grids that can disagree.
+
+[IMPORTANT]
+====
+This is the step people skip, and it is the step that produces the confusing
+failure. The symptom is a PR with two "K9-DEED conformance" check runs, one
+green and one orange, and no indication which one the comment is describing.
+====
+
+== 4. Settings
+
+[cols="1,1,4",options="header"]
+|===
+| Setting | Value | Why
+| Actions → General → Workflow permissions
+| Read repository contents
+| The workflows request exactly what they need per job; the repository default should not grant more.
+| `HYPATIA_SCAN_PAT` (optional)
+| fine-grained, read-only
+| Lets the scanner read Dependabot, code-scanning and secret-scanning alerts. Without it the lane still runs on the built-in token and reports what it can see.
+| Branch protection
+| make the three lane jobs required, *not* the comment
+| A comment cannot block a merge and must not appear to.
+|===
+
+== 5. Verify
+
+. Open a pull request that touches nothing.
+. You should get one comment, in this order: summary, k9-deed, Hypatia.
+. Push another commit to the same PR. The comment must be *updated in place* —
+   same comment id. If a second comment appears, the marker/author lookup is
+   broken.
+. Break something deliberately — add an unparsable `.deed` — and confirm the
+   DEED row turns red and the summary with it.
+
+== 6. Repositories with no DEED or K9 files
+
+`require-files: true` fails the lane when there is nothing to check, which is
+what you want in a repository that claims to be conformant. For a repository
+that legitimately has no deeds yet:
+
+* set `require-files: false` — the lane then reports grey (`not applicable`)
+  rather than failing; or
+* leave it `true` and add the file. A repository in this estate without a deed
+  is a repository whose description is only in its README.
+
+Grey is a deliberate, explicit state. It is never produced by accident: it
+requires the lane to have run and to have decided that the question does not
+apply.
+
+== 7. Rollback
+
+Delete `.github/workflows/fork-governance.yml`, and delete the bot's existing
+comment. Nothing else is installed: the lanes are read-only, the posting engine
+holds nothing, and no repository state is created on a branch.
+
+An orphan comment left behind is worse than no rollout — it keeps claiming a
+verdict on every new revision. Delete it.

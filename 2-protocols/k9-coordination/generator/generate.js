@@ -49,6 +49,14 @@ function parseK9Kennel(text) {
   return parseYamlLikeBlock(contentLines, 0).value;
 }
 
+// Keys come straight out of the document being parsed, so they must never be
+// assigned blindly: `result["__proto__"] = value` rewrites the object's
+// prototype, and `constructor`/`prototype` are the same defect one level up
+// (CWE-915, CodeQL js/prototype-polluting-assignment). A K9 document has no
+// legitimate use for any of the three, so reject rather than silently skip —
+// a file that tried to smuggle one in should fail loudly.
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 /**
  * Recursively parse indented YAML-like blocks.
  * Returns { value, linesConsumed }.
@@ -88,6 +96,9 @@ function parseYamlLikeBlock(lines, baseIndent) {
     }
 
     const key = trimmed.substring(0, colonIdx).trim();
+    if (FORBIDDEN_KEYS.has(key)) {
+      throw new Error(`forbidden key "${key}" in K9 document (prototype pollution)`);
+    }
     const afterColon = trimmed.substring(colonIdx + 1).trim();
 
     if (afterColon === "|") {

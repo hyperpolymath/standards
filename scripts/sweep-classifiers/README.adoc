@@ -28,19 +28,34 @@ are fast.
 
 [source,bash]
 ----
+# Every path below lives in the survey directory (see "Where the data lives"):
+# user-private, re-findable across the three separate invocations.
+SURVEY="${DRIFT_SURVEY_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/drift-survey}"
+mkdir -p -m 700 "$SURVEY"
+
 # 1. Paginate the search (one-time per template):
 gh api --paginate -X GET '/search/code' \
   -f q='filename:mirror.yml path:.github/workflows org:hyperpolymath' \
   --jq '.items[] | {repo: .repository.name, sha: .sha}' \
-  > /tmp/mirror-full.json
+  > "$SURVEY/mirror-full.json"
 
 # 2. Run the classifier:
-BLOBS_DIR=/tmp/mirror-blobs \
-  ./classify-mirror.sh /tmp/mirror-full.json > /tmp/mirror-classification.tsv
+BLOBS_DIR="$SURVEY/mirror-blobs" \
+  ./classify-mirror.sh "$SURVEY/mirror-full.json" > "$SURVEY/mirror-classification.tsv"
 
 # 3. Summarise:
-awk -F'\t' '{print $3}' /tmp/mirror-classification.tsv | sort | uniq -c | sort -rn
+awk -F'\t' '{print $3}' "$SURVEY/mirror-classification.tsv" | sort | uniq -c | sort -rn
 ----
+
+=== Where the data lives
+
+Not `/tmp`. The sweep and the classifier are *separate invocations*, so the
+path must be re-findable — `mktemp` cannot be the answer here — and a
+predictable world-writable location is CWE-377 in a script whose whole job is
+to read files as security evidence: another account can create the directory
+first and choose what the survey "finds". `_lib.sh` resolves
+`$DRIFT_SURVEY_DIR`, else `${XDG_STATE_HOME:-$HOME/.local/state}/drift-survey`,
+and creates it `0700`.
 
 == Nested-path caveat — 3 layers of undercount
 
@@ -71,11 +86,16 @@ directly — bypassing Layers 1 and 2.
 
 [source,bash]
 ----
-./list-workflow-paths.sh codeql.yml \
-  > /tmp/drift-survey/codeql-all-tuples.tsv
+# The survey directory is user-private and re-findable, never /tmp: a
+# predictable world-writable path lets another account plant the "blobs" these
+# scripts read as evidence. Override with DRIFT_SURVEY_DIR.
+SURVEY="${DRIFT_SURVEY_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/drift-survey}"
+mkdir -p -m 700 "$SURVEY"
+
+./list-workflow-paths.sh codeql.yml > "$SURVEY/codeql-all-tuples.tsv"
 
 # Top-level vs nested split:
-awk -F'\t' '{print $4}' /tmp/drift-survey/codeql-all-tuples.tsv \
+awk -F'\t' '{print $4}' "$SURVEY/codeql-all-tuples.tsv" \
   | sort | uniq -c
 ----
 

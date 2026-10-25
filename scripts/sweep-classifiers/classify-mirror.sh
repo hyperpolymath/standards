@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # classify-mirror.sh — classify per-repo mirror.yml for the #187 sweep.
 #
-# Reads /tmp/drift-survey/mirror-full.json (output of `gh api --paginate
+# Reads <survey_dir>/mirror-full.json (output of `gh api --paginate
 # /search/code` filtered to mirror.yml in .github/workflows). For each
 # unique blob SHA, fetches the blob once (cached in $BLOBS_DIR) and
 # classifies as:
@@ -21,9 +21,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_lib.sh
 . "$SCRIPT_DIR/_lib.sh"
 
-INPUT="${1:-/tmp/drift-survey/mirror-full.json}"
-BLOBS_DIR="${BLOBS_DIR:-/tmp/drift-survey/blobs}"
-mkdir -p "$BLOBS_DIR"
+SURVEY="$(survey_dir_init)"
+INPUT="${1:-$SURVEY/mirror-full.json}"
+BLOBS_DIR="${BLOBS_DIR:-$SURVEY/blobs}"
+(umask 077 && mkdir -p "$BLOBS_DIR")
 
 # Canonical 7 forges (alphabetical for stable compare).
 CANON_FORGES="bitbucket,codeberg,disroot,gitea,gitlab,radicle,sourcehut"

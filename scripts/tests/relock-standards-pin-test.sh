@@ -202,27 +202,40 @@ grep -q "^        - 'hyperpolymath/standards@$NEW'\$" "$D/actions.lock" || fail 
 echo "  PASS a quoted uses key is counted as a pin"
 
 # 3. Refusals leave the lock byte-identical.
-refuse_case() { # name mutate-command
-  local d; d=$(consumer "$1"); eval "$2"; cp "$d/actions.lock" "$T/before"
+#
+# Each mutator is a FUNCTION taking the consumer directory, not a shell string
+# handed to `eval` (CWE-95; hypatia eval_in_shell). Nothing untrusted ever
+# reached that `eval` — every case is fixed text in this file — but an `eval` in
+# a test is a template for the next one, and the string form silently breaks the
+# moment a fixture path grows a space or a quote.
+refuse_case() { # name mutator-function
+  local d; d=$(consumer "$1"); "$2" "$d"; cp "$d/actions.lock" "$T/before"
   if bash "$RELOCK" --to "$NEW" --standards "$S" "$d" >/dev/null 2>&1; then fail "$1: relock succeeded"; fi
   cmp -s "$T/before" "$d/actions.lock" || fail "$1: lock modified on refusal"
   echo "  PASS refused: $1"
 }
-refuse_case still-on-old 'sed -i "s/@$NEW/@$OLD/" "$d/caller.yml"'
+mutate_still_on_old() { sed -i "s/@$NEW/@$OLD/" "$1/caller.yml"; }
+refuse_case still-on-old mutate_still_on_old
 BAD_PREFIX="${NEW:0:11}"
 # Appends a hex digit (a string, not arithmetic), so the 12th char differs from NEW's.
 if [ "${NEW:11:1}" = 0 ]; then BAD_PREFIX+="1"; else BAD_PREFIX+="0"; fi
-refuse_case different-prefix 'sed -i "s/@$NEW/@$BAD_PREFIX/" "$d/caller.yml"'
-refuse_case mixed-commits 'cp "$d/caller.yml" "$d/other.yml"; sed -i "s/@$NEW/@$BAD_PREFIX/" "$d/other.yml"'
-refuse_case overlong-pin 'sed -i "s/@$NEW/@${NEW}a/" "$d/caller.yml"'
+mutate_different_prefix() { sed -i "s/@$NEW/@$BAD_PREFIX/" "$1/caller.yml"; }
+refuse_case different-prefix mutate_different_prefix
+mutate_mixed_commits() { cp "$1/caller.yml" "$1/other.yml"; sed -i "s/@$NEW/@$BAD_PREFIX/" "$1/other.yml"; }
+refuse_case mixed-commits mutate_mixed_commits
+mutate_overlong_pin() { sed -i "s/@$NEW/@${NEW}a/" "$1/caller.yml"; }
+refuse_case overlong-pin mutate_overlong_pin
 # A pin whose reusable needs a record that neither lock has: a commit NEW2
 # whose reusable uses acme/tool at a ref standards' own lock does not record.
 sed -i "s#acme/tool/sub@3333333333333333333333333333333333333333#acme/tool/sub@5555555555555555555555555555555555555555#" "$S/.github/workflows/x-reusable.yml"
 git -C "$S" commit -qam new2; NEW2=$(git -C "$S" rev-parse HEAD)
-refuse_case record-nowhere 'sed -i "s/@$NEW/@$NEW2/" "$d/caller.yml"; NEW_SAVE=$NEW; NEW=$NEW2'
+mutate_record_nowhere() { sed -i "s/@$NEW/@$NEW2/" "$1/caller.yml"; NEW_SAVE=$NEW; NEW=$NEW2; }
+refuse_case record-nowhere mutate_record_nowhere
 NEW=$NEW_SAVE
-refuse_case no-old-record 'sed -i "/^    .hyperpolymath\/standards@$OLD.:/,/^            - .old\/dep/d" "$d/actions.lock"'
-refuse_case short-pin-elsewhere 'sed -i "s/@$NEW/@${OLD:0:7}/" "$d/caller.yml"'
+mutate_no_old_record() { sed -i "/^    .hyperpolymath\/standards@$OLD.:/,/^            - .old\/dep/d" "$1/actions.lock"; }
+refuse_case no-old-record mutate_no_old_record
+mutate_short_pin_elsewhere() { sed -i "s/@$NEW/@${OLD:0:7}/" "$1/caller.yml"; }
+refuse_case short-pin-elsewhere mutate_short_pin_elsewhere
 # Under 7 hex is no pin the applier writes or reads, even when it prefixes NEW
 # and the lock carries a matching entry and record for it.
 # tiny DIR — add tiny.yml pinning a 6-hex prefix of NEW, with its lock entry.
@@ -232,7 +245,7 @@ tiny() {
   printf "    'hyperpolymath/standards@%s':\n        ref: '%s'\n        commit: 'sha1-%s'\n        owner_id: 6759885\n        repo_id: 1116521501\n" \
     "${NEW:0:6}" "${NEW:0:6}" "$NEW" >> "$1/actions.lock"
 }
-refuse_case short-pin-too-short 'tiny "$d"'
+refuse_case short-pin-too-short tiny
 # desync DIR — caller.yml now pins a short NEW ref but its lock entry still
 # names OLD; full.yml pins NEW in full. Re-keying caller.yml's entry to the full
 # NEW would not match its pin, which the gates reject.
@@ -241,7 +254,7 @@ desync() {
   sed -i "s/@$NEW/@${NEW:0:12}/" "$1/caller.yml"
   sed -i "/^dependencies:\$/i\\    '.github/workflows/full.yml':\\n        - 'hyperpolymath/standards@$OLD'" "$1/actions.lock"
 }
-refuse_case short-pin-entry-desync 'desync "$d"'
+refuse_case short-pin-entry-desync desync
 
 # 4. No lock: nothing to do.
 D=$(consumer nolock); rm "$D/actions.lock"
