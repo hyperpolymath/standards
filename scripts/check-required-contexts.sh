@@ -440,14 +440,14 @@ data_rule_evidence() {
       producer="$(data_rule_producer code_coverage)"
       [ -n "$producer" ] || return 0
       # Address the workflow by file name; GitHub accepts it in place of the id.
-      body="$(gh api "repos/$repo/actions/workflows/${producer##*/}/runs?status=success&per_page=1" 2>/dev/null)" || return 1
+      body="$(gh api "repos/$repo/actions/workflows/${producer##*/}/runs?status=success&per_page=30" 2>/dev/null)" || return 1
       [ -n "$body" ] || return 1
       printf '%s' "$body" | jq -es '
         length == 1 and (.[0] | type == "object" and
           (.workflow_runs | type == "array"))
       ' >/dev/null 2>&1 || return 1
-      printf '%s' "$body" | jq -r '
-        .workflow_runs[0] // empty
+      printf '%s' "$body" | jq -r --arg repo "$repo" '
+        [.workflow_runs[] | select((.head_repository.full_name // "") == $repo)][0] // empty
         | "a successful \(.path // "coverage") run on \(.head_branch // "?") (\((.head_sha // "")[0:12]))"' \
         2>/dev/null
       ;;
