@@ -358,7 +358,22 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
     note "could not read branch rulesets for $repo (API error, rate limit, or missing permission) — nothing inspected" >&2
     return 1
   fi
-  br="$(gh api "repos/$repo" 2>/dev/null | jq -r 'if type=="object" then (.default_branch // "main") else "main" end' 2>/dev/null || echo main)"
+  # MERGE_BRANCH decides which rulesets are considered to apply, so it must be
+  # the real default branch or the audit must stop. Defaulting to "main" when
+  # the lookup fails is not a harmless fallback: on a repository whose default
+  # branch is `master`, `main` matches no ref filter, every rule is filtered
+  # out, and the audit reports a clean gate that was never examined. That is the
+  # same false-clean this check exists to catch, so an unreadable or malformed
+  # repository response is an inspection failure instead.
+  local details
+  details="$(gh api "repos/$repo" 2>/dev/null || true)"
+  br="$(printf '%s' "$details" | jq -r '
+    if type == "object" and (.default_branch | type) == "string" and (.default_branch | length) > 0
+    then .default_branch else empty end' 2>/dev/null)"
+  if [ -z "$br" ]; then
+    note "could not resolve the default branch of $repo — cannot tell which rules apply, nothing inspected" >&2
+    return 1
+  fi
   MERGE_BRANCH="$br"
   for id in $(printf '%s' "$list" | jq -r '.[]? | select(.target=="branch") | .id'); do
     body="$(gh api "repos/$repo/rulesets/$id" 2>/dev/null || true)"
@@ -494,12 +509,30 @@ data_rules_json() {
   [ -n "${GITHUB_REPOSITORY:-}" ] || GITHUB_REPOSITORY="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)"
   [ -n "${GITHUB_REPOSITORY:-}" ] || return 1
   local repo="$GITHUB_REPOSITORY" id body
-  local list ev_cov ev_qual
+  local list
   [ -n "$MERGE_BRANCH" ] || return 1
-  # Resolve the evidence once per rule type, not once per ruleset: the answer
-  # cannot differ between rulesets, and these are API calls.
-  ev_cov="$(data_rule_evidence code_coverage)" || return 1
-  ev_qual="$(data_rule_evidence code_quality)" || return 1
+  # Evidence is fetched lazily, per rule type, the first time an applicable rule
+  # of that type is seen — never up front. Fetching it unconditionally made an
+  # unrelated Actions API failure abort the whole audit on repositories with no
+  # data-dependent rules at all: protection could be read perfectly well, but
+  # the run reported `inspected: false` because of an endpoint it did not need.
+  local ev_cov="" ev_qual="" got_cov=0 got_qual=0 applicable
+  # Defined once, used twice: the applicability probe and the emission below must
+  # never disagree about which rulesets apply to the merge branch.
+  local ref_match_jq='      # GitHub ref filters use pathname globs: * and ? do not cross /.
+      def matches_ref:
+        if . == "~ALL" or . == "~DEFAULT_BRANCH" then true
+        else
+          ([scan("\\*\\*/|\\*\\*|\\*|\\?|\\[[^]]+\\]|.") |
+            if . == "**/" then "(.*/)?"
+            elif . == "**" then ".*"
+            elif . == "*" then "[^/]*"
+            elif . == "?" then "[^/]"
+            elif startswith("[") then sub("^\\[!"; "[^")
+            else gsub("(?<c>[.()+^$|{}\\\\])"; "\\\(.c)") end] | join("")) as $pattern
+          | ("refs/heads/" + $branch) | test("^" + $pattern + "$")
+        end;
+'
   list="$(gh api "repos/$repo/rulesets" 2>/dev/null)" || return 1
   printf '%s' "$list" | jq -es '
     length == 1 and (.[0] | type == "array" and all(.[]; type == "object" and
@@ -515,21 +548,21 @@ data_rules_json() {
         (.include | type == "array" and all(.[]; type == "string")) and
         (.exclude | type == "array" and all(.[]; type == "string"))))
     ' >/dev/null 2>&1 || return 1
+    applicable="$(printf '%s' "$body" | jq -r --arg types "$DATA_RULES" --arg branch "$MERGE_BRANCH" \
+      "$ref_match_jq"'
+      if .enforcement == "active" then
+        select(any(.conditions.ref_name.include[]; matches_ref))
+        | select(all(.conditions.ref_name.exclude[]; matches_ref | not))
+        | .rules[]? | select(.type as $t | ($types | split(" ") | index($t))) | .type
+      else empty end')" || return 1
+    case "$applicable" in
+      *code_coverage*) [ "$got_cov" = 1 ] || { ev_cov="$(data_rule_evidence code_coverage)" || return 1; got_cov=1; } ;;
+    esac
+    case "$applicable" in
+      *code_quality*) [ "$got_qual" = 1 ] || { ev_qual="$(data_rule_evidence code_quality)" || return 1; got_qual=1; } ;;
+    esac
     printf '%s' "$body" | jq -r --arg types "$DATA_RULES" --arg id "$id" --arg branch "$MERGE_BRANCH" \
-      --arg ev_cov "$ev_cov" --arg ev_qual "$ev_qual" '
-      # GitHub ref filters use pathname globs: * and ? do not cross /.
-      def matches_ref:
-        if . == "~ALL" or . == "~DEFAULT_BRANCH" then true
-        else
-          ([scan("\\*\\*/|\\*\\*|\\*|\\?|\\[[^]]+\\]|.") |
-            if . == "**/" then "(.*/)?"
-            elif . == "**" then ".*"
-            elif . == "*" then "[^/]*"
-            elif . == "?" then "[^/]"
-            elif startswith("[") then sub("^\\[!"; "[^")
-            else gsub("(?<c>[.()+^$|{}\\\\])"; "\\\(.c)") end] | join("")) as $pattern
-          | ("refs/heads/" + $branch) | test("^" + $pattern + "$")
-        end;
+      --arg ev_cov "$ev_cov" --arg ev_qual "$ev_qual" "$ref_match_jq"'
       if .enforcement == "active" then
         select(any(.conditions.ref_name.include[]; matches_ref))
         | select(all(.conditions.ref_name.exclude[]; matches_ref | not))

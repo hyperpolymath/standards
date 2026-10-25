@@ -46,7 +46,13 @@ cat >"$work/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 path="${2:-}"
 case "$path" in
-  repos/example/repo) printf '{"default_branch":"release/current"}' ;;
+  repos/example/repo)
+    case "${REPO_MODE:-ok}" in
+      ok) printf '{"default_branch":"release/current"}' ;;
+      master) printf '{"default_branch":"master"}' ;;
+      fail) echo '{"message":"Not Found"}'; exit 1 ;;
+      no-branch) printf '{"name":"repo"}' ;;
+    esac ;;
   */rulesets)
     n="$(cat "$FIXTURES/list-count" 2>/dev/null || echo 0)"
     n=$((n+1)); echo "$n" >"$FIXTURES/list-count"
@@ -87,6 +93,7 @@ case "$path" in
               elif $mode == "missing-head" then [$run | del(.head_repository)]
               else [$run] end)}' ;;
       invalid) echo '{"workflow_runs":{}}'; exit 0 ;;
+      fail) echo '{"message":"Not Found"}'; exit 1 ;;
       *) echo '{"workflow_runs":[]}' ;;
     esac ;;
   */actions/workflows\?per_page=100)
@@ -137,8 +144,8 @@ pass=0; fail=0
 run() {
   rm -f "$work"/*-count
   (unset REQUIRED_CONTEXTS_JSON
-    PATH="$work/bin:$PATH" FIXTURES="$work" MODE="$1" GITHUB_REPOSITORY=example/repo \
-      RUNS_MODE="${RUNS_MODE:-none}" WF_MODE="${WF_MODE:-none}" \
+    PATH="$work/bin:$PATH" FIXTURES="${FIXDIR:-$work}" MODE="$1" GITHUB_REPOSITORY=example/repo \
+      RUNS_MODE="${RUNS_MODE:-none}" WF_MODE="${WF_MODE:-none}" REPO_MODE="${REPO_MODE:-ok}" \
       REQUIRED_CONTEXTS_STRICT="$2" bash "$GATE" "$work/repo" --no-network --json "$work/report.json"
   ) >"$work/out" 2>&1
   rc=$?
@@ -261,6 +268,41 @@ for mode in incomplete inconsistent-total page-fail empty-pages; do
   WF_MODE="$mode" run ok 1
   check "$mode workflow catalogue is an inspection failure" 1 '.inspected == false and .results == []'
 done
+# A ruleset set with no data-dependent rules. Evidence for those rules must not
+# be fetched at all, because the endpoint it lives on is unrelated to reading
+# protection — and a failure there must not condemn a perfectly readable audit.
+mkdir -p "$work/nodata"
+echo '[{"id":1,"target":"branch"}]' >"$work/nodata/list.json"
+jq -n '{id:1, target:"branch", enforcement:"active",
+        conditions:{ref_name:{include:["~ALL"], exclude:[]}},
+        rules:[{type:"deletion"}]}' >"$work/nodata/1.json"
+FIXDIR="$work/nodata" RUNS_MODE=fail run ok 1
+if [ "$rc" = 0 ] && jq -e '.inspected == true and .unsatisfiable == 0' "$work/report.json" >/dev/null; then
+  pass=$((pass+1)); echo "PASS a failing evidence endpoint cannot condemn an audit that needs no evidence"
+else
+  fail=$((fail+1)); echo "FAIL a failing evidence endpoint cannot condemn an audit that needs no evidence (exit $rc)"; cat "$work/out" "$work/report.json"
+fi
+
+# An unresolvable default branch must not be silently replaced by "main": on a
+# repository whose default branch is `master`, `main` matches no ref filter, the
+# rule below is filtered out, and the audit reports a clean gate it never
+# examined.
+mkdir -p "$work/master"
+echo '[{"id":1,"target":"branch"}]' >"$work/master/list.json"
+jq -n '{id:1, target:"branch", enforcement:"active",
+        conditions:{ref_name:{include:["refs/heads/master"], exclude:[]}},
+        rules:[{type:"code_quality"}]}' >"$work/master/1.json"
+for mode in fail no-branch; do
+  FIXDIR="$work/master" REPO_MODE="$mode" run ok 0
+  check "an unreadable default branch ($mode) is an inspection failure, not an empty success" 1 \
+    '.inspected == false and .results == []'
+done
+# The same fixtures with a readable branch must still find the rule: the guard
+# must not be so broad that it hides real findings.
+FIXDIR="$work/master" REPO_MODE=master run ok 1
+check "a readable default branch still reports the rule it applies to" 1 \
+  '.inspected == true and .unsatisfiable == 1'
+
 rm -f "$work/repo/.github/workflows/coverage.yml"
 for mode in list-fail list-invalid list-empty detail-fail detail-invalid detail-empty detail-malformed detail-shape; do
   run "$mode" 0
