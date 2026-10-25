@@ -62,7 +62,11 @@ run_case() {
   local desc="$1" expected="$2" repo="$3"; shift 3
   TOTAL=$((TOTAL + 1))
   set +e
+  # Pin a non-canonical repository ID before "$@" (which may override it):
+  # this suite itself runs in standards CI, whose inherited canonical ID
+  # would otherwise make every consumer fixture self-identify as the canon.
   env GITHUB_REPOSITORY="hyperpolymath/test-repo" \
+    GITHUB_REPOSITORY_ID=0 GITHUB_SERVER_URL=https://github.com \
     "$@" \
     STALENESS_STANDARDS_DIR="$FIX" \
     bash "$CHECK_SCRIPT" "$repo" >/dev/null 2>&1
@@ -86,6 +90,7 @@ run_case_out() {
   local out rc
   set +e
   out=$(env GITHUB_REPOSITORY="hyperpolymath/test-repo" \
+    GITHUB_REPOSITORY_ID=0 GITHUB_SERVER_URL=https://github.com \
     "$@" \
     STALENESS_STANDARDS_DIR="$FIX" \
     bash "$CHECK_SCRIPT" "$repo" 2>&1)
@@ -206,18 +211,34 @@ run_case "canonical standards Scorecard SARIF uploader passes" 0 "$R" \
 run_case "transferred slug metadatastician/standards is still the canon" 0 "$R" \
   GITHUB_REPOSITORY=metadatastician/standards
 
-# And with no slug signal at all, the structural signature (its own deed under
-# its canonical name, next to the canonical reusable and this checker) must
-# still recognise it — a future rename cannot reopen the hole.
-touch "$R/standards_chora.deed"
+# Candidate-controlled files are NOT identity evidence, even when the deed
+# recites the canon's repository UUID: a consumer can copy all three files to
+# exempt itself from the consumer-only SARIF/retired-enforcer rules.
+cat > "$R/standards_chora.deed" <<'EOF'
+(repo-deed
+  :canonical-name "standards"
+  :repo-uuid #u8"gv-clade-index:github.com/hyperpolymath/standards")
+EOF
 mkdir -p "$R/scripts"
 touch "$R/scripts/check-workflow-staleness.sh" "$R/.github/workflows/scorecard-reusable.yml"
-run_case "structural signature recognises the canon with no slug signal" 0 "$R" \
+run_case "copied canon files cannot self-grant standards identity" 1 "$R" \
   GITHUB_REPOSITORY=example/renamed-again
 rm -f "$R/standards_chora.deed" "$R/scripts/check-workflow-staleness.sh" \
       "$R/.github/workflows/scorecard-reusable.yml"
-# Negative control for the signature: the same tree without it is a consumer.
-run_case "same tree minus the signature is a consumer again" 1 "$R" \
+
+# A future rename changes the slug but not GitHub's immutable repository ID,
+# so that platform-supplied signal still recognises the canon.
+run_case "immutable repository ID recognises the canon under a future slug" 0 "$R" \
+  GITHUB_REPOSITORY=example/renamed-again GITHUB_REPOSITORY_ID=1116521501
+
+# The origin fallback requires a real owner boundary: an owner that merely
+# ends in a known slug (evil-hyperpolymath) is not the canon.
+git -C "$R" init -q
+git -C "$R" remote add origin https://github.com/evil-hyperpolymath/standards
+run_case "lookalike owner suffix in origin is not standards" 1 "$R" \
+  GITHUB_REPOSITORY=example/renamed-again
+git -C "$R" remote set-url origin git@github.com:metadatastician/standards.git
+run_case "checkout origin identifies the canon when the slug signal is stale" 0 "$R" \
   GITHUB_REPOSITORY=example/renamed-again
 
 # ── 10. No workflows dir -> pass ────────────────────────────────────────────

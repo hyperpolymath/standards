@@ -135,24 +135,30 @@ STANDARDS_REUSABLES=(
 # slug recognised, the canon failed its own consumer rules — its canonical
 # scorecard-reusable.yml read as a "consumer-owned direct SARIF publisher"
 # and its template scorecard-enforcer.yml as a retired consumer file).
-# Identity therefore accepts either slug, or — slug-independently — the
-# structural signature of the canon itself: it carries its own repo deed
-# under its canonical name. A rename must never again be able to make the
-# standards repo fail the rules it publishes for everyone else.
+#
+# Identity is accepted only from signals the candidate tree cannot mint:
+# GitHub's immutable repository ID (both slugs resolved to 1116521501 on
+# 2026-10-25; it survives transfer/rename), either exact platform slug, or
+# the checkout origin with a real owner boundary. Files in the candidate —
+# including a deed that recites the canon's identity — are never evidence:
+# a consumer can copy them, and IS_STANDARDS disables consumer-only rules
+# below, so file presence/content would be a self-granted exemption.
 IS_STANDARDS=false
+case "${GITHUB_SERVER_URL:-https://github.com}" in
+  https://github.com)
+    if [ "${GITHUB_REPOSITORY_ID:-}" = "1116521501" ]; then
+      IS_STANDARDS=true
+    fi
+    ;;
+esac
 case "${GITHUB_REPOSITORY:-}" in
   hyperpolymath/standards|metadatastician/standards) IS_STANDARDS=true ;;
 esac
-if [ "$IS_STANDARDS" = "false" ] && [ -d "$REPO_ROOT/.git" ]; then
+if [ "$IS_STANDARDS" = "false" ]; then
   REMOTE_URL=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
-  if [[ "$REMOTE_URL" =~ (hyperpolymath|metadatastician)/standards(\.git)?$ ]]; then
+  if [[ "$REMOTE_URL" =~ (^|[:/])(hyperpolymath|metadatastician)/standards(\.git)?$ ]]; then
     IS_STANDARDS=true
   fi
-fi
-if [ "$IS_STANDARDS" = "false" ] && [ -f "$REPO_ROOT/standards_chora.deed" ] \
-   && [ -f "$REPO_ROOT/.github/workflows/scorecard-reusable.yml" ] \
-   && [ -f "$REPO_ROOT/scripts/check-workflow-staleness.sh" ]; then
-  IS_STANDARDS=true
 fi
 
 # ── Locate a git checkout that carries standards history ────────────────────
