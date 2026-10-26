@@ -120,7 +120,8 @@ one, with the reason recorded beside the artefact (policy §4).
 
 Standing Rust exceptions, alongside Creusot and never instead of it (§4.1):
 **Kani** for `unsafe` and FFI seams (reported `TESTED` with bounds), **Aeneas**
-where Rust implements an Agda-proved theorem. Verus is not adopted.
+where Rust implements an Agda-proved theorem (no Aeneas backend qualifies
+yet, so its results are `ASSUMED`). Verus is not adopted.
 
 Third-party code (crates such as Bevy, libraries, forks) is **not** converted
 or re-proved (§1.1): state what a proof relies on as an `ASSUMED` boundary

@@ -70,7 +70,13 @@ Where a first-party proof relies on a dependency's behaviour, state that
 reliance at the boundary as an assumption: a trusted specification of the
 called function (Creusot `#[trusted]` extern specs, a SPARK `Import`
 contract, an Idris2 FFI type), recorded in the repo's proof-status file as
-`ASSUMED` with the dependency and version it describes.
+`ASSUMED` with the dependency and version it describes. A row is only as
+strong as the weakest step it depends on
+(link:../docs/README-EXPLAINME-STANDARD.adoc[`README-EXPLAINME-STANDARD.adoc`]),
+so a caller whose obligations were discharged using that contract is
+recorded as proved *relative to the assumption*: its row names the
+`ASSUMED` contract it rests on and is never counted as unconditionally
+`PROVEN` until the contract itself is checked.
 
 When choosing between dependencies that fit equally well, prefer one that
 carries its own checking: published proofs (Creusot, Kani, Verus, Aeneas,
@@ -170,9 +176,14 @@ model is checked by the target kernel. Its statement is compared with the
 Agda theorem's Lean or Rocq recheck as in §2. Two rows are recorded: the
 theorem about the model is `PROVEN`, and the correspondence between the
 model and the Rust code (Aeneas's translation) is a separate `ASSUMED` row,
-so the implementation is never counted as proved on the model alone. The
-no-Mathlib rule of §2 still applies: if the pinned Aeneas Lean library
-depends on Mathlib, use its Rocq back end instead.
+so the implementation is never counted as proved on the model alone.
+
+The backend's own axioms are part of the trust base. A backend with an axiom
+from which `False` is derivable cannot support any status above `ASSUMED`;
+Aeneas's Rocq backend is in that state (its `mk_array` axiom, Aeneas issue
+#1116, and it is unmaintained). Its Lean backend depends on Mathlib, which
+§2 rules out. Until a backend qualifies on both counts, Aeneas results are
+recorded as `ASSUMED`, and adopting one needs a recorded owner decision.
 
 Verus is not a standing exception: it shares Creusot's SMT trust base, so it
 adds no independent assurance for the cost of rewriting code in its dialect.
