@@ -1,0 +1,129 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+= Hyperpolymath Proof and Verification Policy
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+:toc:
+:toc-placement: preamble
+
+Which prover carries which kind of obligation, how theory proofs are
+rechecked, and when another tool is allowed. Owner ruling of 2026-10-26;
+it settles standards#692. Every hyperpolymath repository follows this file,
+and the repositories' `CLAUDE.md` files point here rather than restating it.
+
+This policy decides *where a proof lives*. What counts as an escape hatch in
+a proof, and how such debt is recorded, stays with
+link:../docs/TRUSTED-BASE-REDUCTION-POLICY.adoc[`docs/TRUSTED-BASE-REDUCTION-POLICY.adoc`].
+
+== 1. The mapping
+
+[cols="1,1,2",options="header"]
+|===
+|Code or obligation |Verifier |Scope
+
+|Rust code
+|*Creusot*
+|Contracts and proofs on first-party Rust. Verification sits on the code
+itself, not in a parallel model of it.
+
+|Ada code
+|*SPARK*
+|SPARK applies where the code is Ada. It is not the verifier for Rust.
+
+|APIs, ABIs and engineering properties
+|*Idris2*
+|Interface and ABI contracts, totality, serialisation round-trips,
+dispatch and ordering invariants, bounds, and other properties of a
+system as built.
+
+|Theory
+|*Agda*, rechecked in *Rocq* and *Lean*
+|Mathematical content that does not depend on one system's code:
+lattices, orders, convergence, completeness, soundness of a calculus.
+Agda is the source of truth; the recheck is §2.
+|===
+
+The word "Rust" in estate documents means Rust. The 2026-04-10 note that
+read "Rust always means Rust/SPARK" is withdrawn: SPARK belongs to Ada code,
+and Rust is verified with Creusot.
+
+Deciding between *engineering* and *theory*: if the statement names a type,
+function or wire format of one repository, it is engineering (Idris2). If
+it would be true of any implementation, it is theory (Agda).
+
+== 2. Rechecking theory proofs
+
+Every Agda theory proof is rechecked in Rocq and in Lean:
+
+. *Transport first.* The Agda proof term is carried across through Dedukti
+(Agda → Dedukti/Lambdapi → Rocq and Lean). echidna's exchange layer
+(`src/rust/exchange/`) already speaks Dedukti. A transported witness that
+the target kernel accepts is the strongest recheck.
+. *Re-proof as fallback.* Where a construct does not translate (for
+example, a feature Agda2Dedukti does not cover), restate the theorem in
+the target prover and prove it there by hand. The statement must match
+the Agda statement; say how that was checked.
+. *Record which.* Each rechecked theorem lists, next to it in the repo's
+proof-status file, which route each target used: `transported` or
+`re-proved`, with the reason for any re-proof.
+
+No Mathlib, in Lean or elsewhere: a missing tactic or lemma is reproved by
+hand in the core library. A proof that needs a large external library to
+compile is a dependency, not a proof the estate owns.
+
+== 3. Existing proofs
+
+Proofs written before this ruling are re-homed by kind, not rewritten for
+their own sake:
+
+* An existing Lean, Rocq or Isabelle proof of a *theory* statement keeps
+its value as that prover's recheck. The Agda statement becomes the source,
+and the existing file is the Lean or Rocq leg.
+* An existing proof of an *engineering* statement in a theorem prover
+other than Idris2 moves to Idris2 when it is next touched. Until then it
+stays, labelled with its prover.
+* Corpora that exist to exercise provers are not obligations. echidna's
+`proofs/<prover>/` trees and similar fixtures are test material for a
+multi-prover system and are outside this policy.
+
+== 4. Exceptions
+
+Use another tool where it is plainly the right one: when the mapped prover
+would take far longer, or cannot express the property at all. Isabelle/HOL,
+F*, TLA+, an SMT solver or anything else is allowed on that basis. In every
+reasonable case, follow §1.
+
+An exception is recorded beside the artefact (a header comment) and in the
+repo's proof-status file. The record names the obligation, the tool used,
+and why the mapped prover was not the right fit.
+
+Worked exception: *TLA+ model checking* of concurrency protocols, as in
+hypatia's `verification/proofs/tlaplus/KinGate.tla`. A finite model check
+is reported as `TESTED`, with its bounds, not as `PROVEN`.
+
+== 5. Status vocabulary
+
+Proof-status files use the estate vocabulary: `PROVEN` (a kernel checked a
+proof with no escape hatch), `TESTED` (checked on a bounded or sampled
+domain: property tests, model checking), `ASSUMED` (a stated hypothesis or
+a transcription that no kernel checked), `OPEN` (not done).
+
+== 6. Toolchains
+
+The proof toolchains must be installable where the work runs:
+
+* *CI:* through the repo's Guix manifest or its container, per
+link:LANGUAGE-POLICY.adoc[`LANGUAGE-POLICY.adoc`] §2.
+* *Agent sessions:* through the cloud environment's setup script. Versions
+follow what each repo pins: Agda and its standard library as in CI, and Lean
+per project `lean-toolchain`.
+
+Creusot and Lambdapi build through opam, and SPARK's `gnatprove` comes from
+Alire. A session or runner without access to those hosts cannot run those
+legs; say so instead of reporting the leg as passing.
+
+== 7. Amending this document
+
+Change the mapping only by owner ruling, and update the repositories'
+`CLAUDE.md` pointers in the same campaign. A gate that enforces this policy
+cites this file. Verify any such gate both ways, as
+link:LANGUAGE-POLICY.adoc[`LANGUAGE-POLICY.adoc`] §3 requires: it passes on
+conforming input and fails on a planted violation.
