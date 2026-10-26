@@ -47,9 +47,12 @@ awk -f "$ROOT/scripts/lib/csv-to-tsv.awk" "$CSV" > "$TSV" \
 rows="$(awk 'END { print NR - 1 }' "$TSV")"
 [ "$rows" -gt 0 ] || fail "CSV has no rows"
 
+# Column count is taken from the HEADER, not hardcoded: adding a column to the
+# classification (the 2026-10-25 recheck note was the first) must not fail a
+# validation whose only real invariant is "every row has the header's shape".
 problems="$(awk -F'\t' '
-  NR == 1 { next }
-  NF != 12            { print "row " NR ": " NF " fields, expected 12" }
+  NR == 1 { want = NF; next }
+  NF != want          { print "row " NR ": " NF " fields, header has " want }
   seen[$1]++          { print "row " NR ": duplicate issue number " $1 }
   $3 !~ /^[CQSEDRU]$/ { print "row " NR ": unknown tier code " $3 }
   $12 ~ /^[ \t]*$/    { print "row " NR ": no note" }

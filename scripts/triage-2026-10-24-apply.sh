@@ -96,12 +96,21 @@ while IFS=$'\t' read -r number note; do
     printf '  #%s could not be read — stopping\n' "$number" >&2
     exit 1
   fi
-  printf '  #%s  %s\n' "$number" "$note"
+  # Close reason: "completed" only where the note says the defect is gone or the
+  # artefact was superseded. A duplicate folded into an open issue, an agent
+  # probe, a parked campaign and an answered question are all "not planned" —
+  # nothing was delivered for them, and saying "completed" would be a small lie
+  # recorded in the issue's own timeline.
+  reason="not planned"
+  case "$note" in
+    *verified*|*Verified*|*green*|*"no longer"*|*superseded*|*"already fixed"*) reason="completed" ;;
+  esac
+  printf '  #%s  [%s] %s\n' "$number" "$reason" "$note"
   if [ "$MODE" = "apply" ]; then
     gh issue comment "$number" --repo "$REPO" --body "Closing per the 2026-10-24 backlog classification (\`$DOC\`), tier C: $note
 
 If this closure is wrong, reopen it — the classification is a snapshot, not a ruling."
-    gh issue close "$number" --repo "$REPO" --reason "not planned"
+    gh issue close "$number" --repo "$REPO" --reason "$reason"
   fi
   closed=$((closed + 1))
 done < <(rows_for C)

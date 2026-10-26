@@ -11,6 +11,12 @@
 # gate table, and reports gated modules that are:
 #   VESTIGIAL — present but the repo does not declare the gating capability.
 #   MISSING   — the capability is declared but the module is absent.
+# and the always-carried baseline files that are:
+#   MISSING BASELINE — the policy says every repo carries it; this one does not.
+#
+# [baseline] had no reader at all until #1227: `grep -c baseline` on this file
+# returned 0, so the table's "Always carried" rows were asserted by no
+# executable and a repo could pass while missing its LICENSE.
 #
 # Usage: check-rsr-profile.sh [REPO_DIR] [owner/repo]
 # Set RSR_REPOSITORY instead of the second argument to enforce the live
@@ -136,12 +142,16 @@ CARRIER=""
 # gate table for the full rationale.
 case "$ROLE" in
   spine)
-    CARRIER="$(section carrier "$GATES" | quoted_on_key paths || true)"
+    # array_on_key, not quoted_on_key: BOTH carrier sections are multi-line
+    # (`paths = [` then one quoted entry per line), and quoted_on_key only reads
+    # the key's own line — so every entry was invisible and the exemption this
+    # branch exists to provide had never once applied.
+    CARRIER="$(section carrier "$GATES" | array_on_key paths || true)"
     echo "role: spine - [carrier] paths exempt from VESTIGIAL"
     echo
     ;;
   canon)
-    CARRIER="$(section canon "$GATES" | quoted_on_key paths || true)"
+    CARRIER="$(section canon "$GATES" | array_on_key paths || true)"
     echo "role: canon - [canon] paths exempt from VESTIGIAL"
     echo
     ;;
@@ -166,22 +176,46 @@ is_carrier() {
 }
 
 fail=0
+# A row key may be an alternation ("a|b"); print it readably in a verdict, since
+# the raw form ("Cargo.toml|*/Cargo.toml|*/*/Cargo.toml") reads like a broken glob.
+row_label() { printf '%s' "${1//|/ or }"; }
 while IFS= read -r line; do
   path="$(printf '%s' "$line" | grep -oE '"[^"]+"' | sed -n 1p | tr -d '"')"
   cap="$(printf '%s' "$line" | grep -oE '"[^"]+"' | sed -n 2p | tr -d '"')"
   [ -n "$path" ] && [ -n "$cap" ] || continue
   if has_cap "$cap"; then
-    present "$path" || { echo "  MISSING ($cap): $path"; fail=1; }
+    if ! present "$path"; then
+      # A carrier path is a gate the repo SERVES, not one it runs (the spine
+      # ships rust-ci.yml so a Rust project minted from it has one; the canon
+      # serves the same thing as rust-ci-reusable.yml). Carrier exemption
+      # previously applied only to VESTIGIAL, so a carrier that declares the
+      # capability was still failed for not running its own gift.
+      if is_carrier "$path"; then
+        echo "  served for downstream (no local '$cap' module needed): $(row_label "$path")"
+      else
+        echo "  MISSING ($cap): $(row_label "$path")"; fail=1
+      fi
+    fi
   else
     if present "$path"; then
       if is_carrier "$path"; then
-        echo "  carried for downstream (no '$cap' capability, spine): $path"
+        echo "  carried for downstream (no '$cap' capability, spine): $(row_label "$path")"
       else
-        echo "  VESTIGIAL (no '$cap' capability): $path"; fail=1
+        echo "  VESTIGIAL (no '$cap' capability): $(row_label "$path")"; fail=1
       fi
     fi
   fi
 done < <(section gates "$GATES")
+
+# --- baseline: always-carried paths, not capability-gated (#1227) ---
+# The row is "a|b|c": satisfied if ANY alternative exists, exactly like a gate
+# row, so a repo that retired a spelling is not failed for having retired it.
+baseline_checked=0
+while IFS= read -r key; do
+  [ -n "$key" ] || continue
+  baseline_checked=$((baseline_checked + 1))
+  present "$key" || { echo "  MISSING BASELINE: $(row_label "$key")"; fail=1; }
+done < <(section baseline "$GATES" | array_on_key paths)
 
 if [ "$fail" -ne 0 ]; then
   cat >&2 <<'MSG'
@@ -191,7 +225,10 @@ Fix one of:
   * remove the vestigial module, OR
   * declare the capability in .machine_readable/rsr-profile.a2ml (with a
     [rationale] line), OR
-  * add the missing module.
+  * add the missing module, OR
+  * for a MISSING BASELINE row, add the file (the table's [baseline].paths
+    lists the estate spellings that conform; a district path only conforms if
+    the table names it).
 MSG
   exit 1
 fi
@@ -200,4 +237,4 @@ if [ -n "$LIVE_REPOSITORY" ]; then
   echo "checking live Actions policy: $LIVE_REPOSITORY"
   bash "$SCRIPT_DIR/check-actions-policy.sh" "$LIVE_REPOSITORY"
 fi
-echo "rsr-profile check: OK — scaffold matches declared capabilities."
+echo "rsr-profile check: OK — scaffold matches declared capabilities ($baseline_checked baseline path(s) present)."
