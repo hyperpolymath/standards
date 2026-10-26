@@ -118,6 +118,15 @@ Owner ruling 2026-10-26 (settles standards#692). Normative source:
 Another tool (Isabelle/HOL, F*, TLA+, ...) only where it is plainly the right
 one, with the reason recorded beside the artefact (policy §4).
 
+Standing Rust exceptions, alongside Creusot and never instead of it (§4.1):
+**Kani** for `unsafe` and FFI seams (reported `TESTED` with bounds), **Aeneas**
+where Rust implements an Agda-proved theorem. Verus is not adopted.
+
+Third-party code (crates such as Bevy, libraries, forks) is **not** converted
+or re-proved (§1.1): state what a proof relies on as an `ASSUMED` boundary
+spec, and when choosing between equally fitting dependencies, prefer one that
+carries its own verification. A preference, not a gate.
+
 The 2026-04-10 note "Rust always means Rust/SPARK" is **withdrawn**: Rust
 means Rust, verified with Creusot; SPARK belongs to Ada code.
 
