@@ -320,11 +320,12 @@ run_case_out "complete clone: local negative is trusted silently (no SKIPPED war
 R="$TEST_DIR/canon-new-owner"; mk_repo "$R"
 cp "$FIX"/.github/workflows/*.yml "$R/.github/workflows/" 2>/dev/null || true
 write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C5"
-# Plain env assignment (not an env(1) argument) would be lost through run_case,
-# so run it directly.
+# These direct invocations need the same identity isolation as run_case:
+# the host CI repository ID must not override the fixture's slug.
 TOTAL=$((TOTAL + 1))
 set +e
-GITHUB_REPOSITORY="metadatastician/standards" \
+env GITHUB_REPOSITORY_ID=0 GITHUB_SERVER_URL=https://github.com \
+  GITHUB_REPOSITORY="metadatastician/standards" \
   STALENESS_STANDARDS_DIR="$FIX" \
   bash "$CHECK_SCRIPT" "$R" >/dev/null 2>&1
 rc=$?
@@ -340,7 +341,8 @@ R="$TEST_DIR/canon-old-owner"; mk_repo "$R"
 write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C5"
 TOTAL=$((TOTAL + 1))
 set +e
-GITHUB_REPOSITORY="hyperpolymath/standards" \
+env GITHUB_REPOSITORY_ID=0 GITHUB_SERVER_URL=https://github.com \
+  GITHUB_REPOSITORY="hyperpolymath/standards" \
   STALENESS_STANDARDS_DIR="$FIX" \
   bash "$CHECK_SCRIPT" "$R" >/dev/null 2>&1
 rc=$?
@@ -362,7 +364,8 @@ for owner in "someone/standards" "metadatastician/standards"; do
   : > "$R/.github/workflows/scorecard-enforcer.yml"
   TOTAL=$((TOTAL + 1))
   set +e
-  out=$(GITHUB_REPOSITORY="$owner" \
+  out=$(env GITHUB_REPOSITORY_ID=0 GITHUB_SERVER_URL=https://github.com \
+    GITHUB_REPOSITORY="$owner" \
     STALENESS_STANDARDS_DIR="$FIX" \
     bash "$CHECK_SCRIPT" "$R" 2>&1)
   rc=$?

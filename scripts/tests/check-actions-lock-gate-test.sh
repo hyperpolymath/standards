@@ -37,7 +37,7 @@ assert() {
 mkwf() {
   local d="$WORK/$1/.github/workflows"; mkdir -p "$d"
   if [ "$2" = pinned ]; then
-    printf 'jobs:\n  a:\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n      - uses: ./local\n      - uses: hyperpolymath/standards/.github/workflows/x.yml@main\n' > "$d/ci.yml"
+    printf 'jobs:\n  call:\n    uses: hyperpolymath/standards/.github/workflows/x.yml@3d3c42e5aac5ba805825da76410c181273ba90b1\n  a:\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n      - uses: ./local\n' > "$d/ci.yml"
   else
     printf 'jobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n' > "$d/ci.yml"
   fi
@@ -64,6 +64,14 @@ assert "no lock, pinned, custom cutoff honoured → 3"         3 "::error::"    
 d=$(mkwf e unpinned)
 assert "no lock, unpinned, before cutoff → 1 (no grace for unpinned)" 1 "not SHA-pinned" env LOCK_TODAY="$BEFORE" bash "$GATE" "$d"
 assert "no lock, unpinned, after cutoff → 1"                          1 "not SHA-pinned" env LOCK_TODAY="$AFTER"  bash "$GATE" "$d"
+# Canon reusables are remote refs too, under either owner: they get no
+# floating-ref exemption, even inside the missing-lock grace window.
+for ref in hyperpolymath/standards/.github/workflows/x.yml@main metadatastician/standards/.github/workflows/x.yml@main; do
+  d=$(mkwf remote pinned)
+  printf '  remote:\n    uses: %s\n' "$ref" >> "$d/ci.yml"
+  assert "no lock, $ref, before cutoff → 1" 1 "uses: $ref" env LOCK_TODAY="$BEFORE" bash "$GATE" "$d"
+  assert "no lock, $ref, after cutoff → 1"  1 "uses: $ref" env LOCK_TODAY="$AFTER"  bash "$GATE" "$d"
+done
 assert "missing workflows dir → 2" 2 "not found" bash "$GATE" "$WORK/does-not-exist/.github/workflows"
 
 echo "=== no lockfile, KYAML and parser cases (YAML-POLICY Y-1) ==="

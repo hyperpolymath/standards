@@ -96,6 +96,8 @@ check "same rule+line, different file: no match" \
   "[ \"\$(plan <(mk 201 TokenPermissionsID .github/workflows/branch-protection.yml 193))\" = '' ]"
 check "same rule+file, new line: no match" \
   "[ \"\$(plan <(mk 202 TokenPermissionsID .github/workflows/debt-measure.yml 52))\" = '' ]"
+check "the old deep-recon line does not match the corrected dismissal" \
+  "[ \"\$(plan <(mk 206 TokenPermissionsID .github/workflows/deep-recon-reusable.yml 70))\" = '' ]"
 check "aggregate rule with a real path does not inherit the SASTID entry" \
   "[ \"\$(plan <(mk 204 SASTID .github/workflows/ci.yml 12))\" = '' ]"
 check "unlisted rule id: no match" \
