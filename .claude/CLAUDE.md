@@ -103,16 +103,23 @@ legacy. Anything new written there is a `.deed`, such as
 
 ## Language Policy (Hyperpolymath Standard)
 
-### Terminology note — "Rust" always means "Rust/SPARK"
+### Proofs — which prover for which obligation
 
-As of 2026-04-10, the word **Rust** in all hyperpolymath documentation is
-shorthand for **Rust with SPARK integration as the default stance**. SPARK
-integration is the transition direction — Rust-primary now, with SPARK/Ada
-modules called via the standard Idris2-ABI / Zig-FFI pattern for the
-correctness-critical parts. New Rust projects should be *designed* to admit
-SPARK modules even if they do not yet contain any. See
-`spec/LANGUAGE-POLICY.adoc §Terminology` in `rhodium-standard-repositories`
-for the canonical statement.
+Owner ruling 2026-10-26 (settles standards#692). Normative source:
+`3-practice/PROOF-POLICY.adoc`; read it, not a paraphrase.
+
+| Code or obligation | Verifier |
+|---|---|
+| Rust code | **Creusot** |
+| Ada code | **SPARK** |
+| APIs, ABIs, engineering properties | **Idris2** |
+| Theory | **Agda**, rechecked in **Rocq** and **Lean** (Dedukti transport first, hand re-proof as fallback; no Mathlib) |
+
+Another tool (Isabelle/HOL, F*, TLA+, ...) only where it is plainly the right
+one, with the reason recorded beside the artefact (policy §4).
+
+The 2026-04-10 note "Rust always means Rust/SPARK" is **withdrawn**: Rust
+means Rust, verified with Creusot; SPARK belongs to Ada code.
 
 ### ALLOWED Languages & Tools
 
@@ -121,10 +128,10 @@ for the canonical statement.
 | **AffineScript** | Primary application code | Compiles to typed-wasm; affine/linear types. Replaces ReScript across the estate (RS/TS/JS → AffineScript → typed-wasm). |
 | **Bun** | JS runtime & package management (tier 1) | Default for all new work. Runs compiled ESM/JS directly — no bundler step. Uses an npm-compatible `package.json` plus `bun.lock` — both are expected, not anti-patterns. |
 | **Deno** | JS runtime (tier 2) | Permitted, not gated (owner ruling 2026-10-14; order Bun > Deno > pnpm > npm). Reads the same `package.json`; every package carries a generated `deno.lock` (`tools/js-runtimes regen`, `3-practice/LANGUAGE-POLICY.adoc` §1.4). |
-| **Rust/SPARK** | Performance-critical, systems, WASM, CLI tools, safety-critical | "Rust" always means "Rust/SPARK" per terminology note above. Preferred over Ada where reachable. |
-| **Zig** | **APIs, FFIs, gateways, client SDKs (estate default 2026-05-28)**, memory-safe systems where Rust/SPARK is overkill | Zig is the estate-wide default for all API/FFI/gateway/client-SDK work unless explicitly special-cased; Idris2 owns ABIs. Completed V-lang→Zig migration 2026-05-28. |
-| **Idris2** | Formal verification (primary, ABI-style proofs) | ATS2 rejected. Proven-library status in `proven` repo. |
-| **Agda** | Formal verification (foundational / type-theoretic constructions) | Used by `hyperpolymath/echo-types` (loss-with-residue / proof-relevant fibers) and other foundational formalisations. Constructive only — no postulates in load-bearing tracks. |
+| **Rust** | Performance-critical, systems, WASM, CLI tools, safety-critical | Verified with Creusot (`3-practice/PROOF-POLICY.adoc`). Preferred over Ada where reachable. |
+| **Zig** | **APIs, FFIs, gateways, client SDKs (estate default 2026-05-28)**, memory-safe systems where Rust is overkill | Zig is the estate-wide default for all API/FFI/gateway/client-SDK work unless explicitly special-cased; Idris2 owns ABIs. Completed V-lang→Zig migration 2026-05-28. |
+| **Idris2** | Proofs about APIs, ABIs and engineering properties | Per `3-practice/PROOF-POLICY.adoc`. ATS2 rejected. Proven-library status in `proven` repo. |
+| **Agda** | Theory proofs (source of truth; rechecked in Rocq and Lean) | Per `3-practice/PROOF-POLICY.adoc`. Used by `hyperpolymath/echo-types` (loss-with-residue / proof-relevant fibers) and other foundational formalisations. Constructive only — no postulates in load-bearing tracks. |
 | **echo-types library** | Loss-with-residue formalism (Agda) | `hyperpolymath/echo-types` — canonical formalisation of `Echo f y := Σ (x : A) , (f x ≡ y)`. Cite from this lib rather than reinventing in downstream code. |
 | **Tauri 2.0+** | Mobile apps (iOS/Android) | Rust backend + web UI |
 | **Dioxus** | Mobile apps (native UI) | Pure Rust, React-like |
@@ -138,7 +145,7 @@ for the canonical statement.
 | **k9** | Contracts (`*.k9.ncl`) and agent coordination (`coordination.k9`) | Grammars and validators in `1-formats/k9/` and `2-protocols/k9-coordination/`. |
 | **Julia** | Batch scripts, data processing | Per RSR |
 | **OCaml** | AffineScript compiler | Language-specific |
-| **Ada** (legacy) | Safety-critical systems where Rust/SPARK is not yet reachable | Rust/SPARK is absorbing most Ada work over time. Do not start new pure-Ada projects unless Rust/SPARK cannot reach. |
+| **Ada** (legacy) | Safety-critical systems where Rust is not yet reachable | Verified with SPARK. Rust is absorbing most Ada work over time. Do not start new pure-Ada projects unless Rust cannot reach. |
 
 > **Corrected 2026-08-07.** This section previously listed **Bun** as banned
 > with **Deno** as its replacement, and described Deno as "replaces Node/npm/bun".
@@ -197,18 +204,18 @@ for the canonical statement.
 | Node.js | Bun | Bun is Node-compatible; run the code, drop the runtime. |
 | npm | Bun | npm is tier 4 — the last resort: *permitted, never preferred*, not banned. `package-lock.json` must still not be tracked (standards#67). |
 | yarn | Bun | yarn is not in the tier list at all. |
-| Go | Rust/SPARK | |
-| **Python** | AffineScript/Rust/SPARK/Julia | Fully banned, no exceptions (SaltStack exception removed 2026-01-03) |
-| Java/Kotlin | Rust/SPARK, Tauri, Dioxus | |
+| Go | Rust | |
+| **Python** | AffineScript/Rust/Julia | Fully banned, no exceptions (SaltStack exception removed 2026-01-03) |
+| Java/Kotlin | Rust, Tauri, Dioxus | |
 | Swift | Tauri/Dioxus | |
 | React Native | Tauri/Dioxus | |
 | Flutter/Dart | Tauri/Dioxus | Google lock-in |
 | **V-lang** | Zig | Banned 2026-04-10; migration **COMPLETED 2026-05-28** across 16 PRs. Detected via hypatia `cicd_rules/vlang_detected` (`*.v` files) + `cicd_rules/vmod_detected` (`v.mod` manifest) with `path_allow_prefixes` mechanism for: v-ecosystem R&D carve-out, asdf-vlang toolchain installers, Coq proof scripts (`.v` shared with Coq + Verilog), interop targets (`/v-cartridge`, `/v-adapter`, `/v-bindings`, `/v-client` — where we expose work to V consumers without writing V), archived repos (`polystack/`). |
-| **ATS2** | Idris2 (formal), Rust/SPARK (safety-critical operational) | Rejected in favour of Idris2 and Rust/SPARK. |
+| **ATS2** | Idris2 (formal), Rust (safety-critical operational) | Rejected in favour of Idris2 and Rust. |
 | **Makefiles** | Mustfile/justfile | |
 
 **NOTE:** Python is fully banned. V-lang is fully banned (2026-04-10). ATS2 is
-fully banned in favour of Idris2 + Rust/SPARK. ReScript is fully banned in new
+fully banned in favour of Idris2 + Rust. ReScript is fully banned in new
 code as of 2026-04-30 (use AffineScript). All four bans are enforced by
 `.github/workflows/language-policy.yml`.
 
