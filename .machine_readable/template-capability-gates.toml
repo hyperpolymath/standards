@@ -31,13 +31,33 @@ known = ["rust", "zig", "agda", "idris2", "haskell", "gleam", "elixir", "affines
 # GitHub resolves community-health files from .github/ as readily as the root,
 # and the estate's canonical location for them IS .github/ - naming only the
 # root form marked every conforming repo as missing them.
-paths = ["README.adoc", "EXPLAINME.adoc|docs/EXPLAINME.adoc", "LICENSE", "SECURITY.md|.github/SECURITY.md", "CONTRIBUTING.md|.github/CONTRIBUTING.md", "CODE_OF_CONDUCT.md|.github/CODE_OF_CONDUCT.md", "CHANGELOG.adoc|CHANGELOG.md", "0-AI-MANIFEST.a2ml", ".machine_readable/descriptiles/|machine-readable/descriptiles/", ".machine_readable/rsr-profile.a2ml|machine-readable/rsr-profile.a2ml", ".well-known/", ".gitignore", "Justfile"]
+# Enforced by check-rsr-profile.sh since #1227 (it was prose with no reader).
+# Every alternation here is an estate spelling that CONFORMS, not a concession:
+# * .adoc is the canonical docs format (ADR-004); .md is accepted where a
+#   repository has not migrated and where GitHub itself reads it.
+# * 0-AI-MANIFEST: the template retired the .a2ml spelling in favour of .deed
+#   (#1229). Demanding only .a2ml made every deed-era repo fail on a file the
+#   template itself no longer ships.
+# * .well-known: the estate publishes it from www/ since the 2026-09 migration
+#   (#851); the root spelling is kept for repos that have not moved.
+# * 3-practice/: hyperpolymath/standards keeps its own contributing and
+#   conduct guides in a district, not at the root of a 45-directory monorepo.
+paths = ["README.adoc", "EXPLAINME.adoc|docs/EXPLAINME.adoc", "LICENSE", "SECURITY.md|.github/SECURITY.md", "CONTRIBUTING.md|.github/CONTRIBUTING.md|CONTRIBUTING.adoc|3-practice/CONTRIBUTING.adoc", "CODE_OF_CONDUCT.md|.github/CODE_OF_CONDUCT.md|CODE_OF_CONDUCT.adoc|3-practice/CODE_OF_CONDUCT.adoc", "CHANGELOG.adoc|CHANGELOG.md", "0-AI-MANIFEST.a2ml|0-AI-MANIFEST.deed", ".machine_readable/descriptiles/|machine-readable/descriptiles/", ".machine_readable/rsr-profile.a2ml|machine-readable/rsr-profile.a2ml", ".well-known/|www/.well-known/", ".gitignore", "Justfile"]
 
 [gates]
 # "module path (file, dir/, or glob)" = "gating capability"
-"Cargo.toml" = "rust"
-"Cargo.lock" = "rust"
-"src/**/*.rs" = "rust"
+# Manifest rows are depth-anchored for the same reason as the src row below
+# (#1228): a cargo WORKSPACE keeps its manifests in <crate>/, never at the root.
+# Depth is expressed explicitly rather than with `**/` because these rows name a
+# FILE, and an unbounded `**/Cargo.toml` would also match vendored trees.
+"Cargo.toml|*/Cargo.toml|*/*/Cargo.toml" = "rust"
+"Cargo.lock|*/Cargo.lock|*/*/Cargo.lock" = "rust"
+# Depth-anchored, not root-anchored (#1228): a cargo WORKSPACE keeps sources in
+# <crate>/src/**, so the root-anchored form posted a permanent MISSING on every
+# workspace (oikos, four crates, 20+ files) and could never be satisfied.
+# `**/src/**/*.rs` matches the single-crate layout as well — bash's globstar
+# lets the leading `**/` match zero components.
+"**/src/**/*.rs" = "rust"
 ".github/workflows/rust-ci.yml" = "rust"
 # Julia library modules (the julia-library archetype's overlay; the
 # #634 reference variant measured 2026-08-25: the language-specific
@@ -57,7 +77,10 @@ paths = ["README.adoc", "EXPLAINME.adoc|docs/EXPLAINME.adoc", "LICENSE", "SECURI
 "build/container/Containerfile|container/Containerfile|Containerfile" = "container"
 # Guix is primary; Nix is fallback-only (criterion 1.2.1). As two separate rows
 # this demanded BOTH, so every repo that correctly retired Nix failed the gate.
-"guix.scm|build/guix.scm|flake.nix" = "reproducible-build"
+# manifest.scm is the estate's Guix convention and was missing from this row
+# (#894); flake.nix is gone because Nix is retired (#1125) — leaving it made a
+# retired toolchain count as a satisfied build gate.
+"guix.scm|build/guix.scm|manifest.scm" = "reproducible-build"
 "affinescript/" = "affinescript"
 "benches/" = "benchmarks"
 ".github/workflows/release.yml" = "published-package"
@@ -124,6 +147,7 @@ paths = [
   "docs/proofs/",                                             # proof artefacts OF THE ESTATE
   "canon.lock",                                               # the release identity
   "standards-map.toml",
+  ".github/workflows/rust-ci.yml",                            # served as rust-ci-reusable.yml
 ]
 
 [presets]

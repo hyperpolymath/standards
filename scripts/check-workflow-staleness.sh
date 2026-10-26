@@ -130,12 +130,26 @@ STANDARDS_REUSABLES=(
   "scorecard-reusable.yml"
 )
 
-# Determine if we are in the canonical standards repo. The owner changed from
-# hyperpolymath to metadatastician; both slugs resolve to GitHub repo 1116521501.
-# These are exact identities, not an exemption for arbitrary standards forks.
+# Determine if we are in standards repo.
+#
+# BOTH names are matched, deliberately. The repository moved from
+# hyperpolymath/standards to metadatastician/standards and GitHub redirects the
+# old path, so a literal comparison against the old owner silently becomes
+# FALSE in the standards repo itself. The consequence is not cosmetic: every
+# self-scan then runs the consumer-only structural rules against the canon's own
+# workflows, and `.github/workflows/scorecard-reusable.yml` — the file that
+# PUBLISHES Scorecard SARIF for the estate — is reported as a consumer-owned
+# direct publisher. Measured 2026-10-25: this failed on three unrelated PRs and
+# passed on `main`, because the check is evaluated per PR head.
+#
+# Keep the legacy name: a repository whose remote still reads the old path is
+# still the canon, and a redirect is not a rename in git's eyes.
 IS_STANDARDS=false
-REMOTE_URL=""
-if [ -d "$REPO_ROOT/.git" ]; then
+case "${GITHUB_REPOSITORY:-}" in
+  hyperpolymath/standards|metadatastician/standards) IS_STANDARDS=true ;;
+esac
+if [ "$IS_STANDARDS" = "false" ] && [ -d "$REPO_ROOT/.git" ]; then
+  # Fallback: capture Git remote origin URL for exact canonical matching below.
   REMOTE_URL=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
 fi
 for standards_repo in hyperpolymath/standards metadatastician/standards; do

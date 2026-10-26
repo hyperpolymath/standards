@@ -306,6 +306,85 @@ run_case_out "complete clone: local negative is trusted silently (no SKIPPED war
   STALENESS_API_BASE="$UNREACHABLE" \
   STALENESS_KNOWN_BAD_BEFORE="governance-reusable.yml:$C3"
 
+# ── 14. THE REPOSITORY'S OWN NAME, AFTER THE ORG RENAME ─────────────────────
+# The canon's self-scan is only skipped when the gate recognises the repo it is
+# running in. `hyperpolymath/standards` -> `metadatastician/standards` made that
+# recognition FALSE, so the canon ran the consumer-only structural rules against
+# its own reusable workflows and failed on the file that publishes Scorecard
+# SARIF FOR the estate. These three cases pin both spellings, and pin that a
+# consumer is still treated as a consumer.
+#
+# The fixture repo root has no .git, so the remote fallback cannot rescue a miss:
+# only the GITHUB_REPOSITORY comparison can make these pass.
+R="$TEST_DIR/canon-new-owner"; mk_repo "$R"
+cp "$FIX"/.github/workflows/*.yml "$R/.github/workflows/" 2>/dev/null || true
+write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C5"
+# Plain env assignment (not an env(1) argument) would be lost through run_case,
+# so run it directly.
+TOTAL=$((TOTAL + 1))
+set +e
+GITHUB_REPOSITORY="metadatastician/standards" \
+  STALENESS_STANDARDS_DIR="$FIX" \
+  bash "$CHECK_SCRIPT" "$R" >/dev/null 2>&1
+rc=$?
+set -e
+if [ "$rc" -eq 0 ]; then
+  echo "PASS: canon under the NEW owner name is recognised as standards (rename regression)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: canon under the new owner name ran consumer rules (exit $rc)"
+fi
+
+R="$TEST_DIR/canon-old-owner"; mk_repo "$R"
+write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C5"
+TOTAL=$((TOTAL + 1))
+set +e
+GITHUB_REPOSITORY="hyperpolymath/standards" \
+  STALENESS_STANDARDS_DIR="$FIX" \
+  bash "$CHECK_SCRIPT" "$R" >/dev/null 2>&1
+rc=$?
+set -e
+if [ "$rc" -eq 0 ]; then
+  echo "PASS: canon under the LEGACY owner name is still recognised as standards"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: canon under the legacy owner name ran consumer rules (exit $rc)"
+fi
+
+# Both directions of the same switch, asserted behaviourally rather than by
+# reading the script: the retired-enforcer rule applies to a CONSUMER and is
+# waived for the CANON. A lookalike owner (someone/standards) must stay a
+# consumer — nothing may be promoted to canon by its name looking similar.
+for owner in "someone/standards" "metadatastician/standards"; do
+  R="$TEST_DIR/enforcer-${owner%%/*}"; mk_repo "$R"
+  write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$C5"
+  : > "$R/.github/workflows/scorecard-enforcer.yml"
+  TOTAL=$((TOTAL + 1))
+  set +e
+  out=$(GITHUB_REPOSITORY="$owner" \
+    STALENESS_STANDARDS_DIR="$FIX" \
+    bash "$CHECK_SCRIPT" "$R" 2>&1)
+  rc=$?
+  set -e
+  if [ "$owner" = "someone/standards" ]; then
+    # Consumer: the retired enforcer is a hard error.
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'scorecard-enforcer.yml is retired'; then
+      echo "PASS: a lookalike owner is still a consumer (retired enforcer is a hard error)"
+      PASS=$((PASS + 1))
+    else
+      echo "FAIL: lookalike owner was waived as canon (exit $rc)"
+    fi
+  else
+    # Canon: the same file is the canonical history, not a consumer mistake.
+    if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -q 'scorecard-enforcer.yml is retired'; then
+      echo "PASS: the canon itself is exempt from the consumer-only retired-enforcer rule"
+      PASS=$((PASS + 1))
+    else
+      echo "FAIL: canon ran consumer rules on its own workflows (exit $rc)"
+    fi
+  fi
+done
+
 echo "----------------------------------------"
 echo "$PASS/$TOTAL test cases passed."
 [ "$PASS" -eq "$TOTAL" ] || { echo "Some regression tests FAILED."; exit 1; }

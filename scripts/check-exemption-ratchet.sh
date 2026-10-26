@@ -149,7 +149,14 @@ LEDGERS=(
   ".hypatia-baseline.json"
   ".hypatia-ignore"
   ".gitleaks.toml"
-  ".machine_readable/root-allow.txt"
+  # `.machine_readable/root-allow.txt` was listed here while the file did not
+  # exist in this repository (#908). count_at then returned 0 at base and 0 at
+  # HEAD, so the entry could never fire: a five-line ledger entry that read as
+  # a control and was not one. Root drift in this repo is covered by
+  # standards-map.toml (scripts/check-standards-map.sh), which is bidirectional
+  # and fails on an unlisted path. The ledger belongs to rsr-template-repo,
+  # where the file exists; if this repo ever adopts one, add the entry back in
+  # the same commit that creates the file.
   ".machine_readable/lock-allow.txt"
   ".machine_readable/pipeline-allow.txt"
   # The K9 debt ledger (1-formats/k9/tools/CONFORMANCE-REPORTING.adoc): the

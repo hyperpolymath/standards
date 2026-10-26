@@ -37,8 +37,11 @@ while IFS= read -r file; do
     */.git/*|*/check-uuid-v7.sh) continue ;;
   esac
   if grep -IEni -- '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' "$file" >/dev/null 2>&1; then
-    while IFS= read -r match; do
-      uuid=$(printf '%s\n' "$match" | sed -nE 's/.*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}).*/\1/p' | head -n 1)
+    # `grep -oE` per MATCHING LINE, so every UUID on a line is checked. The
+    # previous form read one whole line and pulled the LAST UUID off it with a
+    # greedy `.*`, so `<v4-uuid> <v7-uuid>` passed: the v4 was never seen
+    # (#1079). A line with two v4s passed for the same reason.
+    while IFS= read -r uuid; do
       [ -n "$uuid" ] || continue
       version=$(printf '%s' "$uuid" | cut -d- -f3 | cut -c1)
       variant=$(printf '%s' "$uuid" | cut -d- -f4 | cut -c1 | tr 'A-F' 'a-f')
@@ -47,7 +50,7 @@ while IFS= read -r file; do
         *) printf '%s: non-v7 UUID literal (%s)\n' "$file" "$uuid" >&2; status=1 ;;
       esac
     done <<EOF
-$(scannable_text "$file" | grep -Ei -- '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true)
+$(scannable_text "$file" | grep -Eio -- '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true)
 EOF
   fi
 done <<EOF
