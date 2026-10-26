@@ -82,39 +82,55 @@ case "$path" in
   # resting state, or every test would pass by accident.
   */actions/workflows/*/runs\?status=success\&per_page=30)
     case "${RUNS_MODE:-none}" in
-      ok|foreign|fork-first|missing-head)
-        jq -n --arg mode "$RUNS_MODE" '
+      ok|foreign|fork-first|missing-head|before-enablement|at-enablement|after-enablement|missing-time)
+        jq -n --arg mode "$RUNS_MODE" --arg run_at "${RUN_CREATED_AT:-}" '
           {id:9, path:".github/workflows/coverage.yml", head_sha:"abcdef1234567890",
            head_branch:"main", conclusion:"success",
+           created_at:(if $run_at != "" then $run_at
+             elif $mode == "at-enablement" then "2026-10-25T12:00:00Z"
+             elif $mode == "after-enablement" then "2026-10-25T13:00:00Z"
+             else "2026-10-25T11:00:00Z" end),
            head_repository:{full_name:"example/repo"}} as $run
           | ($run | .id = 10 | .head_repository.full_name = "example/fork") as $fork
           | {workflow_runs: (if $mode == "foreign" then [$fork]
               elif $mode == "fork-first" then [$fork, $run]
               elif $mode == "missing-head" then [$run | del(.head_repository)]
+              elif $mode == "missing-time" then [$run | del(.created_at)]
               else [$run] end)}' ;;
       invalid) echo '{"workflow_runs":{}}'; exit 0 ;;
+      not-found) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;
+      server-fail) echo 'gh: Server Error (HTTP 500)' >&2; exit 1 ;;
       fail) echo '{"message":"Not Found"}'; exit 1 ;;
       *) echo '{"workflow_runs":[]}' ;;
     esac ;;
   */actions/workflows\?per_page=100)
-    # gh --paginate emits one JSON document per page; jq folds them, so the stub
-    # must too. --slurp is deliberately NOT required here: it does not exist in
-    # every gh release, and the script must not depend on it.
-    [[ " $* " == *" --paginate "* ]] || exit 1
-    [[ " $* " != *" --slurp "* ]] || exit 1
+    # Model an old gh (no --slurp): it rejects the flag before any request,
+    # then serves --paginate as concatenated page objects for jq -s to group.
+    if [ "${WF_MODE:-none}" = "old-gh-quality" ]; then
+      if [[ " $* " == *" --slurp "* ]]; then echo 'unknown flag: --slurp' >&2; exit 1; fi
+      [[ " $* " == *" --paginate "* ]] || exit 1
+      printf '%s\n%s\n' \
+        '{"total_count":2,"workflows":[{"name":"CI","path":".github/workflows/ci.yml"}]}' \
+        '{"total_count":2,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}'
+      exit 0
+    fi
+    # Model gh's --slurp output and require pagination, not just a larger page.
+    [[ " $* " == *" --paginate "* && " $* " == *" --slurp "* ]] || exit 1
     case "${WF_MODE:-none}" in
-      quality) echo '{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}' ;;
-      local-quality) echo '{"total_count":1,"workflows":[{"name":"Code Quality","path":".github/workflows/code-quality.yml"}]}' ;;
+      quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}]' ;;
+      quality-timed) jq -n --arg at "${REGISTERED_AT:-2026-10-25T12:00:00Z}" \
+        '[{total_count:1,workflows:[{name:"Code Quality",path:"dynamic/github-code-quality/codeql",created_at:$at}]}]' ;;
+      local-quality) echo '[{"total_count":1,"workflows":[{"name":"Code Quality","path":".github/workflows/code-quality.yml"}]}]' ;;
       quality-later)
         jq -n '[range(100) | {name:"CI", path:".github/workflows/ci-\(.).yml"}] as $first
-          | {total_count:101, workflows:$first},
-            {total_count:101, workflows:[{name:"Renamed analysis", path:"dynamic/github-code-quality/codeql"}]}' ;;
-      incomplete) echo '{"total_count":2,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}' ;;
-      inconsistent-total) printf '%s\n' '{"total_count":1,"workflows":[]}' '{"total_count":2,"workflows":[{"path":"dynamic/github-code-quality/codeql"}]}' ;;
-      page-fail) echo '{"total_count":0,"workflows":[]}'; exit 1 ;;
-      empty-pages) : ;;
-      invalid) echo '{"total_count":0,"workflows":{}}' ;;
-      *) echo '{"total_count":0,"workflows":[]}' ;;
+          | [{total_count:101, workflows:$first},
+             {total_count:101, workflows:[{name:"Renamed analysis", path:"dynamic/github-code-quality/codeql"}]}]' ;;
+      incomplete) echo '[{"total_count":2,"workflows":[{"name":"Code Quality","path":"dynamic/github-code-quality/codeql"}]}]' ;;
+      inconsistent-total) echo '[{"total_count":1,"workflows":[]},{"total_count":2,"workflows":[{"path":"dynamic/github-code-quality/codeql"}]}]' ;;
+      page-fail) echo '[{"total_count":0,"workflows":[]}]'; exit 1 ;;
+      empty-pages) echo '[]' ;;
+      invalid) echo '[{"total_count":0,"workflows":{}}]' ;;
+      *) echo '[{"total_count":0,"workflows":[]}]' ;;
     esac ;;
   */protection/required_status_checks) echo '{"message":"not found"}'; exit 1 ;;
   *) exit 1 ;;
@@ -207,29 +223,53 @@ jobs:
     steps:
       - uses: actions/upload-code-coverage@0000000000000000000000000000000000000000
 YML
-# A green coverage run is not evidence on its own. The upload action skips
-# rather than fails when it cannot attribute the report — fork PRs, and every PR
-# whose head-repo name went stale when this repository was renamed. Those runs
-# conclude success having uploaded nothing, so while Code Quality is off (and the
-# ingestion endpoint therefore absent) a green run must verify nothing.
+# A successful run with the feature OFF verifies nothing: uploads are
+# rejected while Code Quality is disabled, so such a run measured and
+# annotated without uploading. Counting it would be "green run = uploaded
+# data" one level up (code-coverage.yml's probe does exactly this now).
 RUNS_MODE=ok run ok 1
-if [ "$rc" = 1 ] && jq -e '.inspected == true and .unsatisfiable == 12' "$work/report.json" >/dev/null &&
-   ! grep -q 'satisfied rule:code_coverage' "$work/out"; then
-  pass=$((pass+1)); echo "PASS a green coverage run cannot verify the rule while Code Quality is off"
-else
-  fail=$((fail+1)); echo "FAIL a successful coverage run satisfies only the coverage rule (exit $rc)"; cat "$work/out"
-fi
-# Code Quality must be present for a coverage upload to have any chance of being
-# accepted, so these evidence tests enable it and then vary only the run data.
-RUNS_MODE=fork-first WF_MODE=quality run ok 0
+check 'a successful run with Code Quality off is not upload evidence' 1 \
+  '.inspected == true and .unsatisfiable == 12 and
+   ([.results[] | select(.verdict == "VERIFIED-RULE")] | length) == 0'
+RUNS_MODE=fork-first WF_MODE=quality run ok 1
 check 'coverage evidence selects a repository run after a newer fork run' 0 \
   '.inspected == true and .unsatisfiable == 0 and
    ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 6'
+for mode in before-enablement missing-time; do
+  RUNS_MODE="$mode" WF_MODE=quality-timed run ok 1
+  check "$mode coverage run cannot verify a rule after enablement" 1 \
+    '.inspected == true and .unsatisfiable == 6 and
+     ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 0'
+done
+for mode in at-enablement after-enablement; do
+  RUNS_MODE="$mode" WF_MODE=quality-timed run ok 1
+  check "$mode coverage run verifies a rule" 0 \
+    '.inspected == true and .unsatisfiable == 0 and
+     ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 6'
+done
+# Opposing wall-clock order, equivalent instants and fractions exercise both
+# timestamps. Empty registration times are covered by the untimed cases above.
+while read -r run_at registered_at expected; do
+  RUN_CREATED_AT="$run_at" REGISTERED_AT="$registered_at" RUNS_MODE=ok WF_MODE=quality-timed run ok 1
+  check "coverage at $run_at against enablement at $registered_at" "$expected" \
+    ".inspected == true and .unsatisfiable == $((expected * 6)) and
+     ([.results[] | select(.verdict == \"VERIFIED-RULE\" and (.context | startswith(\"rule:code_coverage\")))] | length) == $(((1 - expected) * 6))"
+done <<'TIMESTAMPS'
+2026-10-25T13:00:00+02:00 2026-10-25T12:00:00Z 1
+2026-10-25T11:00:00-02:00 2026-10-25T12:00:00Z 0
+2026-10-25T12:00:00Z 2026-10-25T13:00:00+02:00 0
+2026-10-25T12:00:00Z 2026-10-25T11:00:00-02:00 1
+2026-10-25T17:30:00+05:30 2026-10-25T12:00:00Z 0
+2026-10-25T12:00:00Z 2026-10-25T12:00:00.001+00:00 1
+2026-10-25T12:00:00.001-00:00 2026-10-25T12:00:00Z 0
+TIMESTAMPS
 for mode in foreign missing-head; do
-  RUNS_MODE="$mode" run ok 1
+  # Feature ON (quality verifies, 6) so the runs are actually consulted;
+  # foreign or head-less runs must still leave coverage unverified.
+  RUNS_MODE="$mode" WF_MODE=quality run ok 1
   check "$mode coverage runs cannot verify a rule" 1 \
-    '.inspected == true and .unsatisfiable == 12 and
-     ([.results[] | select(.verdict == "VERIFIED-RULE")] | length) == 0'
+    '.inspected == true and .unsatisfiable == 6 and
+     ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 0'
 done
 # Same tree, no successful run: the uploader exists and proves nothing. This is
 # the branch's first six runs, which all failed 404 while the feature was off.
@@ -260,6 +300,28 @@ if [ "$rc" = 0 ] && jq -e '.inspected == true and .unsatisfiable == 0' "$work/re
 else
   fail=$((fail+1)); echo "FAIL strict mode passes when both data rules are demonstrably fed (exit $rc)"; cat "$work/out"
 fi
+# A 404 from the producer-runs endpoint is the one failure that is NOT an
+# inspection failure: it proves GitHub has no such workflow registered, which
+# is the normal state of the PR introducing the producer (measured on #1338).
+# The verdict must be "inspected, rule unsatisfied" — the finding stands.
+# (WF_MODE=quality in these: with the feature off the runs endpoint is
+# never consulted, so the 404/500 distinction would go unexercised.)
+RUNS_MODE=not-found WF_MODE=quality run ok 1
+check 'a 404 producer is evidence of absence, not an inspection failure' 1 \
+  '.inspected == true and .unsatisfiable == 6 and
+   ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_coverage")))] | length) == 0'
+# Its negative control: any OTHER runs-endpoint failure is still an inspection
+# failure, or the 404 carve-out could pass by swallowing every error.
+RUNS_MODE=server-fail WF_MODE=quality run ok 1
+check 'a 500 from the runs endpoint is still an inspection failure' 1 \
+  '.inspected == false and .results == []'
+# An old gh without --slurp must not turn a readable repository into
+# inspected:false: the fallback groups the same pages with jq -s and the
+# catalogue validation still applies to what it grouped.
+WF_MODE=old-gh-quality run ok 1
+check 'a gh without --slurp falls back to paginated jq -s grouping' 1 \
+  '.inspected == true and .unsatisfiable == 6 and
+   ([.results[] | select(.verdict == "VERIFIED-RULE" and (.context | startswith("rule:code_quality")))] | length) == 6'
 # A lookup that fails must not be read as "no data" (a silent finding) nor as
 # "data present" (a silent pass). It is an inspection failure.
 RUNS_MODE=invalid WF_MODE=quality run ok 1

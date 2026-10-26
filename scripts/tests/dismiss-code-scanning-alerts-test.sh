@@ -42,6 +42,31 @@ plan() {
   rm -f "$feed"
 }
 
+# Every path/line record must still point at a write-permission declaration
+# in the workflow it claims to describe. A dismissal whose line has drifted
+# is worse than an absent dismissal: it looks reasoned and specific while
+# no longer matching the alert it was written for.
+recorded_lines_grounded() {
+  local path line text seen=0
+  while IFS=$'\t' read -r path line; do
+    seen=$((seen + 1))
+    [ -f "$ROOT/$path" ] || {
+      printf 'recorded workflow does not exist: %s\n' "$path" >&2
+      return 1
+    }
+    text="$(sed -n "${line}p" "$ROOT/$path")"
+    if printf '%s\n' "$text" | grep -Eq '^[[:space:]]*#'; then
+      printf '%s:%s is a comment, not a permission: %s\n' "$path" "$line" "$text" >&2
+      return 1
+    fi
+    printf '%s\n' "$text" | grep -Eq '"?[A-Za-z-]+"?[[:space:]]*:[[:space:]]*"?write"?([[:space:],}]|$)' || {
+      printf '%s:%s is not a write permission: %s\n' "$path" "$line" "$text" >&2
+      return 1
+    }
+  done < <(jq -r '.dismissals[] | select(.rule_id=="TokenPermissionsID") | [.path, .line] | @tsv' "$ALLOWLIST")
+  [ "$seen" -gt 0 ]
+}
+
 echo "== allowlist is valid and every entry is specific =="
 check "allowlist parses as JSON" \
   "jq -e . '$ALLOWLIST' >/dev/null"
@@ -53,11 +78,13 @@ check "every TokenPermissionsID entry names both a path and a line" \
   "[ \"\$(jq '[.dismissals[] | select(.rule_id==\"TokenPermissionsID\") | select(.path==null or .line==null)] | length' '$ALLOWLIST')\" = 0 ]"
 check "every entry carries a reasoned comment" \
   "[ \"\$(jq '[.dismissals[] | select((.comment|length) < 40)] | length' '$ALLOWLIST')\" = 0 ]"
+check "every recorded TokenPermissionsID line is still a write permission" \
+  "recorded_lines_grounded"
 
-echo "== the real alert set matches exactly the six token-permission + one SAST =="
+echo "== the real alert set matches exactly the eight token-permission + one SAST =="
 M="$(plan "$FIXTURE")"
-check "matches 101 102 103 104 105 106 107 (got: $M)" \
-  "[ \"$M\" = '101 102 103 104 105 106 107 ' ]"
+check "matches 101 102 103 104 105 106 107 108 109 (got: $M)" \
+  "[ \"$M\" = '101 102 103 104 105 106 107 108 109 ' ]"
 
 echo "== negatives: a near-miss must never be dismissed =="
 mk() { jq --argjson n "$1" --arg rule "$2" --arg path "$3" --argjson line "$4" \

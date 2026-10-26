@@ -97,7 +97,7 @@ jobs:
       # In this repo the PR's own validator is in the first checkout; a caller
       # gets validator, contract and renderer from the canon checkout at
       # job.workflow_sha.
-      CANON: ${{ github.repository == 'hyperpolymath/standards' && '.' || '.k9-canon' }}
+      CANON: ${{ (github.repository_id == 1116521501 || github.repository == 'hyperpolymath/standards' || github.repository == 'metadatastician/standards') && '.' || '.k9-canon' }}
       NICKEL_VERSION: '1.18.0'
       NICKEL_SHA256: '9cba4dd65ae9915ec61f73033aafcff307a377665a83fd8f530df086763318cb'
       IJSON_JCS_REV: '0fdeea716fd558e9807362acf6f8202d56d8d88f'
@@ -112,7 +112,7 @@ jobs:
           persist-credentials: false
 
       - name: checkout the K9 validator, contract and renderer at this workflow's commit
-        if: github.repository != 'hyperpolymath/standards'
+        if: github.repository_id != 1116521501 && github.repository != 'hyperpolymath/standards' && github.repository != 'metadatastician/standards'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: hyperpolymath/standards
@@ -129,7 +129,10 @@ jobs:
           WORKFLOW_SHA: ${{ job.workflow_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          if [ "$GITHUB_REPOSITORY" = "hyperpolymath/standards" ]; then
+          # Immutable repository ID first (it survives transfer/rename),
+          # then either known slug: recognising only the old slug silently
+          # flips this to the caller branch in the canon itself.
+          if [ "${GITHUB_REPOSITORY_ID:-}" = "1116521501" ] || [ "$GITHUB_REPOSITORY" = "hyperpolymath/standards" ] || [ "$GITHUB_REPOSITORY" = "metadatastician/standards" ]; then
             echo "CANON_REF=$HEAD_SHA" >> "$GITHUB_ENV"
           else
             echo "CANON_REF=$WORKFLOW_SHA" >> "$GITHUB_ENV"
@@ -162,7 +165,7 @@ jobs:
             || echo "::warning::ijson-jcs did not install; report.json falls back to jq -S -c"
 
       - name: Renderer regression tests
-        if: github.repository == 'hyperpolymath/standards'
+        if: (github.repository_id == 1116521501 || github.repository == 'hyperpolymath/standards' || github.repository == 'metadatastician/standards')
         run: bash scripts/tests/k9-grid-test.sh
 
       - name: Validator self-test

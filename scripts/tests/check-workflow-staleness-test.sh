@@ -62,7 +62,11 @@ run_case() {
   local desc="$1" expected="$2" repo="$3"; shift 3
   TOTAL=$((TOTAL + 1))
   set +e
+  # Pin a non-canonical repository ID before "$@" (which may override it):
+  # this suite itself runs in standards CI, whose inherited canonical ID
+  # would otherwise make every consumer fixture self-identify as the canon.
   env GITHUB_REPOSITORY="hyperpolymath/test-repo" \
+    GITHUB_REPOSITORY_ID=0 GITHUB_SERVER_URL=https://github.com \
     "$@" \
     STALENESS_STANDARDS_DIR="$FIX" \
     bash "$CHECK_SCRIPT" "$repo" >/dev/null 2>&1
@@ -86,6 +90,7 @@ run_case_out() {
   local out rc
   set +e
   out=$(env GITHUB_REPOSITORY="hyperpolymath/test-repo" \
+    GITHUB_REPOSITORY_ID=0 GITHUB_SERVER_URL=https://github.com \
     "$@" \
     STALENESS_STANDARDS_DIR="$FIX" \
     bash "$CHECK_SCRIPT" "$repo" 2>&1)
@@ -201,44 +206,40 @@ run_case "consumer direct Scorecard SARIF upload fails" 1 "$R"
 run_case "canonical standards Scorecard SARIF uploader passes" 0 "$R" \
   GITHUB_REPOSITORY=hyperpolymath/standards
 
-# The canonical repository moved owners; both names resolve to GitHub repo
-# 1116521501. Its own workflows must not be classified as consumer copies.
-R="$TEST_DIR/standards-self"; mk_repo "$R"
-cp "$TEST_DIR/sarif/.github/workflows/scorecard.yml" "$R/.github/workflows/scorecard-reusable.yml"
-touch "$R/.github/workflows/scorecard-enforcer.yml"
-run_case "canonical standards retains both structural exemptions" 0 "$R" \
-  GITHUB_REPOSITORY=hyperpolymath/standards
-run_case "renamed standards retains both structural exemptions" 0 "$R" \
+# The repository was transferred to metadatastician/standards; self-recognition
+# tied to the old slug made the canon fail its own consumer rules (2026-10-25).
+run_case "transferred slug metadatastician/standards is still the canon" 0 "$R" \
   GITHUB_REPOSITORY=metadatastician/standards
 
-# Local runs have no Actions context; identify the exact GitHub origin, never
-# a consumer whose name merely contains the standards slug.
+# Candidate-controlled files are NOT identity evidence, even when the deed
+# recites the canon's repository UUID: a consumer can copy all three files to
+# exempt itself from the consumer-only SARIF/retired-enforcer rules.
+cat > "$R/standards_chora.deed" <<'EOF'
+(repo-deed
+  :canonical-name "standards"
+  :repo-uuid #u8"gv-clade-index:github.com/hyperpolymath/standards")
+EOF
+mkdir -p "$R/scripts"
+touch "$R/scripts/check-workflow-staleness.sh" "$R/.github/workflows/scorecard-reusable.yml"
+run_case "copied canon files cannot self-grant standards identity" 1 "$R" \
+  GITHUB_REPOSITORY=example/renamed-again
+rm -f "$R/standards_chora.deed" "$R/scripts/check-workflow-staleness.sh" \
+      "$R/.github/workflows/scorecard-reusable.yml"
+
+# A future rename changes the slug but not GitHub's immutable repository ID,
+# so that platform-supplied signal still recognises the canon.
+run_case "immutable repository ID recognises the canon under a future slug" 0 "$R" \
+  GITHUB_REPOSITORY=example/renamed-again GITHUB_REPOSITORY_ID=1116521501
+
+# The origin fallback requires a real owner boundary: an owner that merely
+# ends in a known slug (evil-hyperpolymath) is not the canon.
 git -C "$R" init -q
-git -C "$R" remote add origin https://github.com/metadatastician/standards.git
-for origin in \
-  https://github.com/hyperpolymath/standards.git \
-  https://github.com/metadatastician/standards \
-  https://github.com/metadatastician/standards.git \
-  git@github.com:metadatastician/standards.git \
-  ssh://git@github.com/metadatastician/standards.git; do
-  git -C "$R" remote set-url origin "$origin"
-  run_case "canonical origin $origin is recognised without Actions context" 0 "$R" \
-    GITHUB_REPOSITORY=
-done
-for origin in \
-  https://github.com/hyperpolymath/standards-consumer.git \
-  https://github.com/metadatastician/standards-consumer.git \
-  https://example.com/metadatastician/standards.git; do
-  git -C "$R" remote set-url origin "$origin"
-  run_case "consumer origin $origin still fails structural checks" 1 "$R" \
-    GITHUB_REPOSITORY=
-done
-git -C "$R" remote remove origin
-run_case "a consumer named standards does not gain exemptions" 1 "$R" \
-  GITHUB_REPOSITORY=example/standards
-write_pin "$R/.github/workflows/governance.yml" "governance-reusable.yml" "$FORGED"
-run_case "renamed standards still rejects forged reusable pins" 1 "$R" \
-  GITHUB_REPOSITORY=metadatastician/standards
+git -C "$R" remote add origin https://github.com/evil-hyperpolymath/standards
+run_case "lookalike owner suffix in origin is not standards" 1 "$R" \
+  GITHUB_REPOSITORY=example/renamed-again
+git -C "$R" remote set-url origin git@github.com:metadatastician/standards.git
+run_case "checkout origin identifies the canon when the slug signal is stale" 0 "$R" \
+  GITHUB_REPOSITORY=example/renamed-again
 
 # ── 10. No workflows dir -> pass ────────────────────────────────────────────
 R="$TEST_DIR/empty"; mkdir -p "$R"

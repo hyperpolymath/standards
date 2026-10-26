@@ -1,0 +1,202 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+#
+# deep-recon-reusable.yml — the estate's two deep scanners, as one gate.
+#
+# pons-asinorum and panic-attack are design companions (pons ADR-0004):
+# pons does narrow structural/dataflow analysis and never dresses a
+# heuristic up as a proof (every finding carries an evidence class;
+# SPECULATIVE never gates); panic-attack does broad multi-language
+# security/resilience analysis. Hypatia already gives PR-time governance
+# scanning; this reusable is the slower, deeper pass underneath it.
+#
+# Contracts, per scanner:
+#
+# * pons is a HARD gate at `error` severity with speculative findings
+#   omitted from the report entirely (--no-speculative): exit 1 fails.
+#   Exit 2 (invalid input, no applicable input, config error) also
+#   fails — a scan that examined nothing must never read as a pass.
+#   Findings go to code scanning as SARIF so they are reviewable where
+#   every other scanner's findings are. Scope exclusions are declared in
+#   .ponsignore (reported by pons as visible skips), finding-level
+#   exceptions in pons.toml (rule + path + reason + owner + expiry — the
+#   tool rejects anything broader).
+#
+# * panic-attack `assail` is REPORT-ONLY for findings in this first
+#   cycle: its 49-language surface has never been baselined against this
+#   tree, and gating on an unmeasured corpus would either red everything
+#   or teach the estate to ignore it. What IS hard: the tool must run,
+#   and its JSON report must carry a weak_points array and a positive
+#   statistics.total_lines count — a
+#   crashed or empty scanner fails the job rather than summarising
+#   itself green. Promotion to a finding-level gate happens by editing
+#   the threshold step with a measured baseline in hand, in its own PR.
+#
+# Both tools are installed pinned to commits (`cargo install --git
+# --rev`, the estate pattern while they have no attested release
+# binaries; when they grow them, this file should move to the squabble
+# action's sha256+attestation model).
+
+name: Deep Recon (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      pons-rev:
+        description: "pons-asinorum commit to install."
+        required: false
+        type: string
+        default: "51b8920f541782ceb9465ea3f0d33c96104fc1fb"
+      panic-rev:
+        description: "panic-attack commit to install."
+        required: false
+        type: string
+        default: "b5530834a839734d1d181bfe6edb0d43d4233cf4"
+      runs-on:
+        description: "Runner label."
+        required: false
+        type: string
+        default: "ubuntu-latest"
+
+permissions:
+  contents: read
+
+jobs:
+  pons:
+    name: pons-asinorum scan (error severity blocks)
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pons (pinned commit)
+        env:
+          PONS_REV: ${{ inputs.pons-rev }}
+        run: |
+          set -euo pipefail
+          case "$PONS_REV" in
+            *[!0-9a-f]*|"") echo "::error::pons-rev must be a 40-hex commit"; exit 1 ;;
+          esac
+          [ "${#PONS_REV}" -eq 40 ] || { echo "::error::pons-rev must be a 40-hex commit"; exit 1; }
+          cargo install --git https://github.com/hyperpolymath/pons-asinorum --rev "$PONS_REV" --locked pons-cli
+          pons --version
+
+      - name: Scan
+        id: scan
+        run: |
+          set -uo pipefail
+          rc=0
+          pons scan . --format sarif --fail-on error --no-speculative \
+            > "$RUNNER_TEMP/pons.sarif" 2> "$RUNNER_TEMP/pons.stderr" || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          {
+            echo "### pons-asinorum"
+            echo
+            echo "Exit $rc (0 clean at threshold · 1 error-severity finding · 2 scan did not complete)."
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/pons.stderr" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # A SARIF file that does not parse is a broken scan, whatever the
+          # exit code said; uploading it would fail opaquely downstream.
+          jq -e '.runs[0].tool.driver.name' "$RUNNER_TEMP/pons.sarif" >/dev/null \
+            || { echo "::error::pons produced no parseable SARIF — the scan did not complete"; exit 1; }
+          cp "$RUNNER_TEMP/pons.sarif" pons.sarif
+
+      - name: Upload SARIF to code scanning
+        if: steps.scan.outputs.rc != '2'
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
+        with:
+          sarif_file: pons.sarif
+          category: pons-asinorum
+
+      - name: Verdict
+        env:
+          RC: ${{ steps.scan.outputs.rc }}
+        run: |
+          set -euo pipefail
+          case "$RC" in
+            0) echo "pons: clean at the error threshold (speculative findings omitted by design)" ;;
+            1) echo "::error::pons reached the error threshold — see code scanning (category: pons-asinorum)"; exit 1 ;;
+            *) echo "::error::pons scan did not complete (exit $RC) — nothing was examined, so this is not a pass"; exit 1 ;;
+          esac
+
+  panic-assail:
+    name: panic-attack assail (report-only findings)
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install panic-attack (pinned commit)
+        env:
+          PANIC_REV: ${{ inputs.panic-rev }}
+        run: |
+          set -euo pipefail
+          case "$PANIC_REV" in
+            *[!0-9a-f]*|"") echo "::error::panic-rev must be a 40-hex commit"; exit 1 ;;
+          esac
+          [ "${#PANIC_REV}" -eq 40 ] || { echo "::error::panic-rev must be a 40-hex commit"; exit 1; }
+          cargo install --git https://github.com/hyperpolymath/panic-attack --rev "$PANIC_REV" --locked panic-attack
+          panic-attack --version
+
+      # Scoped to the executable surface (scripts + tools) for the first
+      # measured cycle: assail over the whole monorepo — prose, archives,
+      # vendored satellites — would produce a corpus nobody can baseline.
+      # Widening is a one-line change with a measured reason, in its own PR.
+      - name: Assail the executable surface
+        run: |
+          set -uo pipefail
+          : > "$RUNNER_TEMP/assail-summary.md"
+          echo "### panic-attack assail (report-only)" >> "$RUNNER_TEMP/assail-summary.md"
+          overall=0
+          for target in scripts tools; do
+            report="$RUNNER_TEMP/assail-$(basename "$target").json"
+            rc=0
+            panic-attack assail "$target" --headless --output "$report" \
+              > "$RUNNER_TEMP/assail-$(basename "$target").log" 2>&1 || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::panic-attack assail failed to run on $target (exit $rc) — see the uploaded log"
+              overall=1
+              continue
+            fi
+            # The tool ran; now prove it actually examined something. An
+            # unparseable or shape-less report is a tool failure, not a
+            # clean bill.
+            if ! jq -e '(.weak_points | type == "array") and
+                        (.statistics.total_lines | type == "number" and . > 0)' "$report" >/dev/null 2>&1; then
+              echo "::error::panic-attack report for $target is not parseable JSON with a weak_points array and positive statistics.total_lines — treating as tool failure"
+              overall=1
+              continue
+            fi
+            echo "" >> "$RUNNER_TEMP/assail-summary.md"
+            echo "#### $target" >> "$RUNNER_TEMP/assail-summary.md"
+            echo '```json' >> "$RUNNER_TEMP/assail-summary.md"
+            jq -c 'if has("summary") then .summary
+                   elif has("weak_points") then {weak_points: (.weak_points | length)}
+                   elif has("findings") then {findings: (.findings | length)}
+                   else {keys: (keys)} end' "$report" >> "$RUNNER_TEMP/assail-summary.md"
+            echo '```' >> "$RUNNER_TEMP/assail-summary.md"
+          done
+          cat "$RUNNER_TEMP/assail-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          exit "$overall"
+
+      - name: Upload assail reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: panic-attack-assail
+          path: |
+            ${{ runner.temp }}/assail-*.json
+            ${{ runner.temp }}/assail-*.log
+          if-no-files-found: warn

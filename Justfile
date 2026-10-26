@@ -179,6 +179,19 @@ clean:
 assail:
     @command -v panic-attack >/dev/null 2>&1 && panic-attack assail . || echo "panic-attack not found — install from https://github.com/hyperpolymath/panic-attacker"
 
+# cicd-squabbler: map this repo's CI dependency chains (exit 4 = cycle or
+# dead upstream; the same gate .github/workflows/cicd-squabbler.yml runs)
+squabble-chains:
+    @if command -v squabble >/dev/null 2>&1; then squabble chains .; else echo "squabble not found — install from https://github.com/hyperpolymath/cicd-squabbler"; fi
+
+# cicd-squabbler: classify a stuck PR's reds (propose-only; never --apply here)
+squabble-fight pr:
+    @if command -v squabble >/dev/null 2>&1; then squabble fight metadatastician/standards {{pr}} --repo-root .; else echo "squabble not found — install from https://github.com/hyperpolymath/cicd-squabbler"; fi
+
+# Contract test for the squabbler wiring (pin, exit codes, propose-only, lock)
+squabble-test:
+    @bash scripts/tests/cicd-squabbler-contract-test.sh
+
 # Stable release gate audit
 v1-audit path=".":
     @bash 3-practice/release-pre-flight/v1-audit.sh "{{path}}"

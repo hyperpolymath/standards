@@ -130,27 +130,35 @@ STANDARDS_REUSABLES=(
   "scorecard-reusable.yml"
 )
 
-# Determine if we are in standards repo.
+# Determine if we are in standards repo. The repository was transferred
+# hyperpolymath -> metadatastician (measured 2026-10-25: with only the old
+# slug recognised, the canon failed its own consumer rules — its canonical
+# scorecard-reusable.yml read as a "consumer-owned direct SARIF publisher"
+# and its template scorecard-enforcer.yml as a retired consumer file).
 #
-# BOTH names are matched, deliberately. The repository moved from
-# hyperpolymath/standards to metadatastician/standards and GitHub redirects the
-# old path, so a literal comparison against the old owner silently becomes
-# FALSE in the standards repo itself. The consequence is not cosmetic: every
-# self-scan then runs the consumer-only structural rules against the canon's own
-# workflows, and `.github/workflows/scorecard-reusable.yml` — the file that
-# PUBLISHES Scorecard SARIF for the estate — is reported as a consumer-owned
-# direct publisher. Measured 2026-10-25: this failed on three unrelated PRs and
-# passed on `main`, because the check is evaluated per PR head.
-#
-# Keep the legacy name: a repository whose remote still reads the old path is
-# still the canon, and a redirect is not a rename in git's eyes.
+# Identity is accepted only from signals the candidate tree cannot mint:
+# GitHub's immutable repository ID (both slugs resolved to 1116521501 on
+# 2026-10-25; it survives transfer/rename), either exact platform slug, or
+# the checkout origin with a real owner boundary. Files in the candidate —
+# including a deed that recites the canon's identity — are never evidence:
+# a consumer can copy them, and IS_STANDARDS disables consumer-only rules
+# below, so file presence/content would be a self-granted exemption.
 IS_STANDARDS=false
+case "${GITHUB_SERVER_URL:-https://github.com}" in
+  https://github.com)
+    if [ "${GITHUB_REPOSITORY_ID:-}" = "1116521501" ]; then
+      IS_STANDARDS=true
+    fi
+    ;;
+esac
 case "${GITHUB_REPOSITORY:-}" in
   hyperpolymath/standards|metadatastician/standards) IS_STANDARDS=true ;;
 esac
-if [ "$IS_STANDARDS" = "false" ] && [ -d "$REPO_ROOT/.git" ]; then
-  # Fallback: capture Git remote origin URL for exact canonical matching below.
+if [ "$IS_STANDARDS" = "false" ]; then
   REMOTE_URL=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo "")
+  if [[ "$REMOTE_URL" =~ ^((git@github\.com:)|(ssh://git@github\.com/)|(https?://github\.com/))(hyperpolymath|metadatastician)/standards(\.git)?$ ]]; then
+    IS_STANDARDS=true
+  fi
 fi
 for standards_repo in hyperpolymath/standards metadatastician/standards; do
   if [ "${GITHUB_REPOSITORY:-}" = "$standards_repo" ]; then

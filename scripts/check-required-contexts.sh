@@ -336,6 +336,12 @@ publishable_names() { # [pr] -> one name per line; `pr` restricts to PR-capable 
 }
 
 # ------------------------------------------------------------ required set ----
+# Emit required checks from non-disabled branch rulesets and default-branch
+# legacy protection, or from REQUIRED_CONTEXTS_JSON when set.
+# Live inspection resolves GITHUB_REPOSITORY when unset and sets MERGE_BRANCH.
+# Returns 1 for an unusable fixture, missing tools/repository, an unreadable
+# ruleset list or an unresolved default branch. Individual ruleset read/parse
+# failures and unavailable legacy protection do not fail the call.
 required_json() { # emit {"context":..,"app_id":..,"source":..} objects
   if [ -n "${REQUIRED_CONTEXTS_JSON:-}" ]; then
     [ -f "$REQUIRED_CONTEXTS_JSON" ] || { err "REQUIRED_CONTEXTS_JSON not found: $REQUIRED_CONTEXTS_JSON"; return 1; }
@@ -408,14 +414,10 @@ required_json() { # emit {"context":..,"app_id":..,"source":..} objects
 # remove the rule. Keeping the rule and hoping is what makes every PR
 # undecidable, and an undecidable gate is a gate people bypass.
 DATA_RULES='code_coverage code_quality'
-# Locate a workflow in the tree that uploads data for a data-dependent rule, and
-# echo its path; echo nothing when there is none. This changes the WORDING of the
-# finding only, never whether it is a finding: a rule with an uploader in the
-# tree is still unsatisfiable until the repository setting it needs is on, so it
-# must keep failing rather than becoming a warning. What it stops is the audit
-# asserting that a repository "never uploads" while a workflow in that repository
-# does the uploading — an error message that is confidently wrong sends the
-# reader looking for data that is already being produced.
+# For rule type $1 = code_coverage, print the first .yml/.yaml workflow beneath
+# ROOT/.github/workflows mentioning actions/upload-code-coverage, relative to
+# ROOT. File presence alone does not prove an upload. No match (including an
+# unreadable workflow directory) or an unsupported type returns 0 without output.
 # `code_quality` deliberately has no producer here: GitHub runs that analysis
 # itself once the feature is enabled, so no file can supply it.
 data_rule_producer() {
@@ -433,47 +435,126 @@ data_rule_producer() {
   esac
 }
 
-# Print evidence that a data-dependent rule is demonstrably fed, or nothing when
-# there is none. Empty output means the finding stands.
-#
-# This is the difference between *unverified* and *unsatisfiable*, and it is the
-# whole point of the check. A rule whose data pipeline has actually run is not a
-# rule that blocks every pull request, and reporting it as one is its own defect:
-# a permanent alarm is how people learn to ignore the alarm.
-#
-# The evidence is deliberately an OUTCOME, never an intention. For coverage that
-# means a completed run that SUCCEEDED. A workflow merely existing proves
-# nothing — every run on this branch failed with HTTP 404 while Code Quality was
-# off, and a check that accepted file presence would have called that satisfied
-# and let the block through. Returns 1 when a lookup fails, so an API problem
-# becomes an inspection failure instead of a silent pass.
-data_rule_evidence() {
-  local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body
+# Print the repository's full workflow catalogue as one JSON array of pages
+# (the --slurp shape), validated complete; return 1 when it cannot be read
+# or does not validate. `--slurp` needs gh >= 2.32; older gh exits before
+# any request is made, which callers would otherwise report as "could not
+# inspect" on a machine whose only defect is its gh version (measured
+# 2026-10-25: gh 2.23 turned a fully readable repository into
+# inspected:false). The fallback reproduces --slurp exactly — the same
+# pages, jq -s grouped — and the validation is identical either way, so a
+# truncated fallback is rejected just like a truncated --slurp.
+workflows_catalogue() {
+  local repo="${1:-}" body errf
   [ -n "$repo" ] || return 1
+  errf="$(mktemp)"
+  if ! body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate --slurp 2>"$errf")"; then
+    if grep -qi 'unknown flag.*slurp' "$errf"; then
+      body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate 2>"$errf" | jq -s '.')" || { rm -f "$errf"; return 1; }
+    else
+      rm -f "$errf"
+      return 1
+    fi
+  fi
+  rm -f "$errf"
+  [ -n "$body" ] || return 1
+  printf '%s' "$body" | jq -es '
+    length == 1 and (.[0] | type == "array" and length > 0 and
+      all(.[]; type == "object" and (.total_count | type == "number") and
+        (.workflows | type == "array")) and
+      (.[0].total_count as $total |
+        all(.[]; .total_count == $total) and
+        ([.[].workflows[]] | length == $total)))
+  ' >/dev/null 2>&1 || return 1
+  printf '%s\n' "$body"
+}
+
+# Check $1, a catalogue from workflows_catalogue, for the GitHub-generated
+# Code Quality workflow path. Return 0 when present, 2 for a missing/empty
+# catalogue, or 1 when absent or jq cannot inspect the supplied catalogue.
+code_quality_enabled_in() {
+  local catalogue="${1:-}"
+  [ -n "$catalogue" ] || return 2
+  if printf '%s' "$catalogue" | jq -e \
+      '[.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")] | length > 0' \
+      >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+# Print audit evidence for rule type $1 in GITHUB_REPOSITORY. Coverage requires
+# a local uploader, registered Code Quality workflow and a matching repository
+# run among the producer's 30 most recent successful runs. When the generated
+# workflow has a registration time, the run must be at or after it. Quality
+# evidence is the registered GitHub-generated workflow itself.
+# Return 0 without output for unsupported types or absent evidence, including
+# a producer-runs HTTP 404. Missing GITHUB_REPOSITORY, catalogue lookup/validation
+# failures and other runs-request failures return 1. Invalid runs responses or
+# errors extracting evidence return nonzero.
+data_rule_evidence() {
+  local type="${1:-}" repo="${GITHUB_REPOSITORY:-}" producer body errf catalogue registered_at
+  [ -n "$repo" ] || return 1
+  errf="$(mktemp)"
   case "$type" in
     code_coverage)
       producer="$(data_rule_producer code_coverage)"
-      [ -n "$producer" ] || return 0
-      # A successful run is not yet evidence: the upload action SKIPS rather
-      # than fails when it cannot attribute the report (fork pull requests, and
-      # after this repository was renamed, every PR whose event payload still
-      # carries the old head-repo name). Such a run concludes green having
-      # uploaded nothing. The ingestion endpoint belongs to Code Quality, so no
-      # upload can be accepted before that product exists — which makes its
-      # presence the precondition for any coverage run to have meant anything.
-      local q
-      q="$(data_rule_evidence code_quality)" || return 1
-      [ -n "$q" ] || return 0
+      [ -n "$producer" ] || { rm -f "$errf"; return 0; }
+      # Uploads land in the same Code Quality feature, and its ingestion
+      # endpoint rejects them while the feature is off (measured: HTTP
+      # 404, then 403 "Code quality is not enabled"). A successful producer
+      # run is therefore upload evidence ONLY when the feature is on: with
+      # it off, the run may have measured and annotated beautifully while
+      # uploading nothing — code-coverage.yml now does exactly that behind
+      # a probe, and counting those runs would resurrect, one level up,
+      # the "green run = uploaded data" conflation this function exists to
+      # prevent. Feature off => evidence definitively absent (finding
+      # stands); catalogue unreadable => inspection failure.
+      catalogue="$(workflows_catalogue "$repo")" || { rm -f "$errf"; return 1; }
+      code_quality_enabled_in "$catalogue" || { rm -f "$errf"; return 0; }
+      registered_at="$(printf '%s' "$catalogue" | jq -r '
+        [.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")
+          | .created_at // empty][0] // ""')" || { rm -f "$errf"; return 1; }
       # Address the workflow by file name; inspect several successful runs so a
       # recent fork run cannot hide an earlier run from this repository.
-      body="$(gh api "repos/$repo/actions/workflows/${producer##*/}/runs?status=success&per_page=30" 2>/dev/null)" || return 1
+      #
+      # A 404 from this endpoint has one specific meaning — GitHub has no
+      # workflow registered under that file name — and it is the NORMAL state
+      # of the pull request that introduces the producer: a workflow is not
+      # registered until it reaches the default branch, yet the audit runs on
+      # the very PR carrying it. Evidence is then definitively absent, which
+      # is a finding (the rule stands unsatisfied), not an inability to
+      # inspect. Mapping it to "not inspected" failed #1338's gate on a
+      # workflow that could not possibly have run yet, and said so nowhere.
+      # Every other failure (403, 5xx, network) still returns 1 below: the
+      # audit could not look, so it must not reach a verdict either way.
+      if ! body="$(gh api "repos/$repo/actions/workflows/${producer##*/}/runs?status=success&per_page=30" 2>"$errf")"; then
+        if grep -q 'HTTP 404' "$errf"; then
+          rm -f "$errf"
+          return 0
+        fi
+        rm -f "$errf"
+        return 1
+      fi
+      rm -f "$errf"
       [ -n "$body" ] || return 1
       printf '%s' "$body" | jq -es '
         length == 1 and (.[0] | type == "object" and
           (.workflow_runs | type == "array"))
       ' >/dev/null 2>&1 || return 1
-      printf '%s' "$body" | jq -r --arg repo "$repo" '
-        [.workflow_runs[] | select((.head_repository.full_name // "") == $repo)][0] // empty
+      # Runs before enablement may only have measured and annotated; they
+      # cannot prove an upload. Older catalogues without a registration time
+      # retain the previous repository-run selection.
+      printf '%s' "$body" | jq -r --arg repo "$repo" --arg registered_at "$registered_at" '
+        def instant:
+          capture("^(?<time>[0-9-]+T[0-9:]+)(?<fraction>\\.[0-9]+)?(?<zone>Z|[+-][0-9]{2}:[0-9]{2})$")
+          | ((.time + "Z" | fromdateiso8601) + ((.fraction // "0") | tonumber))
+            - (if .zone == "Z" then 0 else
+                (((.zone[1:3] | tonumber) * 60 + (.zone[4:6] | tonumber)) * 60)
+                * (if .zone[0:1] == "+" then 1 else -1 end)
+              end);
+        [.workflow_runs[] | select((.head_repository.full_name // "") == $repo)
+          | select($registered_at == "" or ((.created_at // "" | instant) >= ($registered_at | instant)))][0] // empty
         | "a successful \(.path // "coverage") run on \(.head_branch // "?") (\((.head_sha // "")[0:12]))"' \
         2>/dev/null
       ;;
@@ -481,39 +562,25 @@ data_rule_evidence() {
       # GitHub runs this analysis itself once the feature is enabled, so there is
       # no uploader in the tree to inspect; the workflow it registers is the
       # signal that the feature exists for this repository.
-      # `--slurp` is not available in every gh release (2.23.0, shipped by
-      # Debian, rejects it outright), and depending on it made this check fail
-      # closed everywhere that version is installed. `--paginate` alone emits
-      # one JSON document per page, which jq's own slurp mode folds into the
-      # array of pages.
-      body="$(gh api "repos/$repo/actions/workflows?per_page=100" --paginate 2>/dev/null)" || return 1
-      [ -n "$body" ] || return 1
-      # Reject malformed or incomplete catalogues, including a successful
-      # response whose pagination stopped too early: every page must agree on
-      # total_count, and the pages must actually contain that many workflows.
-      printf '%s' "$body" | jq -es '
-        length > 0 and
-        all(.[]; type == "object" and (.total_count | type == "number") and
-          (.workflows | type == "array")) and
-        (.[0].total_count as $total |
-          all(.[]; .total_count == $total) and
-          ([.[].workflows[]] | length) == $total)
-      ' >/dev/null 2>&1 || return 1
-      printf '%s' "$body" | jq -sr '
+      rm -f "$errf"
+      catalogue="$(workflows_catalogue "$repo")" || return 1
+      printf '%s' "$catalogue" | jq -r '
         [.[].workflows[]? | select(.path == "dynamic/github-code-quality/codeql")]
         | .[0] // empty
         | "the GitHub-generated workflow \(.path) (\(.name))"' 2>/dev/null
       ;;
-    *) return 0 ;;
+    *) rm -f "$errf"; return 0 ;;
   esac
 }
 
-# Emit tab-separated finding name, app id 0 and UNSATISFIED-RULE for each
+# Emit tab-separated rule name, app id 0 and verdict for each
 # DATA_RULES match in an active branch ruleset whose ref filters match MERGE_BRANCH.
-# Presence alone is flagged; uploaded coverage or quality data is not checked.
+# Evidence from data_rule_evidence yields VERIFIED-RULE plus an evidence field;
+# otherwise the verdict is UNSATISFIED-RULE. Evidence is fetched once per type.
 # Uses GITHUB_REPOSITORY, resolving and setting it with gh when unset.
 # Reuses MERGE_BRANCH resolved by required_json. Returns 0 with no findings for
-# file fixtures; unavailable inspection or a ruleset read/parse failure returns 1.
+# file fixtures; missing prerequisites/branch, ruleset read/parse failures or
+# failed evidence inspection return 1.
 # Output may be partial on failure; run_audit discards those partial findings.
 data_rules_json() {
   [ -f "${REQUIRED_CONTEXTS_JSON:-}" ] && return 0   # offline fixtures: none
@@ -762,7 +829,7 @@ EOF
       if [ "$rtype" = code_quality ]; then
         msg="required $r needs Code Quality enabled for this repository — a repository setting, and no file in the tree can supply it; every pull request waits for a result that cannot exist"
       elif [ -n "$producer" ]; then
-        msg="required $r has an uploader in the tree ($producer), but that upload cannot succeed until Code Quality is enabled for this repository; every pull request waits for data that is uploaded and rejected"
+        msg="required $r has an uploader in the tree ($producer), but no successful upload run by this repository was found — Code Quality may be disabled, the workflow may not yet be registered on the default branch, or no run has succeeded recently; every pull request waits for data that has not arrived"
       else
         msg="required $r needs data this repository never uploads — every pull request waits for a result that cannot exist; upload the data, or remove the rule"
       fi
