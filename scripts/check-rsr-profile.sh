@@ -45,7 +45,84 @@ PROFILE="$REPO/.machine_readable/rsr-profile.a2ml"
 [ -f "$PROFILE" ] || PROFILE="$REPO/machine-readable/rsr-profile.a2ml"
 
 [ -f "$GATES" ] || { echo "ERROR: gates file not found: $GATES" >&2; exit 2; }
-[ -f "$PROFILE" ] || { echo "ERROR: no profile at $PROFILE" >&2; exit 2; }
+
+# --- the deed form: (rsr-profile …) in the repo's one <repo>_chora.deed ---
+# A2ML is retired (D312/D313). The worked model, rsr-template-repo_chora.deed,
+# carries its profile as an (rsr-profile …) clause of the repo deed (it has no
+# .a2ml at all since rsr-template-repo#227), so the reference checker must
+# read that clause or it cannot score the very repo the policy is modelled on.
+# Resolution: the deed clause when the repo has exactly one *_chora.deed and
+# that deed carries exactly one (rsr-profile …); else the .a2ml, as a LEGACY
+# fallback for repos that have not folded their profile yet. Two deeds, or two
+# clauses, is a defect, not a choice to make silently (same rule as deed_canon
+# in check-canon-lockstep.sh).
+#
+# deed_strip <file>: the deed as one line with comments removed. A ";" outside
+# a string starts a comment to line-end (deed.abnf); inside a string it is
+# text. Same tokenizer as deed_canon, kept byte-identical there.
+deed_strip() {
+  awk 'BEGIN { bs = sprintf("%c", 92); dq = sprintf("%c", 34) } { o = ""; q = 0; for (i = 1; i <= length($0); i++) { c = substr($0, i, 1); if (q && c == bs) { o = o c substr($0, i + 1, 1); i++; continue } if (c == dq) q = !q; else if (!q && c == ";") break; o = o c } printf "%s ", o }' "$1"
+}
+# deed_clause <head> : on stdin the stripped deed; prints each balanced
+# "(<head> …)" form, one per line, nested forms included (lists and (notes …)
+# sit inside the profile clause, so a flat [^()]* match cannot reach it).
+# The outer scan tracks string state too: a "(rsr-profile …)" quoted inside
+# a (notes …) is prose, not a clause, and must not be read as one.
+deed_clause() {
+  awk -v head="$1" 'BEGIN { dq = sprintf("%c", 34); bs = sprintf("%c", 92) }
+  { s = $0; n = length(s); i = 1; inq = 0
+    while (i <= n) {
+      c0 = substr(s, i, 1)
+      if (inq) { if (c0 == bs) i++; else if (c0 == dq) inq = 0; i++; continue }
+      if (c0 == dq) { inq = 1; i++; continue }
+      if (substr(s, i, length(head) + 1) == "(" head && substr(s, i + length(head) + 1, 1) ~ /[[:space:])]/) {
+        d = 0; q = 0; o = ""
+        for (j = i; j <= n; j++) { c = substr(s, j, 1)
+          if (q && c == bs) { o = o c substr(s, j + 1, 1); j++; continue }
+          if (c == dq) q = !q
+          o = o c
+          if (!q) { if (c == "(") d++; else if (c == ")") { d--; if (d == 0) break } } }
+        print o; i = j + 1
+      } else i++ } }'
+}
+# deed_scalar <key> : from a clause on stdin, the string value of :<key>, or "".
+deed_scalar() { grep -oE ':'"$1"'[[:space:]]+"[^"]*"' | head -1 | sed -E 's/^[^"]*"//; s/"$//' || true; }
+# deed_list <key> : from a clause on stdin, the items of the flat list
+# :<key> ( … ), strings unquoted, symbols as written, one per line.
+deed_list() {
+  grep -oE ':'"$1"'[[:space:]]+\([^()]*\)' | head -1 | sed -E 's/^[^(]*\(//; s/\)$//' \
+    | grep -oE '"[^"]+"|[A-Za-z0-9][A-Za-z0-9._-]*' | tr -d '"' || true
+}
+
+DEED=""; DEED_PROFILE=""
+_deeds=()
+# estate_chora.deed is the estate-deed (deed.abnf filename dispatch reserves
+# that exact stem), never a second repo deed, so it does not count here.
+for _d in "$REPO"/*_chora.deed; do
+  [ -f "$_d" ] || continue
+  [ "$(basename "$_d")" = "estate_chora.deed" ] && continue
+  _deeds+=("$_d")
+done
+if [ "${#_deeds[@]}" -gt 1 ]; then
+  echo "ERROR: $REPO carries ${#_deeds[@]} *_chora.deed files; one-deed-per-repo (D312) expects exactly 1" >&2; exit 2
+elif [ "${#_deeds[@]}" -eq 1 ]; then
+  DEED="${_deeds[0]}"
+  _clauses="$(deed_strip "$DEED" | deed_clause rsr-profile)"
+  _n="$(printf '%s\n' "$_clauses" | grep -c '^(rsr-profile' || true)"
+  if [ "${_n:-0}" -gt 1 ]; then
+    echo "ERROR: $DEED carries $_n (rsr-profile …) clauses, need exactly 1" >&2; exit 2
+  elif [ "${_n:-0}" -eq 1 ]; then
+    DEED_PROFILE="$_clauses"
+  fi
+fi
+if [ -z "$DEED_PROFILE" ] && [ ! -f "$PROFILE" ]; then
+  if [ -n "$DEED" ]; then
+    echo "ERROR: no profile: $DEED has no (rsr-profile …) clause and there is no legacy $PROFILE" >&2
+  else
+    echo "ERROR: no profile at $PROFILE (and no *_chora.deed in $REPO to carry an (rsr-profile …) clause)" >&2
+  fi
+  exit 2
+fi
 
 # Body lines of a [section] (comments and blanks stripped).
 section() { awk -v s="[$1]" '$0==s{f=1;next} /^\[/{f=0} f && !/^[[:space:]]*#/ && NF' "$2"; }
@@ -70,13 +147,28 @@ array_on_key() { # $1 = key; section body on stdin
 # (the original spelling here) — the normative oracle
 # (hypatia Hypatia.Rules.RsrConformance.load_capabilities/1) accepts both,
 # and this reference checker must not be stricter than the oracle.
-PBODY="$(section rsr-profile "$PROFILE")"
-[ -n "$PBODY" ] || PBODY="$(section profile "$PROFILE")"
-PRESET="$(printf '%s\n' "$PBODY" | quoted_on_key preset | sed -n 1p)"
-DIRECT="$(printf '%s\n' "$PBODY" | array_on_key capabilities)"
-ADD="$(printf '%s\n' "$PBODY" | array_on_key add)"
-REMOVE="$(printf '%s\n' "$PBODY" | array_on_key remove)"
-[ -n "$PRESET$DIRECT" ] || { echo "ERROR: profile declares neither 'capabilities' nor 'preset'" >&2; exit 2; }
+if [ -n "$DEED_PROFILE" ]; then
+  SOURCE="$DEED (rsr-profile …)"
+  PBODY=""
+  PRESET="$(printf '%s\n' "$DEED_PROFILE" | deed_scalar preset)"
+  DIRECT="$(printf '%s\n' "$DEED_PROFILE" | deed_list capabilities)"
+  ADD="$(printf '%s\n' "$DEED_PROFILE" | deed_list add)"
+  REMOVE="$(printf '%s\n' "$DEED_PROFILE" | deed_list remove)"
+  ROLE="$(printf '%s\n' "$DEED_PROFILE" | deed_scalar role)"
+else
+  SOURCE="$PROFILE (legacy .a2ml)"
+  PBODY="$(section rsr-profile "$PROFILE")"
+  [ -n "$PBODY" ] || PBODY="$(section profile "$PROFILE")"
+  PRESET="$(printf '%s\n' "$PBODY" | quoted_on_key preset | sed -n 1p)"
+  DIRECT="$(printf '%s\n' "$PBODY" | array_on_key capabilities)"
+  ADD="$(printf '%s\n' "$PBODY" | array_on_key add)"
+  REMOVE="$(printf '%s\n' "$PBODY" | array_on_key remove)"
+  # Read role from $PBODY, which already falls back from [rsr-profile] to
+  # [profile]. Re-reading [rsr-profile] directly lost the role for any repo
+  # using the [profile] spelling the script otherwise supports.
+  ROLE="$(printf '%s\n' "$PBODY" | quoted_on_key role | sed -n 1p || true)"
+fi
+[ -n "$PRESET$DIRECT" ] || { echo "ERROR: profile declares neither 'capabilities' nor 'preset' ($SOURCE)" >&2; exit 2; }
 
 # --- preset's base capabilities, if a preset is named ---
 PRESETCAPS=""
@@ -118,16 +210,13 @@ present() {
 }
 
 echo "repo:    $REPO"
-echo "profile: ${PRESET:+preset=$PRESET }${DIRECT:+direct-capabilities}"
+echo "profile: ${PRESET:+preset=$PRESET }${DIRECT:+direct-capabilities} <- $SOURCE"
 echo "effective capabilities: $(printf '%s\n' "$EFFECTIVE" | paste -sd ' ' -)"
 echo
 
 # A spine (template) repo legitimately carries capability-gated modules it does
 # not declare - it ships them for the repos minted from it. [carrier] lists them.
-# Read role from $PBODY, which already falls back from [rsr-profile] to
-# [profile]. Re-reading [rsr-profile] directly lost the role for any repo
-# using the [profile] spelling the script otherwise supports.
-ROLE="$(printf '%s\n' "$PBODY" | quoted_on_key role | sed -n 1p || true)"
+# $ROLE was read with the rest of the profile above, from whichever source won.
 CARRIER=""
 # role = "spine": a template legitimately carries modules it does not declare,
 # because it ships them for the repos minted from it.
@@ -214,6 +303,16 @@ baseline_checked=0
 while IFS= read -r key; do
   [ -n "$key" ] || continue
   baseline_checked=$((baseline_checked + 1))
+  # The profile row names the .a2ml spellings. When the profile this run just
+  # read came from the repo deed's (rsr-profile …) clause, that clause IS the
+  # artefact the row asks for; failing the row would fail every deed-era repo,
+  # the worked model first. The table itself should gain the deed spelling in
+  # its next PATCH (as [baseline] gained 0-AI-MANIFEST.deed in #1229), which
+  # is a canon release, not a checker change.
+  if [ -n "$DEED_PROFILE" ] && [[ "$key" == *rsr-profile.a2ml* ]]; then
+    echo "  baseline rsr-profile: satisfied by the (rsr-profile …) clause of $(basename "$DEED")"
+    continue
+  fi
   present "$key" || { echo "  MISSING BASELINE: $(row_label "$key")"; fail=1; }
 done < <(section baseline "$GATES" | array_on_key paths)
 
@@ -223,8 +322,9 @@ if [ "$fail" -ne 0 ]; then
 rsr-profile check: FAIL — scaffold does not match declared capabilities.
 Fix one of:
   * remove the vestigial module, OR
-  * declare the capability in .machine_readable/rsr-profile.a2ml (with a
-    [rationale] line), OR
+  * declare the capability in the repo deed's (rsr-profile …) clause (the
+    legacy .machine_readable/rsr-profile.a2ml is still read where no clause
+    exists; add a [rationale] line there), OR
   * add the missing module, OR
   * for a MISSING BASELINE row, add the file (the table's [baseline].paths
     lists the estate spellings that conform; a district path only conforms if

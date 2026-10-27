@@ -105,6 +105,62 @@ printf '[rsr-profile]\nversion = "1.0.0"\nrole = "spine"\ncapabilities = ["bash"
 rm -f "$d/Cargo.toml" "$d/Cargo.lock" "$d/src/main.rs"
 assert "a spine row listed in [carrier] is exempt from VESTIGIAL" 0 "carried for downstream" bash "$CHECK" "$d"
 
+echo "=== the deed form: (rsr-profile …) in the one <repo>_chora.deed ==="
+# repo_deed <dir> <clause-body>: a conforming scaffold whose profile lives in
+# the repo deed, as rsr-template-repo ships it (no .a2ml at all since #227).
+# The header is the minimal valid repo-deed; the clause body is the caller's.
+repo_deed() {
+  local d; d="$(repo "$1")"; rm -f "$d/.machine_readable/rsr-profile.a2ml"
+  printf ';; SPDX-License-Identifier: CC-BY-SA-4.0\n(repo-deed\n  :schema-version "1.0.0"\n  :canonical-name "%s"\n  :repo-uuid #u5"github.com/o/%s"\n  :beholding-chora #u5"estate/chora"\n%b)\n' "$1" "$1" "$2" > "$d/${1}_chora.deed"
+  printf '%s' "$d"
+}
+d=$(repo_deed deedonly '  (rsr-profile :version "1.0.0" :capabilities ("rust"))')
+assert "deed-only repo: capabilities read from the clause" 0 "(rsr-profile …)" bash "$CHECK" "$d"
+assert "…and the scaffold passes on them" 0 "rsr-profile check: OK" bash "$CHECK" "$d"
+
+d=$(repo_deed deedlines '  (rsr-profile\n    :version "1.0.0"\n    ; a comment line inside the clause\n    :capabilities (\n      "rust"   ; trailing comment\n      )\n    (notes :omitted-rationale "x ; not a comment"))')
+assert "multi-line list, inline comments and a nested (notes …) all parse" 0 "rsr-profile check: OK" bash "$CHECK" "$d"
+
+d=$(repo_deed deedwins '  (rsr-profile :version "1.0.0" :capabilities ("rust"))')
+printf '[rsr-profile]\nversion = "1.0.0"\ncapabilities = ["bash"]\n' > "$d/.machine_readable/rsr-profile.a2ml"
+assert "deed clause wins over a legacy .a2ml beside it" 0 "rsr-profile check: OK" bash "$CHECK" "$d"
+
+d=$(repo_deed deedvest '  (rsr-profile :version "1.0.0" :capabilities ("bash"))')
+assert "deed-declared capabilities drive VESTIGIAL exactly as the a2ml did" 1 "VESTIGIAL" bash "$CHECK" "$d"
+
+d=$(repo_deed deedspine '  (rsr-profile :version "1.0.0" :role "spine" :capabilities ("bash"))')
+rm -f "$d/Cargo.toml" "$d/Cargo.lock" "$d/src/main.rs"
+assert "role read from the deed: spine carrier exemption applies" 0 "carried for downstream" bash "$CHECK" "$d"
+
+d=$(repo_deed deedpreset '  (rsr-profile :version "1.0.0" :preset "cli-tool")')
+assert "preset read from the deed (unknown names still fail loudly)" 2 "unknown preset" bash "$CHECK" "$d"
+
+d=$(repo_deed deedcomment '  ; (rsr-profile :version "1.0.0" :capabilities ("rust"))')
+assert "a commented-out clause is not a profile, and no a2ml means no profile" 2 "no (rsr-profile" bash "$CHECK" "$d"
+
+d=$(repo_deed deedfallback '')
+printf '[rsr-profile]\nversion = "1.0.0"\ncapabilities = ["rust"]\n' > "$d/.machine_readable/rsr-profile.a2ml"
+assert "deed without the clause falls back to the legacy a2ml" 0 "legacy .a2ml" bash "$CHECK" "$d"
+
+d=$(repo_deed deedtwice '  (rsr-profile :version "1.0.0" :capabilities ("rust"))\n  (rsr-profile :version "1.0.0" :capabilities ("bash"))')
+assert "two (rsr-profile …) clauses is a defect, not a choice" 2 "need exactly 1" bash "$CHECK" "$d"
+
+d=$(repo_deed deedtwo '  (rsr-profile :version "1.0.0" :capabilities ("rust"))')
+cp "$d/deedtwo_chora.deed" "$d/other_chora.deed"
+assert "two *_chora.deed files is a defect (one deed per repo, D312)" 2 "expects exactly 1" bash "$CHECK" "$d"
+
+d=$(repo_deed deedestate '  (rsr-profile :version "1.0.0" :capabilities ("rust"))')
+printf ';; SPDX-License-Identifier: CC-BY-SA-4.0\n(estate-deed :schema-version "1.0.0" :canonical-name "estate" :estate-uuid #u5"estate/chora")\n' > "$d/estate_chora.deed"
+assert "estate_chora.deed beside the repo deed is the estate-deed, not a second repo deed" 0 "deedestate_chora.deed (rsr-profile …)" bash "$CHECK" "$d"
+
+d=$(repo_deed deedprose '  (notes :example "a profile looks like (rsr-profile :capabilities (\\"rust\\"))")')
+printf '[rsr-profile]\nversion = "1.0.0"\ncapabilities = ["bash"]\n' > "$d/.machine_readable/rsr-profile.a2ml"
+assert "profile-shaped text inside a deed string is prose: the legacy a2ml still wins" 1 "legacy .a2ml" bash "$CHECK" "$d"
+assert "…and its capabilities are the a2ml's (bash → rust sources are VESTIGIAL)" 1 "VESTIGIAL" bash "$CHECK" "$d"
+
+d=$(repo_deed deedproseonly '  (notes :example "(rsr-profile :capabilities (\\"rust\\"))")')
+assert "profile-shaped text in a string with no a2ml is no profile at all" 2 "no (rsr-profile" bash "$CHECK" "$d"
+
 echo "=== setup errors ==="
 assert "no profile → 2" 2 "no profile at" bash "$CHECK" "$WORK/does-not-exist"
 assert "missing gates table → 2" 2 "gates file not found" env RSR_GATES="$WORK/nope.toml" bash "$CHECK" "$(repo g)"

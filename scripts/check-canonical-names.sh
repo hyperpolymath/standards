@@ -30,10 +30,16 @@ declare -A REPL=( ["6a2"]="descriptiles" ["agent_instructions"]="bot_directives"
 # guard, migration/charter docs, and frozen archives whose records cite the
 # paths of their day). Excluded from the check. The scorecard archive is
 # excluded record by record (ruling R5, #837): its README is still checked.
+# 9-archive/ is excluded whole: it is frozen history indexed by
+# 9-archive/MOVED.adoc, and a record archived there (the retired A2ML corpus
+# lands under 9-archive/a2ml/ at its original path) must keep the names of
+# its day. The anchored "9-archive/" prefix does not reach a sibling such as
+# 9-archives/ or a nested .../9-archive/.
 is_excluded() {
   case "$1" in
     0-canon/CANONICAL-NAMES.adoc|scripts/check-canonical-names.sh|scripts/tests/*|\
     *MIGRATION*|*migration*|*CHANGELOG*|\
+    9-archive/*|\
     .machine_readable/archive/scorecards-v1/*.scorecard.a2ml|\
     standards-update/.machine_readable/6scm-archive/.machine_readable/6a2/*) return 0 ;;
   esac
