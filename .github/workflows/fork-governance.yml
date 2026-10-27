@@ -101,7 +101,7 @@ jobs:
     env:
       # hyperpolymath/gitbot-fleet commit whose driver and adapters run. Bump
       # deliberately; the envelope contract is docs/VERDICT-GRID-SPEC.adoc.
-      FLEET_REF: 68858e0951d34ba48bb5229dfee67edf9766783b
+      FLEET_REF: 4c9ea43d7ff8fc9209165d87845a6faea04c35d3
       # panic-attack commit for panicbot, kept equal to PANIC_ATTACK_SHA in
       # hypatia-scan-reusable.yml so both rows describe one tool.
       PANIC_ATTACK_SHA: b689a74d2762a1c19839ae3fbd59b7fe5ef920ea
@@ -132,18 +132,29 @@ jobs:
           { echo "workspaces<<WS"; for c in $crates; do echo ".fleet-src/bots/$c -> target"; done; echo ".fleet-src/shared-context -> target"; echo WS; } >> "$GITHUB_OUTPUT"
           if [ -n "${crates% }" ]; then echo build=true; else echo build=false; fi >> "$GITHUB_OUTPUT"
 
-      - name: Install Rust toolchain
-        if: steps.plan.outputs.build == 'true' || steps.plan.outputs.panicbot == 'true'
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
-        with:
-          toolchain: stable
-
+      # Rust comes with the GitHub-hosted runner image; the cache is actions/cache
+      # keyed on the fleet commit's lockfiles. Only GitHub-owned, SHA-pinned
+      # actions appear in this job, as in gitbot-fleet's reusable.
       - name: Cache adapter builds
         if: steps.plan.outputs.build == 'true'
-        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          workspaces: ${{ steps.plan.outputs.workspaces }}
-          key: fleet-report-back-v1
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            .fleet-src/bots/*/target
+          key: fleet-report-back-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.fleet-src/bots/*/Cargo.lock') }}-${{ steps.plan.outputs.crates }}
+          restore-keys: |
+            fleet-report-back-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.fleet-src/bots/*/Cargo.lock') }}-
+            fleet-report-back-v2-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Report the Rust toolchain in use
+        if: steps.plan.outputs.build == 'true' || steps.plan.outputs.panicbot == 'true'
+        run: |
+          set -euo pipefail
+          command -v cargo >/dev/null || { echo "::error::cargo is not on this runner; the adapters cannot be built"; exit 1; }
+          cargo --version; rustc --version
 
       - name: Restore panic-attack build cache
         if: steps.plan.outputs.panicbot == 'true'
