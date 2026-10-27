@@ -1,0 +1,99 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell
+= The `(egress …)` clause of a repo deed
+:version: 1.0.0
+:status: PROPOSED (ADR-009)
+:toc: preamble
+
+A repo deed (`<repo>_chora.deed`) may carry one `(egress …)` clause. It attests,
+for each GitHub Actions job that holds a real secret, which secrets the job reads,
+which endpoints outside the GitHub platform it reaches, and what, if anything,
+holds it to that list at run time.
+
+*Normative grammar:* link:./abnf/clauses/egress.abnf[abnf/clauses/egress.abnf]
+v1.0.0, a profile of `deed.abnf` v1.2.0. Every clause it accepts is already a
+`clause` of `deed.abnf`, so the deed grammar does not change. *Check:*
+`bun 1-formats/deed/tools/deed_lint.js --egress FILE.deed`, run on every committed deed
+by `deed-conformance.yml`. *Decision:*
+link:../../../docs/decisions/ADR-009-declared-egress-for-secret-bearing-jobs.adoc[ADR-009].
+
+== Why a deed clause
+
+The owner's model (`docs/ULTRAPLAN-DEED-K9-CONTRACTILES-2026-10-19.adoc`,
+_The owner's model_): contractiles are policy, descriptiles are reality, and the
+deed attests where each party stands. Which endpoints a job reaches is a fact
+about the repository, so it is attested in the deed. The policy that every
+secret-bearing job carries such an attestation belongs to the Trustfile
+(security, privacy and safety). Hypatia rule `research_extensions/RE001` is the
+runner that compares the two and reports a difference.
+
+The clause records the boundary whether or not anything enforces it.
+`:enforcement none` is a true answer: it says the list exists and nothing holds
+the job to it yet. A later enforcer, whether `step-security/harden-runner` in
+block mode, a runner firewall or a proof, then has a reviewed list to enforce.
+
+== Shape
+
+[source]
+----
+(egress
+  :policy "standards ADR-009"
+  (job
+    :workflow ".github/workflows/push-email-notify.yml"
+    :job "notify"
+    :secrets ("SMTP_HOST" "SMTP_PORT" "SMTP_USER" "SMTP_PASS")
+    :endpoints ("secret:SMTP_HOST")
+    :enforcement none
+    :reason "Sends the push notification over SMTP submission."))
+----
+
+[cols="1,1,4",options="header"]
+|===
+|Field |Cardinality |Meaning
+
+|`:policy` |0..1, on `(egress …)` |The decision record the attestation answers. Informative.
+|`:workflow` |1 |Repo-relative path of the workflow file, under `.github/workflows/`.
+|`:job` |1 |The job id, as it appears under `jobs:`. `(:workflow, :job)` is unique.
+|`:secrets` |1, non-empty |Every secret the job references, as strings, without duplicates. Never `GITHUB_TOKEN`: the job token is bounded by `permissions:` and RE001 does not count it.
+|`:endpoints` |1, may be `()` |Endpoints outside the GitHub platform: `host`, `host:port`, `*.host[:port]`, `secret:NAME` when the endpoint is itself held in a secret listed in `:secrets`, or `var:NAME` when it is held in a configuration variable (`vars.NAME`). `()` means the job reaches only GitHub (github.com, api.github.com and the Actions service hosts, which are implicit for every job).
+|`:enforcement` |1 |A symbol: `none`, `harden-runner-audit` or `harden-runner-block`.
+|`:reason` |0..1 |Why the job needs the secret. Prose.
+|===
+
+Order of fields is not semantic, as everywhere in a deed. No other field and no
+nested clause is allowed in `(job …)`.
+
+== What the consumer does with it
+
+Hypatia RE001 (`lib/rules/research_extensions.ex` in `hyperpolymath/hypatia`):
+
+. *Counts real secrets only.* A `secrets.GITHUB_TOKEN` reference does not make a
+  job secret-bearing. It is the same token as `github.token`, which RE001 never
+  counted.
+. *Accepts a declaration.* A job that references real secrets is satisfied when
+  it installs `step-security/harden-runner`, *or* when the repo deed lists the
+  job with exactly the secrets it references.
+. *Reports drift both ways.* A declared job whose `:secrets` differ from what the
+  workflow references, or a declared job that no longer exists or no longer reads
+  a secret, is a finding. An attestation that has stopped being true is worse
+  than none.
+. *Treats an unreadable deed as no declaration*, and says so in the finding.
+
+The rule does not check `:endpoints` against the workflow. That needs either a
+runtime observation (harden-runner audit telemetry) or a static model of what
+each action reaches. Both are recorded as follow-ups in ADR-009, not claimed
+here.
+
+== Versioning
+
+One version, in the ABNF header and in this document's header, three segments,
+as the deed/K9 ultraplan's versioning doctrine proposes. A minor version adds
+optional content only. The v1.0.0 checker rejects a field it does not know,
+so a minor version ships the checker change, its fixtures and the Hypatia reader
+change together. The clause carries no version of its own: the deed's
+`:schema-version` names the deed grammar, and this profile is keyed to that
+grammar's major version.
+
+== Changelog
+
+* 1.0.0 (2026-10-27). First version (ADR-009).
