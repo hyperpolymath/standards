@@ -508,10 +508,14 @@ export class EgressError extends LintError {
 
 export const ENFORCEMENT = ["none", "harden-runner-audit", "harden-runner-block"];
 
-const WORKFLOW = /^\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/;
+// Every "." follows a non-empty name segment, as workflow-path in egress.abnf.
+const WORKFLOW = /^\.github\/workflows\/(?:[A-Za-z0-9_-]+\.)+ya?ml$/;
 const JOB_ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
-const SECRET = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const LABEL = "[A-Za-z0-9][A-Za-z0-9-]*";
+// GitHub stores secret and variable names uppercase and matches them without
+// regard to case, so a declaration uses the stored form: one spelling per name.
+const SECRET = /^[A-Z_][A-Z0-9_]*$/;
+// A label starts and ends with a letter or digit (RFC 1123 §2.1).
+const LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?";
 const HOST_PORT = new RegExp(`^(\\*\\.)?${LABEL}(\\.${LABEL})*(:([0-9]{1,5}))?$`);
 const REQUIRED = ["workflow", "job", "secrets", "endpoints", "enforcement"];
 const ALLOWED = new Set([...REQUIRED, "reason"]);
@@ -550,7 +554,9 @@ function checkJob(items) {
   const secrets = stringList(seen.get("secrets"), "secrets");
   if (secrets.length === 0) throw new EgressError(":secrets must not be empty");
   for (const s of secrets) {
-    if (!SECRET.test(s)) throw new EgressError(`secret name ${JSON.stringify(s)} is malformed`);
+    if (!SECRET.test(s)) {
+      throw new EgressError(`secret name ${JSON.stringify(s)} is malformed (write it as GitHub stores it: uppercase letters, digits, "_")`);
+    }
     if (s === "GITHUB_TOKEN") throw new EgressError("GITHUB_TOKEN is not listed: it is the job token, bounded by permissions:");
   }
   if (new Set(secrets).size !== secrets.length) throw new EgressError(":secrets has a duplicate");
@@ -565,7 +571,9 @@ function checkJob(items) {
     }
     if (e.startsWith("var:")) {
       const name = e.slice("var:".length);
-      if (!SECRET.test(name)) throw new EgressError(`endpoint ${JSON.stringify(e)} names a malformed variable`);
+      if (!SECRET.test(name)) {
+        throw new EgressError(`endpoint ${JSON.stringify(e)} names a malformed variable (uppercase, as GitHub stores it)`);
+      }
       continue;
     }
     const m = HOST_PORT.exec(e);
@@ -590,6 +598,13 @@ function checkJob(items) {
 export function checkEgress(text, filename = null) {
   const [head, items] = validate(text, filename);
   const clauses = items.filter((it) => it[0] === "clause" && it[1] === "egress");
+  // The clause is honoured only at the top level, so one written anywhere
+  // deeper would silently declare nothing. Refuse it instead.
+  const nested = (list) =>
+    list.some((it) => it[0] === "clause" && it[2].some((c) => (c[0] === "clause" && c[1] === "egress") || nested([c])));
+  if (nested(items.filter((it) => !(it[0] === "clause" && it[1] === "egress")))) {
+    throw new EgressError("(egress …) may appear only at the top level of a repo deed, not inside another clause");
+  }
   if (clauses.length === 0) return [];
   if (head !== "repo-deed") throw new EgressError(`(egress …) belongs in a repo-deed, not a ${head}`);
   if (clauses.length > 1) throw new EgressError("a repo deed carries at most one (egress …) clause");

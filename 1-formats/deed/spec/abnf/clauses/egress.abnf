@@ -15,7 +15,9 @@
 ; Requires RFC 7405 (%s"..." case-sensitive string literals).
 ;
 ; Where it appears: at most one (egress …) clause, at the top level of a
-; repo-deed (<repo>_chora.deed). Nowhere else.
+; repo-deed (<repo>_chora.deed). Nowhere else. SEMANTIC: a validator MUST
+; reject an (egress …) clause nested inside any other clause, because a
+; consumer reading only the top level would otherwise see no declaration.
 
 egress-clause   = "(" %s"egress" *(token-sep egress-member) [token-sep] ")"
 egress-member   = policy-field / job-clause
@@ -55,7 +57,12 @@ secrets-field   = %s":secrets" token-sep "(" [token-sep] secret-str
                 ; The set MUST equal the secrets the job references; Hypatia
                 ; reports a difference in either direction as drift.
 secret-str      = DQUOTE secret-name DQUOTE
-secret-name     = ( ALPHA / "_" ) *( ALPHA / DIGIT / "_" )
+secret-name     = ( UPPER / "_" ) *( UPPER / DIGIT / "_" )
+                ; The stored form. GitHub keeps secret and variable names
+                ; uppercase and matches references to them without regard to
+                ; case (secrets.foo reads FOO), so one name has one spelling
+                ; here and the GITHUB_TOKEN and duplicate rules are exact.
+UPPER           = %x41-5A
 
 endpoints-field = %s":endpoints" token-sep "(" [token-sep]
                   [endpoint-str *(token-sep endpoint-str)] [token-sep] ")"
@@ -73,7 +80,10 @@ var-ref         = %s"var:" secret-name
                 ; secrets, so the name is not listed in :secrets.
 host-port       = [ "*." ] hostname [ ":" port ]
 hostname        = label *( "." label )
-label           = ( ALPHA / DIGIT ) *( ALPHA / DIGIT / "-" )
+label           = ( ALPHA / DIGIT ) *( *"-" ( ALPHA / DIGIT ) )
+                ; Starts and ends with a letter or digit (RFC 1123 §2.1);
+                ; hyphens only between them. Written so that possessive and
+                ; backtracking parsers agree, as workflow-path above.
 port            = 1*5DIGIT
                 ; SEMANTIC: 1..65535.
 
