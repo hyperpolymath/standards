@@ -149,6 +149,18 @@ d=$(repo_deed deedtwo '  (rsr-profile :version "1.0.0" :capabilities ("rust"))')
 cp "$d/deedtwo_chora.deed" "$d/other_chora.deed"
 assert "two *_chora.deed files is a defect (one deed per repo, D312)" 2 "expects exactly 1" bash "$CHECK" "$d"
 
+d=$(repo_deed deedestate '  (rsr-profile :version "1.0.0" :capabilities ("rust"))')
+printf ';; SPDX-License-Identifier: CC-BY-SA-4.0\n(estate-deed :schema-version "1.0.0" :canonical-name "estate" :estate-uuid #u5"estate/chora")\n' > "$d/estate_chora.deed"
+assert "estate_chora.deed beside the repo deed is the estate-deed, not a second repo deed" 0 "deedestate_chora.deed (rsr-profile …)" bash "$CHECK" "$d"
+
+d=$(repo_deed deedprose '  (notes :example "a profile looks like (rsr-profile :capabilities (\\"rust\\"))")')
+printf '[rsr-profile]\nversion = "1.0.0"\ncapabilities = ["bash"]\n' > "$d/.machine_readable/rsr-profile.a2ml"
+assert "profile-shaped text inside a deed string is prose: the legacy a2ml still wins" 1 "legacy .a2ml" bash "$CHECK" "$d"
+assert "…and its capabilities are the a2ml's (bash → rust sources are VESTIGIAL)" 1 "VESTIGIAL" bash "$CHECK" "$d"
+
+d=$(repo_deed deedproseonly '  (notes :example "(rsr-profile :capabilities (\\"rust\\"))")')
+assert "profile-shaped text in a string with no a2ml is no profile at all" 2 "no (rsr-profile" bash "$CHECK" "$d"
+
 echo "=== setup errors ==="
 assert "no profile → 2" 2 "no profile at" bash "$CHECK" "$WORK/does-not-exist"
 assert "missing gates table → 2" 2 "gates file not found" env RSR_GATES="$WORK/nope.toml" bash "$CHECK" "$(repo g)"

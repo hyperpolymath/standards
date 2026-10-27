@@ -66,10 +66,15 @@ deed_strip() {
 # deed_clause <head> : on stdin the stripped deed; prints each balanced
 # "(<head> …)" form, one per line, nested forms included (lists and (notes …)
 # sit inside the profile clause, so a flat [^()]* match cannot reach it).
+# The outer scan tracks string state too: a "(rsr-profile …)" quoted inside
+# a (notes …) is prose, not a clause, and must not be read as one.
 deed_clause() {
   awk -v head="$1" 'BEGIN { dq = sprintf("%c", 34); bs = sprintf("%c", 92) }
-  { s = $0; n = length(s); i = 1
+  { s = $0; n = length(s); i = 1; inq = 0
     while (i <= n) {
+      c0 = substr(s, i, 1)
+      if (inq) { if (c0 == bs) i++; else if (c0 == dq) inq = 0; i++; continue }
+      if (c0 == dq) { inq = 1; i++; continue }
       if (substr(s, i, length(head) + 1) == "(" head && substr(s, i + length(head) + 1, 1) ~ /[[:space:])]/) {
         d = 0; q = 0; o = ""
         for (j = i; j <= n; j++) { c = substr(s, j, 1)
@@ -91,7 +96,13 @@ deed_list() {
 
 DEED=""; DEED_PROFILE=""
 _deeds=()
-for _d in "$REPO"/*_chora.deed; do [ -f "$_d" ] && _deeds+=("$_d"); done
+# estate_chora.deed is the estate-deed (deed.abnf filename dispatch reserves
+# that exact stem), never a second repo deed, so it does not count here.
+for _d in "$REPO"/*_chora.deed; do
+  [ -f "$_d" ] || continue
+  [ "$(basename "$_d")" = "estate_chora.deed" ] && continue
+  _deeds+=("$_d")
+done
 if [ "${#_deeds[@]}" -gt 1 ]; then
   echo "ERROR: $REPO carries ${#_deeds[@]} *_chora.deed files; one-deed-per-repo (D312) expects exactly 1" >&2; exit 2
 elif [ "${#_deeds[@]}" -eq 1 ]; then
