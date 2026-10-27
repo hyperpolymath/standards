@@ -97,11 +97,12 @@ deed_fields() {
   awk 'BEGIN { dq = sprintf("%c", 34); bs = sprintf("%c", 92); OFS = "\t" }
   function rstr(   v, e, x) { v = ""; i++
     while (i <= n) { e = substr(s, i, 1)
-      # An escaped quote or backslash decodes to that character. The n and t
-      # escapes stay as written: decoding them to the bare letter would make
-      # "spi" + escaped n + "e" read as spine, and a real newline or tab would
-      # break the one-field-per-line output.
-      if (e == bs) { x = substr(s, i + 1, 1); v = v ((x == "n" || x == "t") ? e x : x); i += 2; continue }
+      # Only an escaped quote or backslash decodes. Every other escape stays
+      # as written, backslash included: decoding the n, t or an unknown
+      # escape to its bare letter would make "spi" + escaped n + "e" read as
+      # spine. A real newline or tab would also break the one-field-per-line
+      # output. Rejecting a malformed escape is the job of the deed lint.
+      if (e == bs) { x = substr(s, i + 1, 1); v = v ((x == dq || x == bs) ? x : e x); i += 2; continue }
       if (e == dq) { i++; return v }
       v = v e; i++ }
     return v }

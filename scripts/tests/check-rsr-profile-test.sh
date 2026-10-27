@@ -190,6 +190,13 @@ assert "an escaped \\n in :role does not alias spine" 1 "VESTIGIAL" bash "$CHECK
 d=$(repo_deed deedescremove '  (rsr-profile :version "1.0.0" :capabilities ("rust") :remove ("rus\\t"))')
 assert "an escaped \\t in :remove does not remove rust" 0 "effective capabilities: rust" bash "$CHECK" "$d"
 
+d=$(repo_deed deedescunkremove '  (rsr-profile :version "1.0.0" :capabilities ("rust") :remove ("r\\ust"))')
+assert "an unknown escape in :remove does not remove rust" 0 "effective capabilities: rust" bash "$CHECK" "$d"
+
+d=$(repo_deed deedescunkrole '  (rsr-profile :version "1.0.0" :role "s\\pine" :capabilities ("bash"))')
+rm -f "$d/Cargo.toml" "$d/Cargo.lock" "$d/src/main.rs"
+assert "an unknown escape in :role does not alias spine" 1 "VESTIGIAL" bash "$CHECK" "$d"
+
 d=$(repo_deed deeduuiditem '  (rsr-profile :version "1.0.0" :capabilities (#u5"rust"))')
 assert "a uuid literal in a list is not a capability" 2 "-" bash "$CHECK" "$d"
 
