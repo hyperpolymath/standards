@@ -46,7 +46,7 @@ describe("checkEgress result", () => {
         workflow: ".github/workflows/sonarqube.yml",
         job: "sonarqube",
         secrets: ["SONAR_TOKEN"],
-        endpoints: ["sonarcloud.io", "*.sonarcloud.io:443"],
+        endpoints: ["sonarcloud.io", "*.sonarcloud.io:443", "var:SONAR_HOST"],
         enforcement: "harden-runner-block",
       },
     ]);

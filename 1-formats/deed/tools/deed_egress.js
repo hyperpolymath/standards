@@ -85,8 +85,13 @@ function checkJob(items) {
       if (!secrets.includes(name)) throw new EgressError(`endpoint ${JSON.stringify(e)} names a secret not in :secrets`);
       continue;
     }
+    if (e.startsWith("var:")) {
+      const name = e.slice("var:".length);
+      if (!SECRET.test(name)) throw new EgressError(`endpoint ${JSON.stringify(e)} names a malformed variable`);
+      continue;
+    }
     const m = HOST_PORT.exec(e);
-    if (!m) throw new EgressError(`endpoint ${JSON.stringify(e)} is not host[:port] or secret:NAME`);
+    if (!m) throw new EgressError(`endpoint ${JSON.stringify(e)} is not host[:port], secret:NAME or var:NAME`);
     if (m[4] !== undefined && (Number(m[4]) < 1 || Number(m[4]) > 65535)) {
       throw new EgressError(`endpoint ${JSON.stringify(e)} has a port outside 1..65535`);
     }
