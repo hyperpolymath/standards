@@ -101,7 +101,7 @@ jobs:
     env:
       # hyperpolymath/gitbot-fleet commit whose driver and adapters run. Bump
       # deliberately; the envelope contract is docs/VERDICT-GRID-SPEC.adoc.
-      FLEET_REF: 4c9ea43d7ff8fc9209165d87845a6faea04c35d3
+      FLEET_REF: e85b71bf139a61f956c7e0717a2912cd6e347cc5
       # panic-attack commit for panicbot, kept equal to PANIC_ATTACK_SHA in
       # hypatia-scan-reusable.yml so both rows describe one tool.
       PANIC_ATTACK_SHA: b689a74d2762a1c19839ae3fbd59b7fe5ef920ea
@@ -120,16 +120,30 @@ jobs:
           path: .fleet-src
           persist-credentials: false
 
+      # The fleet checkout must not sit inside the tree being reported on: walk-
+      # based adapters would scan the fleet's own source and attribute its findings
+      # to this repository. actions/checkout only writes under the workspace, so
+      # the checkout is moved out to RUNNER_TEMP first; the lockfile hash for the
+      # cache key is taken before the move.
+      - name: Move the fleet checkout out of the scanned tree
+        id: fleet
+        run: |
+          set -euo pipefail
+          lockhash=$(cat .fleet-src/bots/*/Cargo.lock .fleet-src/shared-context/Cargo.lock 2>/dev/null | sha256sum | cut -c1-16)
+          mv .fleet-src "$RUNNER_TEMP/fleet-src"
+          echo "dir=$RUNNER_TEMP/fleet-src" >> "$GITHUB_OUTPUT"
+          echo "lockhash=$lockhash" >> "$GITHUB_OUTPUT"
+
       - name: Plan which adapters to build
         id: plan
         run: |
           set -euo pipefail
-          plan=$(bash .fleet-src/scripts/fleet-report-back.sh --plan --enrolment .gitbot-fleet/enrolment.json)
+          plan=$(bash "$RUNNER_TEMP/fleet-src/scripts/fleet-report-back.sh" --plan --enrolment .gitbot-fleet/enrolment.json)
           echo "plan:"; printf '%s\n' "$plan" | sed 's/^/  /'
           crates=$(printf '%s\n' "$plan" | awk -F'\t' '$2 != "" {print $2}' | sort -u | tr '\n' ' ')
           echo "crates=${crates% }" >> "$GITHUB_OUTPUT"
           if printf '%s\n' "$plan" | awk -F'\t' '$1 == "panicbot" {f=1} END {exit !f}'; then echo panicbot=true; else echo panicbot=false; fi >> "$GITHUB_OUTPUT"
-          { echo "workspaces<<WS"; for c in $crates; do echo ".fleet-src/bots/$c -> target"; done; echo ".fleet-src/shared-context -> target"; echo WS; } >> "$GITHUB_OUTPUT"
+          { echo "workspaces<<WS"; for c in $crates; do echo "$RUNNER_TEMP/fleet-src/bots/$c -> target"; done; echo "$RUNNER_TEMP/fleet-src/shared-context -> target"; echo WS; } >> "$GITHUB_OUTPUT"
           if [ -n "${crates% }" ]; then echo build=true; else echo build=false; fi >> "$GITHUB_OUTPUT"
 
       # Rust comes with the GitHub-hosted runner image; the cache is actions/cache
@@ -143,11 +157,11 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-            .fleet-src/bots/*/target
-          key: fleet-report-back-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.fleet-src/bots/*/Cargo.lock') }}-${{ steps.plan.outputs.crates }}
+            ${{ runner.temp }}/fleet-src/bots/*/target
+          key: fleet-report-back-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.fleet.outputs.lockhash }}-${{ steps.plan.outputs.crates }}
           restore-keys: |
-            fleet-report-back-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.fleet-src/bots/*/Cargo.lock') }}-
-            fleet-report-back-v2-${{ runner.os }}-${{ runner.arch }}-
+            fleet-report-back-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.fleet.outputs.lockhash }}-
+            fleet-report-back-v3-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Report the Rust toolchain in use
         if: steps.plan.outputs.build == 'true' || steps.plan.outputs.panicbot == 'true'
@@ -170,15 +184,15 @@ jobs:
           PANICBOT: ${{ steps.plan.outputs.panicbot }}
         run: |
           set -euo pipefail
-          args=(--fleet .fleet-src --bin-dir "$RUNNER_TEMP/fleet-bin" --crates "$CRATES")
+          args=(--fleet "$RUNNER_TEMP/fleet-src" --bin-dir "$RUNNER_TEMP/fleet-bin" --crates "$CRATES")
           [ "$PANICBOT" = true ] && args+=(--panic-attack "$PANIC_ATTACK_SHA")
-          bash .fleet-src/scripts/fleet-report-back-build.sh "${args[@]}"
+          bash "$RUNNER_TEMP/fleet-src/scripts/fleet-report-back-build.sh" "${args[@]}"
 
       - name: Run the enrolled adapters and write the envelopes
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/fleet-bin" "$RUNNER_TEMP/report-backs"
-          bash .fleet-src/scripts/fleet-report-back.sh --repo . --out "$RUNNER_TEMP/report-backs" \
+          bash "$RUNNER_TEMP/fleet-src/scripts/fleet-report-back.sh" --repo . --out "$RUNNER_TEMP/report-backs" \
             --bin-dir "$RUNNER_TEMP/fleet-bin" --enrolment .gitbot-fleet/enrolment.json \
             --fleet-ref "$FLEET_REF" --summary "$GITHUB_STEP_SUMMARY"
           ls "$RUNNER_TEMP/report-backs"/*.json >/dev/null 2>&1 \
@@ -199,10 +213,11 @@ jobs:
 
   hypatia:
     name: Hypatia verdict grid
-    # After the fleet job, whatever its result: a dead fleet job must render as
-    # orange fleet rows, never as a missing Hypatia lane.
+    # After the fleet job, whatever its result (a dead fleet job must render as
+    # orange fleet rows, never as a missing Hypatia lane), but not in a run that
+    # cancel-in-progress has superseded: always() would let a stale lane post.
     needs: [fleet]
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/hypatia-scan-reusable.yml
     permissions:
       actions: read
