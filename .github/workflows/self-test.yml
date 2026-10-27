@@ -94,6 +94,21 @@ jobs:
           bash scripts/kyaml-format.sh --check \
             _shared/container/.gatekeeper.yaml
 
+      # A2ML is retired: every A2ML file sits under 9-archive/ or is named in
+      # the shrink-only legacy ledger (.machine_readable/a2ml-legacy-allow.txt).
+      # The fixtures in scripts/tests/check-a2ml-archived-test.sh prove the
+      # gate; this step holds the repository itself to it. --base compares
+      # ledger membership with the base, so an entry cannot join it even when
+      # another leaves (the count-only exemption ratchet misses that swap).
+      # On a pull request the base is the PR base; on main it is the previous
+      # commit. fetch-depth: 0 above makes both resolvable.
+      - name: A2ML stays archived
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          bash scripts/check-a2ml-archived.sh --base "${BASE_SHA:-HEAD~1}" .
+
       # Not part of the offline suite: this one needs real git history, so it
       # cannot live in scripts/tests/*.sh where a contributor runs it on a
       # shallow or detached tree. On a pull request the comparison is the base
