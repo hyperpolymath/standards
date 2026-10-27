@@ -85,16 +85,21 @@ deed_clause() {
         print o; i = j + 1
       } else i++ } }'
 }
-# deed_fields : on stdin one clause; prints the clause's OWN fields, one per
+# deed_fields : on stdin one comment-free clause on a single line, as emitted
+# by deed_clause; prints the clause's OWN fields, one per
 # line, tab-separated: "S key value" for a string, "Y key value" for a symbol
 # or boolean, "U key body" for a uuid literal, "L key item" for each list item
 # (strings unquoted), "LU key body" for a uuid literal inside a list (never a
 # capability) and "E key" for an empty list. It walks tokens, so text
 # inside a string is never read as a field, a sub-clause such as (notes …) is
-# skipped whole, and layout (line breaks, spacing) does not matter. A key that
-# repeats keeps its first value. Earlier regex readers leaked each of these.
+# skipped whole. A key that repeats keeps its first value. Earlier regex
+# readers leaked each of these.
+# Escaped quotes and backslashes are decoded; other escapes stay literal.
+# This extracts fields without validating DEED syntax.
 deed_fields() {
   awk 'BEGIN { dq = sprintf("%c", 34); bs = sprintf("%c", 92); OFS = "\t" }
+  # Return the string at s[i] and advance i past its closing quote, or return
+  # the accumulated value without an error if the input ends first.
   function rstr(   v, e, x) { v = ""; i++
     while (i <= n) { e = substr(s, i, 1)
       # Only an escaped quote or backslash decodes. Every other escape stays
@@ -106,14 +111,20 @@ deed_fields() {
       if (e == dq) { i++; return v }
       v = v e; i++ }
     return v }
+  # Return the atom at s[i], leaving i at its delimiter or the end of input.
+  # Whitespace, parentheses and quotes delimit atoms; an empty atom is allowed.
   function ratom(   v, e) { v = ""
     while (i <= n) { e = substr(s, i, 1); if (e ~ /[[:space:]()]/ || e == dq) break; v = v e; i++ }
     return v }
+  # Advance i past the parenthesized form at s[i], ignoring parentheses in
+  # strings; consume the remaining input if the form is unbalanced.
   function skip(   d, e) { d = 0
     while (i <= n) { e = substr(s, i, 1)
       if (e == dq) { rstr(); continue }
       if (e == "(") d++; else if (e == ")") { d--; if (d == 0) { i++; return } }
       i++ } }
+  # Print kind, the current key and v as tab-separated fields unless dup marks
+  # a repeated key.
   function emit(kind, v) { if (!dup) print kind, key, v }
   { s = $0; n = length(s); i = 1
     while (i <= n && substr(s, i, 1) != "(") i++
@@ -141,10 +152,14 @@ deed_fields() {
       key = "" }
     exit }'
 }
-# deed_scalar <key> : from a clause on stdin, the string value of :<key>, or "".
+# deed_scalar <key> : read deed_fields input; print the first :<key> value
+# followed by a newline if it is a string, otherwise nothing. String escapes
+# follow deed_fields.
 deed_scalar() { deed_fields | awk -F '\t' -v k="$1" '$1 == "S" && $2 == k && !done { print $3; done = 1 }'; }
-# deed_list <key> : from a clause on stdin, the items of the list :<key> ( … ),
-# strings unquoted, symbols as written, one per line.
+# deed_list <key> : read deed_fields input; print the first :<key> list's items,
+# strings unquoted, symbols as written, one per line. UUID literals and nested
+# lists are omitted; absent, empty or non-list values produce no output.
+# String escapes follow deed_fields.
 deed_list() { deed_fields | awk -F '\t' -v k="$1" '$1 == "L" && $2 == k { print $3 }'; }
 
 DEED=""; DEED_PROFILE=""
