@@ -1,0 +1,85 @@
+; SPDX-FileCopyrightText: © 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+; SPDX-License-Identifier: MPL-2.0
+; SPDX-License-Identifier: CC-BY-SA-4.0
+;
+; DEED clause profile: (egress …), v1.0.0
+; Prose and rationale: ../../EGRESS-CLAUSE-SPEC.adoc
+; Decision: docs/decisions/ADR-009-declared-egress-for-secret-bearing-jobs.adoc
+;
+; A CLAUSE PROFILE, not a new grammar. Every egress-clause below is also a
+; `clause` of deed.abnf v1.2.0, so a deed carrying one still passes deed_lint
+; unchanged. This profile narrows that clause for one consumer contract:
+; Hypatia RE001 accepts a job listed here in place of
+; step-security/harden-runner. Rules it borrows (string, token-sep, line-end,
+; comment, text-char, SP, DIGIT, ALPHA) are deed.abnf's, unchanged.
+; Requires RFC 7405 (%s"..." case-sensitive string literals).
+;
+; Where it appears: at most one (egress …) clause, at the top level of a
+; repo-deed (<repo>_chora.deed). Nowhere else.
+
+egress-clause   = "(" %s"egress" *(token-sep egress-member) [token-sep] ")"
+egress-member   = policy-field / job-clause
+
+policy-field    = %s":policy" token-sep string
+                ; The decision record this attestation answers, e.g.
+                ; "standards ADR-009". Informative. At most once.
+
+job-clause      = "(" %s"job" 1*(token-sep job-field) [token-sep] ")"
+                ; SEMANTIC (validator-enforced, not expressible in ABNF):
+                ; :workflow, :job, :secrets, :endpoints and :enforcement each
+                ; appear EXACTLY once; :reason at most once; no other field
+                ; and no nested clause. The pair (:workflow, :job) is unique
+                ; across the egress clause.
+
+job-field       = workflow-field / job-id-field / secrets-field
+                / endpoints-field / enforcement-field / reason-field
+
+workflow-field  = %s":workflow" token-sep DQUOTE workflow-path DQUOTE
+workflow-path   = %s".github/workflows/" 1*( name-seg "." ) ( %s"yml" / %s"yaml" )
+name-seg        = 1*( ALPHA / DIGIT / "-" / "_" )
+                ; Written so that a parser with possessive repetition (PEG,
+                ; apg-js) and a backtracking one accept the same strings.
+                ; "1*path-char %s".yml"" would let the repetition swallow
+                ; the suffix in the former.
+
+job-id-field    = %s":job" token-sep DQUOTE job-id DQUOTE
+job-id          = ( ALPHA / "_" ) *( ALPHA / DIGIT / "-" / "_" )
+                ; GitHub's job-id rule: starts with a letter or "_", then
+                ; letters, digits, "-" or "_".
+
+secrets-field   = %s":secrets" token-sep "(" [token-sep] secret-str
+                  *(token-sep secret-str) [token-sep] ")"
+                ; Non-empty. SEMANTIC: no duplicates, and never "GITHUB_TOKEN"
+                ; (the job token is bounded by `permissions:`; RE001 does not
+                ; count it, so listing it would attest a secret that is not one).
+                ; The set MUST equal the secrets the job references; Hypatia
+                ; reports a difference in either direction as drift.
+secret-str      = DQUOTE secret-name DQUOTE
+secret-name     = ( ALPHA / "_" ) *( ALPHA / DIGIT / "_" )
+
+endpoints-field = %s":endpoints" token-sep "(" [token-sep]
+                  [endpoint-str *(token-sep endpoint-str)] [token-sep] ")"
+                ; May be empty: "()" attests that the job reaches only the
+                ; GitHub platform (github.com, api.github.com and the Actions
+                ; service hosts), which is implicit for every job.
+endpoint-str    = DQUOTE endpoint DQUOTE
+endpoint        = secret-ref / host-port
+secret-ref      = %s"secret:" secret-name
+                ; The endpoint is itself held in a secret (e.g. SMTP_HOST).
+                ; SEMANTIC: the named secret MUST be listed in :secrets.
+host-port       = [ "*." ] hostname [ ":" port ]
+hostname        = label *( "." label )
+label           = ( ALPHA / DIGIT ) *( ALPHA / DIGIT / "-" )
+port            = 1*5DIGIT
+                ; SEMANTIC: 1..65535.
+
+enforcement-field = %s":enforcement" token-sep enforcement
+enforcement     = %s"none"
+                / %s"harden-runner-audit"
+                / %s"harden-runner-block"
+                ; A symbol, not a string. What, if anything, holds the job to
+                ; :endpoints at run time. "none" is a true answer, not a
+                ; failure: the attestation records the boundary so that a
+                ; later enforcer has a list to enforce.
+
+reason-field    = %s":reason" token-sep string
