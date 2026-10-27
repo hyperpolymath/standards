@@ -295,7 +295,7 @@ d=$(mklock mvr2 "o/untagged@$A" </dev/null); p=$(prior_rec "o/untagged@$A" v1 "$
 out=$(runp "$d" "$p"); st=$?; refused "prior record whose owner_id differs from the API → refused" "$d" "$out" "$st"
 d=$(mklock mvr3 "o/untagged@$A" </dev/null); p=$(prior_rec "o/untagged@$A" "$A" "$A" 7 | mkprior mvr3)
 out=$(runp "$d" "$p"); st=$?; refused "prior self-SHA ref → refused (standards#1271)" "$d" "$out" "$st"
-grep -qF "prior ref '$A': not a symbolic tag name" <<<"$out" && ok "…refused by name, before any lookup" || bad "self-SHA prior reason — $out"
+grep -qF "the prior lock record ref '$A': not a symbolic tag name" <<<"$out" && ok "…refused by name, before any lookup" || bad "self-SHA prior reason — $out"
 d=$(mklock mvr4 "o/untagged@$A" </dev/null); p=$(prior_rec "o/untagged@$A" gone "$A" 7 | mkprior mvr4)
 out=$(runp "$d" "$p"); st=$?; refused "prior ref naming no current tag → refused" "$d" "$out" "$st"
 d=$(mklock mvr5 "o/untagged@$B" </dev/null); p=$(prior_rec "o/untagged@$B" v1 "$B" 7 | mkprior mvr5)
@@ -309,6 +309,53 @@ cp "$d/actions.lock" "$WORK/mvr6.before"; out=$(runp "$d" "$p"); st=$?
 d=$(mklock mvr7 "o/untagged@$A" </dev/null)
 out=$(runp "$d" "$WORK/no-such.prior"); st=$?
 [ "$st" = 1 ] && ok "--prior naming a missing file → exit 1" || bad "--prior missing file — st=$st $out"
+
+echo "=== moved tag: the called repository's own lock supplies ref: ==="
+# The standards@75bd5994 shape: the call site comments the pin `# stable` (a
+# branch, refused), and the called repository's lock records it as ref: 'v1'.
+D=4444444444444444444444444444444444444444
+for r in "$A" "$B" "$C" "$D"; do
+  plant o/q .github/workflows/w.yml "$r" <<EOF
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: o/untagged@$A # stable
+EOF
+done
+prior_rec "o/untagged@$A" v1 "$A" 7 | mkprior qa >/dev/null; plant o/q .github/workflows/actions.lock "$A" < "$WORK/qa.prior"
+prior_rec "o/untagged@$A" v1 "$B" 7 | mkprior qb >/dev/null; plant o/q .github/workflows/actions.lock "$B" < "$WORK/qb.prior"
+prior_rec "o/untagged@$A" v1 "$A" 7 | plant o/q .github/workflows/actions.lock "$D"
+d=$(mklock cl1 "o/q@$A" </dev/null); mkwf cl1 "o/q/.github/workflows/w.yml@$A"
+out=$(run "$d"); st=$?
+[ "$st" = 0 ] && record "$d/actions.lock" "o/untagged@$A" | grep -qxF "        ref: 'v1'" \
+  && grep -qF "~ o/untagged@$A ref 'v1' from the lock of o/q@$A" <<<"$out" \
+  && ok "called repository's lock record with a forward-moved tag → leaf record ref 'v1', reported" || bad "callee lock source — st=$st $out"
+
+echo "=== moved tag: planted positives — a called repository's lock that does not qualify writes nothing ==="
+d=$(mklock clr1 "o/q@$B" </dev/null); mkwf clr1 "o/q/.github/workflows/w.yml@$B"
+out=$(run "$d"); st=$?
+refused "callee lock record for another commit → refused" "$d" "$out" "$st"
+grep -qF "the lock of o/q@$B: commit sha1-$B" <<<"$out" && grep -qF "call-site '# stable': no tag of that name" <<<"$out" \
+  && ok "…and every refused candidate is named" || bad "callee lock refusal reasons — $out"
+plant o/q .github/workflows/w.yml "$C" <<EOF
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: o/other@$A
+EOF
+plant o/q .github/workflows/actions.lock "$C" < "$WORK/qa.prior"
+d=$(mklock clr2 "o/q@$C" "o/untagged@$A" </dev/null); mkwf clr2 "o/q/.github/workflows/w.yml@$C"
+out=$(run "$d"); st=$?
+refused "a record in the lock of a callee that does not use the key is not borrowed" "$d" "$out" "$st"
+d=$(mklock clr3 "o/q@$D" </dev/null); mkwf clr3 "o/q/.github/workflows/w.yml@$D"
+out=$(run "$d"); st=$?
+refused "callee lock without a dependencies: section is not a source" "$d" "$out" "$st"
+d=$(mklock clr4 "o/q@$A" </dev/null); mkwf clr4 "o/q/.github/workflows/w.yml@$A"
+p=$(prior_rec "o/untagged@$A" gone "$A" 7 | mkprior clr4); out=$(runp "$d" "$p"); st=$?
+[ "$st" = 0 ] && grep -qF "from the lock of o/q@$A" <<<"$out" \
+  && ok "a refused prior record falls through to the called repository's lock" || bad "prior → callee lock fallthrough — st=$st $out"
 
 echo "=== moved tag: a call-site '# <tag>' comment supplies ref: ==="
 plant o/r .github/workflows/cm.yml "$A" <<EOF
