@@ -77,6 +77,24 @@ git add "$sib/probe.scorecard.a2ml"
 if bash "$CHK" HEAD >/dev/null 2>&1; then bad "sibling archive escaped the guard"; else ok "sibling archive still guarded"; fi
 git rm -q --cached "$sib/probe.scorecard.a2ml"; rm -rf "$sib"
 
+echo "== 9-archive/ is frozen history and excluded whole =="
+# A record archived at its original path keeps the names of its day.
+frozen="9-archive/a2ml/.machine_readable/6a2/STATE.a2ml"
+mkdir -p "$(dirname "$frozen")"
+printf '[metadata]\nstatus = "frozen"\nsee = ".machine_readable/6a2/STATE.a2ml"\n' > "$frozen"
+git add "$frozen"
+if bash "$CHK" HEAD >/dev/null 2>&1; then ok "record under 9-archive/ excluded"; else bad "record under 9-archive/ wrongly blocked"; fi
+git rm -q --cached "$frozen"; rm -rf 9-archive
+# Planted positives: the prefix is anchored. A sibling that merely starts
+# with the name, and a nested .../9-archive/, are both still guarded.
+for probe in "9-archives/STATE.a2ml" "docs/9-archive/STATE.a2ml"; do
+  mkdir -p "$(dirname "$probe")"
+  printf 'see .machine_readable/6a2/STATE.a2ml\n' > "$probe"
+  git add "$probe"
+  if bash "$CHK" HEAD >/dev/null 2>&1; then bad "$probe escaped the guard"; else ok "$probe still guarded"; fi
+  git rm -q --cached "$probe"; rm -rf "${probe%%/*}"
+done
+
 echo "== the guard excludes 0-canon/CANONICAL-NAMES.adoc itself =="
 grep -q '0-canon/CANONICAL-NAMES.adoc' "$CHK" && ok "mandate doc is excluded from the guard" || bad "mandate doc not excluded"
 

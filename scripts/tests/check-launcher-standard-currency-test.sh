@@ -98,6 +98,12 @@ printf '# Compliant with launcher-standard_praxis.deed v0.3.0\n'      > "$WORK/t
 printf '# Compliant with launcher-standard.a2ml v0.4.0\n'             > "$WORK/tree/retired-but-current.toml"
 printf '# Compliant with launcher-standard_praxis.deed v0.4.0\n'      > "$WORK/tree/clean.toml"
 printf '# Compliant with launcher-standard.a2ml v0.1.0\n'             > "$WORK/tree/docs/audits/rec-2026-05-26.adoc"
+# 9-archive/ is frozen history: the worst mutant, archived at its original
+# path, must NOT be reported. The allowlist glob is anchored at the tree root,
+# so a sibling that merely starts with "9-archive" is still scanned.
+mkdir -p "$WORK/tree/9-archive/a2ml/docs/audits" "$WORK/tree/9-archive-not"
+printf '# Compliant with launcher-standard.a2ml v0.1.0\n'             > "$WORK/tree/9-archive/a2ml/docs/audits/rec-2026-05-26.adoc"
+printf '# Compliant with launcher-standard.a2ml v0.1.0\n'             > "$WORK/tree/9-archive-not/live.toml"
 
 out="$("$GATE" --root "$WORK/tree" --expect-version 0.4.0 2>&1)" || true
 
@@ -114,6 +120,8 @@ expect_hit 'retired-filename  retired-but-current.toml' 'retired filename even a
 expect_miss 'stale-version     retired-but-current'    'no spurious version defect when the version is current'
 expect_miss 'clean.toml'                               'fully-current reference'
 expect_miss 'docs/audits'                              'dated historical record is allowlisted'
+expect_miss '9-archive/a2ml'                           'frozen 9-archive/ record is allowlisted'
+expect_hit  'retired-filename  9-archive-not/live.toml' 'a sibling merely prefixed 9-archive is still scanned'
 
 echo
 echo "=== 5. exit codes ==="
