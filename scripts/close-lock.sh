@@ -66,7 +66,14 @@
 #      `gh actions-lock` rewrote it (`--prior FILE`; regen-dependabot-locks.sh
 #      passes it), used only when its commit is that SHA and its owner and repo
 #      ids are the ones the API returns now;
-#   2. the `# <tag>` comment at a call site of that SHA, in this repository's
+#   2. the record for that key in the CALLED repository's own actions.lock, at
+#      the ref it is called at, for each reusable whose external `uses:` names
+#      the key. This is the lock GitHub validates the called workflow against,
+#      and at a SHA pin it cannot change. It closes callers of
+#      standards@75bd5994, whose call site comments the pin `# stable` (a
+#      branch) and whose own lock records it as `ref: 'v1'`. The same commit
+#      and id checks apply;
+#   3. the `# <tag>` comment at a call site of that SHA, in this repository's
 #      workflows or in a called workflow read below.
 # The candidate's `ref:` is written only when it is a tag in that repository
 # NOW and its current commit descends from the SHA (compare status `ahead` or
@@ -145,11 +152,11 @@ uses_tags() {
         n = split(substr(v, 1, at - 1), a, "/"); if (n < 2 || a[1] == "" || a[2] == "") next
         print a[1] "/" a[2] "@" r t w[1] }'; } || true
 }
-# prior_record KEY: "ref<TAB>commit<TAB>owner_id<TAB>repo_id" of KEY's record in
-# the --prior lock (owner/repo compared case-insensitively), or nothing.
-prior_record() {
-  [ -n "$PRIOR" ] || return 0
-  awk -v k="$(printf '%s\n' "$1" | fold)" -v t="$TAB" '
+# lock_record FILE KEY: "ref<TAB>commit<TAB>owner_id<TAB>repo_id" of KEY's record
+# in the lock FILE (owner/repo compared case-insensitively), or nothing.
+lock_record() {
+  [ -s "$1" ] || return 0
+  awk -v k="$(printf '%s\n' "$2" | fold)" -v t="$TAB" '
     function fk(s,  at) { at = index(s, "@"); return tolower(substr(s, 1, at - 1)) substr(s, at) }
     /^dependencies:[[:space:]]*$/ { d = 1; next }
     d && /^[a-z_]+:/ { d = 0 }
@@ -159,7 +166,20 @@ prior_record() {
     on && /^        commit: '\''[^'\'']+'\''$/ { c = $0; sub(/^        commit: '\''/, "", c); sub(/'\''$/, "", c) }
     on && /^        owner_id: [0-9]+$/ { o = $2 }
     on && /^        repo_id: [0-9]+$/ { p = $2 }
-    END { if (r != "") print r t c t o t p }' "$PRIOR"
+    END { if (r != "") print r t c t o t p }' "$1"
+}
+# try_record LABEL FILE: when FILE holds a record for the leaf key $k whose
+# commit is $sha, whose ids are $ids, and whose ref: is a tag that moved forward
+# from $sha, set tag_ref and src. Otherwise add the reason to why and fail.
+try_record() {
+  local rr rc ro rp r
+  IFS="$TAB" read -r rr rc ro rp <<<"$(lock_record "$2" "$k")" || true
+  [ -n "$rr" ] || return 1
+  if [ "$rc" != "sha1-$sha" ]; then why="$why; $1: commit $rc"
+  elif [ "$ro $rp" != "$ids" ]; then why="$why; $1: ids $ro $rp, API $ids"
+  elif r=$(moved_tag "$owner" "$name" "$sha" "$rr"); then tag_ref="$rr"; src="$1"; return 0
+  else why="$why; $1 ref '$rr': $r"; fi
+  return 1
 }
 # moved_tag OWNER NAME SHA TAG: succeed when TAG is a tag of OWNER/NAME now (not
 # a branch, not a SHA) and its current commit descends from SHA, i.e. the tag
@@ -197,7 +217,7 @@ if [[ "$CHECK" -eq 1 ]]; then
 fi
 
 # ── reusable workflows: read each called file once, transitively ─────────────
-mkdir -p "$SC/u"; : > "$SC/read"; : > "$SC/bad"; : > "$SC/more"; : > "$SC/ctags"
+mkdir -p "$SC/u" "$SC/cl"; : > "$SC/read"; : > "$SC/bad"; : > "$SC/more"; : > "$SC/ctags"
 for f in "$WF"/*.yml "$WF"/*.yaml; do
   [ -e "$f" ] || continue
   uses_tags "$f" >> "$SC/ctags"
@@ -215,6 +235,15 @@ while :; do
       uses_values "$SC/body" | external_refs >> "$SC/u/$(keyfile "$k")"
       uses_values "$SC/body" | reusable_calls >> "$SC/more"
       uses_tags "$SC/body" >> "$SC/ctags"
+      # The called repository's own lock at that ref. GitHub validates the called
+      # workflow against it, and at a SHA pin it cannot change. A missing or
+      # malformed one is simply not a source: lock_record reads records only
+      # under a dependencies: section.
+      cl="$SC/cl/$(keyfile "$k")"
+      if [ ! -e "$cl" ]; then
+        "$GH_BIN" api "repos/$owner/$name/contents/.github/workflows/actions.lock?ref=$ref" \
+          -H 'Accept: application/vnd.github.raw' > "$cl" 2>/dev/null || : > "$cl"
+      fi
     else
       echo "  SKIP $k (cannot read $p at $ref)"; echo "$k" >> "$SC/bad"
     fi
@@ -307,12 +336,15 @@ for pass in 1 2 3 4 5 6; do
       fi
       # No current tag points at the SHA: try a moved tag (see MOVED TAGS).
       if [ -z "$tag_ref" ] && [ "$listed" -eq 1 ]; then
-        IFS="$TAB" read -r p_ref p_commit p_owner p_repo <<<"$(prior_record "$k")" || true
-        if [ -n "${p_ref:-}" ]; then
-          if [ "$p_commit" != "sha1-$sha" ]; then why="$why; prior record: commit $p_commit"
-          elif [ "$p_owner $p_repo" != "$ids" ]; then why="$why; prior record: ids $p_owner $p_repo, API $ids"
-          elif r=$(moved_tag "$owner" "$name" "$sha" "$p_ref"); then tag_ref="$p_ref"; src="the prior lock record"
-          else why="$why; prior ref '$p_ref': $r"; fi
+        if [ -n "$PRIOR" ]; then try_record "the prior lock record" "$PRIOR" || true; fi
+        if [ -z "$tag_ref" ]; then
+          kf="$(printf '%s\n' "$k" | fold)"
+          while IFS= read -r rk; do
+            uf="$SC/u/$(keyfile "$rk")"
+            if [ -f "$uf" ] && fold < "$uf" | grep -qxF "$kf"; then
+              if try_record "the lock of $rk" "$SC/cl/$(keyfile "$rk")"; then break; fi
+            fi
+          done < <(cut -f1 "$SC/calls" | LC_ALL=C sort -u)
         fi
         if [ -z "$tag_ref" ]; then
           while IFS= read -r c; do
