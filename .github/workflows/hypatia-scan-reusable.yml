@@ -22,6 +22,19 @@ on:
         type: string
         required: false
         default: "9-archive/"
+      report-backs-artifact:
+        description: >-
+          Name of an artifact, uploaded earlier in the same run, holding the
+          gitbot-fleet report-back envelopes (one <member>.json each; produced by
+          hyperpolymath/gitbot-fleet fleet-report-back-reusable.yml). It is
+          downloaded into .gitbot-fleet/report-backs/ before the verdict grid
+          renders, so each enrolled member's row carries its evidence instead of
+          "enrolled, but no report-back was received". A missing artifact is
+          tolerated and leaves those rows orange. Set to an empty string to
+          skip the download.
+        type: string
+        required: false
+        default: "fleet-report-backs"
       hypatia-ref:
         description: >-
           Hypatia commit to build the scanner from. Defaults to a vetted SHA so a
@@ -682,6 +695,22 @@ jobs:
             | jq -r '[.[][] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- verdict-grid:")))]
                      | last | .body // ""' \
             > "$RUNNER_TEMP/grid-previous.md" || : > "$RUNNER_TEMP/grid-previous.md"
+
+      # ── Fleet report-backs ─────────────────────────────────────────────────
+      # The envelopes are produced per run by the caller's fleet job (gitbot-fleet
+      # fleet-report-back-reusable.yml, or the same driver inline) and reach this
+      # job only as an artifact: they are evidence about THIS commit and are never
+      # committed. `continue-on-error`: a caller with no fleet job, or a fleet job
+      # that died, leaves every enrolled row orange, which is the truth. The
+      # directory is the one the renderer reads (--report-backs below); the
+      # committed README.md in it is not *.json and stays inert.
+      - name: Download the fleet report-backs
+        if: ${{ always() && inputs.report-backs-artifact != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.report-backs-artifact }}
+          path: .gitbot-fleet/report-backs
 
       - name: Render the verdict grid
         id: grid

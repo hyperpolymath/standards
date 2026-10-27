@@ -12,18 +12,25 @@ lives in the estate (it has `.machine_readable/`, it may have `.deed` and
 
 == 1. What you are turning on
 
-One workflow, four jobs, one comment:
+One workflow, five jobs, one comment:
 
 [source,yaml]
 ----
 jobs:
   deed:    uses: hyperpolymath/standards/.github/workflows/deed-conformance.yml@<SHA>
   k9:      uses: hyperpolymath/standards/.github/workflows/k9-conformance.yml@<SHA>
+  fleet:   uses: hyperpolymath/gitbot-fleet/.github/workflows/fleet-report-back-reusable.yml@<FLEET-SHA>
   hypatia: uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@<SHA>
   verdict: uses: hyperpolymath/standards/.github/workflows/fork-governance-reusable.yml@<SHA>
 ----
 
-The first three produce verdicts and artifacts. The fourth reads them from the
+`fleet` is not a lane: it produces the gitbot-fleet report-back envelopes that
+the Hypatia lane folds into its grid, one row per member enrolled in
+`.gitbot-fleet/enrolment.json`, and uploads them as the `fleet-report-backs`
+artifact. Without it every enrolled row reads orange, "enrolled, but no
+report-back was received". See <<fleet>>.
+
+The three lanes produce verdicts and artifacts. The posting engine reads them from the
 caller's `needs` graph — a reusable cannot see your jobs, so you pass the
 results in — and writes the comment.
 
@@ -67,8 +74,22 @@ jobs:
       require-files: true
       fail-on-indeterminate: false
 
+  # Produces .gitbot-fleet/report-backs/*.json as the `fleet-report-backs`
+  # artifact; the Hypatia lane downloads it before rendering. Pin a
+  # gitbot-fleet commit. If your Actions policy refuses a reusable workflow
+  # from another owner, use the inline form in section 8 instead.
+  fleet:
+    name: Fleet report-backs
+    uses: hyperpolymath/gitbot-fleet/.github/workflows/fleet-report-back-reusable.yml@<FLEET-SHA>
+    permissions:
+      contents: read
+
   hypatia:
     name: Hypatia verdict grid
+    # After the fleet job whatever its result: a dead fleet job renders as
+    # orange fleet rows, never as a missing lane.
+    needs: [fleet]
+    if: ${{ always() }}
     uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@<SHA>
     permissions:
       actions: read
@@ -164,3 +185,71 @@ holds nothing, and no repository state is created on a branch.
 
 An orphan comment left behind is worse than no rollout — it keeps claiming a
 verdict on every new revision. Delete it.
+
+[[fleet]]
+== 8. The fleet report-backs
+
+The Hypatia grid gives one row to every gitbot-fleet member the repository
+enrols. The rows are only as good as the evidence behind them, and the
+evidence is produced per run, never committed.
+
+=== 8.1 The enrolment manifest
+
+Create `.gitbot-fleet/enrolment.json`. State, for every member, whether it
+applies to this repository, with a reason when it does not:
+
+[source,json]
+----
+{ "schema": 1,
+  "reporters": {
+    "rhodibot":         { "title": "rhodibot (RSR compliance)", "enrolled": true },
+    "finishingbot":     { "title": "finishingbot (release readiness)", "enrolled": true },
+    "glambot":          { "title": "glambot (presentation quality)", "enrolled": true },
+    "accessibilitybot": { "enrolled": false, "reason": "no served HTML surface" },
+    "panicbot":         { "enrolled": false, "reason": "panic-attack already reports in this lane directly" },
+    "echidnabot":       { "enrolled": false, "reason": "no proofs in this repository" },
+    "seambot":          { "enrolled": false, "reason": "no seam register is declared" },
+    "cipherbot":        { "enrolled": false, "reason": "no cryptography is implemented" },
+    "sustainabot":      { "enrolled": false, "reason": "reserved fleet slot; no adapter exists" } } }
+----
+
+Enrol what is true of the repository, not what would look complete. A grey row
+with a reason is honest; an orange row forever is noise. Changing the manifest
+changes the grid's profile, so the next revision reads `— no comparable
+baseline` once, which is correct: the question changed.
+
+Also create `.gitbot-fleet/report-backs/` with a README saying the directory is
+empty on purpose (the lane fills it at render time). The rsr-template-repo
+carries both files.
+
+=== 8.2 The producer job
+
+With the reusable (repositories whose Actions policy allows a reusable workflow
+from `hyperpolymath`): the `fleet` job in section 2. The reusable builds only
+the enrolled adapters, caches the builds, runs gitbot-fleet's
+`scripts/fleet-report-back.sh`, and uploads `fleet-report-backs`.
+
+Inline (repositories under another owner, where a cross-owner reusable fails at
+plan time with zero jobs and no error line): check out
+`hyperpolymath/gitbot-fleet` at a pinned SHA with `actions/checkout`, run
+`scripts/fleet-report-back-build.sh` and `scripts/fleet-report-back.sh`, and
+upload the directory under the same artifact name. This repository's own
+`.github/workflows/fork-governance.yml` is the worked example; copy its `fleet`
+job.
+
+=== 8.3 What the lane does with it
+
+`hypatia-scan-reusable.yml` downloads the artifact named by its
+`report-backs-artifact` input (default `fleet-report-backs`) into
+`.gitbot-fleet/report-backs/` before rendering. A missing artifact is tolerated
+and leaves the enrolled rows orange. Pass `report-backs-artifact: ""` to opt
+out. The envelope contract is `docs/VERDICT-GRID-SPEC.adoc`; the producer is
+documented in gitbot-fleet's `docs/REPORT-BACK.adoc`.
+
+=== 8.4 Verify
+
+Open a pull request. Each enrolled member's row should read a state other than
+orange, or orange with a *reason* that names the member's own limitation
+(for example echidnabot without an ECHIDNA engine). A row that still reads
+"enrolled, but no report-back was received" means the artifact did not reach
+the lane: check the `fleet` job's summary table and the lane's download step.

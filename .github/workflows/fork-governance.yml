@@ -9,6 +9,13 @@
 #   2. K9-DEED conformance grid
 #   3. Hypatia verdict grid
 #
+# A fourth job, `fleet`, is not a lane: it produces the gitbot-fleet report-back
+# envelopes the Hypatia lane folds into its grid (one row per member enrolled in
+# .gitbot-fleet/enrolment.json). It runs first and uploads the
+# `fleet-report-backs` artifact; hypatia-scan-reusable.yml downloads it before
+# rendering. Without it every enrolled row reads orange. See 3-practice/
+# fork-governance/LANES.adoc ("The fleet report-backs").
+#
 # THIS WORKFLOW IS THE SINGLE PR-TIME ENTRY POINT for the three lanes. The lane
 # workflows keep their own `push` and `workflow_dispatch` triggers, and they
 # declare `workflow_call` here. Their `pull_request` triggers were removed on
@@ -70,8 +77,121 @@ jobs:
       # a gate that will be disabled by the first person it blocks.
       fail-on-indeterminate: false
 
+  # Fleet report-backs, produced BEFORE the Hypatia lane renders so each enrolled
+  # gitbot-fleet member's row carries evidence instead of "enrolled, but no
+  # report-back was received". Inline rather than `uses:` on purpose: this
+  # repository is owned by metadatastician and gitbot-fleet by hyperpolymath,
+  # and a reusable workflow refused by the Actions policy for crossing owners
+  # dies at plan time with zero jobs and no error line, which would take the
+  # whole governance run with it. Checking out another repository is plain git
+  # and is not subject to that policy. The steps mirror gitbot-fleet's
+  # fleet-report-back-reusable.yml; the build and run logic lives in the two
+  # scripts, so the duplication here is five YAML steps, not the recipe.
+  #
+  # The job never fails on an adapter: a missing, crashed or timed-out adapter
+  # is an `error` envelope with its reason. It fails only when the driver
+  # itself cannot run, and `hypatia` runs regardless (if: always()) so that
+  # case renders as orange fleet rows, never as a missing lane.
+  fleet:
+    name: Fleet report-backs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      # hyperpolymath/gitbot-fleet commit whose driver and adapters run. Bump
+      # deliberately; the envelope contract is docs/VERDICT-GRID-SPEC.adoc.
+      FLEET_REF: 68858e0951d34ba48bb5229dfee67edf9766783b
+      # panic-attack commit for panicbot, kept equal to PANIC_ATTACK_SHA in
+      # hypatia-scan-reusable.yml so both rows describe one tool.
+      PANIC_ATTACK_SHA: b689a74d2762a1c19839ae3fbd59b7fe5ef920ea
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Checkout gitbot-fleet at the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/gitbot-fleet
+          ref: ${{ env.FLEET_REF }}
+          path: .fleet-src
+          persist-credentials: false
+
+      - name: Plan which adapters to build
+        id: plan
+        run: |
+          set -euo pipefail
+          plan=$(bash .fleet-src/scripts/fleet-report-back.sh --plan --enrolment .gitbot-fleet/enrolment.json)
+          echo "plan:"; printf '%s\n' "$plan" | sed 's/^/  /'
+          crates=$(printf '%s\n' "$plan" | awk -F'\t' '$2 != "" {print $2}' | sort -u | tr '\n' ' ')
+          echo "crates=${crates% }" >> "$GITHUB_OUTPUT"
+          if printf '%s\n' "$plan" | awk -F'\t' '$1 == "panicbot" {f=1} END {exit !f}'; then echo panicbot=true; else echo panicbot=false; fi >> "$GITHUB_OUTPUT"
+          { echo "workspaces<<WS"; for c in $crates; do echo ".fleet-src/bots/$c -> target"; done; echo ".fleet-src/shared-context -> target"; echo WS; } >> "$GITHUB_OUTPUT"
+          if [ -n "${crates% }" ]; then echo build=true; else echo build=false; fi >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        if: steps.plan.outputs.build == 'true' || steps.plan.outputs.panicbot == 'true'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
+        with:
+          toolchain: stable
+
+      - name: Cache adapter builds
+        if: steps.plan.outputs.build == 'true'
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: ${{ steps.plan.outputs.workspaces }}
+          key: fleet-report-back-v1
+
+      - name: Restore panic-attack build cache
+        if: steps.plan.outputs.panicbot == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.panic-attack
+          key: panic-attack-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.PANIC_ATTACK_SHA }}
+
+      - name: Build the enrolled adapters
+        if: steps.plan.outputs.build == 'true' || steps.plan.outputs.panicbot == 'true'
+        env:
+          CRATES: ${{ steps.plan.outputs.crates }}
+          PANICBOT: ${{ steps.plan.outputs.panicbot }}
+        run: |
+          set -euo pipefail
+          args=(--fleet .fleet-src --bin-dir "$RUNNER_TEMP/fleet-bin" --crates "$CRATES")
+          [ "$PANICBOT" = true ] && args+=(--panic-attack "$PANIC_ATTACK_SHA")
+          bash .fleet-src/scripts/fleet-report-back-build.sh "${args[@]}"
+
+      - name: Run the enrolled adapters and write the envelopes
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fleet-bin" "$RUNNER_TEMP/report-backs"
+          bash .fleet-src/scripts/fleet-report-back.sh --repo . --out "$RUNNER_TEMP/report-backs" \
+            --bin-dir "$RUNNER_TEMP/fleet-bin" --enrolment .gitbot-fleet/enrolment.json \
+            --fleet-ref "$FLEET_REF" --summary "$GITHUB_STEP_SUMMARY"
+          ls "$RUNNER_TEMP/report-backs"/*.json >/dev/null 2>&1 \
+            || echo "No member is enrolled in .gitbot-fleet/enrolment.json." > "$RUNNER_TEMP/report-backs/NONE-ENROLLED.txt"
+
+      # The artifact name is hypatia-scan-reusable.yml's `report-backs-artifact`
+      # default; the lane downloads it into .gitbot-fleet/report-backs/ before
+      # rendering. Uploaded under always() so a failed adapter step still ships
+      # whatever envelopes were written.
+      - name: Upload the report-backs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fleet-report-backs
+          path: ${{ runner.temp }}/report-backs
+          if-no-files-found: error
+          retention-days: 90
+
   hypatia:
     name: Hypatia verdict grid
+    # After the fleet job, whatever its result: a dead fleet job must render as
+    # orange fleet rows, never as a missing Hypatia lane.
+    needs: [fleet]
+    if: ${{ always() }}
     uses: ./.github/workflows/hypatia-scan-reusable.yml
     permissions:
       actions: read
