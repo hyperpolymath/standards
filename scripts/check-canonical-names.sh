@@ -40,8 +40,7 @@ is_excluded() {
     0-canon/CANONICAL-NAMES.adoc|scripts/check-canonical-names.sh|scripts/tests/*|\
     *MIGRATION*|*migration*|*CHANGELOG*|\
     9-archive/*|\
-    .machine_readable/archive/scorecards-v1/*.scorecard.a2ml|\
-    standards-update/.machine_readable/6scm-archive/.machine_readable/6a2/*) return 0 ;;
+    .machine_readable/archive/scorecards-v1/*.scorecard.a2ml) return 0 ;;
   esac
   return 1
 }
