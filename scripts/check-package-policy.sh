@@ -143,6 +143,18 @@ effective_capabilities() {
   for f in "$ROOT"/.machine_readable/rsr-profile.a2ml "$ROOT"/machine-readable/rsr-profile.a2ml; do
     [ -f "$f" ] && found="$f" && break
   done
+  # Deed-era profile: an (rsr-profile …) clause of the repo's <repo>_chora.deed
+  # (the worked model, rsr-template-repo, has carried its profile there since
+  # it retired its last .a2ml). The resolver parses it; this is only discovery,
+  # so a clause token outside a ";" comment is enough to hand the deed over.
+  # estate_chora.deed is the estate-deed, never a repo deed.
+  if [ -z "$found" ]; then
+    for f in "$ROOT"/*_chora.deed; do
+      [ -f "$f" ] || continue
+      [ "$(basename "$f")" = estate_chora.deed ] && continue
+      if sed 's/;.*$//' "$f" | grep -q '(rsr-profile[[:space:])]'; then found="$f"; break; fi
+    done
+  fi
   [ -n "$found" ] || return 0
   if [ ! -f "$RSR_PROFILE_CHECKER" ]; then
     # Callers pinned to a governance-reusable from before 2026-10-01 copy this
@@ -276,7 +288,8 @@ fi
 if [ -z "$REQUIRED" ]; then
   echo "::notice::No packaging, and none required: the repo's rsr-profile declares" \
        "neither reproducible-build nor container." \
-       "A repo that ships a build should declare one in .machine_readable/rsr-profile.a2ml."
+       "A repo that ships a build should declare one in its repo deed's (rsr-profile …) clause" \
+       "(or the legacy .machine_readable/rsr-profile.a2ml)."
   echo "✅ Packaging not applicable (no packaging capability declared)."
   exit 0
 fi
@@ -294,7 +307,8 @@ echo
 echo "Add one of:"
 echo "  guix.scm | manifest.scm | channels.scm | .guix-channel   (primary; not a stub)"
 echo "  Containerfile with active RUN/CMD/ENTRYPOINT            (escape hatch)"
-echo "or remove the capability from .machine_readable/rsr-profile.a2ml if it is not real."
+echo "or remove the capability from the repo deed's (rsr-profile …) clause (or the legacy"
+echo ".machine_readable/rsr-profile.a2ml) if it is not real."
 echo
 echo "Files inside .git/ node_modules/ deps/ .lake/ vendor/ .clusterfuzzlite/ do not count."
 exit 1
