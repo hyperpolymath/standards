@@ -85,41 +85,66 @@ deed_clause() {
         print o; i = j + 1
       } else i++ } }'
 }
-# deed_toplevel : on stdin one clause; prints it with every NESTED clause
-# blanked, so only the clause's own fields remain for deed_scalar/deed_list.
-# A "(" directly after a :keyword opens a list value and is kept; any other
-# "(" at depth 1 opens a sub-clause such as (notes …), whose fields and
-# strings belong to it, not to the profile. Strings are skipped as units.
-deed_toplevel() {
-  awk 'BEGIN { dq = sprintf("%c", 34); bs = sprintf("%c", 92) }
-  { s = $0; n = length(s); o = ""; d = 0; q = 0; skip = 0; prev = ""
-    for (i = 1; i <= n; i++) { c = substr(s, i, 1)
-      if (q) { o = o (skip ? " " : c); if (c == bs) { i++; o = o (skip ? " " : substr(s, i, 1)) } else if (c == dq) { q = 0; prev = ""; tok = "" } continue }
-      if (c == dq) { q = 1; o = o (skip ? " " : c); continue }
+# deed_fields : on stdin one clause; prints the clause's OWN fields, one per
+# line, tab-separated: "S key value" for a string, "Y key value" for a symbol
+# or boolean, "U key body" for a uuid literal, "L key item" for each list item
+# (strings unquoted) and "E key" for an empty list. It walks tokens, so text
+# inside a string is never read as a field, a sub-clause such as (notes …) is
+# skipped whole, and layout (line breaks, spacing) does not matter. A key that
+# repeats keeps its first value. Earlier regex readers leaked each of these.
+deed_fields() {
+  awk 'BEGIN { dq = sprintf("%c", 34); bs = sprintf("%c", 92); OFS = "\t" }
+  function rstr(   v, e) { v = ""; i++
+    while (i <= n) { e = substr(s, i, 1)
+      if (e == bs) { v = v substr(s, i + 1, 1); i += 2; continue }
+      if (e == dq) { i++; return v }
+      v = v e; i++ }
+    return v }
+  function ratom(   v, e) { v = ""
+    while (i <= n) { e = substr(s, i, 1); if (e ~ /[[:space:]()]/ || e == dq) break; v = v e; i++ }
+    return v }
+  function skip(   d, e) { d = 0
+    while (i <= n) { e = substr(s, i, 1)
+      if (e == dq) { rstr(); continue }
+      if (e == "(") d++; else if (e == ")") { d--; if (d == 0) { i++; return } }
+      i++ } }
+  function emit(kind, v) { if (!dup) print kind, key, v }
+  { s = $0; n = length(s); i = 1
+    while (i <= n && substr(s, i, 1) != "(") i++
+    i++; ratom(); key = ""
+    while (i <= n) { c = substr(s, i, 1)
+      if (c ~ /[[:space:]]/) { i++; continue }
+      if (c == ")") break
+      if (c == dq) { v = rstr(); if (key != "") emit("S", v); key = ""; continue }
       if (c == "(") {
-        d++
-        if (d == 2 && !skip && prev !~ /^:/) { skip = d }
-        o = o (skip ? " " : c); prev = ""; continue }
-      if (c == ")") { o = o (skip ? " " : c); if (skip == d) skip = 0; d--; prev = ""; continue }
-      o = o (skip ? " " : c)
-      if (c ~ /[[:space:]]/) { if (tok != "") prev = tok; tok = "" } else tok = tok c
-    }
-    print o }'
+        if (key == "") { skip(); continue }
+        i++; cnt = 0
+        while (i <= n) { c = substr(s, i, 1)
+          if (c ~ /[[:space:]]/) { i++; continue }
+          if (c == ")") { i++; break }
+          if (c == "(") { skip(); continue }
+          if (c == dq) emit("L", rstr()); else emit("L", ratom())
+          cnt++ }
+        if (!cnt && !dup) print "E", key
+        key = ""; continue }
+      a = ratom()
+      if (a == "") { i++; continue }
+      if (substr(a, 1, 1) == ":") { key = substr(a, 2); dup = (key in seen); seen[key] = 1; continue }
+      if (key != "") { if (a ~ /^#u[0-9]+$/ && substr(s, i, 1) == dq) emit("U", rstr()); else emit("Y", a) }
+      key = "" }
+    exit }'
 }
 # deed_scalar <key> : from a clause on stdin, the string value of :<key>, or "".
-deed_scalar() { deed_toplevel | grep -oE ':'"$1"'[[:space:]]+"[^"]*"' | head -1 | sed -E 's/^[^"]*"//; s/"$//' || true; }
-# deed_list <key> : from a clause on stdin, the items of the flat list
-# :<key> ( … ), strings unquoted, symbols as written, one per line.
-deed_list() {
-  deed_toplevel | grep -oE ':'"$1"'[[:space:]]+\([^()]*\)' | head -1 | sed -E 's/^[^(]*\(//; s/\)$//' \
-    | grep -oE '"[^"]+"|[A-Za-z0-9][A-Za-z0-9._-]*' | tr -d '"' || true
-}
+deed_scalar() { deed_fields | awk -F '\t' -v k="$1" '$1 == "S" && $2 == k && !done { print $3; done = 1 }'; }
+# deed_list <key> : from a clause on stdin, the items of the list :<key> ( … ),
+# strings unquoted, symbols as written, one per line.
+deed_list() { deed_fields | awk -F '\t' -v k="$1" '$1 == "L" && $2 == k { print $3 }'; }
 
 DEED=""; DEED_PROFILE=""
 _deeds=()
 # estate_chora.deed is the estate-deed (deed.abnf filename dispatch reserves
 # that exact stem), never a second repo deed, so it does not count here.
-for _d in "$REPO"/*_chora.deed; do
+for _d in "$REPO"/*_chora.deed "$REPO"/.*_chora.deed; do
   [ -f "$_d" ] || continue
   [ "$(basename "$_d")" = "estate_chora.deed" ] && continue
   _deeds+=("$_d")
