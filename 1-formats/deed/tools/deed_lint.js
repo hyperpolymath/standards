@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // SPDX-License-Identifier: MPL-2.0
 // Port of deed_lint.py to plain JavaScript (bun, zero dependencies).
-const DOC = String.raw`deed-lint — conformance validator for the DEED grammar (deed.abnf v1.2.0).
+const DOC = String.raw`deed-lint — conformance validator for the DEED grammar (deed.abnf v1.2.1).
 
 Stdlib-only. Implements the normative grammar faithfully:
   * header = 1* spdx-line                 (";;" SP "SPDX-" …)
@@ -109,13 +109,35 @@ class Lexer {
           throw new LintError("bare CR is not a line-end (CRLF or LF only)", this.line());
         }
       } else if (c === ";") {
+        // comment = ";" *text-char line-end
+        const start = this.i;
         while (this.i < this.n && this.t[this.i] !== "\r" && this.t[this.i] !== "\n") this.i += 1;
+        if (this.i >= this.n) {
+          throw new LintError("comment has no line-end: a comment runs to CRLF or LF", this.line(start));
+        }
+        checkTextChars(this, start + 1, this.i, "comment");
         seen = 1;
       } else {
         break;
       }
     }
     return seen;
+  }
+}
+
+/**
+ * text-char = VCHAR / SP / UTF8-2 / UTF8-3 / UTF8-4: throw on a C0 control
+ * character or DEL in lx.t[from, to).
+ */
+function checkTextChars(lx, from, to, where) {
+  for (let k = from; k < to; k++) {
+    const o = lx.t.charCodeAt(k);
+    if (o < 0x20 || o === 0x7f) {
+      throw new LintError(
+        `${where} holds control character U+${o.toString(16).toUpperCase().padStart(4, "0")}`,
+        lx.line(k),
+      );
+    }
   }
 }
 
@@ -146,7 +168,7 @@ function lexString(lx) {
       continue;
     }
     const o = c.codePointAt(0);
-    if (o < 0x20) {
+    if (o < 0x20 || o === 0x7f) {
       throw new LintError(
         `raw control character U+${o.toString(16).toUpperCase().padStart(4, "0")} inside string (use legal escapes)`,
         lx.line(),
@@ -238,16 +260,20 @@ function lexHashForm(lx) {
   throw new LintError('unrecognised #-form: only #t, #f, #u5"…", #u8"…" are legal', lx.line());
 }
 
-/** list = "(" *(sep value) ")" — returns ["list", items]. */
+/**
+ * list = "(" [token-sep] [value *(token-sep value)] [token-sep] ")" — returns
+ * ["list", items]. Values after the first must be separated.
+ */
 function lexList(lx) {
   lx.i += 1;
   const items = [];
   for (;;) {
-    lx.skipSep();
+    const sep = lx.skipSep();
     if (lx.peek() === ")") {
       lx.i += 1;
       return ["list", items];
     }
+    if (items.length > 0 && !sep) throw new LintError("list values must be separated", lx.line());
     items.push(lexValue(lx));
   }
 }
@@ -255,7 +281,10 @@ function lexList(lx) {
 /** quoted = "'" value, where only symbols and lists may be quoted. */
 function lexQuoted(lx) {
   lx.i += 1;
-  lx.skipSep();
+  const nxt = lx.peek();
+  if (nxt && " \r\n;".includes(nxt)) {
+    throw new LintError("nothing may come between ' and the symbol or list it quotes", lx.line());
+  }
   const v = lexValue(lx);
   if (v[0] !== "symbol" && v[0] !== "list") {
     throw new LintError(`only symbols and lists may be quoted, not ${v[0]}`, lx.line());
@@ -319,13 +348,17 @@ function lexFieldOrClause(lx) {
     }
     const items = [];
     for (;;) {
-      lx.skipSep();
+      // clause = "(" symbol *(token-sep (field / clause)) [token-sep] ")"
+      const sep = lx.skipSep();
       if (lx.peek() === ")") {
         lx.i += 1;
         return ["clause", head[1], items];
       }
       if (lx.peek() === "" && lx.i >= lx.n) {
         throw new LintError(`unbalanced parens: clause (${head[1]}) never closes`, lx.line());
+      }
+      if (!sep) {
+        throw new LintError(`clause (${head[1]}) needs a separator before each field or clause`, lx.line());
       }
       items.push(lexFieldOrClause(lx));
     }
@@ -348,13 +381,15 @@ function parseForm(lx) {
     throw new LintError(`doc-head ${head[1]} must be followed by a separator before the first field`, lx.line());
   }
   const items = [];
-  for (;;) {
-    lx.skipSep();
+  // The separator after the doc-head was consumed above.
+  for (let first = true; ; first = false) {
+    const sep = lx.skipSep() || first;
     if (lx.peek() === ")") {
       lx.i += 1;
       break;
     }
     if (lx.peek() === "") throw new LintError("unbalanced parens: form never closes", lx.line());
+    if (!sep) throw new LintError("the form needs a separator before each field or clause", lx.line());
     items.push(lexFieldOrClause(lx));
   }
   const schema = items.filter((it) => it[0] === "field" && it[1] === "schema-version");
@@ -381,6 +416,8 @@ function parseHeader(lx) {
       if (eol === -1) throw new LintError("SPDX header line has no line-end", lx.line());
       const payload = lx.t.slice(lx.i + 8, eol);
       if (!payload.trim()) throw new LintError("SPDX header line is empty after ';; SPDX-'", lx.line());
+      // spdx-line = ";;" SP "SPDX-" 1*text-char line-end (CRLF or LF)
+      checkTextChars(lx, lx.i + 8, lx.t[eol - 1] === "\r" ? eol - 1 : eol, "SPDX header line");
       lx.i = eol + 1;
       count += 1;
       continue;
