@@ -198,6 +198,9 @@ rm -f "$d/.machine_readable/rsr-profile.a2ml"
 printf ';; SPDX-License-Identifier: CC-BY-SA-4.0\n(repo-deed :schema-version "1.0.0" :canonical-name ".github" :repo-uuid #u5"github.com/o/.github" :beholding-chora #u5"estate/chora"\n  (rsr-profile :version "1.0.0" :capabilities ("rust")))\n' > "$d/.github_chora.deed"
 assert "with dotglob on, a dot-led deed is still one deed" 0 ".github_chora.deed (rsr-profile …)" bash -O dotglob "$CHECK" "$d"
 
+d=$(repo_deed deedfailglob '  (rsr-profile :version "1.0.0" :capabilities ("rust"))')
+assert "with failglob on, one unmatched deed pattern does not abort the scan" 0 "deedfailglob_chora.deed (rsr-profile …)" bash -O failglob "$CHECK" "$d"
+
 echo "=== setup errors ==="
 assert "no profile → 2" 2 "no profile at" bash "$CHECK" "$WORK/does-not-exist"
 assert "missing gates table → 2" 2 "gates file not found" env RSR_GATES="$WORK/nope.toml" bash "$CHECK" "$(repo g)"

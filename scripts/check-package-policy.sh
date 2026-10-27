@@ -167,6 +167,9 @@ effective_capabilities() {
   # estate_chora.deed is the estate-deed, never a repo deed.
   if [ -z "$found" ]; then
     # ".*_chora.deed" too: the deed grammar allows a dot-led stem (.github).
+    # One of the two patterns normally has no match, so failglob must be off;
+    # dotglob would make the first match the dot-led deed as well.
+    shopt -u dotglob failglob
     for f in "$ROOT"/*_chora.deed "$ROOT"/.*_chora.deed; do
       [ -f "$f" ] || continue
       [ "$(basename "$f")" = estate_chora.deed ] && continue

@@ -151,8 +151,9 @@ _deeds=()
 # estate_chora.deed is the estate-deed (deed.abnf filename dispatch reserves
 # that exact stem), never a second repo deed, so it does not count here.
 # dotglob would make the first glob match .github_chora.deed too, and the
-# second would then count it twice.
-shopt -u dotglob
+# second would then count it twice. failglob would abort on whichever of
+# the two patterns has no match, which is the normal case.
+shopt -u dotglob failglob
 for _d in "$REPO"/*_chora.deed "$REPO"/.*_chora.deed; do
   [ -f "$_d" ] || continue
   [ "$(basename "$_d")" = "estate_chora.deed" ] && continue

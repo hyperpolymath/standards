@@ -109,5 +109,9 @@ d=$(repo deed-head-comment)
 deed "$d" deedheadcomment '  (rsr-profile; the profile\n    :version "1.0.0"\n    :capabilities ("container"))\n'
 assert "a comment straight after the clause head still separates it" 1 "Package policy violation" bash "$GATE" "$d"
 
+d=$(repo deed-failglob)
+deed "$d" deedfailglob '  (rsr-profile :version "1.0.0" :capabilities ("container"))\n'
+assert "with failglob on, discovery still finds the deed" 1 "Package policy violation" bash -O failglob "$GATE" "$d"
+
 printf '\npassed=%d failed=%d\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
