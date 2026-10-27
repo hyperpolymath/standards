@@ -85,12 +85,33 @@ deed_clause() {
         print o; i = j + 1
       } else i++ } }'
 }
+# deed_toplevel : on stdin one clause; prints it with every NESTED clause
+# blanked, so only the clause's own fields remain for deed_scalar/deed_list.
+# A "(" directly after a :keyword opens a list value and is kept; any other
+# "(" at depth 1 opens a sub-clause such as (notes …), whose fields and
+# strings belong to it, not to the profile. Strings are skipped as units.
+deed_toplevel() {
+  awk 'BEGIN { dq = sprintf("%c", 34); bs = sprintf("%c", 92) }
+  { s = $0; n = length(s); o = ""; d = 0; q = 0; skip = 0; prev = ""
+    for (i = 1; i <= n; i++) { c = substr(s, i, 1)
+      if (q) { o = o (skip ? " " : c); if (c == bs) { i++; o = o (skip ? " " : substr(s, i, 1)) } else if (c == dq) { q = 0; prev = ""; tok = "" } continue }
+      if (c == dq) { q = 1; o = o (skip ? " " : c); continue }
+      if (c == "(") {
+        d++
+        if (d == 2 && !skip && prev !~ /^:/) { skip = d }
+        o = o (skip ? " " : c); prev = ""; continue }
+      if (c == ")") { o = o (skip ? " " : c); if (skip == d) skip = 0; d--; prev = ""; continue }
+      o = o (skip ? " " : c)
+      if (c ~ /[[:space:]]/) { if (tok != "") prev = tok; tok = "" } else tok = tok c
+    }
+    print o }'
+}
 # deed_scalar <key> : from a clause on stdin, the string value of :<key>, or "".
-deed_scalar() { grep -oE ':'"$1"'[[:space:]]+"[^"]*"' | head -1 | sed -E 's/^[^"]*"//; s/"$//' || true; }
+deed_scalar() { deed_toplevel | grep -oE ':'"$1"'[[:space:]]+"[^"]*"' | head -1 | sed -E 's/^[^"]*"//; s/"$//' || true; }
 # deed_list <key> : from a clause on stdin, the items of the flat list
 # :<key> ( … ), strings unquoted, symbols as written, one per line.
 deed_list() {
-  grep -oE ':'"$1"'[[:space:]]+\([^()]*\)' | head -1 | sed -E 's/^[^(]*\(//; s/\)$//' \
+  deed_toplevel | grep -oE ':'"$1"'[[:space:]]+\([^()]*\)' | head -1 | sed -E 's/^[^(]*\(//; s/\)$//' \
     | grep -oE '"[^"]+"|[A-Za-z0-9][A-Za-z0-9._-]*' | tr -d '"' || true
 }
 

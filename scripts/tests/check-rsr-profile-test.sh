@@ -161,6 +161,10 @@ assert "…and its capabilities are the a2ml's (bash → rust sources are VESTIG
 d=$(repo_deed deedproseonly '  (notes :example "(rsr-profile :capabilities (\\"rust\\"))")')
 assert "profile-shaped text in a string with no a2ml is no profile at all" 2 "no (rsr-profile" bash "$CHECK" "$d"
 
+d=$(repo_deed deednested '  (rsr-profile :version "1.0.0" (notes :example "write :capabilities (bash) here" :role "spine") :capabilities ("rust"))')
+assert "fields are read from the profile clause itself, not from a nested (notes …) or its strings" 0 "effective capabilities: rust" bash "$CHECK" "$d"
+assert "…and a :role inside the nested clause is not the profile's role" 0 "rsr-profile check: OK" bash "$CHECK" "$d"
+
 echo "=== setup errors ==="
 assert "no profile → 2" 2 "no profile at" bash "$CHECK" "$WORK/does-not-exist"
 assert "missing gates table → 2" 2 "gates file not found" env RSR_GATES="$WORK/nope.toml" bash "$CHECK" "$(repo g)"
