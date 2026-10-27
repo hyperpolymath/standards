@@ -22,11 +22,23 @@
 # are not ignored, so a contributor sees a new file before committing it.
 # Outside git (fixtures) every file under ROOT is scanned.
 #
-# Usage: check-a2ml-archived.sh [ROOT]     (default: the current directory)
-# Exit:  0 clean · 1 violation · 2 setup error (no ledger, unreadable root)
+# With --base REF the ledger is also compared with its copy at REF: an entry
+# that REF did not list has JOINED the ledger and fails, whatever the line
+# count. (Archiving one file while ledgering a new one keeps the count, so a
+# count-only ratchet cannot see that swap.) A REF with no ledger yet is the
+# bootstrap and passes.
+#
+# Usage: check-a2ml-archived.sh [--base REF] [ROOT]   (ROOT defaults to .)
+# Exit:  0 clean · 1 violation · 2 setup error (no ledger, unreadable root,
+#        unresolvable REF)
 
 set -euo pipefail
 
+BASE=""
+if [ "${1:-}" = "--base" ]; then
+  [ -n "${2:-}" ] || { echo "ERROR: --base needs a ref" >&2; exit 2; }
+  BASE="$2"; shift 2
+fi
 ROOT="${1:-.}"
 LEDGER_REL=".machine_readable/a2ml-legacy-allow.txt"
 LEDGER="$ROOT/$LEDGER_REL"
@@ -37,21 +49,31 @@ A2ML_RE='\.a2ml(\.in|\.template|\.v[0-9]+\.template)?$'
 
 list_files() {
   if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git -C "$ROOT" ls-files -co --exclude-standard
+    # -z: without it git quotes unusual names (caf\303\251.a2ml in quotes),
+    # and the closing quote would hide the extension from the match below.
+    git -C "$ROOT" ls-files -z -co --exclude-standard
   else
-    (cd "$ROOT" && find . -type f ! -path './.git/*' | sed 's|^\./||')
+    (cd "$ROOT" && find . -type f ! -path './.git/*' -printf '%P\0')
   fi
+}
+
+# ledger_entries: on stdin a ledger; prints "<line>\t<entry>" per entry,
+# comments and blank lines dropped.
+ledger_entries() {
+  local raw entry n=0
+  while IFS= read -r raw || [ -n "$raw" ]; do
+    n=$((n + 1))
+    entry="${raw%%#*}"
+    entry="${entry#"${entry%%[![:space:]]*}"}"
+    entry="${entry%"${entry##*[![:space:]]}"}"
+    [ -n "$entry" ] && printf '%s\t%s\n' "$n" "$entry"
+  done
+  return 0
 }
 
 declare -A listed=()
 fail=0
-lineno=0
-while IFS= read -r raw || [ -n "$raw" ]; do
-  lineno=$((lineno + 1))
-  entry="${raw%%#*}"
-  entry="${entry#"${entry%%[![:space:]]*}"}"
-  entry="${entry%"${entry##*[![:space:]]}"}"
-  [ -z "$entry" ] && continue
+while IFS=$'\t' read -r lineno entry; do
   case "$entry" in
     *'*'*|*'?'*|*'['*)
       echo "::error file=$LEDGER_REL,line=$lineno::ledger entry '$entry' is a pattern; list exact paths only"
@@ -65,12 +87,29 @@ while IFS= read -r raw || [ -n "$raw" ]; do
     fail=1; continue
   fi
   listed[$entry]="$lineno"
-done < "$LEDGER"
+done < <(ledger_entries < "$LEDGER")
+
+if [ -n "$BASE" ]; then
+  git -C "$ROOT" rev-parse --verify -q "$BASE^{commit}" >/dev/null \
+    || { echo "ERROR: --base $BASE does not resolve to a commit" >&2; exit 2; }
+  if base_ledger="$(git -C "$ROOT" show "$BASE:$LEDGER_REL" 2>/dev/null)"; then
+    declare -A was=()
+    while IFS=$'\t' read -r _ entry; do was[$entry]=1; done < <(printf '%s\n' "$base_ledger" | ledger_entries)
+    for entry in "${!listed[@]}"; do
+      if [ -z "${was[$entry]:-}" ]; then
+        echo "::error file=$LEDGER_REL,line=${listed[$entry]}::ledger entry '$entry' is not in the ledger at $BASE: nothing joins it (A2ML is retired)"
+        fail=1
+      fi
+    done
+  else
+    echo "::notice::$LEDGER_REL is new since $BASE: bootstrap, no membership comparison"
+  fi
+fi
 
 declare -A present=()
 live=0
 archived=0
-while IFS= read -r f; do
+while IFS= read -r -d '' f; do
   [ -n "$f" ] || continue
   [ -e "$ROOT/$f" ] || continue          # deleted in the work tree, not yet committed
   case "$f" in
@@ -83,7 +122,7 @@ while IFS= read -r f; do
     echo "::error file=$f::A2ML file outside 9-archive/ and not in $LEDGER_REL. A2ML is retired: write a .deed or .k9.ncl instead, or archive it under 9-archive/a2ml/ at its original path"
     fail=1
   fi
-done < <(list_files | grep -E "$A2ML_RE" || true)
+done < <(list_files | grep -zE "$A2ML_RE" || true)
 
 for entry in "${!listed[@]}"; do
   if [ -z "${present[$entry]:-}" ]; then

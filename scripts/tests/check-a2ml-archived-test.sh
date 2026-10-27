@@ -88,6 +88,27 @@ if command -v git >/dev/null 2>&1; then
   assert "an untracked, unignored file is scanned before commit" 1 "UNTRACKED.a2ml" bash "$GATE" "$d"
   rm "$d/UNTRACKED.a2ml" "$d/LIVE.a2ml"
   assert "a ledgered file deleted from the work tree leaves a stale entry" 1 "'LIVE.a2ml' names no A2ML file" bash "$GATE" "$d"
+
+  d=$(repo gitbase)
+  git -C "$d" init -q && git -C "$d" add -A && git -C "$d" -c user.email=t@t -c user.name=t commit -qm init
+  assert "--base with the same ledger passes" 0 "a2ml archive gate: OK" bash "$GATE" --base HEAD "$d"
+  # The swap a count-only ratchet cannot see: one file archived, one joins.
+  git -C "$d" mv LIVE.a2ml 9-archive/a2ml/LIVE.a2ml
+  : > "$d/JOINER.a2ml"
+  sed -i 's/^LIVE\.a2ml .*/JOINER.a2ml/' "$d/.machine_readable/a2ml-legacy-allow.txt"
+  assert "a swapped entry keeps the count but fails --base" 1 "'JOINER.a2ml' is not in the ledger at HEAD" bash "$GATE" --base HEAD "$d"
+  assert "the same swap without --base is only caught by the base comparison" 0 "-" bash "$GATE" "$d"
+  assert "an unresolvable --base is a setup error" 2 "does not resolve" bash "$GATE" --base no-such-ref "$d"
+
+  d=$(repo gitboot); rm "$d/.machine_readable/a2ml-legacy-allow.txt"; : > "$d/.machine_readable/keep"
+  git -C "$d" init -q && git -C "$d" add -A && git -C "$d" -c user.email=t@t -c user.name=t commit -qm init
+  printf 'LIVE.a2ml\n' > "$d/.machine_readable/a2ml-legacy-allow.txt"
+  assert "a ledger new since --base is the bootstrap and passes" 0 "bootstrap" bash "$GATE" --base HEAD "$d"
+
+  d=$(repo gitquoted)
+  git -C "$d" init -q && : > "$d/$(printf 'caf\303\251.a2ml')"
+  git -C "$d" add -A && git -C "$d" -c user.email=t@t -c user.name=t commit -qm init
+  assert "a tracked non-ASCII name is still scanned (git would quote it)" 1 "$(printf 'caf\303\251.a2ml')" bash "$GATE" "$d"
 else
   echo "FAIL: git is required for the work-tree cases"; fail=$((fail + 1))
 fi
