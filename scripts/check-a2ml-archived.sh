@@ -111,7 +111,9 @@ live=0
 archived=0
 while IFS= read -r -d '' f; do
   [ -n "$f" ] || continue
-  [ -e "$ROOT/$f" ] || continue          # deleted in the work tree, not yet committed
+  # Skip only an entry deleted from the work tree. A dangling symlink fails
+  # -e but is still a tracked A2ML path, so -L keeps it in the scan.
+  [ -e "$ROOT/$f" ] || [ -L "$ROOT/$f" ] || continue
   case "$f" in
     9-archive/*) archived=$((archived + 1)); continue ;;
   esac

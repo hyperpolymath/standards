@@ -105,6 +105,11 @@ if command -v git >/dev/null 2>&1; then
   printf 'LIVE.a2ml\n' > "$d/.machine_readable/a2ml-legacy-allow.txt"
   assert "a ledger new since --base is the bootstrap and passes" 0 "bootstrap" bash "$GATE" --base HEAD "$d"
 
+  d=$(repo gitsymlink)
+  git -C "$d" init -q && ln -s no-such-target "$d/LINKED.a2ml"
+  git -C "$d" add -A && git -C "$d" -c user.email=t@t -c user.name=t commit -qm init
+  assert "a tracked dangling A2ML symlink is still scanned" 1 "LINKED.a2ml" bash "$GATE" "$d"
+
   d=$(repo gitquoted)
   git -C "$d" init -q && : > "$d/$(printf 'caf\303\251.a2ml')"
   git -C "$d" add -A && git -C "$d" -c user.email=t@t -c user.name=t commit -qm init
