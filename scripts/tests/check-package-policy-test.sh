@@ -105,5 +105,9 @@ d=$(repo deed-dotname)
 deed "$d" .github '  (rsr-profile :version "1.0.0" :capabilities ("container"))\n'
 assert "a dot-prefixed repo deed (.github_chora.deed) is discovered" 1 "Package policy violation" bash "$GATE" "$d"
 
+d=$(repo deed-head-comment)
+deed "$d" deedheadcomment '  (rsr-profile; the profile\n    :version "1.0.0"\n    :capabilities ("container"))\n'
+assert "a comment straight after the clause head still separates it" 1 "Package policy violation" bash "$GATE" "$d"
+
 printf '\npassed=%d failed=%d\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

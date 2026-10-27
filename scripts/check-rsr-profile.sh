@@ -88,15 +88,20 @@ deed_clause() {
 # deed_fields : on stdin one clause; prints the clause's OWN fields, one per
 # line, tab-separated: "S key value" for a string, "Y key value" for a symbol
 # or boolean, "U key body" for a uuid literal, "L key item" for each list item
-# (strings unquoted) and "E key" for an empty list. It walks tokens, so text
+# (strings unquoted), "LU key body" for a uuid literal inside a list (never a
+# capability) and "E key" for an empty list. It walks tokens, so text
 # inside a string is never read as a field, a sub-clause such as (notes …) is
 # skipped whole, and layout (line breaks, spacing) does not matter. A key that
 # repeats keeps its first value. Earlier regex readers leaked each of these.
 deed_fields() {
   awk 'BEGIN { dq = sprintf("%c", 34); bs = sprintf("%c", 92); OFS = "\t" }
-  function rstr(   v, e) { v = ""; i++
+  function rstr(   v, e, x) { v = ""; i++
     while (i <= n) { e = substr(s, i, 1)
-      if (e == bs) { v = v substr(s, i + 1, 1); i += 2; continue }
+      # An escaped quote or backslash decodes to that character. The n and t
+      # escapes stay as written: decoding them to the bare letter would make
+      # "spi" + escaped n + "e" read as spine, and a real newline or tab would
+      # break the one-field-per-line output.
+      if (e == bs) { x = substr(s, i + 1, 1); v = v ((x == "n" || x == "t") ? e x : x); i += 2; continue }
       if (e == dq) { i++; return v }
       v = v e; i++ }
     return v }
@@ -123,7 +128,8 @@ deed_fields() {
           if (c ~ /[[:space:]]/) { i++; continue }
           if (c == ")") { i++; break }
           if (c == "(") { skip(); continue }
-          if (c == dq) emit("L", rstr()); else emit("L", ratom())
+          if (c == dq) emit("L", rstr())
+          else { a = ratom(); if (a ~ /^#u[0-9]+$/ && substr(s, i, 1) == dq) emit("LU", rstr()); else emit("L", a) }
           cnt++ }
         if (!cnt && !dup) print "E", key
         key = ""; continue }
@@ -144,6 +150,9 @@ DEED=""; DEED_PROFILE=""
 _deeds=()
 # estate_chora.deed is the estate-deed (deed.abnf filename dispatch reserves
 # that exact stem), never a second repo deed, so it does not count here.
+# dotglob would make the first glob match .github_chora.deed too, and the
+# second would then count it twice.
+shopt -u dotglob
 for _d in "$REPO"/*_chora.deed "$REPO"/.*_chora.deed; do
   [ -f "$_d" ] || continue
   [ "$(basename "$_d")" = "estate_chora.deed" ] && continue

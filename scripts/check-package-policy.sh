@@ -146,7 +146,7 @@ deed_has_profile() {
       if (q) { if (c == bs) i++; else if (c == dq) q = 0; continue }
       if (c == dq) { q = 1; continue }
       if (c == ";") break
-      if (c == "(" && substr($0, i, 12) == "(rsr-profile" && (i + 12 > n || substr($0, i + 12, 1) ~ /[[:space:])]/)) { found = 1; exit } } }
+      if (c == "(" && substr($0, i, 12) == "(rsr-profile" && (i + 12 > n || substr($0, i + 12, 1) ~ /[[:space:]);]/)) { found = 1; exit } } }
   END { exit !found }' "$1"
 }
 
