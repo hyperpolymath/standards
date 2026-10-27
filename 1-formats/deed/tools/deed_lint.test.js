@@ -55,6 +55,11 @@ describe("embedded self-test cases", () => {
 
 // fixture filename -> regex the failure message must match (rule it names)
 const RULE = {
+  "incomment-control_chora.deed": /comment holds control character U\+0001/,
+  "incomment-no-line-end_chora.deed": /comment has no line-end/,
+  "indel-string_chora.deed": /raw control character U\+007F inside string/,
+  "inheader-control_chora.deed": /SPDX header line holds control character U\+0001/,
+  "inquote-space_chora.deed": /nothing may come between '/,
   "inequals_chora.deed": /'=' as a field separator/,
   "inescape-u_chora.deed": /illegal escape/,
   "inhead_chora.deed": /invalid doc-head/,
@@ -96,6 +101,35 @@ describe("fixtures/invalid", () => {
 });
 
 describe("extra rules", () => {
+  test("text-chars only: a bare CR or DEL in a header line or comment is refused", () => {
+    const form = '(repo-deed :schema-version "1")\n';
+    expect(verdict(";; SPDX-License-Identifier: CC-B\rY-SA-4.0\n" + form)).toMatch(/SPDX header line holds control character U\+000D/);
+    expect(verdict(";; SPDX-License-Identifier: CC-BY-SA-4.0\r\n" + form)).toBeNull();
+    expect(verdict(HDR + "; a \x7f\n" + form)).toMatch(/comment holds control character U\+007F/);
+    expect(verdict(HDR + form + "; last comment\r\n")).toBeNull();
+  });
+
+  test("a separator before every field, clause and list value after the first", () => {
+    const H = HDR + '(repo-deed :schema-version "1"';
+    for (const ok of [' :a "x" :b "y")', " :a () :b ( ) :c (\n  x\n  ; c\n  y\n))", " (c :a \"x\") (d))", " (c\n:a 1))"]) {
+      expect(verdict(H + ok + "\n")).toBeNull();
+    }
+    expect(verdict(H + ' :a "x":b "y")\n')).toMatch(/form needs a separator/);
+    expect(verdict(H + ' :a "x"(c))\n')).toMatch(/form needs a separator/);
+    expect(verdict(H + " :a 1(c))\n")).toMatch(/form needs a separator/);
+    expect(verdict(H + ' (c :a "x")(d))\n')).toMatch(/form needs a separator/);
+    expect(verdict(H + ' (c:a "x"))\n')).toMatch(/clause \(c\) needs a separator/);
+    expect(verdict(H + ' (c :a "x"(d)))\n')).toMatch(/clause \(c\) needs a separator/);
+    expect(verdict(H + ' :a ("A""B"))\n')).toMatch(/list values must be separated/);
+    expect(verdict(H + " :a (x(y)))\n")).toMatch(/list values must be separated/);
+  });
+
+  test("quote: nothing between ' and what it quotes", () => {
+    expect(verdict(HDR + "(repo-deed :schema-version \"1\" :a 'sym :b '(x y))\n")).toBeNull();
+    expect(verdict(HDR + "(repo-deed :schema-version \"1\" :a ' sym)\n")).toMatch(/nothing may come between '/);
+    expect(verdict(HDR + "(repo-deed :schema-version \"1\" :a ';c\nsym)\n")).toMatch(/nothing may come between '/);
+  });
+
   test("filename dispatch mismatch", () => {
     expect(verdict(HDR + '(repo-deed :schema-version "1")\n', "x_praxis.deed")).toMatch(/doc-head\/filename mismatch/);
   });
