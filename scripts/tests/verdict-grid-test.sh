@@ -90,6 +90,36 @@ check "member not enrolled is grey" grey "$(row "$WORK/o7" glambot)"
 check "an advisory red does not set the gating state" green "$(state "$WORK/o7")"
 check "the advisory red is still reported and named" yes \
   "$(grep -q 'Advisory: .*worst .*' "$WORK/o7/report.md" && grep -q '🔴' "$WORK/o7/report.md" && echo yes)"
+check "advisory severity totals explicitly name the grid scope" yes \
+  "$(grep -q 'Advisory: .*critical, .*high in grid scope.*reported, never grading' "$WORK/o7/report.md" && echo yes)"
+# A global advisory may still carry critical/high standing debt while the
+# delta-scoped suffix correctly reports zero graded findings.
+pan_scope="$WORK/pan-scope.json"
+cat > "$pan_scope" <<'JSON'
+{"status":"ran","tool":"panic-attack","ref":"abc","reason":null,"exit_code":0,"report":{"weak_points":[
+ {"category":"C1","file":"legacy/one.rs","severity":"Critical","description":"standing"},
+ {"category":"C2","file":"legacy/two.rs","severity":"Critical","description":"standing"},
+ {"category":"C3","file":"legacy/three.rs","severity":"Critical","description":"standing"},
+ {"category":"C4","file":"legacy/four.rs","severity":"Critical","description":"standing"},
+ {"category":"C5","file":"legacy/five.rs","severity":"Critical","description":"standing"},
+ {"category":"H1","file":"legacy/six.rs","severity":"High","description":"standing"}
+]}}
+JSON
+printf '%s\n' 'src/touched.adoc' > "$WORK/advisory-changed.txt"
+render "$WORK/o7-scope" --hypatia "$hyp_clean" --panic "$pan_scope" --pons "$pons_clean" \
+  --changed "$WORK/advisory-changed.txt"
+check "standing panic criticals stay out of scoped advisory suffix" 0 \
+  "$(jq '.advisory.critical' "$WORK/o7-scope/report.json")"
+check "standing panic highs stay out of scoped advisory suffix" 0 \
+  "$(jq '.advisory.high' "$WORK/o7-scope/report.json")"
+check "the standing panic criticals remain fully reported" 5 \
+  "$(jq --arg id panic-attack '.reporters[] | select(.id == $id) | .counts_standing.critical' "$WORK/o7-scope/report.json")"
+check "the standing panic high remains fully reported" 1 \
+  "$(jq --arg id panic-attack '.reporters[] | select(.id == $id) | .counts_standing.high' "$WORK/o7-scope/report.json")"
+check "the advisory header calls its zero counts grid-scoped" yes \
+  "$(grep -q 'Advisory: .*0 critical, 0 high in grid scope' "$WORK/o7-scope/report.md" && echo yes)"
+check "the row details still disclose the standing severity counts" yes \
+  "$(grep -q '5 critical, 1 high' "$WORK/o7-scope/report.md" && echo yes)"
 check "the row itself is still red, and marked advisory" yes \
   "$(grep -q '| rhodibot (RSR) | advisory | 🔴' "$WORK/o7/report.md" && echo yes)"
 check "the grey reason is shown" yes "$(grep -q 'no served HTML' "$WORK/o7/report.md" && echo yes)"

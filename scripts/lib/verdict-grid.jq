@@ -262,7 +262,7 @@ def render(prev):
   # "purple" from a reporter that cannot block a merge and "purple" from one
   # that can are different facts, and used to look identical.
   + (if (($r.advisory.rows // 0) > 0)
-       then "Advisory: \($r.advisory.rows) row(s), worst \($r.advisory.state | state_label) (\($r.advisory.critical) critical, \($r.advisory.high) high) — reported, never grading the change.\n"
+       then "Advisory: \($r.advisory.rows) row(s), worst \($r.advisory.state | state_label) (\($r.advisory.critical) critical, \($r.advisory.high) high in grid scope) — reported, never grading the change.\n"
        else "" end)
   + "\n| Reporter | Gate | Status | Critical | High | Medium | Minor | Since previous revision |\n|---|---|---|---:|---:|---:|---:|---|\n"
   + ([ $r.reporters[]
