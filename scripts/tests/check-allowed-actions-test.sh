@@ -8,7 +8,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/workflows"
 cat > "$WORK/allowed-actions.json" <<'JSON'
-{"patterns_allowed": ["Swatinem/rust-cache@*", "ExampleOrg/*", "Tools/build-*@*"]}
+{"github_owned_allowed":true,"patterns_allowed": ["Swatinem/rust-cache@*", "ExampleOrg/*", "Tools/build-*@*", "metadatastician/standards/.github/workflows/*@*", "pinned/action@v1"]}
 JSON
 pass=0
 fail=0
@@ -34,10 +34,33 @@ expect 0 'SWATINEM/RUST-CACHE@v2' 'owner and repository case are ignored'
 expect 0 'exampleorg/repo/.github/workflows/build.yml@Release' 'owner wildcard covers mixed-case reusable workflow'
 expect 0 'TOOLS/BUILD-helper@v1' 'repository glob ignores case'
 expect 0 'Actions/Checkout@v4' 'GitHub-owned action ignores case'
+expect 0 'metadatastician/standards/.github/workflows/governance-reusable.yml@abc' 'narrow canonical reusable pattern is accepted'
+expect 0 'METADATASTICIAN/STANDARDS/.github/workflows/x.yml@abc' 'narrow pattern ignores owner/repo case'
+expect 1 'metadatastician/standards/other/action@abc' 'narrow reusable pattern does not allow another path'
+expect 1 'metadatastician/standards/.GITHUB/workflows/x.yml@abc' 'workflow path components remain case-sensitive'
+expect 1 'metadatastician/standards@abc' 'narrow reusable pattern does not allow the repository root'
+expect 1 'metadatastician/another/.github/workflows/x.yml@abc' 'narrow reusable pattern does not allow another repository'
+expect 0 'pinned/action@v1' 'specific allowed ref matches exactly'
+expect 1 'pinned/action@v2' 'specific allowed ref does not allow another version'
+expect 1 'pinned/action/nested@v1' 'repository-only pattern does not widen to subpaths'
+expect 1 'pinned/action@V1' 'action refs remain case-sensitive'
 expect 1 'unlisted/rust-cache@v2' 'unlisted owner is rejected'
 expect 1 'swatinem/other@v2' 'unlisted repository is rejected'
 expect 1 'exampleorg-extra/repo@v1' 'owner wildcard cannot match a different owner'
 expect 1 'tools/test-helper@v1' 'repository glob still rejects nonmatching names'
+
+# GitHub-owned creators are not implicitly allowed when the flag is disabled.
+jq '.github_owned_allowed = false' "$WORK/allowed-actions.json" > "$WORK/disabled.json"
+mv "$WORK/disabled.json" "$WORK/allowed-actions.json"
+expect 1 'actions/checkout@v4' 'disabled GitHub-owned flag is respected'
+
+for policy in config/settings/actions-allowlist.json rhodium-standard-repositories/actions-allowlist/allowed-actions.json; do
+  if jq -e '.patterns_allowed | index("metadatastician/standards/.github/workflows/*@*") != null' "$ROOT/$policy" >/dev/null; then
+    echo "PASS: $policy carries the narrow reusable allowance"; pass=$((pass + 1))
+  else
+    echo "FAIL: $policy is missing the narrow reusable allowance"; fail=$((fail + 1))
+  fi
+done
 
 printf '\nallowlist regression: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

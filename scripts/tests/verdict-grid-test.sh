@@ -26,7 +26,31 @@ check() {
     echo "FAIL: $label expected=$expected got=$got"; fail=$((fail + 1))
   fi
 }
-render() { bash "$GRID" render --out "$1" "${@:2}" >/dev/null; }
+# Existing grid controls use a synthetic SARIF projection of the raw fixture.
+# Tests that exercise projection/baselines explicitly supply --hypatia-sarif.
+render() {
+  local out="$1" raw="" explicit=false sarif="$1.fixture.sarif"; shift
+  local args=("$@") i
+  for ((i=0; i<${#args[@]}; i++)); do
+    [ "${args[i]}" = --hypatia ] && raw="${args[i+1]}"
+    [ "${args[i]}" = --hypatia-sarif ] && explicit=true
+  done
+  if [ -n "$raw" ] && [ "$explicit" = false ]; then
+    if jq -e -s 'length == 1 and (.[0] | type == "array")' "$raw" >/dev/null 2>&1; then
+      jq '{version:"2.1.0",runs:[{tool:{driver:{name:"Hypatia"}},results:
+        [.[] | {ruleId:("hypatia/" + (.rule_module // "r") + "/" + (.type // "t")),
+          level:(if .severity == "critical" or .severity == "high" then "error"
+                 elif .severity == "medium" or .severity == "warn" then "warning"
+                 elif .severity == "info" or .severity == "low" then "note" else "invalid" end),
+          message:{text:(.reason // "")}, locations:[{physicalLocation:{artifactLocation:{uri:(.file // "")}}}],
+          properties:{"hypatia.severity":.severity,"hypatia.originalLine":.line,"hypatia.class":.type}}]}]}' "$raw" > "$sarif"
+    else
+      cp "$raw" "$sarif"
+    fi
+    args+=(--hypatia-sarif "$sarif")
+  fi
+  bash "$GRID" render --out "$out" "${args[@]}" >/dev/null
+}
 state() { jq -r .state "$1/report.json"; }
 row() { jq -r --arg id "$2" '.reporters[] | select(.id == $id) | .state' "$1/report.json"; }
 
@@ -130,6 +154,16 @@ render "$WORK/o8" --hypatia "$hyp_clean" --panic "$pan_clean" --pons "$pons_clea
 # it must remain visible as missing advisory evidence, never as clean.
 check "an unreadable enrolment manifest still surfaces as missing evidence" yes \
   "$(grep -q 'Advisory: .*🟠 indeterminate' "$WORK/o8/report.md" && echo yes)"
+mkdir "$WORK/malformed-backs"
+printf '%s\n' '{"status":"ran","findings":null}' > "$WORK/malformed-backs/no-findings.json"
+printf '%s\n' '{"status":"ran","findings":[42]}' > "$WORK/malformed-backs/bad-finding.json"
+printf '%s\n' '{"reporter":42,"status":"ran","findings":[]}' > "$WORK/malformed-backs/bad-id.json"
+printf '%s\n' '{"reporter":"","status":"ran","findings":[]}' > "$WORK/malformed-backs/empty-id.json"
+render "$WORK/malformed-backs-out" --hypatia "$hyp_clean" --panic "$pan_clean" --pons "$pons_clean" --report-backs "$WORK/malformed-backs"
+for id in no-findings bad-finding bad-id empty-id; do
+  check "malformed report-back $id is an orange row" orange "$(row "$WORK/malformed-backs-out" "$id")"
+done
+check "malformed advisory rows do not erase a valid gating result" green "$(state "$WORK/malformed-backs-out")"
 
 # 6. Escaping: untrusted text cannot break the table or inject markup.
 echo '[{"severity":"high","rule_module":"r","type":"t</details><script>x</script>","file":"a|b","reason":"line one\nline two"}]' > "$WORK/hyp-esc.json"
@@ -149,6 +183,10 @@ render "$WORK/d5" --hypatia "$hyp_clean" --panic "$pan_not" --pons "$pons_clean"
 check "a changed evidence status is not an improvement" 1 "$(grep -c '— evidence changed' "$WORK/d5/report.md")"
 check "baseline round-trips" aaaa "$(bash "$GRID" baseline "$WORK/d1/report.md" | jq -r .sha)"
 check "a garbled baseline reads as null" null "$(printf '<!-- verdict-grid-baseline:xxxx -->' > "$WORK/garbled.md"; bash "$GRID" baseline "$WORK/garbled.md")"
+old_baseline=$(bash "$GRID" baseline "$WORK/d1/report.md" | jq -c '.schema = 2' | base64 -w0)
+printf '<!-- verdict-grid-baseline:%s -->\n' "$old_baseline" > "$WORK/schema2.md"
+render "$WORK/d-old" --hypatia "$hyp_clean" --panic "$pan_clean" --pons "$pons_clean" --pr 7 --sha old --previous "$WORK/schema2.md"
+check "schema-2 raw JSON counts are not compared with schema-3 SARIF counts" 3 "$(grep -c 'no comparable baseline' "$WORK/d-old/report.md")"
 
 # 8. Scope: what the grid is allowed to GRADE.
 #    The failures that matter here are the quiet ones -- a delta grid that
@@ -211,5 +249,99 @@ render "$WORK/s7" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --p
 check "a change of scope is not a comparable baseline" 3 "$(grep -c 'no comparable baseline' "$WORK/s7/report.md")"
 
 echo
+# 11. The grid grades the exact SARIF set the blocking gate sees, not the
+# raw JSON's historical alert echoes or findings removed by a baseline.
+cat > "$WORK/raw-alerts.json" <<'JSON'
+[{"rule_module":"code_scanning_alerts","type":"CSA003","severity":"critical","file":"old.rs","line":9,"reason":"historical"},
+ {"rule_module":"dependabot_alerts","type":"DA001","severity":"high","file":"dep.lock","line":2,"reason":"alert"},
+ {"rule_module":"code_safety","type":"removed_by_baseline","severity":"high","file":"old.rs","line":3,"reason":"accepted"},
+ {"rule_module":"workflow_audit","type":"reusable_call_to_moved_repository","severity":"low","advisory":true,"file":".github/workflows/a.yml","line":1,"reason":"moved"}]
+JSON
+cat > "$WORK/empty.sarif" <<'JSON'
+{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Hypatia"}},"results":[]}]}
+JSON
+render "$WORK/projected" --hypatia "$WORK/raw-alerts.json" --hypatia-sarif "$WORK/empty.sarif" --panic "$pan_clean" --pons "$pons_clean"
+check "raw critical echo and baselined high do not grade" green "$(row "$WORK/projected" hypatia)"
+check "alert-derived raw inventory is separately counted" 2 "$(jq '.hypatia_alerts.total' "$WORK/projected/report.json")"
+check "alert inventory names each alert module" 1 "$(jq '.hypatia_alerts.by_module.code_scanning_alerts' "$WORK/projected/report.json")"
+check "alert inventory is labelled raw and not an extra total" yes "$(grep -q 'Raw Hypatia alert-derived observations: 2' "$WORK/projected/report.md" && echo yes)"
+check "WF028 is surfaced separately without grading" yes "$(grep -q 'JSON-only below-threshold advisories: 1' "$WORK/projected/report.md" && grep -q 'WF028' "$WORK/projected/report.md" && echo yes)"
+render "$WORK/missing-sarif" --hypatia "$hyp_clean" --hypatia-sarif "$WORK/missing" --panic "$pan_clean" --pons "$pons_clean"
+check "missing SARIF is orange even if raw JSON is clean" orange "$(row "$WORK/missing-sarif" hypatia)"
+# A syntactically valid but structurally broken JSON inventory cannot crash the
+# renderer or make the raw alert inventory look complete.
+echo '[{"severity":"high"}, "not-a-finding"]' > "$WORK/malformed-inventory.json"
+render "$WORK/malformed-inventory" --hypatia "$WORK/malformed-inventory.json" --hypatia-sarif "$WORK/empty.sarif" --panic "$pan_clean" --pons "$pons_clean"
+check "malformed JSON inventory is disclosed as unavailable" false "$(jq '.hypatia_alerts.available' "$WORK/malformed-inventory/report.json")"
+check "valid SARIF still grades independently of malformed inventory" green "$(row "$WORK/malformed-inventory" hypatia)"
+# A valid SARIF skeleton with malformed nested fields is orange, not a jq
+# crash which would leave the summary without any state.
+for badfield in properties locations message; do
+  jq --arg field "$badfield" '.runs[0].results = [{ruleId:"hypatia/x/y",level:"error",($field):42}]' "$WORK/empty.sarif" > "$WORK/bad-$badfield.sarif"
+  render "$WORK/bad-$badfield-out" --hypatia "$hyp_clean" --hypatia-sarif "$WORK/bad-$badfield.sarif" --panic "$pan_clean" --pons "$pons_clean"
+  check "malformed SARIF $badfield is indeterminate" orange "$(row "$WORK/bad-$badfield-out" hypatia)"
+done
+jq '.runs[0].results = [{ruleId:"hypatia/x/y",level:"warning",properties:false}]' "$WORK/empty.sarif" > "$WORK/bad-bool.sarif"
+render "$WORK/bad-bool-out" --hypatia "$hyp_clean" --hypatia-sarif "$WORK/bad-bool.sarif" --panic "$pan_clean" --pons "$pons_clean"
+check "false SARIF properties are malformed, not absent" orange "$(row "$WORK/bad-bool-out" hypatia)"
+render "$WORK/unverified" --hypatia "$hyp_clean" --hypatia-sarif "$WORK/empty.sarif" --hypatia-baseline-unverified --panic "$pan_clean" --pons "$pons_clean"
+check "unverified baseline filtering is orange" orange "$(row "$WORK/unverified" hypatia)"
+
+# 12. Corroboration is deliberately conservative: only a known relative
+# path, real line and matching class/CWE merge; severity is the worst. Each
+# reporter's row retains its own count, including duplicates within a row.
+cat > "$WORK/overlap.sarif" <<'JSON'
+{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Hypatia"}},"results":[
+ {"ruleId":"hypatia/security/unsafe_block","level":"error","message":{"text":"one"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"./src/a.rs"}}}],"properties":{"hypatia.severity":"high","hypatia.originalLine":12,"hypatia.class":"CWE-079"}}]}]}
+JSON
+cat > "$WORK/overlap-pan.json" <<'JSON'
+{"status":"ran","report":{"weak_points":[
+ {"category":"PanicPath","cwe":"CWE-79","file":"src/./a.rs","line":12,"severity":"Critical","description":"two"},
+ {"category":"PanicPath","cwe":"CWE-79","file":"src/a.rs","line":12,"severity":"High","description":"duplicate in same row"},
+ {"category":"PanicPath","cwe":"CWE-79","file":"src/a.rs","severity":"High","description":"no line"},
+ {"category":"PanicPath","cwe":"CWE-80","file":"src/a.rs","line":12,"severity":"High","description":"different class"}]}}
+JSON
+cat > "$WORK/overlap-pons.json" <<'JSON'
+{"status":"ran","report":{"findings":[{"rule_id":"some-rule","cwe":79,"severity":"WARN","location":{"file":"src/a.rs","line_start":12},"message":"three"}]}}
+JSON
+render "$WORK/overlap" --hypatia "$hyp_clean" --hypatia-sarif "$WORK/overlap.sarif" --panic "$WORK/overlap-pan.json" --pons "$WORK/overlap-pons.json"
+check "per-row panic counts are not deduplicated" 4 "$(jq '[.reporters[] | select(.id == "panic-attack") | .findings_graded[]] | length' "$WORK/overlap/report.json")"
+check "six observations become four unique findings" 4 "$(jq '.unique_total' "$WORK/overlap/report.json")"
+check "raw reporter observation total is retained" 6 "$(jq '.reported_total' "$WORK/overlap/report.json")"
+check "three reporters corroborate the shared finding" 'hypatia,panic-attack,pons-asinorum' "$(jq -r '.unique_findings[] | select((.corroborated_by | length) == 3) | .corroborated_by | join(",")' "$WORK/overlap/report.json")"
+check "deduplicated finding keeps worst severity" critical "$(jq -r '.unique_findings[] | select((.corroborated_by | length) == 3) | .severity' "$WORK/overlap/report.json")"
+check "missing line is not correlated" 1 "$(jq '.uncorrelatable_total' "$WORK/overlap/report.json")"
+# Decimal line numbers are not real source coordinates, even if two tools
+# happen to repeat them; conservative correlation must keep both observations.
+jq '.runs[0].results[0].properties["hypatia.originalLine"] = 12.5' "$WORK/overlap.sarif" > "$WORK/decimal.sarif"
+jq '.report.findings[0].location.line_start = 12.5' "$WORK/overlap-pons.json" > "$WORK/decimal-pons.json"
+render "$WORK/decimal-out" --hypatia "$hyp_clean" --hypatia-sarif "$WORK/decimal.sarif" --panic "$pan_clean" --pons "$WORK/decimal-pons.json"
+check "fractional source lines are never corroborated" 2 "$(jq '.unique_total' "$WORK/decimal-out/report.json")"
+check "fractional lines are recorded as uncorrelatable" 2 "$(jq '.uncorrelatable_total' "$WORK/decimal-out/report.json")"
+# Hypatia's upstream SARIF renderer replaces an absolute path OUTSIDE the
+# checkout with its basename. Its provenance must prevent that basename from
+# corroborating a real in-repository path, without changing SARIF grading.
+jq '.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri = "a.rs" |
+    .runs[0].results[0].properties["hypatia.originalFile"] = "/outside/a.rs"' "$WORK/overlap.sarif" > "$WORK/outside.sarif"
+jq '.report.findings[0].location.file = "a.rs"' "$WORK/overlap-pons.json" > "$WORK/outside-pons.json"
+render "$WORK/outside-out" --hypatia "$hyp_clean" --hypatia-sarif "$WORK/outside.sarif" --panic "$pan_clean" --pons "$WORK/outside-pons.json"
+check "outside path collapsed to basename does not corroborate" 2 "$(jq '.unique_total' "$WORK/outside-out/report.json")"
+check "outside path remains explicitly uncorrelatable" 1 "$(jq '.uncorrelatable_total' "$WORK/outside-out/report.json")"
+# URI schemes are not repository-relative filesystem paths either.
+jq '.runs[0].results[0].properties["hypatia.originalFile"] = "file:///tmp/a.rs"' "$WORK/outside.sarif" > "$WORK/uri.sarif"
+render "$WORK/uri-out" --hypatia "$hyp_clean" --hypatia-sarif "$WORK/uri.sarif" --panic "$pan_clean" --pons "$WORK/outside-pons.json"
+check "URI schemes cannot be used as repository-relative identity" 1 "$(jq '.uncorrelatable_total' "$WORK/uri-out/report.json")"
+check "advisory critical cannot promote the gating row" red "$(state "$WORK/overlap")"
+
+# 13. Fleet report-backs follow Kin Arbiter precedence, not file order.
+mkdir -p "$WORK/priority"
+for id in accessibilitybot zeta rhodibot echidnabot alpha glambot panicbot; do
+  jq -n --arg id "$id" '{reporter:$id,status:"ran",findings:[]}' > "$WORK/priority/$id.json"
+done
+render "$WORK/priority-out" --hypatia "$hyp_clean" --panic "$pan_clean" --pons "$pons_clean" --report-backs "$WORK/priority"
+check "fleet rows follow canonical Arbiter order with deterministic unknown tail" \
+  'echidnabot,rhodibot,panicbot,glambot,accessibilitybot,alpha,zeta' \
+  "$(jq -r '[.reporters[3:][] | .id] | join(",")' "$WORK/priority-out/report.json")"
+
 echo "verdict-grid-test: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -8,7 +8,9 @@
 # Usage:
 #   verdict-grid.sh render --out DIR [sources] [identity]
 #     sources
-#       --hypatia FILE        Hypatia findings array (paths relativised)
+#       --hypatia FILE        Raw Hypatia findings array (alert/advisory counts only)
+#       --hypatia-sarif FILE  Baseline-filtered Hypatia SARIF (authoritative grade)
+#       --hypatia-baseline-unverified  Baseline present but its SARIF filter did not complete
 #       --panic FILE          panic-attack status envelope
 #       --pons FILE           pons asinorum status envelope
 #       --report-backs DIR    gitbot-fleet report-back envelopes, one *.json per member
@@ -50,8 +52,8 @@ source_record() {
   local kind="$1" name="$2" file="${3:-}"
   if [ -z "$file" ] || [ ! -e "$file" ]; then
     jq -n --arg k "$kind" --arg n "$name" '{kind: $k, name: $n, present: false, valid: false, doc: null}'
-  elif [ -s "$file" ] && jq -e . "$file" >/dev/null 2>&1; then
-    jq -c --arg k "$kind" --arg n "$name" '{kind: $k, name: $n, present: true, valid: true, doc: .}' "$file"
+  elif [ -s "$file" ] && jq -e -s 'length == 1' "$file" >/dev/null 2>&1; then
+    jq -c -s --arg k "$kind" --arg n "$name" '{kind: $k, name: $n, present: true, valid: true, doc: .[0]}' "$file"
   else
     jq -n --arg k "$kind" --arg n "$name" '{kind: $k, name: $n, present: true, valid: false, doc: null}'
   fi
@@ -77,13 +79,16 @@ case "$cmd" in
     baseline_of "$1"
     ;;
   render)
-    out="" hyp="" pan="" pon="" backs="" enrol="" prev="" lane="hypatia"
+    out="" hyp="" sarif="" pan="" pon="" backs="" enrol="" prev="" lane="hypatia"
+    baseline_verified=true
     sha="" run="local" url="" pr="local" repo="" href="" pref="" qref=""
     changed="" excludes=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --out) out="$2"; shift 2 ;;
         --hypatia) hyp="$2"; shift 2 ;;
+        --hypatia-sarif) sarif="$2"; shift 2 ;;
+        --hypatia-baseline-unverified) baseline_verified=false; shift ;;
         --panic) pan="$2"; shift 2 ;;
         --pons) pon="$2"; shift 2 ;;
         --report-backs) backs="$2"; shift 2 ;;
@@ -110,6 +115,7 @@ case "$cmd" in
     sources=$(mktemp); trap 'rm -f "$sources"' EXIT
     {
       source_record hypatia hypatia "$hyp"
+      source_record hypatia-sarif hypatia-sarif "$sarif"
       source_record panic panic-attack "$pan"
       source_record pons pons-asinorum "$pon"
       if [ -n "$backs" ] && [ -d "$backs" ]; then
@@ -164,8 +170,9 @@ case "$cmd" in
       --arg profile "$profile" --arg lane "$lane" --arg sha "$sha" --arg run "$run" --arg url "$url" \
       --arg pr "$pr" --arg repo "$repo" --argjson dirty "$dirty" --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       --arg href "$href" --arg pref "$pref" --arg qref "$qref" \
-      --argjson scope "$scope" \
-      '{sources: $sources[0], enrolment: $enrolment, profile: $profile, scope: $scope,
+      --argjson scope "$scope" --arg root "$PWD" --argjson baseline_verified "$baseline_verified" \
+      '{sources: $sources[0], enrolment: $enrolment, profile: $profile, scope: $scope, root: $root,
+        hypatia_baseline_verified: $baseline_verified,
         identity: {lane: $lane, sha: $sha, run: $run, url: $url, pr: $pr, repo: $repo, dirty: $dirty,
                    generated: $generated, refs: {hypatia: $href, panic: $pref, pons: $qref}}}' \
       | jq --arg mode build --argjson previous null -f "$JQ_LIB" > "$out/report.json"

@@ -115,6 +115,17 @@ check "blue means minor findings" \
 check "overall blue badge says minor findings" \
   "grep -q '\"message\": \"minor findings\"' '$d/badge.json'"
 
+echo "== cross-family colour precedence =="
+d="$TMP/blue-vs-yellow"; render "$d" --deed-result success --k9-result success --k9-verdict yellow \
+  --hypatia-result success --hypatia-verdict blue
+check "yellow conformance debt outranks blue minor findings" "grep -q '\"color\": \"yellow\"' '$d/badge.json'"
+d="$TMP/blue-vs-orange"; render "$d" --deed-result success --k9-result success --k9-verdict orange \
+  --hypatia-result success --hypatia-verdict blue
+check "orange missing evidence outranks blue minor findings" "grep -q '\"color\": \"orange\"' '$d/badge.json'"
+d="$TMP/red-vs-purple"; render "$d" --deed-result failure --k9-result success --k9-verdict green \
+  --hypatia-result success --hypatia-verdict purple
+check "purple critical is not masked by red" "grep -q '\"color\": \"blueviolet\"' '$d/badge.json'"
+
 echo "== DEED lane =="
 d="$TMP/e"; render "$d" --deed-result success --k9-result success --k9-verdict green \
   --k9-report "$grid_k9" --hypatia-result success --hypatia-verdict green --hypatia-report "$grid_hyp"
