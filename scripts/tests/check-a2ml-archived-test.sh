@@ -23,4 +23,24 @@ if [ "$got" -ne 1 ]; then
   echo "FAIL a live .a2ml should exit 1, got $got"
   exit 1
 fi
+# The isolated fixture above proves the rule can fire. The checked-out
+# repository also must pass, and a mutation of ITS actual index must be caught.
+ROOT="$(git -C "$(dirname "$SCRIPT")" rev-parse --show-toplevel)"
+( cd "$ROOT" && bash "$SCRIPT" ) >/dev/null || {
+  echo "FAIL: actual checked-out repository violates the A2ML archive policy"
+  exit 1
+}
+# Overlay a temporary index; never modify the working tree or real git index.
+INDEX="$WORK/checked-out-index"
+GIT_INDEX_FILE="$INDEX" git -C "$ROOT" read-tree HEAD
+BLOB="$(git -C "$ROOT" rev-parse HEAD:README.adoc)"
+GIT_INDEX_FILE="$INDEX" git -C "$ROOT" update-index --add \
+  --cacheinfo "100644,$BLOB,gate-firing-probe.a2ml"
+got=0
+( cd "$ROOT" && GIT_INDEX_FILE="$INDEX" bash "$SCRIPT" ) >/dev/null 2>&1 || got=$?
+if [ "$got" -ne 1 ]; then
+  echo "FAIL: adding a tracked A2ML file to the real repo's temporary index returned $got, expected 1"
+  exit 1
+fi
+echo "ok checked-out tree is clean and an index-only live A2ML mutation is rejected"
 echo "ok a2ml archive guard can fail and can pass"
