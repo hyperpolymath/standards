@@ -49,7 +49,7 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
   exit 2
 fi
 BASE_REF="$1"
-DEBT="${2:-.machine_readable/Debtfile.a2ml}"
+DEBT="${2:-.machine_readable/debt_praxis.deed}"
 
 fail=0
 note() { printf '  %s\n' "$*"; }
@@ -59,15 +59,41 @@ note() { printf '  %s\n' "$*"; }
 # been adopted yet), not an error.
 ceilings_at() {
   local ref="$1" blob
-  blob="$(git show "${ref}:${DEBT}" 2>/dev/null)" || return 0
-  printf '%s\n' "$blob" | awk '
-    { line = $0; sub(/^[ \t]+/, "", line) }
-    line ~ /^### /            { id = substr(line, 5); next }
-    line ~ /^- ceiling: / && id != "" {
-      v = substr(line, 12); gsub(/[ \t\r]/, "", v)
-      print id, v; id = ""
-    }
-  '
+  local path="$DEBT"
+  # Migration boundary: compare the old A2ML baseline against the new deed,
+  # instead of silently interpreting the removed file as deleted debt.
+  if ! blob="$(git show "${ref}:${path}" 2>/dev/null)"; then
+    if [ "$DEBT" = ".machine_readable/debt_praxis.deed" ]; then
+      path=".machine_readable/Debtfile.a2ml"
+      blob="$(git show "${ref}:${path}" 2>/dev/null)" || return 0
+    else
+      return 0
+    fi
+  fi
+  if [ "${path##*.}" = "deed" ]; then
+    printf '%s\n' "$blob" | awk '
+      /\(entry[[:space:]]/ {
+        id=""; ceiling=""
+        if (match($0, /:id[[:space:]]+[a-zA-Z0-9_-]+/))
+          id=substr($0, RSTART+4, RLENGTH-4)
+        if (match($0, /:ceiling[[:space:]]+[0-9]+/)) {
+          ceiling=substr($0, RSTART+8, RLENGTH-8)
+          gsub(/[[:space:]]/, "", ceiling)
+        }
+        if (id != "" && ceiling ~ /^[0-9]+$/) print id, ceiling
+        else { print "Malformed deed debt entry" > "/dev/stderr"; exit 2 }
+      }
+    '
+  else
+    printf '%s\n' "$blob" | awk '
+      { line = $0; sub(/^[ \t]+/, "", line) }
+      line ~ /^### /            { id = substr(line, 5); next }
+      line ~ /^- ceiling: / && id != "" {
+        v = substr(line, 12); gsub(/[ \t\r]/, "", v)
+        print id, v; id = ""
+      }
+    '
+  fi
 }
 
 # Does the pull request declare that a SPECIFIC entry may rise or vanish?
