@@ -120,8 +120,8 @@ declared_for() {
   return 1
 }
 
-before_list="$(ceilings_at "$BASE_REF")"
-after_list="$(ceilings_at "HEAD")"
+before_list="$(ceilings_at "$BASE_REF")" || { echo "debt ratchet: unable to parse baseline" >&2; exit 1; }
+after_list="$(ceilings_at "HEAD")" || { echo "debt ratchet: unable to parse current debt" >&2; exit 1; }
 
 if [ -z "$before_list" ] && [ -z "$after_list" ]; then
   echo "Debt ratchet: no Debtfile at ${BASE_REF} or HEAD — nothing to ratchet."
