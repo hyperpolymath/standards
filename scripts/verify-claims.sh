@@ -242,21 +242,29 @@ deed_unquote() {
 deed_sym() { local rest="${1#*$2 }"; printf '%s' "${rest%% *}" | tr -d ')'; }
 
 if [ "${CLAIMS##*.}" = "deed" ]; then
-  while IFS= read -r raw; do
-    case "$raw" in *'(claim '*) ;; *) continue ;; esac
+  # Parse logical S-expression clauses, not physical lines: a (claim head may
+  # span lines and the final file need not have a trailing newline.
+  # A parse error is fatal before any command-transcript verification runs.
+  deed_clauses="$(mktemp)"
+  extractor="$(cd "$(dirname "$0")" && pwd)/lib/extract-deed-claims.py"
+  if ! python3 "$extractor" "$CLAIMS" > "$deed_clauses"; then
+    rm -f "$deed_clauses"
+    exit 2
+  fi
+  while IFS= read -r raw || [ -n "$raw" ]; do
     in_claim=1
     id="$(deed_sym "$raw" :id)"
     class="$(deed_sym "$raw" :claim-class)"
     verifier="$(deed_sym "$raw" :verifier)"
-    expect=""; target=""; statement=""
+    expect=""; target=""; statement=""; not_before=""
     case "$raw" in *':expect "'*) expect="$(deed_unquote "${raw#*:expect }")" ;; esac
     case "$raw" in *':target "'*) target="$(deed_unquote "${raw#*:target }")" ;; esac
     case "$raw" in *':statement "'*) statement="$(deed_unquote "${raw#*:statement }")" ;; esac
-    not_before=""
     case "$raw" in *':not-before "'*) not_before="$(deed_unquote "${raw#*:not-before }")" ;; esac
     emit
     in_claim=0
-  done < "$CLAIMS"
+  done < "$deed_clauses"
+  rm -f "$deed_clauses"
 else
   while IFS= read -r raw; do
     line="${raw#"${raw%%[![:space:]]*}"}"
@@ -276,6 +284,11 @@ else
     esac
   done < "$CLAIMS"
   emit
+fi
+
+if [ "$n" -eq 0 ]; then
+  echo "error: no claims were verified" >&2
+  exit 2
 fi
 
 echo "DYADT verify: $CLAIMS (base: ${BASE:-<none>})"
