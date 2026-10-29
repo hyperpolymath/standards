@@ -301,6 +301,36 @@ expect 0 "indented list items still parse" <<'EOF'
   - accepted-until: 2030-01-01
 EOF
 
+# The live Deed representation must retain the A2ML invariants.
+expect_deed() { # exit label; deed text via stdin
+  local want="$1" label="$2" got=0
+  cat > debt_praxis.deed
+  bash "$SCRIPT" debt_praxis.deed >/dev/null 2>&1 || got=$?
+  if [ "$got" = "$want" ]; then pass=$((pass+1)); echo "  ok    $label"
+  else fail=$((fail+1)); echo "  FAIL  $label (wanted exit $want, got $got)"; fi
+}
+expect_deed 0 "deed with quoted expiry, measured debt and unique id is valid" <<'EOF'
+(praxis-deed
+  (entry :id foo :severity high :policy remediable :count 1 :ceiling 2 :accepted-until "2030-01-01" :probe "echo 1")
+)
+EOF
+expect_deed 1 "deed with duplicate id is rejected" <<'EOF'
+(praxis-deed
+  (entry :id foo :severity high :policy remediable :count 1 :ceiling 2 :accepted-until "2030-01-01" :probe "echo 1")
+  (entry :id foo :severity low :policy flag-only :count 1 :ceiling 2 :accepted-until "2030-01-01" :probe "echo 1")
+)
+EOF
+expect_deed 1 "deed count greater than ceiling is rejected" <<'EOF'
+(praxis-deed
+  (entry :id foo :severity high :policy remediable :count 3 :ceiling 2 :accepted-until "2030-01-01" :probe "echo 3")
+)
+EOF
+expect_deed 1 "deed unquoted expiry is rejected" <<'EOF'
+(praxis-deed
+  (entry :id foo :severity high :policy remediable :count 1 :ceiling 2 :accepted-until 2030-01-01 :probe "echo 1")
+)
+EOF
+
 got=0; bash "$SCRIPT" no-such-file.a2ml >/dev/null 2>&1 || got=$?
 if [ "$got" = 2 ]; then pass=$((pass+1)); echo "  ok    a missing Debtfile exits 2, distinct from a structural defect"
 else fail=$((fail+1)); echo "  FAIL  missing file (wanted exit 2, got $got)"; fi
