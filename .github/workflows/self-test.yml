@@ -86,6 +86,28 @@ jobs:
       - name: Run tests/*.sh and scripts/tests/*.sh
         run: bash scripts/run-shell-test-suite.sh
 
+      # The suite above runs with whatever `awk` this image offers, and on
+      # ubuntu-latest that is gawk. mawk is the default awk on a plain Debian or
+      # Ubuntu install, and it rejects gawk-only constructs at parse time, so a
+      # script can be green here and dead on a contributor's machine (or on a
+      # slimmer runner) with "awk: syntax error at or near ,". Re-run the awk-
+      # heavy regression suite with `awk` shadowed by mawk so that class of
+      # breakage fails CI. Add a test here when a gate's correctness depends on
+      # awk program text; scripts/prune-stale.sh is exempt because it probes for
+      # gawk and fails closed with a clear message instead.
+      - name: awk-dependent gates also run under mawk
+        run: |
+          set -euo pipefail
+          if ! command -v mawk >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends mawk
+          fi
+          shim="$RUNNER_TEMP/awk-shim"
+          mkdir -p "$shim"
+          ln -sf "$(command -v mawk)" "$shim/awk"
+          echo "awk -> $(PATH="$shim:$PATH" awk -W version 2>&1 | head -1)"
+          PATH="$shim:$PATH" bash scripts/tests/check-lock-sync-test.sh
+
       # KYAML ratchet (YAML-POLICY Y-3, §5 step 5, standards#1024): every file
       # already converted must stay KYAML. A file joins this list in the PR that
       # converts it and never leaves it. Workflows are not listed here (step 6,

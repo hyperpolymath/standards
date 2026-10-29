@@ -121,15 +121,22 @@ FILENAME == lockfile {
   if (!inwf) next
 
   # "    '.github/workflows/x.yml':"  or  "... : []"
-  if (match($0, /^    '"'"'([^'"'"']+)'"'"':/, m)) {
-    cur = m[1]
+  # POSIX awk only: mawk has no 3-argument match(), so the key is extracted
+  # by hand (drop the indent and the opening quote, then cut at the next quote).
+  if (match($0, /^    \047[^\047]+\047:/)) {
+    s = substr($0, 6)
+    i = index(s, "\047")
+    cur = substr(s, 1, i - 1)
     seen_path[cur] = 1
-    if ($0 ~ /\[\][[:space:]]*$/) cur_has_inline_empty = 1
     next
   }
-  if (match($0, /^        - '"'"'([^'"'"']+)'"'"'[[:space:]]*$/, m) && cur != "") {
-    lock[cur, norm(m[1])] = 1
-    lockcount[cur]++
+  if (cur != "" && match($0, /^        - \047/)) {
+    s = substr($0, RLENGTH + 1)
+    i = index(s, "\047")
+    if (i > 0 && substr(s, i + 1) ~ /^[[:space:]]*$/) {
+      lock[cur, norm(substr(s, 1, i - 1))] = 1
+      lockcount[cur]++
+    }
     next
   }
   next
@@ -141,12 +148,12 @@ FNR == 1 { nown = split(substr(owners[FILENAME], 2), own, SUBSEP) }
 {
   line = $0
   sub(/[[:space:]]+#.*$/, "", line)              # strip trailing comment
-  if (match(line, /^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*(.+)$/, m)) {
-    raw = m[1]
+  if (match(line, /^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*/)) {
+    raw = substr(line, RSTART + RLENGTH)
     # KYAML puts a comma after a quoted scalar. Strip the YAML delimiter
     # before unquoting, otherwise the closing quote becomes part of the ref.
-    sub(/["\x27],[[:space:]]*$/, "", raw)
-    gsub(/^["'"'"']|["'"'"']$/, "", raw)
+    sub(/["\047],[[:space:]]*$/, "", raw)
+    gsub(/^["\047]|["\047]$/, "", raw)
     gsub(/[[:space:]]+$/, "", raw)
     if (raw ~ /^\$\//) {                           # known corruption
       for (i = 1; i <= nown; i++) dollar[own[i]] = dollar[own[i]] " " raw
