@@ -135,10 +135,20 @@ deed_unquote() {
 deed_sym() { local rest="${1#*$2 }"; printf '%s' "${rest%% *}" | tr -d ')'; }
 
 if [ "${DEBT##*.}" = "deed" ]; then
+  # No silently green run when the deed cannot be structurally interpreted.
+  # The structural checker also rejects malformed and duplicate entries.
+  validator="$(cd "$(dirname "$0")" && pwd)/check-debtfile-structure.sh"
+  if ! bash "$validator" "$DEBT"; then
+    echo "error: live deed cannot be safely measured" >&2
+    exit 2
+  fi
+  declared_entries="$(grep -Ec '^[[:space:]]*\\(entry([[:space:]]|$)' "$DEBT" || true)"
+  measured_entries=0
   echo "Debtfile: $DEBT"
   echo
   while IFS= read -r raw || [ -n "$raw" ]; do
     case "$raw" in *'(entry '*) ;; *) continue ;; esac
+    measured_entries=$((measured_entries + 1))
     reset_block "$(deed_sym "$raw" :id)"
     probe="$(deed_unquote "${raw#*:probe }")"
     count="$(deed_sym "$raw" :count)"
@@ -148,6 +158,10 @@ if [ "${DEBT##*.}" = "deed" ]; then
     accepted="$(deed_unquote "${raw#*:accepted-until }")"
     measure
   done < "$DEBT"
+  if [ "$measured_entries" -eq 0 ] || [ "$measured_entries" -ne "$declared_entries" ]; then
+    echo "error: parsed $measured_entries of $declared_entries debt entries; refusing a partial or vacuous pass" >&2
+    exit 2
+  fi
   if [ "$WRITE" -eq 1 ] && { [ "${#NEW_COUNT_IDS[@]}" -gt 0 ] || [ "${#NEW_CEIL_IDS[@]}" -gt 0 ]; }; then
     tmp="$(mktemp)"
     while IFS= read -r raw || [ -n "$raw" ]; do
