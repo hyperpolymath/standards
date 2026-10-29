@@ -77,6 +77,50 @@ jobs:
       # a gate that will be disabled by the first person it blocks.
       fail-on-indeterminate: false
 
+  # Optional PR-revision history producer. Scoped read access belongs here,
+  # not in the shared Hypatia reusable, so existing pinned/floating callers
+  # that do not grant PR read keep starting normally.
+  previous-grid:
+    name: Capture previous bot-authored Hypatia grid
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Read previous trusted comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          : > "$RUNNER_TEMP/grid-previous.md"
+          if ! gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+               > "$RUNNER_TEMP/grid-comments.json"; then
+            echo "::warning::Cannot read prior PR comments; historical comparison unavailable."
+          elif ! jq -e 'type == "array" and all(.[]; type == "array")' "$RUNNER_TEMP/grid-comments.json" >/dev/null; then
+            echo "::warning::Malformed PR comments response; historical comparison unavailable."
+          else
+            jq -r '[.[][] | select((.user.login // "") == "github-actions[bot]"
+                     and ((.body // "") | contains("<!-- verdict-grid:hypatia ")))]
+                     | last | .body // ""' "$RUNNER_TEMP/grid-comments.json" \
+              > "$RUNNER_TEMP/grid-previous.md"
+            if [ -s "$RUNNER_TEMP/grid-previous.md" ]; then
+              echo "Trusted prior Hypatia PR grid captured."
+            else
+              echo "::notice::No previous bot-authored Hypatia grid for this PR."
+            fi
+          fi
+
+      - name: Upload previous PR grid evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hypatia-grid-previous
+          path: ${{ runner.temp }}/grid-previous.md
+          if-no-files-found: error
+          retention-days: 7
+
   # Fleet report-backs, produced BEFORE the Hypatia lane renders so each enrolled
   # gitbot-fleet member's row carries evidence instead of "enrolled, but no
   # report-back was received". Inline rather than `uses:` on purpose: this
@@ -218,13 +262,14 @@ jobs:
     # After the fleet job, whatever its result (a dead fleet job must render as
     # orange fleet rows, never as a missing Hypatia lane), but not in a run that
     # cancel-in-progress has superseded: always() would let a stale lane post.
-    needs: [fleet]
+    needs: [fleet, previous-grid]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/hypatia-scan-reusable.yml
+    with:
+      previous-grid-artifact: ${{ github.event_name == 'pull_request' && 'hypatia-grid-previous' || '' }}
     permissions:
       actions: read
       contents: read
-      pull-requests: read # previous PR grid (read-only)
       # MUST be write: the reusable uploads SARIF. A caller may not grant less
       # than the callee declares — the run dies at startup with zero jobs.
       security-events: write
