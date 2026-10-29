@@ -45,10 +45,22 @@ if [ "${DEBT##*.}" = "deed" ]; then
   awk '
     /\(entry / {
       entries++
+      entry_id = ""
+      if (match($0, /:id[[:space:]]+[a-z0-9][a-z0-9._-]*/)) {
+        entry_id = substr($0, RSTART + 4, RLENGTH - 4)
+        gsub(/^[[:space:]]+/, "", entry_id)
+        if (seen[entry_id]++) {
+          printf "  ❌ duplicate debt entry id: %s\n", entry_id
+          fail=1
+        }
+      } else {
+        printf "  ❌ entry missing or invalid :id\n"
+        fail=1
+      }
       if ($0 !~ /:probe "/) { printf "  ❌ entry missing :probe\n"; fail=1 }
       if ($0 !~ /:ceiling [0-9]+/) { printf "  ❌ entry missing :ceiling\n"; fail=1 }
       if ($0 !~ /:count [0-9]+/) { printf "  ❌ entry missing :count\n"; fail=1 }
-      if ($0 !~ /:accepted-until [0-9]{4}-[0-9]{2}-[0-9]{2}([[:space:]]|\))/) { printf "  ❌ entry missing or invalid :accepted-until (expected YYYY-MM-DD)\n"; fail=1 }
+      if ($0 !~ /:accepted-until "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"([[:space:]]|\))/) { printf "  ❌ entry missing or invalid :accepted-until (expected quoted YYYY-MM-DD)\n"; fail=1 }
       if ($0 !~ /:severity (critical|high|medium|low)([[:space:]]|\))/) { printf "  ❌ entry severity missing or illegal\n"; fail=1 }
       if ($0 !~ /:policy (remediable|flag-only)([[:space:]]|\))/) { printf "  ❌ entry policy missing or illegal\n"; fail=1 }
 
@@ -62,8 +74,8 @@ if [ "${DEBT##*.}" = "deed" ]; then
       if (match($0, /:ceiling [0-9]+/)) {
         ceiling = substr($0, RSTART + 9, RLENGTH - 9) + 0
       }
-      if (match($0, /:accepted-until [0-9]{4}-[0-9]{2}-[0-9]{2}/)) {
-        accepted = substr($0, RSTART + 16, RLENGTH - 16)
+      if (match($0, /:accepted-until "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"/)) {
+        accepted = substr($0, RSTART + 17, 10)
         split(accepted, d, "-")
         if (d[2] < 1 || d[2] > 12 || d[3] < 1 || d[3] > 31) {
           printf "  ❌ entry has invalid :accepted-until date components (%s)\n", accepted
