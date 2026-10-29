@@ -9,6 +9,15 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 F="$TMP/checks_praxis.deed"
 
+# The required CI gate must provision the canonical parser before invoking it.
+WORKFLOW="$ROOT/.github/workflows/k9-contractile.yml"
+setup_line="$(grep -nF "Install Bun for Mustfile enforcement and reporting" "$WORKFLOW" | cut -d: -f1)"
+must_line="$(grep -nF "name: K9-SVC Validation" "$WORKFLOW" | cut -d: -f1)"
+[ -n "$setup_line" ] && [ -n "$must_line" ] && [ "$setup_line" -lt "$must_line" ] || {
+  echo "FAIL: Bun must be installed before the required Mustfile gate" >&2
+  exit 1
+}
+
 good() {
   if ! "$@" >"$TMP/output" 2>&1; then
     cat "$TMP/output" >&2

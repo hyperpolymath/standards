@@ -512,12 +512,26 @@ export function readMustfileChecks(text, filename = null) {
   if (head !== "praxis-deed") throw new MustfileError("Mustfile must be a praxis-deed");
   const required = ["id", "severity", "discharge", "body"];
   const allowed = new Set([...required, "description"]);
+  const topLevelFields = new Map([
+    ["schema-version", new Set(["string"])],
+    ["canonical-name", new Set(["string"])],
+    ["beholding-chora", new Set(["uuid5", "uuid8"])],
+  ]);
+  const seenTopLevel = new Set();
   const severities = new Set(["critical", "high", "medium", "low"]);
   const discharges = new Set(["run", "verification"]);
   const seen = new Set();
   const checks = [];
   for (const node of items) {
-    if (node[0] === "field") continue;
+    if (node[0] === "field") {
+      const [, key, value] = node;
+      if (!topLevelFields.has(key)) throw new MustfileError("unknown top-level Mustfile field :" + key);
+      if (seenTopLevel.has(key)) throw new MustfileError("duplicate top-level Mustfile field :" + key);
+      if (!topLevelFields.get(key).has(value[0])) throw new MustfileError("invalid type for top-level :" + key);
+      if (value[0] === "string" && value[1].trim() === "") throw new MustfileError("empty top-level :" + key);
+      seenTopLevel.add(key);
+      continue;
+    }
     if (node[1] !== "check") throw new MustfileError("unexpected clause (" + node[1] + ") in Mustfile");
     const fields = new Map();
     for (const member of node[2]) {
