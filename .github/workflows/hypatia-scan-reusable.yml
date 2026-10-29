@@ -87,6 +87,7 @@ on:
 permissions:
   actions: read
   contents: read
+  pull-requests: read
   security-events: write
 
 jobs:
@@ -785,17 +786,31 @@ jobs:
 
       - name: Read the previous verdict grid
         if: ${{ always() && github.event_name == 'pull_request' }}
-        # Best effort: the token may lack pull-request read on the caller. A
-        # missing previous grid only means "no comparable baseline".
-        continue-on-error: true
+        # Compares revisions of one PR, not the repository's history or
+        # the .hypatia-baseline.json accepted-debt ledger.
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-            | jq -r '[.[][] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- verdict-grid:")))]
-                     | last | .body // ""' \
-            > "$RUNNER_TEMP/grid-previous.md" || : > "$RUNNER_TEMP/grid-previous.md"
+          set -euo pipefail
+          : > "$RUNNER_TEMP/grid-previous.md"
+          if ! gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+               > "$RUNNER_TEMP/grid-comments.json"; then
+            echo "::warning::Hypatia could not read PR comments; comparison unavailable. Check pull-requests: read on caller."
+          elif ! jq -e 'type == "array" and all(.[]; type == "array")' "$RUNNER_TEMP/grid-comments.json" >/dev/null; then
+            echo "::warning::Hypatia received malformed PR comment evidence; comparison unavailable."
+          else
+            # Both author and marker matter: untrusted comments cannot forge history.
+            jq -r '[.[][] | select((.user.login // "") == "github-actions[bot]"
+                     and ((.body // "") | contains("<!-- verdict-grid:hypatia ")))]
+                     | last | .body // ""' "$RUNNER_TEMP/grid-comments.json" \
+              > "$RUNNER_TEMP/grid-previous.md"
+            if [ -s "$RUNNER_TEMP/grid-previous.md" ]; then
+              echo "Previous bot-authored Hypatia grid found for PR #$PR_NUMBER."
+            else
+              echo "::notice::No prior bot-authored Hypatia grid on this PR; comparison unavailable."
+            fi
+          fi
 
       # ── Fleet report-backs ─────────────────────────────────────────────────
       # The envelopes are produced per run by the caller's fleet job (gitbot-fleet
