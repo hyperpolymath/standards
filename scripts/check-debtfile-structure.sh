@@ -23,13 +23,13 @@
 #   skips what it cannot parse reports "valid" for a file it never read, and
 #   "valid" is the state that passes.
 #
-# Usage: check-debtfile-structure.sh [path/to/Debtfile.a2ml]
-#   Default: .machine_readable/Debtfile.a2ml
+# Usage: check-debtfile-structure.sh [path/to/debt_praxis.deed]
+#   Default: .machine_readable/debt_praxis.deed (legacy .a2ml paths remain accepted)
 # Exit: 0 valid · 1 structural defect · 2 file missing / bad invocation
 
 set -uo pipefail
 
-DEBT="${1:-.machine_readable/Debtfile.a2ml}"
+DEBT="${1:-.machine_readable/debt_praxis.deed}"
 
 if [ "$#" -gt 1 ]; then
   echo "usage: check-debtfile-structure.sh [path/to/Debtfile.a2ml]" >&2
