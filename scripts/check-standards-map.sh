@@ -54,6 +54,26 @@ done
 [ -n "$LOCK" ] || LOCK="$REPO/canon.lock"
 [ -f "$MAP" ]  || { echo "ERROR: map not found: $MAP" >&2; exit 2; }
 
+# Check actual TOML syntax before trusting grep-based field checks below.
+# A stray non-assignment can otherwise evade all five map assertions.
+if ! python3 - "$MAP" <<'PY'
+import pathlib
+import sys
+import tomllib
+p = pathlib.Path(sys.argv[1])
+try:
+    data = tomllib.loads(p.read_text(encoding="utf-8"))
+    assert isinstance(data.get("map"), dict), "missing [map] table"
+    assert isinstance(data.get("entry"), list), "missing [[entry]] records"
+except (OSError, UnicodeError, ValueError, AssertionError) as exc:
+    print(f"ERROR: invalid standards-map.toml: {exc}", file=sys.stderr)
+    sys.exit(1)
+PY
+then
+  exit 1
+fi
+
+
 # Fields, in the flat single-line shape the map is authored in.
 map_field() { # $1 = field name
   grep -E "^$1[[:space:]]*=" "$MAP" | sed 's/^[^=]*=[[:space:]]*//; s/^"//; s/"[[:space:]]*$//'
