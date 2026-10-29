@@ -201,6 +201,38 @@ tr '\n' ' ' < "$TMP/future.deed" > "$TMP/future-one-line.deed"
   ok "future-dated Deed claim remains unverifiable" ||
   bad "future-dated Deed claim bypassed freshness guard"
 
+echo "== deed clause boundary and non-vacuity regressions =="
+# A multiline claim is one logical clause, regardless of physical newlines.
+cat > "$TMP/multiline.deed" <<'EOF'
+;; This commented (claim :id FAKED) must not count.
+(praxis-deed
+  (claim
+    :id C1
+    :claim-class command-ran
+    :verifier command-transcript
+    :target "false"
+    :expect "exit==0"
+    :statement "a (claim token in this string is not a new claim")
+)
+EOF
+[ "$(verdict_of "$TMP/multiline.deed" C1)" = refuted ] &&
+  ok "multiline false claim is REFUTED" ||
+  bad "multiline claim was dropped or falsely confirmed"
+
+# A valid final clause without a terminating newline is still verified.
+printf '%s' '(praxis-deed (claim :id C1 :claim-class command-ran :verifier command-transcript :target "false" :expect "exit==0"))' > "$TMP/no-final-newline.deed"
+[ "$(verdict_of "$TMP/no-final-newline.deed" C1)" = refuted ] &&
+  ok "last claim without final newline is REFUTED" ||
+  bad "last claim without final newline was dropped"
+
+printf '%s\n' '(praxis-deed :canonical-name "empty")' > "$TMP/no-claims.deed"
+( cd "$ROOT" && bash "$V" "$TMP/no-claims.deed" >/dev/null 2>&1 )
+[ $? -eq 2 ] && ok "empty deed never returns green" || bad "zero deed claims returned success"
+
+printf '%s\n' '(praxis-deed (claim :id C1 :claim-class command-ran' > "$TMP/truncated.deed"
+( cd "$ROOT" && bash "$V" "$TMP/truncated.deed" >/dev/null 2>&1 )
+[ $? -eq 2 ] && ok "unterminated deed claim fails parsing" || bad "unterminated deed claim was accepted"
+
 echo "== conformance suite =="
 bash "$ROOT/1-formats/sub-specs/did-you-actually-do-that/spec/conformance/run-conformance.sh" >/dev/null 2>&1 && ok "conformance vectors pass" || bad "conformance vectors failed"
 
