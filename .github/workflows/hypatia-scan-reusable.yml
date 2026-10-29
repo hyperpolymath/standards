@@ -35,6 +35,14 @@ on:
         type: string
         required: false
         default: "fleet-report-backs"
+      previous-grid-artifact:
+        description: >-
+          Optional trusted prior PR grid artifact, produced by a read-scoped
+          caller job earlier in this same workflow run. No PR read permission
+          is requested by this reusable; existing callers remain compatible.
+        type: string
+        required: false
+        default: ""
       hypatia-ref:
         description: >-
           Hypatia commit to build the scanner from. Defaults to a vetted SHA so a
@@ -87,7 +95,6 @@ on:
 permissions:
   actions: read
   contents: read
-  pull-requests: read
   security-events: write
 
 jobs:
@@ -784,32 +791,35 @@ jobs:
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "scope: $mode (${n:-0} changed file(s), excluded: ${SCOPE_EXCLUDES:-none})"
 
-      - name: Read the previous verdict grid
-        if: ${{ always() && github.event_name == 'pull_request' }}
-        # Compares revisions of one PR, not the repository's history or
-        # the .hypatia-baseline.json accepted-debt ledger.
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+      # Reading previous PR comments happens in an optional caller job with
+      # pull-requests: read. This reusable never escalates permission demands
+      # on existing cross-repository callers.
+      - name: Download the previous PR grid (if provided)
+        if: ${{ github.event_name == 'pull_request' && inputs.previous-grid-artifact != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.previous-grid-artifact }}
+          path: ${{ runner.temp }}/hypatia-pr-history
+
+      - name: Prepare the prior PR baseline
+        if: ${{ github.event_name == 'pull_request' }}
         run: |
           set -euo pipefail
           : > "$RUNNER_TEMP/grid-previous.md"
-          if ! gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-               > "$RUNNER_TEMP/grid-comments.json"; then
-            echo "::warning::Hypatia could not read PR comments; comparison unavailable. Check pull-requests: read on caller."
-          elif ! jq -e 'type == "array" and all(.[]; type == "array")' "$RUNNER_TEMP/grid-comments.json" >/dev/null; then
-            echo "::warning::Hypatia received malformed PR comment evidence; comparison unavailable."
-          else
-            # Both author and marker matter: untrusted comments cannot forge history.
-            jq -r '[.[][] | select((.user.login // "") == "github-actions[bot]"
-                     and ((.body // "") | contains("<!-- verdict-grid:hypatia ")))]
-                     | last | .body // ""' "$RUNNER_TEMP/grid-comments.json" \
-              > "$RUNNER_TEMP/grid-previous.md"
-            if [ -s "$RUNNER_TEMP/grid-previous.md" ]; then
-              echo "Previous bot-authored Hypatia grid found for PR #$PR_NUMBER."
+          candidate="$RUNNER_TEMP/hypatia-pr-history/grid-previous.md"
+          if [ -s "$candidate" ]; then
+            # The caller must have selected only its trusted bot's comment.
+            if grep -Fq '<!-- verdict-grid:hypatia ' "$candidate"; then
+              cp "$candidate" "$RUNNER_TEMP/grid-previous.md"
+              echo "Previous Hypatia grid supplied by the caller for this PR."
             else
-              echo "::notice::No prior bot-authored Hypatia grid on this PR; comparison unavailable."
+              echo "::warning::Previous-grid artifact did not contain a Hypatia marker; ignoring it."
             fi
+          elif [ -n "${{ inputs.previous-grid-artifact }}" ]; then
+            echo "::warning::Expected previous-grid artifact is missing or empty; revision comparison unavailable."
+          else
+            echo "::notice::No previous-grid artifact configured; PR revision comparison is unavailable."
           fi
 
       # ── Fleet report-backs ─────────────────────────────────────────────────
