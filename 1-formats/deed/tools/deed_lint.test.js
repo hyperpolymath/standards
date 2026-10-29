@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validate, LintError, SELF_TEST_CASES, checkEgress, EgressError } from "./deed_lint.js";
+import { validate, LintError, SELF_TEST_CASES, checkEgress, EgressError, readMustfileChecks, MustfileError } from "./deed_lint.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const LINT = join(HERE, "deed_lint.js");
@@ -212,6 +212,38 @@ function cli(...args) {
   const r = Bun.spawnSync([process.execPath, LINT, ...args]);
   return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
 }
+
+describe("Mustfile check profile", () => {
+  const one = '(check :id alpha :severity critical :discharge run :body "false")';
+  const doc = (clauses) => HDR + '(praxis-deed :schema-version "1" ' + clauses + ')';
+  test("unknown top-level fields must fail closed", () => {
+    expect(() => readMustfileChecks(doc(':typo-check "false" ' + one), "test_praxis.deed")).toThrow(/unknown top-level/);
+    expect(() => readMustfileChecks(doc(':canonical-name #t ' + one), "test_praxis.deed")).toThrow(/invalid type/);
+    expect(() => readMustfileChecks(doc(':canonical-name "x" :canonical-name "y" ' + one), "test_praxis.deed")).toThrow(/duplicate top-level/);
+    expect(() => readMustfileChecks(doc(':canonical-name "must" :beholding-chora #u5"estate/chora" ' + one), "test_praxis.deed")).not.toThrow();
+  });
+  test("multiline critical check survives parsing and has an executable body", () => {
+    const checks = readMustfileChecks(doc('(check\n :id alpha\n :severity critical\n :discharge run\n :body "false")'), "test_praxis.deed");
+    expect(checks).toEqual([{ id: "alpha", severity: "critical", discharge: "run", body: "false" }]);
+  });
+  test("missing clauses, fields, unknown severities and empty bodies are rejected", () => {
+    expect(() => readMustfileChecks(doc(''), "test_praxis.deed")).toThrow(/no \(check/);
+    expect(() => readMustfileChecks(doc(one.replace(' :body "false"', '')), "test_praxis.deed")).toThrow(/missing :body/);
+    expect(() => readMustfileChecks(doc(one.replace('critical', 'critcal')), "test_praxis.deed")).toThrow(/unknown severity/);
+    expect(() => readMustfileChecks(doc(one.replace('"false"', '""')), "test_praxis.deed")).toThrow(/empty :body/);
+    expect(() => readMustfileChecks(doc(one.replace('run', 'unverified')), "test_praxis.deed")).toThrow(/unknown discharge/);
+  });
+  test("duplicate IDs, repeated fields, unrecognised fields and nested checks fail closed", () => {
+    expect(() => readMustfileChecks(doc(one + ' ' + one), "test_praxis.deed")).toThrow(/duplicate check id/);
+    expect(() => readMustfileChecks(doc(one.replace(':severity critical', ':severity high :severity critical')), "test_praxis.deed")).toThrow(/duplicate .*field/);
+    expect(() => readMustfileChecks(doc(one.replace(':body "false"', ':body "false" :extra #t')), "test_praxis.deed")).toThrow(/unknown .*field/);
+    expect(() => readMustfileChecks(doc('(group ' + one + ')'), "test_praxis.deed")).toThrow(/unexpected clause/);
+    expect(() => readMustfileChecks(doc(one.replace(' :body "false"', ' (nested :a "x") :body "false"')), "test_praxis.deed")).toThrow(/nested clauses/);
+  });
+  test("a syntactically valid repo-deed is not a Mustfile praxis-deed", () => {
+    expect(() => readMustfileChecks(HDR + '(repo-deed :schema-version "1" ' + one + ')')).toThrow(MustfileError);
+  });
+});
 
 describe("CLI", () => {
   test("--ast-json emits only validated, lossless structural data", () => {
