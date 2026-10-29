@@ -187,6 +187,20 @@ expect = "exit==0"
 verifier = "command-transcript"'
 [[ "$(reason_of "$TMP/lic.a2ml" C1)" == unverifiable*manual-only ]] && ok "licence-in-statement -> manual-only" || bad "licence-in-statement auto-confirmed"
 
+# Deed claims must not lose the freshness guard during parsing.
+cat > "$TMP/future.deed" <<'EOF'
+(praxis-deed
+  (claim :id C1 :claim-class command-ran :verifier command-transcript
+    :target "true" :expect "exit==0" :statement "future-dated verification"
+    :not-before "2099-01-01T00:00:00Z")
+)
+EOF
+# The reference Deed parser accepts claims on a single line.
+tr '\n' ' ' < "$TMP/future.deed" > "$TMP/future-one-line.deed"
+[ "$(verdict_of "$TMP/future-one-line.deed" C1)" = unverifiable ] &&
+  ok "future-dated Deed claim remains unverifiable" ||
+  bad "future-dated Deed claim bypassed freshness guard"
+
 echo "== conformance suite =="
 bash "$ROOT/1-formats/sub-specs/did-you-actually-do-that/spec/conformance/run-conformance.sh" >/dev/null 2>&1 && ok "conformance vectors pass" || bad "conformance vectors failed"
 
