@@ -34,6 +34,7 @@ if [ "${MUST##*.}" = "deed" ]; then
     /\(check / {
       checks++
       if ($0 !~ /:severity /) { printf "  ❌ check missing :severity\n"; fails++ }
+      else if ($0 !~ /:severity (critical|high|medium|low)([[:space:]]|\))/) { printf "  ❌ check has invalid :severity (expected critical|high|medium|low)\n"; fails++ }
       if ($0 !~ /:discharge (run|verification) /) { printf "  ❌ check missing :discharge\n"; fails++ }
       if ($0 !~ /:body "/) { printf "  ❌ check missing :body\n"; fails++ }
       next
