@@ -115,6 +115,40 @@ else
   fail=$((fail+1)); echo "  FAIL  --write raised a ceiling"; sed -n '1,20p' Debtfile.a2ml
 fi
 
+# Migration boundary: the deed reader must never report success when no
+# entries, or only a subset of entries, were actually understood.
+expect_deed() { # wanted-exit label; reads the deed from stdin
+  local want="$1" label="$2" got=0
+  cat > debt_praxis.deed
+  bash "$SCRIPT" debt_praxis.deed >/dev/null 2>&1 || got=$?
+  if [ "$got" -eq "$want" ]; then pass=$((pass+1)); echo "  ok    $label"
+  else fail=$((fail+1)); echo "  FAIL  $label (wanted $want, got $got)"; fi
+}
+expect_deed 0 "valid one-line deed entry is measured" <<'EOF'
+(praxis-deed
+  (entry :id alpha :severity high :policy remediable :count 2 :ceiling 4 :accepted-until "2099-01-01" :probe "echo 2")
+)
+EOF
+expect_deed 2 "empty deed refuses a vacuous green" <<'EOF'
+(praxis-deed :canonical-name "debt")
+EOF
+expect_deed 2 "unparsed multiline entry cannot silently pass" <<'EOF'
+(praxis-deed
+  (entry
+    :id alpha :severity high :policy remediable
+    :count 2 :ceiling 4 :accepted-until "2099-01-01"
+    :probe "echo 2")
+)
+EOF
+expect_deed 2 "mixed valid and unparsed entries cannot partially pass" <<'EOF'
+(praxis-deed
+  (entry :id alpha :severity high :policy remediable :count 2 :ceiling 4 :accepted-until "2099-01-01" :probe "echo 2")
+  (entry
+    :id beta :severity low :policy flag-only
+    :count 1 :ceiling 2 :accepted-until "2099-01-01" :probe "echo 1")
+)
+EOF
+
 got=0; bash "$SCRIPT" no-such-file.a2ml >/dev/null 2>&1 || got=$?
 if [ "$got" = 2 ]; then pass=$((pass+1)); echo "  ok    a missing Debtfile exits 2, distinct from a probe failure"
 else fail=$((fail+1)); echo "  FAIL  missing file (wanted exit 2, got $got)"; fi
