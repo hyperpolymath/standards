@@ -239,11 +239,13 @@ render "$WORK/s-prescope-extra" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif
   --changed "$WORK/changed.txt" --exclude-prefix 9-archive/
 check "pre-scope-only nonexcluded results never grade" yellow "$(row "$WORK/s-prescope-extra" hypatia)"
 render "$WORK/s-prescope-missing" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/scoped.sarif" \
-  --hypatia-sarif-unscoped "$WORK/not-there.sarif" --panic "$pan_clean" --pons "$pons_clean" --exclude-prefix 9-archive/
+  --hypatia-sarif-unscoped "$WORK/not-there.sarif" --panic "$pan_clean" --pons "$pons_clean" \
+  --changed "$WORK/changed.txt" --exclude-prefix 9-archive/
 check "missing requested pre-scope inventory is explicit" orange "$(row "$WORK/s-prescope-missing" hypatia)"
 printf 'not json\n' > "$WORK/prescope-invalid.sarif"
 render "$WORK/s-prescope-invalid" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/scoped.sarif" \
-  --hypatia-sarif-unscoped "$WORK/prescope-invalid.sarif" --panic "$pan_clean" --pons "$pons_clean" --exclude-prefix 9-archive/
+  --hypatia-sarif-unscoped "$WORK/prescope-invalid.sarif" --panic "$pan_clean" --pons "$pons_clean" \
+  --changed "$WORK/changed.txt" --exclude-prefix 9-archive/
 check "malformed requested pre-scope inventory is explicit" orange "$(row "$WORK/s-prescope-invalid" hypatia)"
 jq '(.runs[0].results[] | select(.locations[0].physicalLocation.artifactLocation.uri == "9-archive/old.adoc") | .locations[0].physicalLocation.artifactLocation.uri) |= "./" + .' \
   "$WORK/s1.fixture.sarif" > "$WORK/prescope-dot.sarif"
@@ -268,6 +270,16 @@ render "$WORK/s-multiloc-unknown" --hypatia "$WORK/hyp-mixed.json" --hypatia-sar
   --hypatia-sarif-unscoped "$WORK/multiloc-unknown.sarif" --panic "$pan_clean" --pons "$pons_clean" \
   --changed "$WORK/changed.txt" --exclude-prefix 9-archive/
 check "an unknown additional location is graded rather than hidden" red "$(row "$WORK/s-multiloc-unknown" hypatia)"
+# Missing reporting-only evidence is indeterminate, but it cannot mask a
+# known high/critical from the authoritative gate SARIF.
+render "$WORK/s-missing-pre-high" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/multiloc-gate.sarif" \
+  --hypatia-sarif-unscoped "$WORK/not-there.sarif" --panic "$pan_clean" --pons "$pons_clean" \
+  --changed "$WORK/changed.txt" --exclude-prefix 9-archive/
+check "known high outranks missing pre-scope inventory" red "$(row "$WORK/s-missing-pre-high" hypatia)"
+check "missing pre-scope inventory remains visible beside a high" yes "$(grep -q 'pre-scope SARIF inventory is unavailable or malformed' "$WORK/s-missing-pre-high/report.md" && echo yes)"
+render "$WORK/s-missing-pre-critical" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/scoped.sarif" \
+  --hypatia-sarif-unscoped "$WORK/not-there.sarif" --panic "$pan_clean" --pons "$pons_clean" --exclude-prefix 9-archive/
+check "known critical outranks missing pre-scope inventory" purple "$(row "$WORK/s-missing-pre-critical" hypatia)"
 
 render "$WORK/s2" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --pons "$WORK/pons_clean"
 check "without --changed the whole repository is graded" purple "$(row "$WORK/s2" hypatia)"

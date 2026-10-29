@@ -235,9 +235,10 @@ def hypatia_with_exclusions($gate; $pre; $scope; $root; $ref; $verified):
 
 def state:
   if .status == "not_applicable" then "grey"
-  elif .status != "ran" then "orange"
   else ([.findings_graded[].severity | rank] | max // 0) as $m
-    | if $m >= 5 then "purple" elif $m == 4 then "red" elif $m == 3 then "yellow"
+    # Missing reporting-only inventory must not mask a known gate finding.
+    | if $m >= 5 then "purple" elif $m == 4 then "red"
+      elif .status != "ran" then "orange" elif $m == 3 then "yellow"
       elif $m >= 1 then "blue" else "green" end end;
 
 # Precedence: a known critical beats missing evidence, which beats anything milder.
