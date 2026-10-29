@@ -26,6 +26,7 @@ Usage: deed_lint.js FILE...     exit 0 iff all files conform
        deed_lint.js --self-test
        deed_lint.js --egress FILE...           (egress …) clause profile (ADR-009)
        deed_lint.js --egress-fixtures DIR      DIR/valid pass the profile, DIR/invalid fail it
+       deed_lint.js --ast-json FILE           emit the validated AST as JSON (integer lexemes stay strings)
 `;
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -179,12 +180,14 @@ function lexString(lx) {
   }
 }
 
-/** Lex an optionally negative decimal integer; returns ["integer", null] or null. */
+/** Lex an optionally negative decimal integer; retain its exact digits as a string.
+ * Keeping the lexeme rather than a JS Number avoids losing precision for large
+ * DEED integers when consumers inspect the validated AST. */
 function lexNumber(lx) {
   const m = /^-?[0-9]+/.exec(lx.t.slice(lx.i));
   if (m) {
     lx.i += m[0].length;
-    return ["integer", null];
+    return ["integer", m[0]];
   }
   return null;
 }
@@ -760,6 +763,23 @@ function fixtures(d) {
 
 /** CLI entry: dispatch on --self-test / --fixtures / file list; returns exit code. */
 function main(argv) {
+  if (argv.includes("--ast-json")) {
+    // One input and a clean stdout contract: consumers must never receive a
+    // partial AST or a success-shaped empty result for invalid DEED input.
+    if (argv.length !== 2 || argv[0] !== "--ast-json" || argv[1].startsWith("-")) {
+      console.error("usage: deed_lint.js --ast-json FILE");
+      return 2;
+    }
+    const file = argv[1];
+    try {
+      const [head, items] = validate(readFileSync(file, "utf8"), file);
+      console.log(JSON.stringify({ head, items }));
+      return 0;
+    } catch (e) {
+      console.error(`FAIL ${file}: ${e instanceof LintError ? e.toString() : e.message}`);
+      return 1;
+    }
+  }
   if (argv.includes("--self-test")) return selfTest();
   if (argv.includes("--egress-fixtures")) {
     const d = argv[argv.indexOf("--egress-fixtures") + 1];

@@ -172,6 +172,15 @@ describe("extra rules", () => {
   test("number followed by identifier chars", () => {
     expect(verdict(HDR + '(repo-deed :schema-version "1" :a 12ab)\n')).toMatch(/malformed token/);
   });
+  test("validated AST preserves exact integer lexemes without JS precision loss", () => {
+    const [head, items] = validate(HDR + '(repo-deed :schema-version "1" (entry\n :count 900719925474099312345\n :ceiling 0007\n :delta -12))', "sample_chora.deed");
+    expect(head).toBe("repo-deed");
+    expect(items[1]).toEqual(["clause", "entry", [
+      ["field", "count", ["integer", "900719925474099312345"]],
+      ["field", "ceiling", ["integer", "0007"]],
+      ["field", "delta", ["integer", "-12"]],
+    ]]);
+  });
   test("only symbols/lists may be quoted", () => {
     expect(verdict(HDR + '(repo-deed :schema-version "1" :a \'"s")\n')).toMatch(/may be quoted/);
   });
@@ -205,6 +214,23 @@ function cli(...args) {
 }
 
 describe("CLI", () => {
+  test("--ast-json emits only validated, lossless structural data", () => {
+    const p = join(FIX, "valid", "minimal_chora.deed");
+    const r = cli("--ast-json", p);
+    expect(r.code).toBe(0);
+    const ast = JSON.parse(r.out);
+    expect(ast.head).toBe("repo-deed");
+    expect(ast.items.some((item) => item[0] === "field" && item[1] === "schema-version")).toBe(true);
+  });
+  test("--ast-json fails closed on invalid files, absent files, and ambiguous arguments", () => {
+    const bad = cli("--ast-json", join(FIX, "invalid", "intab_chora.deed"));
+    expect(bad.code).toBe(1);
+    expect(bad.out).toContain("FAIL");
+    expect(() => JSON.parse(bad.out)).toThrow();
+    expect(cli("--ast-json", join(FIX, "not-found_chora.deed")).code).toBe(1);
+    expect(cli("--ast-json").code).toBe(2);
+    expect(cli("--ast-json", join(FIX, "valid", "minimal_chora.deed"), "extra.deed").code).toBe(2);
+  });
   test("canonical machine manifest passes with its real filename", () => {
     const manifest = join(HERE, "../../../0-AI-MANIFEST.deed");
     const r = cli(manifest);
