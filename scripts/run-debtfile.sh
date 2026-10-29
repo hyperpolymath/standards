@@ -142,7 +142,7 @@ if [ "${DEBT##*.}" = "deed" ]; then
     echo "error: live deed cannot be safely measured" >&2
     exit 2
   fi
-  declared_entries="$(grep -Ec '^[[:space:]]*\\(entry([[:space:]]|$)' "$DEBT" || true)"
+  declared_entries="$(grep -Ec '^[[:space:]]*\(entry([[:space:]]|$)' "$DEBT" || true)"
   measured_entries=0
   echo "Debtfile: $DEBT"
   echo
