@@ -9,7 +9,8 @@
 #   verdict-grid.sh render --out DIR [sources] [identity]
 #     sources
 #       --hypatia FILE        Raw Hypatia findings array (alert/advisory counts only)
-#       --hypatia-sarif FILE  Baseline-filtered Hypatia SARIF (authoritative grade)
+#       --hypatia-sarif FILE  Baseline/scope-filtered SARIF (authoritative grade)
+#       --hypatia-sarif-unscoped FILE  Baseline-filtered SARIF before exclusions (report-only)
 #       --hypatia-baseline-unverified  Baseline present but its SARIF filter did not complete
 #       --panic FILE          panic-attack status envelope
 #       --pons FILE           pons asinorum status envelope
@@ -79,7 +80,7 @@ case "$cmd" in
     baseline_of "$1"
     ;;
   render)
-    out="" hyp="" sarif="" pan="" pon="" backs="" enrol="" prev="" lane="hypatia"
+    out="" hyp="" sarif="" unscoped_sarif="" unscoped_requested=false pan="" pon="" backs="" enrol="" prev="" lane="hypatia"
     baseline_verified=true
     sha="" run="local" url="" pr="local" repo="" href="" pref="" qref=""
     changed="" excludes=""
@@ -88,6 +89,7 @@ case "$cmd" in
         --out) out="$2"; shift 2 ;;
         --hypatia) hyp="$2"; shift 2 ;;
         --hypatia-sarif) sarif="$2"; shift 2 ;;
+        --hypatia-sarif-unscoped) unscoped_sarif="$2"; unscoped_requested=true; shift 2 ;;
         --hypatia-baseline-unverified) baseline_verified=false; shift ;;
         --panic) pan="$2"; shift 2 ;;
         --pons) pon="$2"; shift 2 ;;
@@ -116,6 +118,9 @@ case "$cmd" in
     {
       source_record hypatia hypatia "$hyp"
       source_record hypatia-sarif hypatia-sarif "$sarif"
+      if [ "$unscoped_requested" = true ]; then
+        source_record hypatia-unscoped-sarif hypatia-unscoped-sarif "$unscoped_sarif"
+      fi
       source_record panic panic-attack "$pan"
       source_record pons pons-asinorum "$pon"
       if [ -n "$backs" ] && [ -d "$backs" ]; then
@@ -156,9 +161,12 @@ case "$cmd" in
     scope=$(jq -n --arg mode "$scope_mode" --argjson changed "$changed_json" --argjson ex "$excludes_json" \
       '{mode: $mode, changed: $changed, excluded_prefixes: $ex}')
 
-    # The profile names what produced the grid: renderer, enrolment and tool
-    # commits. Two revisions compare only under the same profile.
-    profile=$( { cat "$0" "$JQ_LIB"; [ -n "$enrol" ] && [ -f "$enrol" ] && cat "$enrol"; printf '%s\n' "$href" "$pref" "$qref" "$lane"; } | sha256sum | cut -d' ' -f1)
+    # The stable scope definition participates in comparisons: changing an
+    # exclusion changes the grading universe. The actual changed-file list is
+    # revision data and must NOT invalidate every PR delta. Exclusion order and
+    # duplicates do not change semantics, so canonicalise them for the hash.
+    profile_scope=$(jq -c '{mode, excluded_prefixes: (.excluded_prefixes | unique | sort)}' <<< "$scope")
+    profile=$( { cat "$0" "$JQ_LIB"; [ -n "$enrol" ] && [ -f "$enrol" ] && cat "$enrol"; printf '%s\n' "$href" "$pref" "$qref" "$lane" "$profile_scope"; } | sha256sum | cut -d' ' -f1)
 
     dirty=false
     if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

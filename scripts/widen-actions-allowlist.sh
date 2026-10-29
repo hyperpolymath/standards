@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MPL-2.0
 # Widen an ALREADY-selected caller's Actions allow-list without pruning.
 # Dry-run by default. Usage: widen-actions-allowlist.sh owner/repo [--apply] [canon.json]
-# This does not change the Actions posture, enabled state, or SHA-pin setting.
+# This does not change the Actions posture, enabled state, SHA-pin setting, or
+# either broad publisher flag. Flag changes require a separate policy decision.
 set -euo pipefail
 repo=${1:?usage: widen-actions-allowlist.sh owner/repo [--apply] [canon.json]}
 shift
@@ -33,14 +34,21 @@ esac
 }
 jq -se "length == 1 and (.[0] | $valid)" "$tmp/live" >/dev/null || { echo 'invalid live allow-list; no changes made' >&2; exit 3; }
 # Union, never replace: an exact canon PUT may delete repo-specific actions.
-# A false flag is never introduced by this transfer, even if canon changes.
+# Preserve both broad publisher flags EXACTLY: enabling verified publishers
+# permits far more than the narrow reusable pattern and needs its own review.
 jq -n --slurpfile live "$tmp/live" --slurpfile canon "$canon" '
-  {github_owned_allowed: ($live[0].github_owned_allowed or $canon[0].github_owned_allowed),
-   verified_allowed: ($live[0].verified_allowed or $canon[0].verified_allowed),
+  {github_owned_allowed: $live[0].github_owned_allowed,
+   verified_allowed: $live[0].verified_allowed,
    patterns_allowed: (($live[0].patterns_allowed + $canon[0].patterns_allowed) | unique)}
 ' > "$tmp/payload"
 echo "${repo}: selected; live $(jq '.patterns_allowed | length' "$tmp/live") patterns -> union $(jq '.patterns_allowed | length' "$tmp/payload") patterns"
 echo "github_owned_allowed: $(jq -r '.github_owned_allowed' "$tmp/live") -> $(jq -r '.github_owned_allowed' "$tmp/payload"); verified_allowed: $(jq -r '.verified_allowed' "$tmp/live") -> $(jq -r '.verified_allowed' "$tmp/payload")"
+for flag in github_owned_allowed verified_allowed; do
+  if [ "$(jq -r --arg f "$flag" '.[$f]' "$canon")" = true ] &&
+     [ "$(jq -r --arg f "$flag" '.[$f]' "$tmp/live")" = false ]; then
+    echo "NOTICE: $flag remains false; the live-policy checker will report the canonical flag difference. Review any change separately."
+  fi
+done
 if [ "$apply" = false ]; then
   echo 'DRY RUN: no settings changed. Review additions:'
   jq -r --slurpfile old "$tmp/live" '.patterns_allowed - $old[0].patterns_allowed | .[]' "$tmp/payload"
@@ -56,8 +64,8 @@ fi
 # an unrelated extra. Verify every requested AND pre-existing pattern and flag.
 if ! jq -se --slurpfile expected "$tmp/payload" "length == 1 and (.[0] | $valid and
     ((\$expected[0].patterns_allowed - .patterns_allowed) | length == 0) and
-    ((\$expected[0].github_owned_allowed | not) or .github_owned_allowed) and
-    ((\$expected[0].verified_allowed | not) or .verified_allowed))" "$tmp/after" >/dev/null; then
+    (.github_owned_allowed == \$expected[0].github_owned_allowed) and
+    (.verified_allowed == \$expected[0].verified_allowed))" "$tmp/after" >/dev/null; then
   echo "Read-back did not preserve the full union/flags for $repo; stop rollout" >&2; exit 1
 fi
 echo "OK: $repo selected-actions union verified; canary before caller propagation"

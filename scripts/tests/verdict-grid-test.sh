@@ -212,6 +212,62 @@ check "the identity line names the exclusion" yes \
   "$(grep -q 'excludes .*9-archive/' "$WORK/s1/report.md" && echo yes)"
 check "the standing finding is named in the accordion" yes \
   "$(grep -q 'further finding(s) in files this change does not touch' "$WORK/s1/report.md" && echo yes)"
+# The workflow filters archive results out of the gate/upload SARIF. A
+# baseline-filtered pre-scope copy supplies only excluded inventory.
+bash "$SCRIPT_DIR/../filter-sarif-by-scope.sh" "$WORK/s1.fixture.sarif" "$WORK/scoped.sarif" 9-archive/ >/dev/null
+render "$WORK/s-prescope" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/scoped.sarif" \
+  --hypatia-sarif-unscoped "$WORK/s1.fixture.sarif" --panic "$pan_clean" --pons "$pons_clean" \
+  --changed "$WORK/changed.txt" --exclude-prefix 9-archive/
+check "pre-scope excluded high stays out of the grade" yellow "$(row "$WORK/s-prescope" hypatia)"
+check "pre-scope excluded high remains in the inventory" 1 "$(jq '.reporters[] | select(.id=="hypatia") | .counts_excluded.high' "$WORK/s-prescope/report.json")"
+check "excluded findings do not enter the unique graded total" 1 "$(jq '.unique_total' "$WORK/s-prescope/report.json")"
+# If the scope filter fails open, the same excluded result is in both inputs;
+# it must not be counted twice. Multiplicity within one source is preserved.
+render "$WORK/s-prescope-open" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/s1.fixture.sarif" \
+  --hypatia-sarif-unscoped "$WORK/s1.fixture.sarif" --panic "$pan_clean" --pons "$pons_clean" --exclude-prefix 9-archive/
+check "fail-open scope results are not duplicated" 1 "$(jq '.reporters[] | select(.id=="hypatia") | .counts_excluded.high' "$WORK/s-prescope-open/report.json")"
+jq '.runs[0].results += [.runs[0].results[] | select(.locations[0].physicalLocation.artifactLocation.uri == "9-archive/old.adoc")]' \
+  "$WORK/s1.fixture.sarif" > "$WORK/prescope-dupe.sarif"
+render "$WORK/s-prescope-dupe" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/s1.fixture.sarif" \
+  --hypatia-sarif-unscoped "$WORK/prescope-dupe.sarif" --panic "$pan_clean" --pons "$pons_clean" --exclude-prefix 9-archive/
+check "distinct excluded occurrences are preserved" 2 "$(jq '.reporters[] | select(.id=="hypatia") | .counts_excluded.high' "$WORK/s-prescope-dupe/report.json")"
+# Nonexcluded evidence in a pre-scope-only file never becomes graded.
+jq '.runs[0].results += [{ruleId:"hypatia/extra/high",level:"error",properties:{"hypatia.severity":"critical"},locations:[{physicalLocation:{artifactLocation:{uri:"scripts/touched.sh"}}}]}]' \
+  "$WORK/s1.fixture.sarif" > "$WORK/prescope-extra.sarif"
+render "$WORK/s-prescope-extra" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/scoped.sarif" \
+  --hypatia-sarif-unscoped "$WORK/prescope-extra.sarif" --panic "$pan_clean" --pons "$pons_clean" \
+  --changed "$WORK/changed.txt" --exclude-prefix 9-archive/
+check "pre-scope-only nonexcluded results never grade" yellow "$(row "$WORK/s-prescope-extra" hypatia)"
+render "$WORK/s-prescope-missing" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/scoped.sarif" \
+  --hypatia-sarif-unscoped "$WORK/not-there.sarif" --panic "$pan_clean" --pons "$pons_clean" --exclude-prefix 9-archive/
+check "missing requested pre-scope inventory is explicit" orange "$(row "$WORK/s-prescope-missing" hypatia)"
+printf 'not json\n' > "$WORK/prescope-invalid.sarif"
+render "$WORK/s-prescope-invalid" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/scoped.sarif" \
+  --hypatia-sarif-unscoped "$WORK/prescope-invalid.sarif" --panic "$pan_clean" --pons "$pons_clean" --exclude-prefix 9-archive/
+check "malformed requested pre-scope inventory is explicit" orange "$(row "$WORK/s-prescope-invalid" hypatia)"
+jq '(.runs[0].results[] | select(.locations[0].physicalLocation.artifactLocation.uri == "9-archive/old.adoc") | .locations[0].physicalLocation.artifactLocation.uri) |= "./" + .' \
+  "$WORK/s1.fixture.sarif" > "$WORK/prescope-dot.sarif"
+render "$WORK/s-prescope-dot" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/scoped.sarif" \
+  --hypatia-sarif-unscoped "$WORK/prescope-dot.sarif" --panic "$pan_clean" --pons "$pons_clean" --exclude-prefix 9-archive/
+check "pre-scope paths are normalized before exclusion matching" 1 "$(jq '.reporters[] | select(.id=="hypatia") | .counts_excluded.high' "$WORK/s-prescope-dot/report.json")"
+# A SARIF result with several locations is excluded by the gate filter only
+# when ALL locations are under the prefix. A first archived location cannot
+# conceal a second live (or unknown) location from the grid.
+jq '(.runs[0].results[] | select(.level == "error" and .properties["hypatia.severity"] == "high") | .locations) +=
+    [{physicalLocation:{artifactLocation:{uri:"scripts/touched.sh"}}}]' "$WORK/s1.fixture.sarif" > "$WORK/multiloc.sarif"
+bash "$SCRIPT_DIR/../filter-sarif-by-scope.sh" "$WORK/multiloc.sarif" "$WORK/multiloc-gate.sarif" 9-archive/ >/dev/null
+render "$WORK/s-multiloc" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/multiloc-gate.sarif" \
+  --hypatia-sarif-unscoped "$WORK/multiloc.sarif" --panic "$pan_clean" --pons "$pons_clean" \
+  --changed "$WORK/changed.txt" --exclude-prefix 9-archive/
+check "mixed-location high grades when its live location is touched" red "$(row "$WORK/s-multiloc" hypatia)"
+check "mixed-location high is not reported as fully excluded" 0 "$(jq '.reporters[] | select(.id=="hypatia") | .counts_excluded.high' "$WORK/s-multiloc/report.json")"
+jq '(.runs[0].results[] | select(.level == "error" and .properties["hypatia.severity"] == "high") | .locations) += [{}]' \
+  "$WORK/s1.fixture.sarif" > "$WORK/multiloc-unknown.sarif"
+bash "$SCRIPT_DIR/../filter-sarif-by-scope.sh" "$WORK/multiloc-unknown.sarif" "$WORK/multiloc-unknown-gate.sarif" 9-archive/ >/dev/null
+render "$WORK/s-multiloc-unknown" --hypatia "$WORK/hyp-mixed.json" --hypatia-sarif "$WORK/multiloc-unknown-gate.sarif" \
+  --hypatia-sarif-unscoped "$WORK/multiloc-unknown.sarif" --panic "$pan_clean" --pons "$pons_clean" \
+  --changed "$WORK/changed.txt" --exclude-prefix 9-archive/
+check "an unknown additional location is graded rather than hidden" red "$(row "$WORK/s-multiloc-unknown" hypatia)"
 
 render "$WORK/s2" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --pons "$WORK/pons_clean"
 check "without --changed the whole repository is graded" purple "$(row "$WORK/s2" hypatia)"
@@ -247,6 +303,17 @@ render "$WORK/s6" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --p
 render "$WORK/s7" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --pons "$WORK/pons_clean" --pr 9 --sha s2 \
   --changed "$WORK/changed.txt" --previous "$WORK/s6/report.md"
 check "a change of scope is not a comparable baseline" 3 "$(grep -c 'no comparable baseline' "$WORK/s7/report.md")"
+# Exclusion changes alter the profile, but changing the PR file list does not.
+printf 'scripts/another.sh\n' > "$WORK/changed-next.txt"
+render "$WORK/s8" --hypatia "$WORK/hyp-mixed.json" --panic "$pan_clean" --pons "$pons_clean" --pr 9 --sha s3 \
+  --changed "$WORK/changed.txt" --exclude-prefix 9-archive/ --exclude-prefix vendor/
+render "$WORK/s9" --hypatia "$WORK/hyp-mixed.json" --panic "$pan_clean" --pons "$pons_clean" --pr 9 --sha s4 \
+  --changed "$WORK/changed-next.txt" --exclude-prefix vendor/ --exclude-prefix 9-archive/ --exclude-prefix vendor/ --previous "$WORK/s8/report.md"
+check "changed paths, prefix order and duplicates do not invalidate the scope profile" "$(jq -r .profile "$WORK/s8/report.json")" "$(jq -r .profile "$WORK/s9/report.json")"
+check "a changed-file list can compare to the previous run" 0 "$(grep -c 'no comparable baseline' "$WORK/s9/report.md" || true)"
+render "$WORK/s10" --hypatia "$WORK/hyp-mixed.json" --panic "$pan_clean" --pons "$pons_clean" --pr 9 --sha s5 \
+  --changed "$WORK/changed-next.txt" --exclude-prefix vendor/ --previous "$WORK/s8/report.md"
+check "changed excluded prefixes invalidate the profile" 3 "$(grep -c 'no comparable baseline' "$WORK/s10/report.md")"
 
 echo
 # 11. The grid grades the exact SARIF set the blocking gate sees, not the

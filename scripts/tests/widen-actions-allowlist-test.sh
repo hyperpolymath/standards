@@ -17,6 +17,9 @@ if [[ "$*" == *' -X PUT '* ]]; then
   if [ "${DROP_FLAG_ON_PUT:-false}" = true ]; then
     jq '.verified_allowed = false' "$LIVE" > "$LIVE.x" && mv "$LIVE.x" "$LIVE"
   fi
+  if [ "${RAISE_FLAG_ON_PUT:-false}" = true ]; then
+    jq '.github_owned_allowed = true' "$LIVE" > "$LIVE.x" && mv "$LIVE.x" "$LIVE"
+  fi
 elif [[ "$*" == *'/selected-actions'* ]]; then
   cat "$LIVE"
 else
@@ -39,7 +42,13 @@ if POSTURE=unexpected bash "$root/scripts/widen-actions-allowlist.sh" owner/repo
 fi
 [ ! -s "$CALLS" ] || { echo 'unknown posture wrote settings' >&2; exit 1; }
 bash "$root/scripts/widen-actions-allowlist.sh" owner/repo --apply "$tmp/canon" >/dev/null
-jq -e '.github_owned_allowed and .verified_allowed and (.patterns_allowed | sort == ["new/workflow@*", "old/custom@*"])' "$LIVE" >/dev/null
+jq -e '(.github_owned_allowed | not) and .verified_allowed and (.patterns_allowed | sort == ["new/workflow@*", "old/custom@*"])' "$LIVE" >/dev/null
+# Even when canon enables both broad publishers, a deliberately restricted
+# live repository must keep both flags false during a transfer.
+reset
+jq '.verified_allowed = false' "$LIVE" > "$tmp/live-new" && mv "$tmp/live-new" "$LIVE"
+bash "$root/scripts/widen-actions-allowlist.sh" owner/repo --apply "$tmp/canon" >/dev/null
+jq -e '(.github_owned_allowed | not) and (.verified_allowed | not) and (.patterns_allowed | length == 2)' "$LIVE" >/dev/null
 reset
 if DROP_ON_PUT=true bash "$root/scripts/widen-actions-allowlist.sh" owner/repo --apply "$tmp/canon" >/dev/null 2>&1; then
   echo 'read-back with a lost old pattern was accepted' >&2; exit 1
@@ -47,6 +56,10 @@ fi
 reset
 if DROP_FLAG_ON_PUT=true bash "$root/scripts/widen-actions-allowlist.sh" owner/repo --apply "$tmp/canon" >/dev/null 2>&1; then
   echo 'read-back with a lost enabled flag was accepted' >&2; exit 1
+fi
+reset
+if RAISE_FLAG_ON_PUT=true bash "$root/scripts/widen-actions-allowlist.sh" owner/repo --apply "$tmp/canon" >/dev/null 2>&1; then
+  echo 'read-back with an unexpectedly enabled flag was accepted' >&2; exit 1
 fi
 reset
 cat "$LIVE" "$LIVE" > "$tmp/multi-live"

@@ -19,7 +19,15 @@ while IFS= read -r -d '' file; do
   if ! jq -e -s 'length > 0' "$tmp" >/dev/null; then
     echo "empty workflow: $file" >&2; bad=1; continue
   fi
-  refs=$(jq -r '.. | objects | .uses?, .repository? | strings' "$tmp")
+  # Only job/step uses and action/reusable inputs can execute coordinates.
+  # Other `repository` keys (environment metadata, strategy data, etc.) are
+  # ordinary YAML and must not make historical text a blocking violation.
+  refs=$(jq -r '
+    .jobs // {} | select(type == "object") | .[] | select(type == "object") |
+    (.uses?, .with.repository?,
+     (.steps // [] | select(type == "array") | .[] | select(type == "object") |
+      (.uses?, .with.repository?))) | strings
+  ' "$tmp")
   if printf '%s\n' "$refs" | grep -iE '^[[:space:]]*hyperpolymath/standards([/@[:space:]]|$)' >/dev/null; then
     echo "former-owner executable coordinate in $file:" >&2
     printf '%s\n' "$refs" | grep -iE '^[[:space:]]*hyperpolymath/standards([/@[:space:]]|$)' >&2

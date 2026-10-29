@@ -139,13 +139,27 @@ ck "completed zero-match filtering is reported" 'filtered=true' "$(cat "$GITHUB_
 # A malformed or multiple-document response is not confirmation that zero
 # findings were suppressed. Leave SARIF untouched and never arm the gate.
 for payload in '{"findings_suppressed":null}' '{"findings_suppressed":[]} {"findings_suppressed":[]}'; do
-  printf '#!/usr/bin/env bash\nprintf '%%s\n' '%s'\n' "$payload" > "$T/invalid-validator"
+  cat > "$T/invalid-validator" <<SCRIPT
+#!/usr/bin/env bash
+cat <<'JSON'
+$payload
+JSON
+SCRIPT
+  ck "invalid-response fixture emits its intended JSON" "$payload" "$(bash "$T/invalid-validator")"
   : > "$GITHUB_OUTPUT"
   APPLY_BASELINE="$T/invalid-validator" bash "$S" "$T/in.sarif" "$T/f.json" "$T/b.json" "$T/out.sarif" > "$T/filter.log" 2>&1
   ck "invalid matcher response leaves SARIF untouched" 3 "$(count "$T/out.sarif")"
   ck "invalid matcher response cannot claim success" '' "$(cat "$GITHUB_OUTPUT")"
 done
-printf '#!/usr/bin/env bash\nprintf '%%s\n' '{"findings_suppressed":[]}'\nexit 1\n' > "$T/invalid-validator"
+cat > "$T/invalid-validator" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' '{"findings_suppressed":[]}'
+exit 1
+SCRIPT
+matcher_status=0
+matcher_response=$(bash "$T/invalid-validator") || matcher_status=$?
+ck "failed matcher fixture returns nonzero" 1 "$matcher_status"
+ck "failed matcher fixture emits valid JSON" '{"findings_suppressed":[]}' "$matcher_response"
 : > "$GITHUB_OUTPUT"
 APPLY_BASELINE="$T/invalid-validator" bash "$S" "$T/in.sarif" "$T/f.json" "$T/b.json" "$T/out.sarif" > "$T/filter.log" 2>&1
 ck "failed matcher leaves SARIF untouched" 3 "$(count "$T/out.sarif")"

@@ -147,7 +147,7 @@ jobs:
               sha="$ref"
             fi
             if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::$label must be a 40-hex commit SHA or HEAD"
+              echo "::error::$label must be a 40-hex commit SHA or HEAD" >&2
               exit 1
             fi
             printf '%s' "$sha"
@@ -675,6 +675,12 @@ jobs:
           SCOPE_EXCLUDES: ${{ inputs.scope-excludes }}
         run: |
           set -uo pipefail
+          # Preserve the baseline-filtered projection for reporting excluded
+          # findings. The gate/upload continue to use only hypatia.sarif.
+          if [ -s hypatia.sarif ] && ! cp hypatia.sarif hypatia.pre-scope.sarif; then
+            rm -f hypatia.pre-scope.sarif
+            echo "::warning::could not preserve pre-scope SARIF for excluded-finding inventory"
+          fi
           [ -z "$SCOPE_EXCLUDES" ] && { echo "  no scope exclusions declared"; exit 0; }
           if [ -f .standards-checkout/scripts/filter-sarif-by-scope.sh ]; then
             FILTER=.standards-checkout/scripts/filter-sarif-by-scope.sh
@@ -708,6 +714,7 @@ jobs:
           path: |
             hypatia-findings.json
             hypatia.sarif
+            hypatia.pre-scope.sarif
             panic-attack-findings.json
             pons-findings.json
           retention-days: 90
@@ -859,7 +866,12 @@ jobs:
           if [ -f .hypatia-baseline.json ] && [ "${BASELINE_FILTERED:-}" != true ]; then
             scope_args+=(--hypatia-baseline-unverified)
           fi
-          # Prefixes from the caller; empty means grade everything.
+          # Prefixes from the caller; empty means grade everything. When scope
+          # excludes are used, report from the pre-scope projection as well;
+          # it contributes excluded counts only, never gate/grade findings.
+          if [ -n "${SCOPE_EXCLUDES:-}" ]; then
+            scope_args+=(--hypatia-sarif-unscoped hypatia.pre-scope.sarif)
+          fi
           IFS=',' read -r -a _ex <<< "${SCOPE_EXCLUDES:-}"
           for _p in "${_ex[@]}"; do
             [ -n "$_p" ] && scope_args+=(--exclude-prefix "$_p")

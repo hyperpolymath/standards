@@ -98,6 +98,12 @@ check "same rule+file, new line: no match" \
   "[ \"\$(plan <(mk 202 TokenPermissionsID .github/workflows/debt-measure.yml 52))\" = '' ]"
 check "the old deep-recon line does not match the corrected dismissal" \
   "[ \"\$(plan <(mk 206 TokenPermissionsID .github/workflows/deep-recon-reusable.yml 70))\" = '' ]"
+check "the old Hypatia reusable line is no longer dismissed" \
+  "[ \"\$(plan <(mk 207 TokenPermissionsID .github/workflows/hypatia-scan-reusable.yml 62))\" = '' ]"
+check "the old fork-governance line is no longer dismissed" \
+  "[ \"\$(plan <(mk 208 TokenPermissionsID .github/workflows/fork-governance.yml 81))\" = '' ]"
+check "the current fork-governance permission line is matched" \
+  "[ \"\$(plan <(mk 209 TokenPermissionsID .github/workflows/fork-governance.yml 229))\" = '209 ' ]"
 check "aggregate rule with a real path does not inherit the SASTID entry" \
   "[ \"\$(plan <(mk 204 SASTID .github/workflows/ci.yml 12))\" = '' ]"
 check "unlisted rule id: no match" \

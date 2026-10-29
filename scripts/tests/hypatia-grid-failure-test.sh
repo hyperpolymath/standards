@@ -46,4 +46,19 @@ export SCOPE_MODE=whole-repo
 bash "$tmp/grid-step.sh" >/dev/null
 grep -qx 'state=orange' "$GITHUB_OUTPUT"
 jq -e '.state == "orange"' verdict-grid/report.json >/dev/null
+# Exercise the actual workflow argument wiring: filtered gate SARIF grades,
+# while its pre-scope snapshot supplies the excluded inventory only.
+cat > hypatia.pre-scope.sarif <<'JSON'
+{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Hypatia"}},"results":[
+ {"ruleId":"hypatia/r/live","level":"warning","locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/live.rs"}}}]},
+ {"ruleId":"hypatia/r/archive","level":"error","locations":[{"physicalLocation":{"artifactLocation":{"uri":"9-archive/old.rs"}}}]}
+]}]}
+JSON
+jq '.runs[0].results |= map(select(.ruleId != "hypatia/r/archive"))' hypatia.pre-scope.sarif > hypatia.sarif
+printf '[]\n' > hypatia-findings.json
+export PANIC_ATTACK_SHA=def PONS_SHA=ghi SCOPE_EXCLUDES=9-archive/
+: > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"
+bash "$tmp/grid-step.sh" >/dev/null
+jq -e '.state == "yellow" and (.reporters[] | select(.id == "hypatia") | .counts.medium == 1 and .counts_excluded.high == 1)' verdict-grid/report.json >/dev/null
+echo 'PASS: grid workflow reports excluded SARIF findings without grading them'
 echo 'PASS: a missing or failed grid renderer produces an explicit orange state'

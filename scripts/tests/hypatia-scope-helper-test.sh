@@ -19,5 +19,6 @@ mkdir -p .standards-checkout/scripts
 cp "$root/scripts/filter-sarif-by-scope.sh" .standards-checkout/scripts/
 bash "$tmp/scope-step.sh" >/dev/null
 jq -e '.runs[0].results | length == 0' hypatia.sarif >/dev/null
+jq -e '.runs[0].results | length == 1' hypatia.pre-scope.sarif >/dev/null
 [ ! -e used-caller-helper ]
-echo 'PASS: scope filtering uses only the revision-matched helper'
+echo 'PASS: scope filtering preserves pre-scope evidence and uses only the revision-matched helper'

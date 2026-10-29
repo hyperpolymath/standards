@@ -41,6 +41,37 @@ export WF_FIXTURE="$tmp/rule-fixture" WF_FINDING="$tmp/wf-finding.json"
 ) > "$WF_FINDING"
 jq -e '.type == "reusable_call_to_moved_repository" and .advisory == true and .severity == "low"' "$WF_FINDING" >/dev/null
 echo 'PASS: pinned Hypatia WF028, CLI advisory normalization and shared registry'
+# Confirm the pinned RE001 rule sees the actual Radicle workflow's narrowly
+# scoped secret as warning-level debt, not the previous shared-step high. The
+# synthetic legacy control proves that this test detects the old exposure.
+mkdir -p "$tmp/radicle-fixture/.github/workflows"
+cp "$root/.github/workflows/mirror-reusable.yml" "$tmp/radicle-fixture/.github/workflows/mirror-reusable.yml"
+cat > "$tmp/radicle-legacy.yml" <<'YAML'
+on: workflow_call
+jobs:
+  mirror-radicle:
+    runs-on: ubuntu-latest
+    env:
+      RADICLE_KEY: ${{ secrets.RADICLE_KEY }}
+    steps:
+      - run: cargo install radicle-cli --locked
+YAML
+export RADICLE_FIXTURE="$tmp/radicle-fixture" RADICLE_LEGACY="$tmp/radicle-legacy.yml"
+(
+  cd "$source_dir"
+  mix run --no-start --no-compile -e '
+    root = System.fetch_env!("RADICLE_FIXTURE")
+    radicle = fn f -> f.file == ".github/workflows/mirror-reusable.yml" and
+                       String.contains?(f.reason, "job `mirror-radicle`") end
+    current = Hypatia.Rules.ResearchExtensions.re001_missing_harden_runner(root) |> Enum.filter(radicle)
+    unless Enum.any?(current, &(&1.severity == :warn)) and not Enum.any?(current, &(&1.severity == :high)),
+      do: raise "Radicle credentials still share a fetched-code step (or the RE001 debt was hidden)"
+    File.cp!(System.fetch_env!("RADICLE_LEGACY"), Path.join(root, ".github/workflows/mirror-reusable.yml"))
+    legacy = Hypatia.Rules.ResearchExtensions.re001_missing_harden_runner(root) |> Enum.filter(radicle)
+    unless Enum.any?(legacy, &(&1.severity == :high)), do: raise "RE001 negative control failed"
+  '
+)
+echo 'PASS: pinned Hypatia RE001 detects the old Radicle exposure but not the step-scoped fix'
 mkdir -p "$tmp/home/hypatia" "$tmp/work"
 for path in mix.exs mix.lock _build deps lib config; do
   [ ! -e "$source_dir/$path" ] || ln -s "$source_dir/$path" "$tmp/home/hypatia/$path"

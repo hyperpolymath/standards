@@ -130,8 +130,12 @@ Hypatia lane; the rest come from the fleet.
 === Grade, alert inventory and corroboration
 
 The Hypatia row grades only the filtered SARIF results the blocking gate sees,
-within the grid's own delta/whole-repo scope. High and critical share SARIF's
-`error` level, so the projection carries the original severity separately.
+within the grid's own delta/whole-repo scope. A separate baseline-filtered,
+pre-scope SARIF snapshot supplies excluded findings for reporting only; it is
+not uploaded to code scanning and cannot add to the graded set. A result with
+multiple locations is excluded only if all locations are excluded; unknown
+locations remain gradable. High and
+critical share SARIF's `error` level, so the projection carries the original severity separately.
 For pinned `code_safety` findings, the CWE is also recovered only from the
 CLI's exact generated `(... occurrences, CWE-..., line ...)` suffix when no
 structured class/CWE is present; other prose is never used as identity.
@@ -209,10 +213,11 @@ so changing it ends comparisons with earlier revisions.
 "Since previous revision" compares the current grid with the baseline
 embedded in the lane's previous comment on the same PR, and only when the
 schema and the *profile* match and the commit differs. The profile is a
-SHA-256 over the renderer, the enrolment manifest and the pinned tool
-commits; a changed tool or scope yields `— no comparable baseline`, never an
-apparent improvement. A row whose status changed (a scanner that ran last
-time and not this time) reads `— evidence changed`. Rows that ran both times
+SHA-256 over the renderer, enrolment manifest, pinned tool commits, scope mode
+and canonically ordered exclusion prefixes; a changed tool or scope yields
+`— no comparable baseline`, never an apparent improvement. The revision's
+changed-file list is not part of the profile. A row whose status changed (a
+scanner that ran last time and not this time) reads `— evidence changed`. Rows that ran both times
 compare blocking findings (critical + high) first, then medium, then minor:
 `↑ improved (n fewer blocking)`, `↓ regressed (n more blocking)`,
 `↑ fewer medium`, `↔ unchanged`, and so on.
@@ -275,10 +280,12 @@ baseline`.
 [source,bash]
 ----
 bash scripts/tests/verdict-grid-test.sh
-# Use the two files from the SAME completed reusable scan artifact. SARIF is
-# already baseline/scope-filtered; do not independently rescan to obtain it.
+# Use files from the SAME completed reusable scan artifact. SARIF is already
+# baseline/scope-filtered; do not independently rescan to obtain it. Repeat
+# --exclude-prefix for the scan's declared prefixes (9-archive/ here).
 bash scripts/verdict-grid.sh render --out verdict-grid \
   --hypatia hypatia-findings.json --hypatia-sarif hypatia.sarif \
+  --hypatia-sarif-unscoped hypatia.pre-scope.sarif --exclude-prefix 9-archive/ \
   --panic panic-attack-findings.json --pons pons-findings.json \
   --report-backs .gitbot-fleet/report-backs --enrolment .gitbot-fleet/enrolment.json
 ----

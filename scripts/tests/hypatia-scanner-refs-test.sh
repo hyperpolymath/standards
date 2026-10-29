@@ -31,14 +31,18 @@ PANIC_REF=HEAD PONS_REF=HEAD bash "$tmp/resolve.sh" >/dev/null
 grep -qx 'PANIC_ATTACK_SHA=1111111111111111111111111111111111111111' "$GITHUB_ENV"
 grep -qx 'PONS_SHA=2222222222222222222222222222222222222222' "$GITHUB_ENV"
 : > "$GITHUB_ENV"
-if PANIC_REF='bad; echo injected' PONS_REF="$pons" bash "$tmp/resolve.sh" >/dev/null 2>&1; then
+if PANIC_REF='bad; echo injected' PONS_REF="$pons" bash "$tmp/resolve.sh" >"$tmp/stdout" 2>"$tmp/stderr"; then
   echo 'invalid panic-ref was accepted' >&2; exit 1
 fi
 [ ! -s "$GITHUB_ENV" ] || { echo 'invalid ref partially set the environment' >&2; exit 1; }
-if PANIC_REF="$panic" PONS_REF=main bash "$tmp/resolve.sh" >/dev/null 2>&1; then
+grep -q '^::error::panic-ref must be a 40-hex commit SHA or HEAD$' "$tmp/stderr" || { echo 'panic-ref diagnostic missing' >&2; exit 1; }
+[ ! -s "$tmp/stdout" ] || { echo 'error annotation was captured on stdout' >&2; exit 1; }
+if PANIC_REF="$panic" PONS_REF=main bash "$tmp/resolve.sh" >"$tmp/stdout" 2>"$tmp/stderr"; then
   echo 'unpinned pons-ref was accepted' >&2; exit 1
 fi
 [ ! -s "$GITHUB_ENV" ] || { echo 'invalid pons ref partially set the environment' >&2; exit 1; }
+grep -q '^::error::pons-ref must be a 40-hex commit SHA or HEAD$' "$tmp/stderr" || { echo 'pons-ref diagnostic missing' >&2; exit 1; }
+[ ! -s "$tmp/stdout" ] || { echo 'error annotation was captured on stdout' >&2; exit 1; }
 # These resolved SHAs must be the values used for cache/install/evidence, not
 # the mutable input literal. Also lock the defaults to the agreed vetted pins.
 grep -Fq "default: $panic" "$workflow"

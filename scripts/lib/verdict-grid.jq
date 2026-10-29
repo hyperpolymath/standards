@@ -126,6 +126,10 @@ def hypatia(src; ref; baseline_verified):
      | (if .level == "error" and $p["hypatia.severity"] == "critical" then "critical"
         elif .level == "error" then "high"
         elif .level == "warning" then "medium" else "info" end) as $severity
+     # Match the scope filter's all-locations rule: a mixed-scope SARIF
+     # result remains visible, as does any result with an unknown location.
+     | [ .locations[]? | (try (.physicalLocation.artifactLocation.uri // "") catch "")
+         | if type == "string" then . else "" end ] as $scope_files
      | finding((.ruleId | sub("^hypatia/"; "")); $severity;
          (.locations[0].physicalLocation.artifactLocation.uri // "");
          (if $p | has("hypatia.originalLine") then $p["hypatia.originalLine"] else 0 end);
@@ -133,7 +137,8 @@ def hypatia(src; ref; baseline_verified):
      # SARIF may collapse an outside absolute path to a basename. Preserve the
      # original scanner path for correlation, but grade the SARIF URI itself.
      | .identity_file = (if ($p["hypatia.originalFile"] | type) == "string"
-                          then $p["hypatia.originalFile"] else .file end)] catch null) as $findings
+                          then $p["hypatia.originalFile"] else .file end)
+     | .scope_files = $scope_files] catch null) as $findings
     | if $findings == null then
         reporter("hypatia"; "Hypatia scan"; "error"; "SARIF result properties or locations are unreadable"; ref; [])
       else reporter("hypatia"; "Hypatia scan"; "ran"; ""; ref; $findings) end
@@ -179,21 +184,54 @@ def counts_of($fs):
 
 def counts: counts_of(.findings);
 
-# A declared exclusion is a PREFIX match on the finding's path, and it applies
-# in every mode: frozen history is out of scope whether or not the change
-# touched it.
-def under_exclusion($sc; $f):
-  any((($sc.excluded_prefixes // [])[]) ; . as $x | ($f.file // "") | startswith($x));
+# Exclude a multi-location SARIF result only if every location is excluded,
+# matching the authoritative SARIF scope filter. Any unknown location grades.
+def path_excluded($sc; $path):
+  ($path != "") and any((($sc.excluded_prefixes // [])[]); . as $p | $path | startswith($p));
 
-# A finding with NO path cannot be shown to be outside the change, so it is
-# graded. The alternative -- inferring "not mine" from a missing field -- would
-# turn malformed evidence into silence.
+def scope_paths($f):
+  if ($f.scope_files | type) == "array" and ($f.scope_files | length) > 0
+  then $f.scope_files else [($f.file // "")] end;
+
+def under_exclusion($sc; $f):
+  all(scope_paths($f)[]; path_excluded($sc; .));
+
 def bucket($sc; $f):
-  if under_exclusion($sc; $f) then "excluded"
-  elif ($sc.mode // "whole-repo") != "delta" then "graded"
-  elif ($f.file // "") == "" then "graded"
-  elif any((($sc.changed // [])[]); . == $f.file) then "graded"
-  else "standing" end;
+  (scope_paths($f)) as $paths
+  | if under_exclusion($sc; $f) then "excluded"
+    elif any($paths[]; . == "") then "graded"
+    elif ($sc.mode // "whole-repo") != "delta" then "graded"
+    elif any($paths[]; . as $path | (path_excluded($sc; $path) | not)
+             and any((($sc.changed // [])[]); . == $path)) then "graded"
+    else "standing" end;
+
+def normalize_finding($root):
+  .file |= norm_path($root) | .identity_file |= norm_path($root)
+  | if (.scope_files | type) == "array" then .scope_files |= map(norm_path($root)) else . end;
+
+# Only add excluded results from a separate pre-scope, baseline-filtered
+# projection. The gate SARIF stays authoritative for every graded finding.
+# Subtract already-present results as a multiset so failed-open scope filters
+# and repeated same-reporter results are neither hidden nor double-counted.
+def extra_excluded($all; $present; $scope; $root):
+  ($all.findings | map(normalize_finding($root))
+    | map(select(under_exclusion($scope; .)))) as $excluded
+  | ($present.findings | map(normalize_finding($root))
+    | map(select(under_exclusion($scope; .)))
+    | reduce .[] as $f ({}; ($f | tojson) as $k | .[$k] = ((.[$k] // 0) + 1))) as $counts
+  | reduce $excluded[] as $f ({counts: $counts, extra: []};
+      ($f | tojson) as $k
+      | if (.counts[$k] // 0) > 0 then .counts[$k] -= 1
+        else .extra += [$f] end) | .extra;
+
+def hypatia_with_exclusions($gate; $pre; $scope; $root; $ref; $verified):
+  hypatia($gate; $ref; $verified) as $row
+  | if $pre == null or $row.status != "ran" then $row
+    else hypatia($pre; $ref; $verified) as $full
+      | if $full.status != "ran" then
+          $row + {status: "error", reason: "pre-scope SARIF inventory is unavailable or malformed"}
+        else $row | .findings += extra_excluded($full; $row; $scope; $root) end
+    end;
 
 def state:
   if .status == "not_applicable" then "grey"
@@ -237,9 +275,10 @@ def build:
   | ($in.scope // {mode: "whole-repo"}) as $scope
   | ($in.sources | map(select(.kind == "hypatia")) | first // {present: false}) as $h
   | ($in.sources | map(select(.kind == "hypatia-sarif")) | first // {present: false}) as $hs
+  | ($in.sources | map(select(.kind == "hypatia-unscoped-sarif")) | first) as $hu
   | ($in.sources | map(select(.kind == "panic")) | first // {present: false}) as $p
   | ($in.sources | map(select(.kind == "pons")) | first // {present: false}) as $q
-  | [ hypatia($hs; $in.identity.refs.hypatia; ($in.hypatia_baseline_verified != false)), panic($p), pons($q) ] as $builtin
+  | [ hypatia_with_exclusions($hs; $hu; $scope; ($in.root // ""); $in.identity.refs.hypatia; ($in.hypatia_baseline_verified != false)), panic($p), pons($q) ] as $builtin
   | [ $in.sources[] | select(.kind == "report-back") | reportback(.) ] as $backs
   | ($in.enrolment.reporters // {}) as $enrol
   | [ $enrol | to_entries[] | .key as $id | .value as $e
@@ -248,8 +287,7 @@ def build:
         then reporter($id; ($e.title // $id); "not_run"; "enrolled, but no report-back was received"; ""; [])
         else reporter($id; ($e.title // $id); "not_applicable"; ($e.reason // "not enrolled for this repository"); ""; []) end ] as $missing
   | ($builtin + (($backs + $missing) | sort_by([(.id | arbiter_priority), (.id | ascii_downcase)]))
-     | map(.findings |= map(.file |= norm_path($in.root // "")
-                             | .identity_file |= norm_path($in.root // "") | . + {fingerprint: fingerprint}))
+     | map(.findings |= map(normalize_finding($in.root // "") | . + {fingerprint: fingerprint}))
      | map(. + {findings_graded:   [.findings[] | select(bucket($scope; .) == "graded")],
                 findings_standing: [.findings[] | select(bucket($scope; .) == "standing")],
                 findings_excluded: [.findings[] | select(bucket($scope; .) == "excluded")]})
