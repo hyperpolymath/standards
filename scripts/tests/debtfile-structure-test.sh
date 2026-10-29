@@ -331,6 +331,14 @@ expect_deed 1 "deed unquoted expiry is rejected" <<'EOF'
 )
 EOF
 
+# The no-argument entrypoint must validate the live deed, not an archived
+# pre-migration ledger. Test from the actual checkout root, not only fixtures.
+LIVE_ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
+got=0
+( cd "$LIVE_ROOT" && bash "$SCRIPT" ) >/dev/null 2>&1 || got=$?
+if [ "$got" -eq 0 ]; then pass=$((pass+1)); echo "  ok    default path validates the live debt_praxis.deed"
+else fail=$((fail+1)); echo "  FAIL  live default debt validation returned $got"; fi
+
 got=0; bash "$SCRIPT" no-such-file.a2ml >/dev/null 2>&1 || got=$?
 if [ "$got" = 2 ]; then pass=$((pass+1)); echo "  ok    a missing Debtfile exits 2, distinct from a structural defect"
 else fail=$((fail+1)); echo "  FAIL  missing file (wanted exit 2, got $got)"; fi
