@@ -253,6 +253,7 @@ if [ "${CLAIMS##*.}" = "deed" ]; then
     case "$raw" in *':target "'*) target="$(deed_unquote "${raw#*:target }")" ;; esac
     case "$raw" in *':statement "'*) statement="$(deed_unquote "${raw#*:statement }")" ;; esac
     not_before=""
+    case "$raw" in *':not-before "'*) not_before="$(deed_unquote "${raw#*:not-before }")" ;; esac
     emit
     in_claim=0
   done < "$CLAIMS"
