@@ -100,6 +100,23 @@ for workflow in "$GOVERNANCE" "$FOCUSED"; do
     fail "$workflow conflates API unavailability with a policy verdict"
 done
 
+# The live detector and additive updater must compare the same estate payload;
+# the separately maintained tree preflight policy is not a settings payload.
+for entry in "$GOVERNANCE:actions-policy-live" "$FOCUSED:live-policy"; do
+  workflow=${entry%:*}; job=${entry##*:}
+  live_block=$(awk -v job="$job" '
+    $0 == "  " job ":" {active=1; next}
+    active && /^  [a-zA-Z0-9_-]+:/ {exit}
+    active {print}' "$workflow")
+  grep -Fq 'config/settings/actions-allowlist.json' <<< "$live_block" ||
+    fail "$workflow live-policy job does not use the estate settings payload"
+  if grep -Fq '.standards-checkout/rhodium-standard-repositories/actions-allowlist/allowed-actions.json' <<< "$live_block"; then
+    fail "$workflow live-policy job still checks the stale tree policy"
+  fi
+done
+grep -Fq '$SCRIPT_DIR/../config/settings/actions-allowlist.json' "$ROOT/scripts/check-actions-policy.sh" ||
+  fail "live-policy detector default differs from the updater"
+
 grep -Eq 'uses: hyperpolymath/standards/.github/workflows/allowlist-preflight-reusable.yml@[0-9a-f]{40}$' \
   "$RSR_SEED" || fail "RSR allowlist seed is not a thin immutable reusable-workflow caller"
 if grep -Eq 'raw\.githubusercontent\.com/.*/main|curl[[:space:]]' "$RSR_SEED"; then

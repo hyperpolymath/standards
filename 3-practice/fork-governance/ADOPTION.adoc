@@ -3,7 +3,7 @@
 = Fork governance — adopting it in a repository
 :toc: left
 :toclevels: 3
-:revdate: 2026-10-24
+:revdate: 2026-10-28
 
 This is the operator's guide. It assumes you want the same comment, in the same
 order, on every pull request in a repository, and that the repository already
@@ -17,11 +17,16 @@ One workflow, five jobs, one comment:
 [source,yaml]
 ----
 jobs:
-  deed:    uses: hyperpolymath/standards/.github/workflows/deed-conformance.yml@<SHA>
-  k9:      uses: hyperpolymath/standards/.github/workflows/k9-conformance.yml@<SHA>
-  fleet:   uses: hyperpolymath/gitbot-fleet/.github/workflows/fleet-report-back-reusable.yml@<FLEET-SHA>
-  hypatia: uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@<SHA>
-  verdict: uses: hyperpolymath/standards/.github/workflows/fork-governance-reusable.yml@<SHA>
+  deed:
+    uses: metadatastician/standards/.github/workflows/deed-conformance.yml@<SHA>
+  k9:
+    uses: metadatastician/standards/.github/workflows/k9-conformance.yml@<SHA>
+  fleet:
+    uses: hyperpolymath/gitbot-fleet/.github/workflows/fleet-report-back-reusable.yml@<FLEET-SHA>
+  hypatia:
+    uses: metadatastician/standards/.github/workflows/hypatia-scan-reusable.yml@<SHA>
+  verdict:
+    uses: metadatastician/standards/.github/workflows/fork-governance-reusable.yml@<SHA>
 ----
 
 `fleet` is not a lane: it produces the gitbot-fleet report-back envelopes that
@@ -33,6 +38,71 @@ report-back was received". See <<fleet>>.
 The three lanes produce verdicts and artifacts. The posting engine reads them from the
 caller's `needs` graph — a reusable cannot see your jobs, so you pass the
 results in — and writes the comment.
+
+== 1.1 Prerequisite: cross-owner Actions policy
+
+A reusable workflow is resolved against the *caller's* effective Actions
+policy before any job is started. For a caller outside `metadatastician`,
+ensure its `selected actions and reusable workflows` list permits
+`metadatastician/standards/.github/workflows/*@*` and every other required
+reusable (including `hyperpolymath/gitbot-fleet` where used). A working git
+checkout or REST redirect does not prove a remote `uses:` is permitted.
+Widen policy first, start and inspect a canonical-coordinate canary, *then*
+propagate the calls; see link:../../docs/compliance/repo-transfer-to-enterprise-playbook.adoc[the transfer playbook].
+A zero-job `startup_failure` is not a passing check.
+
+=== First-class alternative: fork-local reusable copies
+
+If the effective policy cannot allow the cross-owner reusable, use the
+link:https://github.com/hyperpolymath/MetaManifold-WebUI/blob/main/.github/workflows/hypatia-scan.yml[MetaManifold-WebUI pattern]:
+copy each needed `workflow_call` implementation into the fork, then call it
+locally with `uses: ./.github/workflows/<local-reusable>.yml`. The local copy
+is reviewed and maintained by the fork; it is not a claim that the remote
+reusable was permitted. Record the immutable upstream standards commit in each
+copy, keep the `workflow_call` inputs/permissions, pin helper checkouts to that
+same `metadatastician/standards` commit, and test the copy and any fork-specific
+deltas. In a fork-local copy `job.workflow_sha` names the *fork's* commit, not
+the standards source; replace it for every standards helper checkout with the
+recorded upstream SHA. Actions checkout itself and any other cross-owner
+reusables still need to be allowed by the caller's policy.
+
+For example, replace the `deed`, `k9` and `hypatia` remote calls below with:
+
+[source,yaml]
+----
+  deed:
+    uses: ./.github/workflows/deed-conformance-reusable.yml
+    permissions:
+      contents: read
+    with:
+      require-files: true
+  k9:
+    uses: ./.github/workflows/k9-conformance-reusable.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      require-files: true
+      fail-on-indeterminate: false
+  hypatia:
+    needs: [fleet]
+    if: ${{ always() }}
+    uses: ./.github/workflows/hypatia-scan-reusable.yml
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    secrets:
+      HYPATIA_SCAN_PAT: ${{ secrets.HYPATIA_SCAN_PAT }}
+----
+
+Apply the same local-copy treatment to the posting engine if that remote
+reusable is refused. Preserve each lane's outputs, artifacts, event and
+permission boundaries; the WebUI also intentionally avoids PR SARIF uploads,
+a fork-specific choice that must not be silently applied estate-wide. Track
+source-pin and contract drift in CI, refresh the copies deliberately, and test
+that the local calls start jobs. If the fleet reusable is refused, use the
+inline producer described in section 8.2.
 
 == 2. The file
 
@@ -58,7 +128,7 @@ permissions:
 jobs:
   deed:
     name: DEED syntax
-    uses: hyperpolymath/standards/.github/workflows/deed-conformance.yml@<SHA>
+    uses: metadatastician/standards/.github/workflows/deed-conformance.yml@<SHA>
     permissions:
       contents: read
     with:
@@ -66,7 +136,7 @@ jobs:
 
   k9:
     name: K9-DEED conformance
-    uses: hyperpolymath/standards/.github/workflows/k9-conformance.yml@<SHA>
+    uses: metadatastician/standards/.github/workflows/k9-conformance.yml@<SHA>
     permissions:
       contents: read
       pull-requests: read
@@ -90,7 +160,7 @@ jobs:
     # orange fleet rows, never as a missing lane.
     needs: [fleet]
     if: ${{ always() }}
-    uses: hyperpolymath/standards/.github/workflows/hypatia-scan-reusable.yml@<SHA>
+    uses: metadatastician/standards/.github/workflows/hypatia-scan-reusable.yml@<SHA>
     permissions:
       actions: read
       contents: read
@@ -102,7 +172,7 @@ jobs:
     name: Post the fork governance summary
     needs: [deed, k9, hypatia]
     if: ${{ always() && github.event_name == 'pull_request' }}
-    uses: hyperpolymath/standards/.github/workflows/fork-governance-reusable.yml@<SHA>
+    uses: metadatastician/standards/.github/workflows/fork-governance-reusable.yml@<SHA>
     permissions:
       contents: read
       actions: read
@@ -114,8 +184,26 @@ jobs:
       k9-verdict: ${{ needs.k9.outputs.verdict }}
       hypatia-result: ${{ needs.hypatia.result }}
       hypatia-verdict: ${{ needs.hypatia.outputs.verdict }}
+      hypatia-advisory: ${{ needs.hypatia.outputs.advisory }}
       canon-ref: <SHA>
 ----
+
+The Hypatia reusable also accepts `hypatia-ref`, `panic-ref` and `pons-ref`
+(40-hex SHA, or `HEAD` only for an intentional canary). Defaults are vetted,
+not floating. Opt in with `hypatia-advisory: true` to include WF028 and other
+below-threshold advisory findings in the JSON artifact and the separate
+JSON-only advisory summary; this does not change SARIF or either gate.
+The pinned CLI serialises WF028 as type `reusable_call_to_moved_repository`;
+the grid labels that type `WF028` without altering the raw finding.
+
+[NOTE]
+====
+The requested Hypatia pin also advances RE001's declared-egress checks. A
+scanner pin does not enact the policy cutover: link:../../docs/decisions/ADR-009-declared-egress-for-secret-bearing-jobs.adoc[ADR-009]
+remains proposed and D131 remains operative until the documented cutover.
+Canary the new scanner against a consumer tree and review its full rule-set
+changes rather than interpreting the pin as an egress waiver.
+====
 
 `canon-ref` tells the posting engine which standards commit to take the
 renderer from. Pass the same `<SHA>` as the `uses:` pins: two refs that can
@@ -202,16 +290,26 @@ applies to this repository, with a reason when it does not:
 ----
 { "schema": 1,
   "reporters": {
-    "rhodibot":         { "title": "rhodibot (RSR compliance)", "enrolled": true },
-    "finishingbot":     { "title": "finishingbot (release readiness)", "enrolled": true },
-    "glambot":          { "title": "glambot (presentation quality)", "enrolled": true },
-    "accessibilitybot": { "enrolled": false, "reason": "no served HTML surface" },
-    "panicbot":         { "enrolled": false, "reason": "panic-attack already reports in this lane directly" },
-    "echidnabot":       { "enrolled": false, "reason": "no proofs in this repository" },
-    "seambot":          { "enrolled": false, "reason": "no seam register is declared" },
-    "cipherbot":        { "enrolled": false, "reason": "no cryptography is implemented" },
-    "sustainabot":      { "enrolled": false, "reason": "reserved fleet slot; no adapter exists" } } }
+    "echidnabot":        { "enrolled": false, "gating": false, "reason": "no proofs in this repository" },
+    "rhodibot":          { "title": "rhodibot (RSR compliance)", "enrolled": true, "gating": false },
+    "panicbot":          { "enrolled": false, "gating": false, "reason": "panic-attack already reports in this lane directly" },
+    "sustainabot":       { "enrolled": false, "gating": false, "reason": "reserved fleet slot; no adapter exists" },
+    "glambot":           { "title": "glambot (presentation quality)", "enrolled": true, "gating": false },
+    "seambot":           { "enrolled": false, "gating": false, "reason": "no seam register is declared" },
+    "finishingbot":      { "title": "finishingbot (release readiness)", "enrolled": true, "gating": false },
+    "cipherbot":         { "enrolled": false, "gating": false, "reason": "no cryptography is implemented" },
+    "gsbot":             { "enrolled": false, "gating": false, "reason": "no general adapter is configured" },
+    "accessibilitybot":  { "enrolled": false, "gating": false, "reason": "no served HTML surface" },
+    "the-hotchocolabot": { "enrolled": false, "gating": false, "reason": "no comfort/DX adapter is configured" } } }
 ----
+
+The example follows Hypatia Kin Arbiter priority (highest first); the grid sorts
+fleet rows by that order regardless of manifest or artifact order. Fleet rows
+are explicitly advisory (`"gating": false`). Do not enrol panicbot alongside
+the direct panic-attack scan unless duplicate observations are intentionally
+wanted: they are the same scanner. Per-row counts can double-count, and the
+unique total can only corroborate findings with sufficient path, line and class
+identity; it is not a licence to sum duplicate rows.
 
 Enrol what is true of the repository, not what would look complete. A grey row
 with a reason is honest; an orange row forever is noise. Changing the manifest

@@ -124,8 +124,12 @@ word_ok_for_family() { # $1=conformance|findings, $2=state
   esac
 }
 rank_of() {
-  case "$1" in red) printf 4 ;; purple) printf 4 ;; blue) printf 3 ;; orange) printf 3 ;;
-                 yellow) printf 2 ;; green) printf 1 ;; *) printf 3 ;; esac
+  # A common, explicit ordering across both grading families. In particular,
+  # blue (minor findings) must not mask orange or yellow, regardless of which
+  # lane happened to be assembled first.
+  case "$1" in purple) printf 6 ;; red) printf 5 ;; orange) printf 4 ;;
+                 yellow) printf 3 ;; blue) printf 2 ;; green) printf 1 ;;
+                 grey) printf 0 ;; *) printf 4 ;; esac
 }
 
 # A job result says whether the LANE COMPLETED. A grid state says WHAT IT

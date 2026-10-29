@@ -80,6 +80,9 @@ jobs:
           chmod u+x "$RUNNER_TEMP/gh-actions-lock"
           echo "GH_ACTIONS_LOCK_BIN=$RUNNER_TEMP/gh-actions-lock" >> "$GITHUB_ENV"
 
+      - name: Reject former-owner workflow coordinates
+        run: bash scripts/check-workflow-coordinates.sh
+
       - name: Run tests/*.sh and scripts/tests/*.sh
         run: bash scripts/run-shell-test-suite.sh
 
@@ -122,3 +125,32 @@ jobs:
           set -euo pipefail
           COMPARE="${BASE_SHA:-$GITHUB_SHA}"
           bash scripts/check-lock-gate-pin-freshness.sh "$COMPARE"
+
+  hypatia-projection:
+    name: Hypatia single-scan projection contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          elixir-version: '1.19.4'
+          otp-version: '28.3'
+      - name: Check out vetted Hypatia
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hyperpolymath/hypatia
+          ref: adb2f41db34156cf81b2508f6596a10c7f076098
+          path: .hypatia-projection-source
+          persist-credentials: false
+      - name: Build the real SARIF renderer
+        working-directory: .hypatia-projection-source
+        run: |
+          mix deps.get
+          mix escript.build
+      - name: Exercise the reusable projection with real Hypatia
+        env:
+          HYPATIA_SOURCE: ${{ github.workspace }}/.hypatia-projection-source
+        run: bash scripts/integration-hypatia-projection.sh
