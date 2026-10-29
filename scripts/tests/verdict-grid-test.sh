@@ -173,12 +173,15 @@ check "pipes are escaped" 1 "$(grep -c 'a&#124;b' "$WORK/o9/report.md")"
 
 # 7. The delta column: same profile and PR, different commit; otherwise no comparison.
 render "$WORK/d1" --hypatia "$hyp_crit" --panic "$pan_clean" --pons "$pons_clean" --pr 7 --sha aaaa
+check "no earlier PR grid is explained" 3 "$(grep -c 'no comparable baseline (no prior PR grid or unreadable snapshot)' "$WORK/d1/report.md")"
 render "$WORK/d2" --hypatia "$hyp_clean" --panic "$pan_clean" --pons "$pons_clean" --pr 7 --sha bbbb --previous "$WORK/d1/report.md"
 check "fewer blocking findings is an improvement" 1 "$(grep -c '↑ improved (1 fewer blocking)' "$WORK/d2/report.md")"
 render "$WORK/d3" --hypatia "$hyp_clean" --panic "$pan_clean" --pons "$pons_clean" --pr 7 --sha bbbb --previous "$WORK/d2/report.md"
 check "the same commit is not compared with itself" 0 "$(grep -c 'improved' "$WORK/d3/report.md" || true)"
+check "same commit is specifically identified" 3 "$(grep -c 'same commit (no revision comparison)' "$WORK/d3/report.md")"
 render "$WORK/d4" --hypatia "$hyp_clean" --panic "$pan_clean" --pons "$pons_clean" --pr 8 --sha cccc --previous "$WORK/d1/report.md"
 check "another PR is no baseline" 3 "$(grep -c 'no comparable baseline' "$WORK/d4/report.md")"
+check "cross PR comparison is specifically refused" 3 "$(grep -c 'no comparable baseline (different PR)' "$WORK/d4/report.md")"
 render "$WORK/d5" --hypatia "$hyp_clean" --panic "$pan_not" --pons "$pons_clean" --pr 7 --sha dddd --previous "$WORK/d1/report.md"
 check "a changed evidence status is not an improvement" 1 "$(grep -c '— evidence changed' "$WORK/d5/report.md")"
 check "baseline round-trips" aaaa "$(bash "$GRID" baseline "$WORK/d1/report.md" | jq -r .sha)"
@@ -187,6 +190,7 @@ old_baseline=$(bash "$GRID" baseline "$WORK/d1/report.md" | jq -c '.schema = 2' 
 printf '<!-- verdict-grid-baseline:%s -->\n' "$old_baseline" > "$WORK/schema2.md"
 render "$WORK/d-old" --hypatia "$hyp_clean" --panic "$pan_clean" --pons "$pons_clean" --pr 7 --sha old --previous "$WORK/schema2.md"
 check "schema-2 raw JSON counts are not compared with schema-3 SARIF counts" 3 "$(grep -c 'no comparable baseline' "$WORK/d-old/report.md")"
+check "schema mismatch is named" 3 "$(grep -c 'no comparable baseline (schema changed)' "$WORK/d-old/report.md")"
 
 # 8. Scope: what the grid is allowed to GRADE.
 #    The failures that matter here are the quiet ones -- a delta grid that
@@ -303,6 +307,7 @@ render "$WORK/s6" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --p
 render "$WORK/s7" --hypatia "$WORK/hyp-mixed.json" --panic "$WORK/pan_clean" --pons "$WORK/pons_clean" --pr 9 --sha s2 \
   --changed "$WORK/changed.txt" --previous "$WORK/s6/report.md"
 check "a change of scope is not a comparable baseline" 3 "$(grep -c 'no comparable baseline' "$WORK/s7/report.md")"
+check "scope mismatch is named" 3 "$(grep -c 'no comparable baseline (scope changed)' "$WORK/s7/report.md")"
 # Exclusion changes alter the profile, but changing the PR file list does not.
 printf 'scripts/another.sh\n' > "$WORK/changed-next.txt"
 render "$WORK/s8" --hypatia "$WORK/hyp-mixed.json" --panic "$pan_clean" --pons "$pons_clean" --pr 9 --sha s3 \
@@ -314,6 +319,7 @@ check "a changed-file list can compare to the previous run" 0 "$(grep -c 'no com
 render "$WORK/s10" --hypatia "$WORK/hyp-mixed.json" --panic "$pan_clean" --pons "$pons_clean" --pr 9 --sha s5 \
   --changed "$WORK/changed-next.txt" --exclude-prefix vendor/ --previous "$WORK/s8/report.md"
 check "changed excluded prefixes invalidate the profile" 3 "$(grep -c 'no comparable baseline' "$WORK/s10/report.md")"
+check "profile mismatch is named" 3 "$(grep -c 'no comparable baseline (scanner or policy profile changed)' "$WORK/s10/report.md")"
 
 echo
 # 11. The grid grades the exact SARIF set the blocking gate sees, not the

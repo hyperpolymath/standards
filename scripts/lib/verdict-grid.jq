@@ -357,17 +357,23 @@ def build:
 
 # One row's movement since the previous revision of the same PR. `report` is
 # the whole report (profile, pr, sha); `.` is the row.
+# These cases are different facts; a missing historical comparison must not
+# look like a flat trend or an absent finding.
+def comparison_gap(prev; report):
+  if prev == null then "— no comparable baseline (no prior PR grid or unreadable snapshot)"
+  elif prev.schema != 3 then "— no comparable baseline (schema changed)"
+  elif prev.pr != report.pr then "— no comparable baseline (different PR)"
+  elif prev.sha == report.sha then "— same commit (no revision comparison)"
+  elif (prev.scope.mode // "unknown") != (report.scope.mode // "unknown") then "— no comparable baseline (scope changed)"
+  elif prev.profile != report.profile then "— no comparable baseline (scanner or policy profile changed)"
+  else null end;
+
 def delta(prev; report):
   . as $r
-  # Schema 3 grades the baseline-filtered SARIF and deduplicates aggregate
-  # totals. Older raw-JSON row counts answer a different question and cannot
-  # be compared. Scope/profile changes are likewise explicitly incomparable.
-  | if prev == null or prev.schema != 3 or prev.profile != report.profile or prev.pr != report.pr or prev.sha == report.sha
-      or (prev.scope.mode // "unknown") != (report.scope.mode // "unknown")
-    then "— no comparable baseline" else . end
-  | if type == "string" then . else
+  | (comparison_gap(prev; report)) as $gap
+  | if $gap != null then $gap else
     (prev.reporters | map(select(.id == $r.id)) | first) as $b
-    | if $b == null then "— no comparable baseline"
+    | if $b == null then "— no comparable baseline (reporter absent previously)"
       elif $b.status != $r.status then "— evidence changed"
       elif $r.status == "not_applicable" then "↔ unchanged"
       elif $r.status != "ran" then "— indeterminate"
