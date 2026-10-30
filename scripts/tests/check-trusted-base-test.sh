@@ -473,6 +473,37 @@ let f (x:int) : int = admit()
 EOF
 }
 
+setup_mixed_tiers() {
+  # One core marker (`Axiom`) and one extended marker (`Parameter`) in the same
+  # file, so a tier filter can be observed removing exactly one of them.
+  mkdir -p formal
+  cat > formal/M.v <<'EOF'
+Axiom cheat : False.
+Parameter cheat2 : nat.
+EOF
+}
+
+setup_idris_partial_trailing_comment() {
+  # `partial -- why` strips to `partial ` (trailing space, because the stripper
+  # leaves the whitespace before `--`). `^partial$` missed it.
+  mkdir -p proofs
+  cat > proofs/P.idr <<'EOF'
+module P
+
+partial -- the termination checker cannot see the decreasing argument
+loop : Nat -> Nat
+loop n = loop n
+EOF
+}
+
+setup_fstar_admit_with_space() {
+  mkdir -p proofs
+  cat > proofs/S.fst <<'EOF'
+module S
+let f (x:int) : int = admit ()
+EOF
+}
+
 setup_coq_parameter() {
   mkdir -p formal
   cat > formal/P.v <<'EOF'
@@ -720,6 +751,12 @@ run_case "Dafny: a real {:axiom} is still a marker" \
 run_case "F*: a real admit() is still a marker" \
   0 "extended_total=1" setup_fstar_real_admit
 
+run_case "Idris2: a top-level partial with a trailing comment is a core marker" \
+  1 "Found 1 core-tier and 0 extended-tier marker(s)" setup_idris_partial_trailing_comment
+
+run_case "F*: admit () with a space is still an extended marker" \
+  0 "extended_total=1" setup_fstar_admit_with_space
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Discharge routes apply to the extended tier identically.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -773,6 +810,17 @@ done
 # --tier narrows the scan. It is the triage mode: a maintainer looks at the new
 # tier alone without inheriting the core tier's exit code, and vice versa.
 # ─────────────────────────────────────────────────────────────────────────────
+# The old tier tests were vacuous: the "extended ignores core" case used a
+# fixture that contained no core marker at all, so core_total=0 proved nothing
+# about the filter. Both cases now run against ONE fixture carrying a core and
+# an extended marker, and assert the other tier's total is zero while its own is
+# not — which is the only way a filter can be shown to work.
+run_case_env "tier=extended: core marker filtered OUT, extended marker counted" \
+  0 "Found 0 core-tier and 1 extended-tier marker(s)" setup_mixed_tiers TRUSTED_BASE_TIER=extended
+
+run_case_env "tier=core: extended marker filtered OUT, core marker still fails" \
+  1 "Found 1 core-tier and 0 extended-tier marker(s)" setup_mixed_tiers TRUSTED_BASE_TIER=core
+
 run_case_env "tier=extended ignores an undocumented CORE marker" \
   0 "core_total=0" setup_coq_parameter TRUSTED_BASE_TIER=extended
 

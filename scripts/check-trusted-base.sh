@@ -174,7 +174,7 @@ CATALOGUE
 )"
 
 usage() {
-  sed -n '2,120p' "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p'
+  sed -n '2,160p' "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p'
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -334,7 +334,7 @@ emit_marker() {
 strip_coq_noncode() {
   awk '
     {
-      line = $0; out = ""; i = 1; n = length(line)
+      line = $0; sub(/\r$/, "", line); out = ""; i = 1; n = length(line)
       while (i <= n) {
         c = substr(line, i, 1); pair = substr(line, i, 2)
         if (instr) {
@@ -377,7 +377,7 @@ strip_coq_noncode() {
 strip_lean_noncode() {
   awk '
     {
-      line = $0; out = ""; i = 1; n = length(line); instr = 0
+      line = $0; sub(/\r$/, "", line); out = ""; i = 1; n = length(line); instr = 0
       while (i <= n) {
         c = substr(line, i, 1); c2 = substr(line, i, 2)
         if (depth > 0) {
@@ -411,7 +411,7 @@ strip_lean_noncode() {
 strip_haskellish_noncode() {
   awk '
     {
-      line = $0; out = ""; i = 1; n = length(line); instr = 0
+      line = $0; sub(/\r$/, "", line); out = ""; i = 1; n = length(line); instr = 0
       while (i <= n) {
         c = substr(line, i, 1); c2 = substr(line, i, 2); c3 = substr(line, i, 3)
         if (depth > 0) {
@@ -460,7 +460,7 @@ strip_fstar_noncode() {
   # `admit()`. F* strings take backslash escapes.
   awk '
     {
-      line = $0; out = ""; i = 1; n = length(line)
+      line = $0; sub(/\r$/, "", line); out = ""; i = 1; n = length(line)
       while (i <= n) {
         c = substr(line, i, 1); pair = substr(line, i, 2)
         if (depth > 0) {
@@ -491,7 +491,7 @@ strip_dafny_noncode() {
   # into strict-mode failure or eat its budget.
   awk '
     {
-      line = $0; out = ""; i = 1; n = length(line)
+      line = $0; sub(/\r$/, "", line); out = ""; i = 1; n = length(line)
       while (i <= n) {
         c = substr(line, i, 1); pair = substr(line, i, 2)
         if (depth > 0) {
@@ -628,7 +628,7 @@ done
 # Idris2 top-level partial (core)
 echo "$proof_files" | grep -E '\.(idr|idr2)$' | while read -r f; do
   [ -z "$f" ] && continue
-  strip_haskellish_noncode "$f" 2>/dev/null | grep -nE '^partial$|^%default[[:space:]]+partial([[:space:]]|$)' | while IFS=: read -r ln rest; do
+  strip_haskellish_noncode "$f" 2>/dev/null | grep -nE '^partial([[:space:]]|$)|^%default[[:space:]]+partial([[:space:]]|$)' | while IFS=: read -r ln rest; do
     emit_marker "$f" "$ln" "idris-partial" "core" "$(echo "$rest" | head -c 80)"
   done
 done
@@ -656,7 +656,7 @@ done
 
 echo "$proof_files" | grep -E '\.fst$' | while read -r f; do
   [ -z "$f" ] && continue
-  strip_fstar_noncode "$f" 2>/dev/null | grep -nE '(^|[^A-Za-z0-9_])admit\(\)|(^|[^A-Za-z0-9_])assume([^A-Za-z0-9_]|$)' | while IFS=: read -r ln rest; do
+  strip_fstar_noncode "$f" 2>/dev/null | grep -nE '(^|[^A-Za-z0-9_])admit[[:space:]]*\(\)|(^|[^A-Za-z0-9_])assume([^A-Za-z0-9_]|$)' | while IFS=: read -r ln rest; do
     printf '%s' "$rest" | grep -qE 'assume[[:space:]]+val|admit_p' && continue
     printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$ln" "fstar-assume-or-admit-bare" "extended" "$(echo "$rest" | head -c 80)" >> "$markers_tsv"
   done

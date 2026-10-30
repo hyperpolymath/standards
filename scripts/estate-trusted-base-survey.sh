@@ -126,6 +126,7 @@ CHECKER="$SCRIPTS_DIR/check-trusted-base.sh"
 [ -x "$CHECKER" ] || [ -f "$CHECKER" ] || { echo "ERROR: cannot find $CHECKER" >&2; exit 2; }
 
 mkdir -p "$OUT/cache"
+LAST_CODE_SEARCH_FILE="$OUT/cache/.last-search"
 echo "[survey] owners: ${OWNERS[*]}"
 echo "[survey] output: $OUT"
 echo "[survey] markers: $MARKERS"
@@ -231,16 +232,27 @@ want_tier() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Code-search with cache, pagination, and rate-limit backoff.
 # ─────────────────────────────────────────────────────────────────────────────
-LAST_CODE_SEARCH=0
+# The timer lives in a FILE, not a shell variable. `code_search` is always
+# called inside `$(...)`, which is a subshell: a variable set in there is lost
+# the moment it returns, so `LAST_CODE_SEARCH` reset to 0 for every query and the
+# spacing only ever applied BETWEEN PAGES of one query. The marker loop then
+# fired one code search after another with no pause, which is how to collect
+# secondary-rate-limit errors (they are retried, at 60 s each).
+LAST_CODE_SEARCH_FILE=""
 
 throttle() {
-  local now elapsed
+  local now last elapsed
   now=$(date +%s)
-  elapsed=$(( now - LAST_CODE_SEARCH ))
-  if [ "$LAST_CODE_SEARCH" -gt 0 ] && [ "$elapsed" -lt "$NAP" ]; then
-    sleep $(( NAP - elapsed ))
+  last=0
+  if [ -n "$LAST_CODE_SEARCH_FILE" ] && [ -f "$LAST_CODE_SEARCH_FILE" ]; then
+    last=$(cat "$LAST_CODE_SEARCH_FILE" 2>/dev/null || echo 0)
   fi
-  LAST_CODE_SEARCH=$(date +%s)
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
+  if [ "$last" -gt 0 ]; then
+    elapsed=$(( now - last ))
+    if [ "$elapsed" -lt "$NAP" ]; then sleep $(( NAP - elapsed )); fi
+  fi
+  [ -n "$LAST_CODE_SEARCH_FILE" ] && date +%s > "$LAST_CODE_SEARCH_FILE"
 }
 
 # code_search <slug> <query> → writes JSON array of {repo, path} items to
@@ -260,6 +272,15 @@ code_search() {
     local cached_q
     cached_q="$(sed -n 's/.*query=\([0-9]*\).*/\1/p' "$meta" 2>/dev/null | head -1)"
     if [ "$cached_q" = "$qhash" ]; then
+      # A recorded FAILURE is not a cache hit. Returning 0 here meant a
+      # transient error (rate limit, 5xx, dropped connection) was replayed as a
+      # successful answer on every later run until someone removed the file:
+      # the cache made an outage permanent.
+      if [ "$(sed -n '1s/\t.*//p' "$meta" 2>/dev/null)" = "error" ]; then
+        cat "$meta"
+        echo "[survey]   cached FAILURE for '$slug'; retrying rather than replaying it" >&2
+        return 3
+      fi
       cat "$meta"
       return 0
     fi
@@ -317,12 +338,28 @@ code_search() {
   cat "$meta"
 }
 
-echo "[survey] step 1/4 — enumerating repositories visible to the token"
+echo "[survey] step 1/4 — enumerating repositories for the requested owner(s)"
 : > "$OUT/repos.tsv"
+# `users/<login>/repos` lists PUBLIC repositories only. For the account the
+# token belongs to, `user/repos?affiliation=owner` is the listing that includes
+# private ones. Using the public endpoint for your own account makes a
+# correct-scope run and a crippled token indistinguishable, and this file is
+# described as the repositories the token can see.
+me=$(gh api user --jq .login 2>/dev/null || true)
+repo_enum_failed=0
 for owner in "${OWNERS[@]}"; do
   page=1
   while :; do
-    resp=$(gh api "users/$owner/repos?per_page=100&page=$page&type=all" 2>/dev/null) || break
+    if [ -n "$me" ] && [ "$owner" = "$me" ]; then
+      endpoint="user/repos?affiliation=owner&per_page=100&page=$page"
+    else
+      endpoint="users/$owner/repos?per_page=100&page=$page"
+    fi
+    if ! resp=$(gh api "$endpoint" 2>&1); then
+      echo "[survey] REPO ENUMERATION FAILED for $owner ($endpoint): $(printf '%s' "$resp" | head -c 200)" >&2
+      repo_enum_failed=$((repo_enum_failed + 1))
+      break
+    fi
     n=$(printf '%s' "$resp" | jq -r 'length' 2>/dev/null || echo 0)
     [ "$n" -eq 0 ] && break
     printf '%s' "$resp" | jq -r '.[] | [.full_name, (.archived|tostring), (.fork|tostring)] | @tsv' >> "$OUT/repos.tsv"
@@ -333,7 +370,7 @@ done
 # A user account's repositories may also live under an org listing; dedupe.
 sort -u -o "$OUT/repos.tsv" "$OUT/repos.tsv" 2>/dev/null || true
 repo_total=$(wc -l < "$OUT/repos.tsv" | tr -d ' ')
-echo "[survey]   $repo_total repository/ies visible"
+echo "[survey]   $repo_total repository/ies enumerated"
 
 echo "[survey] step 2/4 — resolving governance callers"
 if [ -n "$CALLERS_FILE" ]; then
@@ -520,11 +557,11 @@ generated=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 incomplete_banner=""
 survey_exit=0
-if [ "$query_failures" -gt 0 ] || [ "${caller_fail:-0}" -gt 0 ]; then
+if [ "$query_failures" -gt 0 ] || [ "${caller_fail:-0}" -gt 0 ] || [ "${repo_enum_failed:-0}" -gt 0 ]; then
   # A hit list built on failed queries is not a measurement: the rows for those
   # markers are UNKNOWN, and UNKNOWN rendered as a clean table is the failure
   # mode this file exists to prevent. Publish, but say INCOMPLETE and exit 2.
-  incomplete_banner="**INCOMPLETE — do not act on this table.** $query_failures marker quer(y|ies) failed during this run (status \`error\` below). A failed query is UNKNOWN, not zero: re-run before drawing any conclusion about the markers marked \`error\`."
+  incomplete_banner="**INCOMPLETE — do not act on this table.** This run had ${query_failures} failed marker quer(y|ies) (status \`error\` below), ${caller_fail:-0} failed caller-census quer(y|ies) and ${repo_enum_failed:-0} failed repository enumeration(s). A failed query is UNKNOWN, not zero: re-run before drawing any conclusion."
   survey_exit=2
 fi
 
@@ -599,7 +636,7 @@ EOF
 
 | File | Contents |
 |---|---|
-| `repos.tsv` | every repository visible to the token |
+| `repos.tsv` | every repository listed for the requested owner(s) (`user/repos` for the token's own account, `users/<login>/repos` otherwise) |
 | `callers.tsv` | repositories whose workflows reference `governance-reusable.yml` |
 | `hits.tsv` | `marker<TAB>repo<TAB>path`, callers only |
 | `hits-all.tsv` | same, every visible repository (non-callers included) |
