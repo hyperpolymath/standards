@@ -112,10 +112,16 @@
 #   mode: report | budget | strict        (default: report)
 #   extended-undocumented: <integer>      (default: 0)
 #
-#   Ratchet: the budget may DECREASE in any commit. Increasing it is a policy
-#   change and requires a `Ratchet-exception:` line in the commit message —
-#   scripts/check-exemption-ratchet.sh enforces that direction of travel for
-#   ledgers in this repo.
+#   Ratchet: the budget may DECREASE in any commit; raising it is a policy
+#   change and needs a `Ratchet-exception:` line in the commit message.
+#
+#   ⚠ THIS FILE IS NOT YET IN scripts/check-exemption-ratchet.sh LEDGERS, so
+#   that direction of travel is a REVIEW obligation, not a mechanical one. The
+#   ratchet compares ledger ENTRY COUNTS between the PR base and HEAD; a budget
+#   is a single integer value, and scripts/count-ledger-entries.sh has no format
+#   for it. Until that counter learns one (a `budget:` mode that emits the
+#   `extended-undocumented` value) and `.trusted-base-budget` joins LEDGERS, a
+#   raised ceiling is visible only in the diff. Do not describe this as enforced.
 #
 # Precedence: CLI flag > environment variable > .trusted-base-budget > default.
 #   --extended-mode=report|budget|strict   (env TRUSTED_BASE_EXTENDED_MODE)
@@ -420,9 +426,16 @@ strip_haskellish_noncode() {
         }
         if (c3 == "{-#") {
           # Copy the pragma through verbatim, up to `#-}` or end of line.
+          # The delimiter is THREE characters: a two-character substr compared
+          # against "#-}" never matches, so the loop used to run to end of line
+          # and swallow whatever followed a closed pragma on the same line —
+          # usually a trailing `-- comment`, which then read as code and could
+          # flag a marker the author was only *describing*. Getting this wrong
+          # in the other direction (stopping early) would blank part of a
+          # pragma, so the three-character compare is load-bearing.
           j = i + 3; pre = out "{-#"
-          while (j <= n - 1) {
-            if (substr(line, j, 2) == "#-}") { j += 2; break }
+          while (j <= n - 2) {
+            if (substr(line, j, 3) == "#-}") { j += 3; break }
             j++
           }
           out = pre substr(line, i + 3, j - (i + 3))
@@ -431,6 +444,74 @@ strip_haskellish_noncode() {
         }
         if (c2 == "{-") { depth++; i += 2; continue }
         if (c2 == "--") { break }
+        if (c == "\"") { instr = 1; i++; continue }
+        out = out c; i++
+      }
+      print out
+    }
+  ' "$1"
+}
+
+strip_fstar_noncode() {
+  # F* comment syntax is OCaml's, not Haskell's: `//` to end of line and
+  # NESTED `(* ... *)` blocks. The shared Haskell stripper knows `--` and
+  # `{- -}`, so handing it a .fst file left every `(* ... *)` block intact —
+  # and a comment reading "we removed the admit() here" then counted as an
+  # `admit()`. F* strings take backslash escapes.
+  awk '
+    {
+      line = $0; out = ""; i = 1; n = length(line)
+      while (i <= n) {
+        c = substr(line, i, 1); pair = substr(line, i, 2)
+        if (depth > 0) {
+          if (pair == "(*") { depth++; i += 2; continue }
+          if (pair == "*)") { depth--; i += 2; continue }
+          i++; continue
+        }
+        if (instr) {
+          if (c == "\\") { i += 2; continue }
+          if (c == "\"") { instr = 0; i++; continue }
+          i++; continue
+        }
+        if (pair == "//") { break }
+        if (pair == "(*") { depth++; i += 2; continue }
+        if (c == "\"") { instr = 1; i++; continue }
+        out = out c; i++
+      }
+      print out
+    }
+  ' "$1"
+}
+
+strip_dafny_noncode() {
+  # Dafny: `//` to end of line, NESTED `/* ... */`, ordinary strings with
+  # backslash escapes, and verbatim strings (`@"...`') where `""` is a literal
+  # quote. Without this, `{:axiom}` mentioned in prose — "do not use {:axiom}
+  # in this module" — was counted as an axiom and could push a healthy file
+  # into strict-mode failure or eat its budget.
+  awk '
+    {
+      line = $0; out = ""; i = 1; n = length(line)
+      while (i <= n) {
+        c = substr(line, i, 1); pair = substr(line, i, 2)
+        if (depth > 0) {
+          if (pair == "/*") { depth++; i += 2; continue }
+          if (pair == "*/") { depth--; i += 2; continue }
+          i++; continue
+        }
+        if (inverb) {
+          if (pair == "\"\"") { i += 2; continue }
+          if (c == "\"") { inverb = 0; i++; continue }
+          i++; continue
+        }
+        if (instr) {
+          if (c == "\\") { i += 2; continue }
+          if (c == "\"") { instr = 0; i++; continue }
+          i++; continue
+        }
+        if (pair == "//") { break }
+        if (pair == "/*") { depth++; i += 2; continue }
+        if (pair == "@\"") { inverb = 1; i += 2; continue }
         if (c == "\"") { instr = 1; i++; continue }
         out = out c; i++
       }
@@ -557,21 +638,25 @@ done
 echo "$proof_files" | grep -E '\.(idr|idr2)$' | while read -r f; do
   [ -z "$f" ] && continue
   strip_haskellish_noncode "$f" 2>/dev/null | grep -nE '(^|[^[:alnum:]_.?])\?[A-Za-z_][[:alnum:]_]*' | while IFS=: read -r ln rest; do
-    printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$ln" "idris-hole" "extended" "$(echo "$rest" | head -c 80)" >> "$markers_tsv"
+    # Route through emit_marker, not a bare write: `|||` Idris doc comments
+    # survive the shared stripper (it knows `--` and `{- -}`), so a doc line
+    # saying "the ?goal hole is discharged below" would otherwise be counted
+    # as an unsolved hole. emit_marker applies the comment-line guard.
+    emit_marker "$f" "$ln" "idris-hole" "extended" "$(echo "$rest" | head -c 80)"
   done
 done
 
 # F* assume val / admit_p (core) and the bare forms (extended)
 echo "$proof_files" | grep -E '\.fst$' | while read -r f; do
   [ -z "$f" ] && continue
-  strip_haskellish_noncode "$f" 2>/dev/null | grep -nE 'assume[[:space:]]+val|admit_p' | while IFS=: read -r ln rest; do
+  strip_fstar_noncode "$f" 2>/dev/null | grep -nE 'assume[[:space:]]+val|admit_p' | while IFS=: read -r ln rest; do
     emit_marker "$f" "$ln" "fstar-assume-or-admit" "core" "$(echo "$rest" | head -c 80)"
   done
 done
 
 echo "$proof_files" | grep -E '\.fst$' | while read -r f; do
   [ -z "$f" ] && continue
-  strip_haskellish_noncode "$f" 2>/dev/null | grep -nE '(^|[^A-Za-z0-9_])admit\(\)|(^|[^A-Za-z0-9_])assume([^A-Za-z0-9_]|$)' | while IFS=: read -r ln rest; do
+  strip_fstar_noncode "$f" 2>/dev/null | grep -nE '(^|[^A-Za-z0-9_])admit\(\)|(^|[^A-Za-z0-9_])assume([^A-Za-z0-9_]|$)' | while IFS=: read -r ln rest; do
     printf '%s' "$rest" | grep -qE 'assume[[:space:]]+val|admit_p' && continue
     printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$ln" "fstar-assume-or-admit-bare" "extended" "$(echo "$rest" | head -c 80)" >> "$markers_tsv"
   done
@@ -581,8 +666,8 @@ done
 # detector was ever wired; the omission was silent, which is the worst kind.
 echo "$proof_files" | grep -E '\.dfy$' | while read -r f; do
   [ -z "$f" ] && continue
-  grep -nF '{:axiom}' "$f" 2>/dev/null | while IFS=: read -r ln rest; do
-    printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$ln" "dafny-axiom" "extended" "$(echo "$rest" | head -c 80)" >> "$markers_tsv"
+  strip_dafny_noncode "$f" 2>/dev/null | grep -nF '{:axiom}' | while IFS=: read -r ln rest; do
+    emit_marker "$f" "$ln" "dafny-axiom" "extended" "$(echo "$rest" | head -c 80)"
   done
 done
 

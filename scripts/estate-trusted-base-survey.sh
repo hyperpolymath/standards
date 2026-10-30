@@ -144,34 +144,81 @@ echo "[survey] markers: $MARKERS"
 # `believe_me`, of which the majority were documentation *about* believe_me.
 # ─────────────────────────────────────────────────────────────────────────────
 MARKER_TABLE=$(cat <<'TABLE'
-coq-admit-admitted	core	Admitted	extension:v
-coq-axiom	core	Axiom	extension:v
-coq-admit-dot	core	admit.	extension:v
-lean-sorry	core	sorry	extension:lean
-lean-axiom	core	axiom	extension:lean
-agda-postulate	core	postulate	extension:agda
-idris-believe_me	core	believe_me	extension:idr
-idris-really_believe_me	core	really_believe_me	extension:idr
-idris-assert_total	core	assert_total	extension:idr
-idris-partial	core	%default partial	extension:idr
-fstar-assume-val	core	assume val	extension:fst
-dafny-axiom	extended	{:axiom}	extension:dfy
-agda-terminating-pragma	extended	TERMINATING	extension:agda
-agda-non-covering-pragma	extended	NON_COVERING	extension:agda
-agda-unsound-flag	extended	type-in-type	extension:agda
-agda-primtrustme	extended	primTrustMe	extension:agda
-agda-hole	extended	{!!}	-
-idris-hole	extended	?hole	-
+# id<TAB>tier<TAB>query<TAB>extension
+# An id may appear on several rows: a marker with more than one spelling needs
+# more than one query (GitHub code search has no OR), and the counts step below
+# groups the rows back together. This table is keyed to the catalogue ids that
+# `check-trusted-base.sh --list-markers` prints — not to a private naming
+# scheme — and step 0 refuses to survey if an id is missing from it.
+coq-axiom-or-admit	core	Axiom	extension:v
+coq-axiom-or-admit	core	Admitted	extension:v
+coq-axiom-or-admit	core	admit.	extension:v
+coq-parameter-or-conjecture	extended	Parameter	extension:v
+coq-parameter-or-conjecture	extended	Conjecture	extension:v
+coq-admit-tactic	extended	admit	extension:v
+coq-admit-tactic	extended	give_up	extension:v
+lean-sorry-or-axiom	core	sorry	extension:lean
+lean-sorry-or-axiom	core	axiom	extension:lean
 lean-implemented-by	extended	implemented_by	extension:lean
 lean-extern	extended	@[extern	extension:lean
 lean-native-decide	extended	native_decide	extension:lean
+lean-native-decide	extended	trustCompiler	extension:lean
 lean-admit-tactic	extended	admit	extension:lean
-lean-unsafe-def	extended	unsafe def	extension:lean
-coq-parameter-or-conjecture	extended	Parameter	extension:v
-coq-give-up	extended	give_up	extension:v
-fstar-bare-assume	extended	assume	extension:fst
+lean-unsafe-or-partial-def	extended	unsafe def	extension:lean
+lean-unsafe-or-partial-def	extended	partial def	extension:lean
+agda-postulate	core	postulate	extension:agda
+agda-terminating-pragma	extended	TERMINATING	extension:agda
+agda-terminating-pragma	extended	NON_TERMINATING	extension:agda
+agda-non-covering-pragma	extended	NON_COVERING	extension:agda
+agda-unsound-flag	extended	--type-in-type	extension:agda
+agda-unsound-flag	extended	--allow-unsolved-metas	extension:agda
+agda-primtrustme	extended	primTrustMe	extension:agda
+agda-hole	extended	-	-
+idris-believe-or-assert	core	believe_me	extension:idr
+idris-believe-or-assert	core	really_believe_me	extension:idr
+idris-believe-or-assert	core	assert_total	extension:idr
+idris-partial	core	%default partial	extension:idr
+idris-hole	extended	-	-
+fstar-assume-or-admit	core	assume val	extension:fst
+fstar-assume-or-admit	core	admit_p	extension:fst
+fstar-assume-or-admit-bare	extended	admit()	extension:fst
+dafny-axiom	extended	{:axiom}	extension:dfy
+rust-or-hs-unsafe	core	unsafePerformIO	extension:hs
+rust-or-hs-unsafe	core	unsafeCoerce	extension:hs
 TABLE
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 0: the survey must not silently under-report.
+#
+# A marker table maintained separately from the checker drifts. It did: the
+# first version searched only `type-in-type` for Agda's unsound-flag family and
+# omitted Rust/Haskell escapes, F* `admit()`, `unsafe def`/`partial def` and the
+# `--no-*-check` flags entirely, so a marker the checker enforces had no survey
+# row and no count — an absence indistinguishable from a zero. Any catalogue id
+# without a row is a hole in the measurement, so this exits before querying.
+# ─────────────────────────────────────────────────────────────────────────────
+catalogue_ids=$(bash "$CHECKER" --list-markers 2>/dev/null | cut -f3 | sort -u)
+if [ -z "$catalogue_ids" ]; then
+  echo "ERROR: could not read the marker catalogue from $CHECKER --list-markers" >&2
+  exit 2
+fi
+table_ids=$(printf '%s\n' "$MARKER_TABLE" | grep -v '^#' | grep -v '^$' | cut -f1 | sort -u)
+uncovered=$(comm -23 <(printf '%s\n' "$catalogue_ids") <(printf '%s\n' "$table_ids"))
+if [ -n "$uncovered" ]; then
+  echo "ERROR: the checker enforces marker(s) this survey never searches:" >&2
+  printf '  %s\n' $uncovered >&2
+  echo "Add a row per spelling to MARKER_TABLE (id, tier, query, extension)." >&2
+  echo "A marker with no survey row counts as zero, which is a claim, not a gap." >&2
+  exit 2
+fi
+stale=$(comm -13 <(printf '%s\n' "$catalogue_ids") <(printf '%s\n' "$table_ids"))
+if [ -n "$stale" ]; then
+  echo "ERROR: MARKER_TABLE names marker(s) the checker does not have:" >&2
+  printf '  %s\n' $stale >&2
+  echo "Rename or remove them: a survey row that matches nothing reads as zero." >&2
+  exit 2
+fi
 
 want_tier() {
   case "$MARKERS" in
@@ -203,9 +250,20 @@ code_search() {
   local items="$OUT/cache/${slug}.items.jsonl"
   local meta="$OUT/cache/${slug}.meta"
 
+  # The cache key is derived from the query, and the query is recorded in the
+  # meta line. A cache keyed on the marker id alone returned the first owner's
+  # answer to a later `--owner` run (and a stale definition's answer to a changed
+  # query), which is a stale result wearing a fresh timestamp.
+  local qhash
+  qhash="$(printf '%s' "$query" | cksum | cut -d' ' -f1)"
   if $USE_CACHE && [ -f "$meta" ] && [ -f "$items" ]; then
-    cat "$meta"
-    return 0
+    local cached_q
+    cached_q="$(sed -n 's/.*query=\([0-9]*\).*/\1/p' "$meta" 2>/dev/null | head -1)"
+    if [ "$cached_q" = "$qhash" ]; then
+      cat "$meta"
+      return 0
+    fi
+    echo "[survey]   cache miss (query changed) for '$slug'; re-querying" >&2
   fi
 
   : > "$items"
@@ -229,9 +287,13 @@ code_search() {
       if [ "$rc" -ne 0 ]; then
         printf '%s' "$resp" >> "$OUT/cache/${slug}.errors"
         echo "[survey]   QUERY FAILED: $slug ($query)" >&2
-        printf 'error' > "$meta"
-        cat "$meta"
-        return 0
+        # Return non-zero. A failed query is UNKNOWN, not zero: the caller used
+        # to record total=0, publish it, and exit 0, which turns an API failure
+        # into the claim "this marker does not occur in the estate". The meta
+        # file is still written so the failure is visible on a re-run and is
+        # never mistaken for a cached success.
+        printf 'error\ttotal=NA\tfetched=0\tquery=%s\n' "$qhash" > "$meta"
+        return 3
       fi
     fi
     total=$(printf '%s' "$resp" | jq -r '.total_count // 0')
@@ -251,7 +313,7 @@ code_search() {
   elif [ "$fetched" -lt "$total" ]; then
     status="truncated"
   fi
-  printf '%s\ttotal=%s\tfetched=%s\n' "$status" "$total" "$fetched" > "$meta"
+  printf '%s\ttotal=%s\tfetched=%s\tquery=%s\n' "$status" "$total" "$fetched" "$qhash" > "$meta"
   cat "$meta"
 }
 
@@ -281,11 +343,31 @@ if [ -n "$CALLERS_FILE" ]; then
   cut -f1 "$CALLERS_FILE" | sort -u > "$OUT/callers.tsv"
   echo "[survey]   using --callers-file $CALLERS_FILE (ground truth, no code search)"
 else
-  caller_meta=$(code_search governance-callers "governance-reusable.yml")
-  echo "[survey]   $caller_meta"
-  cut -f1 "$OUT/cache/governance-callers.items.jsonl" 2>/dev/null | sort -u > "$OUT/callers.tsv"
+  # Scoped per owner. `governance-reusable.yml` on its own returns every visible
+  # repository that mentions the filename — including repositories outside the
+  # owner set this run claims to cover. With a token that can read more than one
+  # account, callers.tsv (and every count derived from it) silently widened past
+  # the report's stated scope.
+  : > "$OUT/callers.tsv"
+  caller_fail=0
+  for owner in "${OWNERS[@]}"; do
+    cq="governance-reusable.yml user:$owner"
+    slug="governance-callers__$(printf '%s' "$cq" | cksum | cut -d' ' -f1)"
+    if caller_meta=$(code_search "$slug" "$cq"); then
+      echo "[survey]   $owner: $caller_meta"
+      cut -f1 "$OUT/cache/${slug}.items.jsonl" 2>/dev/null >> "$OUT/callers.tsv"
+    else
+      echo "[survey]   QUERY FAILED: caller census for $owner ($cq)" >&2
+      caller_fail=$((caller_fail + 1))
+    fi
+  done
+  sort -u -o "$OUT/callers.tsv" "$OUT/callers.tsv"
+  if [ "$caller_fail" -gt 0 ]; then
+    echo "[survey] caller enumeration failed for $caller_fail owner(s); the caller set is incomplete." >&2
+    caller_meta="error"
+  fi
 fi
-CALLER_STATUS=$(sed -n '1s/\t.*//p' "$OUT/cache/governance-callers.meta" 2>/dev/null || true)
+CALLER_STATUS="${caller_meta%%$'\t'*}"
 [ -n "$CALLERS_FILE" ] && CALLER_STATUS="complete"
 caller_total=$(wc -l < "$OUT/callers.tsv" | tr -d ' ')
 echo "[survey]   $caller_total caller repo(s) (enumeration: ${CALLER_STATUS:-unknown})"
@@ -320,41 +402,72 @@ fi
 echo "[survey] step 3/4 — querying each marker"
 : > "$OUT/counts.tsv"
 : > "$OUT/hits-all.tsv"
+: > "$OUT/cache/.queries"
+query_failures=0
 
+# One loop over (row × owner). The row id may repeat (one row per spelling), and
+# the counts step groups rows back by id, so neither the table nor the owner set
+# is allowed to produce a partial answer.
 while IFS=$'\t' read -r mid mtier query ext; do
   [ -z "$mid" ] && continue
+  case "$mid" in '#'*) continue ;; esac
   want_tier "$mtier" || continue
-  if [ -z "$ext" ]; then ext="-"; fi
-  if [ "$ext" = "-" ]; then
-    printf '%s\t%s\tNA\t0\tnot-expressed\n' "$mid" "$mtier" >> "$OUT/counts.tsv"
+  if [ -z "$ext" ] || [ "$ext" = "-" ]; then
+    printf '%s\t%s\t-\n' "$mid" "$mtier" >> "$OUT/cache/.queries"
     echo "[survey]   $mid: not expressible as a code search (local checker only)"
     continue
   fi
-  full="$query $ext user:$(printf '%s' "${OWNERS[0]}")"
-  # Additional owners are surveyed with a second query, folded into one slug.
-  meta=$(code_search "$mid" "$full")
-  total=$(printf '%s' "$meta" | sed -n 's/.*total=\([0-9]*\).*/\1/p')
-  status=$(printf '%s' "$meta" | cut -f1)
-  hit_repos=$(cut -f1 "$OUT/cache/${mid}.items.jsonl" 2>/dev/null | sort -u | wc -l | tr -d ' ')
-  printf '%s\t%s\t%s\t%s\t%s\n' "$mid" "$mtier" "${total:-0}" "$hit_repos" "$status" >> "$OUT/counts.tsv"
-  [ -f "$OUT/cache/${mid}.items.jsonl" ] && awk -v m="$mid" '{print m"\t"$0}' "$OUT/cache/${mid}.items.jsonl" >> "$OUT/hits-all.tsv"
-  echo "[survey]   $mid: ${total:-0} hit(s), $hit_repos repo(s), $status"
+  for owner in "${OWNERS[@]}"; do
+    q="$query user:$owner"
+    slug="${mid}__$(printf '%s' "$q" | cksum | cut -d' ' -f1)"
+    if meta=$(code_search "$slug" "$q"); then
+      printf '%s\t%s\t%s\n' "$mid" "$mtier" "$meta" >> "$OUT/cache/.queries"
+      [ -f "$OUT/cache/${slug}.items.jsonl" ] && \
+        awk -v m="$mid" '{print m"\t"$0}' "$OUT/cache/${slug}.items.jsonl" >> "$OUT/hits-all.tsv"
+    else
+      query_failures=$((query_failures + 1))
+      printf '%s\t%s\terror\n' "$mid" "$mtier" >> "$OUT/cache/.queries"
+      echo "[survey]   $mid: QUERY FAILED for owner $owner — counted as UNKNOWN, not zero" >&2
+    fi
+  done
 done <<< "$MARKER_TABLE"
 
-# Owners beyond the first: one extra query per marker, appended.
-if [ ${#OWNERS[@]} -gt 1 ]; then
-  for owner in "${OWNERS[@]:1}"; do
-    while IFS=$'\t' read -r mid mtier query ext; do
-      [ -z "$mid" ] && continue
-      want_tier "$mtier" || continue
-      [ -z "$ext" ] && continue
-      [ "$ext" = "-" ] && continue
-      code_search "${mid}__${owner}" "$query $ext user:$owner" >/dev/null
-      [ -f "$OUT/cache/${mid}__${owner}.items.jsonl" ] && \
-        awk -v m="$mid" '{print m"\t"$0}' "$OUT/cache/${mid}__${owner}.items.jsonl" >> "$OUT/hits-all.tsv"
-    done <<< "$MARKER_TABLE"
-  done
-fi
+# Aggregate `.queries` into counts.tsv, grouped by marker id across every row and
+# every owner. Two earlier defects lived here: the counts row was written right
+# after the FIRST owner's query and never revisited (so a multi-owner run
+# published a first-owner-only table), and a failed query scored 0 instead of
+# UNKNOWN. Status precedence is error > truncated > complete.
+: > "$OUT/counts.tsv"
+awk -F'\t' '
+  NR == FNR {
+    mid = $1
+    if (!(mid in seen)) { seen[mid] = 1; order[++oc] = mid; tier[mid] = $2; status[mid] = "complete" }
+    st = $3
+    if (st == "error")            { status[mid] = "error" }
+    else if (st == "-")           { if (status[mid] != "error") status[mid] = "not-expressed" }
+    else if (st == "truncated")   { if (status[mid] == "complete") status[mid] = "truncated" }
+    if (st != "error" && st != "-") {
+      t = $4; sub(/^total=/, "", t)
+      if (t ~ /^[0-9]+$/) total[mid] += t
+    }
+    next
+  }
+  { repos[$1 SUBSEP $2] = 1 }
+  END {
+    for (i = 1; i <= oc; i++) {
+      m = order[i]; n = 0
+      for (k in repos) { split(k, a, SUBSEP); if (a[1] == m) n++ }
+      if (status[m] == "not-expressed") printf "%s\t%s\tNA\t0\t%s\n", m, tier[m], status[m]
+      else if (status[m] == "error")    printf "%s\t%s\tNA\t%d\t%s\n", m, tier[m], n, status[m]
+      else                              printf "%s\t%s\t%d\t%d\t%s\n", m, tier[m], total[m], n, status[m]
+    }
+  }
+' "$OUT/cache/.queries" "$OUT/hits-all.tsv" > "$OUT/counts.tsv"
+
+while IFS=$'\t' read -r mid mtier total repos status; do
+  [ -z "$mid" ] && continue
+  echo "[survey]   $mid: ${total} result(s), ${repos} repo(s), $status"
+done < "$OUT/counts.tsv"
 
 echo "[survey] step 4/4 — joining hits against the caller set"
 sort -u -o "$OUT/hits-all.tsv" "$OUT/hits-all.tsv"
@@ -405,11 +518,23 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 generated=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
+incomplete_banner=""
+survey_exit=0
+if [ "$query_failures" -gt 0 ] || [ "${caller_fail:-0}" -gt 0 ]; then
+  # A hit list built on failed queries is not a measurement: the rows for those
+  # markers are UNKNOWN, and UNKNOWN rendered as a clean table is the failure
+  # mode this file exists to prevent. Publish, but say INCOMPLETE and exit 2.
+  incomplete_banner="**INCOMPLETE — do not act on this table.** $query_failures marker quer(y|ies) failed during this run (status \`error\` below). A failed query is UNKNOWN, not zero: re-run before drawing any conclusion about the markers marked \`error\`."
+  survey_exit=2
+fi
+
 {
   cat <<EOF
 # Trusted-base marker survey — hit list
 
 Generated: $generated (UTC) · owners: ${OWNERS[*]} · marker set: $MARKERS
+
+$incomplete_banner
 
 This is the *measurement* that must precede enforcement. Nothing in this report
 is a failure: a marker listed here is a marker that needs a disposition
@@ -503,4 +628,9 @@ EOF
 
 echo "[survey] wrote $OUT/HIT-LIST.md"
 echo "[survey] done: $hit_total hit(s) in $affected_repos caller repo(s)"
+if [ "$survey_exit" -ne 0 ]; then
+  echo "[survey] INCOMPLETE: $query_failures failed marker quer(y|ies); ${caller_fail:-0} failed caller census quer(y|ies)." >&2
+  echo "[survey] Re-run (cached successes are reused; failures are retried)." >&2
+  exit 2
+fi
 exit 0

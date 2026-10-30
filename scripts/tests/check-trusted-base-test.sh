@@ -383,6 +383,96 @@ theorem big : (10 ^ 10) > 1 := by native_decide
 EOF
 }
 
+setup_agda_pragma_then_comment() {
+  # The pragma copier must stop AT `#-}`. When it only compared two characters
+  # against the three-character delimiter it never matched, ran to end of line,
+  # and copied the trailing `-- ... {!!}` comment back in as code.
+  mkdir -p proofs
+  cat > proofs/P.agda <<'EOF'
+module P where
+{-# OPTIONS --without-K #-}  -- never write {!!} in this module
+f : Nat -> Nat
+f n = n
+EOF
+}
+
+setup_agda_hole_after_pragma() {
+  mkdir -p proofs
+  cat > proofs/P.agda <<'EOF'
+module P where
+{-# OPTIONS --without-K #-}
+f : Nat -> Nat
+f n = {!!}
+EOF
+}
+
+setup_idris_hole_in_doc_comment() {
+  # `|||` documentation comments survive the shared Haskell stripper (it knows
+  # `--` and `{- -}`), so this pass routes through emit_marker's guard.
+  mkdir -p proofs
+  cat > proofs/D.idr <<'EOF'
+module D
+
+||| The ?goal hole that used to live here is discharged by the totality checker.
+total
+f : Nat -> Nat
+f n = n
+EOF
+}
+
+setup_idris_real_hole() {
+  mkdir -p proofs
+  cat > proofs/H.idr <<'EOF'
+module H
+
+f : Nat -> Nat
+f n = ?goal
+EOF
+}
+
+setup_dafny_axiom_in_comment() {
+  # Dafny has OCaml-style comments, not Haskell's: `//` and nested `/* */`.
+  # A prose mention of the attribute is not an axiom.
+  mkdir -p proofs
+  cat > proofs/L.dfy <<'EOF'
+method M(x: int) returns (y: int)
+  // Do not use {:axiom} in this module; the postcondition is proved below.
+  /* Nor here: {:axiom} would defeat the point. */
+{
+  y := x;
+}
+EOF
+}
+
+setup_dafny_real_axiom() {
+  mkdir -p proofs
+  cat > proofs/A.dfy <<'EOF'
+lemma {:axiom} bogus()
+  ensures false
+{
+}
+EOF
+}
+
+setup_fstar_admit_in_comment() {
+  # F* comments are `//` and nested `(* *)`; the Haskell stripper left them
+  # intact, so a comment saying "the admit() was removed" counted as an admit.
+  mkdir -p proofs
+  cat > proofs/M.fst <<'EOF'
+module M
+(* We removed the admit() call here in 2026-05; the lemma is now proved. *)
+let f (x:int) : int = x
+EOF
+}
+
+setup_fstar_real_admit() {
+  mkdir -p proofs
+  cat > proofs/M.fst <<'EOF'
+module M
+let f (x:int) : int = admit()
+EOF
+}
+
 setup_coq_parameter() {
   mkdir -p formal
   cat > formal/P.v <<'EOF'
@@ -603,6 +693,32 @@ run_case "Agda {-# TERMINATING #-} inside a block comment is NOT a marker" \
 
 run_case "Lean native_decide mentioned in a doc comment is NOT a marker" \
   0 "No soundness-relevant escape hatches detected" setup_lean_native_decide_in_comment
+
+run_case "Agda: a comment AFTER a closed pragma is NOT a marker" \
+  0 "No soundness-relevant escape hatches detected" setup_agda_pragma_then_comment
+
+run_case "Idris2: a ?hole mentioned in a ||| doc comment is NOT a marker" \
+  0 "No soundness-relevant escape hatches detected" setup_idris_hole_in_doc_comment
+
+run_case "Dafny: {:axiom} mentioned in // and /* */ comments is NOT a marker" \
+  0 "No soundness-relevant escape hatches detected" setup_dafny_axiom_in_comment
+
+run_case "F*: admit() mentioned in a (* *) comment is NOT a marker" \
+  0 "No soundness-relevant escape hatches detected" setup_fstar_admit_in_comment
+
+# …and the same constructs in real code still ARE markers. Without these the
+# four cases above could pass by detecting nothing at all.
+run_case "Agda: a real {!!} after a pragma line is still a marker" \
+  0 "extended_total=1" setup_agda_hole_after_pragma
+
+run_case "Idris2: a real ?goal is still a marker" \
+  0 "extended_total=1" setup_idris_real_hole
+
+run_case "Dafny: a real {:axiom} is still a marker" \
+  0 "extended_total=1" setup_dafny_real_axiom
+
+run_case "F*: a real admit() is still a marker" \
+  0 "extended_total=1" setup_fstar_real_admit
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Discharge routes apply to the extended tier identically.

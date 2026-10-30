@@ -174,6 +174,47 @@ else
   bad "diff mode missed an added retired name (rc=$rc)"; printf '%s\n' "$out"
 fi
 
+# ── 6b. diff mode: an added PATH is a reintroduction too ────────────────────
+# `+++ b/` used to be bookkeeping only, so a clean file added inside a
+# retired-name directory passed diff mode while whole-tree mode rejected the
+# identical tree. A rename that re-adds the old directory is the common case.
+mkdir -p "$NEW_REPO/diffmode/juliapackage-reuse-audit"
+printf 'clean contents\n' > "$NEW_REPO/diffmode/juliapackage-reuse-audit/README.adoc"
+( cd "$NEW_REPO/diffmode" && git add -A && git commit -qm addpath )
+out=$(run "$NEW_REPO/diffmode" --diff HEAD~1); rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'added path'; then
+  ok "diff mode fails on an added path carrying a retired name"
+else
+  bad "diff mode missed a retired name in an added path (rc=$rc)"; printf '%s\n' "$out"
+fi
+
+# ── 6c. diff mode: an unresolvable base is a failure, not a clean tree ──────
+# The old pipeline discarded `git diff`'s status inside a process substitution
+# and suppressed its stderr, so a typo or a shallow checkout produced zero
+# lines and the gate printed OK.
+out=$(run "$NEW_REPO/diffmode" --diff no-such-ref-xyz); rc=$?
+if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'does not resolve'; then
+  ok "diff mode fails closed on an unresolvable base"
+else
+  bad "unresolvable diff base should exit 2 (rc=$rc)"; printf '%s\n' "$out"
+fi
+
+# ── 6d. --spellings normalises the PATH, not only the contents ──────────────
+# A capitalisation (`JuliaPackage_Reuse_Audit/`) is in the gate's reach; the
+# old pass tokenised file contents only, so one underscore moved the finding
+# outside the scan.
+mkdir -p "$NEW_REPO/spell/JuliaPackage_Reuse_Audit"
+mkdir -p "$NEW_REPO/spell/docs/naming"
+printf 'juliapackage-reuse-audit\n' > "$NEW_REPO/spell/docs/naming/retired-names.txt"
+printf 'clean contents\n' > "$NEW_REPO/spell/JuliaPackage_Reuse_Audit/README.adoc"
+( cd "$NEW_REPO/spell" && git init -q && git config user.email t@example.invalid && git config user.name t && git add -A && git commit -qm base )
+out=$(run "$NEW_REPO/spell" --spellings); rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'in the PATH'; then
+  ok "spellings scan normalises the path"
+else
+  bad "spellings scan missed a spelling in the path (rc=$rc)"; printf '%s\n' "$out"
+fi
+
 # ── 7. usage errors are exit 2, and the register location is configurable ───
 out=$(run "$NEW_REPO/plain" --nonsense); rc=$?
 if [ "$rc" -eq 2 ]; then ok "unknown flag exits 2"; else bad "unknown flag should exit 2 (rc=$rc)"; fi

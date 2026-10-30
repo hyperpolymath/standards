@@ -148,13 +148,39 @@ is_allowed() {
 # ─────────────────────────────────────────────────────────────────────────────
 if [ -n "$diff_base" ]; then
   echo "[INFO] diff mode against $diff_base (added lines only)"
-  patterns="$(mktemp)"; trap 'rm -f "$patterns"' EXIT
+  # A base that does not resolve (typo, unfetched branch, shallow checkout) is
+  # not "nothing was added". `git diff` used to fail inside a process
+  # substitution whose status was discarded and whose stderr was suppressed, so
+  # the loop saw zero lines and the gate reported OK — the worst outcome
+  # available to a gate.
+  if ! git -C "$root" rev-parse --verify --quiet "${diff_base}^{commit}" >/dev/null 2>&1; then
+    echo "[FAIL] diff base '$diff_base' does not resolve to a commit in $root." >&2
+    echo "[FAIL] Fetch it, or drop --diff to scan the whole tree." >&2
+    exit 2
+  fi
+  patterns="$(mktemp)"; diffout="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f '$patterns' '$diffout'" EXIT
   printf '%s\n' "$names" > "$patterns"
+  if ! git -C "$root" diff "$diff_base" -- . > "$diffout"; then
+    echo "[FAIL] git diff $diff_base failed; refusing to report a clean tree." >&2
+    exit 2
+  fi
   violations=0
   current_file=""
   while IFS= read -r line; do
     case "$line" in
-      "+++ b/"*) current_file="${line#+++ b/}" ;;
+      "+++ b/"*)
+        current_file="${line#+++ b/}"
+        # The added PATH is checked too. `+++ b/` used to be bookkeeping only,
+        # so adding a clean file under `old-name-dir/` exited 0 while the
+        # whole-tree scan rejected the identical tree as a path violation.
+        if printf '%s' "$current_file" | grep -qF -f "$patterns"; then
+          is_allowed "$current_file" && continue
+          echo "violation: added path $current_file reintroduces a retired name"
+          violations=$((violations + 1))
+        fi
+        ;;
       "+"*)
         [ -z "$current_file" ] && continue
         body="${line#+}"
@@ -166,7 +192,7 @@ if [ -n "$diff_base" ]; then
         fi
         ;;
     esac
-  done < <(cd "$root" && git diff "$diff_base" -- . 2>/dev/null)
+  done < "$diffout"
   if [ "$violations" -gt 0 ]; then
     echo "[FAIL] $violations added line(s) reintroduce a retired name."
     echo "[FAIL] Retired names are historical record: see $register and $allowlist."
@@ -263,6 +289,26 @@ if $do_spellings; then
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     is_allowed "$f" && continue
+    # The PATH is a spelling site as well. `JuliaPackage_Reuse_Audit/` normalises
+    # to the same token as the retired `juliapackage-reuse-audit`, yet every
+    # file inside it can be clean and the literal path scan only matches the
+    # exact registered strings. Without this, one capitalisation moved the
+    # finding out of the gate's reach.
+    path_spell="$(printf '%s\n' "$f" | awk -v reg="$norm_reg" '
+        BEGIN { while ((getline r < reg) > 0) want[r] = 1 }
+        {
+          n = split($0, parts, "/")
+          for (i = 1; i <= n; i++) {
+            t = tolower(parts[i]); gsub(/[._-]/, "", t)
+            if (t in want) print parts[i]
+          }
+        }' | sort -u | head -5)"
+    if [ -n "$path_spell" ]; then
+      spell_hits=$((spell_hits + 1))
+      if [ "$spell_hits" -le "$max_show" ]; then
+        echo "  $f: unregistered spelling(s) in the PATH: $(printf '%s' "$path_spell" | tr '\n' ' ')"
+      fi
+    fi
     found="$(cd "$root" && grep -oI -E '[A-Za-z0-9][A-Za-z0-9._-]*' -- "$f" 2>/dev/null \
               | awk -v reg="$norm_reg" '
                   BEGIN { while ((getline r < reg) > 0) want[r] = 1 }
