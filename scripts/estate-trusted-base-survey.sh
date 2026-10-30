@@ -1,0 +1,506 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath)
+#
+# estate-trusted-base-survey.sh — measure a marker set across every repository
+# that calls the governance bundle, BEFORE any marker is enforced.
+#
+# WHY THIS EXISTS
+# ---------------
+# scripts/check-trusted-base.sh gained a widened marker set (2026-10-30) that
+# can be enforced in three modes: report, budget, strict. Deciding which mode a
+# repository should carry — and what number its budget should start at — is a
+# measurement question, not an opinion. This script performs the measurement.
+#
+# The order is deliberate and is the order docs/CICD-SIGNAL-DISCIPLINE.adoc
+# prescribes for any estate-wide change:
+#
+#   1. census          — who calls governance?
+#   2. difference      — which callers carry which markers, and how many?
+#   3. publish         — the hit list, as a reviewable artefact
+#   4. only then       — enforcement, per repository, at a measured number.
+#
+# Skipping step 3 is how a gate gets red-boarded: a marker that is a soundness
+# hole in one proof development is a documented, defended choice in another,
+# and the cheapest way to survive a red board is to add an ignore path — which
+# destroys the signal the gate existed to create.
+#
+# TOKEN SCOPE — READ THIS BEFORE BLAMING THE SCRIPT
+# -------------------------------------------------
+# GitHub's code-search API is scoped to what the TOKEN can read. A fine-grained
+# app token granted one repository can survey exactly one repository, and its
+# zero results are indistinguishable from a real zero. This script therefore
+# probes scope first and refuses to publish a hit list it cannot stand behind:
+#
+#   * it lists the repositories visible to the token;
+#   * it counts the governance callers it can see;
+#   * if either count is 1 while `--owner` names an owner with more than one
+#     repository, it prints NEEDS-SCOPE and exits 2 rather than producing a
+#     hit list that looks like a clean bill of health.
+#
+# Use a user token with `repo` scope (classic) or a fine-grained token with
+# read access to the whole estate. Nothing here writes to GitHub: one-shot
+# GETs and local files only.
+#
+# USAGE
+#   bash scripts/estate-trusted-base-survey.sh --owner <login> [options]
+#
+#   --owner <login>       owner to survey (repeatable). Default: hyperpolymath
+#   --out <dir>           output directory. Default: out/trusted-base-survey
+#   --markers <set>       core | extended | all (default: all)
+#   --max-pages <n>       page cap per code-search query (default: 10 = 1000
+#                         results). A query that hits the cap is recorded as
+#                         TRUNCATED, never as complete.
+#   --sleep <seconds>     pause between code-search calls (default: 7; the
+#                         code-search limit is 10 requests/minute)
+#   --pins                additionally census caller pins of the standards
+#                         reusable workflows. SLOW: one API call to list a
+#                         caller's workflows plus one per workflow, so ~15
+#                         minutes per hundred callers. Measured 2026-10-30:
+#                         56 of 306 callers took ~7 minutes. Interrupting is
+#                         fine — pins.tsv is appended as it goes — but say so
+#                         in the report, because a partial census and a complete
+#                         one look identical once the file exists.
+#   --no-cache            ignore previously cached query responses
+#
+# OUTPUT (all under --out, newline-delimited, diffable, no Python)
+#   repos.tsv        every repository visible to the token
+#   callers.tsv      repositories whose workflows reference governance-reusable.yml
+#   cache/<slug>.json  raw API response per query (resume without re-querying)
+#   hits.tsv         marker<TAB>repo<TAB>path  (callers only)
+#   hits-all.tsv     marker<TAB>repo<TAB>path  (every visible repo)
+#   counts.tsv       marker<TAB>tier<TAB>result-count<TAB>repos<TAB>truncated
+#   pins.tsv         repo<TAB>workflow<TAB>pinned-sha   (only with --pins)
+#   HIT-LIST.md      the publishable hit list
+#
+# EXIT
+#   0  survey completed and the hit list is publishable
+#   2  environment/scope error — no hit list was produced (or it is marked
+#      INCOMPLETE)
+#
+# Shell + jq + gh only. No Python.
+
+set -uo pipefail
+
+OWNERS=()
+OUT="out/trusted-base-survey"
+MARKERS="all"
+MAX_PAGES=10
+NAP=7
+DO_PINS=false
+CALLERS_FILE=""
+USE_CACHE=true
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --owner)      OWNERS+=("${2:?--owner needs a value}"); shift 2 ;;
+    --owner=*)    OWNERS+=("${1#*=}"); shift ;;
+    --out)        OUT="${2:?--out needs a value}"; shift 2 ;;
+    --out=*)      OUT="${1#*=}"; shift ;;
+    --markers)    MARKERS="${2:?--markers needs a value}"; shift 2 ;;
+    --markers=*)  MARKERS="${1#*=}"; shift ;;
+    --max-pages)  MAX_PAGES="${2:?--max-pages needs a value}"; shift 2 ;;
+    --max-pages=*) MAX_PAGES="${1#*=}"; shift ;;
+    --sleep)      NAP="${2:?--sleep needs a value}"; shift 2 ;;
+    --sleep=*)    NAP="${1#*=}"; shift ;;
+    --pins)       DO_PINS=true; shift ;;
+    --no-cache)   USE_CACHE=false; shift ;;
+    --callers-file) CALLERS_FILE="${2:?--callers-file needs a value}"; shift 2 ;;
+    --callers-file=*) CALLERS_FILE="${1#*=}"; shift ;;
+    -h|--help)    sed -n '2,80p' "${BASH_SOURCE[0]}" | sed -n 's/^# \{0,1\}//p'; exit 0 ;;
+    *) echo "ERROR: unknown argument '$1'" >&2; exit 2 ;;
+  esac
+done
+
+[ ${#OWNERS[@]} -eq 0 ] && OWNERS=(hyperpolymath)
+
+case "$MARKERS" in core|extended|all) ;; *) echo "ERROR: --markers must be core|extended|all" >&2; exit 2 ;; esac
+
+need() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: '$1' is required" >&2; exit 2; }; }
+need gh
+need jq
+need sort
+
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHECKER="$SCRIPTS_DIR/check-trusted-base.sh"
+[ -x "$CHECKER" ] || [ -f "$CHECKER" ] || { echo "ERROR: cannot find $CHECKER" >&2; exit 2; }
+
+mkdir -p "$OUT/cache"
+echo "[survey] owners: ${OWNERS[*]}"
+echo "[survey] output: $OUT"
+echo "[survey] markers: $MARKERS"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Marker → code-search query table.
+#
+# `-` in the query column means "this marker is NOT expressible as a GitHub
+# code search". Those rows are still published, because a hit list that omits
+# the markers it could not see is a lie by omission. The local checker detects
+# them; the survey says so explicitly.
+#
+# Every query carries `extension:` so that prose about a marker (a proof-debt
+# entry, an essay, a scanner's own regex) is not counted as a use of it. The
+# first survey attempt without `extension:` returned 3,496 hits for
+# `believe_me`, of which the majority were documentation *about* believe_me.
+# ─────────────────────────────────────────────────────────────────────────────
+MARKER_TABLE=$(cat <<'TABLE'
+coq-admit-admitted	core	Admitted	extension:v
+coq-axiom	core	Axiom	extension:v
+coq-admit-dot	core	admit.	extension:v
+lean-sorry	core	sorry	extension:lean
+lean-axiom	core	axiom	extension:lean
+agda-postulate	core	postulate	extension:agda
+idris-believe_me	core	believe_me	extension:idr
+idris-really_believe_me	core	really_believe_me	extension:idr
+idris-assert_total	core	assert_total	extension:idr
+idris-partial	core	%default partial	extension:idr
+fstar-assume-val	core	assume val	extension:fst
+dafny-axiom	extended	{:axiom}	extension:dfy
+agda-terminating-pragma	extended	TERMINATING	extension:agda
+agda-non-covering-pragma	extended	NON_COVERING	extension:agda
+agda-unsound-flag	extended	type-in-type	extension:agda
+agda-primtrustme	extended	primTrustMe	extension:agda
+agda-hole	extended	{!!}	-
+idris-hole	extended	?hole	-
+lean-implemented-by	extended	implemented_by	extension:lean
+lean-extern	extended	@[extern	extension:lean
+lean-native-decide	extended	native_decide	extension:lean
+lean-admit-tactic	extended	admit	extension:lean
+lean-unsafe-def	extended	unsafe def	extension:lean
+coq-parameter-or-conjecture	extended	Parameter	extension:v
+coq-give-up	extended	give_up	extension:v
+fstar-bare-assume	extended	assume	extension:fst
+TABLE
+)
+
+want_tier() {
+  case "$MARKERS" in
+    all) return 0 ;;
+    core) [ "$1" = core ] ;;
+    extended) [ "$1" = extended ] ;;
+  esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Code-search with cache, pagination, and rate-limit backoff.
+# ─────────────────────────────────────────────────────────────────────────────
+LAST_CODE_SEARCH=0
+
+throttle() {
+  local now elapsed
+  now=$(date +%s)
+  elapsed=$(( now - LAST_CODE_SEARCH ))
+  if [ "$LAST_CODE_SEARCH" -gt 0 ] && [ "$elapsed" -lt "$NAP" ]; then
+    sleep $(( NAP - elapsed ))
+  fi
+  LAST_CODE_SEARCH=$(date +%s)
+}
+
+# code_search <slug> <query> → writes JSON array of {repo, path} items to
+# $OUT/cache/<slug>.items.jsonl, and echoes "truncated" or "complete".
+code_search() {
+  local slug="$1" query="$2"
+  local items="$OUT/cache/${slug}.items.jsonl"
+  local meta="$OUT/cache/${slug}.meta"
+
+  if $USE_CACHE && [ -f "$meta" ] && [ -f "$items" ]; then
+    cat "$meta"
+    return 0
+  fi
+
+  : > "$items"
+  local page=1 total=0 fetched=0
+  while [ "$page" -le "$MAX_PAGES" ]; do
+    throttle
+    local resp rc
+    resp=$(gh api -X GET search/code \
+              -f q="$query" \
+              -f per_page=100 \
+              -f page="$page" 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      # Secondary rate limit / abuse detection: back off once, then fail loudly.
+      if printf '%s' "$resp" | grep -qi 'rate limit\|secondary'; then
+        echo "[survey]   rate limited on '$slug'; backing off 60s" >&2
+        sleep 60
+        resp=$(gh api -X GET search/code -f q="$query" -f per_page=100 -f page="$page" 2>&1)
+        rc=$?
+      fi
+      if [ "$rc" -ne 0 ]; then
+        printf '%s' "$resp" >> "$OUT/cache/${slug}.errors"
+        echo "[survey]   QUERY FAILED: $slug ($query)" >&2
+        printf 'error' > "$meta"
+        cat "$meta"
+        return 0
+      fi
+    fi
+    total=$(printf '%s' "$resp" | jq -r '.total_count // 0')
+    local n
+    n=$(printf '%s' "$resp" | jq -r '.items | length' 2>/dev/null || echo 0)
+    printf '%s' "$resp" | jq -r '.items[]? | [.repository.full_name, .path] | @tsv' >> "$items"
+    fetched=$(( fetched + n ))
+    [ "$n" -lt 100 ] && break
+    [ "$fetched" -ge "$total" ] && break
+    [ "$fetched" -ge 1000 ] && break
+    page=$(( page + 1 ))
+  done
+
+  local status="complete"
+  if [ "$fetched" -lt "$total" ] && [ "$fetched" -ge 1000 ]; then
+    status="truncated"
+  elif [ "$fetched" -lt "$total" ]; then
+    status="truncated"
+  fi
+  printf '%s\ttotal=%s\tfetched=%s\n' "$status" "$total" "$fetched" > "$meta"
+  cat "$meta"
+}
+
+echo "[survey] step 1/4 — enumerating repositories visible to the token"
+: > "$OUT/repos.tsv"
+for owner in "${OWNERS[@]}"; do
+  page=1
+  while :; do
+    resp=$(gh api "users/$owner/repos?per_page=100&page=$page&type=all" 2>/dev/null) || break
+    n=$(printf '%s' "$resp" | jq -r 'length' 2>/dev/null || echo 0)
+    [ "$n" -eq 0 ] && break
+    printf '%s' "$resp" | jq -r '.[] | [.full_name, (.archived|tostring), (.fork|tostring)] | @tsv' >> "$OUT/repos.tsv"
+    [ "$n" -lt 100 ] && break
+    page=$(( page + 1 ))
+  done
+done
+# A user account's repositories may also live under an org listing; dedupe.
+sort -u -o "$OUT/repos.tsv" "$OUT/repos.tsv" 2>/dev/null || true
+repo_total=$(wc -l < "$OUT/repos.tsv" | tr -d ' ')
+echo "[survey]   $repo_total repository/ies visible"
+
+echo "[survey] step 2/4 — resolving governance callers"
+if [ -n "$CALLERS_FILE" ]; then
+  # Ground truth supplied by the caller, e.g. an estate board export or the
+  # output of scripts/cicd-census.sh. Preferred over a code search whenever it
+  # exists: see the caller-truncation note below.
+  cut -f1 "$CALLERS_FILE" | sort -u > "$OUT/callers.tsv"
+  echo "[survey]   using --callers-file $CALLERS_FILE (ground truth, no code search)"
+else
+  caller_meta=$(code_search governance-callers "governance-reusable.yml")
+  echo "[survey]   $caller_meta"
+  cut -f1 "$OUT/cache/governance-callers.items.jsonl" 2>/dev/null | sort -u > "$OUT/callers.tsv"
+fi
+CALLER_STATUS=$(sed -n '1s/\t.*//p' "$OUT/cache/governance-callers.meta" 2>/dev/null || true)
+[ -n "$CALLERS_FILE" ] && CALLER_STATUS="complete"
+caller_total=$(wc -l < "$OUT/callers.tsv" | tr -d ' ')
+echo "[survey]   $caller_total caller repo(s) (enumeration: ${CALLER_STATUS:-unknown})"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scope guard: a token scoped to one repository produces exactly one repo and
+# one caller, and a hit list built from that is worse than no hit list.
+# ─────────────────────────────────────────────────────────────────────────────
+if [ "$repo_total" -le 1 ] || [ "$caller_total" -le 1 ]; then
+  cat > "$OUT/HIT-LIST.md" <<EOF
+# Trusted-base marker survey — INCOMPLETE
+
+**This run did not survey an estate.** The token in use can see
+$repo_total repository/ies and $caller_total governance caller(s).
+
+GitHub's code-search API is scoped to the token. A fine-grained token granted
+one repository returns one repository — and a zero result from such a token is
+indistinguishable from a genuine zero. Publishing a hit list from this run
+would be a confident, wrong answer about 400+ repositories.
+
+Re-run with a user token carrying \`repo\` scope:
+
+    bash scripts/estate-trusted-base-survey.sh --owner hyperpolymath
+
+See docs/audits/2026-10-30-trusted-base-marker-widening.adoc § "Survey".
+EOF
+  echo "[survey] NEEDS-SCOPE: visible repos=$repo_total callers=$caller_total" >&2
+  echo "[survey] wrote $OUT/HIT-LIST.md (INCOMPLETE) — refusing to publish a hit list" >&2
+  exit 2
+fi
+
+echo "[survey] step 3/4 — querying each marker"
+: > "$OUT/counts.tsv"
+: > "$OUT/hits-all.tsv"
+
+while IFS=$'\t' read -r mid mtier query ext; do
+  [ -z "$mid" ] && continue
+  want_tier "$mtier" || continue
+  if [ -z "$ext" ]; then ext="-"; fi
+  if [ "$ext" = "-" ]; then
+    printf '%s\t%s\tNA\t0\tnot-expressed\n' "$mid" "$mtier" >> "$OUT/counts.tsv"
+    echo "[survey]   $mid: not expressible as a code search (local checker only)"
+    continue
+  fi
+  full="$query $ext user:$(printf '%s' "${OWNERS[0]}")"
+  # Additional owners are surveyed with a second query, folded into one slug.
+  meta=$(code_search "$mid" "$full")
+  total=$(printf '%s' "$meta" | sed -n 's/.*total=\([0-9]*\).*/\1/p')
+  status=$(printf '%s' "$meta" | cut -f1)
+  hit_repos=$(cut -f1 "$OUT/cache/${mid}.items.jsonl" 2>/dev/null | sort -u | wc -l | tr -d ' ')
+  printf '%s\t%s\t%s\t%s\t%s\n' "$mid" "$mtier" "${total:-0}" "$hit_repos" "$status" >> "$OUT/counts.tsv"
+  [ -f "$OUT/cache/${mid}.items.jsonl" ] && awk -v m="$mid" '{print m"\t"$0}' "$OUT/cache/${mid}.items.jsonl" >> "$OUT/hits-all.tsv"
+  echo "[survey]   $mid: ${total:-0} hit(s), $hit_repos repo(s), $status"
+done <<< "$MARKER_TABLE"
+
+# Owners beyond the first: one extra query per marker, appended.
+if [ ${#OWNERS[@]} -gt 1 ]; then
+  for owner in "${OWNERS[@]:1}"; do
+    while IFS=$'\t' read -r mid mtier query ext; do
+      [ -z "$mid" ] && continue
+      want_tier "$mtier" || continue
+      [ -z "$ext" ] && continue
+      [ "$ext" = "-" ] && continue
+      code_search "${mid}__${owner}" "$query $ext user:$owner" >/dev/null
+      [ -f "$OUT/cache/${mid}__${owner}.items.jsonl" ] && \
+        awk -v m="$mid" '{print m"\t"$0}' "$OUT/cache/${mid}__${owner}.items.jsonl" >> "$OUT/hits-all.tsv"
+    done <<< "$MARKER_TABLE"
+  done
+fi
+
+echo "[survey] step 4/4 — joining hits against the caller set"
+sort -u -o "$OUT/hits-all.tsv" "$OUT/hits-all.tsv"
+awk -F'\t' 'NR==FNR{callers[$1]=1; next} ($2 in callers)' \
+  "$OUT/callers.tsv" "$OUT/hits-all.tsv" > "$OUT/hits.tsv"
+
+hit_total=$(wc -l < "$OUT/hits.tsv" | tr -d ' ')
+affected_repos=$(cut -f2 "$OUT/hits.tsv" | sort -u | wc -l | tr -d ' ')
+echo "[survey]   $hit_total hit(s) across $affected_repos caller repo(s)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Optional: pin census. Behaviour changes land in a caller only when the caller
+# bumps its pin of the reusable workflow, so the bump list is part of the
+# change, not an afterthought.
+# ─────────────────────────────────────────────────────────────────────────────
+if $DO_PINS; then
+  echo "[survey] pin census (one API call per caller)"
+  : > "$OUT/pins.tsv"
+  # The estate references this repository under BOTH owners — the canonical
+  # `metadatastician/standards` remote and the historical `hyperpolymath/standards`
+  # name (which GitHub redirects) — and sometimes both in one caller. The first
+  # run matched one owner and produced 306 callers with ZERO pins, which reads
+  # exactly like a census of repositories that pin nothing. A census that finds
+  # nothing because the pattern was wrong is the same defect class as
+  # docs/CICD-SIGNAL-DISCIPLINE.adoc § "Distinguish absent from unreadable".
+  pin_scan() { # pin_scan <repo> <workflow-file>
+    local repo="$1" wf="$2"
+    gh api "repos/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null \
+      | tr -d '\n' | base64 -d 2>/dev/null \
+      | grep -oE '(metadatastician|hyperpolymath)/standards/\.github/workflows/[a-z0-9-]+\.ya?ml@[0-9a-f]{40}' \
+      | sed -E "s#^.*/workflows/(.*)@([0-9a-f]{40})\$#${repo}\t\1\t\2#" \
+      | sort -u
+  }
+  while IFS= read -r repo; do
+    [ -z "$repo" ] && continue
+    for wf in $(gh api "repos/$repo/contents/.github/workflows" \
+                   --jq '.[]? | select(.name|test("\\.ya?ml$")) | .name' 2>/dev/null); do
+      [ -z "$wf" ] && continue
+      pin_scan "$repo" "$wf" >> "$OUT/pins.tsv"
+    done
+  done < "$OUT/callers.tsv"
+  sort -u -o "$OUT/pins.tsv" "$OUT/pins.tsv"
+  echo "[survey]   $(wc -l < "$OUT/pins.tsv" | tr -d ' ') pinned reusable-workflow reference(s)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Publish.
+# ─────────────────────────────────────────────────────────────────────────────
+generated=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+{
+  cat <<EOF
+# Trusted-base marker survey — hit list
+
+Generated: $generated (UTC) · owners: ${OWNERS[*]} · marker set: $MARKERS
+
+This is the *measurement* that must precede enforcement. Nothing in this report
+is a failure: a marker listed here is a marker that needs a disposition
+(discharged, budgeted, axiom, or dated debt), and the disposition is a
+per-repository judgement, not an estate-wide verdict.
+
+Scope: $repo_total repository/ies visible to the token; $caller_total
+governance caller(s); $hit_total marker instance(s) across $affected_repos
+caller repo(s).
+
+EOF
+
+  echo "## Per-marker counts (callers only is NOT applied here — this is raw)"
+  echo
+  echo "| Marker | Tier | Code-search results | Repos | Status |"
+  echo "|---|---|---|---|---|"
+  while IFS=$'\t' read -r mid mtier total repos status; do
+    [ -z "$mid" ] && continue
+    printf '| `%s` | %s | %s | %s | %s |\n' "$mid" "$mtier" "$total" "$repos" "$status"
+  done < "$OUT/counts.tsv"
+  echo
+  cat <<'EOF'
+`not-expressed` means the marker cannot be found by GitHub code search and is
+only detected by `scripts/check-trusted-base.sh` running against a checkout.
+`truncated` means the query hit GitHub's 1,000-result ceiling: the true count is
+HIGHER than shown. Both are stated rather than hidden — see
+`docs/CICD-SIGNAL-DISCIPLINE.adoc` § "Never report a proxy as a finding".
+
+## Per-repository hit list
+
+Every visible repository is listed, with a column saying whether it is known to
+call governance. The caller column exists because caller enumeration is itself
+a code search, and a code search is a proxy: two runs of this script on the same
+estate returned 914 and 1,184 results for the caller query, and the API caps any
+single query at 1,000. Rather than quietly dropping the repositories that fell
+outside the proxy, the marker table below is built from ALL visible repositories
+and the join is a column.
+
+EOF
+  echo
+  if [ "$(wc -l < "$OUT/hits-all.tsv" | tr -d ' ')" -eq 0 ]; then
+    echo "_No hits._"
+  else
+    echo "| Repository | Marker | Files | Calls governance |"
+    echo "|---|---|---|---|"
+    awk -F'\t' '
+      NR==FNR { caller[$1]=1; next }
+      { n[$2 "\t" $1]++ }
+      END {
+        for (k in n) {
+          split(k, a, "\t")
+          printf "%s\t%s\t%d\t%s\n", a[1], a[2], n[k], ((a[1] in caller) ? "yes" : "no")
+        }
+      }
+    ' "$OUT/callers.tsv" "$OUT/hits-all.tsv" \
+      | sort \
+      | awk -F'\t' '{ printf "| `%s` | `%s` | %s | %s |\n", $1, $2, $3, $4 }'
+  fi
+  echo
+  cat <<'EOF'
+## Files
+
+| File | Contents |
+|---|---|
+| `repos.tsv` | every repository visible to the token |
+| `callers.tsv` | repositories whose workflows reference `governance-reusable.yml` |
+| `hits.tsv` | `marker<TAB>repo<TAB>path`, callers only |
+| `hits-all.tsv` | same, every visible repository (non-callers included) |
+| `counts.tsv` | `marker<TAB>tier<TAB>results<TAB>repos<TAB>status` |
+EOF
+  if $DO_PINS; then
+    cat <<'EOF'
+| `pins.tsv` | `repo<TAB>workflow<TAB>pinned-sha` — the bump list |
+EOF
+  fi
+  cat <<'EOF'
+
+## What this does NOT tell you
+
+* **How many markers are defensible.** A `{-# TERMINATING #-}` with a written
+  termination argument is the pragma working as designed. The count is the
+  size of the conversation, not the size of the problem.
+* **Whether a repository is unsound.** A `postulate` in a teaching example, a
+  `{!!}` in a work-in-progress module and a `sorry` in a Mathlib-shaped
+  development are three different things with one spelling.
+* **What a budget should be.** The budget is the number the repository's
+  maintainer accepts *after* triage (§(b) budgeted / §(c) axiom / §(d) dated
+  debt), not the number this script measured.
+EOF
+} > "$OUT/HIT-LIST.md"
+
+echo "[survey] wrote $OUT/HIT-LIST.md"
+echo "[survey] done: $hit_total hit(s) in $affected_repos caller repo(s)"
+exit 0

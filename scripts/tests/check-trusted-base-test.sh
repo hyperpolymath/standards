@@ -54,6 +54,45 @@ run_case() {
   rm -rf "$tmp"
 }
 
+# run_case_env <name> <expected-exit> <expected-substr> <setup-fn> <env-assignment>
+# Same as run_case, with one environment assignment applied to the checker
+# invocation (used to exercise the extended-tier modes).
+run_case_env() {
+  local name="$1"; shift
+  local expected_exit="$1"; shift
+  local expected_substr="$1"; shift
+  local setup_fn="$1"; shift
+  local env_assign="$1"; shift
+
+  local tmp
+  tmp="$(mktemp -d)"
+  (
+    cd "$tmp"
+    "$setup_fn"
+  )
+  set +e
+  local out
+  out="$(cd "$tmp" && env "$env_assign" bash "$SCRIPT" . 2>&1)"
+  local actual_exit=$?
+  set -e
+
+  local ok=true
+  if [[ "$actual_exit" -ne "$expected_exit" ]]; then ok=false; fi
+  if [[ -n "$expected_substr" && "$out" != *"$expected_substr"* ]]; then ok=false; fi
+
+  if $ok; then
+    echo "ok   $name"
+    PASS=$((PASS+1))
+  else
+    echo "FAIL $name (exit=$actual_exit, expected=$expected_exit)"
+    echo "---- output ----"
+    echo "$out"
+    echo "----------------"
+    FAIL=$((FAIL+1))
+  fi
+  rm -rf "$tmp"
+}
+
 # Each setup creates a fresh fixture tree at $PWD (the tmpdir).
 
 setup_marker_no_docs() {
@@ -257,6 +296,223 @@ EOF
 EOF
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 2026-10-30 widening — extended-tier fixtures.
+#
+# The governing constraint for every case below: a repository whose proofs are
+# fine must NOT be red-boarded by the act of widening the detector. So there are
+# two families of test here — "detected" and "deliberately not detected" — and
+# the second family is as load-bearing as the first.
+# ─────────────────────────────────────────────────────────────────────────────
+
+setup_agda_terminating_undocumented() {
+  mkdir -p proofs
+  cat > proofs/Term.agda <<'EOF'
+module Term where
+{-# TERMINATING #-}
+loop : Nat -> Nat
+loop n = loop n
+EOF
+}
+
+setup_agda_terminating_justified() {
+  mkdir -p proofs
+  cat > proofs/Term.agda <<'EOF'
+module Term where
+
+-- JUSTIFIED: the recursion is structurally decreasing on the third argument;
+-- Agda's checker cannot see through the `with` abstraction, but every call
+-- passes a smaller fuel value (see the argument below).
+{-# TERMINATING #-}
+loop : Nat -> Nat
+loop n = loop n
+EOF
+}
+
+setup_agda_terminating_in_block_comment() {
+  mkdir -p proofs
+  cat > proofs/Term.agda <<'EOF'
+module Term where
+
+{- A note about proof state:
+   {-# TERMINATING #-}
+   was used here until 2026-05; the current definition passes the checker. -}
+total : Nat -> Nat
+total n = n
+EOF
+}
+
+setup_agda_unsound_flags() {
+  mkdir -p proofs
+  cat > proofs/Bad.agda <<'EOF'
+module Bad where
+{-# OPTIONS --type-in-type #-}
+{-# OPTIONS --allow-unsolved-metas #-}
+EOF
+}
+
+setup_agda_hole() {
+  mkdir -p proofs
+  cat > proofs/Hole.agda <<'EOF'
+module Hole where
+answer : Nat
+answer = {!!}
+EOF
+}
+
+setup_lean_implemented_by() {
+  mkdir -p formal
+  cat > formal/Fast.lean <<'EOF'
+@[implemented_by fastAdd] def add (a b : Nat) : Nat := a + b
+EOF
+}
+
+setup_lean_native_decide_in_comment() {
+  mkdir -p formal
+  cat > formal/Doc.lean <<'EOF'
+/- This module explains why `native_decide` is a trust expansion:
+   it makes the kernel accept a computation performed by the compiler. -/
+theorem t : True := by trivial
+EOF
+}
+
+setup_lean_native_decide_real() {
+  mkdir -p formal
+  cat > formal/Ev.lean <<'EOF'
+theorem big : (10 ^ 10) > 1 := by native_decide
+EOF
+}
+
+setup_coq_parameter() {
+  mkdir -p formal
+  cat > formal/P.v <<'EOF'
+Parameter cheat : forall P : Prop, P.
+EOF
+}
+
+setup_coq_hypothesis_in_section() {
+  mkdir -p formal
+  cat > formal/S.v <<'EOF'
+Section S.
+  Hypothesis H : forall n : nat, n = n.
+  Variable A : Type.
+
+  Theorem trivial_use : forall n : nat, n = n.
+  Proof. exact H. Qed.
+End S.
+EOF
+}
+
+setup_idris_hole() {
+  mkdir -p src
+  cat > src/H.idr <<'EOF'
+module H
+f : Int -> Int
+f x = ?need_to_think
+EOF
+}
+
+setup_idris_default_total_not_a_hole() {
+  # `%default total` is the STRICT setting. Treating it as a marker would
+  # red-board every well-disciplined Idris2 repository in the estate.
+  mkdir -p src
+  cat > src/Good.idr <<'EOF'
+module Good
+%default total
+add : Nat -> Nat -> Nat
+add x y = x + y
+EOF
+}
+
+setup_idris_owed_annotation() {
+  mkdir -p src docs
+  # The proof-debt index is mandatory for a repo carrying core markers; the
+  # OWED: annotation is what discharges the individual marker.
+  cat > docs/proof-debt.md <<'EOF'
+# Proof Debt
+(Inline OWED: annotations only; see the source.)
+EOF
+  cat > src/Ax.idr <<'EOF'
+module Ax
+||| OWED: function extensionality; necessary; see docs/proof-debt.md §(c).
+||| Citation: Mathlib4 Function.funext_iff.
+0 funExt : (f, g : a -> b) -> ((x : a) -> f x = g x) -> f = g
+-- OWED: erased axiom at the typed-wasm boundary; see §(c) entry "funExt".
+funExt f g p = believe_me ()
+EOF
+}
+
+setup_dafny_axiom() {
+  mkdir -p dafny
+  cat > dafny/D.dfy <<'EOF'
+lemma {:axiom} cheat()
+  ensures false
+EOF
+}
+
+setup_fstar_bare_assume() {
+  mkdir -p fstar
+  cat > fstar/A.fst <<'EOF'
+let bad : Lemma True = admit()
+EOF
+}
+
+setup_extended_with_budget_file() {
+  mkdir -p proofs
+  cat > proofs/Term.agda <<'EOF'
+module Term where
+{-# TERMINATING #-}
+loop : Nat -> Nat
+loop n = loop n
+EOF
+  cat > .trusted-base-budget <<'EOF'
+# Measured by scripts/estate-trusted-base-survey.sh on 2026-10-30.
+mode: budget
+extended-undocumented: 1
+EOF
+}
+
+setup_extended_with_budget_too_small() {
+  mkdir -p proofs
+  cat > proofs/Term.agda <<'EOF'
+module Term where
+{-# TERMINATING #-}
+loop : Nat -> Nat
+loop n = loop n
+EOF
+  cat > .trusted-base-budget <<'EOF'
+mode: budget
+extended-undocumented: 0
+EOF
+}
+
+setup_extended_malformed_budget() {
+  mkdir -p proofs
+  cat > proofs/Term.agda <<'EOF'
+module Term where
+{-# TERMINATING #-}
+loop : Nat -> Nat
+loop n = loop n
+EOF
+  cat > .trusted-base-budget <<'EOF'
+mode: sometimes
+EOF
+}
+
+setup_extended_ignored_path() {
+  mkdir -p test/fixtures
+  cat > test/fixtures/term.agda <<'EOF'
+module term where
+{-# TERMINATING #-}
+loop : Nat -> Nat
+loop n = loop n
+EOF
+  cat > .trusted-base-ignore <<'EOF'
+# Negative-control fixtures: exist to be detected.
+test/fixtures/
+EOF
+}
+
 # Existing behaviour must still work.
 run_case "marker with no docs and no ignore fails (early exit)" \
   1 "No docs/proof-debt.md (or equivalent) found" setup_marker_no_docs
@@ -297,6 +553,115 @@ run_case "real Coq marker after a same-line leading comment still fails" \
 
 run_case "unterminated Coq string fails closed instead of hiding the file" \
   1 "1/1 escape hatch(es) are undocumented" setup_coq_unterminated_string
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Extended tier — detected, and reported rather than failed by default
+# ─────────────────────────────────────────────────────────────────────────────
+run_case "Agda {-# TERMINATING #-} is detected" \
+  0 "agda-terminating-pragma" setup_agda_terminating_undocumented
+
+run_case "extended marker alone does NOT fail the repo (mode=report default)" \
+  0 "extended_mode=report" setup_agda_terminating_undocumented
+
+run_case "Agda unsound OPTIONS flags are detected" \
+  0 "agda-unsound-flag" setup_agda_unsound_flags
+
+run_case "Agda {!!} hole is detected" \
+  0 "agda-hole" setup_agda_hole
+
+run_case "Lean @[implemented_by] is detected" \
+  0 "lean-implemented-by" setup_lean_implemented_by
+
+run_case "Lean native_decide is detected" \
+  0 "lean-native-decide" setup_lean_native_decide_real
+
+run_case "Coq Parameter is detected" \
+  0 "coq-parameter-or-conjecture" setup_coq_parameter
+
+run_case "Idris2 ?hole is detected" \
+  0 "idris-hole" setup_idris_hole
+
+run_case "Dafny {:axiom} is detected" \
+  0 "dafny-axiom" setup_dafny_axiom
+
+run_case "F* bare admit() is detected" \
+  0 "fstar-assume-or-admit-bare" setup_fstar_bare_assume
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Extended tier — deliberately NOT detected (the anti-red-board family).
+# Each of these would flag healthy code; a failure here is a regression that
+# costs a real repository its green board.
+# ─────────────────────────────────────────────────────────────────────────────
+run_case "Idris2 %default total is NOT a marker (it is the strict setting)" \
+  0 "No soundness-relevant escape hatches detected" setup_idris_default_total_not_a_hole
+
+run_case "Coq Hypothesis inside a Section is NOT a marker" \
+  0 "No soundness-relevant escape hatches detected" setup_coq_hypothesis_in_section
+
+run_case "Agda {-# TERMINATING #-} inside a block comment is NOT a marker" \
+  0 "No soundness-relevant escape hatches detected" setup_agda_terminating_in_block_comment
+
+run_case "Lean native_decide mentioned in a doc comment is NOT a marker" \
+  0 "No soundness-relevant escape hatches detected" setup_lean_native_decide_in_comment
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Discharge routes apply to the extended tier identically.
+# ─────────────────────────────────────────────────────────────────────────────
+run_case "JUSTIFIED: leading comment discharges an extended marker" \
+  0 "extended_documented=1" setup_agda_terminating_justified
+
+run_case_env "JUSTIFIED: annotation passes mode=strict" \
+  0 "no undocumented markers (mode=strict)" setup_agda_terminating_justified TRUSTED_BASE_EXTENDED_MODE=strict
+
+run_case "OWED: annotation discharges an Idris2 believe_me (policy claimed this since #203)" \
+  0 "core_undocumented=0" setup_idris_owed_annotation
+
+run_case ".trusted-base-ignore exempts an extended marker" \
+  0 "1 extended-tier marker(s) exempted" setup_extended_ignored_path
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Budget mechanism.
+# ─────────────────────────────────────────────────────────────────────────────
+run_case "budget file: measured number passes" \
+  0 "1/1 budgeted marker(s) undocumented" setup_extended_with_budget_file
+
+run_case "budget file: exceeding the budget fails" \
+  1 "exceed the declared budget of 0" setup_extended_with_budget_too_small
+
+run_case "budget file: malformed mode fails closed with exit 2" \
+  2 "mode must be report|budget|strict" setup_extended_malformed_budget
+
+run_case_env "mode=strict fails on an undocumented extended marker" \
+  1 "mode=strict permits none" setup_agda_terminating_undocumented TRUSTED_BASE_EXTENDED_MODE=strict
+
+run_case_env "CLI/environment override beats the budget file" \
+  0 "extended_mode=report" setup_extended_with_budget_too_small TRUSTED_BASE_EXTENDED_MODE=report
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The marker catalogue is a contract: the survey script and the docs both read
+# it, so both tiers must appear and nothing may silently vanish.
+# ─────────────────────────────────────────────────────────────────────────────
+catalogue="$(bash "$SCRIPT" --list-markers 2>&1)"
+for need in agda-terminating-pragma agda-unsound-flag lean-implemented-by \
+            lean-native-decide coq-parameter-or-conjecture idris-hole dafny-axiom; do
+  if printf '%s' "$catalogue" | grep -q "$need"; then
+    echo "ok   catalogue lists $need"
+    PASS=$((PASS+1))
+  else
+    echo "FAIL catalogue is missing $need"
+    FAIL=$((FAIL+1))
+  fi
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+# --tier narrows the scan. It is the triage mode: a maintainer looks at the new
+# tier alone without inheriting the core tier's exit code, and vice versa.
+# ─────────────────────────────────────────────────────────────────────────────
+run_case_env "tier=extended ignores an undocumented CORE marker" \
+  0 "core_total=0" setup_coq_parameter TRUSTED_BASE_TIER=extended
+
+run_case_env "tier=core ignores an undocumented EXTENDED marker" \
+  0 "No soundness-relevant escape hatches detected" setup_agda_terminating_undocumented TRUSTED_BASE_TIER=core
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

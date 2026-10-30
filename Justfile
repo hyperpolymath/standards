@@ -121,6 +121,20 @@ language-guides-check:
 canonical-names-check base="origin/main":
     @bash scripts/check-canonical-names.sh "{{base}}"
 
+# Mechanical half of a repository rename: register + allowlist + tree check
+# (0-canon/CANONICAL-NAMES.adoc § "What a repository rename mechanically entails")
+retired-names-check args="--strict":
+    @bash scripts/check-retired-names.sh {{args}}
+
+# Trusted-base scanner regression suite (core + extended tiers, budget, tiers)
+trusted-base-test:
+    @bash scripts/tests/check-trusted-base-test.sh
+
+# Measure the trusted-base marker set across governance callers. Writes to
+# out/ (gitignored); needs a token with estate-wide read.
+trusted-base-survey owner="hyperpolymath":
+    @bash scripts/estate-trusted-base-survey.sh --owner {{owner}}
+
 # Aggregate compliance gate. The RSR self-audit is INFORMATIONAL — a monorepo
 # is not expected to score Gold — but a *broken* audit (exit 4 / unexpected)
 # must fail loudly rather than pass silently under a blanket `|| true`
