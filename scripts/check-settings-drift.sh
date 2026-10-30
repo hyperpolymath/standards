@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 set -eo pipefail
+#
+# The rule this implements: docs/REPO-SETTINGS.adoc § "Private repositories on a
+# Free account: N/A, never `disabled`" — drop the security_and_analysis block and
+# report the drop, rather than assert a setting the plan cannot provide.
 
 # check-settings-drift.sh — detect estate settings moving without anyone noticing.
 #
