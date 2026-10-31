@@ -56,3 +56,20 @@ jobs:
       # infer it from another script's internals.
       - name: "actions.lock is transitively closed"
         run: bash scripts/close-lock.sh --check .github/workflows/actions.lock
+
+      # Closure above is a property of THIS file: delete an edge from
+      # `workflows:` and its record from `dependencies:` together and the
+      # lockfile is still perfectly closed. Completeness is a property measured
+      # against the callee graph at the pinned commits, which is why it needs an
+      # artefact independent of the current lock — the reviewed baseline in
+      # .github/workflows/actions-lock.closure.tsv.
+      #
+      # `gh actions-lock` documents that it does not lock remote job-level
+      # reusable calls, so a regeneration can drop a dependency this repository
+      # really resolves at startup. Measured 2026-10-31:
+      # hyperpolymath/unified-dataset-vocab#81 records actions/checkout under
+      # the caller for exactly that reason.
+      - name: "Refs reached through remote reusable calls are recorded, and never dropped"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-reusable-closure.sh .github/workflows --repo "$GITHUB_REPOSITORY"
