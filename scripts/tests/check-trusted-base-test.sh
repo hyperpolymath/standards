@@ -578,6 +578,23 @@ let bad : Lemma True = admit()
 EOF
 }
 
+setup_fstar_multiline_assume() {
+  mkdir -p fstar docs
+  cat > fstar/A.fst <<'EOF'
+module A
+assume val first : True
+assume // declaration continues after comments
+(* nested (* comment *) *)
+  val second : True
+let a = assume (True)
+assume
+let b = True
+let c = assume (True); assume val third : True
+let d = admit ()
+EOF
+  echo '# Proof debt' > docs/proof-debt.md
+}
+
 setup_extended_with_budget_file() {
   mkdir -p proofs
   cat > proofs/Term.agda <<'EOF'
@@ -707,6 +724,11 @@ run_case "Dafny {:axiom} is detected" \
 
 run_case "F* bare admit() is detected" \
   0 "fstar-assume-or-admit-bare" setup_fstar_bare_assume
+
+# Core declarations on one or multiple lines must not be counted as bare;
+# genuine standalone assumes (including one next to a declaration) still are.
+run_case "F* multiline assume val is core and standalone assumes remain extended" \
+  1 "core_total=3 core_undocumented=3 core_documented=0 core_exempted=0 extended_total=4" setup_fstar_multiline_assume
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Extended tier — deliberately NOT detected (the anti-red-board family).

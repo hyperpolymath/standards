@@ -184,8 +184,8 @@ for doc in "${files[@]}"; do
       is_inv=true
     fi
 
-    enforced_by="$(printf '%s\n' "$body" | sed -nE 's|^(// )?Enforced-by:[[:space:]]*||p' | head -1)"
-    review_only="$(printf '%s\n' "$body" | sed -nE 's|^(// )?Review-only:[[:space:]]*||p' | head -1)"
+    enforced_by="$(printf '%s\n' "$body" | sed -nE 's|^(// )?Enforced-by:[[:space:]]*||; t trim; b; :trim; s|[[:space:]]+$||; p' | head -1)"
+    review_only="$(printf '%s\n' "$body" | sed -nE 's|^(// )?Review-only:[[:space:]]*||; t trim; b; :trim; s|[[:space:]]+$||; p' | head -1)"
     n_enforced="$(printf '%s\n' "$body" | grep -cE '^(// )?Enforced-by:[[:space:]]*')"
     n_review="$(printf '%s\n' "$body" | grep -cE '^(// )?Review-only:[[:space:]]*')"
 
@@ -206,14 +206,13 @@ for doc in "${files[@]}"; do
       problem "add 'Enforced-by: <script>' or 'Review-only: <why nothing does>'"
       continue
     fi
-    if [ "$n_enforced" -gt 0 ] && [ "$n_review" -gt 0 ]; then
+    if [ "$((n_enforced + n_review))" -gt 1 ]; then
       echo "$doc:$ln: AMBIGUOUS invariant: \"$heading\""
-      problem "carries both Enforced-by and Review-only; the claim must be one or the other"
+      problem "carries multiple tags; the claim must have exactly one Enforced-by or Review-only"
       continue
     fi
 
     if [ "$n_enforced" -gt 0 ]; then
-      inv_enforced=$((inv_enforced + 1))
       if [ ! -e "$enforced_by" ]; then
         echo "$doc:$ln: DANGLING claim: Enforced-by $enforced_by (no such path)"
         problem "the enforcing path does not exist"
@@ -232,8 +231,8 @@ for doc in "${files[@]}"; do
         problem "the named file has no reference to this invariant; cite the doc or use the slug"
         continue
       fi
+      inv_enforced=$((inv_enforced + 1))
     else
-      inv_review=$((inv_review + 1))
       reason_len=${#review_only}
       if [ "$reason_len" -lt 40 ]; then
         echo "$doc:$ln: THIN reason ($reason_len chars): Review-only $review_only"
@@ -246,6 +245,7 @@ for doc in "${files[@]}"; do
           problem "TODO/TBD/none is the untagged case wearing a tag"
           continue ;;
       esac
+      inv_review=$((inv_review + 1))
     fi
   done <<< "$headings"
 done
