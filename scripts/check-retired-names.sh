@@ -51,8 +51,8 @@
 #                           (default: docs/naming/retired-names.txt)
 #   --allowlist PATH        allowlist path relative to root
 #                           (default: docs/naming/retired-names-allowlist.txt)
-#   --diff BASE             check only lines ADDED since BASE (pre-commit /
-#                           pull-request mode) instead of the whole tree
+#   --diff BASE             check added lines and added/renamed paths since BASE
+#                           (pre-commit / pull-request mode)
 #   --spellings             additionally run the normalised (spelling-insensitive)
 #                           report
 #   --strict                tree mode fails on violations (default: report-only,
@@ -147,7 +147,7 @@ is_allowed() {
 # for text it inherited. This is the pre-commit / pull-request mode.
 # ─────────────────────────────────────────────────────────────────────────────
 if [ -n "$diff_base" ]; then
-  echo "[INFO] diff mode against $diff_base (added lines only)"
+  echo "[INFO] diff mode against $diff_base (added lines and added/renamed paths)"
   # A base that does not resolve (typo, unfetched branch, shallow checkout) is
   # not "nothing was added". `git diff` used to fail inside a process
   # substitution whose status was discarded and whose stderr was suppressed, so
@@ -158,28 +158,34 @@ if [ -n "$diff_base" ]; then
     echo "[FAIL] Fetch it, or drop --diff to scan the whole tree." >&2
     exit 2
   fi
-  patterns="$(mktemp)"; diffout="$(mktemp)"
+  patterns="$(mktemp)"; diffout="$(mktemp)"; pathsout="$(mktemp)"
   # shellcheck disable=SC2064
-  trap "rm -f '$patterns' '$diffout'" EXIT
+  trap "rm -f '$patterns' '$diffout' '$pathsout'" EXIT
   printf '%s\n' "$names" > "$patterns"
   if ! git -C "$root" diff "$diff_base" -- . > "$diffout"; then
     echo "[FAIL] git diff $diff_base failed; refusing to report a clean tree." >&2
     exit 2
   fi
+  if ! git -C "$root" diff --find-renames --name-status -z --diff-filter=AR "$diff_base" -- . > "$pathsout"; then
+    echo "[FAIL] git diff path metadata failed; refusing to report a clean tree." >&2
+    exit 2
+  fi
   violations=0
+  while IFS= read -r -d '' status && IFS= read -r -d '' path; do
+    case "$status" in
+      R*) IFS= read -r -d '' path || break ;;
+    esac
+    if printf '%s' "$path" | grep -qF -f "$patterns"; then
+      is_allowed "$path" && continue
+      echo "violation: added path $path reintroduces a retired name"
+      violations=$((violations + 1))
+    fi
+  done < "$pathsout"
   current_file=""
   while IFS= read -r line; do
     case "$line" in
       "+++ b/"*)
         current_file="${line#+++ b/}"
-        # The added PATH is checked too. `+++ b/` used to be bookkeeping only,
-        # so adding a clean file under `old-name-dir/` exited 0 while the
-        # whole-tree scan rejected the identical tree as a path violation.
-        if printf '%s' "$current_file" | grep -qF -f "$patterns"; then
-          is_allowed "$current_file" && continue
-          echo "violation: added path $current_file reintroduces a retired name"
-          violations=$((violations + 1))
-        fi
         ;;
       "+"*)
         [ -z "$current_file" ] && continue
@@ -194,11 +200,11 @@ if [ -n "$diff_base" ]; then
     esac
   done < "$diffout"
   if [ "$violations" -gt 0 ]; then
-    echo "[FAIL] $violations added line(s) reintroduce a retired name."
+    echo "[FAIL] $violations added line(s) or path(s) reintroduce a retired name."
     echo "[FAIL] Retired names are historical record: see $register and $allowlist."
     exit 1
   fi
-  echo "[OK] no added line reintroduces a retired name"
+  echo "[OK] no added line or path reintroduces a retired name"
   do_spellings=false
 fi
 

@@ -188,6 +188,36 @@ else
   bad "diff mode missed a retired name in an added path (rc=$rc)"; printf '%s\n' "$out"
 fi
 
+# A modified inherited path is not a new path, even when its content changes.
+printf 'another clean line\n' >> "$NEW_REPO/diffmode/juliapackage-reuse-audit/README.adoc"
+out=$(run "$NEW_REPO/diffmode" --diff HEAD); rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "diff mode permits clean edits to an inherited retired-name path"
+else
+  bad "diff mode rejected an inherited path (rc=$rc)"; printf '%s\n' "$out"
+fi
+( cd "$NEW_REPO/diffmode" && git add -A && git commit -qm editpath )
+
+# Binary additions have no +++ text header; use a path containing spaces too.
+printf 'binary\0content\n' > "$NEW_REPO/diffmode/juliapackage-reuse-audit/binary file.bin"
+git -C "$NEW_REPO/diffmode" add -A
+out=$(run "$NEW_REPO/diffmode" --diff HEAD); rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'added path juliapackage-reuse-audit/binary file.bin'; then
+  ok "diff mode detects an added binary path with spaces"
+else
+  bad "diff mode missed an added binary path (rc=$rc)"; printf '%s\n' "$out"
+fi
+git -C "$NEW_REPO/diffmode" commit -qm binary
+
+printf 'rename content\n' > "$NEW_REPO/diffmode/clean-source.txt"
+( cd "$NEW_REPO/diffmode" && git add -A && git commit -qm source && git mv clean-source.txt juliapackage-reuse-audit/renamed.txt )
+out=$(run "$NEW_REPO/diffmode" --diff HEAD); rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'added path juliapackage-reuse-audit/renamed.txt'; then
+  ok "diff mode detects a renamed destination path"
+else
+  bad "diff mode missed a renamed destination (rc=$rc)"; printf '%s\n' "$out"
+fi
+
 # ── 6c. diff mode: an unresolvable base is a failure, not a clean tree ──────
 # The old pipeline discarded `git diff`'s status inside a process substitution
 # and suppressed its stderr, so a typo or a shallow checkout produced zero

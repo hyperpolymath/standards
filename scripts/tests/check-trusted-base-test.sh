@@ -360,6 +360,17 @@ answer = {!!}
 EOF
 }
 
+setup_agda_multiline_pragma() {
+  mkdir -p proofs
+  cat > proofs/Bad.agda <<'EOF'
+module Bad where
+{-# OPTIONS
+  --without-K
+  --type-in-type
+#-} -- {!!} is a comment
+EOF
+}
+
 setup_lean_implemented_by() {
   mkdir -p formal
   cat > formal/Fast.lean <<'EOF'
@@ -578,6 +589,32 @@ let bad : Lemma True = admit()
 EOF
 }
 
+setup_fstar_mixed_forms() {
+  mkdir -p fstar docs
+  printf '# Proof debt\n' > docs/proof-debt.md
+  cat > fstar/A.fst <<'EOF'
+let x = admit_p (); let y = admit (); let z = assume True
+EOF
+}
+
+setup_fstar_core_and_bare_assume() {
+  mkdir -p fstar docs
+  printf '# Proof debt\n' > docs/proof-debt.md
+  cat > fstar/A.fst <<'EOF'
+// TRUSTED: documented core escape.
+assume val x : Type; assume True
+EOF
+}
+
+setup_fstar_core_only() {
+  mkdir -p fstar docs
+  printf '# Proof debt\n' > docs/proof-debt.md
+  cat > fstar/A.fst <<'EOF'
+// TRUSTED: documented core escape.
+assume val x : Type
+EOF
+}
+
 setup_extended_with_budget_file() {
   mkdir -p proofs
   cat > proofs/Term.agda <<'EOF'
@@ -687,6 +724,11 @@ run_case "extended marker alone does NOT fail the repo (mode=report default)" \
 run_case "Agda unsound OPTIONS flags are detected" \
   0 "agda-unsound-flag" setup_agda_unsound_flags
 
+run_case_env "Agda multiline OPTIONS flags fail strict mode" \
+  1 "mode=strict permits none" setup_agda_multiline_pragma TRUSTED_BASE_EXTENDED_MODE=strict
+run_case "Agda multiline pragma closes before trailing comments" \
+  0 "extended_total=1" setup_agda_multiline_pragma
+
 run_case "Agda {!!} hole is detected" \
   0 "agda-hole" setup_agda_hole
 
@@ -707,6 +749,13 @@ run_case "Dafny {:axiom} is detected" \
 
 run_case "F* bare admit() is detected" \
   0 "fstar-assume-or-admit-bare" setup_fstar_bare_assume
+
+run_case_env "F* bare markers alongside admit_p fail strict mode" \
+  1 "mode=strict permits none" setup_fstar_mixed_forms TRUSTED_BASE_EXTENDED_MODE=strict
+run_case "F* bare assume alongside assume val is detected" \
+  0 "extended_total=1" setup_fstar_core_and_bare_assume
+run_case "F* assume val alone adds no extended marker" \
+  0 "extended_total=0" setup_fstar_core_only
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Extended tier — deliberately NOT detected (the anti-red-board family).

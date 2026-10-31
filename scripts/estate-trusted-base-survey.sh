@@ -173,6 +173,11 @@ agda-terminating-pragma	extended	NON_TERMINATING	extension:agda
 agda-non-covering-pragma	extended	NON_COVERING	extension:agda
 agda-unsound-flag	extended	--type-in-type	extension:agda
 agda-unsound-flag	extended	--allow-unsolved-metas	extension:agda
+agda-unsound-flag	extended	--no-termination-check	extension:agda
+agda-unsound-flag	extended	--no-positivity-check	extension:agda
+agda-unsound-flag	extended	--no-coverage-check	extension:agda
+agda-unsound-flag	extended	--no-projection-likeness-check	extension:agda
+agda-unsound-flag	extended	--no-universe-check	extension:agda
 agda-primtrustme	extended	primTrustMe	extension:agda
 agda-hole	extended	-	-
 idris-believe-or-assert	core	believe_me	extension:idr
@@ -199,13 +204,13 @@ TABLE
 # row and no count — an absence indistinguishable from a zero. Any catalogue id
 # without a row is a hole in the measurement, so this exits before querying.
 # ─────────────────────────────────────────────────────────────────────────────
-catalogue_ids=$(bash "$CHECKER" --list-markers 2>/dev/null | cut -f3 | sort -u)
+catalogue_ids=$(bash "$CHECKER" --list-markers 2>/dev/null | cut -f3 | LC_ALL=C sort -u)
 if [ -z "$catalogue_ids" ]; then
   echo "ERROR: could not read the marker catalogue from $CHECKER --list-markers" >&2
   exit 2
 fi
-table_ids=$(printf '%s\n' "$MARKER_TABLE" | grep -v '^#' | grep -v '^$' | cut -f1 | sort -u)
-uncovered=$(comm -23 <(printf '%s\n' "$catalogue_ids") <(printf '%s\n' "$table_ids"))
+table_ids=$(printf '%s\n' "$MARKER_TABLE" | grep -v '^#' | grep -v '^$' | cut -f1 | LC_ALL=C sort -u)
+uncovered=$(LC_ALL=C comm -23 <(printf '%s\n' "$catalogue_ids") <(printf '%s\n' "$table_ids"))
 if [ -n "$uncovered" ]; then
   echo "ERROR: the checker enforces marker(s) this survey never searches:" >&2
   printf '  %s\n' $uncovered >&2
@@ -213,7 +218,7 @@ if [ -n "$uncovered" ]; then
   echo "A marker with no survey row counts as zero, which is a claim, not a gap." >&2
   exit 2
 fi
-stale=$(comm -13 <(printf '%s\n' "$catalogue_ids") <(printf '%s\n' "$table_ids"))
+stale=$(LC_ALL=C comm -13 <(printf '%s\n' "$catalogue_ids") <(printf '%s\n' "$table_ids"))
 if [ -n "$stale" ]; then
   echo "ERROR: MARKER_TABLE names marker(s) the checker does not have:" >&2
   printf '  %s\n' $stale >&2
@@ -368,16 +373,18 @@ for owner in "${OWNERS[@]}"; do
   done
 done
 # A user account's repositories may also live under an org listing; dedupe.
-sort -u -o "$OUT/repos.tsv" "$OUT/repos.tsv" 2>/dev/null || true
+LC_ALL=C sort -u -o "$OUT/repos.tsv" "$OUT/repos.tsv" 2>/dev/null || true
 repo_total=$(wc -l < "$OUT/repos.tsv" | tr -d ' ')
 echo "[survey]   $repo_total repository/ies enumerated"
 
 echo "[survey] step 2/4 — resolving governance callers"
+CALLER_STATUS="complete"
+caller_fail=0
 if [ -n "$CALLERS_FILE" ]; then
   # Ground truth supplied by the caller, e.g. an estate board export or the
   # output of scripts/cicd-census.sh. Preferred over a code search whenever it
   # exists: see the caller-truncation note below.
-  cut -f1 "$CALLERS_FILE" | sort -u > "$OUT/callers.tsv"
+  cut -f1 "$CALLERS_FILE" | LC_ALL=C sort -u > "$OUT/callers.tsv"
   echo "[survey]   using --callers-file $CALLERS_FILE (ground truth, no code search)"
 else
   # Scoped per owner. `governance-reusable.yml` on its own returns every visible
@@ -386,26 +393,24 @@ else
   # account, callers.tsv (and every count derived from it) silently widened past
   # the report's stated scope.
   : > "$OUT/callers.tsv"
-  caller_fail=0
   for owner in "${OWNERS[@]}"; do
     cq="governance-reusable.yml user:$owner"
     slug="governance-callers__$(printf '%s' "$cq" | cksum | cut -d' ' -f1)"
     if caller_meta=$(code_search "$slug" "$cq"); then
       echo "[survey]   $owner: $caller_meta"
+      if [ "${caller_meta%%$'\t'*}" = "truncated" ]; then CALLER_STATUS="truncated"; fi
       cut -f1 "$OUT/cache/${slug}.items.jsonl" 2>/dev/null >> "$OUT/callers.tsv"
     else
       echo "[survey]   QUERY FAILED: caller census for $owner ($cq)" >&2
       caller_fail=$((caller_fail + 1))
     fi
   done
-  sort -u -o "$OUT/callers.tsv" "$OUT/callers.tsv"
+  LC_ALL=C sort -u -o "$OUT/callers.tsv" "$OUT/callers.tsv"
   if [ "$caller_fail" -gt 0 ]; then
     echo "[survey] caller enumeration failed for $caller_fail owner(s); the caller set is incomplete." >&2
-    caller_meta="error"
+    CALLER_STATUS="error"
   fi
 fi
-CALLER_STATUS="${caller_meta%%$'\t'*}"
-[ -n "$CALLERS_FILE" ] && CALLER_STATUS="complete"
 caller_total=$(wc -l < "$OUT/callers.tsv" | tr -d ' ')
 echo "[survey]   $caller_total caller repo(s) (enumeration: ${CALLER_STATUS:-unknown})"
 
@@ -507,12 +512,12 @@ while IFS=$'\t' read -r mid mtier total repos status; do
 done < "$OUT/counts.tsv"
 
 echo "[survey] step 4/4 — joining hits against the caller set"
-sort -u -o "$OUT/hits-all.tsv" "$OUT/hits-all.tsv"
+LC_ALL=C sort -u -o "$OUT/hits-all.tsv" "$OUT/hits-all.tsv"
 awk -F'\t' 'NR==FNR{callers[$1]=1; next} ($2 in callers)' \
   "$OUT/callers.tsv" "$OUT/hits-all.tsv" > "$OUT/hits.tsv"
 
 hit_total=$(wc -l < "$OUT/hits.tsv" | tr -d ' ')
-affected_repos=$(cut -f2 "$OUT/hits.tsv" | sort -u | wc -l | tr -d ' ')
+affected_repos=$(cut -f2 "$OUT/hits.tsv" | LC_ALL=C sort -u | wc -l | tr -d ' ')
 echo "[survey]   $hit_total hit(s) across $affected_repos caller repo(s)"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -536,7 +541,7 @@ if $DO_PINS; then
       | tr -d '\n' | base64 -d 2>/dev/null \
       | grep -oE '(metadatastician|hyperpolymath)/standards/\.github/workflows/[a-z0-9-]+\.ya?ml@[0-9a-f]{40}' \
       | sed -E "s#^.*/workflows/(.*)@([0-9a-f]{40})\$#${repo}\t\1\t\2#" \
-      | sort -u
+      | LC_ALL=C sort -u
   }
   while IFS= read -r repo; do
     [ -z "$repo" ] && continue
@@ -546,7 +551,7 @@ if $DO_PINS; then
       pin_scan "$repo" "$wf" >> "$OUT/pins.tsv"
     done
   done < "$OUT/callers.tsv"
-  sort -u -o "$OUT/pins.tsv" "$OUT/pins.tsv"
+  LC_ALL=C sort -u -o "$OUT/pins.tsv" "$OUT/pins.tsv"
   echo "[survey]   $(wc -l < "$OUT/pins.tsv" | tr -d ' ') pinned reusable-workflow reference(s)"
 fi
 
@@ -627,7 +632,7 @@ EOF
         }
       }
     ' "$OUT/callers.tsv" "$OUT/hits-all.tsv" \
-      | sort \
+      | LC_ALL=C sort \
       | awk -F'\t' '{ printf "| `%s` | `%s` | %s | %s |\n", $1, $2, $3, $4 }'
   fi
   echo

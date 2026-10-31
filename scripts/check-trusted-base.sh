@@ -424,24 +424,11 @@ strip_haskellish_noncode() {
           if (c == "\"") { instr = 0; i++; continue }
           i++; continue
         }
-        if (c3 == "{-#") {
-          # Copy the pragma through verbatim, up to `#-}` or end of line.
-          # The delimiter is THREE characters: a two-character substr compared
-          # against "#-}" never matches, so the loop used to run to end of line
-          # and swallow whatever followed a closed pragma on the same line —
-          # usually a trailing `-- comment`, which then read as code and could
-          # flag a marker the author was only *describing*. Getting this wrong
-          # in the other direction (stopping early) would blank part of a
-          # pragma, so the three-character compare is load-bearing.
-          j = i + 3; pre = out "{-#"
-          while (j <= n - 2) {
-            if (substr(line, j, 3) == "#-}") { j += 3; break }
-            j++
-          }
-          out = pre substr(line, i + 3, j - (i + 3))
-          i = j
-          continue
+        if (pragma) {
+          if (c3 == "#-}") { out = out c3; i += 3; pragma = 0; continue }
+          out = out c; i++; continue
         }
+        if (c3 == "{-#") { pragma = 1; out = out c3; i += 3; continue }
         if (c2 == "{-") { depth++; i += 2; continue }
         if (c2 == "--") { break }
         if (c == "\"") { instr = 1; i++; continue }
@@ -657,7 +644,9 @@ done
 echo "$proof_files" | grep -E '\.fst$' | while read -r f; do
   [ -z "$f" ] && continue
   strip_fstar_noncode "$f" 2>/dev/null | grep -nE '(^|[^A-Za-z0-9_])admit[[:space:]]*\(\)|(^|[^A-Za-z0-9_])assume([^A-Za-z0-9_]|$)' | while IFS=: read -r ln rest; do
-    printf '%s' "$rest" | grep -qE 'assume[[:space:]]+val|admit_p' && continue
+    # Remove only core forms, retaining independent bare markers on this line.
+    bare=$(printf '%s' "$rest" | sed -E 's/assume[[:space:]]+val/ /g; s/admit_p/ /g')
+    printf '%s' "$bare" | grep -qE '(^|[^A-Za-z0-9_])admit[[:space:]]*\(\)|(^|[^A-Za-z0-9_])assume([^A-Za-z0-9_]|$)' || continue
     printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$ln" "fstar-assume-or-admit-bare" "extended" "$(echo "$rest" | head -c 80)" >> "$markers_tsv"
   done
 done
