@@ -28,9 +28,9 @@
 # MEASURED (2026-10-31, main 1725bebd): `governance-reusable.yml` staged its
 # policy helpers, its duplicate-key linter and its pin-existence gate from the
 # literal `317101e03b8fe642589498f4bdb84541ab466062` (2026-09-14) — while main
-# had moved 194 files under `scripts/`. Consumers were being judged by
-# six-week-old gate code: `check-action-pins-resolve.sh` had since gained the
-# orphan-pin/ancestry probe (145 lines, issue #782) and
+# had moved 202 files (+29,544/-1,736 lines) under `scripts/`. Consumers were
+# being judged by six-week-old gate code: `check-action-pins-resolve.sh` had
+# since gained the orphan-pin/ancestry probe (+158/-13, issue #782) and
 # `check-workflow-duplicate-keys.sh` the KYAML normalisation that stopped 14
 # phantom duplicate reports (2026-10-01). Nothing noticed, because standards
 # runs its OWN tree in those steps (`GITHUB_REPOSITORY` self-lint) and every

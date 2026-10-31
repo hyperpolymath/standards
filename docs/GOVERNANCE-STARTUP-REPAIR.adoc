@@ -363,6 +363,49 @@ it refuses to certify and says why (no contract guard shipped; gates absent).
 2 floating, 1 unscanned `git clone`).
 |===
 
+=== On the runner, not only in the sandbox
+
+Local results are necessary and not sufficient: the guards have to run in
+GitHub's own environment against the real corpus. Measured on PR #1381:
+
+[cols="3,1,6"]
+|===
+|job / step |result |note
+
+|`uses ⊆ actions.lock` → *actions.lock representation, provenance and closure*
+|success
+|The contract guard executes in the required gate path against this repository's
+lock, including the delegated `close-lock.sh --check`.
+
+|`uses ⊆ actions.lock` → *actions.lock is transitively closed*
+|success
+|Closure named as its own obligation, so it does not depend on another script's
+internals.
+
+|`Repo self-tests` → *Standards helper checkouts are immutable and fresh*
+|success
+|The generalised third-pin guard over all 68 workflows, with `--compare` against
+the PR base — 34 standards checkouts, 0 failures.
+
+|`Repo self-tests` → *Lock-gate pin is not stale*
+|success
+|The original subject of that guard, still asserted separately.
+
+|`Repo self-tests` → *Guard controls (fixture-driven)*
+|success
+|All three regression suites **and the two-phase canary** run on the runner,
+including the canary's digest check, `git archive` extraction and both policy
+directions.
+
+|`Repo self-tests` → *Run tests/\*.sh and scripts/tests/\*.sh*
+|failure — **pre-existing**
+|`scripts/tests/dismiss-code-scanning-alerts-test.sh` exits 1. The identical
+step fails on `main` at `1725bebd` with the identical annotation, and it fails
+identically on the base tree, so it is not caused here and is not claimed fixed.
+It is why the guard steps above were moved *ahead* of the suite, and why the
+three controls have their own step: a red step skips everything after it.
+|===
+
 === Lock regeneration and dependency closure
 
 **No `uses:` ref changed in this PR**, so no lock regeneration was required and
