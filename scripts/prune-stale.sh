@@ -27,6 +27,20 @@
 # regardless. An entry whose ref is referenced by no `uses:` in its own file
 # cannot be satisfying anything there.
 #
+# ── A THIRD oracle: the reviewed closure of remote reusable workflows ───────
+# A ref reached only through a remote reusable workflow appears in NEITHER the
+# workflow text NOR any local composite file, so both oracles above agree that
+# nothing uses it and the entry is dropped — silently removing a dependency
+# GitHub validates at startup for every caller. Measured shape:
+# hyperpolymath/unified-dataset-vocab#81 records
+# `actions/checkout@3d3c42e5…` under `.github/workflows/secret-scanner.yml` while
+# the workflow only calls a reusable that uses it.
+# So when `.github/workflows/actions-lock.closure.tsv` exists (written by
+# check-reusable-closure.sh --write-baseline and reviewed in a pull request),
+# every ref it records for a workflow is KEPT. `--closure FILE` overrides the
+# path; `--no-closure` disables the oracle (only for a repository that has no
+# remote reusable calls at all).
+#
 # ── Two independent oracles must agree before a ref is dropped ──────────────
 #   1. the PARSER: no `uses:` in that workflow normalises to this owner/repo@ref
 #      (same norm()/ck() semantics as check-lock-sync.sh);
@@ -61,7 +75,17 @@
 
 set -euo pipefail
 
-WF_DIR="${1:-.github/workflows}"
+WF_DIR=".github/workflows"
+CLOSURE=""
+CLOSURE_SET=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --closure) CLOSURE="${2:-}"; CLOSURE_SET=1; shift 2 ;;
+    --no-closure) CLOSURE_SET=1; CLOSURE=""; shift ;;
+    *) WF_DIR="$1"; shift ;;
+  esac
+done
+[ "$CLOSURE_SET" -eq 1 ] || { [ -f "$WF_DIR/actions-lock.closure.tsv" ] && CLOSURE="$WF_DIR/actions-lock.closure.tsv"; }
 LOCK="$WF_DIR/actions.lock"
 
 AWK=""
@@ -209,9 +233,27 @@ literal_hit() {
   done < "$TMP/reach.tsv"
   return 1
 }
+# closure_keeps PATH REF: the reviewed closure names this dependency for this
+# workflow. Compared case-insensitively on owner/repo, refs exact.
+closure_keeps() {
+  [ -n "$CLOSURE" ] && [ -f "$CLOSURE" ] || return 1
+  awk -F'\t' -v p="$1" -v r="$2" '
+    /^#/ || NF < 3 { next }
+    {
+      want = tolower(r); got = tolower($3)
+      if (tolower($1) == tolower(p) && got == want) found = 1
+    }
+    END { exit(found ? 0 : 1) }' "$CLOSURE"
+}
 : > "$TMP/drop.tsv"
 kept_by_oracle=0
+kept_by_closure=0
 while IFS=$'\t' read -r path ref; do
+  if closure_keeps "$path" "$ref"; then
+    printf '  ! closure manifest, KEEPING %s in %s (reached through a remote reusable)\n' "$ref" "$path"
+    kept_by_closure=$((kept_by_closure + 1))
+    continue
+  fi
   if hit="$(literal_hit "$path" "$ref")"; then
     printf '  ! oracle disagrees, KEEPING %s in %s (literal string present in %s)\n' "$ref" "$path" "$hit"
     kept_by_oracle=$((kept_by_oracle + 1))
