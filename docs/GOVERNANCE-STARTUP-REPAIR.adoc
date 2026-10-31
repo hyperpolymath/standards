@@ -77,49 +77,90 @@ SHA there is not a stricter pin; it is a record the runner refuses.
 
 === The consumer census, measured
 
-Status is `scripts/check-lock-pin-contract.sh` run against each consumer's
-pinned standards commit's own lock, plus the observed run outcome.
+The column that decides whether a pin can start at all is this repository's own
+`scripts/lock-selfcheck.sh`, run against each consumer's pinned standards commit.
+It is the tool the estate uses for exactly this question ("is this SHA safe to
+pin a caller to?"), so its verdict is the one quoted. `contract violations` is
+the new guard's independent count on the same file; the two agree on every row
+in *verdict*, and they count different things (self-SHA records vs records that
+break the representation contract by any means).
 
-[cols="2,2,1,5"]
+[cols="2,2,3,5"]
 |===
-|consumer |pinned standards commit |contract violations |observed
+|consumer |pinned standards commit |`lock-selfcheck` verdict |observed
 
 |`metadatastician/svalinn`
 |`fad242d3` (2026-09-07)
-|11
-|12 of 12 jobs dead at `Set up job` (run 40108154356)
+|POISON — 51 self-SHA record(s)
+|15 jobs: 12 dead at `Set up job` (one step each), 3 skipped (run 40108154356)
 
 |`metadatastician/odraz`
 |`da2c748a` (2026-09-10)
-|13
+|POISON — 56 self-SHA record(s)
 |run 38811452675 `startup_failure`; run 40837852944 `failure` with **zero jobs**
 
 |`metadatastician/cadastra`
 |`e3b9929c` (2026-09-22)
-|14
+|POISON — 36 self-SHA record(s) **and 1 dangling edge**
 |run 40943144620 `failure`, **zero jobs**
 
 |`metadatastician/lintel`
 |`e16a2317` (2026-10-18)
-|5
+|POISON — 6 self-SHA record(s)
 |run 40736091140: **zero jobs** — the run-level signature
 
 |`metadatastician/burble`, `marid`
 |`01c9b0c9` (2026-10-20)
-|0
+|SELF-CONSISTENT
 |run 39678123406 green: 21 jobs, 6–13 steps each — policy executed
 
 |`metadatastician/standards` (main)
 |`1725bebd` (2026-10-29)
-|0
+|SELF-CONSISTENT
 |—
 |===
 
-The `lintel` row is the four `github/codeql-action` / `goto-bus-stop/setup-zig`
-/ `swatinem/rust-cache` / `webfactory/ssh-agent` leaves that
+The `lintel` row is exactly the four leaves
 https://github.com/metadatastician/standards/issues/1290[standards#1290] names,
-plus `hyperpolymath/standards@571cc734` recorded as a *leaf* where a nested
-`uses:` list is owed.
+and `lock-selfcheck` attributes each to the workflow that reaches it:
+`github/codeql-action@b96794f0` from `codeql-reusable.yml`,
+`hypatia-scan-reusable.yml` and `scorecard-reusable.yml`;
+`goto-bus-stop/setup-zig@abea47f8` and `swatinem/rust-cache@6323deb1` from
+`rust-ci-reusable.yml`; `webfactory/ssh-agent@e8387483` from
+`mirror-reusable.yml`.
+
+The correlation is exact and it runs in both directions: every consumer whose
+pin is POISON has a governance run with either zero jobs or a job list that dies
+at `Set up job`, and the one pin that is SELF-CONSISTENT has a green run with
+policy steps in it. That is the strongest statement the run API supports, and it
+is the reason the migration below repins **only** to a SHA whose verdict was
+measured, never to "latest".
+
+=== The control arrived late — that is the actual defect
+
+`lock-selfcheck.sh` did not contain the self-SHA rule at any of the four POISON
+pins. Measured by reading the file out of each commit:
+
+[cols="1,1,3"]
+|===
+|commit |date |self-SHA rule in that commit's `lock-selfcheck.sh`
+
+|`fad242d3` |2026-09-07 |absent
+|`da2c748a` |2026-09-10 |absent
+|`e3b9929c` |2026-09-22 |absent
+|`e16a2317` |2026-10-18 |absent
+|`75bd5994` |2026-10-19 |**present** (9 references), together with the corrected lock
+|`01c9b0c9` |2026-10-20 |present
+|`1725bebd` (main) |2026-10-29 |present
+|===
+
+So #1290's acceptance criterion 3 was really satisfied at `75bd5994`, in the
+same commit that corrected the records: the guard and the repair landed
+together, a day after the last POISON pin. Everything consumers were pinned to
+before that date could not be detected by any control in existence at that date.
+That, and not the absence of a task, is why the class survived a month — and why
+this PR keeps the guard *and* states the migration, since a guard only protects
+commits that are written after it.
 
 === What main already had right — no duplicate fix
 
@@ -128,7 +169,8 @@ the whole lock passes the contract below: **0 violations**, two caller-side
 reusable edges legitimately exempt. The nine leaves corrected by
 https://github.com/metadatastician/standards/pull/1271[#1271] and the four from
 [#1290] are all in place. **No record in this repository's lock was changed by
-this PR.** What was missing is the control that keeps them fixed.
+this PR** — a second correction would be a duplicate, and it would also be
+unverifiable, because the shapes it would "fix" are no longer there.
 
 The previously identified "corrected source" `75bd5994` is
 `compare fad242d3...75bd5994 → ahead_by: 454`, 300 files, and it adds four
@@ -140,15 +182,30 @@ upgrade**, not a startup repair. It is not proposed here.
 
 == What was still unguarded, and what this PR does about it
 
-=== 1. No control on lock *representation* (issue #1290's acceptance criterion 3)
+=== 1. No single gate that holds representation, provenance and closure
 
 `#1290` closes with: *"a guard is added so a leaf entry whose `ref:` equals the
 40-hex SHA in its own key cannot be committed again … nothing enforces the
-rule."* Nothing did. `scripts/lock-selfcheck.sh` answers a narrower question: it
-walks the workflows and catches a self-SHA record **only when a workflow at that
-commit uses the action directly**, so a leaf reachable only through another
-record's nested `uses:` (composite actions) is invisible to it. `close-lock.sh
---check` answers closure, not representation.
+rule."* For commits written after `75bd5994` that is no longer true —
+`lock-selfcheck.sh` carries the rule, and it attributes each hit to the workflow
+that reaches it. What no single gate does is hold the three properties that
+together make a lock consumable:
+
+* **representation** — `ref` names a reviewed ref, never the pin's own SHA and
+  never a 40-hex at all;
+* **provenance** — `commit` is `sha1-<the key's SHA>` and the key is SHA-pinned
+  (canon rule 10), checked as a conjugation rather than as two shapes;
+* **closure** — every ref under `workflows:` and every nested `uses:` has a
+  record (`close-lock.sh --check`, standards#963).
+
+`lock-selfcheck.sh` is workflow-driven: it starts from the `uses:` refs a commit
+actually uses, which is the right question for "is this SHA safe to pin" but not
+for "is this file internally well-formed" — a record nothing references yet, or
+a `commit:` that disagrees with its key while still naming a valid object,
+falls outside it. `close-lock.sh --check` owns closure and provenance but is not
+in the required gate path, and `update-actions-lock.sh --verify` is shaped for
+the lock-sync bot's job. So the three properties are spread across tools that
+each answer one.
 
 Added `scripts/check-lock-pin-contract.sh`, adopted from
 `hyperpolymath/cicd-suite#66` and extended as that PR's own guidance requires —
@@ -181,13 +238,13 @@ Wired into `.github/workflows/actions-lock-gate.yml` (the required
 `governance-reusable.yml` staged its policy helpers, its duplicate-key linter
 and its pin-existence gate from the literal
 `317101e03b8fe642589498f4bdb84541ab466062` — *2026-09-14*, while `main` had moved
-**194 files** under `scripts/` (measured 2026-10-31). Consumers were being judged
-by six-week-old gate code, including:
+**202 files, +29,544/−1,736 lines** under `scripts/` (measured 2026-10-31).
+Consumers were being judged by six-week-old gate code, including:
 
-* `scripts/check-action-pins-resolve.sh`: +145 lines, the orphan-pin/ancestry
+* `scripts/check-action-pins-resolve.sh`: +158/−13, the orphan-pin/ancestry
   probe from issue #782 — the check that a pinned reusable commit is reachable
   from the default branch rather than a real-but-orphaned object;
-* `scripts/check-workflow-duplicate-keys.sh`: +35 lines, KYAML normalisation —
+* `scripts/check-workflow-duplicate-keys.sh`: +37/−2, KYAML normalisation —
   without it a flow-style workflow produced 14 phantom duplicates (2026-10-01).
 
 Nothing noticed, for the same structural reason as #946: standards' own
