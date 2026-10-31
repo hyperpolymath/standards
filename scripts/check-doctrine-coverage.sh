@@ -128,6 +128,8 @@ done
 NORMATIVE_RE='(^|[^[:alnum:]_])(never|always|every|nothing|distinguish|reject|refuse|must|do not|don.t)([^[:alnum:]_]|$)'
 NORMATIVE_START_RE='^(Never|Always|No|Do not|Don.t|Distinguish|Reject|Refuse|Every|Nothing)([^[:alnum:]_]|$)'
 
+# Print a lowercase heading slug with anchor markup removed and runs of
+# characters outside a-z and 0-9 replaced by hyphens.
 slugify() {
   printf '%s' "$1" \
     | tr '[:upper:]' '[:lower:]' \
@@ -139,6 +141,7 @@ inv_total=0
 inv_enforced=0
 inv_review=0
 
+# Print a diagnostic and increment the problem count in the current shell.
 problem() { printf '  %s\n' "$*"; problems=$((problems + 1)); }
 
 files=()

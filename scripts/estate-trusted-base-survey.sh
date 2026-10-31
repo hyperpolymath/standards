@@ -116,6 +116,7 @@ done
 
 case "$MARKERS" in core|extended|all) ;; *) echo "ERROR: --markers must be core|extended|all" >&2; exit 2 ;; esac
 
+# Exit with status 2 if the named command is unavailable.
 need() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: '$1' is required" >&2; exit 2; }; }
 need gh
 need jq
@@ -224,6 +225,7 @@ if [ -n "$stale" ]; then
   exit 2
 fi
 
+# Return success when the given tier is selected by MARKERS.
 want_tier() {
   case "$MARKERS" in
     all) return 0 ;;
@@ -243,6 +245,8 @@ want_tier() {
 # secondary-rate-limit errors (they are retried, at 60 s each).
 LAST_CODE_SEARCH_FILE=""
 
+# Wait until NAP seconds have elapsed since the recorded search time, when
+# LAST_CODE_SEARCH_FILE is set, then update that file.
 throttle() {
   local now last elapsed
   now=$(date +%s)
@@ -258,8 +262,11 @@ throttle() {
   [ -n "$LAST_CODE_SEARCH_FILE" ] && date +%s > "$LAST_CODE_SEARCH_FILE"
 }
 
-# code_search <slug> <query> → writes JSON array of {repo, path} items to
-# $OUT/cache/<slug>.items.jsonl, and echoes "truncated" or "complete".
+# Search GitHub for query, using slug for cache filenames. Write repository and
+# path pairs as TSV to $OUT/cache/<slug>.items.jsonl and print a TSV metadata
+# record with status, total, fetched count, and query checksum. A matching
+# successful cache is reused. Return 3 for a cached failure or a failed API
+# request after any rate-limit retry; API failures are recorded in the cache.
 code_search() {
   local slug="$1" query="$2"
   local items="$OUT/cache/${slug}.items.jsonl"
@@ -533,6 +540,8 @@ if $DO_PINS; then
   # exactly like a census of repositories that pin nothing. A census that finds
   # nothing because the pattern was wrong is the same defect class as
   # docs/CICD-SIGNAL-DISCIPLINE.adoc § "Distinguish absent from unreadable".
+  # Print unique TSV rows of repository, reusable workflow, and pinned SHA
+  # found in the named repository's workflow file. Pipeline failures propagate.
   pin_scan() { # pin_scan <repo> <workflow-file>
     local repo="$1" wf="$2"
     gh api "repos/$repo/contents/.github/workflows/$wf" --jq '.content' 2>/dev/null \
