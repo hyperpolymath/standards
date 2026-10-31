@@ -505,6 +505,27 @@ Per-site rollback if only one change misbehaves:
   a passing fixture is not proof of a working consumer job is honoured by the
   canary and by <<migration>>.
 
+=== Two open items, measured and closed as non-defects
+
+* **Four workflows carry no lock key.** `lock-sync-gate.yml`, `scorecard.yml`,
+  `secret-scanner.yml` and `self-ci.yml` appear under neither `workflows:` in the
+  lock nor among the records. Measured by parsing each file: **all four contain
+  zero external `uses:`** (only `run:` steps and `./`-relative composite
+  actions), so there is nothing for a lock to key and nothing the runner
+  validates. Unkeyed is correct here, not a gap — and if one of them ever gains
+  a third-party `uses:`, `.githooks/validate-actions-lock.sh` fails, because
+  coverage is asserted in both directions in the required gate.
+* **Two caller-side records record `ref:` equal to their own SHA.**
+  `metadatastician/standards@70019048…` and `…@d55304a0…` are reusable-workflow
+  edges, and standards#1290 records them as correct as-is: the requested ref of
+  a reusable call *is* the commit. This is why the adopted cicd-suite#66 guard is
+  not applied verbatim — unmodified, it fails this repository's own lock on those
+  two records, and "make the guard pass" would then mean corrupting valid
+  records. The exemption is three-claused (this repository, a record carrying a
+  `uses:` list, `ref` identical to the key's SHA); the guard reports what it
+  exempted (`caller-side reusable edges exempted: 2`) so the exemption is never
+  silent.
+
 == Residual risk and follow-ups
 
 * `job.workflow_sha` is unavailable on GHES. The estate is github.com; a GHES
