@@ -128,6 +128,8 @@ done
 NORMATIVE_RE='(^|[^[:alnum:]_])(never|always|every|nothing|distinguish|reject|refuse|must|do not|don.t)([^[:alnum:]_]|$)'
 NORMATIVE_START_RE='^(Never|Always|No|Do not|Don.t|Distinguish|Reject|Refuse|Every|Nothing)([^[:alnum:]_]|$)'
 
+# Print a lowercase heading slug with anchor markup removed and runs of
+# characters outside a-z and 0-9 replaced by hyphens.
 slugify() {
   printf '%s' "$1" \
     | tr '[:upper:]' '[:lower:]' \
@@ -139,6 +141,7 @@ inv_total=0
 inv_enforced=0
 inv_review=0
 
+# Print a diagnostic and increment the problem count in the current shell.
 problem() { printf '  %s\n' "$*"; problems=$((problems + 1)); }
 
 files=()
@@ -206,9 +209,10 @@ for doc in "${files[@]}"; do
       problem "add 'Enforced-by: <script>' or 'Review-only: <why nothing does>'"
       continue
     fi
-    if [ "$n_enforced" -gt 0 ] && [ "$n_review" -gt 0 ]; then
+    if { [ "$n_enforced" -gt 0 ] && [ "$n_review" -gt 0 ]; } \
+      || [ "$n_enforced" -gt 1 ] || [ "$n_review" -gt 1 ]; then
       echo "$doc:$ln: AMBIGUOUS invariant: \"$heading\""
-      problem "carries both Enforced-by and Review-only; the claim must be one or the other"
+      problem "must carry exactly one Enforced-by or Review-only tag"
       continue
     fi
 

@@ -132,6 +132,7 @@ if [ -f "$allow_file" ]; then
   allowed="$(grep -vE '^[[:space:]]*(#|$)' "$allow_file" | sed 's/[[:space:]]*$//')"
 fi
 
+# Return success if the repository-relative path exactly matches an allowlist entry.
 is_allowed() {
   local p="$1" a
   [ -n "$allowed" ] || return 1
