@@ -206,9 +206,10 @@ for doc in "${files[@]}"; do
       problem "add 'Enforced-by: <script>' or 'Review-only: <why nothing does>'"
       continue
     fi
-    if [ "$n_enforced" -gt 0 ] && [ "$n_review" -gt 0 ]; then
+    if { [ "$n_enforced" -gt 0 ] && [ "$n_review" -gt 0 ]; } \
+      || [ "$n_enforced" -gt 1 ] || [ "$n_review" -gt 1 ]; then
       echo "$doc:$ln: AMBIGUOUS invariant: \"$heading\""
-      problem "carries both Enforced-by and Review-only; the claim must be one or the other"
+      problem "must carry exactly one Enforced-by or Review-only tag"
       continue
     fi
 
