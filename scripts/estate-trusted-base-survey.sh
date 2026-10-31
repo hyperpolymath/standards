@@ -173,6 +173,9 @@ agda-terminating-pragma	extended	NON_TERMINATING	extension:agda
 agda-non-covering-pragma	extended	NON_COVERING	extension:agda
 agda-unsound-flag	extended	--type-in-type	extension:agda
 agda-unsound-flag	extended	--allow-unsolved-metas	extension:agda
+agda-unsound-flag	extended	--no-termination-check	extension:agda
+agda-unsound-flag	extended	--no-positivity-check	extension:agda
+agda-unsound-flag	extended	--no-universe-check	extension:agda
 agda-primtrustme	extended	primTrustMe	extension:agda
 agda-hole	extended	-	-
 idris-believe-or-assert	core	believe_me	extension:idr
