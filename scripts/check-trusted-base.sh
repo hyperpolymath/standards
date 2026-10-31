@@ -308,6 +308,8 @@ is_comment_line() {
 
 emit_marker() {
   # 1=file, 2=line, 3=kind, 4=tier, 5=identifier-or-context
+  # Append a TSV row unless the tier is disabled or the context is a comment.
+  # Return 0 for a skipped row, 1 for an unknown tier, or the append's status.
   #
   # Tier filtering happens here so that every downstream pass — documentation
   # check, exemption accounting, reporting — sees exactly one list.
@@ -408,6 +410,8 @@ strip_lean_noncode() {
 # markers this widening adds (`{-# TERMINATING #-}`, `{-# NON_COVERING #-}`,
 # and `{-# OPTIONS --type-in-type #-}`), so pragma text is copied through
 # verbatim. Nested comments inside a pragma are not a thing worth supporting.
+# Print the remaining text from the given file, retaining one output line per
+# input line for marker locations. String state resets at each line.
 strip_haskellish_noncode() {
   awk '
     {
@@ -452,6 +456,7 @@ strip_haskellish_noncode() {
   ' "$1"
 }
 
+# Print the given file without comments and strings, retaining line numbers.
 strip_fstar_noncode() {
   # F* comment syntax is OCaml's, not Haskell's: `//` to end of line and
   # NESTED `(* ... *)` blocks. The shared Haskell stripper knows `--` and
@@ -483,6 +488,7 @@ strip_fstar_noncode() {
   ' "$1"
 }
 
+# Print the given file without comments and strings, retaining line numbers.
 strip_dafny_noncode() {
   # Dafny: `//` to end of line, NESTED `/* ... */`, ordinary strings with
   # backslash escapes, and verbatim strings (`@"...`') where `""` is a literal
