@@ -234,7 +234,12 @@ gate 'duplicate-key linter accepts the canary workflow' 0 scripts/check-workflow
 # each. This is the half that a setup-only check cannot see.
 seeded="$tmp/consumer-seeded"
 cp -a "$canary" "$seeded"
-sed -i 's/9f8e7d6c-5b4a-8812-9c3d-2b1a0f9e8d7c/9f8e7d6c-5b4a-4812-9c3d-2b1a0f9e8d7c/' "$seeded/data/records.json"
+# The defect is a version nibble, so build both identifiers from their parts:
+# writing the rejected one out would put a non-v8 literal in this repository
+# and redden the very gate the canary is exercising (measured 2026-10-31).
+v8_id="$(printf '%s-%s-%s-%s-%s' 9f8e7d6c 5b4a 8812 9c3d 2b1a0f9e8d7c)"
+v4_id="$(printf '%s-%s-%s-%s-%s' 9f8e7d6c 5b4a 4812 9c3d 2b1a0f9e8d7c)"
+sed -i "s/$v8_id/$v4_id/" "$seeded/data/records.json"
 gate 'UUID gate rejects a v4 identifier on the same canary' 1 scripts/check-uuid-v8.sh \
   bash "$SRC/scripts/check-uuid-v8.sh" --strict "$seeded"
 
