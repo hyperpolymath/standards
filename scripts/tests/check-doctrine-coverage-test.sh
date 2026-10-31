@@ -39,12 +39,13 @@ run() { local d="$1"; shift; ( cd "$d" && bash "$SCRIPT" "$@" 2>&1 ); }
 
 # case <name> <expected-rc> <expected-substring> <doc-body>
 case_() {
-  local name="$1" want_rc="$2" want="$3" body="$4"
+  local name="$1" want_rc="$2" want="$3" body="$4" summary="${5:-}"
   rm -rf "$WORK/docs"; mkdir -p "$WORK/docs"
   printf '%s\n' "$body" > "$WORK/docs/RULES.adoc"
   local out rc
   out="$(run "$WORK" --path docs)"; rc=$?
-  if [ "$rc" -eq "$want_rc" ] && printf '%s' "$out" | grep -qF "$want"; then
+  if [ "$rc" -eq "$want_rc" ] && printf '%s' "$out" | grep -qF "$want" \
+    && { [ -z "$summary" ] || printf '%s' "$out" | grep -qF "$summary"; }; then
     ok "$name"
   else
     bad "$name (rc=$rc, wanted $want_rc / '$want')"
@@ -135,6 +136,60 @@ case_ "carrying both tags is ambiguous" 1 "AMBIGUOUS invariant" \
 
 Text.'
 
+# Repeated tags of either kind are ambiguous, even when their values agree.
+case_ "repeated Enforced-by tags fail" 1 "AMBIGUOUS invariant" \
+'= Rules
+// doctrine-coverage: on
+
+== Never do the bad thing
+
+// Enforced-by: scripts/gate.sh
+// Enforced-by: scripts/gate.sh' "1 invariant(s): 0 enforced, 0 review-only"
+
+case_ "repeated Review-only tags fail" 1 "AMBIGUOUS invariant" \
+'= Rules
+// doctrine-coverage: on
+
+== Never do the bad thing
+
+// Review-only: no mechanical oracle exists for this one; it needs human judgement
+// Review-only: no mechanical oracle exists for this one; it needs human judgement' "1 invariant(s): 0 enforced, 0 review-only"
+
+printf '# never-do-the-bad-thing\n' > "$WORK/scripts/slug-gate.sh"
+case_ "a link by invariant slug passes without the document basename" 0 "1 enforced" \
+'= Rules
+// doctrine-coverage: on
+
+== Never do the bad thing
+
+// Enforced-by: scripts/slug-gate.sh'
+
+case_ "trailing spaces and CRLF on an Enforced-by tag pass" 0 "1 enforced" \
+$'= Rules\r\n// doctrine-coverage: on\r\n\r\n== Never do the bad thing\r\n\r\n// Enforced-by: scripts/gate.sh \t\r'
+
+case_ "trailing spaces and CRLF on a Review-only tag pass" 0 "1 review-only" \
+$'= Rules\r\n// doctrine-coverage: on\r\n\r\n== Never do the bad thing\r\n\r\n// Review-only: no mechanical oracle exists for this; it needs human judgement \t\r'
+
+case_ "trailing whitespace does not make a thin reason valid" 1 "THIN reason" \
+$'= Rules\n// doctrine-coverage: on\n\n== Never do the bad thing\n\n// Review-only: too short                               \r' "1 invariant(s): 0 enforced, 0 review-only"
+
+# Invalid claims must not appear in covered summary counts.
+case_ "invalid claims are excluded from covered totals" 1 "4 problem(s)" \
+'= Rules
+// doctrine-coverage: on
+
+== Never do the first thing
+// Enforced-by: scripts/missing.sh
+
+== Never do the second thing
+// Enforced-by: scripts/other.sh
+
+== Never do the third thing
+// Review-only: too short
+
+== Never do the fourth thing
+// Review-only: TODO replace this placeholder with a proper human review reason' "4 invariant(s): 0 enforced, 0 review-only"
+
 # 8. thin reason
 case_ "a two-word Review-only reason is a shrug" 1 "THIN reason" \
 '= Rules
@@ -202,6 +257,15 @@ if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'report-only'; then
   ok "--report reports without failing"
 else
   bad "--report should exit 0 with a note (rc=$rc)"; printf '%s\n' "$out"
+fi
+
+# --list and --path=VALUE work together with a single file.
+printf '= Rules\n// doctrine-coverage: on\n\n== Never do the bad thing\n// Enforced-by: scripts/gate.sh\n' > "$WORK/docs/RULES.adoc"
+out="$(run "$WORK" --list --path=docs/RULES.adoc)"; rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -qF $'docs/RULES.adoc:4\tnever-do-the-bad-thing\tenforced-by=scripts/gate.sh'; then
+  ok "--list with --path=VALUE lists the selected invariant"
+else
+  bad "--list and --path=VALUE should select and list the file (rc=$rc)"; printf '%s\n' "$out"
 fi
 
 # 14. unknown flag

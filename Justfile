@@ -130,7 +130,7 @@ retired-names-check args="--strict":
 trusted-base-test:
     @bash scripts/tests/check-trusted-base-test.sh
 
-# Every prose invariant in an opted-in document must declare its enforcement
+# Every normative heading in an opted-in document must declare its enforcement
 # status: `Enforced-by: <script>` or `Review-only: <why nothing does>`. Opt-in
 # per document with `// doctrine-coverage: on` so a repository that has never
 # tagged anything is not red-boarded the day the gate is installed.

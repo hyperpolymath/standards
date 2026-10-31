@@ -639,21 +639,36 @@ echo "$proof_files" | grep -E '\.(idr|idr2)$' | while read -r f; do
   done
 done
 
-# F* assume val / admit_p (core) and the bare forms (extended)
+# F* assume val / admit_p (core) and the bare forms (extended).
+# Look past blank and comment-only lines for val, retaining the assume line
+# for documentation and reporting. A standalone assume remains extended.
 echo "$proof_files" | grep -E '\.fst$' | while read -r f; do
   [ -z "$f" ] && continue
-  strip_fstar_noncode "$f" 2>/dev/null | grep -nE 'assume[[:space:]]+val|admit_p' | while IFS=: read -r ln rest; do
-    emit_marker "$f" "$ln" "fstar-assume-or-admit" "core" "$(echo "$rest" | head -c 80)"
-  done
-done
-
-echo "$proof_files" | grep -E '\.fst$' | while read -r f; do
-  [ -z "$f" ] && continue
-  strip_fstar_noncode "$f" 2>/dev/null | grep -nE '(^|[^A-Za-z0-9_])admit[[:space:]]*\(\)|(^|[^A-Za-z0-9_])assume([^A-Za-z0-9_]|$)' | while IFS=: read -r ln rest; do
-    # Remove only core forms, retaining independent bare markers on this line.
-    bare=$(printf '%s' "$rest" | sed -E 's/assume[[:space:]]+val/ /g; s/admit_p/ /g')
-    printf '%s' "$bare" | grep -qE '(^|[^A-Za-z0-9_])admit[[:space:]]*\(\)|(^|[^A-Za-z0-9_])assume([^A-Za-z0-9_]|$)' || continue
-    printf '%s\t%s\t%s\t%s\t%s\n' "$f" "$ln" "fstar-assume-or-admit-bare" "extended" "$(echo "$rest" | head -c 80)" >> "$markers_tsv"
+  strip_fstar_noncode "$f" 2>/dev/null | awk '
+    { lines[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        line = lines[i]; bare = line; continued = 0
+        if (line ~ /(^|[^A-Za-z0-9_])assume[[:space:]]*$/) {
+          j = i + 1
+          while (j <= NR && lines[j] ~ /^[[:space:]]*$/) j++
+          if (j <= NR && lines[j] ~ /^[[:space:]]*val([^A-Za-z0-9_]|$)/) {
+            continued = 1
+            sub(/assume[[:space:]]*$/, "", bare)
+          }
+        }
+        if (continued || line ~ /assume[[:space:]]+val|admit_p/)
+          printf "core\t%d\t%s\n", i, line
+        gsub(/assume[[:space:]]+val/, " ", bare)
+        if (bare ~ /(^|[^A-Za-z0-9_])admit[[:space:]]*\(\)|(^|[^A-Za-z0-9_])assume([^A-Za-z0-9_]|$)/)
+          printf "extended\t%d\t%s\n", i, line
+      }
+    }
+  ' | while IFS=$'\t' read -r tier_name ln rest; do
+    case "$tier_name" in
+      core) emit_marker "$f" "$ln" "fstar-assume-or-admit" "core" "$(echo "$rest" | head -c 80)" ;;
+      extended) emit_marker "$f" "$ln" "fstar-assume-or-admit-bare" "extended" "$(echo "$rest" | head -c 80)" ;;
+    esac
   done
 done
 
